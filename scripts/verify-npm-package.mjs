@@ -11,6 +11,7 @@ const required = [
   { path: "dist/web/standalone/packages/web/.next/BUILD_ID", type: "file" },
   { path: "dist/web/standalone/packages/web/.next/static", type: "directory", nonEmpty: true },
   { path: "dist/web/standalone/packages/web/node_modules/next/package.json", type: "file" },
+  { path: "dist/web/standalone/node_modules/@swc/helpers/package.json", type: "file" },
   { path: "dist/web/standalone/packages/web/public", type: "directory", nonEmpty: true },
   { path: "dist/web/standalone/packages/web/public/openforge-runtime.js", type: "file" },
   { path: "README.md", type: "file" },

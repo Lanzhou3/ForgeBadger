@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const cliDist = path.resolve("packages/cli/dist");
@@ -31,6 +31,7 @@ try {
 
   await cp("packages/gateway/dist", gatewayTarget, copyTreeOptions);
   await cp("packages/web/.next/standalone", webStandaloneTarget, copyTreeOptions);
+  await materializePnpmAliases(path.join(webStandaloneTarget, "node_modules"));
   await mkdir(path.join(webStandalonePackage, ".next"), { recursive: true });
   await cp("packages/web/.next/static", path.join(webStandalonePackage, ".next", "static"), copyTreeOptions);
   await cp("packages/web/public", path.join(webStandalonePackage, "public"), copyTreeOptions);
@@ -69,4 +70,36 @@ async function preserveFile(filePath) {
   return async () => {
     await writeFile(filePath, original);
   };
+}
+
+async function materializePnpmAliases(nodeModulesDir) {
+  const aliasRoot = path.join(nodeModulesDir, ".pnpm", "node_modules");
+  if (!existsSync(aliasRoot)) {
+    return;
+  }
+
+  const entries = await readdir(aliasRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    const source = path.join(aliasRoot, entry.name);
+    if (entry.name.startsWith("@")) {
+      await materializeScopedPackageAliases(source, path.join(nodeModulesDir, entry.name));
+      continue;
+    }
+    await copyAliasIfMissing(source, path.join(nodeModulesDir, entry.name));
+  }
+}
+
+async function materializeScopedPackageAliases(sourceScopeDir, targetScopeDir) {
+  const entries = await readdir(sourceScopeDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const source = path.join(sourceScopeDir, entry.name);
+    await copyAliasIfMissing(source, path.join(targetScopeDir, entry.name));
+  }
+}
+
+async function copyAliasIfMissing(source, target) {
+  if (existsSync(target)) {
+    return;
+  }
+  await cp(source, target, copyTreeOptions);
 }

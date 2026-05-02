@@ -154,6 +154,39 @@ describe("InMemorySessionManager", () => {
     assert.deepEqual(calls, ["kill:of-gate-a-u-session_orphan"]);
   });
 
+  it("only recovers and kills sessions matching the configured tmux prefix", async () => {
+    const calls: string[] = [];
+    const manager = new InMemorySessionManager({
+      async createSession() {},
+      async killSession(name) {
+        calls.push(`kill:${name}`);
+      },
+      async capturePane() {
+        return "";
+      },
+      async listSessions() {
+        return ["of-user123-session", "smoke-user123-known", "smoke-user123-orphan"];
+      }
+    }, new MemoryRecoveryStore([
+      {
+        id: "session_known",
+        userId: "gate-a-user",
+        tmuxName: "smoke-user123-known",
+        launchPlan: launchPlan(),
+        createdAt: "2026-04-27T00:00:00.000Z"
+      }
+    ]), undefined, { tmuxPrefix: "smoke-" });
+
+    const result = await manager.recoverOpenForgeSessions({
+      userId: "gate-a-user",
+      cwd: "/tmp"
+    });
+
+    assert.equal(result.recovered[0]?.tmuxName, "smoke-user123-known");
+    assert.deepEqual(result.killedOrphans, ["smoke-user123-orphan"]);
+    assert.deepEqual(calls, ["kill:smoke-user123-orphan"]);
+  });
+
   it("writes successfully created sessions to the recovery index", async () => {
     const store = new MemoryRecoveryStore([]);
     const manager = new InMemorySessionManager(fakeTmux([]), store);

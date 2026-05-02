@@ -34,7 +34,8 @@ export async function startupGateway(options: {
   const sessionManager = new InMemorySessionManager(
     options.tmuxClient ?? createTmuxClient(),
     createDbSessionRecoveryStore(db),
-    eventBus
+    eventBus,
+    { tmuxPrefix: options.env.OPENFORGE_TMUX_PREFIX }
   );
 
   // 6. Recover sessions + kill orphans

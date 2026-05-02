@@ -54,6 +54,10 @@ export interface RecoveryResult {
   killedOrphans: string[];
 }
 
+export interface SessionManagerOptions {
+  tmuxPrefix?: string;
+}
+
 class EmptyRecoveryStore implements SessionRecoveryStore {
   async listSessions(): Promise<StoredSession[]> {
     return [];
@@ -66,16 +70,20 @@ class EmptyRecoveryStore implements SessionRecoveryStore {
 
 export class InMemorySessionManager {
   private readonly sessions = new Map<string, GateASession>();
+  private readonly tmuxPrefix: string;
 
   constructor(
     private readonly tmux: TmuxClient,
     private readonly recoveryStore: SessionRecoveryStore = new EmptyRecoveryStore(),
-    private readonly eventBus?: OpenForgeEventBus
-  ) {}
+    private readonly eventBus?: OpenForgeEventBus,
+    options: SessionManagerOptions = {}
+  ) {
+    this.tmuxPrefix = normalizeTmuxPrefix(options.tmuxPrefix);
+  }
 
   async createSession(input: CreateSessionInput): Promise<GateASession> {
     const now = new Date().toISOString();
-    const tmuxName = buildTmuxName(input.userId, input.sessionId);
+    const tmuxName = buildTmuxName(input.userId, input.sessionId, this.tmuxPrefix);
     const session: GateASession = {
       id: input.sessionId,
       userId: input.userId,
@@ -186,7 +194,7 @@ export class InMemorySessionManager {
     const killedOrphans: string[] = [];
 
     for (const tmuxName of names) {
-      if (!isOpenForgeTmuxName(tmuxName)) {
+      if (!isOpenForgeTmuxName(tmuxName, this.tmuxPrefix)) {
         continue;
       }
 
@@ -259,8 +267,8 @@ export class InMemorySessionManager {
   }
 }
 
-export function buildTmuxName(userId: string, sessionId: string): string {
-  return `of-${shortId(userId)}-${sanitizeId(sessionId)}`;
+export function buildTmuxName(userId: string, sessionId: string, tmuxPrefix = "of-"): string {
+  return `${normalizeTmuxPrefix(tmuxPrefix)}${shortId(userId)}-${sanitizeId(sessionId)}`;
 }
 
 function shortId(value: string): string {
@@ -271,8 +279,13 @@ function sanitizeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
-function isOpenForgeTmuxName(tmuxName: string): boolean {
-  return tmuxName.startsWith("of-");
+function isOpenForgeTmuxName(tmuxName: string, tmuxPrefix: string): boolean {
+  return tmuxName.startsWith(tmuxPrefix);
+}
+
+function normalizeTmuxPrefix(value = "of-"): string {
+  const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, "");
+  return sanitized || "of-";
 }
 
 function fallbackLaunchPlan(cwd: string, sessionId: string): LaunchPlan {

@@ -8,6 +8,7 @@ const envSchema = z.object({
   OPENFORGE_STATE_DIR: z.string().default(path.join(homedir(), ".openforge")),
   OPENFORGE_DB_PATH: z.string().default(path.join(homedir(), ".openforge", "openforge.db")),
   OPENFORGE_JWT_SECRET: z.string().min(32),
+  OPENFORGE_TMUX_PREFIX: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("of-"),
   OPENFORGE_MASTER_KEY: z
     .string()
     .refine((value) => isValidMasterKey(value), {

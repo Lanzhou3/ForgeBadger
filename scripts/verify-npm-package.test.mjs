@@ -89,6 +89,7 @@ async function createPackageTree(options = {}) {
     await writeFile(await ensureFile(root, "dist/web/standalone/packages/web/.next/static/chunks/app.js"), "");
   }
   await writeFile(await ensureFile(root, "dist/web/standalone/packages/web/node_modules/next/package.json"), "{}\n");
+  await writeFile(await ensureFile(root, "dist/web/standalone/node_modules/@swc/helpers/package.json"), "{}\n");
   await writeFile(await ensureFile(root, "dist/web/standalone/packages/web/public/openforge-runtime.js"), "");
 
   return root;
