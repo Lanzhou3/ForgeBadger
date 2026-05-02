@@ -22,6 +22,9 @@ Operational runtime state:
 - SQLite data file at `OPENFORGE_DB_PATH`.
 - Project-generated config files under user-approved project directories.
 - Runtime tmux sessions named with `OPENFORGE_TMUX_PREFIX`, default `of-`.
+- User agent configuration directories such as `.claude`, `.codex`, and
+  `.opencode`.
+- Local API keys, credentials, and user configuration files.
 
 Operational runtime state is never part of the npm package or release artifact.
 
@@ -63,6 +66,15 @@ OPENFORGE_TMUX_PREFIX=of-
 
 Do not commit `.env`, database files, API keys, JWTs, or generated user
 credentials.
+
+Native dependency notes:
+
+- The npm package still declares runtime dependencies on native modules
+  `better-sqlite3` and `node-pty`.
+- `tmux` is a system dependency and is not installed by npm.
+- If prebuilt native binaries are unavailable for the operator's platform,
+  dependency installation requires a working C/C++ build toolchain compatible
+  with Node.js 20 or newer.
 
 ## 3. Preflight Checklist
 
@@ -139,7 +151,8 @@ pnpm smoke:npm
 
 Before publishing, inspect the `npm pack --dry-run` output from `pnpm pack:npm`
 and confirm the package does not include local config, database files, logs,
-API keys, or internal development artifacts.
+API keys, `.claude`, `.codex`, `.opencode`, SQLite databases, or internal
+development artifacts.
 
 ## 7. Release Acceptance
 
