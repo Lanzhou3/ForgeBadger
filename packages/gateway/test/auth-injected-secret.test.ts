@@ -21,6 +21,8 @@ const masterKey = "abcdef0123456789abcdef0123456789";
 describe("Gateway app auth secret injection", () => {
   it("verifies authenticated routes with the app jwt secret instead of process env", async () => {
     const injectedSecret = "injected-jwt-secret-0123456789abcdef";
+    const originalJwtSecret = process.env.OPENFORGE_JWT_SECRET;
+    const originalMasterKey = process.env.OPENFORGE_MASTER_KEY;
     process.env.OPENFORGE_JWT_SECRET = "process-env-jwt-secret-0123456789";
     process.env.OPENFORGE_MASTER_KEY = masterKey;
 
@@ -51,9 +53,19 @@ describe("Gateway app auth secret injection", () => {
       assert.equal(me.body.data.email, "injected-secret@example.com");
     } finally {
       await gateway.close();
+      restoreEnv("OPENFORGE_JWT_SECRET", originalJwtSecret);
+      restoreEnv("OPENFORGE_MASTER_KEY", originalMasterKey);
     }
   });
 });
+
+function restoreEnv(name: "OPENFORGE_JWT_SECRET" | "OPENFORGE_MASTER_KEY", value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
+}
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
