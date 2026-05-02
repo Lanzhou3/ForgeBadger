@@ -34,6 +34,42 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("defaults to start when open flag is provided without a command", () => {
+    assert.deepEqual(parseCliArgs(["--open"]), {
+      command: "start",
+      gatewayPort: undefined,
+      webPort: undefined,
+      host: undefined,
+      openBrowser: true
+    });
+  });
+
+  it("defaults to start when start options are provided without a command", () => {
+    assert.deepEqual(parseCliArgs(["--gateway-port", "3001"]), {
+      command: "start",
+      gatewayPort: 3001,
+      webPort: undefined,
+      host: undefined,
+      openBrowser: false
+    });
+
+    assert.deepEqual(parseCliArgs(["--web-port", "3002"]), {
+      command: "start",
+      gatewayPort: undefined,
+      webPort: 3002,
+      host: undefined,
+      openBrowser: false
+    });
+
+    assert.deepEqual(parseCliArgs(["--host", "127.0.0.1"]), {
+      command: "start",
+      gatewayPort: undefined,
+      webPort: undefined,
+      host: "127.0.0.1",
+      openBrowser: false
+    });
+  });
+
   it("rejects unknown commands", () => {
     assert.throws(() => parseCliArgs(["launch"]), /Unknown command: launch/);
   });

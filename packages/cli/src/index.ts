@@ -27,11 +27,13 @@ export function parseCliArgs(args: string[]): CliCommand {
   if (command === "help" || command === "--help" || command === "-h") {
     return { command: "help" };
   }
-  if (command !== "start") {
-    throw new Error(`Unknown command: ${command}`);
+  if (command === "start") {
+    return parseStartArgs(rest);
   }
-
-  return parseStartArgs(rest);
+  if (isStartFlag(command)) {
+    return parseStartArgs(args);
+  }
+  throw new Error(`Unknown command: ${command}`);
 }
 
 function parseStartArgs(args: string[]): Extract<CliCommand, { command: "start" }> {
@@ -68,6 +70,10 @@ function parseStartArgs(args: string[]): Extract<CliCommand, { command: "start" 
     throw new Error(`Unexpected argument: ${token}`);
   }
   return command;
+}
+
+function isStartFlag(token: string): boolean {
+  return token === "--open" || token === "--gateway-port" || token === "--web-port" || token === "--host";
 }
 
 function parsePort(value: string, flag: string): number {
