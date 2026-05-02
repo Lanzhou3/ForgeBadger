@@ -44,6 +44,19 @@ describe("runCommand", () => {
     assert.equal(result.stderr, "Command timed out after 1ms");
   });
 
+  it("kills a timed out child that ignores SIGTERM after the configured grace period", async () => {
+    const startedAt = Date.now();
+    const result = await runCommand(
+      "sh",
+      ["-c", "trap '' TERM; while :; do sleep 1; done"],
+      { timeoutMs: 1, killGraceMs: 50 }
+    );
+
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(result.stderr, "Command timed out after 1ms");
+    assert.ok(Date.now() - startedAt >= 40);
+  });
+
   it("bounds stdout and stderr to the configured maximum output bytes", async () => {
     const stdoutText = "o".repeat(128);
     const stderrText = "e".repeat(128);

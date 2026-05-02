@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { runDoctor } from "../src/commands/doctor.js";
-import { runCli } from "../src/index.js";
+import { isMainModule, runCli } from "../src/index.js";
 import { checkCliDependencies, runCommand } from "../src/runtime/dependency-check.js";
 import type { RuntimeConfig } from "../src/runtime/config.js";
 
@@ -49,6 +53,19 @@ describe("runCommand", () => {
 
     assert.notEqual(result.exitCode, 0);
     assert.equal(result.stderr, "Command timed out after 1ms");
+  });
+
+  it("kills a timed out child that ignores SIGTERM after the configured grace period", async () => {
+    const startedAt = Date.now();
+    const result = await runCommand(
+      "sh",
+      ["-c", "trap '' TERM; while :; do sleep 1; done"],
+      { timeoutMs: 1, killGraceMs: 50 }
+    );
+
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(result.stderr, "Command timed out after 1ms");
+    assert.ok(Date.now() - startedAt >= 40);
   });
 
   it("bounds stdout and stderr to the configured maximum output bytes", async () => {
@@ -124,6 +141,18 @@ describe("runCli", () => {
     });
 
     assert.equal(code, 7);
+  });
+});
+
+describe("isMainModule", () => {
+  it("treats a symlinked npm bin path as the main module", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "openforge-main-"));
+    const targetPath = path.join(tempDir, "index.js");
+    const binPath = path.join(tempDir, "openforge");
+    await writeFile(targetPath, "", "utf8");
+    await symlink(targetPath, binPath);
+
+    assert.equal(isMainModule(binPath, pathToFileURL(targetPath).href), true);
   });
 });
 

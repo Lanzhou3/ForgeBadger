@@ -9,6 +9,7 @@ export interface CliCommandResult {
 export interface CliCommandRunnerOptions {
   timeoutMs?: number;
   maxOutputBytes?: number;
+  killGraceMs?: number;
 }
 
 export type CliCommandRunner = (
@@ -39,6 +40,7 @@ const CLI_DEPENDENCY_CHECKS: CliDependencyCheck[] = [
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 3000;
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
+const DEFAULT_KILL_GRACE_MS = 250;
 
 interface BoundedOutput {
   chunks: Buffer[];
@@ -101,17 +103,24 @@ export function runCommand(
 
     const timeoutMs = options.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+    const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
     const stdout = createBoundedOutput();
     const stderr = createBoundedOutput();
     let settled = false;
+    let timeoutResult: CliCommandResult | undefined;
+    let killGraceTimeout: ReturnType<typeof setTimeout> | undefined;
 
     const timeout = setTimeout(() => {
-      child.kill("SIGTERM");
-      finish({
+      timeoutResult = {
         exitCode: 124,
         stdout: boundedOutputToString(stdout),
         stderr: `Command timed out after ${timeoutMs}ms`
-      });
+      };
+      child.kill("SIGTERM");
+      killGraceTimeout = setTimeout(() => {
+        child.kill("SIGKILL");
+        finish(timeoutResult!);
+      }, killGraceMs);
     }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
@@ -131,7 +140,7 @@ export function runCommand(
       });
     });
     child.on("close", (exitCode) => {
-      finish({
+      finish(timeoutResult ?? {
         exitCode: exitCode ?? 1,
         stdout: boundedOutputToString(stdout),
         stderr: boundedOutputToString(stderr)
@@ -144,6 +153,9 @@ export function runCommand(
       }
       settled = true;
       clearTimeout(timeout);
+      if (killGraceTimeout) {
+        clearTimeout(killGraceTimeout);
+      }
       resolve(result);
     }
   });

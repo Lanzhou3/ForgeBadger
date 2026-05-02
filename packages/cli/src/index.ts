@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -105,8 +106,19 @@ export async function runCli(args = process.argv.slice(2), options: RunCliOption
   throw new Error(`Command not implemented yet: ${command.command}`);
 }
 
-function isMainModule(): boolean {
-  return process.argv[1] ? path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) : false;
+export function isMainModule(argv1 = process.argv[1], moduleUrl = import.meta.url): boolean {
+  if (!argv1) {
+    return false;
+  }
+  return safeRealPath(path.resolve(argv1)) === safeRealPath(fileURLToPath(moduleUrl));
+}
+
+function safeRealPath(filePath: string): string {
+  try {
+    return realpathSync(filePath);
+  } catch {
+    return path.resolve(filePath);
+  }
 }
 
 if (isMainModule()) {
