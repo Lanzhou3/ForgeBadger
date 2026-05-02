@@ -11,6 +11,7 @@ export interface StartedGateway extends GatewayApp {
   port: number;
 }
 
+/** @internal Test/runtime wiring hook; production callers should use the defaults. */
 export interface GatewayRuntimeOverrides {
   tmuxClient?: TmuxClient;
 }
@@ -43,7 +44,12 @@ export async function startGateway(
   const env = resolveGatewayEnv(input);
   const runtime = await createGatewayRuntime(env, overrides);
 
-  await listen(runtime.server, env.OPENFORGE_PORT, env.OPENFORGE_HOST);
+  try {
+    await listen(runtime.server, env.OPENFORGE_PORT, env.OPENFORGE_HOST);
+  } catch (error) {
+    await runtime.close();
+    throw error;
+  }
 
   return {
     ...runtime,
@@ -53,18 +59,7 @@ export async function startGateway(
 }
 
 function resolveGatewayEnv(input: NodeJS.ProcessEnv | GatewayEnv): GatewayEnv {
-  return isGatewayEnv(input) ? input : loadEnv(input);
-}
-
-function isGatewayEnv(input: NodeJS.ProcessEnv | GatewayEnv): input is GatewayEnv {
-  return (
-    typeof input.OPENFORGE_PORT === "number" &&
-    typeof input.OPENFORGE_HOST === "string" &&
-    typeof input.OPENFORGE_STATE_DIR === "string" &&
-    typeof input.OPENFORGE_DB_PATH === "string" &&
-    typeof input.OPENFORGE_JWT_SECRET === "string" &&
-    typeof input.OPENFORGE_MASTER_KEY === "string"
-  );
+  return loadEnv(input as NodeJS.ProcessEnv);
 }
 
 async function listen(server: Server, port: number, host: string): Promise<void> {

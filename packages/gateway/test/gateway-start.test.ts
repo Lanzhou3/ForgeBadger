@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, writeFile } from "node:fs/promises";
-import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -19,7 +18,7 @@ describe("createGatewayRuntime", () => {
       runtime = await createGatewayRuntime(
         {
           OPENFORGE_HOST: "127.0.0.1",
-          OPENFORGE_PORT: 0,
+          OPENFORGE_PORT: 3001,
           OPENFORGE_STATE_DIR: root,
           OPENFORGE_DB_PATH: path.join(root, "openforge.db"),
           OPENFORGE_MASTER_KEY: "a".repeat(64),
@@ -36,9 +35,42 @@ describe("createGatewayRuntime", () => {
     } finally {
       restorePath();
       if (runtime) {
-        await closeServerIfListening(runtime.server);
+        await runtime.close();
       }
     }
+  });
+
+  it("validates GatewayEnv-shaped input instead of trusting its shape", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-gateway-runtime-"));
+    const tmux = createMockTmuxClient();
+    const restorePath = await installFailingTmuxShim(root);
+    let runtime: Awaited<ReturnType<typeof createGatewayRuntime>> | undefined;
+    let rejected = false;
+
+    try {
+      runtime = await createGatewayRuntime(
+        {
+          OPENFORGE_HOST: "127.0.0.1",
+          OPENFORGE_PORT: 0,
+          OPENFORGE_STATE_DIR: root,
+          OPENFORGE_DB_PATH: path.join(root, "openforge.db"),
+          OPENFORGE_MASTER_KEY: "a".repeat(64),
+          OPENFORGE_JWT_SECRET: "jwt-secret-for-gateway-runtime-test-456"
+        },
+        { tmuxClient: tmux.client }
+      );
+    } catch (error) {
+      rejected = true;
+      assert.match(String(error), /OPENFORGE_PORT|greater than 0|positive/i);
+    } finally {
+      restorePath();
+      if (runtime && "close" in runtime) {
+        await runtime.close();
+      }
+    }
+
+    assert.equal(rejected, true);
+    assert.equal(tmux.listSessionsCalls, 0);
   });
 });
 
@@ -95,20 +127,4 @@ async function installFailingTmuxShim(root: string): Promise<() => void> {
     }
     process.env.PATH = originalPath;
   };
-}
-
-async function closeServerIfListening(server: Server): Promise<void> {
-  if (!server.listening) {
-    return;
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
-    });
-  });
 }

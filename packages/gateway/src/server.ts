@@ -29,6 +29,7 @@ export interface GatewayApp {
   apiKeyStore: InMemoryApiKeyStore;
   eventBus: OpenForgeEventBus;
   recoveryReady: Promise<void>;
+  close(): Promise<void>;
 }
 
 export interface GatewayAppOptions {
@@ -43,6 +44,7 @@ export interface GatewayAppOptions {
 
 export function createServer(deps: ServerDeps): express.Express {
   const app = express();
+  app.locals.jwtSecret = deps.jwtSecret;
 
   app.use((request, response, next) => {
     const origin = request.headers.origin;
@@ -84,6 +86,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   });
 
   const server = createHttpServer(app);
+  let closed = false;
   attachNotificationPersistence({ db: options.db, eventBus });
   attachTerminalWebSocket({ server, sessionManager, jwtSecret });
   attachEventsWebSocket({ server, eventBus, jwtSecret });
@@ -94,8 +97,36 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     sessionManager,
     apiKeyStore,
     eventBus,
-    recoveryReady
+    recoveryReady,
+    async close() {
+      if (closed) {
+        return;
+      }
+      closed = true;
+
+      try {
+        await closeServerIfListening(server);
+      } finally {
+        options.db.close();
+      }
+    }
   };
+}
+
+async function closeServerIfListening(server: Server): Promise<void> {
+  if (!server.listening) {
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 export function isAllowedLocalWebOrigin(origin: string | undefined): origin is string {
