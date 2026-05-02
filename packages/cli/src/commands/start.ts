@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import path from "node:path";
 
 import {
   loadOrCreateRuntimeConfig,
@@ -8,7 +9,13 @@ import {
 import { resolveInstalledPaths, type InstalledPaths } from "../runtime/paths.js";
 import { assertPortAvailable } from "../runtime/ports.js";
 import { installShutdownHandlers, spawnNode, type ShutdownCleanup } from "../runtime/processes.js";
-import { writeWebRuntimeConfig, type WriteWebRuntimeConfigOptions } from "../runtime/web-runtime.js";
+import {
+  prepareWebRuntime,
+  type PreparedWebRuntime,
+  type PrepareWebRuntimeOptions,
+  writeWebRuntimeConfig,
+  type WriteWebRuntimeConfigOptions
+} from "../runtime/web-runtime.js";
 
 interface OutputWriter {
   write(chunk: string): unknown;
@@ -19,6 +26,7 @@ export interface RunStartOptions extends LoadRuntimeConfigOptions {
   loadConfig?: (options: LoadRuntimeConfigOptions) => Promise<RuntimeConfig>;
   resolvePaths?: () => InstalledPaths;
   checkPort?: (host: string, port: number) => Promise<void>;
+  prepareWebRuntime?: (options: PrepareWebRuntimeOptions) => Promise<PreparedWebRuntime>;
   writeRuntimeConfig?: (options: WriteWebRuntimeConfigOptions) => Promise<string>;
   spawn?: (entry: string, env: NodeJS.ProcessEnv) => ChildProcess;
   installShutdown?: (children: ChildProcess[]) => ShutdownCleanup | void;
@@ -32,10 +40,25 @@ interface ChildResult {
   error?: Error;
 }
 
+const WEB_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "USER",
+  "USERNAME",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "NODE_ENV",
+  "NODE_OPTIONS",
+  "SYSTEMROOT",
+  "COMSPEC"
+] as const;
+
 export async function runStart(options: RunStartOptions = {}): Promise<number> {
   const loadConfig = options.loadConfig ?? loadOrCreateRuntimeConfig;
   const resolvePaths = options.resolvePaths ?? resolveInstalledPaths;
   const checkPort = options.checkPort ?? assertPortAvailable;
+  const prepareRuntime = options.prepareWebRuntime ?? prepareWebRuntime;
   const writeRuntimeConfig = options.writeRuntimeConfig ?? writeWebRuntimeConfig;
   const spawnProcess = options.spawn ?? spawnNode;
   const installShutdown = options.installShutdown ?? installShutdownHandlers;
@@ -43,21 +66,29 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
 
   const config = await loadConfig(toRuntimeConfigOptions(options));
   const paths = resolvePaths();
-  const gatewayUrl = buildUrl(config.gateway.host, config.gateway.port);
-  const webUrl = buildUrl(config.web.host, config.web.port);
+  assertDistinctBindEndpoints(config);
+
+  const gatewayUrl = buildBrowserUrl(config.gateway.host, config.gateway.port);
+  const webUrl = buildBrowserUrl(config.web.host, config.web.port);
 
   await checkPort(config.gateway.host, config.gateway.port);
   await checkPort(config.web.host, config.web.port);
+
+  const webRuntime = await prepareRuntime({
+    installedWebServerEntry: paths.webServerEntry,
+    runtimeWebDir: path.join(config.stateDir, "runtime", "web")
+  });
+
   try {
-    await writeRuntimeConfig({ webPublicDir: paths.webPublicDir, gatewayBaseUrl: gatewayUrl });
+    await writeRuntimeConfig({ webPublicDir: webRuntime.webPublicDir, gatewayBaseUrl: gatewayUrl });
   } catch (error) {
-    throw new Error(`Unable to write Web runtime config to ${paths.webPublicDir}: ${formatError(error)}`, {
+    throw new Error(`Unable to write Web runtime config to ${webRuntime.webPublicDir}: ${formatError(error)}`, {
       cause: error
     });
   }
 
   const gateway = spawnProcess(paths.gatewayEntry, buildGatewayEnv(config, gatewayUrl));
-  const web = spawnProcess(paths.webServerEntry, buildWebEnv(config, gatewayUrl));
+  const web = spawnProcess(webRuntime.webServerEntry, buildWebEnv(config, gatewayUrl));
   const children = [gateway, web];
   const childResult = waitForFirstChildResult(children);
   const cleanupShutdown = installShutdown(children) ?? noop;
@@ -65,6 +96,9 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
   try {
     stdout.write(`OpenForge Web Console: ${webUrl}\n`);
     stdout.write(`OpenForge Gateway: ${gatewayUrl}\n`);
+    if (options.openBrowser) {
+      stdout.write("--open is not supported yet; open the URL manually.\n");
+    }
 
     const result = await childResult;
     terminateSiblings(children, result.child);
@@ -110,9 +144,13 @@ function buildGatewayEnv(config: RuntimeConfig, gatewayUrl: string): NodeJS.Proc
 }
 
 function buildWebEnv(config: RuntimeConfig, gatewayUrl: string): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  delete env.OPENFORGE_MASTER_KEY;
-  delete env.OPENFORGE_JWT_SECRET;
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of WEB_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
 
   return {
     ...env,
@@ -122,8 +160,55 @@ function buildWebEnv(config: RuntimeConfig, gatewayUrl: string): NodeJS.ProcessE
   };
 }
 
-function buildUrl(host: string, port: number): string {
-  return `http://${host}:${port}`;
+function assertDistinctBindEndpoints(config: RuntimeConfig): void {
+  if (config.gateway.host === config.web.host && config.gateway.port === config.web.port) {
+    throw new Error(`Gateway and Web cannot use the same bind endpoint: ${formatBindEndpoint(config.gateway.host, config.gateway.port)}`);
+  }
+  if (config.gateway.port === config.web.port && bindHostsOverlap(config.gateway.host, config.web.host)) {
+    throw new Error(
+      `Gateway and Web cannot use overlapping bind endpoints: ${formatBindEndpoint(config.gateway.host, config.gateway.port)} and ${formatBindEndpoint(config.web.host, config.web.port)}`
+    );
+  }
+}
+
+function buildBrowserUrl(bindHost: string, port: number): string {
+  return `http://${formatBrowserHost(bindHost)}:${port}`;
+}
+
+function formatBrowserHost(bindHost: string): string {
+  if (bindHost === "0.0.0.0" || bindHost === "::" || bindHost === "[::]") {
+    return "127.0.0.1";
+  }
+  if (bindHost.startsWith("[") && bindHost.endsWith("]")) {
+    return bindHost;
+  }
+  if (bindHost.includes(":")) {
+    return `[${bindHost}]`;
+  }
+  return bindHost;
+}
+
+function formatBindEndpoint(host: string, port: number): string {
+  if (host.startsWith("[") && host.endsWith("]")) {
+    return `${host}:${port}`;
+  }
+  if (host.includes(":")) {
+    return `[${host}]:${port}`;
+  }
+  return `${host}:${port}`;
+}
+
+function bindHostsOverlap(firstHost: string, secondHost: string): boolean {
+  return normalizeBindHost(firstHost) === normalizeBindHost(secondHost) || isWildcardBindHost(firstHost) || isWildcardBindHost(secondHost);
+}
+
+function normalizeBindHost(host: string): string {
+  return host.toLowerCase().replace(/^\[(.*)]$/, "$1");
+}
+
+function isWildcardBindHost(host: string): boolean {
+  const normalized = normalizeBindHost(host);
+  return normalized === "0.0.0.0" || normalized === "::";
 }
 
 function waitForFirstChildResult(children: ChildProcess[]): Promise<ChildResult> {

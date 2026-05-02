@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import net from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -10,6 +12,7 @@ import { runCli } from "../src/index.js";
 import type { RuntimeConfig } from "../src/runtime/config.js";
 import { resolveInstalledPaths } from "../src/runtime/paths.js";
 import { assertPortAvailable } from "../src/runtime/ports.js";
+import { prepareWebRuntime } from "../src/runtime/web-runtime.js";
 
 describe("resolveInstalledPaths", () => {
   it("resolves shipped artifacts relative to the compiled CLI dist directory", () => {
@@ -79,6 +82,7 @@ describe("runStart", () => {
     };
     const loadCalls: unknown[] = [];
     const portChecks: Array<{ host: string; port: number }> = [];
+    const prepareCalls: Array<{ installedWebServerEntry: string; runtimeWebDir: string }> = [];
     const runtimeWrites: Array<{ webPublicDir: string; gatewayBaseUrl: string }> = [];
     const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
     const spawnedChildren: FakeChild[] = [];
@@ -104,6 +108,10 @@ describe("runStart", () => {
         resolvePaths: () => paths,
         checkPort: async (host, port) => {
           portChecks.push({ host, port });
+        },
+        prepareWebRuntime: async (options) => {
+          prepareCalls.push(options);
+          return createPreparedWebPaths(options.runtimeWebDir);
         },
         writeRuntimeConfig: async (options) => {
           runtimeWrites.push(options);
@@ -132,9 +140,15 @@ describe("runStart", () => {
         { host: "127.0.0.1", port: 48731 },
         { host: "127.0.0.1", port: 48732 }
       ]);
+      assert.deepEqual(prepareCalls, [
+        {
+          installedWebServerEntry: paths.webServerEntry,
+          runtimeWebDir: path.join(config.stateDir, "runtime", "web")
+        }
+      ]);
       assert.deepEqual(runtimeWrites, [
         {
-          webPublicDir: paths.webPublicDir,
+          webPublicDir: path.join(config.stateDir, "runtime", "web", "packages", "web", "public"),
           gatewayBaseUrl: "http://127.0.0.1:48731"
         }
       ]);
@@ -147,8 +161,8 @@ describe("runStart", () => {
       assert.equal(spawns[0]?.env.OPENFORGE_MASTER_KEY, config.secrets.masterKey);
       assert.equal(spawns[0]?.env.OPENFORGE_JWT_SECRET, config.secrets.jwtSecret);
       assert.equal(spawns[0]?.env.OPENFORGE_GATEWAY_URL, "http://127.0.0.1:48731");
-      assert.equal(spawns[1]?.entry, paths.webServerEntry);
-      assert.equal(spawns[1]?.env[parentEnvName], "from-parent-env");
+      assert.equal(spawns[1]?.entry, path.join(config.stateDir, "runtime", "web", "packages", "web", "server.js"));
+      assert.equal(spawns[1]?.env[parentEnvName], undefined);
       assert.equal(spawns[1]?.env.HOSTNAME, "127.0.0.1");
       assert.equal(spawns[1]?.env.PORT, "48732");
       assert.equal(spawns[1]?.env.OPENFORGE_GATEWAY_URL, "http://127.0.0.1:48731");
@@ -158,6 +172,7 @@ describe("runStart", () => {
       assert.equal(shutdownChildren.length, 2);
       assert.match(stdout.text, /OpenForge Web Console: http:\/\/127\.0\.0\.1:48732\n/);
       assert.match(stdout.text, /OpenForge Gateway: http:\/\/127\.0\.0\.1:48731\n/);
+      assert.match(stdout.text, /--open is not supported yet; open the URL manually\.\n/);
     } finally {
       if (originalParentEnv === undefined) {
         delete process.env[parentEnvName];
@@ -177,19 +192,32 @@ describe("runStart", () => {
     }
   });
 
-  it("does not pass parent OpenForge secrets to the web child", async () => {
+  it("passes only allowlisted parent environment variables to the web child", async () => {
     // Arrange
-    const originalMasterKey = process.env.OPENFORGE_MASTER_KEY;
-    const originalJwtSecret = process.env.OPENFORGE_JWT_SECRET;
+    const originalEnv = captureEnv([
+      "PATH",
+      "OPENFORGE_MASTER_KEY",
+      "OPENFORGE_JWT_SECRET",
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "DATABASE_URL",
+      "OPENFORGE_EXTRA_SECRET"
+    ]);
     const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
+    process.env.PATH = "/tmp/openforge-bin";
     process.env.OPENFORGE_MASTER_KEY = "parent-master-key";
     process.env.OPENFORGE_JWT_SECRET = "parent-jwt-secret";
+    process.env.ANTHROPIC_API_KEY = "parent-anthropic";
+    process.env.OPENAI_API_KEY = "parent-openai";
+    process.env.DATABASE_URL = "postgres://example";
+    process.env.OPENFORGE_EXTRA_SECRET = "parent-openforge-extra";
 
     try {
       const codePromise = runStart({
         loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
         resolvePaths: () => createInstalledPaths(),
         checkPort: async () => undefined,
+        prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
         writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
         spawn: (entry, env) => {
           const child = new FakeChild();
@@ -207,12 +235,144 @@ describe("runStart", () => {
       // Assert
       assert.equal(spawns[0]?.env.OPENFORGE_MASTER_KEY, "a".repeat(64));
       assert.equal(spawns[0]?.env.OPENFORGE_JWT_SECRET, "abcdefghijklmnopqrstuvwxyz123456");
+      assert.equal(spawns[1]?.env.PATH, "/tmp/openforge-bin");
       assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "OPENFORGE_MASTER_KEY"), false);
       assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "OPENFORGE_JWT_SECRET"), false);
+      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "ANTHROPIC_API_KEY"), false);
+      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "OPENAI_API_KEY"), false);
+      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "DATABASE_URL"), false);
+      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "OPENFORGE_EXTRA_SECRET"), false);
     } finally {
-      restoreEnv("OPENFORGE_MASTER_KEY", originalMasterKey);
-      restoreEnv("OPENFORGE_JWT_SECRET", originalJwtSecret);
+      restoreEnvSnapshot(originalEnv);
     }
+  });
+
+  it("uses localhost browser URLs for wildcard bind hosts while preserving bind env", async () => {
+    // Arrange
+    const stdout = createMemoryWriter();
+    const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
+
+    const codePromise = runStart({
+      loadConfig: async () =>
+        createRuntimeConfig("/tmp/openforge-state", {
+          gateway: { host: "0.0.0.0", port: 48731 },
+          web: { host: "0.0.0.0", port: 48732 }
+        }),
+      resolvePaths: () => createInstalledPaths(),
+      checkPort: async () => undefined,
+      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      spawn: (entry, env) => {
+        const child = new FakeChild();
+        spawns.push({ entry, env });
+        return child;
+      },
+      installShutdown: (children) => {
+        setImmediate(() => children[1]?.emit("exit", 0, null));
+      },
+      stdout
+    });
+
+    await codePromise;
+
+    // Assert
+    assert.equal(spawns[0]?.env.OPENFORGE_HOST, "0.0.0.0");
+    assert.equal(spawns[0]?.env.OPENFORGE_GATEWAY_URL, "http://127.0.0.1:48731");
+    assert.equal(spawns[1]?.env.HOSTNAME, "0.0.0.0");
+    assert.equal(spawns[1]?.env.OPENFORGE_GATEWAY_URL, "http://127.0.0.1:48731");
+    assert.match(stdout.text, /OpenForge Web Console: http:\/\/127\.0\.0\.1:48732\n/);
+    assert.match(stdout.text, /OpenForge Gateway: http:\/\/127\.0\.0\.1:48731\n/);
+  });
+
+  it("formats IPv6 browser URLs with brackets", async () => {
+    // Arrange
+    const stdout = createMemoryWriter();
+    const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
+
+    const codePromise = runStart({
+      loadConfig: async () =>
+        createRuntimeConfig("/tmp/openforge-state", {
+          gateway: { host: "::1", port: 48731 },
+          web: { host: "::1", port: 48732 }
+        }),
+      resolvePaths: () => createInstalledPaths(),
+      checkPort: async () => undefined,
+      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      spawn: (entry, env) => {
+        const child = new FakeChild();
+        spawns.push({ entry, env });
+        return child;
+      },
+      installShutdown: (children) => {
+        setImmediate(() => children[1]?.emit("exit", 0, null));
+      },
+      stdout
+    });
+
+    await codePromise;
+
+    // Assert
+    assert.equal(spawns[0]?.env.OPENFORGE_HOST, "::1");
+    assert.equal(spawns[0]?.env.OPENFORGE_GATEWAY_URL, "http://[::1]:48731");
+    assert.equal(spawns[1]?.env.HOSTNAME, "::1");
+    assert.equal(spawns[1]?.env.OPENFORGE_GATEWAY_URL, "http://[::1]:48731");
+    assert.match(stdout.text, /OpenForge Web Console: http:\/\/\[::1\]:48732\n/);
+    assert.match(stdout.text, /OpenForge Gateway: http:\/\/\[::1\]:48731\n/);
+  });
+
+  it("rejects matching gateway and web bind endpoints before checking ports", async () => {
+    // Arrange
+    const portChecks: Array<{ host: string; port: number }> = [];
+
+    // Act / Assert
+    await assert.rejects(
+      () =>
+        runStart({
+          loadConfig: async () =>
+            createRuntimeConfig("/tmp/openforge-state", {
+              gateway: { host: "127.0.0.1", port: 48731 },
+              web: { host: "127.0.0.1", port: 48731 }
+            }),
+          resolvePaths: () => createInstalledPaths(),
+          checkPort: async (host, port) => {
+            portChecks.push({ host, port });
+          },
+          prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+          spawn: () => new FakeChild(),
+          stdout: createMemoryWriter()
+        }),
+      /Gateway and Web cannot use the same bind endpoint: 127\.0\.0\.1:48731/
+    );
+    assert.deepEqual(portChecks, []);
+  });
+
+  it("rejects wildcard and loopback bind endpoint overlap before checking ports", async () => {
+    // Arrange
+    const portChecks: Array<{ host: string; port: number }> = [];
+
+    // Act / Assert
+    await assert.rejects(
+      () =>
+        runStart({
+          loadConfig: async () =>
+            createRuntimeConfig("/tmp/openforge-state", {
+              gateway: { host: "0.0.0.0", port: 48731 },
+              web: { host: "127.0.0.1", port: 48731 }
+            }),
+          resolvePaths: () => createInstalledPaths(),
+          checkPort: async (host, port) => {
+            portChecks.push({ host, port });
+          },
+          prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+          spawn: () => new FakeChild(),
+          stdout: createMemoryWriter()
+        }),
+      /Gateway and Web cannot use overlapping bind endpoints: 0\.0\.0\.0:48731 and 127\.0\.0\.1:48731/
+    );
+    assert.deepEqual(portChecks, []);
   });
 
   it("kills the sibling child, cleans listeners, and rejects when a child emits an error", async () => {
@@ -226,6 +386,7 @@ describe("runStart", () => {
       loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
+      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
       writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
       spawn: () => {
         const child = new FakeChild();
@@ -260,6 +421,7 @@ describe("runStart", () => {
       loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
+      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
       writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
       spawn: () => {
         const child = new FakeChild();
@@ -295,6 +457,7 @@ describe("runStart", () => {
       loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
+      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
       writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
       spawn: () => {
         const child = new FakeChild();
@@ -325,6 +488,7 @@ describe("runStart", () => {
     const paths = createInstalledPaths();
     const writeError = new Error("EACCES: permission denied");
     const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
+    const runtimePublicDir = path.join("/tmp", "openforge-state", "runtime", "web", "packages", "web", "public");
 
     // Act / Assert
     await assert.rejects(
@@ -333,6 +497,7 @@ describe("runStart", () => {
           loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
           resolvePaths: () => paths,
           checkPort: async () => undefined,
+          prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
           writeRuntimeConfig: async () => {
             throw writeError;
           },
@@ -342,9 +507,36 @@ describe("runStart", () => {
           },
           stdout: createMemoryWriter()
         }),
-      new RegExp(`Unable to write Web runtime config to ${escapeRegExp(paths.webPublicDir)}.*EACCES`)
+      new RegExp(`Unable to write Web runtime config to ${escapeRegExp(runtimePublicDir)}.*EACCES`)
     );
     assert.deepEqual(spawns, []);
+  });
+});
+
+describe("prepareWebRuntime", () => {
+  it("copies the installed Web standalone artifact into a writable runtime directory", async () => {
+    // Arrange
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-web-prepare-"));
+    const installedRoot = path.join(root, "installed", "standalone");
+    const installedServer = path.join(installedRoot, "packages", "web", "server.js");
+    const installedPublicFile = path.join(installedRoot, "packages", "web", "public", "asset.txt");
+    const runtimeWebDir = path.join(root, "state", "runtime", "web");
+    await mkdir(path.dirname(installedServer), { recursive: true });
+    await mkdir(path.dirname(installedPublicFile), { recursive: true });
+    await writeFile(installedServer, "server");
+    await writeFile(installedPublicFile, "asset");
+
+    // Act
+    const prepared = await prepareWebRuntime({
+      installedWebServerEntry: installedServer,
+      runtimeWebDir
+    });
+
+    // Assert
+    assert.equal(prepared.webServerEntry, path.join(runtimeWebDir, "packages", "web", "server.js"));
+    assert.equal(prepared.webPublicDir, path.join(runtimeWebDir, "packages", "web", "public"));
+    assert.equal(await readFile(prepared.webServerEntry, "utf8"), "server");
+    assert.equal(await readFile(path.join(prepared.webPublicDir, "asset.txt"), "utf8"), "asset");
   });
 });
 
@@ -405,13 +597,16 @@ async function closeServer(server: net.Server): Promise<void> {
   });
 }
 
-function createRuntimeConfig(stateDir: string): RuntimeConfig {
+function createRuntimeConfig(
+  stateDir: string,
+  overrides: Partial<Pick<RuntimeConfig, "gateway" | "web">> = {}
+): RuntimeConfig {
   return {
     version: 1,
     stateDir,
     dbPath: `${stateDir}/openforge.db`,
-    gateway: { host: "127.0.0.1", port: 48731 },
-    web: { host: "127.0.0.1", port: 48732 },
+    gateway: overrides.gateway ?? { host: "127.0.0.1", port: 48731 },
+    web: overrides.web ?? { host: "127.0.0.1", port: 48732 },
     secrets: {
       masterKey: "a".repeat(64),
       jwtSecret: "abcdefghijklmnopqrstuvwxyz123456"
@@ -429,6 +624,14 @@ function createInstalledPaths() {
   };
 }
 
+function createPreparedWebPaths(runtimeWebDir: string) {
+  return {
+    webRootDir: runtimeWebDir,
+    webServerEntry: path.join(runtimeWebDir, "packages", "web", "server.js"),
+    webPublicDir: path.join(runtimeWebDir, "packages", "web", "public")
+  };
+}
+
 function createMemoryWriter() {
   return {
     text: "",
@@ -436,6 +639,16 @@ function createMemoryWriter() {
       this.text += chunk;
     }
   };
+}
+
+function captureEnv(names: string[]): Record<string, string | undefined> {
+  return Object.fromEntries(names.map((name) => [name, process.env[name]]));
+}
+
+function restoreEnvSnapshot(snapshot: Record<string, string | undefined>): void {
+  for (const [name, value] of Object.entries(snapshot)) {
+    restoreEnv(name, value);
+  }
 }
 
 function restoreEnv(name: string, value: string | undefined): void {
