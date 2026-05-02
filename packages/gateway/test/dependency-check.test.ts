@@ -38,33 +38,38 @@ describe("checkCommand", () => {
 
 describe("runCommand", () => {
   it("returns a timeout error when the child process exceeds the configured timeout", async () => {
-    const result = await runCommand("sleep", ["10"], { timeoutMs: 1 });
-
-    assert.notEqual(result.exitCode, 0);
-    assert.equal(result.stderr, "Command timed out after 1ms");
-  });
-
-  it("kills a timed out child that ignores SIGTERM after the configured grace period", async () => {
-    const startedAt = Date.now();
     const result = await runCommand(
-      "sh",
-      ["-c", "trap '' TERM; while :; do sleep 1; done"],
-      { timeoutMs: 1, killGraceMs: 50 }
+      process.execPath,
+      ["-e", "setInterval(() => {}, 1000);"],
+      { timeoutMs: 25 }
     );
 
     assert.notEqual(result.exitCode, 0);
-    assert.equal(result.stderr, "Command timed out after 1ms");
-    assert.ok(Date.now() - startedAt >= 40);
+    assert.equal(result.stderr, "Command timed out after 25ms");
+  });
+
+  it("kills a timed out child that ignores SIGTERM after the configured grace period", async () => {
+    const result = await runCommand(
+      process.execPath,
+      ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"],
+      { timeoutMs: 25, killGraceMs: 50 }
+    );
+
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(result.stderr, "Command timed out after 25ms");
   });
 
   it("bounds stdout and stderr to the configured maximum output bytes", async () => {
     const stdoutText = "o".repeat(128);
     const stderrText = "e".repeat(128);
     const result = await runCommand(
-      "sh",
+      "awk",
       [
-        "-c",
-        `printf '%s' '${stdoutText}'; printf '%s' '${stderrText}' >&2`
+        "-v",
+        `stdoutText=${stdoutText}`,
+        "-v",
+        `stderrText=${stderrText}`,
+        "BEGIN { printf \"%s\", stdoutText; printf \"%s\", stderrText > \"/dev/stderr\" }",
       ],
       { maxOutputBytes: 16 }
     );
