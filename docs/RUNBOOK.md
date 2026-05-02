@@ -6,14 +6,20 @@ This runbook captures operational checks and failure handling for the MVP-0 Clau
 
 ## 1. Required Local Dependencies
 
+NPM runtime:
+
 - Node.js 20+
-- pnpm
 - tmux 3.2+
-- Claude Code CLI
 - SQLite-compatible filesystem
+
+Optional runtime dependencies:
+
+- Claude Code CLI, OpenCode, and/or Codex on `PATH`, only for the corresponding
+  real CLI sessions.
 
 Optional during development:
 
+- pnpm
 - compiler toolchain for native modules
 - Playwright browsers for E2E tests
 
@@ -42,16 +48,30 @@ Before Gate A:
 
 ```bash
 node --version
-pnpm --version
 tmux -V
+```
+
+For source development:
+
+```bash
+pnpm --version
+```
+
+When the corresponding real CLI session type is in scope:
+
+```bash
 claude --version
+opencode --version
+codex --version
 ```
 
 Expected:
 
 - Node.js is 20 or newer.
 - tmux is installed.
-- Claude Code command is available on `PATH`, or adapter configuration points to it.
+- pnpm is installed for source development workflows.
+- Claude Code, OpenCode, or Codex is available on `PATH` only when that adapter
+  is being used for real sessions.
 
 ## 4. NPM CLI Startup
 
@@ -62,9 +82,11 @@ openforge doctor
 openforge start --gateway-port 48731 --web-port 48732
 ```
 
-`openforge start` prints the Web console URL after the Gateway and Web console
-are ready. Runtime state defaults to `~/.openforge`; use `OPENFORGE_STATE_DIR`
-when testing against disposable state or running multiple isolated installs.
+`openforge start` starts the Gateway/Web child processes and prints the Web
+console URL. If the browser cannot connect immediately, wait for initialization
+or inspect logs and `openforge doctor` output. Runtime state defaults to
+`~/.openforge`; use `OPENFORGE_STATE_DIR` when testing against disposable state
+or running multiple isolated installs.
 
 ## 5. Gateway Startup Behavior
 

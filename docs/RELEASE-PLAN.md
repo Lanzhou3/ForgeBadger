@@ -10,11 +10,20 @@ hosting, billing, external worker pools, or hosted plugin marketplaces.
 
 Release artifacts:
 
+- npm package tarball for the publishable `openforge` CLI.
+- CLI build output: `packages/cli/dist`.
 - Gateway build output: `packages/gateway/dist`.
 - Web build output: `packages/web/.next`.
+- README, LICENSE, localized docs, and database migrations needed by the
+  package.
+
+Operational runtime state:
+
 - SQLite data file at `OPENFORGE_DB_PATH`.
 - Project-generated config files under user-approved project directories.
 - Runtime tmux sessions named with `OPENFORGE_TMUX_PREFIX`, default `of-`.
+
+Operational runtime state is never part of the npm package or release artifact.
 
 The Gateway owns all API and WebSocket behavior. The Web console is a pure
 Next.js client that talks to the Gateway through `NEXT_PUBLIC_GATEWAY_URL`.
