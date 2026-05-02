@@ -9,10 +9,15 @@ const webTarget = path.join(cliDist, "web");
 const webStandaloneTarget = path.join(webTarget, "standalone");
 const webStandalonePackage = path.join(webStandaloneTarget, "packages", "web");
 const webNextEnv = path.resolve("packages/web/next-env.d.ts");
+const gatewayDist = path.resolve("packages/gateway/dist");
+const copyTreeOptions = { recursive: true, dereference: true };
 
 const restoreWebNextEnv = await preserveFile(webNextEnv);
 
 try {
+  await rm(cliDist, { recursive: true, force: true });
+  await rm(gatewayDist, { recursive: true, force: true });
+
   run("pnpm", ["--filter", "@openforge/gateway", "build"]);
   run("pnpm", ["--filter", "@openforge/web", "build"]);
   run("pnpm", ["--filter", "openforge", "build"]);
@@ -21,11 +26,11 @@ try {
   await rm(webTarget, { recursive: true, force: true });
   await mkdir(cliDist, { recursive: true });
 
-  await cp("packages/gateway/dist", gatewayTarget, { recursive: true });
-  await cp("packages/web/.next/standalone", webStandaloneTarget, { recursive: true });
+  await cp("packages/gateway/dist", gatewayTarget, copyTreeOptions);
+  await cp("packages/web/.next/standalone", webStandaloneTarget, copyTreeOptions);
   await mkdir(path.join(webStandalonePackage, ".next"), { recursive: true });
-  await cp("packages/web/.next/static", path.join(webStandalonePackage, ".next", "static"), { recursive: true });
-  await cp("packages/web/public", path.join(webStandalonePackage, "public"), { recursive: true });
+  await cp("packages/web/.next/static", path.join(webStandalonePackage, ".next", "static"), copyTreeOptions);
+  await cp("packages/web/public", path.join(webStandalonePackage, "public"), copyTreeOptions);
 
   await cp("README.md", "packages/cli/README.md");
   await cp("LICENSE", "packages/cli/LICENSE");
@@ -50,7 +55,9 @@ function run(command, args) {
 
 async function preserveFile(filePath) {
   if (!existsSync(filePath)) {
-    return async () => undefined;
+    return async () => {
+      await rm(filePath, { force: true });
+    };
   }
   const original = await readFile(filePath);
   return async () => {

@@ -6,15 +6,19 @@ const cliPackageRoot = path.resolve("packages/cli");
 const cliDist = path.join(cliPackageRoot, "dist");
 
 const required = [
-  "dist/index.js",
-  "dist/gateway/src/index.js",
-  "dist/gateway/src/db/migrations",
-  "dist/web/standalone/packages/web/server.js",
-  "dist/web/standalone/packages/web/public/openforge-runtime.js",
-  "README.md",
-  "LICENSE",
-  "docs/README.zh-CN.md",
-  "docs/README.zh-TW.md"
+  { path: "dist/index.js", type: "file" },
+  { path: "dist/gateway/src/index.js", type: "file" },
+  { path: "dist/gateway/src/db/migrations", type: "directory", nonEmpty: true },
+  { path: "dist/web/standalone/packages/web/server.js", type: "file" },
+  { path: "dist/web/standalone/packages/web/.next/BUILD_ID", type: "file" },
+  { path: "dist/web/standalone/packages/web/.next/static", type: "directory", nonEmpty: true },
+  { path: "dist/web/standalone/packages/web/node_modules/next/package.json", type: "file" },
+  { path: "dist/web/standalone/packages/web/public", type: "directory", nonEmpty: true },
+  { path: "dist/web/standalone/packages/web/public/openforge-runtime.js", type: "file" },
+  { path: "README.md", type: "file" },
+  { path: "LICENSE", type: "file" },
+  { path: "docs/README.zh-CN.md", type: "file" },
+  { path: "docs/README.zh-TW.md", type: "file" }
 ];
 
 const forbiddenNames = new Set([
@@ -27,18 +31,28 @@ const forbiddenNames = new Set([
   "reports"
 ]);
 
-const forbiddenExtensions = new Set([".db", ".sqlite", ".sqlite3", ".log"]);
+const forbiddenFilePatterns = [
+  /\.(?:db|sqlite|sqlite3)(?:-(?:wal|shm))?$/,
+  /\.log$/
+];
 
 let failed = false;
 
-for (const relative of required) {
-  const absolute = path.join(cliPackageRoot, relative);
+for (const artifact of required) {
+  const absolute = path.join(cliPackageRoot, artifact.path);
   if (!existsSync(absolute)) {
-    fail(`missing required artifact: packages/cli/${relative}`);
+    fail(`missing required artifact: packages/cli/${artifact.path}`);
     continue;
   }
-  if (relative.endsWith("/migrations") && !statSync(absolute).isDirectory()) {
-    fail(`required artifact is not a directory: packages/cli/${relative}`);
+  const stats = statSync(absolute);
+  if (artifact.type === "file" && !stats.isFile()) {
+    fail(`required artifact is not a file: packages/cli/${artifact.path}`);
+  }
+  if (artifact.type === "directory" && !stats.isDirectory()) {
+    fail(`required artifact is not a directory: packages/cli/${artifact.path}`);
+  }
+  if (artifact.nonEmpty && stats.isDirectory() && (await readdir(absolute)).length === 0) {
+    fail(`required artifact directory is empty: packages/cli/${artifact.path}`);
   }
 }
 
@@ -62,6 +76,10 @@ async function scanForbiddenArtifacts(root) {
   for (const entry of entries) {
     const absolute = path.join(root, entry.name);
     const relative = path.relative(cliPackageRoot, absolute);
+    if (entry.isSymbolicLink()) {
+      fail(`forbidden symlink artifact present: packages/cli/${relative}`);
+      continue;
+    }
     if (isForbiddenArtifact(entry.name)) {
       fail(`forbidden artifact present: packages/cli/${relative}`);
       continue;
@@ -79,7 +97,7 @@ function isForbiddenArtifact(name) {
   if (name.startsWith(".env")) {
     return true;
   }
-  return forbiddenExtensions.has(path.extname(name));
+  return forbiddenFilePatterns.some((pattern) => pattern.test(name));
 }
 
 function hasAllowedFilesWhitelist() {
