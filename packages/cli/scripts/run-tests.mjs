@@ -5,16 +5,39 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const nodeTestArgs = ["--test", "--import", "tsx"];
+const nodeTestOptionsWithValue = new Set([
+  "--test-concurrency",
+  "--test-name-pattern",
+  "--test-reporter",
+  "--test-reporter-destination",
+  "--test-shard",
+  "--test-skip-pattern",
+  "--test-timeout"
+]);
 
 export async function resolveNodeTestArgs(args, cwd = process.cwd()) {
+  const normalizedArgs = args[0] === "--" ? args.slice(1) : args;
   const resolved = [];
-  for (const arg of args) {
+  let preserveNextValue = false;
+
+  for (const arg of normalizedArgs) {
+    if (preserveNextValue) {
+      resolved.push(arg);
+      preserveNextValue = false;
+      continue;
+    }
+
     resolved.push(await resolveNodeTestArg(arg, cwd));
+    preserveNextValue = takesFollowingValue(arg);
   }
   return resolved;
 }
 
 async function resolveNodeTestArg(arg, cwd) {
+  if (arg.startsWith("-")) {
+    return arg;
+  }
+
   if (await exists(path.resolve(cwd, arg))) {
     return arg;
   }
@@ -25,6 +48,13 @@ async function resolveNodeTestArg(arg, cwd) {
   }
 
   return arg;
+}
+
+function takesFollowingValue(arg) {
+  if (arg.includes("=")) {
+    return false;
+  }
+  return nodeTestOptionsWithValue.has(arg);
 }
 
 async function exists(filePath) {

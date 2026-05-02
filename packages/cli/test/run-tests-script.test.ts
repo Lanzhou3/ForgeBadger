@@ -32,4 +32,17 @@ describe("resolveNodeTestArgs", () => {
     // Assert
     assert.deepEqual(args, ["--test-reporter", "spec", "test/runtime-config.test.ts"]);
   });
+
+  it("does not rewrite values for node:test options", async () => {
+    // Arrange
+    const cwd = await mkdtemp(path.join(tmpdir(), "openforge-cli-tests-"));
+    await mkdir(path.join(cwd, "test"));
+    await writeFile(path.join(cwd, "test", "runtime-config.test.ts"), "");
+
+    // Act
+    const args = await resolveNodeTestArgs(["--test-reporter-destination", "runtime-config.test.ts"], cwd);
+
+    // Assert
+    assert.deepEqual(args, ["--test-reporter-destination", "runtime-config.test.ts"]);
+  });
 });

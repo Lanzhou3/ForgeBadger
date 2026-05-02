@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { constants } from "node:fs";
-import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -42,7 +41,8 @@ export async function loadOrCreateRuntimeConfig(
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
   await chmod(stateDir, 0o700).catch(() => undefined);
 
-  if (await exists(configPath)) {
+  if (await isExistingConfigFile(configPath)) {
+    await chmod(configPath, 0o600).catch(() => undefined);
     const config = runtimeConfigSchema.parse(JSON.parse(await readFile(configPath, "utf8")));
     return applyRuntimeOverrides(config, options);
   }
@@ -59,27 +59,53 @@ export async function loadOrCreateRuntimeConfig(
     }
   };
 
-  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, { flag: "wx", mode: 0o600 });
   await chmod(configPath, 0o600).catch(() => undefined);
 
   return applyRuntimeOverrides(config, options);
 }
 
 function resolveStateDir(stateDir: string | undefined): string {
-  return path.resolve(stateDir ?? process.env.OPENFORGE_STATE_DIR ?? path.join(homedir(), ".openforge"));
+  const configuredStateDir = stateDir ?? process.env.OPENFORGE_STATE_DIR ?? path.join(homedir(), ".openforge");
+  return path.resolve(expandHomeDir(configuredStateDir));
 }
 
-async function exists(filePath: string): Promise<boolean> {
+function expandHomeDir(filePath: string): string {
+  if (filePath === "~") {
+    return homedir();
+  }
+  if (filePath.startsWith("~/")) {
+    return path.join(homedir(), filePath.slice(2));
+  }
+  return filePath;
+}
+
+async function isExistingConfigFile(filePath: string): Promise<boolean> {
   try {
-    await access(filePath, constants.F_OK);
+    const stats = await lstat(filePath);
+    if (!stats.isFile()) {
+      throw new Error(`Runtime config must be a regular file: ${filePath}`);
+    }
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return false;
+    }
+    throw error;
   }
 }
 
+function isFileNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  );
+}
+
 function applyRuntimeOverrides(config: RuntimeConfig, options: LoadRuntimeConfigOptions): RuntimeConfig {
-  return {
+  return runtimeConfigSchema.parse({
     ...config,
     gateway: {
       host: options.host ?? config.gateway.host,
@@ -89,5 +115,5 @@ function applyRuntimeOverrides(config: RuntimeConfig, options: LoadRuntimeConfig
       host: options.host ?? config.web.host,
       port: options.webPort ?? config.web.port
     }
-  };
+  });
 }
