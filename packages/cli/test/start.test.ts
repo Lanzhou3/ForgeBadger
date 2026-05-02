@@ -152,8 +152,8 @@ describe("runStart", () => {
       assert.equal(spawns[1]?.env.HOSTNAME, "127.0.0.1");
       assert.equal(spawns[1]?.env.PORT, "48732");
       assert.equal(spawns[1]?.env.OPENFORGE_GATEWAY_URL, "http://127.0.0.1:48731");
-      assert.notEqual(spawns[1]?.env.OPENFORGE_MASTER_KEY, config.secrets.masterKey);
-      assert.notEqual(spawns[1]?.env.OPENFORGE_JWT_SECRET, config.secrets.jwtSecret);
+      assert.equal(spawns[1]?.env.OPENFORGE_MASTER_KEY, undefined);
+      assert.equal(spawns[1]?.env.OPENFORGE_JWT_SECRET, undefined);
       assert.deepEqual(shutdownChildren, spawnedChildren);
       assert.equal(shutdownChildren.length, 2);
       assert.match(stdout.text, /OpenForge Web Console: http:\/\/127\.0\.0\.1:48732\n/);
@@ -175,6 +175,176 @@ describe("runStart", () => {
         process.env.OPENFORGE_JWT_SECRET = originalJwtSecret;
       }
     }
+  });
+
+  it("does not pass parent OpenForge secrets to the web child", async () => {
+    // Arrange
+    const originalMasterKey = process.env.OPENFORGE_MASTER_KEY;
+    const originalJwtSecret = process.env.OPENFORGE_JWT_SECRET;
+    const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
+    process.env.OPENFORGE_MASTER_KEY = "parent-master-key";
+    process.env.OPENFORGE_JWT_SECRET = "parent-jwt-secret";
+
+    try {
+      const codePromise = runStart({
+        loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+        resolvePaths: () => createInstalledPaths(),
+        checkPort: async () => undefined,
+        writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+        spawn: (entry, env) => {
+          const child = new FakeChild();
+          spawns.push({ entry, env });
+          return child;
+        },
+        installShutdown: (children) => {
+          setImmediate(() => children[1]?.emit("exit", 0, null));
+        },
+        stdout: createMemoryWriter()
+      });
+
+      await codePromise;
+
+      // Assert
+      assert.equal(spawns[0]?.env.OPENFORGE_MASTER_KEY, "a".repeat(64));
+      assert.equal(spawns[0]?.env.OPENFORGE_JWT_SECRET, "abcdefghijklmnopqrstuvwxyz123456");
+      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "OPENFORGE_MASTER_KEY"), false);
+      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "OPENFORGE_JWT_SECRET"), false);
+    } finally {
+      restoreEnv("OPENFORGE_MASTER_KEY", originalMasterKey);
+      restoreEnv("OPENFORGE_JWT_SECRET", originalJwtSecret);
+    }
+  });
+
+  it("kills the sibling child, cleans listeners, and rejects when a child emits an error", async () => {
+    // Arrange
+    const originalSigintCount = process.listenerCount("SIGINT");
+    const originalSigtermCount = process.listenerCount("SIGTERM");
+    const children: FakeChild[] = [];
+    const spawnError = new Error("gateway spawn failed");
+
+    const codePromise = runStart({
+      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      resolvePaths: () => createInstalledPaths(),
+      checkPort: async () => undefined,
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      spawn: () => {
+        const child = new FakeChild();
+        children.push(child);
+        return child;
+      },
+      stdout: createMemoryWriter()
+    });
+
+    await waitForChildren(children, 2);
+
+    // Act
+    assert.doesNotThrow(() => children[0]?.emit("error", spawnError));
+
+    // Assert
+    await assert.rejects(() => withTimeout(codePromise), /gateway spawn failed/);
+    assert.deepEqual(children[1]?.killSignals, ["SIGTERM"]);
+    assert.equal(process.listenerCount("SIGINT"), originalSigintCount);
+    assert.equal(process.listenerCount("SIGTERM"), originalSigtermCount);
+    assert.equal(children[0]?.listenerCount("error"), 0);
+    assert.equal(children[1]?.listenerCount("exit"), 0);
+    assert.equal(children[1]?.listenerCount("close"), 0);
+  });
+
+  it("kills the sibling child, cleans listeners, and returns the first child exit code", async () => {
+    // Arrange
+    const originalSigintCount = process.listenerCount("SIGINT");
+    const originalSigtermCount = process.listenerCount("SIGTERM");
+    const children: FakeChild[] = [];
+
+    const codePromise = runStart({
+      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      resolvePaths: () => createInstalledPaths(),
+      checkPort: async () => undefined,
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      spawn: () => {
+        const child = new FakeChild();
+        children.push(child);
+        return child;
+      },
+      stdout: createMemoryWriter()
+    });
+
+    await waitForChildren(children, 2);
+
+    // Act
+    children[1]?.emit("close", 7, null);
+    const code = await withTimeout(codePromise);
+
+    // Assert
+    assert.equal(code, 7);
+    assert.deepEqual(children[0]?.killSignals, ["SIGTERM"]);
+    assert.equal(process.listenerCount("SIGINT"), originalSigintCount);
+    assert.equal(process.listenerCount("SIGTERM"), originalSigtermCount);
+    assert.equal(children[0]?.listenerCount("error"), 0);
+    assert.equal(children[0]?.listenerCount("exit"), 0);
+    assert.equal(children[1]?.listenerCount("close"), 0);
+  });
+
+  it("kills the sibling child, cleans listeners, and returns zero when a child exits normally", async () => {
+    // Arrange
+    const originalSigintCount = process.listenerCount("SIGINT");
+    const originalSigtermCount = process.listenerCount("SIGTERM");
+    const children: FakeChild[] = [];
+
+    const codePromise = runStart({
+      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      resolvePaths: () => createInstalledPaths(),
+      checkPort: async () => undefined,
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      spawn: () => {
+        const child = new FakeChild();
+        children.push(child);
+        return child;
+      },
+      stdout: createMemoryWriter()
+    });
+
+    await waitForChildren(children, 2);
+
+    // Act
+    children[0]?.emit("exit", 0, null);
+    const code = await withTimeout(codePromise);
+
+    // Assert
+    assert.equal(code, 0);
+    assert.deepEqual(children[1]?.killSignals, ["SIGTERM"]);
+    assert.equal(process.listenerCount("SIGINT"), originalSigintCount);
+    assert.equal(process.listenerCount("SIGTERM"), originalSigtermCount);
+    assert.equal(children[0]?.listenerCount("error"), 0);
+    assert.equal(children[1]?.listenerCount("exit"), 0);
+    assert.equal(children[1]?.listenerCount("close"), 0);
+  });
+
+  it("wraps web runtime config write failures with a diagnostic path", async () => {
+    // Arrange
+    const paths = createInstalledPaths();
+    const writeError = new Error("EACCES: permission denied");
+    const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
+
+    // Act / Assert
+    await assert.rejects(
+      () =>
+        runStart({
+          loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+          resolvePaths: () => paths,
+          checkPort: async () => undefined,
+          writeRuntimeConfig: async () => {
+            throw writeError;
+          },
+          spawn: (entry, env) => {
+            spawns.push({ entry, env });
+            return new FakeChild();
+          },
+          stdout: createMemoryWriter()
+        }),
+      new RegExp(`Unable to write Web runtime config to ${escapeRegExp(paths.webPublicDir)}.*EACCES`)
+    );
+    assert.deepEqual(spawns, []);
   });
 });
 
@@ -205,7 +375,16 @@ describe("runCli", () => {
   });
 });
 
-class FakeChild extends EventEmitter {}
+class FakeChild extends EventEmitter {
+  killed = false;
+  readonly killSignals: string[] = [];
+
+  kill(signal: NodeJS.Signals = "SIGTERM"): boolean {
+    this.killed = true;
+    this.killSignals.push(signal);
+    return true;
+  }
+}
 
 interface BoundServer extends net.Server {
   address(): net.AddressInfo;
@@ -240,6 +419,16 @@ function createRuntimeConfig(stateDir: string): RuntimeConfig {
   };
 }
 
+function createInstalledPaths() {
+  return {
+    packageRoot: "/tmp/openforge-package",
+    gatewayEntry: "/tmp/openforge-package/gateway/src/index.js",
+    gatewayInitEntry: "/tmp/openforge-package/gateway/src/cli/init.js",
+    webServerEntry: "/tmp/openforge-package/web/standalone/packages/web/server.js",
+    webPublicDir: "/tmp/openforge-package/web/standalone/packages/web/public"
+  };
+}
+
 function createMemoryWriter() {
   return {
     text: "",
@@ -247,4 +436,46 @@ function createMemoryWriter() {
       this.text += chunk;
     }
   };
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function waitForChildren(children: FakeChild[], count: number): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    if (children.length >= count) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+  throw new Error(`Timed out waiting for ${count} children`);
+}
+
+async function withTimeout<T>(promise: Promise<T>): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error("Timed out waiting for runStart"));
+        }, 50);
+      })
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }

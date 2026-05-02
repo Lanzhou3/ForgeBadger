@@ -1,4 +1,3 @@
-import { once } from "node:events";
 import type { ChildProcess } from "node:child_process";
 
 import {
@@ -8,7 +7,7 @@ import {
 } from "../runtime/config.js";
 import { resolveInstalledPaths, type InstalledPaths } from "../runtime/paths.js";
 import { assertPortAvailable } from "../runtime/ports.js";
-import { installShutdownHandlers, spawnNode } from "../runtime/processes.js";
+import { installShutdownHandlers, spawnNode, type ShutdownCleanup } from "../runtime/processes.js";
 import { writeWebRuntimeConfig, type WriteWebRuntimeConfigOptions } from "../runtime/web-runtime.js";
 
 interface OutputWriter {
@@ -22,8 +21,15 @@ export interface RunStartOptions extends LoadRuntimeConfigOptions {
   checkPort?: (host: string, port: number) => Promise<void>;
   writeRuntimeConfig?: (options: WriteWebRuntimeConfigOptions) => Promise<string>;
   spawn?: (entry: string, env: NodeJS.ProcessEnv) => ChildProcess;
-  installShutdown?: (children: ChildProcess[]) => void;
+  installShutdown?: (children: ChildProcess[]) => ShutdownCleanup | void;
   stdout?: OutputWriter;
+}
+
+interface ChildResult {
+  child: ChildProcess;
+  type: "error" | "exit" | "close";
+  code: number | null;
+  error?: Error;
 }
 
 export async function runStart(options: RunStartOptions = {}): Promise<number> {
@@ -42,17 +48,35 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
 
   await checkPort(config.gateway.host, config.gateway.port);
   await checkPort(config.web.host, config.web.port);
-  await writeRuntimeConfig({ webPublicDir: paths.webPublicDir, gatewayBaseUrl: gatewayUrl });
+  try {
+    await writeRuntimeConfig({ webPublicDir: paths.webPublicDir, gatewayBaseUrl: gatewayUrl });
+  } catch (error) {
+    throw new Error(`Unable to write Web runtime config to ${paths.webPublicDir}: ${formatError(error)}`, {
+      cause: error
+    });
+  }
 
   const gateway = spawnProcess(paths.gatewayEntry, buildGatewayEnv(config, gatewayUrl));
   const web = spawnProcess(paths.webServerEntry, buildWebEnv(config, gatewayUrl));
+  const children = [gateway, web];
+  const childResult = waitForFirstChildResult(children);
+  const cleanupShutdown = installShutdown(children) ?? noop;
 
-  installShutdown([gateway, web]);
-  stdout.write(`OpenForge Web Console: ${webUrl}\n`);
-  stdout.write(`OpenForge Gateway: ${gatewayUrl}\n`);
+  try {
+    stdout.write(`OpenForge Web Console: ${webUrl}\n`);
+    stdout.write(`OpenForge Gateway: ${gatewayUrl}\n`);
 
-  const [code] = (await Promise.race([once(gateway, "exit"), once(web, "exit")])) as [number | null];
-  return code ?? 0;
+    const result = await childResult;
+    terminateSiblings(children, result.child);
+
+    if (result.type === "error") {
+      throw result.error ?? new Error("OpenForge child process failed to spawn");
+    }
+
+    return result.code ?? 1;
+  } finally {
+    cleanupShutdown();
+  }
 }
 
 function toRuntimeConfigOptions(options: RunStartOptions): LoadRuntimeConfigOptions {
@@ -86,8 +110,12 @@ function buildGatewayEnv(config: RuntimeConfig, gatewayUrl: string): NodeJS.Proc
 }
 
 function buildWebEnv(config: RuntimeConfig, gatewayUrl: string): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.OPENFORGE_MASTER_KEY;
+  delete env.OPENFORGE_JWT_SECRET;
+
   return {
-    ...process.env,
+    ...env,
     HOSTNAME: config.web.host,
     PORT: String(config.web.port),
     OPENFORGE_GATEWAY_URL: gatewayUrl
@@ -97,3 +125,60 @@ function buildWebEnv(config: RuntimeConfig, gatewayUrl: string): NodeJS.ProcessE
 function buildUrl(host: string, port: number): string {
   return `http://${host}:${port}`;
 }
+
+function waitForFirstChildResult(children: ChildProcess[]): Promise<ChildResult> {
+  return new Promise((resolve) => {
+    const cleanupCallbacks: Array<() => void> = [];
+    let settled = false;
+
+    const settle = (result: ChildResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanupChildListeners(cleanupCallbacks);
+      resolve(result);
+    };
+
+    for (const child of children) {
+      const onError = (error: Error) => {
+        settle({ child, type: "error", code: null, error });
+      };
+      const onExit = (code: number | null) => {
+        settle({ child, type: "exit", code });
+      };
+      const onClose = (code: number | null) => {
+        settle({ child, type: "close", code });
+      };
+
+      child.once("error", onError);
+      child.once("exit", onExit);
+      child.once("close", onClose);
+      cleanupCallbacks.push(() => {
+        child.off("error", onError);
+        child.off("exit", onExit);
+        child.off("close", onClose);
+      });
+    }
+  });
+}
+
+function cleanupChildListeners(cleanupCallbacks: Array<() => void>): void {
+  for (const cleanup of cleanupCallbacks) {
+    cleanup();
+  }
+}
+
+function terminateSiblings(children: ChildProcess[], finishedChild: ChildProcess): void {
+  for (const child of children) {
+    if (child !== finishedChild && !child.killed) {
+      child.kill("SIGTERM");
+    }
+  }
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function noop(): void {}
