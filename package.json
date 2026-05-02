@@ -10,6 +10,7 @@
     "dev": "pnpm -r --parallel dev",
     "openforge": "pnpm --filter @openforge/gateway openforge",
     "pack:npm": "pnpm --filter openforge pack --dry-run",
+    "smoke:npm": "node scripts/smoke-npm-package.mjs",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "verify:npm": "node scripts/verify-npm-package.mjs"
