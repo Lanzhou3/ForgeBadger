@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import type { ReactNode } from "react";
 import { Providers } from "./providers";
 
@@ -14,6 +15,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="dark">
       <body>
+        <Script src="/openforge-runtime.js" strategy="beforeInteractive" />
         <Providers>{children}</Providers>
       </body>
     </html>

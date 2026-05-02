@@ -1,5 +1,6 @@
 import { getToken } from "@/lib/auth";
 import type { StoredNotification } from "@/lib/notifications";
+import { getGatewayBaseUrl } from "@/lib/runtime-config";
 
 export interface GateASession {
   id: string;
@@ -642,12 +643,16 @@ interface ApiEnvelope<T> {
   message: string;
 }
 
-export const gatewayBaseUrl =
-  process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://127.0.0.1:48731";
+export const gatewayBaseUrl = getGatewayBaseUrl();
+
+export function apiUrl(path: string): string {
+  const baseUrl = getGatewayBaseUrl().replace(/\/+$/, "");
+  return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+}
 
 export async function fetchJson<T = unknown>(path: string, options: RequestInit = {}) {
   const token = getToken();
-  const res = await fetch(`${gatewayBaseUrl}${path}`, {
+  const res = await fetch(apiUrl(path), {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -668,7 +673,7 @@ export async function fetchJson<T = unknown>(path: string, options: RequestInit 
 
 export async function fetchEnvelope<T = unknown>(path: string, options: RequestInit = {}) {
   const token = getToken();
-  const res = await fetch(`${gatewayBaseUrl}${path}`, {
+  const res = await fetch(apiUrl(path), {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -706,7 +711,7 @@ export async function getMe() {
 }
 
 export async function getDependencies(): Promise<unknown> {
-  const response = await fetch(`${gatewayBaseUrl}/api/v1/gate-a/dependencies`, {
+  const response = await fetch(apiUrl("/api/v1/gate-a/dependencies"), {
     cache: "no-store"
   });
   return response.json();
