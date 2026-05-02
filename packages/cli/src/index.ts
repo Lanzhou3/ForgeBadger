@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runDoctor } from "./commands/doctor.js";
+import { runStart, type RunStartOptions } from "./commands/start.js";
 
 export type CliCommand =
   | {
@@ -21,6 +22,7 @@ export type CliCommand =
 
 export interface RunCliOptions {
   doctorRunner?: () => Promise<number>;
+  startRunner?: (command: Extract<CliCommand, { command: "start" }>) => Promise<number>;
 }
 
 export function parseCliArgs(args: string[]): CliCommand {
@@ -96,6 +98,12 @@ function parsePort(value: string, flag: string): number {
 
 export async function runCli(args = process.argv.slice(2), options: RunCliOptions = {}): Promise<number> {
   const command = parseCliArgs(args);
+  if (command.command === "start") {
+    if (options.startRunner) {
+      return options.startRunner(command);
+    }
+    return runStart(toRunStartOptions(command));
+  }
   if (command.command === "doctor") {
     return (options.doctorRunner ?? runDoctor)();
   }
@@ -104,6 +112,22 @@ export async function runCli(args = process.argv.slice(2), options: RunCliOption
     return 0;
   }
   throw new Error(`Command not implemented yet: ${command.command}`);
+}
+
+function toRunStartOptions(command: Extract<CliCommand, { command: "start" }>): RunStartOptions {
+  const options: RunStartOptions = {
+    openBrowser: command.openBrowser
+  };
+  if (command.gatewayPort !== undefined) {
+    options.gatewayPort = command.gatewayPort;
+  }
+  if (command.webPort !== undefined) {
+    options.webPort = command.webPort;
+  }
+  if (command.host !== undefined) {
+    options.host = command.host;
+  }
+  return options;
 }
 
 export function isMainModule(argv1 = process.argv[1], moduleUrl = import.meta.url): boolean {
