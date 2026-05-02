@@ -4,7 +4,8 @@ import { describe, it } from "node:test";
 import {
   checkCommand,
   checkGateADependencies,
-  checkOpenForgeDependencies
+  checkOpenForgeDependencies,
+  runCommand
 } from "../src/lib/dependency-check.js";
 
 describe("checkCommand", () => {
@@ -32,6 +33,31 @@ describe("checkCommand", () => {
     assert.equal(result.name, "claude");
     assert.equal(result.available, false);
     assert.equal(result.error, "command not found");
+  });
+});
+
+describe("runCommand", () => {
+  it("returns a timeout error when the child process exceeds the configured timeout", async () => {
+    const result = await runCommand("sleep", ["10"], { timeoutMs: 1 });
+
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(result.stderr, "Command timed out after 1ms");
+  });
+
+  it("bounds stdout and stderr to the configured maximum output bytes", async () => {
+    const stdoutText = "o".repeat(128);
+    const stderrText = "e".repeat(128);
+    const result = await runCommand(
+      "sh",
+      [
+        "-c",
+        `printf '%s' '${stdoutText}'; printf '%s' '${stderrText}' >&2`
+      ],
+      { maxOutputBytes: 16 }
+    );
+
+    assert.equal(result.stdout, "o".repeat(16));
+    assert.equal(result.stderr, "e".repeat(16));
   });
 });
 

@@ -6,6 +6,11 @@ export interface CliCommandResult {
   stderr: string;
 }
 
+export interface CliCommandRunnerOptions {
+  timeoutMs?: number;
+  maxOutputBytes?: number;
+}
+
 export type CliCommandRunner = (
   command: string,
   args: string[]
@@ -31,6 +36,14 @@ const CLI_DEPENDENCY_CHECKS: CliDependencyCheck[] = [
   { name: "opencode", args: ["--version"], required: false },
   { name: "codex", args: ["--version"], required: false }
 ];
+
+const DEFAULT_COMMAND_TIMEOUT_MS = 3000;
+const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
+
+interface BoundedOutput {
+  chunks: Buffer[];
+  byteLength: number;
+}
 
 export async function checkCliDependencies(
   runner: CliCommandRunner = runCommand
@@ -76,36 +89,85 @@ function formatDependencyStatus(
   };
 }
 
-function runCommand(command: string, args: string[]): Promise<CliCommandResult> {
+export function runCommand(
+  command: string,
+  args: string[],
+  options: CliCommandRunnerOptions = {}
+): Promise<CliCommandResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       stdio: ["ignore", "pipe", "pipe"]
     });
 
-    let stdout = "";
-    let stderr = "";
+    const timeoutMs = options.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+    const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+    const stdout = createBoundedOutput();
+    const stderr = createBoundedOutput();
+    let settled = false;
 
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
+    const timeout = setTimeout(() => {
+      child.kill("SIGTERM");
+      finish({
+        exitCode: 124,
+        stdout: boundedOutputToString(stdout),
+        stderr: `Command timed out after ${timeoutMs}ms`
+      });
+    }, timeoutMs);
+
     child.stdout.on("data", (chunk) => {
-      stdout += chunk;
+      appendBoundedOutput(stdout, chunk, maxOutputBytes);
     });
     child.stderr.on("data", (chunk) => {
-      stderr += chunk;
+      appendBoundedOutput(stderr, chunk, maxOutputBytes);
     });
     child.on("error", (error) => {
-      resolve({
+      if (stderr.byteLength === 0) {
+        appendBoundedOutput(stderr, error.message, maxOutputBytes);
+      }
+      finish({
         exitCode: 127,
-        stdout,
-        stderr: error.message
+        stdout: boundedOutputToString(stdout),
+        stderr: boundedOutputToString(stderr)
       });
     });
     child.on("close", (exitCode) => {
-      resolve({
+      finish({
         exitCode: exitCode ?? 1,
-        stdout,
-        stderr
+        stdout: boundedOutputToString(stdout),
+        stderr: boundedOutputToString(stderr)
       });
     });
+
+    function finish(result: CliCommandResult): void {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      resolve(result);
+    }
   });
+}
+
+function createBoundedOutput(): BoundedOutput {
+  return {
+    chunks: [],
+    byteLength: 0
+  };
+}
+
+function appendBoundedOutput(output: BoundedOutput, chunk: Buffer | string, maxBytes: number): void {
+  if (output.byteLength >= maxBytes) {
+    return;
+  }
+
+  const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+  const remainingBytes = maxBytes - output.byteLength;
+  const accepted = buffer.byteLength <= remainingBytes ? buffer : buffer.subarray(0, remainingBytes);
+  output.chunks.push(accepted);
+  output.byteLength += accepted.byteLength;
+}
+
+function boundedOutputToString(output: BoundedOutput): string {
+  return Buffer.concat(output.chunks, output.byteLength).toString("utf8");
 }
