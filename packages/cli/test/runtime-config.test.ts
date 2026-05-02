@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { chmod, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
 import { ZodError } from "zod";
 
-import { loadOrCreateRuntimeConfig } from "../src/runtime/config.js";
+import { loadOrCreateRuntimeConfig, resolveStateDir } from "../src/runtime/config.js";
 
 describe("loadOrCreateRuntimeConfig", () => {
   it("creates a config with version 1, defaults, secure secrets, and file permissions", async () => {
@@ -102,20 +102,6 @@ describe("loadOrCreateRuntimeConfig", () => {
     await assert.rejects(() => loadOrCreateRuntimeConfig({ stateDir, gatewayPort: 0 }), ZodError);
   });
 
-  it("expands leading tilde state directories to the home directory", async (t) => {
-    // Arrange
-    const relativeHomePath = `.codex/memories/openforge-runtime-${process.pid}-${Date.now()}`;
-    const expandedPath = path.join(homedir(), relativeHomePath);
-    t.after(() => rm(expandedPath, { recursive: true, force: true }));
-
-    // Act
-    const config = await loadOrCreateRuntimeConfig({ stateDir: `~/${relativeHomePath}` });
-
-    // Assert
-    assert.equal(config.stateDir, expandedPath);
-    assert.ok(config.stateDir.startsWith(homedir()));
-  });
-
   it("rejects malformed existing config with a zod error", async () => {
     // Arrange
     const stateDir = await mkdtemp(path.join(tmpdir(), "openforge-runtime-"));
@@ -136,6 +122,19 @@ describe("loadOrCreateRuntimeConfig", () => {
 
     // Act / Assert
     await assert.rejects(() => loadOrCreateRuntimeConfig({ stateDir }), ZodError);
+  });
+});
+
+describe("resolveStateDir", () => {
+  it("expands leading tilde state directories with a supplied home directory", () => {
+    // Arrange
+    const fakeHome = path.join(tmpdir(), "openforge-fake-home");
+
+    // Act
+    const stateDir = resolveStateDir("~/openforge-test", fakeHome);
+
+    // Assert
+    assert.equal(stateDir, path.join(fakeHome, "openforge-test"));
   });
 });
 

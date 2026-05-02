@@ -65,17 +65,17 @@ export async function loadOrCreateRuntimeConfig(
   return applyRuntimeOverrides(config, options);
 }
 
-function resolveStateDir(stateDir: string | undefined): string {
-  const configuredStateDir = stateDir ?? process.env.OPENFORGE_STATE_DIR ?? path.join(homedir(), ".openforge");
-  return path.resolve(expandHomeDir(configuredStateDir));
+export function resolveStateDir(stateDir: string | undefined, homeDir = homedir()): string {
+  const configuredStateDir = stateDir ?? process.env.OPENFORGE_STATE_DIR ?? path.join(homeDir, ".openforge");
+  return path.resolve(expandHomeDir(configuredStateDir, homeDir));
 }
 
-function expandHomeDir(filePath: string): string {
+function expandHomeDir(filePath: string, homeDir: string): string {
   if (filePath === "~") {
-    return homedir();
+    return homeDir;
   }
   if (filePath.startsWith("~/")) {
-    return path.join(homedir(), filePath.slice(2));
+    return path.join(homeDir, filePath.slice(2));
   }
   return filePath;
 }
