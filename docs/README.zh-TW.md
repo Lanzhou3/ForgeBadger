@@ -45,12 +45,26 @@ docs/        README 多語言翻譯
 ## 環境需求
 
 - Node.js 20 或更高版本
-- pnpm 9 或更高版本
 - tmux 3.2 或更高版本
 - 如需真實 CLI 工作階段，需要在 `PATH` 中安裝 Claude Code、OpenCode 和/或 Codex
 - 支援 SQLite 的本地檔案系統
+- 原始碼開發需要 pnpm 9 或更高版本
 
-## 快速開始
+## 從 npm 安裝
+
+```bash
+npm install -g openforge
+openforge doctor
+openforge start
+```
+
+在 `openforge start` 印出的 URL 開啟 Web 控制台。
+
+`npm install -g openforge` 只安裝 OpenForge CLI，不會安裝 `tmux`、Claude
+Code、OpenCode 或 Codex。請另外安裝計劃使用的 AI CLI 工具，並確保它們在
+`PATH` 中可用。
+
+## 從原始碼開發
 
 安裝依賴：
 

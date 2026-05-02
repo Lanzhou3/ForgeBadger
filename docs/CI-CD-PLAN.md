@@ -47,18 +47,23 @@ Known skip:
 ### NPM Package Checks
 
 ```bash
+pnpm build:npm
 pnpm pack:npm
-pnpm verify:npm
+node scripts/verify-npm-package.mjs
 pnpm smoke:npm
 ```
 
 Acceptance:
 
+- `pnpm build:npm` creates the publishable CLI package artifacts from the
+  current source tree.
 - `pnpm pack:npm` completes the package dry-run and reports the files that
-  would ship in the `openforge` npm package.
-- `pnpm verify:npm` confirms required Gateway, Web standalone, migration,
-  runtime config, README, license, and localized README artifacts are present
-  and no forbidden local state files are included.
+  would ship in the `openforge` npm package. Inspect this dry-run output before
+  publishing and confirm it excludes local config, databases, logs, API keys,
+  and internal development artifacts.
+- `node scripts/verify-npm-package.mjs` confirms required Gateway, Web
+  standalone, migration, runtime config, README, license, and localized README
+  artifacts are present and no forbidden local state files are included.
 - `pnpm smoke:npm` builds the npm package, packs a tarball into a temporary
   directory, installs that tarball with `npm --prefix` into a temporary prefix,
   sets `OPENFORGE_STATE_DIR` to temporary state, and runs `openforge doctor`
@@ -66,10 +71,13 @@ Acceptance:
 
 Known skip:
 
+- `pnpm pack:npm` and `node scripts/verify-npm-package.mjs` are required even
+  when smoke is skipped; they should not need registry access.
 - In restricted CI, `npm install` of the tarball may fail if registry access is
   blocked while resolving package dependencies or native package downloads. If
-  this happens, record the exact npm stdout/stderr and keep `pnpm pack:npm` plus
-  `pnpm verify:npm` as required evidence.
+  this happens, record the exact npm stdout/stderr and keep `pnpm build:npm`,
+  `pnpm pack:npm`, and `node scripts/verify-npm-package.mjs` as required
+  evidence.
 - `openforge doctor` must fail when required dependencies such as `tmux` are not
   installed. Treat that as an environment failure, not a passing smoke.
 

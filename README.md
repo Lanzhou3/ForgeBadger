@@ -50,12 +50,26 @@ docs/        Localized README translations
 ## Requirements
 
 - Node.js 20 or newer
-- pnpm 9 or newer
 - tmux 3.2 or newer
 - Claude Code, OpenCode, and/or Codex installed on `PATH` for real CLI sessions
 - SQLite-compatible local filesystem
+- pnpm 9 or newer for source development
 
-## Quick Start
+## Install From npm
+
+```bash
+npm install -g openforge
+openforge doctor
+openforge start
+```
+
+Open the Web console at the URL printed by `openforge start`.
+
+`npm install -g openforge` installs the OpenForge CLI only. It does not install
+`tmux`, Claude Code, OpenCode, or Codex. Install the AI CLI tools you plan to
+use separately and make sure they are available on `PATH`.
+
+## Development From Source
 
 Install dependencies:
 
