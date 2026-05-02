@@ -6,11 +6,53 @@ settings:
 
 importers:
 
-  .:
+  .: {}
+
+  packages/cli:
     dependencies:
-      oh-my-opencode-linux-x64:
-        specifier: ^3.17.4
-        version: 3.17.4
+      bcrypt:
+        specifier: ^5.1.1
+        version: 5.1.1
+      better-sqlite3:
+        specifier: ^11.7.0
+        version: 11.10.0
+      drizzle-orm:
+        specifier: ^0.36.4
+        version: 0.36.4(@types/better-sqlite3@7.6.13)(@types/react@19.2.14)(better-sqlite3@11.10.0)(react@19.2.5)
+      express:
+        specifier: ^4.19.2
+        version: 4.22.1
+      jsonwebtoken:
+        specifier: ^9.0.2
+        version: 9.0.3
+      next:
+        specifier: ^16.0.0
+        version: 16.2.4(@playwright/test@1.59.1)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      node-pty:
+        specifier: ^1.0.0
+        version: 1.1.0
+      react:
+        specifier: ^19.0.0
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.5(react@19.2.5)
+      ws:
+        specifier: ^8.18.0
+        version: 8.20.0
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.17
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
 
   packages/gateway:
     dependencies:
@@ -2773,13 +2815,6 @@ packages:
     resolution: {integrity: sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==}
     engines: {node: '>= 0.4'}
 
-  oh-my-opencode-linux-x64@3.17.4:
-    resolution: {integrity: sha512-WgDiowJBI7nXxqFZDo3FbR0lRkxURrFbBjDVfpqj7jxRQfUrVtwedNjkgxCF8eBOQwoBrijTmxG40GiF4z219g==}
-    cpu: [x64]
-    os: [linux]
-    libc: [glibc]
-    hasBin: true
-
   on-finished@2.4.1:
     resolution: {integrity: sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg==}
     engines: {node: '>= 0.8'}
@@ -5496,8 +5531,6 @@ snapshots:
   object-assign@4.1.1: {}
 
   object-inspect@1.13.4: {}
-
-  oh-my-opencode-linux-x64@3.17.4: {}
 
   on-finished@2.4.1:
     dependencies:

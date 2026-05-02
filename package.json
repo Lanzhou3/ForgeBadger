@@ -1,22 +1,22 @@
 {
-  "name": "openforge",
+  "name": "openforge-monorepo",
   "version": "0.0.0",
   "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
+    "build:npm": "node scripts/build-npm-package.mjs",
     "dev": "pnpm -r --parallel dev",
-    "openforge": "pnpm --filter @openforge/gateway openforge",
+    "openforge": "pnpm --filter openforge exec tsx src/index.ts",
+    "pack:npm": "pnpm build:npm && pnpm --filter openforge pack --dry-run",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "verify:npm": "node scripts/verify-npm-package.mjs"
   },
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=9.0.0"
   },
-  "packageManager": "pnpm@10.33.2",
-  "dependencies": {
-    "oh-my-opencode-linux-x64": "^3.17.4"
-  }
+  "packageManager": "pnpm@10.33.2"
 }

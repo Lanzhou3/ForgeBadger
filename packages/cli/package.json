@@ -1,0 +1,47 @@
+{
+  "name": "openforge",
+  "version": "0.1.0",
+  "description": "Local-first Web console for Claude Code, OpenCode, and Codex workflows.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "openforge": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "docs/README.zh-CN.md",
+    "docs/README.zh-TW.md",
+    "package.json"
+  ],
+  "engines": {
+    "node": ">=20 <25"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test --import tsx",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "better-sqlite3": "^11.7.0",
+    "drizzle-orm": "^0.36.4",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "next": "^16.0.0",
+    "node-pty": "^1.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
