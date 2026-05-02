@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runDoctor } from "./commands/doctor.js";
+import { runInit } from "./commands/init.js";
 import { runStart, type RunStartOptions } from "./commands/start.js";
 
 export type CliCommand =
@@ -22,6 +23,7 @@ export type CliCommand =
 
 export interface RunCliOptions {
   doctorRunner?: () => Promise<number>;
+  initRunner?: (args: string[]) => Promise<number>;
   startRunner?: (command: Extract<CliCommand, { command: "start" }>) => Promise<number>;
 }
 
@@ -106,6 +108,9 @@ export async function runCli(args = process.argv.slice(2), options: RunCliOption
   }
   if (command.command === "doctor") {
     return (options.doctorRunner ?? runDoctor)();
+  }
+  if (command.command === "init") {
+    return (options.initRunner ?? runInit)(command.args);
   }
   if (command.command === "help") {
     process.stdout.write("Usage: openforge [start|doctor|init|config]\n");
