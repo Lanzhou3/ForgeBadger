@@ -47,6 +47,31 @@ describe("parseCliArgs", () => {
     assert.throws(() => parseCliArgs(["start", "--host", "--open"]), /Missing value for --host/);
   });
 
+  it("parses doctor command", () => {
+    assert.deepEqual(parseCliArgs(["doctor"]), {
+      command: "doctor"
+    });
+  });
+
+  it("parses config command arguments", () => {
+    assert.deepEqual(parseCliArgs(["config", "show"]), {
+      command: "config",
+      args: ["show"]
+    });
+  });
+
+  it("parses help aliases", () => {
+    assert.deepEqual(parseCliArgs(["help"]), {
+      command: "help"
+    });
+    assert.deepEqual(parseCliArgs(["--help"]), {
+      command: "help"
+    });
+    assert.deepEqual(parseCliArgs(["-h"]), {
+      command: "help"
+    });
+  });
+
   it("preserves init arguments for the existing init flow", () => {
     assert.deepEqual(parseCliArgs(["init", "--path", "/tmp/project", "--dry-run"]), {
       command: "init",
