@@ -10,6 +10,9 @@ const webStandaloneTarget = path.join(webTarget, "standalone");
 const webStandalonePackage = path.join(webStandaloneTarget, "packages", "web");
 const webNextEnv = path.resolve("packages/web/next-env.d.ts");
 const gatewayDist = path.resolve("packages/gateway/dist");
+const cliReadme = path.resolve("packages/cli/README.md");
+const cliLicense = path.resolve("packages/cli/LICENSE");
+const cliDocs = path.resolve("packages/cli/docs");
 const copyTreeOptions = { recursive: true, dereference: true };
 
 const restoreWebNextEnv = await preserveFile(webNextEnv);
@@ -32,11 +35,14 @@ try {
   await cp("packages/web/.next/static", path.join(webStandalonePackage, ".next", "static"), copyTreeOptions);
   await cp("packages/web/public", path.join(webStandalonePackage, "public"), copyTreeOptions);
 
-  await cp("README.md", "packages/cli/README.md");
-  await cp("LICENSE", "packages/cli/LICENSE");
-  await mkdir("packages/cli/docs", { recursive: true });
-  await cp("docs/README.zh-CN.md", "packages/cli/docs/README.zh-CN.md");
-  await cp("docs/README.zh-TW.md", "packages/cli/docs/README.zh-TW.md");
+  await rm(cliReadme, { recursive: true, force: true });
+  await rm(cliLicense, { recursive: true, force: true });
+  await rm(cliDocs, { recursive: true, force: true });
+  await cp("README.md", cliReadme);
+  await cp("LICENSE", cliLicense);
+  await mkdir(cliDocs, { recursive: true });
+  await cp("docs/README.zh-CN.md", path.join(cliDocs, "README.zh-CN.md"));
+  await cp("docs/README.zh-TW.md", path.join(cliDocs, "README.zh-TW.md"));
 
   run("node", ["scripts/verify-npm-package.mjs"]);
 } finally {
