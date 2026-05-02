@@ -4,17 +4,25 @@ import type { GatewayEnv } from "../config/env.js";
 import { loadEnv } from "../config/env.js";
 import { createGatewayApp, type GatewayApp } from "../server.js";
 import { startupGateway } from "../services/startup.js";
+import type { TmuxClient } from "../services/tmux.js";
 
 export interface StartedGateway extends GatewayApp {
   host: string;
   port: number;
 }
 
+export interface GatewayRuntimeOverrides {
+  tmuxClient?: TmuxClient;
+}
+
 export async function createGatewayRuntime(
-  input: NodeJS.ProcessEnv | GatewayEnv = process.env
+  input: NodeJS.ProcessEnv | GatewayEnv = process.env,
+  overrides: GatewayRuntimeOverrides = {}
 ): Promise<GatewayApp> {
   const env = resolveGatewayEnv(input);
-  const { db, sessionManager, apiKeyStore, eventBus } = await startupGateway({ env });
+  const startupOptions =
+    overrides.tmuxClient === undefined ? { env } : { env, tmuxClient: overrides.tmuxClient };
+  const { db, sessionManager, apiKeyStore, eventBus } = await startupGateway(startupOptions);
   const runtime = createGatewayApp({
     jwtSecret: env.OPENFORGE_JWT_SECRET,
     masterKey: env.OPENFORGE_MASTER_KEY,
@@ -29,10 +37,11 @@ export async function createGatewayRuntime(
 }
 
 export async function startGateway(
-  input: NodeJS.ProcessEnv | GatewayEnv = process.env
+  input: NodeJS.ProcessEnv | GatewayEnv = process.env,
+  overrides: GatewayRuntimeOverrides = {}
 ): Promise<StartedGateway> {
   const env = resolveGatewayEnv(input);
-  const runtime = await createGatewayRuntime(env);
+  const runtime = await createGatewayRuntime(env, overrides);
 
   await listen(runtime.server, env.OPENFORGE_PORT, env.OPENFORGE_HOST);
 
