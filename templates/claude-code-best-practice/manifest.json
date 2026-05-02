@@ -1,0 +1,41 @@
+{
+  "id": "claude-code-best-practice",
+  "name": "Claude Code Best Practice Template",
+  "description": "Reusable Claude Code project scaffold with agent roles, rules, workflows, hooks, and prompt examples.",
+  "version": "0.1.0",
+  "sourceRoot": "files/dot-claude",
+  "targetRoot": ".claude",
+  "files": [
+    "CLAUDE.md",
+    "settings.json",
+    "agents/backend-dev.md",
+    "agents/business-analyst.md",
+    "agents/code-reviewer.md",
+    "agents/debugger.md",
+    "agents/doc-sync.md",
+    "agents/frontend-dev.md",
+    "agents/planner.md",
+    "agents/security-reviewer.md",
+    "agents/test-writer.md",
+    "hooks/danger-block.md",
+    "hooks/notification-handoff.md",
+    "hooks/prettier-format.md",
+    "hooks/protect-files.md",
+    "prompts/refactor-template.md",
+    "prompts/task-template.md",
+    "rules/api.md",
+    "rules/backend.md",
+    "rules/frontend.md",
+    "rules/security.md",
+    "rules/testing.md",
+    "skills/commit-workflow.md",
+    "skills/plan-workflow.md",
+    "skills/review-workflow.md",
+    "skills/verify-workflow.md"
+  ],
+  "notes": [
+    "The source directory intentionally uses dot-claude instead of .claude to avoid conflicts with this repository's local development configuration.",
+    "Materialize files into .claude/ in a target project.",
+    "Keep credentials, local paths, and machine-specific settings out of the template."
+  ]
+}

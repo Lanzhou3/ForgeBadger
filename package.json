@@ -1,0 +1,22 @@
+{
+  "name": "openforge",
+  "version": "0.0.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "openforge": "pnpm --filter @openforge/gateway openforge",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "dependencies": {
+    "oh-my-opencode-linux-x64": "^3.17.4"
+  }
+}
