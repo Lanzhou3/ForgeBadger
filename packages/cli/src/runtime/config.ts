@@ -1,0 +1,93 @@
+import { randomBytes } from "node:crypto";
+import { constants } from "node:fs";
+import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
+
+import { z } from "zod";
+
+const runtimeConfigSchema = z.object({
+  version: z.literal(1),
+  stateDir: z.string().min(1),
+  dbPath: z.string().min(1),
+  gateway: z.object({
+    host: z.string().min(1),
+    port: z.number().int().positive().max(65535)
+  }),
+  web: z.object({
+    host: z.string().min(1),
+    port: z.number().int().positive().max(65535)
+  }),
+  secrets: z.object({
+    masterKey: z.string().regex(/^[a-f0-9]{64}$/),
+    jwtSecret: z.string().min(32)
+  })
+});
+
+export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
+
+export interface LoadRuntimeConfigOptions {
+  stateDir?: string;
+  gatewayPort?: number;
+  webPort?: number;
+  host?: string;
+}
+
+export async function loadOrCreateRuntimeConfig(
+  options: LoadRuntimeConfigOptions = {}
+): Promise<RuntimeConfig> {
+  const stateDir = resolveStateDir(options.stateDir);
+  const configPath = path.join(stateDir, "config.json");
+
+  await mkdir(stateDir, { recursive: true, mode: 0o700 });
+  await chmod(stateDir, 0o700).catch(() => undefined);
+
+  if (await exists(configPath)) {
+    const config = runtimeConfigSchema.parse(JSON.parse(await readFile(configPath, "utf8")));
+    return applyRuntimeOverrides(config, options);
+  }
+
+  const config: RuntimeConfig = {
+    version: 1,
+    stateDir,
+    dbPath: path.join(stateDir, "openforge.db"),
+    gateway: { host: "127.0.0.1", port: 48731 },
+    web: { host: "127.0.0.1", port: 48732 },
+    secrets: {
+      masterKey: randomBytes(32).toString("hex"),
+      jwtSecret: randomBytes(48).toString("base64url")
+    }
+  };
+
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  await chmod(configPath, 0o600).catch(() => undefined);
+
+  return applyRuntimeOverrides(config, options);
+}
+
+function resolveStateDir(stateDir: string | undefined): string {
+  return path.resolve(stateDir ?? process.env.OPENFORGE_STATE_DIR ?? path.join(homedir(), ".openforge"));
+}
+
+async function exists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function applyRuntimeOverrides(config: RuntimeConfig, options: LoadRuntimeConfigOptions): RuntimeConfig {
+  return {
+    ...config,
+    gateway: {
+      host: options.host ?? config.gateway.host,
+      port: options.gatewayPort ?? config.gateway.port
+    },
+    web: {
+      host: options.host ?? config.web.host,
+      port: options.webPort ?? config.web.port
+    }
+  };
+}
