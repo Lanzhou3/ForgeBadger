@@ -50,7 +50,7 @@ function parseStartArgs(args: string[]): Extract<CliCommand, { command: "start" 
     }
     if (token === "--gateway-port" || token === "--web-port" || token === "--host") {
       const value = args[index + 1];
-      if (!value) {
+      if (!value || value.startsWith("--")) {
         throw new Error(`Missing value for ${token}`);
       }
       if (token === "--gateway-port") {

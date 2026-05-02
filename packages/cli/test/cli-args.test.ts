@@ -24,6 +24,29 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("parses open browser flag", () => {
+    assert.deepEqual(parseCliArgs(["start", "--open"]), {
+      command: "start",
+      gatewayPort: undefined,
+      webPort: undefined,
+      host: undefined,
+      openBrowser: true
+    });
+  });
+
+  it("rejects unknown commands", () => {
+    assert.throws(() => parseCliArgs(["launch"]), /Unknown command: launch/);
+  });
+
+  it("rejects invalid ports", () => {
+    assert.throws(() => parseCliArgs(["start", "--gateway-port", "70000"]), /Invalid --gateway-port: 70000/);
+  });
+
+  it("rejects missing flag values", () => {
+    assert.throws(() => parseCliArgs(["start", "--host"]), /Missing value for --host/);
+    assert.throws(() => parseCliArgs(["start", "--host", "--open"]), /Missing value for --host/);
+  });
+
   it("preserves init arguments for the existing init flow", () => {
     assert.deepEqual(parseCliArgs(["init", "--path", "/tmp/project", "--dry-run"]), {
       command: "init",

@@ -6,13 +6,10 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
-    "build:npm": "node scripts/build-npm-package.mjs",
     "dev": "pnpm -r --parallel dev",
-    "openforge": "pnpm --filter openforge exec tsx src/index.ts",
-    "pack:npm": "pnpm build:npm && pnpm --filter openforge pack --dry-run",
+    "openforge": "pnpm --filter @openforge/gateway openforge",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck",
-    "verify:npm": "node scripts/verify-npm-package.mjs"
+    "typecheck": "pnpm -r typecheck"
   },
   "engines": {
     "node": ">=20.0.0",
