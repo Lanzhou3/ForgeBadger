@@ -1,11 +1,11 @@
 import { Router } from "express";
-import { checkGateADependencies } from "../lib/dependency-check.js";
+import { checkOpenForgeDependencies } from "../lib/dependency-check.js";
 
 export function createDependencyRoutes(): Router {
   const router = Router();
 
   router.get("/", async (_req, res) => {
-    const dependencies = await checkGateADependencies();
+    const dependencies = await checkOpenForgeDependencies();
     res.json({
       code: 0,
       data: { dependencies },

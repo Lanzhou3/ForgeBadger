@@ -14,9 +14,23 @@ export type CommandRunner = (
 export interface DependencyStatus {
   name: string;
   available: boolean;
+  required?: boolean;
   version?: string;
   error?: string;
 }
+
+interface DependencyCheck {
+  command: string;
+  args: string[];
+  required: boolean;
+}
+
+const OPENFORGE_DEPENDENCY_CHECKS: DependencyCheck[] = [
+  { command: "tmux", args: ["-V"], required: true },
+  { command: "claude", args: ["--version"], required: false },
+  { command: "opencode", args: ["--version"], required: false },
+  { command: "codex", args: ["--version"], required: false }
+];
 
 export async function checkCommand(
   command: string,
@@ -55,6 +69,17 @@ export async function checkGateADependencies(
     checkCommand("tmux", ["-V"], runner),
     checkCommand("claude", ["--version"], runner)
   ]);
+}
+
+export async function checkOpenForgeDependencies(
+  runner: CommandRunner = runCommand
+): Promise<DependencyStatus[]> {
+  return Promise.all(
+    OPENFORGE_DEPENDENCY_CHECKS.map(async (check) => ({
+      ...(await checkCommand(check.command, check.args, runner)),
+      required: check.required
+    }))
+  );
 }
 
 export function runCommand(command: string, args: string[]): Promise<CommandResult> {

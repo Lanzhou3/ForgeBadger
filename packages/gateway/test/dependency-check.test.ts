@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { checkCommand, checkGateADependencies } from "../src/lib/dependency-check.js";
+import {
+  checkCommand,
+  checkGateADependencies,
+  checkOpenForgeDependencies
+} from "../src/lib/dependency-check.js";
 
 describe("checkCommand", () => {
   it("reports an available command with version output", async () => {
@@ -46,5 +50,47 @@ describe("checkGateADependencies", () => {
 
     assert.deepEqual(seen, ["tmux", "claude"]);
     assert.equal(result.every((item) => item.available), true);
+  });
+});
+
+describe("checkOpenForgeDependencies", () => {
+  it("marks tmux required and AI CLIs optional", async () => {
+    const result = await checkOpenForgeDependencies(async (command) => ({
+      exitCode: command === "tmux" ? 0 : 127,
+      stdout: command === "tmux" ? "tmux 3.4\n" : "",
+      stderr: command === "tmux" ? "" : "not found"
+    }));
+
+    const tmux = result.find((item) => item.name === "tmux");
+    const claude = result.find((item) => item.name === "claude");
+    const opencode = result.find((item) => item.name === "opencode");
+    const codex = result.find((item) => item.name === "codex");
+
+    assert.equal(tmux?.required, true);
+    assert.equal(tmux?.available, true);
+    assert.equal(claude?.required, false);
+    assert.equal(claude?.available, false);
+    assert.equal(opencode?.required, false);
+    assert.equal(codex?.required, false);
+  });
+
+  it("checks the OpenForge runtime command list in order", async () => {
+    const seen: Array<{ command: string; args: string[] }> = [];
+
+    await checkOpenForgeDependencies(async (command, args) => {
+      seen.push({ command, args });
+      return {
+        exitCode: 0,
+        stdout: `${command} ok\n`,
+        stderr: ""
+      };
+    });
+
+    assert.deepEqual(seen, [
+      { command: "tmux", args: ["-V"] },
+      { command: "claude", args: ["--version"] },
+      { command: "opencode", args: ["--version"] },
+      { command: "codex", args: ["--version"] }
+    ]);
   });
 });

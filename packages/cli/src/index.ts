@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { runDoctor } from "./commands/doctor.js";
+
 export type CliCommand =
   | {
       command: "start";
@@ -12,6 +14,10 @@ export type CliCommand =
   | { command: "config"; args: string[] }
   | { command: "init"; args: string[] }
   | { command: "help" };
+
+export interface RunCliOptions {
+  doctorRunner?: () => Promise<number>;
+}
 
 export function parseCliArgs(args: string[]): CliCommand {
   const [command = "start", ...rest] = args;
@@ -82,4 +88,27 @@ function parsePort(value: string, flag: string): number {
     throw new Error(`Invalid ${flag}: ${value}`);
   }
   return port;
+}
+
+export async function runCli(args = process.argv.slice(2), options: RunCliOptions = {}): Promise<number> {
+  const command = parseCliArgs(args);
+  if (command.command === "doctor") {
+    return (options.doctorRunner ?? runDoctor)();
+  }
+  if (command.command === "help") {
+    process.stdout.write("Usage: openforge [start|doctor|init|config]\n");
+    return 0;
+  }
+  throw new Error(`Command not implemented yet: ${command.command}`);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runCli()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((error) => {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    });
 }

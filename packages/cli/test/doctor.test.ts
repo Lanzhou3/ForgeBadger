@@ -1,0 +1,126 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import { runDoctor } from "../src/commands/doctor.js";
+import { runCli } from "../src/index.js";
+import { checkCliDependencies } from "../src/runtime/dependency-check.js";
+import type { RuntimeConfig } from "../src/runtime/config.js";
+
+describe("checkCliDependencies", () => {
+  it("reports required and optional dependency statuses from the command list", async () => {
+    const seen: Array<{ command: string; args: string[] }> = [];
+
+    const result = await checkCliDependencies(async (command, args) => {
+      seen.push({ command, args });
+      return {
+        exitCode: command === "tmux" ? 0 : 127,
+        stdout: command === "tmux" ? "tmux 3.4\n" : "",
+        stderr: command === "tmux" ? "" : "not found"
+      };
+    });
+
+    assert.deepEqual(seen, [
+      { command: "tmux", args: ["-V"] },
+      { command: "claude", args: ["--version"] },
+      { command: "opencode", args: ["--version"] },
+      { command: "codex", args: ["--version"] }
+    ]);
+    assert.deepEqual(
+      result.map((item) => ({
+        name: item.name,
+        available: item.available,
+        required: item.required,
+        version: item.version,
+        error: item.error
+      })),
+      [
+        { name: "tmux", available: true, required: true, version: "tmux 3.4", error: undefined },
+        { name: "claude", available: false, required: false, version: undefined, error: "not found" },
+        { name: "opencode", available: false, required: false, version: undefined, error: "not found" },
+        { name: "codex", available: false, required: false, version: undefined, error: "not found" }
+      ]
+    );
+  });
+});
+
+describe("runDoctor", () => {
+  it("returns 0 and prints dependency status when required dependencies are available", async () => {
+    const stdout = createMemoryWriter();
+    const stderr = createMemoryWriter();
+
+    const code = await runDoctor({
+      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      dependencyRunner: async (command) => {
+        if (command === "tmux") {
+          return { exitCode: 0, stdout: "tmux 3.4\n", stderr: "" };
+        }
+        if (command === "claude") {
+          return { exitCode: 0, stdout: "claude 1.2.3\n", stderr: "" };
+        }
+        return { exitCode: 127, stdout: "", stderr: "not found" };
+      },
+      stdout,
+      stderr
+    });
+
+    assert.equal(code, 0);
+    assert.match(stdout.text, /OpenForge state: \/tmp\/openforge-state\n/);
+    assert.match(stdout.text, /ok tmux tmux 3\.4\n/);
+    assert.match(stdout.text, /ok claude claude 1\.2\.3\n/);
+    assert.match(stdout.text, /optional-missing opencode - not found\n/);
+    assert.equal(stderr.text, "");
+  });
+
+  it("returns 1 and prints stderr when a required dependency is missing", async () => {
+    const stdout = createMemoryWriter();
+    const stderr = createMemoryWriter();
+
+    const code = await runDoctor({
+      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      dependencyRunner: async (command) => ({
+        exitCode: command === "tmux" ? 127 : 0,
+        stdout: command === "tmux" ? "" : `${command} ok\n`,
+        stderr: command === "tmux" ? "tmux not found" : ""
+      }),
+      stdout,
+      stderr
+    });
+
+    assert.equal(code, 1);
+    assert.match(stdout.text, /missing tmux - tmux not found\n/);
+    assert.match(stderr.text, /Required dependencies are missing/);
+  });
+});
+
+describe("runCli", () => {
+  it("dispatches doctor through an injectable runner", async () => {
+    const code = await runCli(["doctor"], {
+      doctorRunner: async () => 7
+    });
+
+    assert.equal(code, 7);
+  });
+});
+
+function createRuntimeConfig(stateDir: string): RuntimeConfig {
+  return {
+    version: 1,
+    stateDir,
+    dbPath: `${stateDir}/openforge.db`,
+    gateway: { host: "127.0.0.1", port: 48731 },
+    web: { host: "127.0.0.1", port: 48732 },
+    secrets: {
+      masterKey: "a".repeat(64),
+      jwtSecret: "abcdefghijklmnopqrstuvwxyz123456"
+    }
+  };
+}
+
+function createMemoryWriter() {
+  return {
+    text: "",
+    write(chunk: string) {
+      this.text += chunk;
+    }
+  };
+}
