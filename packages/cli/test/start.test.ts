@@ -341,6 +341,9 @@ describe("runStart", () => {
           prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
           writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
           spawn: () => new FakeChild(),
+          installShutdown: (children) => {
+            setImmediate(() => children[1]?.emit("exit", 0, null));
+          },
           stdout: createMemoryWriter()
         }),
       /Gateway and Web cannot use the same bind endpoint: 127\.0\.0\.1:48731/
@@ -368,9 +371,72 @@ describe("runStart", () => {
           prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
           writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
           spawn: () => new FakeChild(),
+          installShutdown: (children) => {
+            setImmediate(() => children[1]?.emit("exit", 0, null));
+          },
           stdout: createMemoryWriter()
         }),
       /Gateway and Web cannot use overlapping bind endpoints: 0\.0\.0\.0:48731 and 127\.0\.0\.1:48731/
+    );
+    assert.deepEqual(portChecks, []);
+  });
+
+  it("rejects localhost and IPv4 loopback bind endpoint overlap before checking ports", async () => {
+    // Arrange
+    const portChecks: Array<{ host: string; port: number }> = [];
+
+    // Act / Assert
+    await assert.rejects(
+      () =>
+        runStart({
+          loadConfig: async () =>
+            createRuntimeConfig("/tmp/openforge-state", {
+              gateway: { host: "localhost", port: 48731 },
+              web: { host: "127.0.0.1", port: 48731 }
+            }),
+          resolvePaths: () => createInstalledPaths(),
+          checkPort: async (host, port) => {
+            portChecks.push({ host, port });
+          },
+          prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+          spawn: () => new FakeChild(),
+          installShutdown: (children) => {
+            setImmediate(() => children[1]?.emit("exit", 0, null));
+          },
+          stdout: createMemoryWriter()
+        }),
+      /Gateway and Web cannot use overlapping bind endpoints: localhost:48731 and 127\.0\.0\.1:48731/
+    );
+    assert.deepEqual(portChecks, []);
+  });
+
+  it("rejects localhost and IPv6 loopback bind endpoint overlap before checking ports", async () => {
+    // Arrange
+    const portChecks: Array<{ host: string; port: number }> = [];
+
+    // Act / Assert
+    await assert.rejects(
+      () =>
+        runStart({
+          loadConfig: async () =>
+            createRuntimeConfig("/tmp/openforge-state", {
+              gateway: { host: "localhost", port: 48731 },
+              web: { host: "::1", port: 48731 }
+            }),
+          resolvePaths: () => createInstalledPaths(),
+          checkPort: async (host, port) => {
+            portChecks.push({ host, port });
+          },
+          prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+          spawn: () => new FakeChild(),
+          installShutdown: (children) => {
+            setImmediate(() => children[1]?.emit("exit", 0, null));
+          },
+          stdout: createMemoryWriter()
+        }),
+      /Gateway and Web cannot use overlapping bind endpoints: localhost:48731 and \[::1\]:48731/
     );
     assert.deepEqual(portChecks, []);
   });

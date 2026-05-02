@@ -199,7 +199,13 @@ function formatBindEndpoint(host: string, port: number): string {
 }
 
 function bindHostsOverlap(firstHost: string, secondHost: string): boolean {
-  return normalizeBindHost(firstHost) === normalizeBindHost(secondHost) || isWildcardBindHost(firstHost) || isWildcardBindHost(secondHost);
+  if (isWildcardBindHost(firstHost) || isWildcardBindHost(secondHost)) {
+    return true;
+  }
+
+  const firstAliases = bindHostAliases(firstHost);
+  const secondAliases = bindHostAliases(secondHost);
+  return firstAliases.some((alias) => secondAliases.includes(alias));
 }
 
 function normalizeBindHost(host: string): string {
@@ -209,6 +215,14 @@ function normalizeBindHost(host: string): string {
 function isWildcardBindHost(host: string): boolean {
   const normalized = normalizeBindHost(host);
   return normalized === "0.0.0.0" || normalized === "::";
+}
+
+function bindHostAliases(host: string): string[] {
+  const normalized = normalizeBindHost(host);
+  if (normalized === "localhost") {
+    return ["localhost", "127.0.0.1", "::1"];
+  }
+  return [normalized];
 }
 
 function waitForFirstChildResult(children: ChildProcess[]): Promise<ChildResult> {
