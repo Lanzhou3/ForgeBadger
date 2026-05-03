@@ -502,8 +502,8 @@ export function createSessionRoutes(
       }
     }
 
-    sessionRepo.delete(req.params.id);
     recordSessionActivity(db, eventBus, userId, dbSession, "session_deleted", "warning", `Session ${dbSession.name} deleted`);
+    sessionRepo.delete(req.params.id);
     eventBus?.emitEvent({
       type: "session_deleted",
       userId,

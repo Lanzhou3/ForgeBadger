@@ -762,6 +762,65 @@ describe("security hardening", () => {
     assert.deepEqual(mockTmuxCalls, [`kill:${sessionData.data.session.tmuxName}`]);
   });
 
+  it("deletes a session without crashing while recording activity", async () => {
+    const registerRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "delete-session@test.com",
+        password: "password123"
+      })
+    });
+    const registerData = await registerRes.json();
+    const token = registerData.data.token;
+
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-delete-session-"));
+    const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        name: "Delete Session Project",
+        path: rootPath,
+        aiTool: "claude"
+      })
+    });
+    const projectData = await projectRes.json();
+
+    const sessionRes = await fetch(`${baseUrl}/api/v1/sessions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        projectId: projectData.data.project.id,
+        credentialMode: "host_environment"
+      })
+    });
+    const sessionData = await sessionRes.json();
+    assert.equal(sessionRes.status, 201);
+
+    const deleteRes = await fetch(`${baseUrl}/api/v1/sessions/${sessionData.data.session.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const deleteData = await deleteRes.json();
+
+    assert.equal(deleteRes.status, 200);
+    assert.equal(deleteData.code, 0);
+
+    const sessionsRes = await fetch(`${baseUrl}/api/v1/sessions`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const sessionsData = await sessionsRes.json();
+    assert.equal(sessionsData.data.sessions.some(
+      (session: { id: string }) => session.id === sessionData.data.session.id
+    ), false);
+  });
+
   it("does not expose terminal attach credentials after a session is stopped", async () => {
     const registerRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: "POST",
