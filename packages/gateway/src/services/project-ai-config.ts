@@ -55,10 +55,8 @@ export async function readProjectAiConfig(
   adapter: AdapterId
 ): Promise<ProjectAiConfigSnapshot> {
   const approvedRoot = validateProjectRoot(projectRoot);
-  const candidates = new Set([
-    ...candidateFilesForAdapter(adapter),
-    ...(await discoverExistingConfigFiles(approvedRoot))
-  ]);
+  const discoveredFiles = await discoverExistingConfigFiles(approvedRoot);
+  const candidates = new Set(projectCandidateFilesForAdapter(adapter, discoveredFiles));
   const files = await Promise.all([...candidates].sort().map((relativePath) => readProjectConfigFile(approvedRoot, relativePath)));
 
   return {
@@ -106,6 +104,35 @@ export async function writeProjectAiConfigFile(
   await writeFile(absolutePath, content, "utf8");
 
   return readProjectAiConfig(approvedRoot, adapter);
+}
+
+function projectCandidateFilesForAdapter(adapter: AdapterId, discoveredFiles: string[]): string[] {
+  const candidates = new Set(discoveredFiles);
+
+  if (adapter === "claude") {
+    if (!hasInstructionFile(discoveredFiles, adapter)) {
+      candidates.add("CLAUDE.md");
+    }
+    return [...candidates];
+  }
+
+  for (const relativePath of candidateFilesForAdapter(adapter)) {
+    candidates.add(relativePath);
+  }
+  return [...candidates];
+}
+
+function hasInstructionFile(files: string[], adapter: AdapterId): boolean {
+  const instructionFiles = new Set(primaryInstructionFilesForAdapter(adapter));
+  if (adapter === "claude") {
+    instructionFiles.add(".claude/CLAUDE.md");
+  }
+  return files.some((file) => instructionFiles.has(file));
+}
+
+function primaryInstructionFilesForAdapter(adapter: AdapterId): string[] {
+  if (adapter === "claude") return ["CLAUDE.md"];
+  return ["AGENTS.md"];
 }
 
 function candidateFilesForAdapter(adapter: AdapterId): string[] {

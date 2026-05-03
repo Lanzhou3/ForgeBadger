@@ -830,16 +830,36 @@ async function buildProjectConfigRenderPlan(
     },
     templateFiles: buildProjectConfigFiles({
       adapter: aiToolSchema.parse(project.aiTool),
-      templateFiles: template.files.map((file) => ({
+      templateFiles: normalizeTemplateFilesForProject(project, template.files.map((file) => ({
         id: String(file.id),
         relativePath: file.filePath,
         content: file.content
-      })),
+      }))),
       agents: agentRepo.list().filter((agent) => agent.projectId === project.id),
       skills: skillRepo.listByProject(project.id)
     }),
     credentialMode,
     dryRun
+  });
+}
+
+function normalizeTemplateFilesForProject(
+  project: { aiTool: string; isImported: boolean; path: string },
+  files: Array<{ id: string; relativePath: string; content: string }>
+): Array<{ id: string; relativePath: string; content: string }> {
+  if (project.aiTool !== "claude" || !project.isImported) {
+    return files;
+  }
+
+  const hasRootClaude = existsSync(resolve(project.path, "CLAUDE.md"));
+  return files.flatMap((file) => {
+    if (file.relativePath === ".claude/settings.json") {
+      return [];
+    }
+    if (file.relativePath === ".claude/CLAUDE.md" && hasRootClaude) {
+      return [{ ...file, relativePath: "CLAUDE.md" }];
+    }
+    return [file];
   });
 }
 

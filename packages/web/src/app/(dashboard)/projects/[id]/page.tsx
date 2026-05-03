@@ -266,6 +266,7 @@ export default function ProjectDetailPage() {
     .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent));
   const skills = skillsData?.skills ?? [];
   const projectSkills = projectSkillsData?.skills ?? [];
+  const projectSkillById = new Map(projectSkills.map((skill) => [skill.skillId, skill]));
   const enabledSkillIds = new Set(
     projectSkills.filter((skill) => skill.isEnabled).map((skill) => skill.skillId)
   );
@@ -494,7 +495,7 @@ export default function ProjectDetailPage() {
                 </select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="credential-mode">{t("projects.credentialMode")}</Label>
+                <Label htmlFor="credential-mode">{t("projects.authenticationMethod")}</Label>
                 <select
                   id="credential-mode"
                   className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -504,6 +505,11 @@ export default function ProjectDetailPage() {
                   <option value="host_environment">{t("projects.hostEnvironment")}</option>
                   <option value="stored_encrypted_key">{t("projects.storedCredential")}</option>
                 </select>
+                <p className="text-xs text-muted-foreground">
+                  {credentialMode === "host_environment"
+                    ? t("projects.hostEnvironmentDescription")
+                    : t("projects.storedCredentialDescription")}
+                </p>
               </div>
               {credentialMode === "stored_encrypted_key" && (
                 <div className="space-y-2">
@@ -532,8 +538,9 @@ export default function ProjectDetailPage() {
                 <CardTitle className="text-base">{t("projects.configPreview")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="text-sm text-muted-foreground">
-                  {t("projects.previewFiles")}: {previewConfigMutation.data?.plan.files.length ?? 0}
+                <div className="space-y-1 text-sm text-muted-foreground">
+                  <div>{t("projects.previewFiles")}: {previewConfigMutation.data?.plan.files.length ?? 0}</div>
+                  <p>{t("projects.configPreviewDescription")}</p>
                 </div>
                 {configConflicts.length > 0 ? (
                   <div className="space-y-2">
@@ -544,9 +551,37 @@ export default function ProjectDetailPage() {
                           key={conflict.relativePath}
                           className="flex flex-col gap-2 rounded-md border border-border bg-background p-3 md:flex-row md:items-center md:justify-between"
                         >
-                          <span>
-                            {conflict.relativePath} · {conflict.conflictType}
-                          </span>
+                          <div className="min-w-0 flex-1 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-xs text-foreground">{conflict.relativePath}</span>
+                              <Badge variant={conflict.conflictType === "modified" ? "destructive" : "secondary"}>
+                                {conflict.conflictType}
+                              </Badge>
+                            </div>
+                            <div className="flex flex-wrap gap-3 text-xs">
+                              {conflict.existingSha256 && (
+                                <span>{t("projects.existingHash")}: {shortHash(conflict.existingSha256)}</span>
+                              )}
+                              {conflict.incomingSha256 && (
+                                <span>{t("projects.incomingHash")}: {shortHash(conflict.incomingSha256)}</span>
+                              )}
+                            </div>
+                            {conflict.diffPreview && conflict.diffPreview.length > 0 && (
+                              <div className="overflow-hidden rounded-md border border-border bg-muted/40">
+                                {conflict.diffPreview.map((line) => (
+                                  <div key={line.line} className="grid gap-0 border-b border-border/60 last:border-b-0 md:grid-cols-[72px_1fr_1fr]">
+                                    <div className="bg-background/70 px-2 py-1 font-mono text-[11px] text-muted-foreground">L{line.line}</div>
+                                    <div className="min-w-0 border-border px-2 py-1 font-mono text-[11px] text-destructive md:border-l">
+                                      <span className="mr-1 select-none">-</span>{line.existing}
+                                    </div>
+                                    <div className="min-w-0 border-border px-2 py-1 font-mono text-[11px] text-emerald-600 md:border-l dark:text-emerald-400">
+                                      <span className="mr-1 select-none">+</span>{line.incoming}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                           {conflict.allowedActions.length > 0 ? (
                             <select
                               className="h-8 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -941,21 +976,34 @@ export default function ProjectDetailPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {skills.map((skill) => (
-                        <TableRow key={skill.id}>
-                          <TableCell className="font-medium">{skill.name}</TableCell>
-                          <TableCell>{skill.source}</TableCell>
-                          <TableCell>
-                            <Switch
-                              checked={enabledSkillIds.has(skill.id)}
-                              onCheckedChange={(enabled) =>
-                                projectSkillMutation.mutate({ skillId: skill.id, enabled })
-                              }
-                              disabled={projectSkillMutation.isPending}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {skills.map((skill) => {
+                        const projectSkill = projectSkillById.get(skill.id);
+                        return (
+                          <TableRow key={skill.id}>
+                            <TableCell className="font-medium">
+                              <div>{skill.name}</div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {projectSkillStateLabel(projectSkill?.selectionState, t)}
+                              </div>
+                            </TableCell>
+                            <TableCell>{skill.source}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <Switch
+                                  checked={enabledSkillIds.has(skill.id)}
+                                  onCheckedChange={(enabled) =>
+                                    projectSkillMutation.mutate({ skillId: skill.id, enabled })
+                                  }
+                                  disabled={projectSkillMutation.isPending}
+                                />
+                                <Badge variant={enabledSkillIds.has(skill.id) ? "default" : "secondary"}>
+                                  {enabledSkillIds.has(skill.id) ? t("common.enabled") : t("common.disabled")}
+                                </Badge>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </Card>
@@ -991,6 +1039,20 @@ export default function ProjectDetailPage() {
       )}
     </div>
   );
+}
+
+function shortHash(value: string): string {
+  return value.slice(0, 10);
+}
+
+function projectSkillStateLabel(
+  state: string | undefined,
+  t: (key: "projects.skillProjectEnabled" | "projects.skillProjectDisabled" | "projects.skillInheritedDisabled" | "projects.skillInheritedEnabled") => string
+): string {
+  if (state === "project_enabled") return t("projects.skillProjectEnabled");
+  if (state === "project_disabled") return t("projects.skillProjectDisabled");
+  if (state === "inherited_disabled") return t("projects.skillInheritedDisabled");
+  return t("projects.skillInheritedEnabled");
 }
 
 function ProjectConfigPanel({
@@ -1051,7 +1113,7 @@ function ProjectConfigPanel({
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+    <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -1102,7 +1164,7 @@ function ProjectConfigPanel({
         </CardHeader>
         <CardContent className="space-y-3">
           <textarea
-            className="min-h-[420px] w-full resize-y rounded-md border border-input bg-background p-3 font-mono text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="min-h-[520px] w-full resize-y rounded-md border border-input bg-background p-3 font-mono text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             spellCheck={false}
@@ -1126,7 +1188,7 @@ function ProjectConfigPanel({
         </CardContent>
       </Card>
 
-      <div className="space-y-4">
+      <div className="grid gap-4 xl:col-span-2 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">{t("projects.formFields")}</CardTitle>
@@ -1277,7 +1339,7 @@ function GlobalConfigPreview({ file }: { file: AiConfigFile }) {
           {file.exists ? t("projects.configExists") : t("projects.configMissing")}
         </Badge>
       </summary>
-      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs text-muted-foreground">
+      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs leading-5 text-muted-foreground">
         {file.content || t("projects.noGlobalConfigContent")}
       </pre>
     </details>

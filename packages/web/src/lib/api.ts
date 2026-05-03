@@ -252,6 +252,7 @@ export interface ProjectSkill {
   content: string;
   version: string;
   isEnabled: boolean;
+  selectionState?: "inherited_enabled" | "inherited_disabled" | "project_enabled" | "project_disabled";
 }
 
 export interface Model {
@@ -538,6 +539,9 @@ export interface ConfigConflict {
   relativePath: string;
   conflictType: string;
   allowedActions: string[];
+  existingSha256?: string;
+  incomingSha256?: string;
+  diffPreview?: Array<{ line: number; existing: string; incoming: string }>;
 }
 
 export interface ConfigPreview {

@@ -87,6 +87,42 @@ describe("team library visibility foundations", () => {
     db.close();
   });
 
+  it("inherits globally enabled Skills for project configuration unless explicitly disabled", () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inherited-project-skill@example.com", "hash");
+    const skillRepo = new SkillRepository(db, user.id);
+    const inherited = skillRepo.create({
+      name: "Inherited Skill",
+      content: "# Inherited",
+      isEnabled: true
+    });
+    const globallyDisabled = skillRepo.create({
+      name: "Globally Disabled Skill",
+      content: "# Disabled",
+      isEnabled: false
+    });
+    const project = new ProjectRepository(db, user.id).create({
+      name: "Inherited Project",
+      path: "/tmp/openforge-inherited-project-skill",
+      aiTool: "claude"
+    });
+
+    const projectSkills = new ProjectSkillRepository(db, user.id);
+    let listed = projectSkills.listByProject(project.id);
+
+    assert.equal(listed.find((skill) => skill.skillId === inherited.id)?.isEnabled, true);
+    assert.equal(listed.find((skill) => skill.skillId === inherited.id)?.selectionState, "inherited_enabled");
+    assert.equal(listed.find((skill) => skill.skillId === globallyDisabled.id)?.isEnabled, false);
+    assert.equal(listed.find((skill) => skill.skillId === globallyDisabled.id)?.selectionState, "inherited_disabled");
+
+    projectSkills.setSkill(project.id, inherited.id, false);
+    listed = projectSkills.listByProject(project.id);
+
+    assert.equal(listed.find((skill) => skill.skillId === inherited.id)?.isEnabled, false);
+    assert.equal(listed.find((skill) => skill.skillId === inherited.id)?.selectionState, "project_disabled");
+    db.close();
+  });
+
   it("includes admin Skills in project Skill listings only for admin users", () => {
     const db = createTestDb();
     const owner = new UserRepository(db).create("admin-project-skill-owner@example.com", "hash");
