@@ -551,7 +551,7 @@ export default function ProjectDetailPage() {
                 )}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="config-template">{t("projects.template")}</Label>
+                <Label htmlFor="config-template">{t("projects.configTemplate")}</Label>
                 <select
                   id="config-template"
                   className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -573,6 +573,9 @@ export default function ProjectDetailPage() {
                     </option>
                   ))}
                 </select>
+                <p className="text-xs text-muted-foreground">
+                  {t("projects.configTemplateDescription")}
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="session-model">{t("projects.model")}</Label>
