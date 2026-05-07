@@ -1,80 +1,43 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">OpenForge logo</title>
-  <desc id="desc">A high-contrast forge aperture mark with an open frame and bright molten core.</desc>
-  <defs>
-    <linearGradient id="frame" x1="188" x2="836" y1="170" y2="854" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#f8fafc"/>
-      <stop offset="0.42" stop-color="#8bd3ff"/>
-      <stop offset="1" stop-color="#3dd6b6"/>
-    </linearGradient>
-    <linearGradient id="core" x1="396" x2="628" y1="262" y2="762" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#fff7ad"/>
-      <stop offset="0.46" stop-color="#ff8a1f"/>
-      <stop offset="1" stop-color="#ff3d00"/>
-    </linearGradient>
-    <radialGradient id="halo" cx="512" cy="512" r="460" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ff8a1f" stop-opacity="0.42"/>
-      <stop offset="0.42" stop-color="#1fb6ff" stop-opacity="0.16"/>
-      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="outerGlow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="18" result="blur"/>
-      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.16 0 0 0 0 0.74 0 0 0 0 1 0 0 0 0.55 0" result="glow"/>
-      <feMerge>
-        <feMergeNode in="glow"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <filter id="coreGlow" x="-45%" y="-45%" width="190%" height="190%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur"/>
-      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 1 0 0 0 0 0.33 0 0 0 0 0.02 0 0 0 0.74 0" result="glow"/>
-      <feMerge>
-        <feMergeNode in="glow"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-  </defs>
+  <desc id="desc">An open hexagonal control frame containing a geometric F and terminal prompt mark.</desc>
 
-  <rect width="1024" height="1024" rx="224" fill="#020617"/>
-  <circle cx="512" cy="512" r="468" fill="url(#halo)"/>
-
-  <g filter="url(#outerGlow)">
-    <path
-      d="M512 128 836 315v394L512 896 188 709V315L512 128Z"
-      fill="none"
-      stroke="url(#frame)"
-      stroke-width="70"
-      stroke-linejoin="round"
-    />
-    <path
-      d="M512 245 735 374v276L512 779 289 650V374L512 245Z"
-      fill="none"
-      stroke="#dff7ff"
-      stroke-opacity="0.42"
-      stroke-width="38"
-      stroke-linejoin="round"
-    />
-  </g>
-
-  <g filter="url(#coreGlow)">
-    <path
-      d="M512 259 628 463l-44 257H440l-44-257L512 259Z"
-      fill="url(#core)"
-    />
-    <path
-      d="M512 334 572 474l-25 178h-70l-25-178 60-140Z"
-      fill="#fff8c7"
-      opacity="0.64"
-    />
-    <path
-      d="M368 621h288l-42 86H410l-42-86Z"
-      fill="#ff6a00"
-    />
-  </g>
-
-  <g fill="#e6fbff" opacity="0.92">
-    <path d="M512 176 552 246h-80l40-70Z"/>
-    <path d="M782 670h-80l40-70 40 70Z"/>
-    <path d="M322 670h-80l40-70 40 70Z"/>
-  </g>
+  <rect width="1024" height="1024" rx="188" fill="#071018"/>
+  <path d="M512 116 850 312v400L512 908 174 712V312L512 116Z" fill="#0b151e"/>
+  <path
+    d="M512 146 802 314v112M802 598v90L512 856 222 688V336L456 201"
+    fill="none"
+    stroke="#9be7f5"
+    stroke-width="68"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M549 190 589 214"
+    fill="none"
+    stroke="#e9fbff"
+    stroke-opacity="0.86"
+    stroke-width="68"
+    stroke-linecap="round"
+  />
+  <path
+    d="M374 302H674L636 386H478V474H606L570 552H478V720H374V302Z"
+    fill="#eefbff"
+  />
+  <path
+    d="M626 552 710 636 626 720"
+    fill="none"
+    stroke="#39d6b6"
+    stroke-width="54"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M592 744H732"
+    fill="none"
+    stroke="#8fe8ff"
+    stroke-width="38"
+    stroke-linecap="round"
+  />
+  <path d="M506 256 534 304H478L506 256Z" fill="#f6d96a"/>
 </svg>
