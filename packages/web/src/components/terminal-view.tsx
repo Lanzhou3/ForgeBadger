@@ -6,6 +6,7 @@ import type { Terminal as TerminalInstance } from "@xterm/xterm";
 
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/hooks/use-language";
+import { copySelectedTerminalText, shouldCopyTerminalSelection } from "@/lib/terminal-copy";
 import { createTerminalInputMessage, createTerminalResizeMessage } from "@/lib/terminal-messages";
 import { parseTerminalWebSocketMessage } from "@/lib/terminal-websocket-messages";
 import { replaceTerminalInputListener, type DisposableInputListener } from "@/lib/terminal-input-listener";
@@ -179,6 +180,14 @@ export function TerminalView({
               foreground: "#e5edf7",
               cursor: "#5cc8ff"
             }
+          });
+          terminal.attachCustomKeyEventHandler((event) => {
+            if (event.type !== "keydown") return true;
+            if (!shouldCopyTerminalSelection(event, terminal.hasSelection())) return true;
+
+            event.preventDefault();
+            void copySelectedTerminalText(terminal);
+            return false;
           });
           const fitAddon = new fit.FitAddon();
           terminal.loadAddon(fitAddon);

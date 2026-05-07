@@ -10,6 +10,7 @@ import {
   isSidebarToggleShortcut,
   shouldHandleGlobalShortcut,
 } from "@/lib/keyboard-shortcuts";
+import { appShellContainerClassName, appShellMainClassName } from "@/lib/app-shell-layout";
 import { Sidebar } from "./sidebar";
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -40,7 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [isTerminalRoute]);
 
   return (
-    <div className="flex min-h-dvh w-full overflow-hidden bg-background text-foreground">
+    <div className={appShellContainerClassName}>
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:text-foreground focus:ring-2 focus:ring-ring"
@@ -51,11 +52,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main
         id="main-content"
         tabIndex={-1}
-        className={
-          isTerminalRoute
-            ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-            : "min-h-0 min-w-0 flex-1 overflow-auto"
-        }
+        className={appShellMainClassName(isTerminalRoute)}
       >
         {children}
       </main>
