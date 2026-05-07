@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Cpu, Globe2, KeyRound, ScrollText, Settings2, ShieldCheck } from "lucide-react";
+import { Bell, Cpu, FlaskConical, Globe2, KeyRound, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -162,6 +163,34 @@ export default function SettingsPage() {
                   <AdapterItem key={adapter.id} adapter={adapter} />
                 ))
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <FlaskConical className="size-4 text-muted-foreground" />
+                <CardTitle>{t("settings.experimentalFeatures")}</CardTitle>
+              </div>
+              <CardDescription>
+                {t("settings.experimentalFeaturesDescription")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <ServerCog className="mt-0.5 size-4 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <div className="font-medium">{t("settings.codexAppServerExperiment")}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      {t("settings.codexAppServerExperimentDescription")}
+                    </div>
+                  </div>
+                </div>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/codex-app-server">{t("common.open")}</Link>
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
