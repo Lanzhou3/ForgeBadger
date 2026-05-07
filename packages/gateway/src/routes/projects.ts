@@ -36,7 +36,7 @@ const createProjectSchema = z.object({
   path: z.string().min(1),
   description: z.string().optional(),
   techStack: z.string().optional(),
-  aiTool: aiToolSchema.default("claude"),
+  aiTool: aiToolSchema.optional(),
   templateId: z.string().optional()
 });
 
@@ -67,6 +67,7 @@ const agentSequenceSchema = z.object({
 });
 
 const defaultTemplateId = "builtin-claude-code";
+const legacyProjectConfigHint = "claude";
 const defaultTemplateIdsByAiTool: Record<z.infer<typeof aiToolSchema>, string> = {
   claude: defaultTemplateId,
   opencode: "builtin-opencode",
@@ -91,16 +92,17 @@ export function createProjectRoutes(
     }
 
     try {
-      const { name, path: rawPath, description, techStack, aiTool, templateId } = parseResult.data;
+      const { name, path: rawPath, description, techStack, templateId } = parseResult.data;
+      const projectConfigHint = parseResult.data.aiTool ?? legacyProjectConfigHint;
       const rootPath = await prepareCreatedProjectRoot(rawPath);
-      const resolvedTemplateId = resolveProjectTemplateId(db, userId, aiTool, templateId);
+      const resolvedTemplateId = resolveProjectTemplateId(db, userId, projectConfigHint, templateId);
       const repo = new ProjectRepository(db, userId);
       const project = repo.create({
         name,
         path: rootPath,
         description,
         techStack,
-        aiTool,
+        aiTool: projectConfigHint,
         templateId: resolvedTemplateId
       });
       res.status(201).json({
@@ -255,16 +257,17 @@ export function createProjectRoutes(
     }
 
     try {
-      const { name, path: rawPath, description, techStack, aiTool, templateId } = parseResult.data;
+      const { name, path: rawPath, description, techStack, templateId } = parseResult.data;
+      const projectConfigHint = parseResult.data.aiTool ?? legacyProjectConfigHint;
       const rootPath = await prepareImportedProjectRoot(rawPath);
-      const resolvedTemplateId = resolveProjectTemplateId(db, userId, aiTool, templateId);
+      const resolvedTemplateId = resolveProjectTemplateId(db, userId, projectConfigHint, templateId);
       const repo = new ProjectRepository(db, userId);
       const project = repo.import({
         name,
         path: rootPath,
         description,
         techStack,
-        aiTool,
+        aiTool: projectConfigHint,
         templateId: resolvedTemplateId
       });
       res.status(201).json({

@@ -9,6 +9,10 @@ import {
   CodexAppServerManager,
   type CodexAppServerChild
 } from "../src/services/codex-app-server-manager.js";
+import {
+  createCodexAppServerNotificationEvent,
+  type CodexAppServerTransport
+} from "../src/services/codex-app-server-client.js";
 
 class FakeChild extends EventEmitter implements CodexAppServerChild {
   killed = false;
@@ -162,4 +166,63 @@ describe("CodexAppServerManager", () => {
     await assert.rejects(() => stat(first.tokenFile as string), { code: "ENOENT" });
     await assert.rejects(() => stat(second.tokenFile as string), { code: "ENOENT" });
   });
+
+  it("emits normalized app-server notifications with session ownership metadata", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-notify-"));
+    const transport = new ManualTransport();
+    const manager = new CodexAppServerManager({
+      runtimeRoot: root,
+      spawn: () => new FakeChild(5555),
+      transportFactory: () => transport
+    });
+    const notifications: unknown[] = [];
+    manager.on("notification", (event) => notifications.push(event));
+
+    const session = await manager.start({
+      userId: "user-1",
+      projectId: "project-1",
+      projectRoot: "/workspace/project",
+      credentialMode: "host_environment",
+      runtimeMode: "app-server-stdio"
+    });
+    transport.emitMessage(JSON.stringify(createCodexAppServerNotificationEvent({
+      threadId: "thr_123",
+      notificationType: "permission_prompt",
+      message: "approval needed"
+    })));
+
+    assert.deepEqual(notifications, [{
+      userId: "user-1",
+      projectId: "project-1",
+      appServerSessionId: session.id,
+      threadId: "thr_123",
+      activityType: "permission_prompt",
+      status: "warning",
+      method: "notification/prompt",
+      message: "approval needed"
+    }]);
+  });
 });
+
+class ManualTransport implements CodexAppServerTransport {
+  private messageHandler: ((raw: string | Buffer) => void) | undefined;
+  private closeHandler: ((code?: number, reason?: string) => void) | undefined;
+
+  send(): void {}
+
+  close(code?: number, reason?: string): void {
+    this.closeHandler?.(code, reason);
+  }
+
+  onMessage(handler: (raw: string | Buffer) => void): void {
+    this.messageHandler = handler;
+  }
+
+  onClose(handler: (code?: number, reason?: string) => void): void {
+    this.closeHandler = handler;
+  }
+
+  emitMessage(raw: string): void {
+    this.messageHandler?.(raw);
+  }
+}

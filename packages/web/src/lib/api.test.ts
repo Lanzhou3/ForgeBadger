@@ -66,8 +66,13 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
   clearServerNotifications,
+  initializeCodexAppServer,
+  listCodexAppServers,
   setDefaultModel,
+  startCodexAppServer,
+  startCodexAppServerTurn,
   setProjectSkill,
+  stopCodexAppServer,
   togglePlugin,
   updateAgent,
   updateAdminUser,
@@ -425,6 +430,60 @@ describe("api client", () => {
           apiKeyId: "key-1",
         }),
       })
+    );
+  });
+
+  it("calls Codex app-server lifecycle and guarded RPC endpoints", async () => {
+    await listCodexAppServers();
+    await startCodexAppServer({
+      projectId: "project-1",
+      runtimeMode: "app-server-stdio",
+      credentialMode: "host_environment",
+    });
+    await initializeCodexAppServer("app-1");
+    await startCodexAppServerTurn("app-1", {
+      threadId: "thr_123",
+      text: "Summarize the repo",
+    });
+    await stopCodexAppServer("app-1");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/codex/app-server",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/codex/app-server",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          projectId: "project-1",
+          runtimeMode: "app-server-stdio",
+          credentialMode: "host_environment",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/initialize",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/turn",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          threadId: "thr_123",
+          text: "Summarize the repo",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/stop",
+      expect.objectContaining({ method: "POST" })
     );
   });
 

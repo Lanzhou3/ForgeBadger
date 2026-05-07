@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
@@ -21,6 +21,18 @@ const startAppServerSchema = z.object({
   credentialMode: z.enum(["host_environment", "stored_encrypted_key"]).default("host_environment"),
   apiKeyId: z.string().min(1).optional(),
   modelId: z.string().min(1).optional()
+});
+
+const threadStartSchema = z.object({
+  cwd: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  approvalPolicy: z.string().min(1).optional(),
+  sandbox: z.string().min(1).optional()
+});
+
+const turnStartSchema = z.object({
+  threadId: z.string().min(1),
+  text: z.string().min(1).max(32 * 1024)
 });
 
 export interface CodexAppServerRoutesOptions {
@@ -102,6 +114,59 @@ export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions)
     }
   });
 
+  router.post("/:id/initialize", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    try {
+      const result = await options.manager.initialize(req.params.id, userId);
+      res.json({ code: 0, data: { result }, message: "" });
+    } catch (error) {
+      sendRpcError(res, error);
+    }
+  });
+
+  router.post("/:id/thread", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const session = getOwnedSession(options, req.params.id, userId);
+    if (!session) {
+      res.status(404).json({ code: 1, message: "Codex app-server session not found" });
+      return;
+    }
+
+    const parseResult = threadStartSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid Codex thread payload" });
+      return;
+    }
+
+    try {
+      const result = await options.manager.startThread(req.params.id, userId, {
+        cwd: parseResult.data.cwd ?? session.projectRoot,
+        ...(parseResult.data.model ? { model: parseResult.data.model } : {}),
+        ...(parseResult.data.approvalPolicy ? { approvalPolicy: parseResult.data.approvalPolicy } : {}),
+        ...(parseResult.data.sandbox ? { sandbox: parseResult.data.sandbox } : {})
+      });
+      res.json({ code: 0, data: { result }, message: "" });
+    } catch (error) {
+      sendRpcError(res, error);
+    }
+  });
+
+  router.post("/:id/turn", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = turnStartSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid Codex turn payload" });
+      return;
+    }
+
+    try {
+      const result = await options.manager.startTurn(req.params.id, userId, parseResult.data);
+      res.json({ code: 0, data: { result }, message: "" });
+    } catch (error) {
+      sendRpcError(res, error);
+    }
+  });
+
   return router;
 }
 
@@ -178,6 +243,27 @@ function toSafeSessionPayload(session: CodexAppServerSession): Omit<
 > {
   const { token: _token, tokenFile: _tokenFile, ...safe } = session;
   return safe;
+}
+
+function getOwnedSession(
+  options: CodexAppServerRoutesOptions,
+  id: string,
+  userId: string
+): CodexAppServerSession | null {
+  try {
+    return options.manager.get(id, userId);
+  } catch {
+    return null;
+  }
+}
+
+function sendRpcError(res: Response, error: unknown): void {
+  const message = error instanceof Error ? error.message : "Codex app-server request failed";
+  if (message.includes("not found")) {
+    res.status(404).json({ code: 1, message: "Codex app-server session not found" });
+    return;
+  }
+  res.status(409).json({ code: 1, message });
 }
 
 function apiKeyEnvName(provider: string): string {

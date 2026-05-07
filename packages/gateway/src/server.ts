@@ -8,6 +8,7 @@ import { InMemorySessionManager } from "./services/session-manager.js";
 import { CodexAppServerManager } from "./services/codex-app-server-manager.js";
 import { OpenForgeEventBus } from "./services/event-bus.js";
 import { attachNotificationPersistence } from "./services/notification-events.js";
+import { attachCodexAppServerNotificationPersistence } from "./services/codex-app-server-events.js";
 import { attachTerminalWebSocket } from "./websocket/terminal.js";
 import { attachEventsWebSocket } from "./websocket/events.js";
 import type { Database } from "./db/types.js";
@@ -102,6 +103,11 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const server = createHttpServer(app);
   let closed = false;
   attachNotificationPersistence({ db: options.db, eventBus });
+  attachCodexAppServerNotificationPersistence({
+    db: options.db,
+    manager: codexAppServerManager,
+    eventBus
+  });
   attachTerminalWebSocket({ server, sessionManager, jwtSecret });
   attachEventsWebSocket({ server, eventBus, jwtSecret });
 

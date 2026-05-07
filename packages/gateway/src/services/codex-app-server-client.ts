@@ -292,7 +292,9 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
   constructor(private readonly options: CodexAppServerClientOptions) {
     super();
     options.transport.onMessage((raw) => {
-      void this.handleRawFrame(raw);
+      void this.handleRawFrame(raw).catch((error: unknown) => {
+        this.closeForProtocolError(error);
+      });
     });
     options.transport.onClose(() => {
       this.rejectPending("Codex app-server transport closed");
@@ -429,6 +431,19 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
       this.pending.delete(id);
       pending.reject(new Error(message));
     }
+  }
+
+  private closeForProtocolError(error: unknown): void {
+    if (this.closed) {
+      return;
+    }
+    const protocolError = error instanceof Error ? error : new Error(String(error));
+    this.closed = true;
+    this.rejectPending(protocolError.message);
+    if (this.listenerCount("error") > 0) {
+      this.emit("error", protocolError);
+    }
+    this.options.transport.close(1002, "Malformed Codex app-server frame");
   }
 }
 

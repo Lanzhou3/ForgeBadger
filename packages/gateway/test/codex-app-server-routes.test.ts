@@ -14,6 +14,7 @@ import { signJwt } from "../src/auth/jwt.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { CodexAppServerManager } from "../src/services/codex-app-server-manager.js";
+import type { CodexAppServerTransport } from "../src/services/codex-app-server-client.js";
 import { createCodexAppServerRoutes } from "../src/routes/codex-app-server.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
@@ -112,7 +113,95 @@ describe("Codex app-server routes", () => {
     assert.equal(res.status, 404);
     assert.equal(res.body.code, 1);
   });
+
+  it("sends initialize and turn JSON-RPC requests through the managed app-server client", async () => {
+    const transport = new AutoResponseTransport();
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-rpc-"));
+    const manager = new CodexAppServerManager({
+      runtimeRoot: root,
+      spawn: () => ({
+        pid: 456,
+        on() {
+          return this;
+        },
+        kill() {
+          return true;
+        }
+      }),
+      transportFactory: () => transport
+    });
+    app = express();
+    app.locals.jwtSecret = secret;
+    app.use(express.json());
+    app.use("/api/v1/codex/app-server", createCodexAppServerRoutes({
+      db,
+      manager
+    }));
+
+    const start = await makeRequest(app, "POST", "/api/v1/codex/app-server", {
+      projectId,
+      runtimeMode: "app-server-stdio"
+    }, { Authorization: `Bearer ${token}` });
+    const sessionId = start.body.data.session.id;
+
+    const initialized = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/codex/app-server/${sessionId}/initialize`,
+      undefined,
+      { Authorization: `Bearer ${token}` }
+    );
+    assert.equal(initialized.status, 200);
+    assert.deepEqual(initialized.body.data.result, { accepted: true });
+
+    const turn = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/codex/app-server/${sessionId}/turn`,
+      {
+        threadId: "thr_123",
+        text: "Summarize the repo"
+      },
+      { Authorization: `Bearer ${token}` }
+    );
+    assert.equal(turn.status, 200);
+    assert.deepEqual(turn.body.data.result, { accepted: true });
+
+    const sentMethods = transport.sent.map((payload) => JSON.parse(payload).method);
+    assert.deepEqual(sentMethods, ["initialize", "turn/start"]);
+    assert.equal(JSON.parse(transport.sent[1]).params.input[0].text, "Summarize the repo");
+  });
 });
+
+class AutoResponseTransport implements CodexAppServerTransport {
+  sent: string[] = [];
+  private messageHandler: ((raw: string | Buffer) => void) | undefined;
+  private closeHandler: ((code?: number, reason?: string) => void) | undefined;
+
+  send(data: string): void {
+    this.sent.push(data);
+    const parsed = JSON.parse(data) as { id: string | number };
+    queueMicrotask(() => {
+      this.messageHandler?.(JSON.stringify({
+        jsonrpc: "2.0",
+        id: parsed.id,
+        result: { accepted: true }
+      }));
+    });
+  }
+
+  close(code?: number, reason?: string): void {
+    this.closeHandler?.(code, reason);
+  }
+
+  onMessage(handler: (raw: string | Buffer) => void): void {
+    this.messageHandler = handler;
+  }
+
+  onClose(handler: (code?: number, reason?: string) => void): void {
+    this.closeHandler = handler;
+  }
+}
 
 async function makeRequest(
   app: express.Express,

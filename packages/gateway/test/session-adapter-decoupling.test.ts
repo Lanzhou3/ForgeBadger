@@ -93,7 +93,7 @@ describe("session adapter decoupling", () => {
     await gateway.close();
   });
 
-  it("creates project records without CLI fields using compatibility defaults", async () => {
+  it("creates project records without runtime CLI fields using a legacy config hint", async () => {
     const token = await register("adapter-project-default@example.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-project-default-"));
 

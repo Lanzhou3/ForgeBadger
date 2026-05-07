@@ -13,6 +13,7 @@ import { TerminalView } from "@/components/terminal-view";
 import { connectSession, getSession, listActivities, stopSession, type SessionActivity } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
+import { normalizeSessionStatus } from "@/lib/session-status";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function TerminalPage() {
@@ -241,7 +242,8 @@ function formatActivityTime(value: string): string {
 
 function SessionStatusBadge({ status }: { status?: string }) {
   const { t } = useLanguage();
-  if (status === "running") {
+  const normalizedStatus = normalizeSessionStatus(status);
+  if (normalizedStatus === "running") {
     return (
       <Badge variant="default" className="gap-1 bg-green-600 hover:bg-green-600">
         <Activity className="size-3" />
@@ -249,7 +251,7 @@ function SessionStatusBadge({ status }: { status?: string }) {
       </Badge>
     );
   }
-  if (status === "error") {
+  if (normalizedStatus === "error") {
     return <Badge variant="destructive">{t("sessions.error")}</Badge>;
   }
   return <Badge variant="secondary">{t("sessions.stopped")}</Badge>;

@@ -266,10 +266,28 @@ describe("Codex app-server client helpers", () => {
     await assert.rejects(pending, /closed/i);
     client.close();
   });
+
+  it("emits an error and closes the transport for malformed inbound frames", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerJsonRpcClient({
+      transport,
+      clientVersion: "0.0.0"
+    });
+    const errors: Error[] = [];
+    client.on("error", (error) => errors.push(error));
+
+    transport.emitMessage("{not-json");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(errors.length, 1);
+    assert.match(errors[0]?.message ?? "", /Malformed Codex app-server frame/);
+    assert.equal(transport.closedCode, 1002);
+  });
 });
 
 class FakeTransport implements CodexAppServerTransport {
   sent: string[] = [];
+  closedCode: number | undefined;
   private messageHandler: ((raw: string | Buffer) => void) | undefined;
   private closeHandler: ((code?: number, reason?: string) => void) | undefined;
 
@@ -278,6 +296,7 @@ class FakeTransport implements CodexAppServerTransport {
   }
 
   close(code?: number, reason?: string): void {
+    this.closedCode = code;
     this.closeHandler?.(code, reason);
   }
 

@@ -20,6 +20,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { deleteSession, listSessions, startSession, stopSession } from "@/lib/api";
 import { notifySessionTabsChanged } from "@/components/session-tabs";
 import { pruneSessionTabs, sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
+import { normalizeSessionStatus, sessionMatchesStatusFilter } from "@/lib/session-status";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function SessionsPage() {
@@ -61,7 +62,7 @@ export default function SessionsPage() {
   const filteredSessions = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return sessions.filter((session) => {
-      const matchesStatus = statusFilter === "all" || session.status === statusFilter;
+      const matchesStatus = sessionMatchesStatusFilter(session.status, statusFilter);
       if (!matchesStatus) {
         return false;
       }
@@ -76,6 +77,7 @@ export default function SessionsPage() {
         session.projectId,
         session.aiTool,
         session.status,
+        normalizeSessionStatus(session.status),
       ].some((value) => value?.toLowerCase().includes(normalizedQuery));
     });
   }, [query, sessions, statusFilter]);
@@ -262,14 +264,15 @@ export default function SessionsPage() {
 
 function SessionStatusBadge({ status }: { status: string }) {
   const { t } = useLanguage();
-  if (status === "running") {
+  const normalizedStatus = normalizeSessionStatus(status);
+  if (normalizedStatus === "running") {
     return (
       <Badge variant="default" className="bg-green-600 hover:bg-green-600">
         {t("sessions.running")}
       </Badge>
     );
   }
-  if (status === "error") {
+  if (normalizedStatus === "error") {
     return <Badge variant="destructive">{t("sessions.error")}</Badge>;
   }
   return <Badge variant="secondary">{t("sessions.stopped")}</Badge>;

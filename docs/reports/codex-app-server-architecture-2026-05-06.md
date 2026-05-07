@@ -2,7 +2,7 @@
 
 > Date: 2026-05-06
 > Scope: MVP-9 guarded Gateway control-plane prototype
-> Status: implemented behind Gateway routes; Web prompt input deferred
+> Status: Gateway JSON-RPC integration in progress; Web prompt input deferred
 
 ## Boundary
 
@@ -25,17 +25,28 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 - Lifecycle: start/list/stop are exposed; per-user running process limit is
   enforced by the manager; Gateway close calls `stopAll()`.
 - Activity: start/stop create structured activity rows and event-bus events.
+- JSON-RPC client helpers build `initialize`, `thread/start`, and `turn/start`
+  requests, enforce request timeout and frame-size limits, validate inbound
+  JSON-RPC frames, and close malformed inbound frames with a protocol error.
+- Managed app-server sessions can own a Gateway JSON-RPC client. Authenticated
+  routes expose `initialize`, `thread`, and `turn` operations without exposing
+  capability tokens or persisting prompt/response transcript content.
+- Codex app-server notifications are normalized into
+  `codex_app_server_notification` activity rows and broadcast through the
+  existing activity event path.
 
 ## Deferred
 
-- JSON-RPC frame reader/client with inbound schema validation.
-- Notification/event normalization from Codex app-server streaming responses.
+- Production WebSocket transport validation against a real `codex app-server`
+  process.
 - Web prompt input or transcript UI.
-- Additional rate/message-size controls for app-server JSON-RPC traffic.
+- Dedicated app-server rate limiting beyond request size, timeout, process
+  limits, and JSON-RPC frame-size guards.
 
 ## Verification
 
 - `test/codex-app-server.test.ts`
+- `test/codex-app-server-client.test.ts`
+- `test/codex-app-server-events.test.ts`
 - `test/codex-app-server-manager.test.ts`
 - `test/codex-app-server-routes.test.ts`
-- Full Gateway regression on 2026-05-06: 318 tests passed.

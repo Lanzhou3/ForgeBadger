@@ -7,6 +7,7 @@ import type { Terminal as TerminalInstance } from "@xterm/xterm";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/hooks/use-language";
 import { createTerminalInputMessage, createTerminalResizeMessage } from "@/lib/terminal-messages";
+import { parseTerminalWebSocketMessage } from "@/lib/terminal-websocket-messages";
 import { replaceTerminalInputListener, type DisposableInputListener } from "@/lib/terminal-input-listener";
 import { cn } from "@/lib/utils";
 import { terminalWebSocketProtocols, terminalWebSocketUrl } from "../lib/ws";
@@ -95,16 +96,14 @@ export function TerminalView({
       const terminal = terminalRef.current;
       if (!terminal) return;
 
-      const message = JSON.parse(String(event.data)) as {
-        type: string;
-        payload: Record<string, unknown>;
-      };
+      const message = parseTerminalWebSocketMessage(String(event.data));
+      if (!message) return;
 
-      if (message.type === "terminal_output" && typeof message.payload.data === "string") {
+      if (message.type === "terminal_output") {
         terminal.write(message.payload.data);
       }
 
-      if (message.type === "terminal_error" && typeof message.payload.message === "string") {
+      if (message.type === "terminal_error") {
         terminal.writeln(`\r\n[openforge] ${message.payload.message}`);
       }
     });

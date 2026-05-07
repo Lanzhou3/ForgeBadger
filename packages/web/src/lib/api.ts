@@ -125,6 +125,22 @@ export interface Session {
   apiKeyId?: string | null;
 }
 
+export interface CodexAppServerSession {
+  id: string;
+  userId: string;
+  projectId: string;
+  projectRoot: string;
+  runtimeMode: "app-server-stdio" | "app-server-websocket";
+  status: "running" | "stopped" | "error";
+  command: string;
+  args: string[];
+  listen: string;
+  pid?: number;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -970,6 +986,51 @@ export async function deleteSession(id: string): Promise<unknown> {
 
 export async function connectSession(id: string): Promise<{ session: Session }> {
   return fetchJson(`/api/v1/sessions/${id}/connect`, { method: "POST" }) as Promise<{ session: Session }>;
+}
+
+export async function listCodexAppServers(): Promise<{ sessions: CodexAppServerSession[] }> {
+  return fetchJson("/api/v1/codex/app-server") as Promise<{ sessions: CodexAppServerSession[] }>;
+}
+
+export async function startCodexAppServer(input: {
+  projectId: string;
+  runtimeMode: "app-server-stdio" | "app-server-websocket";
+  credentialMode?: CredentialMode;
+  modelId?: string;
+  apiKeyId?: string;
+}): Promise<{ session: CodexAppServerSession }> {
+  return fetchJson("/api/v1/codex/app-server", {
+    method: "POST",
+    body: JSON.stringify({
+      projectId: input.projectId,
+      runtimeMode: input.runtimeMode,
+      ...(input.credentialMode ? { credentialMode: input.credentialMode } : {}),
+      ...(input.modelId ? { modelId: input.modelId } : {}),
+      ...(input.apiKeyId ? { apiKeyId: input.apiKeyId } : {}),
+    }),
+  }) as Promise<{ session: CodexAppServerSession }>;
+}
+
+export async function initializeCodexAppServer(id: string): Promise<{ result: unknown }> {
+  return fetchJson(`/api/v1/codex/app-server/${id}/initialize`, { method: "POST" }) as Promise<{
+    result: unknown;
+  }>;
+}
+
+export async function startCodexAppServerTurn(
+  id: string,
+  input: { threadId: string; text: string }
+): Promise<{ result: unknown }> {
+  return fetchJson(`/api/v1/codex/app-server/${id}/turn`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ result: unknown }>;
+}
+
+export async function stopCodexAppServer(id: string): Promise<{ session: CodexAppServerSession }> {
+  return fetchJson(`/api/v1/codex/app-server/${id}/stop`, { method: "POST" }) as Promise<{
+    session: CodexAppServerSession;
+  }>;
 }
 
 // Agents
