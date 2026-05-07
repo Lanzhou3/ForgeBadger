@@ -30,6 +30,8 @@ docs/reports/*
 !docs/reports/release-candidate-2026-05-06.md
 !docs/README.zh-CN.md
 !docs/README.zh-TW.md
+!docs/assets/
+!docs/assets/openforge-wordmark.png
 
 # Local AI CLI config, personal project overrides, and repository agent notes.
 .codex
