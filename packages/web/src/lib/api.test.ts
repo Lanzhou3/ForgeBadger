@@ -12,6 +12,8 @@ import {
   createModel,
   createTemplate,
   createSession,
+  chooseDefaultRuntimeAdapter,
+  isAdapterLaunchable,
   deleteModel,
   deleteAgent,
   deleteSkill,
@@ -76,6 +78,7 @@ import {
   updateTemplateFile,
   updateModel,
   writeConfig,
+  type AdapterDiscovery,
 } from "./api";
 
 function mockEnvelope(data: unknown = {}) {
@@ -401,10 +404,11 @@ describe("api client", () => {
     );
   });
 
-  it("creates sessions with explicit model and stored credential selection", async () => {
+  it("creates sessions with explicit runtime adapter, model, and stored credential selection", async () => {
     await createSession({
       projectId: "project-1",
       credentialMode: "stored_encrypted_key",
+      aiTool: "opencode",
       modelId: "model-1",
       apiKeyId: "key-1",
     });
@@ -416,11 +420,57 @@ describe("api client", () => {
         body: JSON.stringify({
           projectId: "project-1",
           credentialMode: "stored_encrypted_key",
+          aiTool: "opencode",
           modelId: "model-1",
           apiKeyId: "key-1",
         }),
       })
     );
+  });
+
+  it("chooses only launchable runtime adapters from discovery", () => {
+    const adapters: AdapterDiscovery[] = [
+      {
+        id: "claude",
+        label: "Claude Code",
+        command: "claude",
+        supportLevel: "supported",
+        launchEnabled: false,
+        configDir: ".claude",
+        runtimeModes: ["terminal"],
+        available: true,
+        status: "available",
+      },
+      {
+        id: "opencode",
+        label: "OpenCode",
+        command: "opencode",
+        supportLevel: "prototype",
+        launchEnabled: true,
+        configDir: ".opencode",
+        runtimeModes: ["terminal"],
+        available: false,
+        status: "missing",
+      },
+      {
+        id: "codex",
+        label: "Codex CLI",
+        command: "codex",
+        supportLevel: "prototype",
+        launchEnabled: true,
+        configDir: ".codex",
+        runtimeModes: ["terminal"],
+        available: true,
+        status: "available",
+      },
+    ];
+
+    expect(isAdapterLaunchable(adapters[0]!)).toBe(false);
+    expect(isAdapterLaunchable(adapters[1]!)).toBe(false);
+    expect(isAdapterLaunchable(adapters[2]!)).toBe(true);
+    expect(chooseDefaultRuntimeAdapter(adapters)).toBe("codex");
+    expect(chooseDefaultRuntimeAdapter(adapters, "codex")).toBe("codex");
+    expect(chooseDefaultRuntimeAdapter(adapters, "claude")).toBe("codex");
   });
 
   it("manages agents through REST", async () => {
@@ -793,107 +843,46 @@ describe("api client", () => {
     );
   });
 
-  it("keeps project import successful when best-effort config generation conflicts", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            code: 0,
-            data: {
-              project: {
-                id: "project-1",
-                name: "Existing",
-                path: "/tmp/existing",
-                aiTool: "claude",
-              },
+  it("imports project records without CLI fields or automatic config generation", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          code: 0,
+          data: {
+            project: {
+              id: "project-1",
+              name: "Existing",
+              path: "/tmp/existing",
             },
-            message: "",
-          }),
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: false,
-        text: () =>
-          Promise.resolve(
-            JSON.stringify({
-              code: 1,
-              data: {
-                conflicts: [
-                  {
-                    relativePath: ".claude/CLAUDE.md",
-                    conflictType: "modified",
-                    allowedActions: ["skip", "overwrite"],
-                  },
-                ],
-              },
-              message: "Explicit config write decisions required",
-            })
-          ),
-      } as Response);
+          },
+          message: "",
+        }),
+    } as Response);
 
     const result = await importProjectWithConfig({
       path: "/tmp/existing",
       name: "Existing",
-      aiTool: "claude",
     });
 
     expect(result.project.id).toBe("project-1");
-    expect(result.configStatus).toBe("failed");
-    expect(result.configError).toContain("Explicit config write decisions required");
+    expect(result.configStatus).toBe("skipped");
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       "http://127.0.0.1:48731/api/v1/projects/import",
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/generate-config",
-      expect.objectContaining({ method: "POST" })
-    );
-  });
-
-  it("uses the matching built-in template when importing non-Claude projects", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            code: 0,
-            data: {
-              project: {
-                id: "project-2",
-                name: "Codex Project",
-                path: "/tmp/codex",
-                aiTool: "codex",
-              },
-            },
-            message: "",
-          }),
-      } as Response)
-      .mockImplementationOnce(() => mockEnvelope({ result: { writtenFiles: ["AGENTS.md"] } }));
-
-    await importProjectWithConfig({
-      path: "/tmp/codex",
-      name: "Codex Project",
-      aiTool: "codex",
-    });
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/projects/project-2/generate-config",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          templateId: "builtin-codex",
-          credentialMode: "host_environment"
+          path: "/tmp/existing",
+          name: "Existing",
         }),
       })
     );
   });
 
-  it("creates a project with the matching built-in template and generates config", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({
+  it("creates project records without CLI fields or automatic config generation", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
         ok: true,
         json: () =>
           Promise.resolve({
@@ -901,44 +890,29 @@ describe("api client", () => {
             data: {
               project: {
                 id: "project-3",
-                name: "OpenCode Project",
-                path: "/tmp/opencode",
-                aiTool: "opencode",
+                name: "Runtime Agnostic Project",
+                path: "/tmp/runtime-agnostic",
               },
             },
             message: "",
           }),
-      } as Response)
-      .mockImplementationOnce(() => mockEnvelope({ result: { writtenFiles: ["AGENTS.md"] } }));
+      } as Response);
 
     const result = await createProjectWithConfig({
-      path: "/tmp/opencode",
-      name: "OpenCode Project",
-      aiTool: "opencode",
+      path: "/tmp/runtime-agnostic",
+      name: "Runtime Agnostic Project",
     });
 
-    expect(result.configStatus).toBe("applied");
+    expect(result.configStatus).toBe("skipped");
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       "http://127.0.0.1:48731/api/v1/projects",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          path: "/tmp/opencode",
-          name: "OpenCode Project",
-          aiTool: "opencode",
-          templateId: "builtin-opencode",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/projects/project-3/generate-config",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          templateId: "builtin-opencode",
-          credentialMode: "host_environment"
+          path: "/tmp/runtime-agnostic",
+          name: "Runtime Agnostic Project",
         }),
       })
     );

@@ -59,6 +59,14 @@ const mockTmuxClient = {
   }
 };
 
+async function availableAdapterCommandRunner(command: string) {
+  return {
+    exitCode: 0,
+    stdout: `${command} test\n`,
+    stderr: ""
+  };
+}
+
 describe("security hardening", () => {
   let server: ReturnType<typeof createGatewayApp>["server"];
   let baseUrl: string;
@@ -73,7 +81,8 @@ describe("security hardening", () => {
       masterKey,
       db,
       sessionManager,
-      apiKeyStore
+      apiKeyStore,
+      adapterCommandRunner: availableAdapterCommandRunner
     });
     await new Promise<void>((resolve) => {
       server = app.server.listen(0, "127.0.0.1", () => {
@@ -559,6 +568,8 @@ describe("security hardening", () => {
     assert.notEqual(pluginFlagIndex, -1);
     const pluginDir = args[pluginFlagIndex + 1];
     assert.equal(pluginDir, path.join(rootPath, ".openforge", "claude-plugins", "claude-safe-edits"));
+    assert.equal(mockTmuxCreates.at(-1)?.command, "claude");
+    assert.equal(args.includes("-lc"), false);
     const manifest = JSON.parse(
       await readFile(path.join(pluginDir, ".claude-plugin", "plugin.json"), "utf8")
     );
@@ -1070,7 +1081,7 @@ describe("security hardening", () => {
     });
     const writeData = await writeRes.json();
     assert.equal(writeRes.status, 200);
-    assert.ok(writeData.data.result.writtenFiles.includes(".claude/CLAUDE.md"));
+    assert.ok(writeData.data.result.writtenFiles.includes("CLAUDE.md"));
 
     const deleteRes = await fetch(`${baseUrl}/api/v1/templates/${cloneData.data.template.id}`, {
       method: "DELETE",
@@ -1165,7 +1176,7 @@ describe("security hardening", () => {
     const writeData = await writeRes.json();
 
     assert.equal(writeRes.status, 200);
-    assert.ok(writeData.data.result.writtenFiles.includes(".claude/CLAUDE.md"));
+    assert.ok(writeData.data.result.writtenFiles.includes("CLAUDE.md"));
     assert.ok(writeData.data.result.writtenFiles.some((file: string) => file.startsWith(".claude/agents/")));
     assert.ok(writeData.data.result.writtenFiles.some((file: string) => file.startsWith(".claude/skills/")));
 
@@ -1222,7 +1233,7 @@ describe("security hardening", () => {
     const previewMissing = await previewMissingRes.json();
     assert.equal(previewMissingRes.status, 200);
     assert.equal(previewMissing.data.summary.templateId, "builtin-claude-code");
-    assert.ok(previewMissing.data.summary.missingFiles.includes(".claude/CLAUDE.md"));
+    assert.ok(previewMissing.data.summary.missingFiles.includes("CLAUDE.md"));
 
     const applyRes = await fetch(
       `${baseUrl}/api/v1/projects/${projectData.data.project.id}/config/sync/apply`,
@@ -1237,7 +1248,7 @@ describe("security hardening", () => {
     );
     const applyData = await applyRes.json();
     assert.equal(applyRes.status, 200);
-    assert.ok(applyData.data.result.writtenFiles.includes(".claude/CLAUDE.md"));
+    assert.ok(applyData.data.result.writtenFiles.includes("CLAUDE.md"));
 
     const auditRes = await fetch(
       `${baseUrl}/api/v1/audit-logs?resourceType=project&resourceId=${projectData.data.project.id}`,
@@ -1267,9 +1278,9 @@ describe("security hardening", () => {
     );
     const previewIdentical = await previewIdenticalRes.json();
     assert.equal(previewIdenticalRes.status, 200);
-    assert.ok(previewIdentical.data.summary.identicalFiles.includes(".claude/CLAUDE.md"));
+    assert.ok(previewIdentical.data.summary.identicalFiles.includes("CLAUDE.md"));
 
-    await writeFile(path.join(rootPath, ".claude", "CLAUDE.md"), "local edit", "utf8");
+    await writeFile(path.join(rootPath, "CLAUDE.md"), "local edit", "utf8");
     const previewModifiedRes = await fetch(
       `${baseUrl}/api/v1/projects/${projectData.data.project.id}/config/sync/preview`,
       {
@@ -1283,6 +1294,6 @@ describe("security hardening", () => {
     );
     const previewModified = await previewModifiedRes.json();
     assert.equal(previewModifiedRes.status, 200);
-    assert.ok(previewModified.data.summary.modifiedFiles.includes(".claude/CLAUDE.md"));
+    assert.ok(previewModified.data.summary.modifiedFiles.includes("CLAUDE.md"));
   });
 });

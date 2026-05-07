@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   eventsWebSocketUrl,
+  eventsWebSocketProtocols,
   terminalWebSocketProtocols,
   terminalWebSocketUrl,
 } from "./ws";
@@ -28,9 +29,16 @@ describe("terminalWebSocketProtocols", () => {
 });
 
 describe("eventsWebSocketUrl", () => {
-  it("puts JWT in query params for the events channel", () => {
-    const url = eventsWebSocketUrl("jwt-token", "https://openforge.example");
+  it("does not put token in query params for events", () => {
+    const url = eventsWebSocketUrl("https://openforge.example");
 
-    expect(url).toBe("wss://openforge.example/ws/events?token=jwt-token");
+    expect(url).toBe("wss://openforge.example/ws/events");
+  });
+});
+
+describe("eventsWebSocketProtocols", () => {
+  it("returns openforge-events protocol with auth token", () => {
+    const protocols = eventsWebSocketProtocols("jwt-token");
+    expect(protocols).toEqual(["openforge-events", "jwt-token"]);
   });
 });

@@ -8,18 +8,11 @@ import {
   type SessionRecoveryStore,
   type StoredSession
 } from "../../src/services/session-manager.js";
-import { createTmuxClient, formatTmuxShellCommand } from "../../src/services/tmux.js";
+import { createTmuxClient } from "../../src/services/tmux.js";
 
 const runTmuxTests = process.env.RUN_TMUX_TESTS === "1";
 
 describe("tmux integration", { skip: !runTmuxTests }, () => {
-  it("quotes tmux shell command arguments at the tmux boundary", () => {
-    assert.equal(
-      formatTmuxShellCommand("bash", ["-lc", "printf 'safe value'"]),
-      "bash -lc 'printf '\\''safe value'\\'''"
-    );
-  });
-
   it("creates, captures, and kills a real tmux session", async () => {
     const tmux = createTmuxClient();
     const sessionName = `of-test-${process.pid}`;

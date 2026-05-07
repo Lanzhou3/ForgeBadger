@@ -8,7 +8,12 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "OpenForge",
-  description: "AI programming IDE control platform"
+  description: "Local-first AI programming IDE control platform",
+  icons: {
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+    apple: "/brand/openforge-logo.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

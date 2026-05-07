@@ -1,8 +1,11 @@
 import express from "express";
 import { createServer as createHttpServer, type Server } from "node:http";
+import { homedir } from "node:os";
+import path from "node:path";
 
 import { InMemoryApiKeyStore } from "./secrets/api-key-store.js";
 import { InMemorySessionManager } from "./services/session-manager.js";
+import { CodexAppServerManager } from "./services/codex-app-server-manager.js";
 import { OpenForgeEventBus } from "./services/event-bus.js";
 import { attachNotificationPersistence } from "./services/notification-events.js";
 import { attachTerminalWebSocket } from "./websocket/terminal.js";
@@ -11,6 +14,7 @@ import type { Database } from "./db/types.js";
 import type { CommandRunner } from "./lib/dependency-check.js";
 
 import { mountRoutes } from "./routes/index.js";
+import { errorHandler } from "./middleware/error-handler.js";
 
 export interface ServerDeps {
   db: Database;
@@ -19,6 +23,8 @@ export interface ServerDeps {
   sessionManager: InMemorySessionManager;
   apiKeyStore: InMemoryApiKeyStore;
   eventBus: OpenForgeEventBus;
+  codexAppServerManager: CodexAppServerManager;
+  appVersion: string;
   adapterCommandRunner?: CommandRunner | undefined;
 }
 
@@ -39,6 +45,8 @@ export interface GatewayAppOptions {
   sessionManager: InMemorySessionManager;
   apiKeyStore: InMemoryApiKeyStore;
   eventBus?: OpenForgeEventBus;
+  codexAppServerManager?: CodexAppServerManager;
+  appVersion?: string;
   adapterCommandRunner?: CommandRunner | undefined;
 }
 
@@ -64,6 +72,7 @@ export function createServer(deps: ServerDeps): express.Express {
   app.use(express.json());
 
   mountRoutes(app, deps);
+  app.use(errorHandler);
 
   return app;
 }
@@ -73,6 +82,9 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const sessionManager = options.sessionManager;
   const apiKeyStore = options.apiKeyStore;
   const eventBus = options.eventBus ?? new OpenForgeEventBus();
+  const codexAppServerManager = options.codexAppServerManager ?? new CodexAppServerManager({
+    runtimeRoot: defaultRuntimeRoot()
+  });
   const recoveryReady = Promise.resolve();
 
   const app = createServer({
@@ -82,6 +94,8 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     sessionManager,
     apiKeyStore,
     eventBus,
+    codexAppServerManager,
+    appVersion: options.appVersion ?? "0.0.0",
     adapterCommandRunner: options.adapterCommandRunner
   });
 
@@ -105,6 +119,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
       closed = true;
 
       try {
+        codexAppServerManager.stopAll();
         await closeServerIfListening(server);
       } finally {
         options.db.close();
@@ -127,6 +142,10 @@ async function closeServerIfListening(server: Server): Promise<void> {
       resolve();
     });
   });
+}
+
+function defaultRuntimeRoot(): string {
+  return path.join(process.env.OPENFORGE_STATE_DIR?.trim() || path.join(homedir(), ".openforge"), "runtime");
 }
 
 export function isAllowedLocalWebOrigin(origin: string | undefined): origin is string {

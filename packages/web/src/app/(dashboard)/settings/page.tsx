@@ -252,6 +252,11 @@ function AdapterItem({ adapter }: { adapter: AdapterDiscovery }) {
       <div className="mt-2 text-xs text-muted-foreground">
         {adapter.version ?? adapter.error ?? adapter.configDir}
       </div>
+      {adapter.runtimeModes.length > 0 && (
+        <div className="mt-2 font-mono text-xs text-muted-foreground">
+          {adapter.runtimeModes.join(" / ")}
+        </div>
+      )}
     </div>
   );
 }

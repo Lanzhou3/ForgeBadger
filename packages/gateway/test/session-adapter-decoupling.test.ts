@@ -1,0 +1,229 @@
+import assert from "node:assert/strict";
+import { after, before, describe, it } from "node:test";
+import { mkdtemp } from "node:fs/promises";
+import type { Server } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+
+import { createGatewayApp } from "../src/server.js";
+import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
+import { InMemorySessionManager } from "../src/services/session-manager.js";
+import type { CommandResult } from "../src/lib/dependency-check.js";
+
+const jwtSecret = "0123456789abcdef0123456789abcdef";
+const masterKey = "abcdef0123456789abcdef0123456789";
+
+interface MockTmuxCreateInput {
+  name: string;
+  cwd: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+interface AuthResponseBody {
+  data: {
+    token: string;
+  };
+}
+
+interface ProjectResponseBody {
+  data: {
+    project: {
+      id: string;
+      aiTool?: string;
+      templateId?: string | null;
+    };
+  };
+}
+
+function createTestDb(): Database {
+  const db = new Database(":memory:");
+  db.pragma("journal_mode = WAL");
+  const drizzleDb = drizzle(db);
+  const migrationsFolder = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../src/db/migrations"
+  );
+  migrate(drizzleDb, { migrationsFolder });
+  return db;
+}
+
+describe("session adapter decoupling", () => {
+  const tmuxCreates: MockTmuxCreateInput[] = [];
+  let gateway: ReturnType<typeof createGatewayApp>;
+  let server: Server;
+  let baseUrl: string;
+
+  before(async () => {
+    const db = createTestDb();
+    const sessionManager = new InMemorySessionManager({
+      async createSession(input) {
+        tmuxCreates.push(input);
+      },
+      async killSession() {},
+      async capturePane() {
+        return "";
+      },
+      async listSessions() {
+        return [];
+      }
+    });
+    gateway = createGatewayApp({
+      jwtSecret,
+      masterKey,
+      db,
+      sessionManager,
+      apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
+      adapterCommandRunner: async (command): Promise<CommandResult> => ({
+        exitCode: 0,
+        stdout: `${command} test-version`,
+        stderr: ""
+      })
+    });
+    server = gateway.server;
+    baseUrl = await listenOnLoopback(server);
+  });
+
+  after(async () => {
+    await gateway.close();
+  });
+
+  it("creates project records without CLI fields using compatibility defaults", async () => {
+    const token = await register("adapter-project-default@example.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-project-default-"));
+
+    const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        name: "Runtime Agnostic Project",
+        path: rootPath
+      })
+    });
+    const projectData = await projectRes.json() as ProjectResponseBody;
+
+    assert.equal(projectRes.status, 201);
+    assert.equal(projectData.data.project.aiTool, "claude");
+    assert.equal(projectData.data.project.templateId, "builtin-claude-code");
+  });
+
+  it("keeps legacy project create/import adapter fields compatible", async () => {
+    const token = await register("adapter-project-legacy@example.com");
+    const createPath = await mkdtemp(path.join(tmpdir(), "openforge-project-legacy-create-"));
+    const importPath = await mkdtemp(path.join(tmpdir(), "openforge-project-legacy-import-"));
+
+    const createRes = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        name: "Legacy Codex Project",
+        path: createPath,
+        aiTool: "codex"
+      })
+    });
+    const createData = await createRes.json() as ProjectResponseBody;
+
+    const importRes = await fetch(`${baseUrl}/api/v1/projects/import`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        name: "Legacy OpenCode Project",
+        path: importPath,
+        aiTool: "opencode"
+      })
+    });
+    const importData = await importRes.json() as ProjectResponseBody;
+
+    assert.equal(createRes.status, 201);
+    assert.equal(createData.data.project.aiTool, "codex");
+    assert.equal(createData.data.project.templateId, "builtin-codex");
+    assert.equal(importRes.status, 201);
+    assert.equal(importData.data.project.aiTool, "opencode");
+    assert.equal(importData.data.project.templateId, "builtin-opencode");
+  });
+
+  it("launches a requested session adapter instead of the project default adapter", async () => {
+    const token = await register("adapter-decoupling@example.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-adapter-session-"));
+
+    const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        name: "Multi Adapter Project",
+        path: rootPath,
+        aiTool: "claude"
+      })
+    });
+    const projectData = await projectRes.json();
+
+    const sessionRes = await fetch(`${baseUrl}/api/v1/sessions`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        projectId: projectData.data.project.id,
+        credentialMode: "host_environment",
+        aiTool: "codex"
+      })
+    });
+    const sessionData = await sessionRes.json();
+
+    assert.equal(sessionRes.status, 201);
+    assert.equal(sessionData.data.session.aiTool, "codex");
+    assert.equal(tmuxCreates.at(-1)?.command, "codex");
+    assert.equal(tmuxCreates.at(-1)?.cwd, rootPath);
+  });
+});
+
+async function register(email: string): Promise<string> {
+  const registerRes = await fetch(`${baseUrlForRegister}/api/v1/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email,
+      password: "password123"
+    })
+  });
+  const registerData = await registerRes.json() as AuthResponseBody;
+  return registerData.data.token;
+}
+
+let baseUrlForRegister = "";
+
+function jsonAuthHeaders(token: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
+}
+
+async function listenOnLoopback(server: Server): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      server.off("error", onError);
+      reject(new Error("Timed out listening on 127.0.0.1"));
+    }, 5_000);
+    const onError = (error: Error) => {
+      clearTimeout(timeout);
+      reject(error);
+    };
+    server.once("error", onError);
+    server.listen(0, "127.0.0.1", () => {
+      clearTimeout(timeout);
+      server.off("error", onError);
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("Gateway test server did not return a TCP address"));
+        return;
+      }
+      const url = `http://127.0.0.1:${address.port}`;
+      baseUrlForRegister = url;
+      resolve(url);
+    });
+  });
+}

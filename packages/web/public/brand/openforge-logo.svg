@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">OpenForge logo</title>
+  <desc id="desc">A minimal OpenForge monogram combining O and F with a forge spark.</desc>
+  <defs>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0.95  0 0.38 0 0 0.24  0 0 0.08 0 0  0 0 0 0.45 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Transparent canvas by default -->
+  <g fill="none" stroke="none">
+    <!-- Open O / forge frame -->
+    <path d="M 501 168
+             A 332 332 0 1 0 607 835
+             M 718 786
+             A 332 332 0 0 0 852 488"
+          fill="none"
+          stroke="#101923"
+          stroke-width="108"
+          stroke-linecap="butt"
+          stroke-linejoin="miter"/>
+
+    <!-- F monogram -->
+    <path fill="#101923" d="
+      M 548 168
+      L 860 168
+      L 820 252
+      L 655 252
+      L 655 350
+      L 790 350
+      L 742 454
+      L 655 454
+      L 655 562
+      L 586 644
+      L 548 470
+      Z"/>
+
+    <!-- Forge/anvil platform -->
+    <path fill="#101923" d="
+      M 310 704
+      L 412 704
+      L 463 745
+      L 305 745
+      Z
+      M 561 820
+      L 464 913
+      L 681 913
+      L 584 820
+      Z
+      M 612 704
+      L 737 704
+      L 705 745
+      L 553 745
+      Z"/>
+
+    <!-- Orange forge core and sparks -->
+    <g fill="#ff6a00" filter="url(#softGlow)">
+      <path d="M 510 676 L 552 705 L 623 705 L 582 772 L 474 772 L 428 705 L 491 705 Z"/>
+      <path d="M 512 443 L 545 642 L 512 710 L 479 642 Z"/>
+      <path d="M 392 548 L 486 661 L 448 649 Z"/>
+      <path d="M 332 642 L 457 705 L 402 699 Z"/>
+      <path d="M 632 548 L 538 661 L 576 649 Z"/>
+      <path d="M 692 642 L 567 705 L 622 699 Z"/>
+      <path d="M 409 634 L 471 706 L 432 685 Z"/>
+      <path d="M 615 634 L 553 706 L 592 685 Z"/>
+    </g>
+  </g>
+</svg>

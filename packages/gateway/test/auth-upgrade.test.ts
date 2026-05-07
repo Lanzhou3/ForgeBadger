@@ -224,7 +224,7 @@ describe("auth routes", () => {
       });
       assert.equal(res.status, 401);
       assert.equal(res.body.code, 1);
-      assert.match(res.body.message, /invalid credentials/i);
+      assert.equal(res.body.message, "Invalid credentials");
     });
 
     it("rejects nonexistent email", async () => {
@@ -234,7 +234,27 @@ describe("auth routes", () => {
       });
       assert.equal(res.status, 401);
       assert.equal(res.body.code, 1);
-      assert.match(res.body.message, /invalid credentials/i);
+      assert.equal(res.body.message, "Invalid credentials");
+    });
+
+    it("uses the same error for nonexistent accounts and wrong passwords", async () => {
+      await makeRequest(app, "POST", "/api/v1/auth/register", {
+        email: "enumeration@example.com",
+        password: "password123"
+      });
+
+      const missing = await makeRequest(app, "POST", "/api/v1/auth/login", {
+        email: "missing@example.com",
+        password: "password123"
+      });
+      const wrongPassword = await makeRequest(app, "POST", "/api/v1/auth/login", {
+        email: "enumeration@example.com",
+        password: "badpass"
+      });
+
+      assert.equal(missing.status, 401);
+      assert.equal(wrongPassword.status, 401);
+      assert.deepEqual(missing.body, wrongPassword.body);
     });
 
     it("rejects disabled users", async () => {

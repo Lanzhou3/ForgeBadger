@@ -29,6 +29,7 @@ import { materializeClaudePluginPackages } from "../services/claude-plugin-packa
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
   credentialMode: z.enum(["host_environment", "stored_encrypted_key"]),
+  aiTool: z.enum(["claude", "opencode", "codex"]).optional(),
   apiKeyId: z.string().min(1).optional(),
   modelId: z.string().min(1).optional()
 }).superRefine((value, ctx) => {
@@ -74,7 +75,7 @@ export function createSessionRoutes(
       return;
     }
 
-    const { projectId, credentialMode, apiKeyId, modelId } = parseResult.data;
+    const { projectId, credentialMode, aiTool, apiKeyId, modelId } = parseResult.data;
     const projectRepo = new ProjectRepository(db, userId);
     const project = projectRepo.getById(projectId);
     if (!project) {
@@ -98,7 +99,7 @@ export function createSessionRoutes(
       }
     }
 
-    const adapter = normalizeAdapter(project.aiTool);
+    const adapter = normalizeAdapter(aiTool ?? project.aiTool);
     if (!adapter) {
       res.status(400).json({ code: 1, message: "Unsupported project adapter" });
       return;

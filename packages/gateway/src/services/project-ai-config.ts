@@ -113,6 +113,7 @@ function projectCandidateFilesForAdapter(adapter: AdapterId, discoveredFiles: st
     if (!hasInstructionFile(discoveredFiles, adapter)) {
       candidates.add("CLAUDE.md");
     }
+    candidates.delete(".claude/CLAUDE.md");
     return [...candidates];
   }
 
@@ -124,9 +125,6 @@ function projectCandidateFilesForAdapter(adapter: AdapterId, discoveredFiles: st
 
 function hasInstructionFile(files: string[], adapter: AdapterId): boolean {
   const instructionFiles = new Set(primaryInstructionFilesForAdapter(adapter));
-  if (adapter === "claude") {
-    instructionFiles.add(".claude/CLAUDE.md");
-  }
   return files.some((file) => instructionFiles.has(file));
 }
 
@@ -139,7 +137,6 @@ function candidateFilesForAdapter(adapter: AdapterId): string[] {
   if (adapter === "claude") {
     return [
       "CLAUDE.md",
-      ".claude/CLAUDE.md",
       ".claude/settings.json",
       ".claude/settings.local.json",
       ".claude/hooks/openforge-guard.mjs"
@@ -300,7 +297,7 @@ function globalConfigRoot(adapter: AdapterId): string {
 
 function candidateGlobalFilesForAdapter(adapter: AdapterId): string[] {
   if (adapter === "claude") {
-    return ["CLAUDE.md", "settings.json", "settings.local.json"];
+    return ["settings.json"];
   }
   if (adapter === "opencode") {
     return ["AGENTS.md", "opencode.json", "opencode.jsonc"];

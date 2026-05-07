@@ -186,6 +186,11 @@ export class InMemorySessionManager {
     return this.tmux.capturePane(session.tmuxName);
   }
 
+  async resizeSession(id: string, cols: number, rows: number): Promise<void> {
+    const session = this.requireSession(id);
+    await this.tmux.resizeWindow?.(session.tmuxName, cols, rows);
+  }
+
   async recoverOpenForgeSessions(input: RecoverSessionsInput): Promise<RecoveryResult> {
     const names = await this.tmux.listSessions();
     const indexed = await this.recoveryStore.listSessions();

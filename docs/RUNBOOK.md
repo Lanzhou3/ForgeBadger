@@ -4,6 +4,10 @@
 
 This runbook captures operational checks and failure handling for the MVP-0 Claude Code local control loop.
 
+First-user local trial startup now begins in [TRIAL-RUNBOOK.md](TRIAL-RUNBOOK.md).
+Use this runbook for deeper operational notes, dependency checks, failure
+handling, and manual tmux inspection after the trial path needs more detail.
+
 ## 1. Required Local Dependencies
 
 NPM runtime:

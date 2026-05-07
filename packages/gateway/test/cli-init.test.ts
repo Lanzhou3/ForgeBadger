@@ -47,10 +47,10 @@ describe("openforge init CLI prototype", () => {
     assert.equal(plan.targetRoot, projectPath);
     assert.equal(plan.templateId, "builtin-claude-code");
     assert.equal(plan.dryRun, true);
-    assert.ok(plan.files.some((file) => file.relativePath === ".claude/CLAUDE.md"));
+    assert.ok(plan.files.some((file) => file.relativePath === "CLAUDE.md"));
     assert.ok(plan.files.some((file) => file.relativePath === ".claude/settings.json"));
     assert.match(
-      plan.files.find((file) => file.relativePath === ".claude/CLAUDE.md")?.content ?? "",
+      plan.files.find((file) => file.relativePath === "CLAUDE.md")?.content ?? "",
       /openforge-cli-init-/
     );
   });

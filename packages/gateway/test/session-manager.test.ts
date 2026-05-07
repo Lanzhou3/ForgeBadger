@@ -64,6 +64,28 @@ describe("InMemorySessionManager", () => {
     assert.equal(history, "hello from tmux");
   });
 
+  it("resizes the backing tmux window for an active session", async () => {
+    const calls: string[] = [];
+    const manager = new InMemorySessionManager({
+      ...fakeTmux(calls),
+      async resizeWindow(name, cols, rows) {
+        calls.push(`resize:${name}:${cols}x${rows}`);
+      }
+    });
+    const session = await manager.createSession({
+      userId: "user_123456",
+      sessionId: "session_abcdef",
+      launchPlan: launchPlan()
+    });
+
+    await manager.resizeSession(session.id, 180, 50);
+
+    assert.deepEqual(calls, [
+      "create:of-user_123-session_abcdef",
+      "resize:of-user_123-session_abcdef:180x50"
+    ]);
+  });
+
   it("marks launch failures as errors", async () => {
     const manager = new InMemorySessionManager({
       async createSession() {

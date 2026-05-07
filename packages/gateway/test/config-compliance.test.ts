@@ -125,10 +125,10 @@ describe("project config compliance", () => {
     assert.equal(missing.status, 200);
     assert.ok(missing.body.data);
     assert.equal(missing.body.data.compliance.status, "needs_attention");
-    assert.ok(missing.body.data.compliance.missingFiles.includes(".claude/CLAUDE.md"));
+    assert.ok(missing.body.data.compliance.missingFiles.includes("CLAUDE.md"));
     assert.equal(missing.body.data.compliance.identicalFiles.length, 0);
     assert.equal(missing.body.data.compliance.staleFiles.length, 0);
-    assert.ok(missing.body.data.files.some((file) => file.relativePath === ".claude/CLAUDE.md"));
+    assert.ok(missing.body.data.files.some((file) => file.relativePath === "CLAUDE.md"));
 
     const applyRes = await fetch(`${baseUrl}/api/v1/projects/${projectId}/config/sync/apply`, {
       method: "POST",
@@ -144,19 +144,19 @@ describe("project config compliance", () => {
     assert.equal(identical.status, 200);
     assert.ok(identical.body.data);
     assert.equal(identical.body.data.compliance.status, "compliant");
-    assert.ok(identical.body.data.compliance.identicalFiles.includes(".claude/CLAUDE.md"));
+    assert.ok(identical.body.data.compliance.identicalFiles.includes("CLAUDE.md"));
     assert.equal(identical.body.data.compliance.missingFiles.length, 0);
     assert.equal(identical.body.data.compliance.modifiedFiles.length, 0);
     assert.equal(identical.body.data.compliance.staleFiles.length, 0);
 
-    await writeFile(path.join(rootPath, ".claude", "CLAUDE.md"), "local edit", "utf8");
+    await writeFile(path.join(rootPath, "CLAUDE.md"), "local edit", "utf8");
     const stale = await getCompliance(token, projectId);
     assert.equal(stale.status, 200);
     assert.ok(stale.body.data);
     assert.equal(stale.body.data.compliance.status, "needs_attention");
-    assert.ok(stale.body.data.compliance.modifiedFiles.includes(".claude/CLAUDE.md"));
-    assert.ok(stale.body.data.compliance.staleFiles.includes(".claude/CLAUDE.md"));
-    assert.ok(stale.body.data.compliance.requiresDecision.includes(".claude/CLAUDE.md"));
+    assert.ok(stale.body.data.compliance.modifiedFiles.includes("CLAUDE.md"));
+    assert.ok(stale.body.data.compliance.staleFiles.includes("CLAUDE.md"));
+    assert.ok(stale.body.data.compliance.requiresDecision.includes("CLAUDE.md"));
     assert.ok(stale.body.data.conflicts.some((conflict: { conflictType: string }) => conflict.conflictType === "modified"));
   });
 

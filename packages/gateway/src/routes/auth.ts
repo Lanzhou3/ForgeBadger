@@ -17,6 +17,8 @@ const loginSchema = z.object({
   password: z.string().min(1)
 });
 
+const invalidCredentialsResponse = { code: 1, message: "Invalid credentials" };
+
 export function createAuthRouter(userRepository: UserRepository, jwtSecret: string): Router {
   const router = Router();
 
@@ -64,8 +66,13 @@ export function createAuthRouter(userRepository: UserRepository, jwtSecret: stri
     const { email, password } = parseResult.data;
     const user = userRepository.findByEmail(email);
 
-    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-      res.status(401).json({ code: 1, message: "Invalid credentials" });
+    if (!user) {
+      res.status(401).json(invalidCredentialsResponse);
+      return;
+    }
+
+    if (!(await bcrypt.compare(password, user.passwordHash))) {
+      res.status(401).json(invalidCredentialsResponse);
       return;
     }
     if (user.status !== "active") {

@@ -10,6 +10,13 @@ OpenForge 面向自架開發環境。Gateway 負責所有檔案系統、資料�
 WebSocket、加密和 CLI 程序管理；Web 控制台是純 Next.js SPA，透過 HTTP 和
 WebSocket 與 Gateway 通訊。
 
+## 首次使用者試用
+
+- 試用執行手冊：[`TRIAL-RUNBOOK.md`](TRIAL-RUNBOOK.md)
+- 首次執行檢查表：[`TRIAL-CHECKLIST.md`](TRIAL-CHECKLIST.md)
+- 疑難排解：[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
+- 回饋範本：[`TRIAL-FEEDBACK.md`](TRIAL-FEEDBACK.md)
+
 ## 功能
 
 - 管理專案、工作階段、終端機、Agent、Skill、範本、模型、API Key、外掛、用量、歷史和設定。

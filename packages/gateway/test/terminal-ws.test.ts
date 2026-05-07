@@ -1,17 +1,43 @@
 import assert from "node:assert/strict";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
+import WebSocket from "ws";
 
 import {
   authenticateTerminalRequest,
   TerminalHeartbeat,
   TerminalInputRateLimiter,
+  TerminalResizeBuffer,
   parseTerminalMessage,
   TerminalConnectionRegistry,
   validateTerminalAccess
 } from "../src/websocket/terminal.js";
+import { createGatewayApp } from "../src/server.js";
+import { WebSocketConnectionLimits } from "../src/websocket/connection-limits.js";
+import { extractWsAuthToken } from "../src/websocket/auth.js";
 import { signJwt } from "../src/auth/index.js";
+import { OpenForgeEventBus } from "../src/services/event-bus.js";
+import { InMemorySessionManager } from "../src/services/session-manager.js";
+import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
+const masterKey = "0123456789abcdef0123456789abcdef";
+
+function createTestDb(): Database {
+  const db = new Database(":memory:");
+  db.pragma("journal_mode = WAL");
+  const drizzleDb = drizzle(db);
+  const migrationsFolder = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../src/db/migrations"
+  );
+  migrate(drizzleDb, { migrationsFolder });
+  return db;
+}
 
 describe("parseTerminalMessage", () => {
   it("accepts terminal input messages", () => {
@@ -102,11 +128,6 @@ describe("validateTerminalAccess", () => {
 
 describe("authenticateTerminalRequest", () => {
   it("authenticates terminal access from a valid JWT and attach token", () => {
-    const authToken = signJwt(
-      { userId: "user_123", email: "test@example.com" },
-      jwtSecret
-    );
-
     assert.equal(
       authenticateTerminalRequest(
         {
@@ -114,9 +135,8 @@ describe("authenticateTerminalRequest", () => {
           attachToken: "attach_123"
         },
         {
-          authToken,
-          attachToken: "attach_123",
-          jwtSecret
+          authTokenUserId: "user_123",
+          attachToken: "attach_123"
         }
       ),
       true
@@ -124,11 +144,6 @@ describe("authenticateTerminalRequest", () => {
   });
 
   it("rejects terminal access when JWT user does not own the session", () => {
-    const authToken = signJwt(
-      { userId: "user_other", email: "other@example.com" },
-      jwtSecret
-    );
-
     assert.equal(
       authenticateTerminalRequest(
         {
@@ -136,9 +151,8 @@ describe("authenticateTerminalRequest", () => {
           attachToken: "attach_123"
         },
         {
-          authToken,
-          attachToken: "attach_123",
-          jwtSecret
+          authTokenUserId: "user_other",
+          attachToken: "attach_123"
         }
       ),
       false
@@ -165,5 +179,196 @@ describe("TerminalHeartbeat", () => {
     assert.equal(heartbeat.isTimedOut(91_001), true);
     heartbeat.recordPong(91_500);
     assert.equal(heartbeat.isTimedOut(100_000), false);
+  });
+});
+
+describe("TerminalResizeBuffer", () => {
+  it("applies the latest resize received before pty attach", () => {
+    const calls: Array<{ cols: number; rows: number }> = [];
+    const resizeBuffer = new TerminalResizeBuffer();
+
+    resizeBuffer.applyOrStore(undefined, 140, 42);
+    resizeBuffer.applyOrStore(undefined, 180, 50);
+    resizeBuffer.flush({
+      resize(cols, rows) {
+        calls.push({ cols, rows });
+      }
+    });
+
+    assert.deepEqual(calls, [{ cols: 180, rows: 50 }]);
+  });
+
+  it("applies resize immediately after pty attach", () => {
+    const calls: Array<{ cols: number; rows: number }> = [];
+    const resizeBuffer = new TerminalResizeBuffer();
+
+    resizeBuffer.applyOrStore(
+      {
+        resize(cols, rows) {
+          calls.push({ cols, rows });
+        }
+      },
+      160,
+      44
+    );
+
+    assert.deepEqual(calls, [{ cols: 160, rows: 44 }]);
+  });
+});
+
+describe("extractWsAuthToken", () => {
+  it("prefers Authorization header over protocol token", () => {
+    const token = extractWsAuthToken(
+      {
+        authorization: "Bearer header-token",
+        "sec-websocket-protocol": "openforge-terminal, protocol-token"
+      },
+      "openforge-terminal"
+    );
+    assert.equal(token, "header-token");
+  });
+
+  it("extracts token from protocol list when header is absent", () => {
+    const token = extractWsAuthToken(
+      {
+        "sec-websocket-protocol": "openforge-terminal, protocol-token"
+      },
+      "openforge-terminal"
+    );
+    assert.equal(token, "protocol-token");
+  });
+
+  it("returns undefined when protocol token is missing", () => {
+    const token = extractWsAuthToken(
+      {
+        "sec-websocket-protocol": "openforge-terminal"
+      },
+      "openforge-terminal"
+    );
+    assert.equal(token, undefined);
+  });
+});
+
+describe("WebSocket connection limits", () => {
+  it("enforces per-user limit", () => {
+    const limiter = new WebSocketConnectionLimits<WebSocket>({
+      maxGlobalConnections: 10,
+      maxConnectionsPerUser: 1
+    });
+
+    assert.equal(limiter.tryAcquire({ close() {} } as WebSocket, "user-a").accepted, true);
+    assert.equal(limiter.tryAcquire({ close() {} } as WebSocket, "user-a").accepted, false);
+  });
+
+  it("enforces global limit", () => {
+    const limiter = new WebSocketConnectionLimits<WebSocket>({
+      maxGlobalConnections: 1,
+      maxConnectionsPerUser: 10
+    });
+
+    assert.equal(limiter.tryAcquire({ close() {} } as WebSocket, "user-a").accepted, true);
+    assert.equal(limiter.tryAcquire({ close() {} } as WebSocket, "user-b").accepted, false);
+  });
+});
+
+describe("terminal websocket authentication", () => {
+  it("does not read auth token from query params", async () => {
+    const db = createTestDb();
+    const eventBus = new OpenForgeEventBus();
+    const sessionManager = new InMemorySessionManager({
+      async createSession() {},
+      async killSession() {},
+      async capturePane() {
+        return "";
+      },
+      async listSessions() {
+        return [];
+      }
+    });
+    const apiKeyStore = new InMemoryApiKeyStore({ masterKey });
+    const app = createGatewayApp({
+      db,
+      jwtSecret,
+      masterKey,
+      sessionManager,
+      apiKeyStore,
+      eventBus
+    });
+
+    let serverUrl: string;
+    await new Promise<void>((resolve) => {
+      app.server.listen(0, "127.0.0.1", () => {
+        const address = app.server.address();
+        if (address && typeof address === "object") {
+          serverUrl = `ws://127.0.0.1:${address.port}`;
+        }
+        resolve();
+      });
+    });
+
+    const token = signJwt({ userId: "user_123", email: "test@example.com" }, jwtSecret);
+    const ws = new WebSocket(
+      `${serverUrl}/ws/terminal/session-123?attachToken=attach-123&authToken=${token}`
+    );
+
+    const result = await new Promise<{ code: number }>((resolve) => {
+      ws.on("close", (code) => resolve({ code }));
+      ws.on("error", () => resolve({ code: 1006 }));
+    });
+
+    assert.equal(result.code, 1006);
+    await new Promise<void>((resolve) => app.server.close(resolve));
+    db.close();
+  });
+
+  it("accepts secure header auth and rejects missing terminal session with not found", async () => {
+    const db = createTestDb();
+    const eventBus = new OpenForgeEventBus();
+    const sessionManager = new InMemorySessionManager({
+      async createSession() {},
+      async killSession() {},
+      async capturePane() {
+        return "";
+      },
+      async listSessions() {
+        return [];
+      }
+    });
+    const apiKeyStore = new InMemoryApiKeyStore({ masterKey });
+    const app = createGatewayApp({
+      db,
+      jwtSecret,
+      masterKey,
+      sessionManager,
+      apiKeyStore,
+      eventBus
+    });
+
+    let serverUrl: string;
+    await new Promise<void>((resolve) => {
+      app.server.listen(0, "127.0.0.1", () => {
+        const address = app.server.address();
+        if (address && typeof address === "object") {
+          serverUrl = `ws://127.0.0.1:${address.port}`;
+        }
+        resolve();
+      });
+    });
+
+    const token = signJwt({ userId: "user_123", email: "test@example.com" }, jwtSecret);
+    const ws = new WebSocket(`${serverUrl}/ws/terminal/session-123?attachToken=attach-123`, {
+      headers: {
+        authorization: `Bearer ${token}`
+      }
+    });
+
+    const result = await new Promise<{ code: number }>((resolve) => {
+      ws.on("close", (code) => resolve({ code }));
+      ws.on("error", () => resolve({ code: 1006 }));
+    });
+
+    assert.equal(result.code, 4404);
+    await new Promise<void>((resolve) => app.server.close(resolve));
+    db.close();
   });
 });

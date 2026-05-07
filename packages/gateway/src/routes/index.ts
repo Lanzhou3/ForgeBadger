@@ -22,6 +22,8 @@ import { createPluginRoutes } from "./plugins.js";
 import { createNotificationRoutes } from "./notifications.js";
 import { createSessionHookRoutes } from "./session-hooks.js";
 import { createSnapshotRoutes } from "./snapshots.js";
+import { createCodexAppServerRoutes } from "./codex-app-server.js";
+import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
@@ -59,4 +61,15 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/notifications", createNotificationRoutes(deps.db));
   app.use("/api/v1/api-keys", createApiKeyRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/dashboard", createDashboardRoutes(deps.db, deps.masterKey));
+  app.use("/api/v1/codex/app-server", createCodexAppServerRoutes({
+    db: deps.db,
+    manager: deps.codexAppServerManager,
+    masterKey: deps.masterKey,
+    eventBus: deps.eventBus
+  }));
+  app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
+    db: deps.db,
+    masterKey: deps.masterKey,
+    appVersion: deps.appVersion
+  }));
 }

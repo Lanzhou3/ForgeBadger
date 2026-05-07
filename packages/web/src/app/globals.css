@@ -17,6 +17,10 @@
   --color-accent-foreground: hsl(var(--accent-foreground));
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-brand: hsl(var(--brand));
+  --color-brand-foreground: hsl(var(--brand-foreground));
+  --color-surface-raised: hsl(var(--surface-raised));
+  --color-terminal: hsl(var(--terminal-bg));
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
@@ -47,29 +51,41 @@
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 10%;
+    --brand: 24 100% 50%;
+    --brand-foreground: 0 0% 100%;
+    --surface-raised: 0 0% 100%;
+    --terminal-bg: 220 33% 3%;
     --radius: 0.5rem;
   }
 
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
+    --background: 220 27% 4%;
+    --foreground: 210 35% 96%;
+    --card: 216 28% 7%;
+    --card-foreground: 210 35% 96%;
+    --popover: 216 28% 7%;
+    --popover-foreground: 210 35% 96%;
     --primary: 0 0% 98%;
     --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
+    --secondary: 214 24% 10%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
+    --muted: 214 24% 10%;
+    --muted-foreground: 213 12% 58%;
+    --accent: 214 24% 13%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
+    --border: 211 28% 15%;
+    --input: 211 28% 15%;
     --ring: 240 4.9% 83.9%;
+    --brand: 24 100% 50%;
+    --brand-foreground: 0 0% 100%;
+    --surface-raised: 213 27% 9%;
+    --terminal-bg: 220 33% 3%;
+  }
+
+  html.dark {
+    color-scheme: dark;
   }
 }
 
@@ -78,6 +94,8 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    @apply bg-background text-foreground antialiased;
   }
 }

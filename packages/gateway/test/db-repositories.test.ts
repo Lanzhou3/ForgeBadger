@@ -397,7 +397,8 @@ describe("db repositories", () => {
       const withFiles = repo.getById(claude.id);
       assert.ok(withFiles);
       assert.ok(withFiles!.files);
-      assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/CLAUDE.md"));
+      assert.ok(withFiles!.files!.some((f) => f.filePath === "CLAUDE.md"));
+      assert.equal(withFiles!.files!.some((f) => f.filePath === ".claude/CLAUDE.md"), false);
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/settings.json"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === "WORKFLOW.md"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === "PLAN.md"));
@@ -410,7 +411,7 @@ describe("db repositories", () => {
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/rules/testing.md"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/hooks/openforge-guard.mjs"));
       assert.equal(withFiles!.files!.some((f) => f.filePath === ".claude/hooks/openforge-notification.mjs"), false);
-      const claudeMd = withFiles!.files!.find((f) => f.filePath === ".claude/CLAUDE.md")?.content ?? "";
+      const claudeMd = withFiles!.files!.find((f) => f.filePath === "CLAUDE.md")?.content ?? "";
       assert.match(claudeMd, /Common Commands/);
       assert.match(claudeMd, /Architecture/);
       assert.match(claudeMd, /Context Management/);
@@ -469,13 +470,17 @@ describe("db repositories", () => {
 
       const repo = new TemplateRepository(db, user.id);
       const refreshed = repo.getById("builtin-claude-code");
-      const claudeMd = refreshed?.files?.find((file) => file.filePath === ".claude/CLAUDE.md")?.content ?? "";
+      const claudeMd = refreshed?.files?.find((file) => file.filePath === "CLAUDE.md")?.content ?? "";
 
       assert.equal(refreshed?.version, "2.1.0");
       assert.match(claudeMd, /Context Management/);
       assert.match(claudeMd, /Operating Pattern/);
       assert.equal(
         refreshed?.files?.some((file) => file.filePath === ".claude/hooks/openforge-notification.mjs"),
+        false
+      );
+      assert.equal(
+        refreshed?.files?.some((file) => file.filePath === ".claude/CLAUDE.md"),
         false
       );
     });
@@ -489,7 +494,7 @@ describe("db repositories", () => {
       assert.ok(withFiles);
       assert.equal(withFiles!.name, "Claude Code");
       assert.ok(withFiles!.files);
-      assert.ok(withFiles!.files!.some((file) => file.filePath === ".claude/CLAUDE.md"));
+      assert.ok(withFiles!.files!.some((file) => file.filePath === "CLAUDE.md"));
     });
 
     it("returns OpenCode and Codex built-in templates by id before templates have been listed", () => {
@@ -547,7 +552,7 @@ describe("db repositories", () => {
       assert.equal(cloned.userId, user.id);
 
       const clonedDetails = repo.getById(cloned.id);
-      assert.ok(clonedDetails?.files?.some((file) => file.filePath === ".claude/CLAUDE.md"));
+      assert.ok(clonedDetails?.files?.some((file) => file.filePath === "CLAUDE.md"));
 
       const created = repo.create({
         name: "Scratch",

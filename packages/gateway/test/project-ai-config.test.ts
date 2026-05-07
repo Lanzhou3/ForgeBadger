@@ -78,6 +78,15 @@ interface ProjectResponseBody {
   };
 }
 
+interface ScanResponseBody {
+  data?: {
+    path: string;
+    exists: boolean;
+    isDirectory: boolean;
+    instructionFiles: string[];
+  };
+}
+
 describe("project AI config routes", () => {
   let server: ReturnType<typeof createGatewayApp>["server"];
   let baseUrl: string;
@@ -133,6 +142,57 @@ describe("project AI config routes", () => {
     assertFile(body, "opencode.json", true, "{\"instructions\":[\"AGENTS.md\"]}\n");
     assertFile(body, ".opencode/agents/reviewer.md", true, "# Reviewer\n");
     assertFile(body, ".opencode/commands/review.md", false, "");
+  });
+
+  it("reports existing root instruction files when scanning an import directory", async () => {
+    const token = await register("scan-existing-config@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-scan-config-"));
+    await writeFile(path.join(rootPath, "CLAUDE.md"), "# Existing Claude\n", "utf8");
+    await writeFile(path.join(rootPath, "AGENTS.md"), "# Existing Agents\n", "utf8");
+
+    const res = await fetch(`${baseUrl}/api/v1/projects/scan`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ path: rootPath })
+    });
+    const body = (await res.json()) as ScanResponseBody;
+
+    assert.equal(res.status, 200, JSON.stringify(body));
+    assert.equal(body.data?.path, rootPath);
+    assert.deepEqual(body.data?.instructionFiles, ["AGENTS.md", "CLAUDE.md"]);
+  });
+
+  it("uses root CLAUDE.md as the Claude Code project instruction file", async () => {
+    const token = await register("ai-config-claude-root@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-claude-"));
+    await mkdir(path.join(rootPath, ".claude"), { recursive: true });
+    await writeFile(path.join(rootPath, "CLAUDE.md"), "# Root Claude\n", "utf8");
+    await writeFile(path.join(rootPath, ".claude", "CLAUDE.md"), "# Legacy Nested Claude\n", "utf8");
+    await writeFile(path.join(rootPath, ".claude", "settings.json"), "{}\n", "utf8");
+    const projectId = await importProject(token, {
+      name: "Claude Project",
+      path: rootPath,
+      aiTool: "claude"
+    });
+
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = (await res.json()) as AiConfigResponseBody;
+
+    assert.equal(res.status, 200, JSON.stringify(body));
+    assert.equal(body.data?.adapter, "claude");
+    assertFile(body, "CLAUDE.md", true, "# Root Claude\n");
+    assertFile(body, ".claude/settings.json", true, "{}\n");
+    assert.equal(
+      body.data?.files.some((file) => file.relativePath === ".claude/CLAUDE.md"),
+      false
+    );
+    assert.ok(body.data?.forms.some((form) => form.filePath === "CLAUDE.md"));
+    assert.ok(body.data?.forms.some((form) => form.filePath === ".claude/settings.json"));
   });
 
   it("updates allowed project config files and rejects unsafe paths", async () => {
@@ -257,6 +317,47 @@ describe("project AI config routes", () => {
         delete process.env.OPENCODE_CONFIG_DIR;
       } else {
         process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+    }
+  });
+
+  it("returns only ~/.claude/settings.json for Claude Code global config", async () => {
+    const token = await register("ai-config-claude-global@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-claude-global-project-"));
+    const claudeConfigDir = await mkdtemp(path.join(tmpdir(), "openforge-claude-config-"));
+    await writeFile(path.join(claudeConfigDir, "CLAUDE.md"), "# Personal Claude\n", "utf8");
+    await writeFile(path.join(claudeConfigDir, "settings.local.json"), "{}\n", "utf8");
+    await writeFile(
+      path.join(claudeConfigDir, "settings.json"),
+      "{\n  \"permissions\": { \"allow\": [\"Read\"], \"apiKey\": \"sk-secret-value\" }\n}\n",
+      "utf8"
+    );
+    const projectId = await importProject(token, {
+      name: "Claude Global Config Project",
+      path: rootPath,
+      aiTool: "claude"
+    });
+    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = claudeConfigDir;
+
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config/global`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const body = (await res.json()) as AiConfigResponseBody;
+
+      assert.equal(res.status, 200, JSON.stringify(body));
+      assert.equal(body.data?.adapter, "claude");
+      assert.deepEqual(body.data?.files.map((file) => file.relativePath), ["settings.json"]);
+      const settings = assertFile(body, "settings.json", true, undefined, "global");
+      assert.equal(settings.editable, false);
+      assert.match(settings.content, /REDACTED/);
+      assert.doesNotMatch(settings.content, /sk-secret-value/);
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
       }
     }
   });

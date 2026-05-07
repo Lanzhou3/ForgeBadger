@@ -21,10 +21,13 @@ export function terminalWebSocketProtocols(authToken: string): string[] {
   return ["openforge-terminal", authToken];
 }
 
-export function eventsWebSocketUrl(authToken: string, baseUrl = getGatewayBaseUrl()): string {
+export function eventsWebSocketUrl(baseUrl = getGatewayBaseUrl()): string {
   const url = new URL(baseUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = "/ws/events";
-  url.searchParams.set("token", authToken);
   return url.toString();
+}
+
+export function eventsWebSocketProtocols(authToken: string): string[] {
+  return ["openforge-events", authToken];
 }

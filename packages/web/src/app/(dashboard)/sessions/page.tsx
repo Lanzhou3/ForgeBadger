@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, RotateCcw, Search, Square, TerminalSquare, Trash2 } from "lucide-react";
@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { deleteSession, listSessions, startSession, stopSession } from "@/lib/api";
+import { notifySessionTabsChanged } from "@/components/session-tabs";
+import { pruneSessionTabs, sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function SessionsPage() {
@@ -48,6 +50,14 @@ export default function SessionsPage() {
   });
 
   const sessions = data?.sessions ?? [];
+  useEffect(() => {
+    if (!data) {
+      return;
+    }
+    pruneSessionTabs(new Set(sessions.map((session) => session.id)));
+    notifySessionTabsChanged();
+  }, [data, sessions]);
+
   const filteredSessions = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return sessions.filter((session) => {
@@ -181,7 +191,15 @@ export default function SessionsPage() {
                               <TableCell>
                                 <div className="flex justify-end gap-1">
                                   {isRunning ? (
-                                    <Button asChild variant="ghost" size="sm">
+                                    <Button
+                                      asChild
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        upsertSessionTab(sessionToTab(session));
+                                        notifySessionTabsChanged();
+                                      }}
+                                    >
                                       <Link href={`/sessions/${session.id}`}>
                                         <Play className="mr-2 size-3" />
                                         {t("common.connect")}

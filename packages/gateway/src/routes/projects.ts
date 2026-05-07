@@ -72,6 +72,7 @@ const defaultTemplateIdsByAiTool: Record<z.infer<typeof aiToolSchema>, string> =
   opencode: "builtin-opencode",
   codex: "builtin-codex"
 };
+const rootInstructionFileNames = ["AGENT.md", "AGENTS.md", "CLAUDE.md"] as const;
 
 export function createProjectRoutes(
   db: Database,
@@ -229,7 +230,12 @@ export function createProjectRoutes(
       }
       res.json({
         code: 0,
-        data: { path: resolved, exists: true, isDirectory: true },
+        data: {
+          path: resolved,
+          exists: true,
+          isDirectory: true,
+          instructionFiles: listRootInstructionFiles(resolved)
+        },
         message: ""
       });
     } catch (error) {
@@ -861,6 +867,10 @@ function normalizeTemplateFilesForProject(
     }
     return [file];
   });
+}
+
+function listRootInstructionFiles(projectRoot: string): string[] {
+  return rootInstructionFileNames.filter((fileName) => existsSync(resolve(projectRoot, fileName)));
 }
 
 function getGatewayUrl(): string {

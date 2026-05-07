@@ -2,15 +2,17 @@
 
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Square, Activity, History, Maximize2, Minimize2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { notifySessionTabsChanged, SessionTabs } from "@/components/session-tabs";
 import { TerminalView } from "@/components/terminal-view";
 import { connectSession, getSession, listActivities, stopSession, type SessionActivity } from "@/lib/api";
 import { getToken } from "@/lib/auth";
+import { sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function TerminalPage() {
@@ -21,7 +23,7 @@ export default function TerminalPage() {
   const id = params.id as string;
   const [focusMode, setFocusMode] = useState(false);
 
-  const authToken = searchParams.get("token") ?? getToken() ?? "";
+  const authToken = getToken() ?? "";
   const attachTokenOverride = searchParams.get("attachToken");
 
   const { data: sessionData } = useQuery({
@@ -30,11 +32,12 @@ export default function TerminalPage() {
     enabled: !!id,
   });
 
-  const connectQuery = useQuery({
-    queryKey: ["session-connect", id],
-    queryFn: () => connectSession(id),
-    enabled: !!id && !!authToken && !attachTokenOverride,
-    retry: false,
+  const connectMutation = useMutation({
+    mutationFn: () => connectSession(id),
+    onSuccess: ({ session }) => {
+      queryClient.setQueryData(["session", id], { session });
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
   });
 
   const { data: activityData } = useQuery({
@@ -51,16 +54,31 @@ export default function TerminalPage() {
     },
   });
 
-  const session = connectQuery.data?.session ?? sessionData?.session;
-  const attachToken = attachTokenOverride ?? connectQuery.data?.session.attachToken ?? "";
+  useEffect(() => {
+    if (!id || !authToken || attachTokenOverride || connectMutation.isPending || connectMutation.data) {
+      return;
+    }
+    connectMutation.mutate();
+  }, [attachTokenOverride, authToken, connectMutation, id]);
+
+  const session = connectMutation.data?.session ?? sessionData?.session;
+  const attachToken = attachTokenOverride ?? connectMutation.data?.session.attachToken ?? "";
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    upsertSessionTab(sessionToTab(session));
+    notifySessionTabsChanged();
+  }, [session]);
 
   const missing: string[] = [];
   if (!authToken) missing.push("login token");
   if (!attachToken) missing.push("attach token");
 
-  if (!attachTokenOverride && connectQuery.isPending && authToken) {
+  if (!attachTokenOverride && (connectMutation.isIdle || connectMutation.isPending) && authToken) {
     return (
-      <div className="flex h-full flex-col">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="flex items-center gap-3 border-b border-border px-4 py-3">
           <Button asChild variant="ghost" size="sm">
             <Link href="/sessions">
@@ -77,13 +95,13 @@ export default function TerminalPage() {
     );
   }
 
-  if (missing.length > 0 || connectQuery.isError) {
+  if (missing.length > 0 || connectMutation.isError) {
     const errorMessage =
-      connectQuery.error instanceof Error
-        ? connectQuery.error.message
+      connectMutation.error instanceof Error
+        ? connectMutation.error.message
         : `Missing ${missing.join(" and ")}`;
     return (
-      <div className="flex h-full flex-col">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="flex items-center gap-3 border-b border-border px-4 py-3">
           <Button asChild variant="ghost" size="sm">
             <Link href="/sessions">
@@ -101,11 +119,11 @@ export default function TerminalPage() {
             <p className="mt-2 text-sm text-muted-foreground">
               {errorMessage}. {t("sessions.returnToList")}
             </p>
-            <Link href="/sessions" className="mt-4 inline-block">
-              <Button variant="outline" size="sm">
+            <Button asChild variant="outline" size="sm" className="mt-4">
+              <Link href="/sessions">
                 {t("sessions.backToSessions")}
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </div>
       </div>
@@ -113,25 +131,26 @@ export default function TerminalPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <SessionTabs activeSessionId={id} />
       {/* Top bar */}
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Button asChild variant="ghost" size="sm">
             <Link href="/sessions">
               <ArrowLeft className="size-4" />
               {t("sessions.back")}
             </Link>
           </Button>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-medium">
               {session?.name || session?.tmuxName || `Session ${id}`}
             </span>
             <SessionStatusBadge status={session?.status} />
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           <Badge variant="outline" className="text-xs">
             {session?.aiTool ?? "Claude"}
           </Badge>
@@ -146,8 +165,10 @@ export default function TerminalPage() {
             size="sm"
             onClick={() => setFocusMode((current) => !current)}
           >
-            {focusMode ? <Minimize2 className="mr-2 size-3" /> : <Maximize2 className="mr-2 size-3" />}
-            {focusMode ? t("sessions.exitFocusMode") : t("sessions.focusMode")}
+            {focusMode ? <Minimize2 className="size-3 sm:mr-2" /> : <Maximize2 className="size-3 sm:mr-2" />}
+            <span className="hidden sm:inline">
+              {focusMode ? t("sessions.exitFocusMode") : t("sessions.focusMode")}
+            </span>
           </Button>
           <Button
             variant="ghost"
@@ -156,14 +177,16 @@ export default function TerminalPage() {
             onClick={() => stopMutation.mutate()}
             disabled={stopMutation.isPending}
           >
-            <Square className="mr-2 size-3" />
-            {stopMutation.isPending ? t("sessions.stopping") : t("common.stop")}
+            <Square className="size-3 sm:mr-2" />
+            <span className="hidden sm:inline">
+              {stopMutation.isPending ? t("sessions.stopping") : t("common.stop")}
+            </span>
           </Button>
         </div>
       </div>
 
-      <div className={focusMode ? "grid min-h-0 flex-1 grid-cols-1" : "grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px]"}>
-        <div className="min-h-0 overflow-hidden">
+      <div className={focusMode ? "grid min-h-0 flex-1 grid-cols-1 overflow-hidden" : "grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px]"}>
+        <div className="h-full min-h-0 overflow-hidden">
           <TerminalView
             sessionId={id}
             authToken={authToken}
@@ -180,7 +203,7 @@ function ActivityPanel({ activities }: { activities: SessionActivity[] }) {
   const { t } = useLanguage();
 
   return (
-    <aside className="min-h-0 overflow-auto border-t border-border bg-background/95 p-3 lg:border-l lg:border-t-0">
+    <aside className="hidden min-h-0 overflow-auto border-t border-border bg-background/95 p-3 lg:block lg:border-l lg:border-t-0">
       <div className="mb-3 flex items-center gap-2 text-sm font-medium">
         <Activity className="size-4 text-muted-foreground" />
         {t("sessions.activity")}

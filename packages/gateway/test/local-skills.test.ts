@@ -24,15 +24,22 @@ function createTestDb(): Database {
 }
 
 describe("local skill discovery", () => {
-  it("discovers flat project skills and folder-based SKILL.md files", async () => {
+  it("discovers folder-based SKILL.md files", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "openforge-local-skills-"));
     const projectSkills = path.join(root, ".claude", "skills");
     const userSkills = path.join(root, "user-skills");
-    await mkdir(projectSkills, { recursive: true });
+    await mkdir(path.join(projectSkills, "plan-workflow"), { recursive: true });
     await mkdir(path.join(userSkills, "reviewer"), { recursive: true });
     await writeFile(
-      path.join(projectSkills, "plan-workflow.md"),
-      "# Plan Workflow\n\nUse this when planning work.\n"
+      path.join(projectSkills, "plan-workflow", "SKILL.md"),
+      [
+        "---",
+        "name: plan-workflow",
+        "description: Use this when planning work.",
+        "---",
+        "",
+        "# Plan Workflow"
+      ].join("\n")
     );
     await writeFile(
       path.join(userSkills, "reviewer", "SKILL.md"),
@@ -130,12 +137,16 @@ describe("local skill discovery", () => {
     assert.ok(skills.some((skill) => skill.name === "later-review"));
   });
 
-  it("includes ancestor project .claude skills when Gateway starts from a package directory", async () => {
+  it("uses only root Claude Code and Agents skill directories as the default discovery roots", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "openforge-ancestor-skills-"));
     const nestedCwd = path.join(root, "packages", "gateway");
     const projectSkillDir = path.join(root, ".claude", "skills", "verify-workflow");
+    const agentSkillDir = path.join(root, ".agents", "skills", "agent-workflow");
+    const opencodeSkillDir = path.join(root, ".opencode", "skills", "opencode-workflow");
     await mkdir(nestedCwd, { recursive: true });
     await mkdir(projectSkillDir, { recursive: true });
+    await mkdir(agentSkillDir, { recursive: true });
+    await mkdir(opencodeSkillDir, { recursive: true });
     await writeFile(
       path.join(projectSkillDir, "SKILL.md"),
       [
@@ -147,36 +158,62 @@ describe("local skill discovery", () => {
         "# Verify Workflow"
       ].join("\n")
     );
+    await writeFile(
+      path.join(agentSkillDir, "SKILL.md"),
+      [
+        "---",
+        "name: agent-workflow",
+        "description: Agent-compatible workflow.",
+        "---",
+        "",
+        "# Agent Workflow"
+      ].join("\n")
+    );
+    await writeFile(
+      path.join(opencodeSkillDir, "SKILL.md"),
+      [
+        "---",
+        "name: opencode-workflow",
+        "description: OpenCode workflow.",
+        "---",
+        "",
+        "# OpenCode Workflow"
+      ].join("\n")
+    );
 
     const roots = defaultLocalSkillRoots(nestedCwd, {});
     const skills = discoverLocalSkills({ cwd: nestedCwd, env: {}, maxFiles: 20 });
 
-    assert.ok(roots.includes(path.join(root, ".claude", "skills")));
-    assert.ok(skills.some((skill) => skill.name === "verify-workflow"));
+    assert.deepEqual(roots, [
+      path.join(homedir(), ".claude", "skills"),
+      path.join(homedir(), ".agents", "skills")
+    ]);
+    assert.equal(skills.some((skill) => skill.name === "verify-workflow"), false);
+    assert.equal(skills.some((skill) => skill.name === "agent-workflow"), false);
+    assert.equal(skills.some((skill) => skill.name === "opencode-workflow"), false);
   });
 
-  it("includes Claude Code plugin cache skills in default discovery roots", () => {
+  it("does not include command or plugin cache directories in default discovery roots", () => {
     const roots = defaultLocalSkillRoots("/tmp/openforge-project", {});
 
-    assert.ok(roots.includes(path.join(homedir(), ".claude", "plugins", "cache")));
+    assert.ok(!roots.includes(path.join(homedir(), ".claude", "commands")));
+    assert.ok(!roots.includes(path.join(homedir(), ".claude", "plugins", "cache")));
+    assert.ok(!roots.includes(path.join(homedir(), ".claude", "plugins", "marketplaces")));
+    assert.ok(!roots.includes(path.join(homedir(), ".codex", "skills")));
+    assert.ok(!roots.includes(path.join(homedir(), ".codex", "plugins", "cache")));
   });
 
-  it("uses CLAUDE_CONFIG_DIR for Claude Code user skills and plugin cache", async () => {
+  it("ignores custom skill directory environment variables for default discovery", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-config-skills-"));
     const configDir = path.join(root, "custom-claude");
+    const agentsHome = path.join(root, "agents-home");
+    const configuredDir = path.join(root, "configured-skills");
     const userSkillDir = path.join(configDir, "skills", "custom-review");
-    const pluginSkillDir = path.join(
-      configDir,
-      "plugins",
-      "cache",
-      "vendor",
-      "plugin",
-      "1.0.0",
-      "skills",
-      "plugin-review"
-    );
+    const agentSkillDir = path.join(agentsHome, "skills", "agent-review");
+    const configuredSkillDir = path.join(configuredDir, "configured-review");
     await mkdir(userSkillDir, { recursive: true });
-    await mkdir(pluginSkillDir, { recursive: true });
+    await mkdir(agentSkillDir, { recursive: true });
+    await mkdir(configuredSkillDir, { recursive: true });
     await writeFile(
       path.join(userSkillDir, "SKILL.md"),
       [
@@ -186,85 +223,6 @@ describe("local skill discovery", () => {
         "---",
         "",
         "# Custom Review"
-      ].join("\n")
-    );
-    await writeFile(
-      path.join(pluginSkillDir, "SKILL.md"),
-      [
-        "---",
-        "name: plugin-review",
-        "description: Review from a cached plugin.",
-        "---",
-        "",
-        "# Plugin Review"
-      ].join("\n")
-    );
-
-    const roots = defaultLocalSkillRoots(path.join(root, "project"), {
-      CLAUDE_CONFIG_DIR: configDir
-    });
-    const skills = discoverLocalSkills({
-      cwd: path.join(root, "project"),
-      env: { CLAUDE_CONFIG_DIR: configDir }
-    });
-
-    assert.ok(roots.includes(path.join(configDir, "skills")));
-    assert.ok(roots.includes(path.join(configDir, "plugins", "cache")));
-    assert.ok(skills.some((skill) => skill.name === "custom-review"));
-    assert.ok(skills.some((skill) => skill.name === "plugin-review"));
-  });
-
-  it("discovers command-style skills from Claude plugin marketplaces", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-marketplace-skills-"));
-    const configDir = path.join(root, "custom-claude");
-    const commandDir = path.join(configDir, "plugins", "marketplaces", "vendor", "workflow-pack", "commands");
-    await mkdir(commandDir, { recursive: true });
-    await writeFile(
-      path.join(commandDir, "review-pr.md"),
-      [
-        "---",
-        "description: Review the current pull request with repository context.",
-        "---",
-        "",
-        "# Review PR",
-        "",
-        "Inspect the pull request and report concrete findings."
-      ].join("\n")
-    );
-
-    const roots = defaultLocalSkillRoots(path.join(root, "project"), {
-      CLAUDE_CONFIG_DIR: configDir
-    });
-    const skills = discoverLocalSkills({
-      cwd: path.join(root, "project"),
-      env: { CLAUDE_CONFIG_DIR: configDir }
-    });
-
-    assert.ok(roots.includes(path.join(configDir, "plugins", "marketplaces")));
-    assert.ok(skills.some((skill) => skill.name === "review-pr"));
-    assert.equal(
-      skills.find((skill) => skill.name === "review-pr")?.description,
-      "Review the current pull request with repository context."
-    );
-  });
-
-  it("uses explicit Codex and Agents home directories in default discovery roots", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-skill-homes-"));
-    const codexHome = path.join(root, "codex-home");
-    const agentsHome = path.join(root, "agents-home");
-    const codexSkillDir = path.join(codexHome, "skills", "codex-review");
-    const agentSkillDir = path.join(agentsHome, "skills", "agent-review");
-    await mkdir(codexSkillDir, { recursive: true });
-    await mkdir(agentSkillDir, { recursive: true });
-    await writeFile(
-      path.join(codexSkillDir, "SKILL.md"),
-      [
-        "---",
-        "name: codex-review",
-        "description: Review from CODEX_HOME.",
-        "---",
-        "",
-        "# Codex Review"
       ].join("\n")
     );
     await writeFile(
@@ -278,20 +236,39 @@ describe("local skill discovery", () => {
         "# Agent Review"
       ].join("\n")
     );
+    await writeFile(
+      path.join(configuredSkillDir, "SKILL.md"),
+      [
+        "---",
+        "name: configured-review",
+        "description: Review from OPENFORGE_SKILL_DIRS.",
+        "---",
+        "",
+        "# Configured Review"
+      ].join("\n")
+    );
 
     const roots = defaultLocalSkillRoots(path.join(root, "project"), {
-      CODEX_HOME: codexHome,
+      CLAUDE_CONFIG_DIR: configDir,
+      OPENFORGE_SKILL_DIRS: configuredDir,
       AGENTS_HOME: agentsHome
     });
     const skills = discoverLocalSkills({
       cwd: path.join(root, "project"),
-      env: { CODEX_HOME: codexHome, AGENTS_HOME: agentsHome }
+      env: {
+        CLAUDE_CONFIG_DIR: configDir,
+        OPENFORGE_SKILL_DIRS: configuredDir,
+        AGENTS_HOME: agentsHome
+      }
     });
 
-    assert.ok(roots.includes(path.join(codexHome, "skills")));
-    assert.ok(roots.includes(path.join(agentsHome, "skills")));
-    assert.ok(skills.some((skill) => skill.name === "codex-review"));
-    assert.ok(skills.some((skill) => skill.name === "agent-review"));
+    assert.deepEqual(roots, [
+      path.join(homedir(), ".claude", "skills"),
+      path.join(homedir(), ".agents", "skills")
+    ]);
+    assert.equal(skills.some((skill) => skill.name === "custom-review"), false);
+    assert.equal(skills.some((skill) => skill.name === "agent-review"), false);
+    assert.equal(skills.some((skill) => skill.name === "configured-review"), false);
   });
 
   it("follows symlinked local Skill directories", async () => {
@@ -366,6 +343,62 @@ describe("local skill discovery", () => {
       assert.equal(skill?.description, "Updated local review skill.");
       assert.equal(skill?.version, "2.0.0");
       assert.equal(skill?.content.includes("Updated Safe Review"), true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not delete local Skills that are no longer discovered under the current roots", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-prune-local-skills-"));
+    const currentSkillRoot = path.join(root, "skills", "safe-review");
+    await mkdir(currentSkillRoot, { recursive: true });
+    await writeFile(
+      path.join(currentSkillRoot, "SKILL.md"),
+      [
+        "---",
+        "name: safe-review",
+        "description: Current local review skill.",
+        "---",
+        "",
+        "# Safe Review"
+      ].join("\n")
+    );
+    const db = createTestDb();
+    try {
+      const user = new UserRepository(db).create("local-prune@example.com", "hash");
+      const repo = new SkillRepository(db, user.id);
+      repo.create({
+        name: "openclaw-stale",
+        description: "Old OpenClaw Skill that should not remain listed.",
+        source: "local",
+        content: [
+          "---",
+          "name: openclaw-stale",
+          "description: Old OpenClaw Skill that should not remain listed.",
+          "---",
+          "",
+          "# OpenClaw Stale"
+        ].join("\n")
+      });
+      repo.create({
+        name: "manual-local",
+        description: "Manual local Skill content should not be pruned.",
+        source: "local",
+        content: "<script>alert('xss')</script>"
+      });
+      repo.create({
+        name: "remote-installed",
+        description: "Non-local installed Skill should not be pruned by local sync.",
+        source: "github:raw",
+        content: "# Remote Installed"
+      });
+
+      const result = syncLocalSkills(repo, { roots: [path.join(root, "skills")] });
+      const names = repo.list().map((skill) => skill.name).sort();
+
+      assert.equal(result.discoveredCount, 1);
+      assert.equal(result.deletedCount, 0);
+      assert.deepEqual(names, ["manual-local", "openclaw-stale", "remote-installed", "safe-review"]);
     } finally {
       db.close();
     }

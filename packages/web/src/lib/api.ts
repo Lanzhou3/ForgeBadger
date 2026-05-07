@@ -186,6 +186,7 @@ export interface SkillDiscovery {
   discoveredCount: number;
   createdCount: number;
   updatedCount: number;
+  deletedCount: number;
   skippedCount: number;
 }
 
@@ -419,11 +420,14 @@ export interface AdapterDiscovery {
   supportLevel: "supported" | "prototype";
   launchEnabled: boolean;
   configDir: string;
+  runtimeModes: Array<"terminal" | "app-server-stdio" | "app-server-websocket" | string>;
   available: boolean;
   status: "available" | "missing";
   version?: string;
   error?: string;
 }
+
+export type RuntimeAdapterId = AdapterDiscovery["id"];
 
 export type CredentialMode = "host_environment" | "stored_encrypted_key";
 
@@ -839,6 +843,21 @@ export function defaultTemplateForAiTool(aiTool?: string | null): string {
   return "builtin-claude-code";
 }
 
+export function isAdapterLaunchable(adapter: Pick<AdapterDiscovery, "available" | "launchEnabled">): boolean {
+  return adapter.available && adapter.launchEnabled;
+}
+
+export function chooseDefaultRuntimeAdapter(
+  adapters: readonly AdapterDiscovery[],
+  preferred?: RuntimeAdapterId | string | null
+): RuntimeAdapterId | undefined {
+  const preferredAdapter = adapters.find((adapter) => adapter.id === preferred);
+  if (preferredAdapter && isAdapterLaunchable(preferredAdapter)) {
+    return preferredAdapter.id;
+  }
+  return adapters.find(isAdapterLaunchable)?.id;
+}
+
 export async function listProjects(): Promise<{ projects: Project[] }> {
   return fetchJson("/api/v1/projects") as Promise<{ projects: Project[] }>;
 }
@@ -846,16 +865,13 @@ export async function listProjects(): Promise<{ projects: Project[] }> {
 export async function createProject(data: {
   name: string;
   path: string;
-  aiTool: string;
+  aiTool?: RuntimeAdapterId;
   description?: string;
   templateId?: string;
 }): Promise<{ project: Project }> {
   return fetchJson("/api/v1/projects", {
     method: "POST",
-    body: JSON.stringify({
-      ...data,
-      templateId: data.templateId ?? defaultTemplateForAiTool(data.aiTool),
-    }),
+    body: JSON.stringify(data),
   }) as Promise<{ project: Project }>;
 }
 
@@ -929,6 +945,7 @@ export async function listSessions(): Promise<{ sessions: Session[] }> {
 export async function createSession(data: {
   projectId: string;
   credentialMode: CredentialMode;
+  aiTool?: RuntimeAdapterId;
   modelId?: string;
   apiKeyId?: string;
 }): Promise<{ session: Session }> {
@@ -1119,6 +1136,7 @@ export interface ScanResult {
   path: string;
   exists: boolean;
   isDirectory: boolean;
+  instructionFiles?: string[];
 }
 
 export async function scanProject(path: string): Promise<ScanResult> {
@@ -1131,13 +1149,14 @@ export async function scanProject(path: string): Promise<ScanResult> {
 export interface ImportProjectInput {
   path: string;
   name: string;
-  aiTool: string;
+  aiTool?: RuntimeAdapterId;
   templateId?: string;
+  skipConfigGeneration?: boolean;
 }
 
 export interface ProjectWithConfigResult {
   project: Project;
-  configStatus: "applied" | "failed";
+  configStatus: "applied" | "failed" | "skipped";
   configError?: string;
 }
 
@@ -1147,8 +1166,10 @@ export async function importProject(input: ImportProjectInput): Promise<{ projec
   return fetchJson("/api/v1/projects/import", {
     method: "POST",
     body: JSON.stringify({
-      ...input,
-      templateId: input.templateId ?? defaultTemplateForAiTool(input.aiTool),
+      path: input.path,
+      name: input.name,
+      ...(input.aiTool ? { aiTool: input.aiTool } : {}),
+      ...(input.templateId ? { templateId: input.templateId } : {}),
     }),
   }) as Promise<{ project: Project }>;
 }
@@ -1157,38 +1178,20 @@ export async function importProjectWithConfig(
   input: ImportProjectInput
 ): Promise<ImportProjectWithConfigResult> {
   const { project } = await importProject(input);
-  try {
-    await generateConfig(project.id, project.templateId ?? input.templateId ?? defaultTemplateForAiTool(input.aiTool));
-    return { project, configStatus: "applied" };
-  } catch (error) {
-    return {
-      project,
-      configStatus: "failed",
-      configError: error instanceof Error ? error.message : "Config generation failed",
-    };
-  }
+  return { project, configStatus: "skipped" };
 }
 
 export async function createProjectWithConfig(
   input: {
     path: string;
     name: string;
-    aiTool: string;
+    aiTool?: RuntimeAdapterId;
     description?: string;
     templateId?: string;
   }
 ): Promise<ProjectWithConfigResult> {
   const { project } = await createProject(input);
-  try {
-    await generateConfig(project.id, project.templateId ?? input.templateId ?? defaultTemplateForAiTool(input.aiTool));
-    return { project, configStatus: "applied" };
-  } catch (error) {
-    return {
-      project,
-      configStatus: "failed",
-      configError: error instanceof Error ? error.message : "Config generation failed",
-    };
-  }
+  return { project, configStatus: "skipped" };
 }
 
 // Templates
@@ -1398,7 +1401,7 @@ export async function getConfigCompliance(
 export async function writeConfig(
   projectId: string,
   templateId = "builtin-claude-code",
-  decisions: Record<string, "skip" | "overwrite"> = { ".claude/CLAUDE.md": "overwrite" }
+  decisions: Record<string, "skip" | "overwrite"> = { "CLAUDE.md": "overwrite" }
 ): Promise<ConfigWriteResult> {
   return fetchJson(`/api/v1/projects/${encodeURIComponent(projectId)}/config/write`, {
     method: "POST",
