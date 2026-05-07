@@ -48,7 +48,7 @@ describe("Codex app-server helpers", () => {
     assert.deepEqual(plan.secretEnvNames, ["OPENAI_API_KEY"]);
   });
 
-  it("builds initialize, thread/start, and turn/start JSON-RPC requests", () => {
+  it("builds initialize, thread/start, and turn/start Codex app-server requests", () => {
     assert.deepEqual(
       createCodexAppServerInitializeRequest({
         id: 0,
@@ -57,7 +57,6 @@ describe("Codex app-server helpers", () => {
         optOutNotificationMethods: ["item/agentMessage/delta"]
       }),
       {
-        jsonrpc: "2.0",
         method: "initialize",
         id: 0,
         params: {
@@ -80,18 +79,19 @@ describe("Codex app-server helpers", () => {
         cwd: "/workspace/app",
         model: "gpt-5.4",
         approvalPolicy: "on-request",
-        sandbox: "workspaceWrite"
+        sandbox: "workspace-write"
       }),
       {
-        jsonrpc: "2.0",
         method: "thread/start",
         id: 1,
         params: {
           cwd: "/workspace/app",
           model: "gpt-5.4",
           approvalPolicy: "on-request",
-          sandbox: "workspaceWrite",
-          serviceName: "openforge"
+          sandbox: "workspace-write",
+          serviceName: "openforge",
+          experimentalRawEvents: false,
+          persistExtendedHistory: false
         }
       }
     );
@@ -103,12 +103,11 @@ describe("Codex app-server helpers", () => {
         text: "Summarize this repo."
       }),
       {
-        jsonrpc: "2.0",
         method: "turn/start",
         id: 2,
         params: {
           threadId: "thr_123",
-          input: [{ type: "text", text: "Summarize this repo." }]
+          input: [{ type: "text", text: "Summarize this repo.", text_elements: [] }]
         }
       }
     );

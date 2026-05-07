@@ -35,12 +35,13 @@ describe("Codex app-server routes", () => {
   let db: Database.Database;
   let token: string;
   let projectId: string;
+  let projectRoot: string;
 
   beforeEach(async () => {
     db = createTestDb();
     const user = new UserRepository(db).create("codex-route@example.com", "hash");
     token = signJwt({ userId: user.id, email: user.email }, secret);
-    const projectRoot = await mkdtemp(path.join(tmpdir(), "openforge-codex-route-"));
+    projectRoot = await mkdtemp(path.join(tmpdir(), "openforge-codex-route-"));
     const project = new ProjectRepository(db, user.id).create({
       name: "Codex Route",
       path: projectRoot,
@@ -114,7 +115,7 @@ describe("Codex app-server routes", () => {
     assert.equal(res.body.code, 1);
   });
 
-  it("sends initialize and turn JSON-RPC requests through the managed app-server client", async () => {
+  it("sends initialize, thread, and turn requests through the managed app-server client", async () => {
     const transport = new AutoResponseTransport();
     const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-rpc-"));
     const manager = new CodexAppServerManager({
@@ -154,6 +155,19 @@ describe("Codex app-server routes", () => {
     assert.equal(initialized.status, 200);
     assert.deepEqual(initialized.body.data.result, { accepted: true });
 
+    const thread = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/codex/app-server/${sessionId}/thread`,
+      {
+        approvalPolicy: "never",
+        sandbox: "read-only"
+      },
+      { Authorization: `Bearer ${token}` }
+    );
+    assert.equal(thread.status, 200);
+    assert.deepEqual(thread.body.data.result, { accepted: true });
+
     const turn = await makeRequest(
       app,
       "POST",
@@ -168,8 +182,67 @@ describe("Codex app-server routes", () => {
     assert.deepEqual(turn.body.data.result, { accepted: true });
 
     const sentMethods = transport.sent.map((payload) => JSON.parse(payload).method);
-    assert.deepEqual(sentMethods, ["initialize", "turn/start"]);
-    assert.equal(JSON.parse(transport.sent[1]).params.input[0].text, "Summarize the repo");
+    assert.deepEqual(sentMethods, ["initialize", "thread/start", "turn/start"]);
+    assert.equal(JSON.parse(transport.sent[1]).params.cwd, projectRoot);
+    assert.equal(JSON.parse(transport.sent[1]).params.approvalPolicy, "never");
+    assert.equal(JSON.parse(transport.sent[1]).params.sandbox, "read-only");
+    assert.equal(JSON.parse(transport.sent[1]).params.experimentalRawEvents, false);
+    assert.equal(JSON.parse(transport.sent[1]).params.persistExtendedHistory, false);
+    assert.equal(JSON.parse(transport.sent[2]).params.input[0].text, "Summarize the repo");
+    assert.deepEqual(JSON.parse(transport.sent[2]).params.input[0].text_elements, []);
+  });
+
+  it("rate limits repeated turn requests for the same app-server session", async () => {
+    const transport = new AutoResponseTransport();
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-rate-"));
+    const manager = new CodexAppServerManager({
+      runtimeRoot: root,
+      spawn: () => ({
+        pid: 789,
+        on() {
+          return this;
+        },
+        kill() {
+          return true;
+        }
+      }),
+      transportFactory: () => transport
+    });
+    app = express();
+    app.locals.jwtSecret = secret;
+    app.use(express.json());
+    app.use("/api/v1/codex/app-server", createCodexAppServerRoutes({
+      db,
+      manager,
+      turnRateLimit: { maxRequests: 1, windowMs: 60_000 }
+    }));
+
+    const start = await makeRequest(app, "POST", "/api/v1/codex/app-server", {
+      projectId,
+      runtimeMode: "app-server-stdio"
+    }, { Authorization: `Bearer ${token}` });
+    const sessionId = start.body.data.session.id;
+
+    const first = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/codex/app-server/${sessionId}/turn`,
+      { threadId: "thr_123", text: "first" },
+      { Authorization: `Bearer ${token}` }
+    );
+    const second = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/codex/app-server/${sessionId}/turn`,
+      { threadId: "thr_123", text: "second" },
+      { Authorization: `Bearer ${token}` }
+    );
+
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 429);
+    assert.equal(second.body.code, 1);
+    assert.match(second.body.message, /rate limit/i);
+    assert.equal(transport.sent.length, 1);
   });
 });
 

@@ -13,9 +13,11 @@
   project creation/import payloads remain runtime-CLI-agnostic while the
   database keeps a legacy config hint for template compatibility, and Web
   session status display/filtering normalizes terminal end states to stopped.
-- Phase B Codex app-server work is active. The Gateway now owns JSON-RPC client
-  integration for managed app-server sessions and normalizes Codex app-server
-  notifications into OpenForge activity events.
+- Phase B Codex app-server work is active. The Gateway now owns Codex
+  app-server protocol integration for managed sessions, normalizes Codex
+  app-server notifications into OpenForge activity events, and aligns outgoing
+  frames with `codex-cli 0.128.0` generated bindings instead of a standard
+  JSON-RPC wrapper.
 
 ## Source Of Truth
 
@@ -26,7 +28,13 @@
 
 ## Next Work
 
-1. Continue Phase B with real `codex app-server` process validation,
-   Web prototype state surface, and stronger app-server request rate limits.
-2. Keep SSH/remote execution as a separate architecture item, not part of the
+1. Continue Phase B with transport-level real `codex app-server` initialize
+   response capture. Zero-quota validation on 2026-05-07 used an isolated
+   `/tmp/openforge-codex-isolated` HOME/CODEX_HOME, confirmed `codex-cli
+   0.128.0`, generated protocol bindings, and short-lived Unix-socket startup,
+   but one-shot initialize over stdio/proxy did not emit a response yet.
+2. Extend the guarded Web prototype only after initialize response capture.
+   Current Web surface supports lifecycle, initialize, thread creation, and stop;
+   prompt/turn input remains intentionally hidden to avoid accidental quota use.
+3. Keep SSH/remote execution as a separate architecture item, not part of the
    local Codex app-server prototype.

@@ -14,7 +14,7 @@ import {
 } from "../src/services/codex-app-server-client.js";
 
 describe("Codex app-server client helpers", () => {
-  it("builds typed JSON-RPC request envelopes", () => {
+  it("builds typed Codex app-server request envelopes", () => {
     assert.deepEqual(
       createCodexAppServerRequestEnvelope({
         id: 7,
@@ -32,7 +32,6 @@ describe("Codex app-server client helpers", () => {
         }
       }),
       {
-        jsonrpc: "2.0",
         id: 7,
         method: "initialize",
         params: {
@@ -55,7 +54,6 @@ describe("Codex app-server client helpers", () => {
         clientVersion: "0.0.0"
       }),
       {
-        jsonrpc: "2.0",
         id: 8,
         method: "initialize",
         params: {
@@ -80,18 +78,19 @@ describe("Codex app-server client helpers", () => {
         cwd: "/workspace/app",
         model: "gpt-5.4",
         approvalPolicy: "on-request",
-        sandbox: "workspaceWrite"
+        sandbox: "workspace-write"
       }),
       {
-        jsonrpc: "2.0",
         id: "req-1",
         method: "thread/start",
         params: {
           cwd: "/workspace/app",
           model: "gpt-5.4",
           approvalPolicy: "on-request",
-          sandbox: "workspaceWrite",
-          serviceName: "openforge"
+          sandbox: "workspace-write",
+          serviceName: "openforge",
+          experimentalRawEvents: false,
+          persistExtendedHistory: false
         }
       }
     );
@@ -103,22 +102,20 @@ describe("Codex app-server client helpers", () => {
         text: "Summarize this repo."
       }),
       {
-        jsonrpc: "2.0",
         id: 9,
         method: "turn/start",
         params: {
           threadId: "thr_123",
-          input: [{ type: "text", text: "Summarize this repo." }]
+          input: [{ type: "text", text: "Summarize this repo.", text_elements: [] }]
         }
       }
     );
   });
 
-  it("parses responses and notifications with schema validation", () => {
+  it("parses Codex response and notification envelopes with schema validation", () => {
     assert.deepEqual(
       parseCodexAppServerFrame(
         JSON.stringify({
-          jsonrpc: "2.0",
           id: 1,
           result: { accepted: true }
         })
@@ -133,7 +130,6 @@ describe("Codex app-server client helpers", () => {
     assert.deepEqual(
       parseCodexAppServerFrame(
         JSON.stringify({
-          jsonrpc: "2.0",
           method: "item/agentMessage/delta",
           params: {
             threadId: "thr_123",
@@ -145,7 +141,6 @@ describe("Codex app-server client helpers", () => {
         })
       ),
       {
-        jsonrpc: "2.0",
         kind: "notification",
         method: "item/agentMessage/delta",
         params: {
@@ -167,7 +162,6 @@ describe("Codex app-server client helpers", () => {
   it("normalizes permission prompts into internal activity shapes", () => {
     assert.deepEqual(
       normalizeCodexAppServerNotification({
-        jsonrpc: "2.0",
         kind: "notification",
         method: "notification/prompt",
         params: {
@@ -195,7 +189,6 @@ describe("Codex app-server client helpers", () => {
         message: "Claude needs approval"
       }),
       {
-        jsonrpc: "2.0",
         kind: "notification",
         method: "notification/prompt",
         params: {

@@ -5,7 +5,6 @@ import type { OpenForgeEvent } from "./event-bus.js";
 export type JsonRpcId = string | number;
 
 export interface CodexAppServerRequestEnvelope<TParams extends Record<string, unknown> = Record<string, unknown>> {
-  jsonrpc: "2.0";
   id: JsonRpcId;
   method: string;
   params: TParams;
@@ -28,8 +27,8 @@ export interface CodexThreadStartRequestInput {
   id: JsonRpcId;
   cwd: string;
   model?: string;
-  approvalPolicy?: string;
-  sandbox?: string;
+  approvalPolicy?: CodexApprovalPolicy;
+  sandbox?: CodexSandboxMode;
 }
 
 export interface CodexTurnStartRequestInput {
@@ -46,6 +45,9 @@ export interface CodexAppServerNotificationInput {
   status?: "info" | "warning" | "error";
 }
 
+export type CodexApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
+export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+
 export interface CodexAppServerResponseFrame {
   kind: "response";
   id: JsonRpcId;
@@ -54,7 +56,6 @@ export interface CodexAppServerResponseFrame {
 }
 
 export interface CodexAppServerNotificationFrame {
-  jsonrpc: "2.0";
   kind: "notification";
   method: string;
   params: Record<string, unknown>;
@@ -104,7 +105,6 @@ export function createCodexAppServerRequestEnvelope<TParams extends Record<strin
   input: CodexAppServerRequestOptions & { params: TParams }
 ): CodexAppServerRequestEnvelope<TParams> {
   return {
-    jsonrpc: "2.0",
     id: input.id,
     method: input.method,
     params: input.params
@@ -142,6 +142,8 @@ export function createCodexAppServerThreadStartRequest(
   approvalPolicy?: string;
   sandbox?: string;
   serviceName: string;
+  experimentalRawEvents: boolean;
+  persistExtendedHistory: boolean;
 }> {
   return createCodexAppServerRequestEnvelope({
     id: input.id,
@@ -151,7 +153,9 @@ export function createCodexAppServerThreadStartRequest(
       ...(input.model ? { model: input.model } : {}),
       ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
       ...(input.sandbox ? { sandbox: input.sandbox } : {}),
-      serviceName: "openforge"
+      serviceName: "openforge",
+      experimentalRawEvents: false,
+      persistExtendedHistory: false
     }
   });
 }
@@ -160,14 +164,14 @@ export function createCodexAppServerTurnStartRequest(
   input: CodexTurnStartRequestInput
 ): CodexAppServerRequestEnvelope<{
   threadId: string;
-  input: Array<{ type: "text"; text: string }>;
+  input: Array<{ type: "text"; text: string; text_elements: [] }>;
 }> {
   return createCodexAppServerRequestEnvelope({
     id: input.id,
     method: "turn/start",
     params: {
       threadId: input.threadId,
-      input: [{ type: "text", text: input.text }]
+      input: [{ type: "text", text: input.text, text_elements: [] }]
     }
   });
 }
@@ -176,7 +180,6 @@ export function createCodexAppServerNotificationEvent(
   input: CodexAppServerNotificationInput
 ): CodexAppServerNotificationFrame {
   return {
-    jsonrpc: "2.0",
     kind: "notification",
     method: input.method ?? "notification/prompt",
     params: {
@@ -205,7 +208,7 @@ export function parseCodexAppServerFrame(
     throw new Error("Malformed Codex app-server frame");
   }
 
-  if (!isRecord(value) || value.jsonrpc !== "2.0") {
+  if (!isRecord(value) || (value.jsonrpc !== undefined && value.jsonrpc !== "2.0")) {
     throw new Error("Malformed Codex app-server frame");
   }
 
@@ -241,7 +244,6 @@ export function parseCodexAppServerFrame(
     isRecord(value.params)
   ) {
     return {
-      jsonrpc: "2.0",
       kind: "notification",
       method: value.method,
       params: value.params
@@ -323,14 +325,16 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
       ...(input.model ? { model: input.model } : {}),
       ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
       ...(input.sandbox ? { sandbox: input.sandbox } : {}),
-      serviceName: "openforge"
+      serviceName: "openforge",
+      experimentalRawEvents: false,
+      persistExtendedHistory: false
     });
   }
 
   async startTurn(input: Omit<CodexTurnStartRequestInput, "id">): Promise<unknown> {
     return this.request("turn/start", {
       threadId: input.threadId,
-      input: [{ type: "text", text: input.text }]
+      input: [{ type: "text", text: input.text, text_elements: [] }]
     });
   }
 

@@ -26,8 +26,8 @@ const startAppServerSchema = z.object({
 const threadStartSchema = z.object({
   cwd: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
-  approvalPolicy: z.string().min(1).optional(),
-  sandbox: z.string().min(1).optional()
+  approvalPolicy: z.enum(["untrusted", "on-failure", "on-request", "never"]).optional(),
+  sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional()
 });
 
 const turnStartSchema = z.object({
@@ -40,10 +40,17 @@ export interface CodexAppServerRoutesOptions {
   manager: CodexAppServerManager;
   masterKey?: string | undefined;
   eventBus?: OpenForgeEventBus | undefined;
+  turnRateLimit?: {
+    maxRequests: number;
+    windowMs: number;
+  } | undefined;
 }
 
 export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions): Router {
   const router = Router();
+  const turnLimiter = new AppServerTurnRateLimiter(
+    options.turnRateLimit ?? { maxRequests: 6, windowMs: 60_000 }
+  );
   router.use(authenticate);
 
   router.get("/", (req, res) => {
@@ -156,6 +163,15 @@ export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions)
     const parseResult = turnStartSchema.safeParse(req.body ?? {});
     if (!parseResult.success) {
       res.status(400).json({ code: 1, message: "Invalid Codex turn payload" });
+      return;
+    }
+    const session = getOwnedSession(options, req.params.id, userId);
+    if (!session) {
+      res.status(404).json({ code: 1, message: "Codex app-server session not found" });
+      return;
+    }
+    if (!turnLimiter.consume(userId, session.id)) {
+      res.status(429).json({ code: 1, message: "Codex app-server turn rate limit exceeded" });
       return;
     }
 
@@ -271,6 +287,31 @@ function apiKeyEnvName(provider: string): string {
   if (normalized === "anthropic") return "ANTHROPIC_API_KEY";
   if (normalized === "openai") return "OPENAI_API_KEY";
   return `${normalized.replace(/[^a-z0-9]+/g, "_").toUpperCase()}_API_KEY`;
+}
+
+class AppServerTurnRateLimiter {
+  private readonly buckets = new Map<string, { count: number; resetAt: number }>();
+
+  constructor(private readonly options: { maxRequests: number; windowMs: number }) {}
+
+  consume(userId: string, sessionId: string, now = Date.now()): boolean {
+    const key = `${userId}:${sessionId}`;
+    const current = this.buckets.get(key);
+    if (!current || current.resetAt <= now) {
+      this.buckets.set(key, {
+        count: 1,
+        resetAt: now + this.options.windowMs
+      });
+      return true;
+    }
+
+    if (current.count >= this.options.maxRequests) {
+      return false;
+    }
+
+    current.count += 1;
+    return true;
+  }
 }
 
 export type { CodexAppServerRuntimeMode, CredentialMode };

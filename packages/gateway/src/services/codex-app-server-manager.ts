@@ -232,7 +232,7 @@ export class CodexAppServerManager extends EventEmitter {
       throw new Error("Codex app-server session not found");
     }
     if (!session.client) {
-      throw new Error("Codex app-server JSON-RPC client is not available");
+      throw new Error("Codex app-server protocol client is not available");
     }
     return session.client;
   }

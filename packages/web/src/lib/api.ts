@@ -1017,6 +1017,21 @@ export async function initializeCodexAppServer(id: string): Promise<{ result: un
   }>;
 }
 
+export async function startCodexAppServerThread(
+  id: string,
+  input: {
+    cwd?: string;
+    model?: string;
+    approvalPolicy?: string;
+    sandbox?: string;
+  } = {}
+): Promise<{ result: unknown }> {
+  return fetchJson(`/api/v1/codex/app-server/${id}/thread`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ result: unknown }>;
+}
+
 export async function startCodexAppServerTurn(
   id: string,
   input: { threadId: string; text: string }

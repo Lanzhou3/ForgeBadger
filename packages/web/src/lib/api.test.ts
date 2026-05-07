@@ -70,6 +70,7 @@ import {
   listCodexAppServers,
   setDefaultModel,
   startCodexAppServer,
+  startCodexAppServerThread,
   startCodexAppServerTurn,
   setProjectSkill,
   stopCodexAppServer,
@@ -441,6 +442,11 @@ describe("api client", () => {
       credentialMode: "host_environment",
     });
     await initializeCodexAppServer("app-1");
+    await startCodexAppServerThread("app-1", {
+      cwd: "/tmp/project",
+      approvalPolicy: "never",
+      sandbox: "read-only",
+    });
     await startCodexAppServerTurn("app-1", {
       threadId: "thr_123",
       text: "Summarize the repo",
@@ -471,6 +477,18 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
+      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/thread",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          cwd: "/tmp/project",
+          approvalPolicy: "never",
+          sandbox: "read-only",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
       "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/turn",
       expect.objectContaining({
         method: "POST",
@@ -481,7 +499,7 @@ describe("api client", () => {
       })
     );
     expect(fetch).toHaveBeenNthCalledWith(
-      5,
+      6,
       "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/stop",
       expect.objectContaining({ method: "POST" })
     );
