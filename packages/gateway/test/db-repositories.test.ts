@@ -338,6 +338,43 @@ describe("db repositories", () => {
       assert.equal(repoB.getById(session.id), undefined);
     });
 
+    it("lists sessions by project while preserving tenant isolation", () => {
+      const userA = userRepo.create("session-project-a@example.com", "hash");
+      const userB = userRepo.create("session-project-b@example.com", "hash");
+      const projectRepoA = new ProjectRepository(db, userA.id);
+      const projectA = projectRepoA.create({ name: "Project A", path: "/tmp/pa", aiTool: "claude" });
+      const projectB = projectRepoA.create({ name: "Project B", path: "/tmp/pb", aiTool: "claude" });
+      const projectForOtherUser = new ProjectRepository(db, userB.id).create({
+        name: "Project Other",
+        path: "/tmp/po",
+        aiTool: "claude"
+      });
+      const repoA = new SessionRepository(db, userA.id);
+      const repoB = new SessionRepository(db, userB.id);
+
+      const sessionA = repoA.create({
+        projectId: projectA.id,
+        name: "S A",
+        aiTool: "claude",
+        workingDir: "/tmp/pa"
+      });
+      repoA.create({
+        projectId: projectB.id,
+        name: "S B",
+        aiTool: "claude",
+        workingDir: "/tmp/pb"
+      });
+      repoB.create({
+        projectId: projectForOtherUser.id,
+        name: "S Other",
+        aiTool: "claude",
+        workingDir: "/tmp/po"
+      });
+
+      assert.deepEqual(repoA.listByProject(projectA.id).map((session) => session.id), [sessionA.id]);
+      assert.deepEqual(repoB.listByProject(projectA.id), []);
+    });
+
     it("persists terminal attach and credential launch metadata", () => {
       const user = userRepo.create("session-meta@example.com", "hash");
       const projectRepo = new ProjectRepository(db, user.id);

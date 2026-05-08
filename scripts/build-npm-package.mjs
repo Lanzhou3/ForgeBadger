@@ -2,17 +2,19 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const cliDist = path.resolve("packages/cli/dist");
+const workspaceRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const cliDist = path.join(workspaceRoot, "packages/cli/dist");
 const gatewayTarget = path.join(cliDist, "gateway");
 const webTarget = path.join(cliDist, "web");
 const webStandaloneTarget = path.join(webTarget, "standalone");
 const webStandalonePackage = path.join(webStandaloneTarget, "packages", "web");
-const webNextEnv = path.resolve("packages/web/next-env.d.ts");
-const gatewayDist = path.resolve("packages/gateway/dist");
-const cliReadme = path.resolve("packages/cli/README.md");
-const cliLicense = path.resolve("packages/cli/LICENSE");
-const cliDocs = path.resolve("packages/cli/docs");
+const webNextEnv = path.join(workspaceRoot, "packages/web/next-env.d.ts");
+const gatewayDist = path.join(workspaceRoot, "packages/gateway/dist");
+const cliReadme = path.join(workspaceRoot, "packages/cli/README.md");
+const cliLicense = path.join(workspaceRoot, "packages/cli/LICENSE");
+const cliDocs = path.join(workspaceRoot, "packages/cli/docs");
 const copyTreeOptions = { recursive: true, dereference: true };
 
 const restoreWebNextEnv = await preserveFile(webNextEnv);
@@ -29,21 +31,21 @@ try {
   await rm(webTarget, { recursive: true, force: true });
   await mkdir(cliDist, { recursive: true });
 
-  await cp("packages/gateway/dist", gatewayTarget, copyTreeOptions);
-  await cp("packages/web/.next/standalone", webStandaloneTarget, copyTreeOptions);
+  await cp(path.join(workspaceRoot, "packages/gateway/dist"), gatewayTarget, copyTreeOptions);
+  await cp(path.join(workspaceRoot, "packages/web/.next/standalone"), webStandaloneTarget, copyTreeOptions);
   await materializePnpmAliases(path.join(webStandaloneTarget, "node_modules"));
   await mkdir(path.join(webStandalonePackage, ".next"), { recursive: true });
-  await cp("packages/web/.next/static", path.join(webStandalonePackage, ".next", "static"), copyTreeOptions);
-  await cp("packages/web/public", path.join(webStandalonePackage, "public"), copyTreeOptions);
+  await cp(path.join(workspaceRoot, "packages/web/.next/static"), path.join(webStandalonePackage, ".next", "static"), copyTreeOptions);
+  await cp(path.join(workspaceRoot, "packages/web/public"), path.join(webStandalonePackage, "public"), copyTreeOptions);
 
   await rm(cliReadme, { recursive: true, force: true });
   await rm(cliLicense, { recursive: true, force: true });
   await rm(cliDocs, { recursive: true, force: true });
-  await cp("README.md", cliReadme);
-  await cp("LICENSE", cliLicense);
+  await cp(path.join(workspaceRoot, "README.md"), cliReadme);
+  await cp(path.join(workspaceRoot, "LICENSE"), cliLicense);
   await mkdir(cliDocs, { recursive: true });
-  await cp("docs/README.zh-CN.md", path.join(cliDocs, "README.zh-CN.md"));
-  await cp("docs/README.zh-TW.md", path.join(cliDocs, "README.zh-TW.md"));
+  await cp(path.join(workspaceRoot, "docs/README.zh-CN.md"), path.join(cliDocs, "README.zh-CN.md"));
+  await cp(path.join(workspaceRoot, "docs/README.zh-TW.md"), path.join(cliDocs, "README.zh-TW.md"));
 
   run("node", ["scripts/verify-npm-package.mjs"]);
 } finally {
@@ -51,7 +53,7 @@ try {
 }
 
 function run(command, args) {
-  const result = spawnSync(command, args, { stdio: "inherit", shell: false });
+  const result = spawnSync(command, args, { cwd: workspaceRoot, stdio: "inherit", shell: false });
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with ${result.status}`);
   }

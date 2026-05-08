@@ -19,15 +19,16 @@ export interface PreparedWebRuntime {
 
 export async function prepareWebRuntime(options: PrepareWebRuntimeOptions): Promise<PreparedWebRuntime> {
   const installedWebRoot = resolveInstalledWebRoot(options.installedWebServerEntry);
+  const runtimeWebDir = assertSafeRuntimeWebDir(options.runtimeWebDir);
 
-  await rm(options.runtimeWebDir, { recursive: true, force: true });
-  await mkdir(path.dirname(options.runtimeWebDir), { recursive: true });
-  await cp(installedWebRoot, options.runtimeWebDir, { recursive: true });
+  await rm(runtimeWebDir, { recursive: true, force: true });
+  await mkdir(path.dirname(runtimeWebDir), { recursive: true });
+  await cp(installedWebRoot, runtimeWebDir, { recursive: true });
 
   return {
-    webRootDir: options.runtimeWebDir,
-    webServerEntry: path.join(options.runtimeWebDir, "packages", "web", "server.js"),
-    webPublicDir: path.join(options.runtimeWebDir, "packages", "web", "public")
+    webRootDir: runtimeWebDir,
+    webServerEntry: path.join(runtimeWebDir, "packages", "web", "server.js"),
+    webPublicDir: path.join(runtimeWebDir, "packages", "web", "public")
   };
 }
 
@@ -43,4 +44,26 @@ export async function writeWebRuntimeConfig(options: WriteWebRuntimeConfigOption
 
 function resolveInstalledWebRoot(installedWebServerEntry: string): string {
   return path.resolve(path.dirname(installedWebServerEntry), "..", "..");
+}
+
+export function assertSafeRuntimeWebDir(runtimeWebDir: string): string {
+  const resolved = path.resolve(runtimeWebDir);
+  const runtimeDir = path.dirname(resolved);
+  const stateDir = path.dirname(runtimeDir);
+  const root = path.parse(resolved).root;
+  const expected = path.join(stateDir, "runtime", "web");
+  if (
+    resolved !== expected ||
+    stateDir === root ||
+    isSensitiveStateDir(stateDir)
+  ) {
+    throw new Error(`unsafe runtime Web directory: ${runtimeWebDir}`);
+  }
+  return resolved;
+}
+
+function isSensitiveStateDir(stateDir: string): boolean {
+  const normalized = path.resolve(stateDir);
+  const sensitiveRoots = ["/etc", "/proc", "/sys"];
+  return sensitiveRoots.some((root) => normalized === root || normalized.startsWith(`${root}${path.sep}`));
 }

@@ -667,6 +667,8 @@ interface ApiEnvelope<T> {
   message: string;
 }
 
+const DEFAULT_API_TIMEOUT_MS = 30_000;
+
 export const gatewayBaseUrl = getGatewayBaseUrl();
 
 export function apiUrl(path: string): string {
@@ -676,17 +678,10 @@ export function apiUrl(path: string): string {
 
 export async function fetchJson<T = unknown>(path: string, options: RequestInit = {}) {
   const token = getToken();
-  const res = await fetch(apiUrl(path), {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
+  const { request, cleanup } = buildApiRequest(options, token);
+  const res = await fetch(apiUrl(path), request).finally(cleanup);
   if (!res.ok) {
-    const text = await res.text().catch(() => "Unknown error");
-    throw new Error(text);
+    throw new Error(formatHttpError(res));
   }
   const envelope = (await res.json()) as ApiEnvelope<T>;
   if (envelope.code !== 0) {
@@ -697,23 +692,46 @@ export async function fetchJson<T = unknown>(path: string, options: RequestInit 
 
 export async function fetchEnvelope<T = unknown>(path: string, options: RequestInit = {}) {
   const token = getToken();
-  const res = await fetch(apiUrl(path), {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
+  const { request, cleanup } = buildApiRequest(options, token);
+  const res = await fetch(apiUrl(path), request).finally(cleanup);
   if (!res.ok) {
-    const text = await res.text().catch(() => "Unknown error");
-    throw new Error(text);
+    throw new Error(formatHttpError(res));
   }
   const envelope = (await res.json()) as ApiEnvelope<T>;
   if (envelope.code !== 0) {
     throw new Error(envelope.message || "API request failed");
   }
   return envelope;
+}
+
+function buildApiRequest(options: RequestInit, token: string | null): {
+  request: RequestInit;
+  cleanup: () => void;
+} {
+  const controller = options.signal ? undefined : new AbortController();
+  const timeout = controller
+    ? setTimeout(() => controller.abort(), DEFAULT_API_TIMEOUT_MS)
+    : undefined;
+  return {
+    request: {
+      ...options,
+      signal: options.signal ?? controller?.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    },
+    cleanup: () => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    },
+  };
+}
+
+function formatHttpError(res: Response): string {
+  return `Gateway request failed with HTTP ${res.status}`;
 }
 
 export async function login(email: string, password: string) {
@@ -735,10 +753,9 @@ export async function getMe() {
 }
 
 export async function getDependencies(): Promise<unknown> {
-  const response = await fetch(apiUrl("/api/v1/gate-a/dependencies"), {
+  return fetchJson("/api/v1/gate-a/dependencies", {
     cache: "no-store"
   });
-  return response.json();
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
@@ -954,8 +971,13 @@ export async function generateConfig(
 }
 
 // Sessions
-export async function listSessions(): Promise<{ sessions: Session[] }> {
-  return fetchJson("/api/v1/sessions") as Promise<{ sessions: Session[] }>;
+export function listSessions(): Promise<{ sessions: Session[] }>;
+export function listSessions(params: { projectId?: string }): Promise<{ sessions: Session[] }>;
+export async function listSessions(params: { projectId?: string } = {}): Promise<{ sessions: Session[] }> {
+  const searchParams = new URLSearchParams();
+  if (params.projectId) searchParams.set("projectId", params.projectId);
+  const query = searchParams.toString();
+  return fetchJson(`/api/v1/sessions${query ? `?${query}` : ""}`) as Promise<{ sessions: Session[] }>;
 }
 
 export async function createSession(data: {

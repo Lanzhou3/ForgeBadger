@@ -83,6 +83,22 @@ export interface CodexAppServerManagerOptions {
   }) => CodexAppServerTransport | undefined;
 }
 
+const APP_SERVER_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "USER",
+  "USERNAME",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "LANG",
+  "LC_ALL",
+  "SHELL",
+  "CODEX_HOME"
+] as const;
+const APP_SERVER_LOOPBACK_PORT_START = 45200;
+const APP_SERVER_LOOPBACK_PORT_END = 46200;
+
 interface ManagedCodexAppServerSession extends CodexAppServerSession {
   child: CodexAppServerChild;
   client?: CodexAppServerJsonRpcClient | undefined;
@@ -90,6 +106,8 @@ interface ManagedCodexAppServerSession extends CodexAppServerSession {
 
 export class CodexAppServerManager extends EventEmitter {
   private sessions = new Map<string, ManagedCodexAppServerSession>();
+  private readonly reservedLoopbackPorts = new Set<number>();
+  private nextLoopbackPortCandidate = APP_SERVER_LOOPBACK_PORT_START;
   private readonly perUserLimit: number;
   private readonly spawnProcess: NonNullable<CodexAppServerManagerOptions["spawn"]>;
 
@@ -115,10 +133,7 @@ export class CodexAppServerManager extends EventEmitter {
     const plan = createCodexAppServerLaunchPlan(launchInput);
     const child = this.spawnProcess(plan.command, plan.args, {
       cwd: plan.cwd,
-      env: {
-        ...process.env,
-        ...plan.env
-      }
+      env: buildAppServerChildEnv(process.env, plan.env)
     });
     const now = new Date();
     const session: ManagedCodexAppServerSession = {
@@ -298,16 +313,51 @@ export class CodexAppServerManager extends EventEmitter {
   }
 
   private nextLoopbackPort(): number {
-    return 45200 + this.sessions.size;
+    for (let attempts = 0; attempts <= APP_SERVER_LOOPBACK_PORT_END - APP_SERVER_LOOPBACK_PORT_START; attempts += 1) {
+      const port = this.nextLoopbackPortCandidate;
+      this.nextLoopbackPortCandidate =
+        port >= APP_SERVER_LOOPBACK_PORT_END ? APP_SERVER_LOOPBACK_PORT_START : port + 1;
+      if (!this.reservedLoopbackPorts.has(port)) {
+        this.reservedLoopbackPorts.add(port);
+        return port;
+      }
+    }
+    throw new Error("No Codex app-server loopback ports are available");
   }
 
   private releaseSession(session: ManagedCodexAppServerSession): void {
     session.client?.close();
+    releaseLoopbackPort(this.reservedLoopbackPorts, session.listen);
     if (session.tokenFile) {
       rmSync(session.tokenFile, { force: true });
     }
     this.sessions.delete(session.id);
   }
+}
+
+function buildAppServerChildEnv(
+  parentEnv: NodeJS.ProcessEnv,
+  launchEnv: Record<string, string>
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of APP_SERVER_ENV_ALLOWLIST) {
+    const value = parentEnv[key];
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  return {
+    ...env,
+    ...launchEnv
+  };
+}
+
+function releaseLoopbackPort(reservedPorts: Set<number>, listen: string): void {
+  const match = /^ws:\/\/127\.0\.0\.1:(\d+)$/.exec(listen);
+  if (!match) {
+    return;
+  }
+  reservedPorts.delete(Number(match[1]));
 }
 
 function defaultSpawn(command: string, args: string[], options: {

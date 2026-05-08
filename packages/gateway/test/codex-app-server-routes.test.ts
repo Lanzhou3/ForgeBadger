@@ -15,7 +15,7 @@ import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { CodexAppServerManager } from "../src/services/codex-app-server-manager.js";
 import type { CodexAppServerTransport } from "../src/services/codex-app-server-client.js";
-import { createCodexAppServerRoutes } from "../src/routes/codex-app-server.js";
+import { AppServerTurnRateLimiter, createCodexAppServerRoutes } from "../src/routes/codex-app-server.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 
@@ -243,6 +243,19 @@ describe("Codex app-server routes", () => {
     assert.equal(second.body.code, 1);
     assert.match(second.body.message, /rate limit/i);
     assert.equal(transport.sent.length, 1);
+  });
+});
+
+describe("AppServerTurnRateLimiter", () => {
+  it("prunes expired buckets while consuming new turn requests", () => {
+    const limiter = new AppServerTurnRateLimiter({ maxRequests: 1, windowMs: 100 });
+
+    assert.equal(limiter.consume("user-1", "session-1", 1000), true);
+    assert.equal(limiter.consume("user-1", "session-2", 1001), true);
+    assert.equal(limiter.size(), 2);
+    assert.equal(limiter.consume("user-1", "session-3", 1101), true);
+
+    assert.equal(limiter.size(), 1);
   });
 });
 

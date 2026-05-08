@@ -301,7 +301,7 @@ export function createProjectRoutes(
           continue;
         }
         try {
-          await sessionManager.stopSession(session.id, session.tmuxSession);
+          await sessionManager.stopSession(session.id, session.tmuxSession, userId);
         } catch {
           // The project record can still be removed when an already-dead tmux pane is referenced.
         }

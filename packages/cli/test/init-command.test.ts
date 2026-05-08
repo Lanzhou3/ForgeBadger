@@ -57,4 +57,21 @@ export async function runOpenForgeCli(args) {
     assert.equal(code, 23);
     assert.deepEqual(JSON.parse(await readFile(argsPath, "utf8")), ["init", "--path", "/tmp/project"]);
   });
+
+  it("rejects gateway init entries outside the installed package root", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "openforge-init-command-"));
+
+    await assert.rejects(
+      () => runInit(["init"], {
+        resolvePaths: () => ({
+          packageRoot: path.join(tempDir, "package"),
+          gatewayEntry: path.join(tempDir, "package", "gateway.js"),
+          gatewayInitEntry: path.join(tempDir, "outside", "init.js"),
+          webServerEntry: path.join(tempDir, "package", "server.js"),
+          webPublicDir: path.join(tempDir, "package", "public")
+        })
+      }),
+      /outside the installed package/
+    );
+  });
 });

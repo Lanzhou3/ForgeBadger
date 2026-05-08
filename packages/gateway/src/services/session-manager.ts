@@ -162,7 +162,7 @@ export class InMemorySessionManager {
     return [...this.sessions.values()];
   }
 
-  async stopSession(id: string, tmuxName?: string): Promise<GateASession> {
+  async stopSession(id: string, tmuxName?: string, userId?: string): Promise<GateASession> {
     const session = this.sessions.get(id);
     if (!session && !tmuxName) {
       throw new Error(`Unknown session: ${id}`);
@@ -178,7 +178,7 @@ export class InMemorySessionManager {
 
     await this.tmux.killSession(tmuxName as string);
     await this.recoveryStore.removeSession(id);
-    return fallbackStoppedSession(id, tmuxName as string);
+    return fallbackStoppedSession(id, tmuxName as string, userId);
   }
 
   async captureHistory(id: string): Promise<string> {
@@ -304,11 +304,11 @@ function fallbackLaunchPlan(cwd: string, sessionId: string): LaunchPlan {
   };
 }
 
-function fallbackStoppedSession(id: string, tmuxName: string): GateASession {
+function fallbackStoppedSession(id: string, tmuxName: string, userId = ""): GateASession {
   const now = new Date().toISOString();
   return {
     id,
-    userId: "",
+    userId,
     attachToken: "",
     tmuxName,
     launchPlan: fallbackLaunchPlan(process.cwd(), id),

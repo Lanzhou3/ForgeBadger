@@ -95,6 +95,7 @@ type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
+  abortSignal?: AbortSignal;
   abortListener?: () => void;
 };
 
@@ -357,7 +358,10 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       const timeoutMs = this.options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
       const timeout = setTimeout(() => {
-        this.pending.delete(id);
+        const pendingRequest = this.pending.get(id);
+        if (pendingRequest) {
+          this.cleanupPending(id, pendingRequest);
+        }
         reject(new Error(`Codex app-server request timed out after ${timeoutMs}ms`));
       }, timeoutMs);
 
@@ -369,8 +373,7 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
 
       if (signal) {
         const abortListener = () => {
-          clearTimeout(timeout);
-          this.pending.delete(id);
+          this.cleanupPending(id, pending);
           reject(new Error("Codex app-server request cancelled"));
         };
         if (signal.aborted) {
@@ -378,6 +381,7 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
           return;
         }
         signal.addEventListener("abort", abortListener, { once: true });
+        pending.abortSignal = signal;
         pending.abortListener = abortListener;
       }
 
@@ -385,8 +389,7 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
       try {
         this.options.transport.send(payload);
       } catch (error) {
-        clearTimeout(timeout);
-        this.pending.delete(id);
+        this.cleanupPending(id, pending);
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
@@ -420,8 +423,7 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
     if (!pending) {
       return;
     }
-    clearTimeout(pending.timeout);
-    this.pending.delete(frame.id);
+    this.cleanupPending(frame.id, pending);
     if ("error" in frame && frame.error) {
       pending.reject(new Error(frame.error.message));
       return;
@@ -431,10 +433,17 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
 
   private rejectPending(message: string): void {
     for (const [id, pending] of this.pending) {
-      clearTimeout(pending.timeout);
-      this.pending.delete(id);
+      this.cleanupPending(id, pending);
       pending.reject(new Error(message));
     }
+  }
+
+  private cleanupPending(id: JsonRpcId, pending: PendingRequest): void {
+    clearTimeout(pending.timeout);
+    if (pending.abortSignal && pending.abortListener) {
+      pending.abortSignal.removeEventListener("abort", pending.abortListener);
+    }
+    this.pending.delete(id);
   }
 
   private closeForProtocolError(error: unknown): void {

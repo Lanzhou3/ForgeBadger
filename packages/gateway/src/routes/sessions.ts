@@ -46,6 +46,10 @@ const switchModelSchema = z.object({
   modelId: z.string().min(1)
 });
 
+const listSessionsQuerySchema = z.object({
+  projectId: z.string().min(1).optional()
+});
+
 export function createSessionRoutes(
   db: Database,
   masterKey: string,
@@ -58,8 +62,16 @@ export function createSessionRoutes(
 
   router.get("/", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = listSessionsQuerySchema.safeParse(req.query ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid session query" });
+      return;
+    }
     const repo = new SessionRepository(db, userId);
-    const sessions = repo.list().map((session) => toSessionPayload(session));
+    const sessions = (parseResult.data.projectId
+      ? repo.listByProject(parseResult.data.projectId)
+      : repo.list()
+    ).map((session) => toSessionPayload(session));
     res.json({
       code: 0,
       data: { sessions },
@@ -398,7 +410,7 @@ export function createSessionRoutes(
     }
 
     try {
-      await sessionManager.stopSession(dbSession.id, dbSession.tmuxSession ?? undefined);
+      await sessionManager.stopSession(dbSession.id, dbSession.tmuxSession ?? undefined, userId);
 
       const oldStatus = dbSession.status;
       const updated = sessionRepo.update(dbSession.id, {
@@ -497,7 +509,7 @@ export function createSessionRoutes(
 
     if (dbSession.status === "running") {
       try {
-        await sessionManager.stopSession(dbSession.id, dbSession.tmuxSession ?? undefined);
+        await sessionManager.stopSession(dbSession.id, dbSession.tmuxSession ?? undefined, userId);
       } catch {
         // Deleting the database row should still be possible if the tmux pane is already gone.
       }

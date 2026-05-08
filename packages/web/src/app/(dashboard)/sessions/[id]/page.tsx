@@ -55,12 +55,16 @@ export default function TerminalPage() {
     },
   });
 
+  const connectSessionMutation = connectMutation.mutate;
+  const isConnecting = connectMutation.isPending;
+  const connectedSession = connectMutation.data;
+
   useEffect(() => {
-    if (!id || !authToken || attachTokenOverride || connectMutation.isPending || connectMutation.data) {
+    if (!id || !authToken || attachTokenOverride || isConnecting || connectedSession) {
       return;
     }
-    connectMutation.mutate();
-  }, [attachTokenOverride, authToken, connectMutation, id]);
+    connectSessionMutation();
+  }, [attachTokenOverride, authToken, connectSessionMutation, connectedSession, id, isConnecting]);
 
   const session = connectMutation.data?.session ?? sessionData?.session;
   const attachToken = attachTokenOverride ?? connectMutation.data?.session.attachToken ?? "";

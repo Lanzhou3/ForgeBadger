@@ -135,7 +135,15 @@ function hasAllowedFilesWhitelist(cliPackageRoot) {
     "docs/README.zh-TW.md",
     "package.json"
   ];
-  return JSON.stringify(packageJson.files) === JSON.stringify(expected);
+  return hasSameStringItems(packageJson.files, expected);
+}
+
+function hasSameStringItems(actual, expected) {
+  return (
+    Array.isArray(actual) &&
+    actual.length === expected.length &&
+    expected.every((item) => actual.includes(item))
+  );
 }
 
 function isMainModule() {

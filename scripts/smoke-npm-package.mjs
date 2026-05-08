@@ -1,6 +1,7 @@
+import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -14,43 +15,50 @@ const npmCache = path.join(smokeRoot, "npm-cache");
 const stateDir = path.join(smokeRoot, "state");
 const tmuxPrefix = `of-smoke-${process.pid}-`;
 
-console.log(`OpenForge npm smoke root: ${smokeRoot}`);
+try {
+  console.log(`OpenForge npm smoke root: ${smokeRoot}`);
 
-await mkdir(packDir, { recursive: true });
-run("pnpm", ["--dir", workspaceRoot, "build:npm"]);
-run("pnpm", [
-  "--dir",
-  workspaceRoot,
-  "--filter",
-  "openforge",
-  "pack",
-  "--pack-destination",
-  packDir
-], { printOutput: false });
+  await mkdir(packDir, { recursive: true });
+  run("pnpm", ["--dir", workspaceRoot, "build:npm"]);
+  run("pnpm", [
+    "--dir",
+    workspaceRoot,
+    "--filter",
+    "openforge",
+    "pack",
+    "--pack-destination",
+    packDir
+  ], { printOutput: false });
 
-const tarball = await findPackedTarball(packDir);
-console.log(`Packed tarball: ${tarball}`);
+  const tarball = await findPackedTarball(packDir);
+  console.log(`Packed tarball: ${tarball}`);
 
-run("npm", [
-  "install",
-  "--prefix",
-  npmPrefix,
-  "--cache",
-  npmCache,
-  "--ignore-scripts=false",
-  "--no-audit",
-  "--no-fund",
-  tarball
-]);
+  run("npm", [
+    "install",
+    "--prefix",
+    npmPrefix,
+    "--cache",
+    npmCache,
+    "--ignore-scripts=false",
+    "--no-audit",
+    "--no-fund",
+    tarball
+  ]);
 
-const openforgeBin = resolveOpenForgeBin(npmPrefix);
-run(openforgeBin, ["doctor"], {
-  env: {
-    OPENFORGE_STATE_DIR: stateDir,
-    OPENFORGE_TMUX_PREFIX: tmuxPrefix
+  const openforgeBin = resolveOpenForgeBin(npmPrefix);
+  run(openforgeBin, ["doctor"], {
+    env: {
+      OPENFORGE_STATE_DIR: stateDir,
+      OPENFORGE_TMUX_PREFIX: tmuxPrefix
+    }
+  });
+  await runStartSmoke(openforgeBin);
+} finally {
+  cleanupTmuxSessions();
+  if (process.env.OPENFORGE_KEEP_NPM_SMOKE_ROOT !== "1") {
+    await rm(smokeRoot, { recursive: true, force: true });
   }
-});
-await runStartSmoke(openforgeBin);
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -181,7 +189,7 @@ async function runStartSmoke(openforgeBin) {
     await waitForUrl(`http://127.0.0.1:${webPort}/`, exitPromise, () => output);
 
     const email = `smoke-${Date.now()}@example.com`;
-    const password = "password123";
+    const password = randomBytes(18).toString("base64url");
     const registered = await postJson(`http://127.0.0.1:${gatewayPort}/api/v1/auth/register`, {
       email,
       password
@@ -200,6 +208,17 @@ async function runStartSmoke(openforgeBin) {
   } finally {
     await stopChild(child, exitPromise);
   }
+}
+
+function cleanupTmuxSessions() {
+  spawnSync("tmux", ["list-sessions", "-F", "#{session_name}"], {
+    encoding: "utf8",
+    shell: false
+  }).stdout?.split("\n")
+    .filter((name) => name.startsWith(tmuxPrefix))
+    .forEach((name) => {
+      spawnSync("tmux", ["kill-session", "-t", name], { stdio: "ignore", shell: false });
+    });
 }
 
 async function getAvailablePort() {

@@ -55,6 +55,69 @@ describe("CodexAppServerManager", () => {
     assert.equal((await stat(session.tokenFile)).mode & 0o777, 0o600);
   });
 
+  it("allocates unique loopback ports for concurrent websocket starts", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-ports-"));
+    const manager = new CodexAppServerManager({
+      runtimeRoot: root,
+      perUserLimit: 3,
+      spawn: () => new FakeChild(1234)
+    });
+
+    const [first, second] = await Promise.all([
+      manager.start({
+        userId: "user-1",
+        projectId: "project-1",
+        projectRoot: "/workspace/project",
+        credentialMode: "host_environment",
+        runtimeMode: "app-server-websocket"
+      }),
+      manager.start({
+        userId: "user-1",
+        projectId: "project-1",
+        projectRoot: "/workspace/project",
+        credentialMode: "host_environment",
+        runtimeMode: "app-server-websocket"
+      })
+    ]);
+
+    assert.notEqual(first.listen, second.listen);
+  });
+
+  it("does not pass unrelated parent secrets to the app-server child", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-env-"));
+    const previousOpenAiKey = process.env.OPENAI_API_KEY;
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    process.env.OPENAI_API_KEY = "parent-openai-key";
+    process.env.DATABASE_URL = "postgres://example";
+    let childEnv: NodeJS.ProcessEnv | undefined;
+    const manager = new CodexAppServerManager({
+      runtimeRoot: root,
+      spawn: (_command, _args, options) => {
+        childEnv = options.env;
+        return new FakeChild(1234);
+      }
+    });
+
+    try {
+      await manager.start({
+        userId: "user-1",
+        projectId: "project-1",
+        projectRoot: "/workspace/project",
+        credentialMode: "host_environment",
+        runtimeMode: "app-server-stdio"
+      });
+    } finally {
+      if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousOpenAiKey;
+      if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previousDatabaseUrl;
+    }
+
+    assert.equal(childEnv?.OPENAI_API_KEY, undefined);
+    assert.equal(childEnv?.DATABASE_URL, undefined);
+    assert.ok(childEnv?.PATH);
+  });
+
   it("enforces tenant ownership and process limits", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-limit-"));
     const manager = new CodexAppServerManager({

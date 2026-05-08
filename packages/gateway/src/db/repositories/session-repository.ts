@@ -76,6 +76,14 @@ export class SessionRepository {
       .all() as Session[];
   }
 
+  listByProject(projectId: string): Session[] {
+    return this.drizzle
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.userId, this.userId), eq(sessions.projectId, projectId)))
+      .all() as Session[];
+  }
+
   getById(id: string): Session | undefined {
     return this.drizzle
       .select()

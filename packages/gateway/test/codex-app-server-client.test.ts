@@ -260,6 +260,30 @@ describe("Codex app-server client helpers", () => {
     client.close();
   });
 
+  it("removes AbortSignal listeners after a request resolves", async () => {
+    const transport = new FakeTransport();
+    const signal = new CountingAbortSignal();
+    const client = new CodexAppServerJsonRpcClient({
+      transport,
+      clientVersion: "0.0.0"
+    });
+
+    const pending = client.request("test/method", {}, signal as unknown as AbortSignal);
+    const sent = JSON.parse(transport.sent[0] ?? "{}") as { id: number };
+    transport.emitMessage(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: sent.id,
+        result: { ok: true }
+      })
+    );
+
+    await assert.doesNotReject(pending);
+    assert.equal(signal.added, 1);
+    assert.equal(signal.removed, 1);
+    client.close();
+  });
+
   it("emits an error and closes the transport for malformed inbound frames", async () => {
     const transport = new FakeTransport();
     const client = new CodexAppServerJsonRpcClient({
@@ -307,5 +331,24 @@ class FakeTransport implements CodexAppServerTransport {
 
   emitClose(code?: number, reason?: string): void {
     this.closeHandler?.(code, reason);
+  }
+}
+
+class CountingAbortSignal {
+  readonly aborted = false;
+  added = 0;
+  removed = 0;
+  private listener: (() => void) | undefined;
+
+  addEventListener(_type: "abort", listener: () => void): void {
+    this.added += 1;
+    this.listener = listener;
+  }
+
+  removeEventListener(_type: "abort", listener: () => void): void {
+    if (this.listener === listener) {
+      this.removed += 1;
+      this.listener = undefined;
+    }
   }
 }

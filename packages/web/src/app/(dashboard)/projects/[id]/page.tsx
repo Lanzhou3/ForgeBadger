@@ -107,8 +107,9 @@ export default function ProjectDetailPage() {
   });
 
   const { data: sessionsData } = useQuery({
-    queryKey: ["sessions"],
-    queryFn: listSessions,
+    queryKey: ["sessions", { projectId: id }],
+    queryFn: () => listSessions({ projectId: id }),
+    enabled: !!id,
   });
 
   const { data: activitiesData } = useQuery({
@@ -269,8 +270,8 @@ export default function ProjectDetailPage() {
 
   const project = projectData?.project;
   const projectSessions = useMemo(
-    () => sessionsData?.sessions?.filter((s) => s.projectId === id) ?? [],
-    [id, sessionsData?.sessions]
+    () => sessionsData?.sessions ?? [],
+    [sessionsData?.sessions]
   );
   const projectActivities = useMemo(
     () => activitiesData?.activities ?? [],

@@ -51,6 +51,21 @@ describe("InMemorySessionManager", () => {
     ]);
   });
 
+  it("preserves caller user id when stopping a stale tmux-backed session", async () => {
+    const calls: string[] = [];
+    const manager = new InMemorySessionManager(fakeTmux(calls));
+
+    const stopped = await manager.stopSession(
+      "session_stale",
+      "of-user_123-session_stale",
+      "user_123456"
+    );
+
+    assert.equal(stopped.status, "exited");
+    assert.equal(stopped.userId, "user_123456");
+    assert.deepEqual(calls, ["kill:of-user_123-session_stale"]);
+  });
+
   it("returns captured history from tmux", async () => {
     const manager = new InMemorySessionManager(fakeTmux([]));
     const session = await manager.createSession({

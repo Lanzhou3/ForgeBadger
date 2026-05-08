@@ -130,9 +130,7 @@ export function runCommand(
       appendBoundedOutput(stderr, chunk, maxOutputBytes);
     });
     child.on("error", (error) => {
-      if (stderr.byteLength === 0) {
-        appendBoundedOutput(stderr, error.message, maxOutputBytes);
-      }
+      appendBoundedOutput(stderr, stderr.byteLength === 0 ? error.message : `\n${error.message}`, maxOutputBytes);
       finish({
         exitCode: 127,
         stdout: boundedOutputToString(stdout),

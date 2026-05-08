@@ -289,12 +289,13 @@ function apiKeyEnvName(provider: string): string {
   return `${normalized.replace(/[^a-z0-9]+/g, "_").toUpperCase()}_API_KEY`;
 }
 
-class AppServerTurnRateLimiter {
+export class AppServerTurnRateLimiter {
   private readonly buckets = new Map<string, { count: number; resetAt: number }>();
 
   constructor(private readonly options: { maxRequests: number; windowMs: number }) {}
 
   consume(userId: string, sessionId: string, now = Date.now()): boolean {
+    this.pruneExpired(now);
     const key = `${userId}:${sessionId}`;
     const current = this.buckets.get(key);
     if (!current || current.resetAt <= now) {
@@ -311,6 +312,18 @@ class AppServerTurnRateLimiter {
 
     current.count += 1;
     return true;
+  }
+
+  size(): number {
+    return this.buckets.size;
+  }
+
+  private pruneExpired(now: number): void {
+    for (const [key, bucket] of this.buckets) {
+      if (bucket.resetAt <= now) {
+        this.buckets.delete(key);
+      }
+    }
   }
 }
 

@@ -71,8 +71,8 @@ describe("local diagnostics export", () => {
       assert.equal(report.app.version, "0.0.0-test");
       assert.equal(report.counts.apiKeys, 1);
       assert.equal(report.counts.auditLogs, 1);
-      assert.equal(report.environment.OPENFORGE_MASTER_KEY, "[redacted]");
-      assert.equal(report.environment.OPENAI_API_KEY, "[redacted]");
+      assert.equal("OPENFORGE_MASTER_KEY" in report.environment, false);
+      assert.equal("OPENAI_API_KEY" in report.environment, false);
       assert.equal(JSON.stringify(report).includes("sk-test-secret"), false);
     } finally {
       db.close();

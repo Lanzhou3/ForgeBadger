@@ -123,6 +123,20 @@ describe("loadOrCreateRuntimeConfig", () => {
     // Act / Assert
     await assert.rejects(() => loadOrCreateRuntimeConfig({ stateDir }), ZodError);
   });
+
+  it("reports invalid JSON in an existing config with a readable error", async () => {
+    // Arrange
+    const stateDir = await mkdtemp(path.join(tmpdir(), "openforge-runtime-"));
+    const file = path.join(stateDir, "config.json");
+    await writeFile(file, "{not-json", { mode: 0o600 });
+    await chmod(file, 0o600);
+
+    // Act / Assert
+    await assert.rejects(
+      () => loadOrCreateRuntimeConfig({ stateDir }),
+      /Invalid OpenForge runtime config JSON/
+    );
+  });
 });
 
 describe("resolveStateDir", () => {

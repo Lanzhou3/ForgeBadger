@@ -255,14 +255,14 @@ function traceClaudeNotificationHook(stage: string, details: Record<string, unkn
     return;
   }
 
-  console.log(
-    JSON.stringify({
+  process.stderr.write(
+    `${JSON.stringify({
       level: "info",
       action: "session_hooks.claude_notification",
       stage,
       timestamp: new Date().toISOString(),
       ...details
-    })
+    })}\n`
   );
 }
 

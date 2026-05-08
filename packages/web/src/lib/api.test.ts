@@ -22,6 +22,7 @@ import {
   discoverAdapters,
   exportTemplate,
   getDashboardSummary,
+  getDependencies,
   getConfigCompliance,
   getGlobalAiConfig,
   getProjectAgentSequence,
@@ -42,6 +43,7 @@ import {
   listCatalogItems,
   listCatalogSources,
   listNotifications,
+  listSessions,
   listSnapshots,
   listUsageRates,
   listSkillTemplates,
@@ -1031,6 +1033,52 @@ describe("api client", () => {
         }),
       })
     );
+  });
+
+  it("loads dependency checks through the shared authenticated API client", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({ dependencies: [] })));
+
+    await getDependencies();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/gate-a/dependencies",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+  });
+
+  it("lists sessions with an optional project filter", async () => {
+    await listSessions({ projectId: "project-1" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/sessions?projectId=project-1",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+  });
+
+  it("sanitizes raw HTTP error bodies from Gateway requests", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 500,
+          statusText: "Internal Server Error",
+          text: () => Promise.resolve("stack trace: /tmp/openforge/private.ts"),
+        } as Response)
+      )
+    );
+
+    await expect(getDashboardSummary()).rejects.toThrow("Gateway request failed with HTTP 500");
+    await expect(getDashboardSummary()).rejects.not.toThrow("/tmp/openforge");
   });
 
   it("checks model health through REST", async () => {

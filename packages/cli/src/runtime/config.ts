@@ -43,7 +43,7 @@ export async function loadOrCreateRuntimeConfig(
 
   if (await isExistingConfigFile(configPath)) {
     await chmod(configPath, 0o600).catch(() => undefined);
-    const config = runtimeConfigSchema.parse(JSON.parse(await readFile(configPath, "utf8")));
+    const config = runtimeConfigSchema.parse(await readRuntimeConfigJson(configPath));
     return applyRuntimeOverrides(config, options);
   }
 
@@ -102,6 +102,15 @@ function isFileNotFoundError(error: unknown): boolean {
     "code" in error &&
     (error as { code?: unknown }).code === "ENOENT"
   );
+}
+
+async function readRuntimeConfigJson(configPath: string): Promise<unknown> {
+  const content = await readFile(configPath, "utf8");
+  try {
+    return JSON.parse(content);
+  } catch (error) {
+    throw new Error(`Invalid OpenForge runtime config JSON: ${configPath}`, { cause: error });
+  }
 }
 
 function applyRuntimeOverrides(config: RuntimeConfig, options: LoadRuntimeConfigOptions): RuntimeConfig {

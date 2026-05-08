@@ -9,7 +9,9 @@ import WebSocket from "ws";
 
 import {
   authenticateTerminalRequest,
+  formatTerminalClientError,
   TerminalHeartbeat,
+  TerminalInputBuffer,
   TerminalInputRateLimiter,
   TerminalResizeBuffer,
   parseTerminalMessage,
@@ -168,6 +170,30 @@ describe("TerminalInputRateLimiter", () => {
     assert.equal(limiter.consume(1000), true);
     assert.equal(limiter.consume(1000), false);
     assert.equal(limiter.consume(2001), true);
+  });
+});
+
+describe("TerminalInputBuffer", () => {
+  it("flushes terminal input received before pty attach in order", () => {
+    const writes: string[] = [];
+    const inputBuffer = new TerminalInputBuffer();
+
+    inputBuffer.writeOrStore(undefined, "first");
+    inputBuffer.writeOrStore(undefined, "second");
+    inputBuffer.flush({
+      write(data: string) {
+        writes.push(data);
+      }
+    });
+
+    assert.deepEqual(writes, ["first", "second"]);
+  });
+});
+
+describe("formatTerminalClientError", () => {
+  it("returns generic client errors for unexpected internal failures", () => {
+    assert.equal(formatTerminalClientError(new Error("ENOENT: /tmp/private-stack")), "Terminal request failed");
+    assert.equal(formatTerminalClientError(new Error("Malformed terminal message")), "Malformed terminal message");
   });
 });
 

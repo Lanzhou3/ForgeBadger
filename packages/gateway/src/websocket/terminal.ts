@@ -24,6 +24,29 @@ export interface TerminalResizable {
   resize(cols: number, rows: number): void;
 }
 
+export interface TerminalWritable {
+  write(data: string): void;
+}
+
+export class TerminalInputBuffer {
+  private readonly pendingInput: string[] = [];
+
+  writeOrStore(pty: TerminalWritable | undefined, data: string): void {
+    if (pty) {
+      pty.write(data);
+      return;
+    }
+    this.pendingInput.push(data);
+  }
+
+  flush(pty: TerminalWritable): void {
+    for (const data of this.pendingInput) {
+      pty.write(data);
+    }
+    this.pendingInput.length = 0;
+  }
+}
+
 export class TerminalResizeBuffer {
   private latestSize: { cols: number; rows: number } | undefined;
 
@@ -168,7 +191,7 @@ export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void
       attachToken
     };
     const sessionSocket = registry.getSocket(sessionId);
-    if (sessionSocket && sessionSocket !== undefined && "close" in sessionSocket) {
+    if (sessionSocket) {
       limits.release(sessionSocket as unknown as WebSocket);
     }
 
@@ -200,6 +223,7 @@ async function handleTerminalSocket(
   limits: WebSocketConnectionLimits<WebSocket>
 ): Promise<void> {
   let pty: IPty | undefined;
+  const inputBuffer = new TerminalInputBuffer();
   const resizeBuffer = new TerminalResizeBuffer();
   let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
 
@@ -247,9 +271,7 @@ async function handleTerminalSocket(
           );
           return;
         }
-        if (pty) {
-          pty.write(message.payload.data);
-        }
+        inputBuffer.writeOrStore(pty, message.payload.data);
         return;
       }
       resizeBuffer.applyOrStore(pty, message.payload.cols, message.payload.rows);
@@ -260,7 +282,7 @@ async function handleTerminalSocket(
       ws.send(
         JSON.stringify({
           type: "terminal_error",
-          payload: { message: error instanceof Error ? error.message : String(error) }
+          payload: { message: formatTerminalClientError(error) }
         })
       );
     }
@@ -279,13 +301,14 @@ async function handleTerminalSocket(
     ws.send(
       JSON.stringify({
         type: "terminal_error",
-        payload: { message: error instanceof Error ? error.message : String(error) }
+        payload: { message: "Terminal attach failed" }
       })
     );
     ws.close(1011, "pty attach failed");
     return;
   }
   const activePty = pty;
+  inputBuffer.flush(activePty);
   resizeBuffer.flush(activePty);
 
   void sessionManager
@@ -301,9 +324,7 @@ async function handleTerminalSocket(
           JSON.stringify({
             type: "terminal_error",
             payload: {
-              message: `history restore failed: ${
-                error instanceof Error ? error.message : String(error)
-              }`
+              message: "Terminal history restore failed"
             }
           })
         );
@@ -346,6 +367,15 @@ async function handleTerminalSocket(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+export function formatTerminalClientError(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.message === "Malformed terminal message" || error.message === "Terminal message too large") {
+      return error.message;
+    }
+  }
+  return "Terminal request failed";
 }
 
 interface TerminalAccessSession {
