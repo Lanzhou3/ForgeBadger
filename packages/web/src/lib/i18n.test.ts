@@ -49,6 +49,7 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "commandPalette.title")).toBe("命令面板");
     expect(getTranslation("en", "sessions.focusMode")).toBe("Focus mode");
     expect(getTranslation("zh-CN", "models.applyTargets")).toBe("可应用到 CLI");
+    expect(getTranslation("zh-CN", "models.deleteProviderInlineLabel")).toBe("删除服务商");
     expect(getTranslation("zh-TW", "models.deleteProviderConfirm")).toContain("供應商");
     expect(getTranslation("en", "models.codexOfficialDocs")).toContain("OpenAI Codex docs");
   });

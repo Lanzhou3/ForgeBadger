@@ -305,7 +305,13 @@ export default function ModelsPage() {
           selectedProviderId={selectedProviderId}
           isLoading={providerQuery.isLoading || catalogQuery.isLoading}
           isAdding={addPresetMutation.isPending}
+          isDeleting={deleteProviderMutation.isPending}
           onSelectProvider={setSelectedProviderId}
+          onDeleteProvider={(providerId) => {
+            if (window.confirm(t("models.deleteProviderConfirm"))) {
+              deleteProviderMutation.mutate(providerId);
+            }
+          }}
           onAddPreset={(preset) => addPresetMutation.mutate(preset.id)}
           t={t}
         />
@@ -489,12 +495,25 @@ interface ProviderColumnProps {
   selectedProviderId: string;
   isLoading: boolean;
   isAdding: boolean;
+  isDeleting: boolean;
   onSelectProvider: (providerId: string) => void;
+  onDeleteProvider: (providerId: string) => void;
   onAddPreset: (preset: ProviderCatalogPreset) => void;
   t: (key: any) => string;
 }
 
-function ProviderColumn({ catalog, providers, selectedProviderId, isLoading, isAdding, onSelectProvider, onAddPreset, t }: ProviderColumnProps) {
+function ProviderColumn({
+  catalog,
+  providers,
+  selectedProviderId,
+  isLoading,
+  isAdding,
+  isDeleting,
+  onSelectProvider,
+  onDeleteProvider,
+  onAddPreset,
+  t
+}: ProviderColumnProps) {
   return (
     <div className="space-y-4">
       <Card>
@@ -512,19 +531,35 @@ function ProviderColumn({ catalog, providers, selectedProviderId, isLoading, isA
             <EmptyLine text={t("models.emptyProviders")} />
           ) : (
             providers.map((provider) => (
-              <button
+              <div
                 key={provider.id}
-                type="button"
-                className={`w-full rounded-md border px-3 py-2 text-left text-sm transition ${
+                className={`flex w-full items-center gap-2 rounded-md border px-3 py-2 text-sm transition ${
                   provider.id === selectedProviderId
                     ? "border-primary bg-primary/10"
                     : "border-border hover:bg-muted"
                 }`}
-                onClick={() => onSelectProvider(provider.id)}
               >
-                <span className="block font-medium">{provider.name}</span>
-                <span className="block truncate text-xs text-muted-foreground">{provider.baseUrl ?? provider.providerKey}</span>
-              </button>
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() => onSelectProvider(provider.id)}
+                >
+                  <span className="block font-medium">{provider.name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{provider.baseUrl ?? provider.providerKey}</span>
+                </button>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+                  disabled={isDeleting}
+                  title={t("models.deleteProviderInlineLabel")}
+                  aria-label={t("models.deleteProviderInlineLabel")}
+                  onClick={() => onDeleteProvider(provider.id)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
             ))
           )}
         </CardContent>
