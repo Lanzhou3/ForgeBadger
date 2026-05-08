@@ -104,6 +104,26 @@ describe("model provider routes", () => {
     assert.match(mismatchedCredential.body.message, /provider/i);
   });
 
+  it("deletes an added provider profile with its models and credentials", async () => {
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+    const providerId = created.body.data.provider.id;
+    await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
+      plaintextSecret: "sk-deepseek"
+    }, authHeaders());
+
+    const deleted = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}`, undefined, authHeaders());
+    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
+
+    assert.equal(deleted.status, 200);
+    assert.equal(deleted.body.code, 0);
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.data.providers.some((provider: { id: string }) => provider.id === providerId), false);
+    assert.equal(listed.body.data.models.some((model: { providerProfileId: string }) => model.providerProfileId === providerId), false);
+    assert.equal(listed.body.data.credentials.some((credential: { providerProfileId: string }) => credential.providerProfileId === providerId), false);
+  });
+
   it("returns envelope errors for invalid custom provider payloads and denied apply roots", async () => {
     const invalidCustom = await makeRequest(app, "POST", "/api/v1/model-providers", {
       name: "Missing fields"
@@ -132,6 +152,8 @@ describe("model provider routes", () => {
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.status.providerApplyEnabled, false);
     assert.equal(res.body.data.status.identitySource, "chatgpt_subscription_sdk");
+    assert.equal(res.body.data.status.sdk.packageName, "@openai/codex-sdk");
+    assert.equal(res.body.data.status.sdk.docsUrl, "https://developers.openai.com/codex/sdk");
   });
 
   function authHeaders(): Record<string, string> {

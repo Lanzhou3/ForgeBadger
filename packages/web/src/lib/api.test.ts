@@ -12,6 +12,7 @@ import {
   createModel,
   createTemplate,
   createSession,
+  deleteModelProvider,
   chooseDefaultRuntimeAdapter,
   isAdapterLaunchable,
   deleteModel,
@@ -122,6 +123,15 @@ describe("api client", () => {
           endpoint: "https://api.anthropic.com",
         }),
       })
+    );
+  });
+
+  it("deletes model provider profiles through REST", async () => {
+    await deleteModelProvider("provider-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1",
+      expect.objectContaining({ method: "DELETE" })
     );
   });
 

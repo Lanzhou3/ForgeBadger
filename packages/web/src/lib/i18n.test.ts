@@ -48,6 +48,9 @@ describe("i18n", () => {
     expect(getTranslation("en", "visibility.sharedDescription")).toContain("local instance");
     expect(getTranslation("zh-CN", "commandPalette.title")).toBe("命令面板");
     expect(getTranslation("en", "sessions.focusMode")).toBe("Focus mode");
+    expect(getTranslation("zh-CN", "models.applyTargets")).toBe("可应用到 CLI");
+    expect(getTranslation("zh-TW", "models.deleteProviderConfirm")).toContain("供應商");
+    expect(getTranslation("en", "models.codexOfficialDocs")).toContain("OpenAI Codex docs");
   });
 
   it("normalizes unsupported language values to Simplified Chinese", () => {

@@ -388,6 +388,12 @@ export interface CodexSubscriptionStatus {
   connectionState: "connected" | "not_connected" | "pending_sdk_connection";
   accountLabel: string | null;
   canUseAppServerIdentity: boolean;
+  sdk: {
+    packageName: string;
+    installed: boolean;
+    docsUrl: string;
+    appServerDocsUrl: string;
+  };
 }
 
 export interface Plugin {
@@ -1533,6 +1539,12 @@ export async function createModelProvider(data: {
     method: "POST",
     body: JSON.stringify(data),
   }) as Promise<{ provider: ProviderProfile; models: ModelProfile[] }>;
+}
+
+export async function deleteModelProvider(providerId: string): Promise<unknown> {
+  return fetchJson(`/api/v1/model-providers/${providerId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function createProviderCredential(

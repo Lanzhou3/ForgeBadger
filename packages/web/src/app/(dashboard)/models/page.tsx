@@ -7,12 +7,14 @@ import {
   CheckCircle2,
   Cloud,
   Database,
+  ExternalLink,
   KeyRound,
   Layers3,
   Play,
   Plus,
   ServerCog,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +36,7 @@ import {
   createModelProvider,
   createProviderCredential,
   createProviderModel,
+  deleteModelProvider,
   getCodexSubscriptionStatus,
   listModelProviders,
   listProviderCatalog,
@@ -165,6 +168,19 @@ export default function ModelsPage() {
     },
   });
 
+  const deleteProviderMutation = useMutation({
+    mutationFn: (providerId: string) => deleteModelProvider(providerId),
+    onSuccess: async (_result, providerId) => {
+      const nextProviderId = providers.find((provider) => provider.id !== providerId)?.id || "";
+      setSelectedProviderId(nextProviderId);
+      setSelectedModelId("");
+      setSelectedCredentialId("");
+      setApplyPreview(null);
+      setNotice(t("models.providerDeleted"));
+      await refreshProviders();
+    },
+  });
+
   const credentialMutation = useMutation({
     mutationFn: () =>
       createProviderCredential(selectedProviderId, {
@@ -255,6 +271,7 @@ export default function ModelsPage() {
     codexStatusQuery.error ??
     addPresetMutation.error ??
     customProviderMutation.error ??
+    deleteProviderMutation.error ??
     credentialMutation.error ??
     modelMutation.error ??
     previewMutation.error ??
@@ -304,7 +321,18 @@ export default function ModelsPage() {
             </CardHeader>
             <CardContent>
               {selectedProvider ? (
-                <ProviderSummary provider={selectedProvider} modelCount={providerModels.length} credentialCount={providerCredentials.length} t={t} />
+                <ProviderSummary
+                  provider={selectedProvider}
+                  modelCount={providerModels.length}
+                  credentialCount={providerCredentials.length}
+                  isDeleting={deleteProviderMutation.isPending}
+                  onDelete={() => {
+                    if (window.confirm(t("models.deleteProviderConfirm"))) {
+                      deleteProviderMutation.mutate(selectedProvider.id);
+                    }
+                  }}
+                  t={t}
+                />
               ) : (
                 <EmptyLine text={t("models.noProviderSelected")} />
               )}
@@ -511,18 +539,20 @@ function ProviderColumn({ catalog, providers, selectedProviderId, isLoading, isA
           {catalog.map((preset) => (
             <div key={preset.id} className="rounded-md border p-3">
               <div className="flex items-start justify-between gap-2">
-                <div>
+                <div className="min-w-0">
                   <div className="font-medium">{preset.name}</div>
-                  <div className="text-xs text-muted-foreground">{preset.apiFormat}</div>
+                  <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{preset.description}</div>
                 </div>
                 <Button size="sm" variant="outline" disabled={isAdding} onClick={() => onAddPreset(preset)}>
                   <Plus className="size-4" />
                 </Button>
               </div>
-              <div className="mt-2 flex flex-wrap gap-1">
-                {preset.supportedAdapters.map((adapter) => (
-                  <Badge key={adapter} variant="outline">{adapter}</Badge>
-                ))}
+              <div className="mt-3 flex flex-wrap gap-1">
+                <Badge variant="outline">{preset.apiFormat}</Badge>
+                <Badge variant="outline">{preset.authType}</Badge>
+                <Badge variant="secondary">
+                  {preset.defaultModels.length} {t("models.modelsWorkspace")}
+                </Badge>
               </div>
             </div>
           ))}
@@ -532,24 +562,41 @@ function ProviderColumn({ catalog, providers, selectedProviderId, isLoading, isA
   );
 }
 
-function ProviderSummary({ provider, modelCount, credentialCount, t }: {
+function ProviderSummary({ provider, modelCount, credentialCount, isDeleting, onDelete, t }: {
   provider: ProviderProfile;
   modelCount: number;
   credentialCount: number;
+  isDeleting: boolean;
+  onDelete: () => void;
   t: (key: any) => string;
 }) {
   return (
-    <div className="grid gap-3 md:grid-cols-4">
-      <SummaryCell label={t("models.providerKey")} value={provider.providerKey} />
-      <SummaryCell label={t("models.apiFormat")} value={provider.apiFormat} />
-      <SummaryCell label={t("models.modelsWorkspace")} value={String(modelCount)} />
-      <SummaryCell label={t("models.credentials")} value={String(credentialCount)} />
-      <div className="md:col-span-4 flex flex-wrap gap-2">
-        {provider.supportedAdapters.map((adapter) => (
-          <Badge key={adapter} variant="secondary">{adapter}</Badge>
-        ))}
-        <Badge variant="outline">{provider.authType}</Badge>
-        {provider.baseUrl && <Badge variant="outline">{provider.baseUrl}</Badge>}
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">{provider.name}</div>
+          <div className="truncate text-xs text-muted-foreground">{provider.baseUrl ?? provider.providerKey}</div>
+        </div>
+        <Button type="button" size="sm" variant="outline" disabled={isDeleting} onClick={onDelete}>
+          <Trash2 className="size-4" />
+          {t("common.delete")}
+        </Button>
+      </div>
+      <div className="grid gap-3 md:grid-cols-4">
+        <SummaryCell label={t("models.providerKey")} value={provider.providerKey} />
+        <SummaryCell label={t("models.apiFormat")} value={provider.apiFormat} />
+        <SummaryCell label={t("models.modelsWorkspace")} value={String(modelCount)} />
+        <SummaryCell label={t("models.credentials")} value={String(credentialCount)} />
+      </div>
+      <div className="space-y-2">
+        <div className="text-xs text-muted-foreground">{t("models.applyTargets")}</div>
+        <div className="flex flex-wrap gap-2">
+          {provider.supportedAdapters.map((adapter) => (
+            <Badge key={adapter} variant="secondary">{adapter === "claude" ? "Claude Code" : "OpenCode"}</Badge>
+          ))}
+          <Badge variant="outline">{provider.authType}</Badge>
+          {provider.baseUrl && <Badge variant="outline">{provider.baseUrl}</Badge>}
+        </div>
       </div>
     </div>
   );
@@ -666,7 +713,16 @@ function ApplyColumn({
   selectedModelId: string;
   selectedCredentialId: string;
   preview: ProviderApplyPreview | null;
-  codexStatus: { connectionState: string; canUseAppServerIdentity: boolean } | undefined;
+  codexStatus: {
+    connectionState: string;
+    canUseAppServerIdentity: boolean;
+    sdk?: {
+      packageName: string;
+      installed: boolean;
+      docsUrl: string;
+      appServerDocsUrl: string;
+    };
+  } | undefined;
   isPreviewing: boolean;
   isApplying: boolean;
   onAdapterChange: (adapter: ProviderApplyAdapter) => void;
@@ -750,9 +806,24 @@ function ApplyColumn({
               <div className="mt-1 text-muted-foreground">
                 {t("models.codexSubscriptionDescription")}
               </div>
-              <Badge className="mt-2" variant="outline">
-                {codexStatus?.connectionState ?? "not_connected"}
-              </Badge>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Badge variant="outline">
+                  {codexStatus?.connectionState ?? "not_connected"}
+                </Badge>
+                <Badge variant={codexStatus?.sdk?.installed ? "secondary" : "outline"}>
+                  {codexStatus?.sdk?.packageName ?? "@openai/codex-sdk"}
+                  {codexStatus?.sdk?.installed ? ` ${t("models.sdkInstalled")}` : ` ${t("models.sdkMissing")}`}
+                </Badge>
+              </div>
+              <a
+                className="mt-3 inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                href={codexStatus?.sdk?.docsUrl ?? "https://developers.openai.com/codex/sdk"}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("models.codexOfficialDocs")}
+                <ExternalLink className="size-3" />
+              </a>
             </div>
           )}
           <div className="grid grid-cols-2 gap-2">

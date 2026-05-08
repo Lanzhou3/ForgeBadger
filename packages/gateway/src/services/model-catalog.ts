@@ -85,7 +85,7 @@ const providerCatalog: ProviderCatalogPreset[] = [
   {
     id: "anthropic",
     name: "Anthropic",
-    description: "Claude API provider for Claude Code.",
+    description: "Anthropic Claude API provider.",
     baseUrl: "https://api.anthropic.com",
     authType: "api_key",
     apiFormat: "anthropic",
@@ -99,7 +99,7 @@ const providerCatalog: ProviderCatalogPreset[] = [
   {
     id: "openai",
     name: "OpenAI",
-    description: "OpenAI API provider for OpenCode-compatible workflows.",
+    description: "OpenAI API provider.",
     baseUrl: "https://api.openai.com/v1",
     authType: "api_key",
     apiFormat: "openai",
