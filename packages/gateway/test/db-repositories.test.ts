@@ -20,6 +20,7 @@ import {
   TemplateRepository,
   UserRepository
 } from "../src/db/repositories/index.js";
+import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -707,13 +708,39 @@ describe("db repositories", () => {
       const m1 = repo.create({ name: "M1", provider: "p", modelId: "m1" });
       const m2 = repo.create({ name: "M2", provider: "p", modelId: "m2" });
 
-      repo.setDefault(m1.id);
-      repo.setDefault(m2.id);
+      assert.ok(repo.setDefault(m1.id));
+      assert.ok(repo.setDefault(m2.id));
 
       const updatedM1 = repo.getById(m1.id);
       const updatedM2 = repo.getById(m2.id);
       assert.equal(updatedM1!.isDefault, false);
       assert.equal(updatedM2!.isDefault, true);
+    });
+
+    it("sets default for provider-backed models without legacy rows", () => {
+      const user = userRepo.create("provider-default@example.com", "hash");
+      const providerRepo = new ModelProviderRepository(db, user.id, "0123456789abcdef0123456789abcdef");
+      const provider = providerRepo.createProviderProfile({
+        name: "DeepSeek",
+        providerKey: "deepseek",
+        baseUrl: "https://api.deepseek.com",
+        authType: "api_key",
+        apiFormat: "openai-compatible",
+        supportedAdapters: ["opencode"]
+      });
+      const model = providerRepo.createModelProfile({
+        providerProfileId: provider.id,
+        name: "DeepSeek Chat",
+        modelId: "deepseek-chat",
+        mirrorLegacy: false
+      });
+      const repo = new ModelRepository(db, user.id);
+
+      const updated = repo.setDefault(model.id);
+
+      assert.ok(updated);
+      assert.equal(updated.id, model.id);
+      assert.equal(updated.isDefault, true);
     });
 
     it("enforces tenant isolation for models", () => {

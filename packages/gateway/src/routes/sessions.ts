@@ -15,6 +15,7 @@ import { validateProjectRoot } from "../lib/safe-resolve.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
 import { SessionRepository, type Session } from "../db/repositories/session-repository.js";
 import { ModelRepository } from "../db/repositories/model-repository.js";
+import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import { ApiKeyRepository } from "../db/repositories/api-key-repository.js";
 import { PluginRepository } from "../db/repositories/plugin-repository.js";
 import type { Database } from "../db/types.js";
@@ -33,11 +34,11 @@ const createSessionSchema = z.object({
   apiKeyId: z.string().min(1).optional(),
   modelId: z.string().min(1).optional()
 }).superRefine((value, ctx) => {
-  if (value.credentialMode === "stored_encrypted_key" && !value.apiKeyId) {
+  if (value.credentialMode === "stored_encrypted_key" && !value.apiKeyId && !value.modelId) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["apiKeyId"],
-      message: "API key is required for stored credentials"
+      message: "API key or provider-backed model is required for stored credentials"
     });
   }
 });
@@ -103,9 +104,9 @@ export function createSessionRoutes(
       }
     }
 
-    if (credentialMode === "stored_encrypted_key") {
+    if (credentialMode === "stored_encrypted_key" && apiKeyId) {
       const apiKeyRepo = new ApiKeyRepository(db, userId, masterKey);
-      if (!apiKeyId || !apiKeyRepo.getById(apiKeyId)) {
+      if (!apiKeyRepo.getById(apiKeyId)) {
         res.status(404).json({ code: 1, message: "API key not found" });
         return;
       }
@@ -577,21 +578,13 @@ export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
   const secretEnvNames: string[] = [];
   let selectedModel: AdapterModelSelection | undefined;
 
-  if (input.credentialMode === "stored_encrypted_key") {
-    if (!input.apiKeyId) {
-      throw new Error("API key is required for stored credentials");
-    }
-    const apiKeyRepo = new ApiKeyRepository(input.db, input.userId, input.masterKey);
-    const record = apiKeyRepo.getById(input.apiKeyId);
-    if (!record) {
-      throw new Error("API key not found");
-    }
-    const secretName = apiKeyEnvName(record.provider);
-    env[secretName] = apiKeyRepo.decryptForLaunch(input.apiKeyId);
-    secretEnvNames.push(secretName);
+  if (input.credentialMode === "stored_encrypted_key" && input.adapter !== "codex") {
+    const credential = resolveStoredCredential(input);
+    env[credential.envName] = credential.secret;
+    secretEnvNames.push(credential.envName);
   }
 
-  if (input.modelId) {
+  if (input.modelId && input.adapter !== "codex") {
     const model = new ModelRepository(input.db, input.userId).getById(input.modelId);
     if (!model) {
       throw new Error("Model not found");
@@ -601,8 +594,6 @@ export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
       env.ANTHROPIC_MODEL = model.modelId;
     } else if (input.adapter === "opencode") {
       env.OPENCODE_MODEL = model.modelId.includes("/") ? model.modelId : `${model.provider}/${model.modelId}`;
-    } else {
-      env.CODEX_MODEL = model.modelId;
     }
   }
 
@@ -615,6 +606,37 @@ export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
     model: selectedModel,
     pluginDirs: input.pluginDirs
   });
+}
+
+function resolveStoredCredential(input: LaunchPlanInput): { envName: string; secret: string } {
+  if (input.apiKeyId) {
+    const apiKeyRepo = new ApiKeyRepository(input.db, input.userId, input.masterKey);
+    const record = apiKeyRepo.getById(input.apiKeyId);
+    if (!record) {
+      throw new Error("API key not found");
+    }
+    return {
+      envName: apiKeyEnvName(record.provider),
+      secret: apiKeyRepo.decryptForLaunch(input.apiKeyId)
+    };
+  }
+
+  if (input.modelId) {
+    const providerRepo = new ModelProviderRepository(input.db, input.userId, input.masterKey);
+    const model = providerRepo.getModelProfile(input.modelId);
+    if (model) {
+      const credential = providerRepo.listCredentials(model.providerProfileId)[0];
+      if (!credential) {
+        throw new Error("Provider credential not found");
+      }
+      return {
+        envName: apiKeyEnvName(model.providerKey),
+        secret: providerRepo.decryptCredential(credential.id)
+      };
+    }
+  }
+
+  throw new Error("API key is required for stored credentials");
 }
 
 export async function prepareClaudeLaunchExtras(

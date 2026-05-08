@@ -41,6 +41,18 @@ interface ProjectResponseBody {
   };
 }
 
+interface ProviderResponseBody {
+  data: {
+    provider: {
+      id: string;
+    };
+    models: Array<{
+      id: string;
+      modelId: string;
+    }>;
+  };
+}
+
 function createTestDb(): Database {
   const db = new Database(":memory:");
   db.pragma("journal_mode = WAL");
@@ -177,6 +189,56 @@ describe("session adapter decoupling", () => {
     assert.equal(sessionData.data.session.aiTool, "codex");
     assert.equal(tmuxCreates.at(-1)?.command, "codex");
     assert.equal(tmuxCreates.at(-1)?.cwd, rootPath);
+  });
+
+  it("launches provider-backed OpenCode sessions without a legacy api key id", async () => {
+    const token = await register("adapter-provider-credential@example.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-provider-session-"));
+
+    const providerRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({ catalogId: "deepseek" })
+    });
+    const providerData = await providerRes.json() as ProviderResponseBody;
+    assert.equal(providerRes.status, 201);
+
+    const credentialRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerData.data.provider.id}/credentials`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({ plaintextSecret: "provider-secret" })
+    });
+    assert.equal(credentialRes.status, 201);
+
+    const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        name: "Provider Credential Project",
+        path: rootPath,
+        aiTool: "opencode"
+      })
+    });
+    const projectData = await projectRes.json() as ProjectResponseBody;
+    assert.equal(projectRes.status, 201);
+
+    const sessionRes = await fetch(`${baseUrl}/api/v1/sessions`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        projectId: projectData.data.project.id,
+        credentialMode: "stored_encrypted_key",
+        aiTool: "opencode",
+        modelId: providerData.data.models[0]?.id
+      })
+    });
+    const sessionData = await sessionRes.json() as { data: { session: { aiTool: string } } };
+
+    assert.equal(sessionRes.status, 201);
+    assert.equal(sessionData.data.session.aiTool, "opencode");
+    assert.equal(tmuxCreates.at(-1)?.command, "opencode");
+    assert.deepEqual(tmuxCreates.at(-1)?.args, ["--model", "deepseek/deepseek-chat"]);
+    assert.equal(tmuxCreates.at(-1)?.env.DEEPSEEK_API_KEY, "provider-secret");
   });
 });
 

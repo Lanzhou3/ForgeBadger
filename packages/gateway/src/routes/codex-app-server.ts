@@ -2,8 +2,6 @@ import { Router, type Response } from "express";
 import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
-import { ApiKeyRepository } from "../db/repositories/api-key-repository.js";
-import { ModelRepository } from "../db/repositories/model-repository.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
 import type { Database } from "../db/types.js";
 import type { CredentialMode } from "../adapters/claude.js";
@@ -193,40 +191,11 @@ type LaunchEnvResult =
   | { ok: false; status: number; message: string };
 
 function buildLaunchEnv(
-  options: CodexAppServerRoutesOptions,
-  userId: string,
-  input: StartAppServerInput
+  _options: CodexAppServerRoutesOptions,
+  _userId: string,
+  _input: StartAppServerInput
 ): LaunchEnvResult {
-  const env: Record<string, string> = {};
-  const secretEnvNames: string[] = [];
-
-  if (input.credentialMode === "stored_encrypted_key") {
-    if (!options.masterKey) {
-      return { ok: false, status: 400, message: "Stored credential mode is not configured" };
-    }
-    if (!input.apiKeyId) {
-      return { ok: false, status: 404, message: "API key not found" };
-    }
-
-    const apiKeyRepo = new ApiKeyRepository(options.db, userId, options.masterKey);
-    const record = apiKeyRepo.getById(input.apiKeyId);
-    if (!record) {
-      return { ok: false, status: 404, message: "API key not found" };
-    }
-    const secretName = apiKeyEnvName(record.provider);
-    env[secretName] = apiKeyRepo.decryptForLaunch(input.apiKeyId);
-    secretEnvNames.push(secretName);
-  }
-
-  if (input.modelId) {
-    const model = new ModelRepository(options.db, userId).getById(input.modelId);
-    if (!model) {
-      return { ok: false, status: 404, message: "Model not found" };
-    }
-    env.CODEX_MODEL = model.modelId;
-  }
-
-  return { ok: true, env, secretEnvNames };
+  return { ok: true, env: {}, secretEnvNames: [] };
 }
 
 function recordAppServerActivity(
@@ -280,13 +249,6 @@ function sendRpcError(res: Response, error: unknown): void {
     return;
   }
   res.status(409).json({ code: 1, message });
-}
-
-function apiKeyEnvName(provider: string): string {
-  const normalized = provider.trim().toLowerCase();
-  if (normalized === "anthropic") return "ANTHROPIC_API_KEY";
-  if (normalized === "openai") return "OPENAI_API_KEY";
-  return `${normalized.replace(/[^a-z0-9]+/g, "_").toUpperCase()}_API_KEY`;
 }
 
 export class AppServerTurnRateLimiter {

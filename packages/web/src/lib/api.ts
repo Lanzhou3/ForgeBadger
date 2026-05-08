@@ -319,6 +319,77 @@ export interface ModelGroup {
   models: Model[];
 }
 
+export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
+export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
+export type ProviderApplyAdapter = "claude" | "opencode" | "codex";
+
+export interface ProviderCatalogModel {
+  id: string;
+  name: string;
+  modelId: string;
+  capabilities: string[];
+  contextWindow?: number;
+}
+
+export interface ProviderCatalogPreset {
+  id: string;
+  name: string;
+  description: string;
+  baseUrl: string;
+  authType: ProviderAuthType;
+  apiFormat: ProviderApiFormat;
+  supportedAdapters: Array<"claude" | "opencode">;
+  defaultModels: ProviderCatalogModel[];
+}
+
+export interface ProviderProfile {
+  id: string;
+  providerKey: string;
+  name: string;
+  baseUrl: string | null;
+  authType: ProviderAuthType;
+  apiFormat: ProviderApiFormat;
+  supportedAdapters: Array<"claude" | "opencode">;
+  status: string;
+}
+
+export interface ModelProfile {
+  id: string;
+  providerProfileId: string;
+  providerKey: string;
+  providerName: string;
+  baseUrl: string | null;
+  name: string;
+  modelId: string;
+  capabilities: string[];
+  status: string;
+  isDefault: boolean;
+}
+
+export interface ProviderCredentialSummary {
+  id: string;
+  providerProfileId: string;
+  label: string | null;
+  status: string;
+  secretPreview: string;
+}
+
+export interface ProviderApplyPreview {
+  adapter: ProviderApplyAdapter;
+  env: Record<string, string>;
+  secretEnvNames: string[];
+  changedFiles: Array<{ relativePath: string; operation: "create" | "update" }>;
+  backupPath?: string;
+}
+
+export interface CodexSubscriptionStatus {
+  providerApplyEnabled: boolean;
+  identitySource: "chatgpt_subscription_sdk";
+  connectionState: "connected" | "not_connected" | "pending_sdk_connection";
+  accountLabel: string | null;
+  canUseAppServerIdentity: boolean;
+}
+
 export interface Plugin {
   id: string;
   name: string;
@@ -1431,6 +1502,81 @@ export async function checkModelEndpointHealth(
     method: "POST",
     body: JSON.stringify({ timeoutMs }),
   }) as Promise<{ health: ModelEndpointHealth }>;
+}
+
+export async function listProviderCatalog(): Promise<{ providers: ProviderCatalogPreset[] }> {
+  return fetchJson("/api/v1/model-providers/catalog") as Promise<{ providers: ProviderCatalogPreset[] }>;
+}
+
+export async function listModelProviders(): Promise<{
+  providers: ProviderProfile[];
+  models: ModelProfile[];
+  credentials: ProviderCredentialSummary[];
+}> {
+  return fetchJson("/api/v1/model-providers") as Promise<{
+    providers: ProviderProfile[];
+    models: ModelProfile[];
+    credentials: ProviderCredentialSummary[];
+  }>;
+}
+
+export async function createModelProvider(data: {
+  catalogId?: string;
+  name?: string;
+  providerKey?: string;
+  baseUrl?: string;
+  authType?: ProviderAuthType;
+  apiFormat?: ProviderApiFormat;
+  supportedAdapters?: Array<"claude" | "opencode">;
+}): Promise<{ provider: ProviderProfile; models: ModelProfile[] }> {
+  return fetchJson("/api/v1/model-providers", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ provider: ProviderProfile; models: ModelProfile[] }>;
+}
+
+export async function createProviderCredential(
+  providerId: string,
+  data: { label?: string; plaintextSecret: string }
+): Promise<{ credential: ProviderCredentialSummary }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/credentials`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ credential: ProviderCredentialSummary }>;
+}
+
+export async function createProviderModel(
+  providerId: string,
+  data: { name: string; modelId: string; capabilities?: string[]; isDefault?: boolean }
+): Promise<{ model: ModelProfile }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/models`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ model: ModelProfile }>;
+}
+
+export async function previewProviderApply(
+  providerId: string,
+  data: { adapter: ProviderApplyAdapter; projectRoot: string; modelProfileId?: string; credentialId?: string }
+): Promise<{ preview: ProviderApplyPreview }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/preview-apply`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ preview: ProviderApplyPreview }>;
+}
+
+export async function applyProviderConfig(
+  providerId: string,
+  data: { adapter: ProviderApplyAdapter; projectRoot: string; modelProfileId?: string; credentialId?: string }
+): Promise<{ result: ProviderApplyPreview }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/apply`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ result: ProviderApplyPreview }>;
+}
+
+export async function getCodexSubscriptionStatus(): Promise<{ status: CodexSubscriptionStatus }> {
+  return fetchJson("/api/v1/codex/subscription/status") as Promise<{ status: CodexSubscriptionStatus }>;
 }
 
 export async function listApiKeys(): Promise<{ apiKeys: ApiKeySummary[] }> {
