@@ -12,7 +12,9 @@ import {
   createModel,
   createTemplate,
   createSession,
+  deleteProviderCredential,
   deleteModelProvider,
+  deleteProviderModel,
   chooseDefaultRuntimeAdapter,
   isAdapterLaunchable,
   deleteModel,
@@ -51,6 +53,9 @@ import {
   listSkillSources,
   syncLocalSkills,
   syncProviderModels,
+  rotateProviderCredential,
+  setDefaultProviderModel,
+  updateProviderModel,
   listPlugins,
   refreshCatalog,
   restoreTemplateVersion,
@@ -145,6 +150,56 @@ describe("api client", () => {
         method: "POST",
         body: JSON.stringify({ credentialId: "credential-1" }),
       })
+    );
+  });
+
+  it("manages provider model profiles through REST", async () => {
+    await updateProviderModel("provider-1", "model-1", {
+      name: "Updated",
+      capabilities: ["chat", "reasoning"],
+    });
+    await setDefaultProviderModel("provider-1", "model-1");
+    await deleteProviderModel("provider-1", "model-1");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/model-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ name: "Updated", capabilities: ["chat", "reasoning"] }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/model-1/set-default",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/model-1",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("manages provider credentials through REST", async () => {
+    await rotateProviderCredential("provider-1", "credential-1", {
+      label: "new",
+      plaintextSecret: "sk-new",
+    });
+    await deleteProviderCredential("provider-1", "credential-1");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/credentials/credential-1/rotate",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ label: "new", plaintextSecret: "sk-new" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/credentials/credential-1",
+      expect.objectContaining({ method: "DELETE" })
     );
   });
 

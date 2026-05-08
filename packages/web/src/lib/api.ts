@@ -1568,6 +1568,23 @@ export async function createProviderCredential(
   }) as Promise<{ credential: ProviderCredentialSummary }>;
 }
 
+export async function rotateProviderCredential(
+  providerId: string,
+  credentialId: string,
+  data: { label?: string; plaintextSecret: string }
+): Promise<{ credential: ProviderCredentialSummary }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/credentials/${credentialId}/rotate`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ credential: ProviderCredentialSummary }>;
+}
+
+export async function deleteProviderCredential(providerId: string, credentialId: string): Promise<unknown> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/credentials/${credentialId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function createProviderModel(
   providerId: string,
   data: { name: string; modelId: string; capabilities?: string[]; isDefault?: boolean }
@@ -1576,6 +1593,29 @@ export async function createProviderModel(
     method: "POST",
     body: JSON.stringify(data),
   }) as Promise<{ model: ModelProfile }>;
+}
+
+export async function updateProviderModel(
+  providerId: string,
+  modelId: string,
+  data: { name?: string; modelId?: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean }
+): Promise<{ model: ModelProfile }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/models/${modelId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  }) as Promise<{ model: ModelProfile }>;
+}
+
+export async function setDefaultProviderModel(providerId: string, modelId: string): Promise<{ model: ModelProfile }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/models/${modelId}/set-default`, {
+    method: "POST",
+  }) as Promise<{ model: ModelProfile }>;
+}
+
+export async function deleteProviderModel(providerId: string, modelId: string): Promise<unknown> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/models/${modelId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function syncProviderModels(

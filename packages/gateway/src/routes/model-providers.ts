@@ -10,7 +10,8 @@ import {
   type ProviderAdapter,
   type ProviderApiFormat,
   type ProviderAuthType,
-  type ProviderProfile
+  type ProviderProfile,
+  type UpdateModelProfileInput
 } from "../db/repositories/model-provider-repository.js";
 import type { Database } from "../db/types.js";
 import {
@@ -48,10 +49,12 @@ const createModelProfileSchema = z.object({
   contextWindow: z.number().int().positive().optional(),
   isDefault: z.boolean().optional()
 });
+const updateModelProfileSchema = createModelProfileSchema.partial();
 const createCredentialSchema = z.object({
   label: z.string().optional(),
   plaintextSecret: z.string().min(1)
 });
+const rotateCredentialSchema = createCredentialSchema;
 const applySchema = z.object({
   adapter: adapterSchema,
   projectRoot: z.string().min(1),
@@ -219,6 +222,74 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     }
   });
 
+  router.patch("/:id/models/:modelId", (req, res) => {
+    const parseResult = updateModelProfileSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid model profile payload" });
+      return;
+    }
+    const repo = repoFor(db, masterKey, req);
+    if (!repo.getProviderProfile(req.params.id)) {
+      res.status(404).json({ code: 1, message: "Provider not found" });
+      return;
+    }
+    const model = repo.getModelProfile(req.params.modelId);
+    if (!model) {
+      res.status(404).json({ code: 1, message: "Model not found" });
+      return;
+    }
+    if (model.providerProfileId !== req.params.id) {
+      res.status(400).json({ code: 1, message: "Model does not belong to the selected provider" });
+      return;
+    }
+    const updateInput: UpdateModelProfileInput = {};
+    if (parseResult.data.name !== undefined) updateInput.name = parseResult.data.name;
+    if (parseResult.data.modelId !== undefined) updateInput.modelId = parseResult.data.modelId;
+    if (parseResult.data.capabilities !== undefined) updateInput.capabilities = parseResult.data.capabilities;
+    if (parseResult.data.contextWindow !== undefined) updateInput.contextWindow = parseResult.data.contextWindow;
+    if (parseResult.data.isDefault !== undefined) updateInput.isDefault = parseResult.data.isDefault;
+    const updated = repo.updateModelProfile(model.id, updateInput);
+    res.json({ code: 0, data: { model: updated }, message: "" });
+  });
+
+  router.post("/:id/models/:modelId/set-default", (req, res) => {
+    const repo = repoFor(db, masterKey, req);
+    if (!repo.getProviderProfile(req.params.id)) {
+      res.status(404).json({ code: 1, message: "Provider not found" });
+      return;
+    }
+    const model = repo.getModelProfile(req.params.modelId);
+    if (!model) {
+      res.status(404).json({ code: 1, message: "Model not found" });
+      return;
+    }
+    if (model.providerProfileId !== req.params.id) {
+      res.status(400).json({ code: 1, message: "Model does not belong to the selected provider" });
+      return;
+    }
+    const updated = repo.setDefaultModel(model.id);
+    res.json({ code: 0, data: { model: updated }, message: "" });
+  });
+
+  router.delete("/:id/models/:modelId", (req, res) => {
+    const repo = repoFor(db, masterKey, req);
+    if (!repo.getProviderProfile(req.params.id)) {
+      res.status(404).json({ code: 1, message: "Provider not found" });
+      return;
+    }
+    const model = repo.getModelProfile(req.params.modelId);
+    if (!model) {
+      res.status(404).json({ code: 1, message: "Model not found" });
+      return;
+    }
+    if (model.providerProfileId !== req.params.id) {
+      res.status(400).json({ code: 1, message: "Model does not belong to the selected provider" });
+      return;
+    }
+    repo.deleteModelProfile(model.id);
+    res.json({ code: 0, data: {}, message: "" });
+  });
+
   router.post("/:id/credentials", (req, res) => {
     const parseResult = createCredentialSchema.safeParse(req.body ?? {});
     if (!parseResult.success) {
@@ -231,6 +302,52 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       plaintextSecret: parseResult.data.plaintextSecret
     });
     res.status(201).json({ code: 0, data: { credential }, message: "" });
+  });
+
+  router.post("/:id/credentials/:credentialId/rotate", (req, res) => {
+    const parseResult = rotateCredentialSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid credential payload" });
+      return;
+    }
+    const repo = repoFor(db, masterKey, req);
+    if (!repo.getProviderProfile(req.params.id)) {
+      res.status(404).json({ code: 1, message: "Provider not found" });
+      return;
+    }
+    const credential = repo.getCredential(req.params.credentialId);
+    if (!credential) {
+      res.status(404).json({ code: 1, message: "Credential not found" });
+      return;
+    }
+    if (credential.providerProfileId !== req.params.id) {
+      res.status(400).json({ code: 1, message: "Credential does not belong to the selected provider" });
+      return;
+    }
+    const updated = repo.rotateCredential(credential.id, {
+      ...(parseResult.data.label ? { label: parseResult.data.label } : {}),
+      plaintextSecret: parseResult.data.plaintextSecret
+    });
+    res.json({ code: 0, data: { credential: updated }, message: "" });
+  });
+
+  router.delete("/:id/credentials/:credentialId", (req, res) => {
+    const repo = repoFor(db, masterKey, req);
+    if (!repo.getProviderProfile(req.params.id)) {
+      res.status(404).json({ code: 1, message: "Provider not found" });
+      return;
+    }
+    const credential = repo.getCredential(req.params.credentialId);
+    if (!credential) {
+      res.status(404).json({ code: 1, message: "Credential not found" });
+      return;
+    }
+    if (credential.providerProfileId !== req.params.id) {
+      res.status(400).json({ code: 1, message: "Credential does not belong to the selected provider" });
+      return;
+    }
+    repo.deleteCredential(credential.id);
+    res.json({ code: 0, data: {}, message: "" });
   });
 
   router.post("/:id/test", async (req, res) => {

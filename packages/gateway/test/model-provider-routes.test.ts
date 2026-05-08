@@ -13,6 +13,7 @@ import { beforeEach, describe, it } from "node:test";
 import { signJwt } from "../src/auth/jwt.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createModelProviderRoutes } from "../src/routes/model-providers.js";
+import { createModelRoutes } from "../src/routes/models.js";
 import { createCodexSubscriptionRoutes } from "../src/routes/codex-subscription.js";
 import type { FetchProviderModelsInput } from "../src/services/provider-model-fetch.js";
 
@@ -42,6 +43,7 @@ describe("model provider routes", () => {
     app = express();
     app.locals.jwtSecret = secret;
     app.use(express.json());
+    app.use("/api/v1/models", createModelRoutes(db));
     app.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey));
     app.use("/api/v1/codex/subscription", createCodexSubscriptionRoutes());
   });
@@ -179,6 +181,84 @@ describe("model provider routes", () => {
       synced.body.data.models.map((model: { modelId: string }) => model.modelId),
       ["deepseek-v4-flash", "deepseek-v4-pro"]
     );
+  });
+
+  it("manages provider-scoped model defaults, updates, and deletion", async () => {
+    const deepseek = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+    const openai = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "openai"
+    }, authHeaders());
+    const providerId = deepseek.body.data.provider.id;
+    const modelA = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "DeepSeek Chat",
+      modelId: "deepseek-chat",
+      isDefault: true
+    }, authHeaders());
+    const modelB = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "DeepSeek Reasoner",
+      modelId: "deepseek-reasoner"
+    }, authHeaders());
+    const foreignModel = await makeRequest(app, "POST", `/api/v1/model-providers/${openai.body.data.provider.id}/models`, {
+      name: "GPT",
+      modelId: "gpt-test"
+    }, authHeaders());
+
+    const updated = await makeRequest(app, "PATCH", `/api/v1/model-providers/${providerId}/models/${modelB.body.data.model.id}`, {
+      name: "DeepSeek Reasoner Updated",
+      capabilities: ["chat", "reasoning"]
+    }, authHeaders());
+    const defaulted = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models/${modelB.body.data.model.id}/set-default`, undefined, authHeaders());
+    const mismatchedDelete = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}/models/${foreignModel.body.data.model.id}`, undefined, authHeaders());
+    const deleted = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}/models/${modelA.body.data.model.id}`, undefined, authHeaders());
+    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
+    const legacyModels = await makeRequest(app, "GET", "/api/v1/models", undefined, authHeaders());
+
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.data.model.name, "DeepSeek Reasoner Updated");
+    assert.deepEqual(updated.body.data.model.capabilities, ["chat", "reasoning"]);
+    assert.equal(defaulted.status, 200);
+    assert.equal(defaulted.body.data.model.isDefault, true);
+    assert.equal(mismatchedDelete.status, 400);
+    assert.match(mismatchedDelete.body.message, /provider/i);
+    assert.equal(deleted.status, 200);
+    assert.equal(listed.body.data.models.some((model: { id: string }) => model.id === modelA.body.data.model.id), false);
+    assert.equal(legacyModels.body.data.models.some((model: { id: string }) => model.id === modelA.body.data.model.id), false);
+    assert.equal(legacyModels.body.data.models.find((model: { id: string }) => model.id === modelB.body.data.model.id)?.isDefault, true);
+  });
+
+  it("deletes and rotates credentials only within the selected provider", async () => {
+    const deepseek = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+    const openai = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "openai"
+    }, authHeaders());
+    const providerId = deepseek.body.data.provider.id;
+    const credential = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
+      label: "old",
+      plaintextSecret: "sk-old"
+    }, authHeaders());
+    const foreignCredential = await makeRequest(app, "POST", `/api/v1/model-providers/${openai.body.data.provider.id}/credentials`, {
+      plaintextSecret: "sk-foreign"
+    }, authHeaders());
+
+    const rotated = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/credentials/${credential.body.data.credential.id}/rotate`, {
+      label: "new",
+      plaintextSecret: "sk-new"
+    }, authHeaders());
+    const mismatchedDelete = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}/credentials/${foreignCredential.body.data.credential.id}`, undefined, authHeaders());
+    const deleted = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}/credentials/${credential.body.data.credential.id}`, undefined, authHeaders());
+    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
+
+    assert.equal(rotated.status, 200);
+    assert.equal(rotated.body.data.credential.label, "new");
+    assert.equal(rotated.body.data.credential.secretPreview, "********");
+    assert.equal(mismatchedDelete.status, 400);
+    assert.match(mismatchedDelete.body.message, /provider/i);
+    assert.equal(deleted.status, 200);
+    assert.equal(listed.body.data.credentials.some((item: { id: string }) => item.id === credential.body.data.credential.id), false);
   });
 
   it("returns envelope errors for invalid custom provider payloads and denied apply roots", async () => {

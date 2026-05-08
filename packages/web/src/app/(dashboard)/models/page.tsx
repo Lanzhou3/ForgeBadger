@@ -37,12 +37,17 @@ import {
   createModelProvider,
   createProviderCredential,
   createProviderModel,
+  deleteProviderCredential,
+  deleteProviderModel,
   deleteModelProvider,
   getCodexSubscriptionStatus,
   listModelProviders,
   listProviderCatalog,
   previewProviderApply,
+  rotateProviderCredential,
+  setDefaultProviderModel,
   syncProviderModels,
+  updateProviderModel,
   type ModelProfile,
   type ProviderApplyAdapter,
   type ProviderApplyPreview,
@@ -132,6 +137,14 @@ export default function ModelsPage() {
     () => credentials.filter((credential) => credential.providerProfileId === selectedProviderId),
     [credentials, selectedProviderId]
   );
+  const selectedModel = useMemo(
+    () => providerModels.find((model) => model.id === selectedModelId),
+    [providerModels, selectedModelId]
+  );
+  const selectedCredential = useMemo(
+    () => providerCredentials.find((credential) => credential.id === selectedCredentialId),
+    [providerCredentials, selectedCredentialId]
+  );
 
   useEffect(() => {
     setSelectedModelId((current) =>
@@ -142,6 +155,24 @@ export default function ModelsPage() {
     );
     setApplyPreview(null);
   }, [providerModels, providerCredentials]);
+
+  useEffect(() => {
+    if (selectedModel) {
+      setModelForm({
+        name: selectedModel.name,
+        modelId: selectedModel.modelId,
+        capabilities: selectedModel.capabilities.join(","),
+      });
+    } else {
+      setModelForm(emptyModel);
+    }
+  }, [selectedModel]);
+
+  useEffect(() => {
+    if (selectedCredential) {
+      setCredentialForm((form) => ({ ...form, label: selectedCredential.label ?? "" }));
+    }
+  }, [selectedCredential]);
 
   const addPresetMutation = useMutation({
     mutationFn: (catalogId: string) => createModelProvider({ catalogId }),
@@ -197,6 +228,33 @@ export default function ModelsPage() {
     },
   });
 
+  const rotateCredentialMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedCredentialId) throw new Error(t("models.credentialRequired"));
+      return rotateProviderCredential(selectedProviderId, selectedCredentialId, {
+        label: credentialForm.label.trim() || undefined,
+        plaintextSecret: credentialForm.plaintextSecret,
+      });
+    },
+    onSuccess: async (result) => {
+      setCredentialForm(emptyCredential);
+      setSelectedCredentialId(result.credential.id);
+      setNotice(t("models.credentialRotated"));
+      await refreshProviders();
+    },
+  });
+
+  const deleteCredentialMutation = useMutation({
+    mutationFn: (credentialId: string) => deleteProviderCredential(selectedProviderId, credentialId),
+    onSuccess: async (_result, credentialId) => {
+      const nextCredentialId = providerCredentials.find((credential) => credential.id !== credentialId)?.id || "";
+      setSelectedCredentialId(nextCredentialId);
+      setCredentialForm(emptyCredential);
+      setNotice(t("models.credentialDeleted"));
+      await refreshProviders();
+    },
+  });
+
   const modelMutation = useMutation({
     mutationFn: () =>
       createProviderModel(selectedProviderId, {
@@ -211,6 +269,45 @@ export default function ModelsPage() {
       setModelForm(emptyModel);
       setSelectedModelId(result.model.id);
       setNotice(t("models.modelProfileSaved"));
+      await refreshProviders();
+    },
+  });
+
+  const updateModelMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedModelId) throw new Error(t("models.modelRequired"));
+      return updateProviderModel(selectedProviderId, selectedModelId, {
+        name: modelForm.name.trim(),
+        modelId: modelForm.modelId.trim(),
+        capabilities: modelForm.capabilities
+          .split(",")
+          .map((capability) => capability.trim())
+          .filter(Boolean),
+      });
+    },
+    onSuccess: async (result) => {
+      setSelectedModelId(result.model.id);
+      setNotice(t("models.updated"));
+      await refreshProviders();
+    },
+  });
+
+  const deleteModelMutation = useMutation({
+    mutationFn: (modelId: string) => deleteProviderModel(selectedProviderId, modelId),
+    onSuccess: async (_result, modelId) => {
+      const nextModelId = providerModels.find((model) => model.id !== modelId)?.id || "";
+      setSelectedModelId(nextModelId);
+      setModelForm(nextModelId ? modelForm : emptyModel);
+      setNotice(t("models.deleted"));
+      await refreshProviders();
+    },
+  });
+
+  const setDefaultModelMutation = useMutation({
+    mutationFn: (modelId: string) => setDefaultProviderModel(selectedProviderId, modelId),
+    onSuccess: async (result) => {
+      setSelectedModelId(result.model.id);
+      setNotice(t("models.defaultUpdated"));
       await refreshProviders();
     },
   });
@@ -277,7 +374,11 @@ export default function ModelsPage() {
 
   function submitModel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    modelMutation.mutate();
+    if (selectedModelId) {
+      updateModelMutation.mutate();
+    } else {
+      modelMutation.mutate();
+    }
   }
 
   const currentError =
@@ -288,7 +389,12 @@ export default function ModelsPage() {
     customProviderMutation.error ??
     deleteProviderMutation.error ??
     credentialMutation.error ??
+    rotateCredentialMutation.error ??
+    deleteCredentialMutation.error ??
     modelMutation.error ??
+    updateModelMutation.error ??
+    deleteModelMutation.error ??
+    setDefaultModelMutation.error ??
     syncModelsMutation.error ??
     previewMutation.error ??
     applyMutation.error;
@@ -403,7 +509,7 @@ export default function ModelsPage() {
               <CardDescription>{t("models.credentialsDescription")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto]" onSubmit={submitCredential}>
+              <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto_auto]" onSubmit={submitCredential}>
                 <Input
                   placeholder={t("models.credentialLabel")}
                   value={credentialForm.label}
@@ -422,11 +528,26 @@ export default function ModelsPage() {
                   <Plus className="size-4" />
                   {t("models.saveCredential")}
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!selectedCredentialId || !credentialForm.plaintextSecret || rotateCredentialMutation.isPending}
+                  onClick={() => rotateCredentialMutation.mutate()}
+                >
+                  <RefreshCw className="size-4" />
+                  {t("models.rotateSelectedCredential")}
+                </Button>
               </form>
               <CredentialTable
                 credentials={providerCredentials}
                 selectedCredentialId={selectedCredentialId}
                 onSelectCredential={setSelectedCredentialId}
+                onDeleteCredential={(credentialId) => {
+                  if (window.confirm(t("models.deleteCredentialConfirm"))) {
+                    deleteCredentialMutation.mutate(credentialId);
+                  }
+                }}
+                isDeleting={deleteCredentialMutation.isPending}
                 t={t}
               />
             </CardContent>
@@ -441,7 +562,7 @@ export default function ModelsPage() {
               <CardDescription>{t("models.modelsWorkspaceDescription")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]" onSubmit={submitModel}>
+              <form className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto_auto]" onSubmit={submitModel}>
                 <Input
                   placeholder={t("common.name")}
                   value={modelForm.name}
@@ -462,9 +583,24 @@ export default function ModelsPage() {
                   onChange={(event) => setModelForm((form) => ({ ...form, capabilities: event.target.value }))}
                   disabled={!selectedProvider}
                 />
-                <Button type="submit" disabled={!selectedProvider || modelMutation.isPending}>
+                <Button
+                  type="submit"
+                  disabled={!selectedProvider || modelMutation.isPending || updateModelMutation.isPending}
+                >
+                  {selectedModelId ? <CheckCircle2 className="size-4" /> : <Plus className="size-4" />}
+                  {selectedModelId ? t("models.saveModel") : t("models.addModel")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!selectedProvider}
+                  onClick={() => {
+                    setSelectedModelId("");
+                    setModelForm(emptyModel);
+                  }}
+                >
                   <Plus className="size-4" />
-                  {t("models.addModel")}
+                  {t("models.newModel")}
                 </Button>
               </form>
               <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm">
@@ -487,6 +623,14 @@ export default function ModelsPage() {
                 models={providerModels}
                 selectedModelId={selectedModelId}
                 onSelectModel={setSelectedModelId}
+                onSetDefault={(modelId) => setDefaultModelMutation.mutate(modelId)}
+                onDeleteModel={(modelId) => {
+                  if (window.confirm(t("models.deleteModelConfirm"))) {
+                    deleteModelMutation.mutate(modelId);
+                  }
+                }}
+                isSettingDefault={setDefaultModelMutation.isPending}
+                isDeleting={deleteModelMutation.isPending}
                 t={t}
               />
             </CardContent>
@@ -680,10 +824,12 @@ function SummaryCell({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CredentialTable({ credentials, selectedCredentialId, onSelectCredential, t }: {
+function CredentialTable({ credentials, selectedCredentialId, onSelectCredential, onDeleteCredential, isDeleting, t }: {
   credentials: ProviderCredentialSummary[];
   selectedCredentialId: string;
   onSelectCredential: (credentialId: string) => void;
+  onDeleteCredential: (credentialId: string) => void;
+  isDeleting: boolean;
   t: (key: any) => string;
 }) {
   if (credentials.length === 0) return <EmptyLine text={t("models.emptyCredentials")} />;
@@ -694,6 +840,7 @@ function CredentialTable({ credentials, selectedCredentialId, onSelectCredential
           <TableHead>{t("common.name")}</TableHead>
           <TableHead>{t("models.apiKey")}</TableHead>
           <TableHead>{t("common.status")}</TableHead>
+          <TableHead className="w-12" />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -706,6 +853,23 @@ function CredentialTable({ credentials, selectedCredentialId, onSelectCredential
             <TableCell className="font-medium">{credential.label ?? t("models.unnamedCredential")}</TableCell>
             <TableCell className="font-mono text-xs">{credential.secretPreview}</TableCell>
             <TableCell><Badge variant="outline">{credential.status}</Badge></TableCell>
+            <TableCell>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-8 text-muted-foreground hover:text-destructive"
+                disabled={isDeleting}
+                title={t("models.deleteCredential")}
+                aria-label={t("models.deleteCredential")}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeleteCredential(credential.id);
+                }}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -713,10 +877,14 @@ function CredentialTable({ credentials, selectedCredentialId, onSelectCredential
   );
 }
 
-function ModelProfileTable({ models, selectedModelId, onSelectModel, t }: {
+function ModelProfileTable({ models, selectedModelId, onSelectModel, onSetDefault, onDeleteModel, isSettingDefault, isDeleting, t }: {
   models: ModelProfile[];
   selectedModelId: string;
   onSelectModel: (modelId: string) => void;
+  onSetDefault: (modelId: string) => void;
+  onDeleteModel: (modelId: string) => void;
+  isSettingDefault: boolean;
+  isDeleting: boolean;
   t: (key: any) => string;
 }) {
   if (models.length === 0) return <EmptyLine text={t("models.emptyModelsForProvider")} />;
@@ -727,6 +895,7 @@ function ModelProfileTable({ models, selectedModelId, onSelectModel, t }: {
           <TableHead>{t("common.name")}</TableHead>
           <TableHead>{t("models.modelId")}</TableHead>
           <TableHead>{t("models.capabilities")}</TableHead>
+          <TableHead className="w-24" />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -745,6 +914,40 @@ function ModelProfileTable({ models, selectedModelId, onSelectModel, t }: {
                 {model.capabilities.map((capability) => (
                   <Badge key={capability} variant="outline">{capability}</Badge>
                 ))}
+              </div>
+            </TableCell>
+            <TableCell>
+              <div className="flex justify-end gap-1">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-8 text-muted-foreground hover:text-primary"
+                  disabled={model.isDefault || isSettingDefault}
+                  title={t("models.setDefault")}
+                  aria-label={t("models.setDefault")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSetDefault(model.id);
+                  }}
+                >
+                  <ShieldCheck className="size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-8 text-muted-foreground hover:text-destructive"
+                  disabled={isDeleting}
+                  title={t("models.deleteModel")}
+                  aria-label={t("models.deleteModel")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDeleteModel(model.id);
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
               </div>
             </TableCell>
           </TableRow>

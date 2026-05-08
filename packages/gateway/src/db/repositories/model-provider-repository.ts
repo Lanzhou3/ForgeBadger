@@ -72,6 +72,14 @@ export interface CreateModelProfileInput {
   mirrorLegacy?: boolean;
 }
 
+export interface UpdateModelProfileInput {
+  name?: string;
+  modelId?: string;
+  capabilities?: string[];
+  contextWindow?: number | null;
+  isDefault?: boolean;
+}
+
 export interface CreateProviderCredentialInput {
   providerProfileId: string;
   label?: string | null;
@@ -289,14 +297,67 @@ export class ModelProviderRepository {
     return row ? toModelProfile(row) : undefined;
   }
 
+  updateModelProfile(id: string, input: UpdateModelProfileInput): ModelProfile | undefined {
+    const existing = this.getModelProfile(id);
+    if (!existing) return undefined;
+    if (input.isDefault) this.clearDefaultModels();
+    const now = Date.now();
+    const next = {
+      name: input.name ?? existing.name,
+      modelId: input.modelId ?? existing.modelId,
+      capabilities: input.capabilities ?? existing.capabilities,
+      contextWindow: input.contextWindow === undefined ? existing.contextWindow : input.contextWindow,
+      isDefault: input.isDefault ?? existing.isDefault
+    };
+    this.db.prepare(`
+      UPDATE model_profiles
+      SET name = ?, model_id = ?, capabilities = ?, context_window = ?,
+        is_default = ?, updated_at = ?
+      WHERE id = ? AND user_id = ?
+    `).run(
+      next.name,
+      next.modelId,
+      JSON.stringify(next.capabilities),
+      next.contextWindow ?? null,
+      next.isDefault ? 1 : 0,
+      now,
+      id,
+      this.userId
+    );
+    this.updateLegacyModelMirror({
+      id,
+      name: next.name,
+      modelId: next.modelId,
+      isDefault: next.isDefault,
+      now
+    });
+    return this.getModelProfile(id);
+  }
+
   setDefaultModel(id: string): ModelProfile | undefined {
     const existing = this.getModelProfile(id);
     if (!existing) return undefined;
     this.clearDefaultModels();
+    const now = Date.now();
     this.db.prepare(`
       UPDATE model_profiles SET is_default = 1, updated_at = ? WHERE id = ? AND user_id = ?
-    `).run(Date.now(), id, this.userId);
+    `).run(now, id, this.userId);
+    this.db.prepare(`
+      UPDATE models SET is_default = 1, updated_at = ? WHERE id = ? AND user_id = ?
+    `).run(now, id, this.userId);
     return this.getModelProfile(id);
+  }
+
+  deleteModelProfile(id: string): boolean {
+    const existing = this.getModelProfile(id);
+    if (!existing) return false;
+    this.db.prepare(`
+      DELETE FROM models WHERE id = ? AND user_id = ?
+    `).run(id, this.userId);
+    const result = this.db.prepare(`
+      DELETE FROM model_profiles WHERE id = ? AND user_id = ?
+    `).run(id, this.userId);
+    return result.changes > 0;
   }
 
   createCredential(input: CreateProviderCredentialInput): ProviderCredentialSummary {
@@ -328,6 +389,34 @@ export class ModelProviderRepository {
       SELECT * FROM provider_credentials WHERE id = ? AND user_id = ?
     `).get(id, this.userId) as CredentialRow | undefined;
     return row ? toCredentialSummary(row) : undefined;
+  }
+
+  rotateCredential(
+    id: string,
+    input: { plaintextSecret: string; label?: string | null }
+  ): ProviderCredentialSummary | undefined {
+    const existing = this.getCredential(id);
+    if (!existing) return undefined;
+    const encrypted = encryptSecret(input.plaintextSecret, { key: this.masterKey });
+    this.db.prepare(`
+      UPDATE provider_credentials
+      SET label = ?, secret_encrypted = ?, updated_at = ?
+      WHERE id = ? AND user_id = ?
+    `).run(
+      input.label === undefined ? existing.label : input.label,
+      JSON.stringify(encrypted),
+      Date.now(),
+      id,
+      this.userId
+    );
+    return this.getCredential(id);
+  }
+
+  deleteCredential(id: string): boolean {
+    const result = this.db.prepare(`
+      DELETE FROM provider_credentials WHERE id = ? AND user_id = ?
+    `).run(id, this.userId);
+    return result.changes > 0;
   }
 
   decryptCredential(id: string): string {
@@ -371,6 +460,20 @@ export class ModelProviderRepository {
       input.now,
       input.now
     );
+  }
+
+  private updateLegacyModelMirror(input: {
+    id: string;
+    name: string;
+    modelId: string;
+    isDefault: boolean;
+    now: number;
+  }): void {
+    this.db.prepare(`
+      UPDATE models
+      SET name = ?, model_id = ?, is_default = ?, updated_at = ?
+      WHERE id = ? AND user_id = ?
+    `).run(input.name, input.modelId, input.isDefault ? 1 : 0, input.now, input.id, this.userId);
   }
 }
 
