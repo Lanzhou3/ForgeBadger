@@ -21,6 +21,9 @@ describe("model catalog", () => {
     assert.ok(catalog.some((provider) => provider.id === "anthropic"));
     assert.ok(catalog.some((provider) => provider.id === "openai-compatible"));
     assert.ok(catalog.some((provider) => provider.id === "deepseek"));
+    assert.ok(catalog.some((provider) => provider.id === "bailian-for-coding"));
+    assert.ok(catalog.some((provider) => provider.id === "kimi-for-coding"));
+    assert.ok(catalog.some((provider) => provider.id === "minimax"));
     assert.ok(catalog.some((provider) => provider.id === "ollama"));
 
     const anthropic = catalog.find((provider) => provider.id === "anthropic");
@@ -31,7 +34,14 @@ describe("model catalog", () => {
     const compatible = catalog.find((provider) => provider.id === "openai-compatible");
     assert.equal(compatible?.authType, "api_key");
     assert.ok(compatible?.supportedAdapters.includes("opencode"));
+    assert.equal(compatible?.modelSource, "dynamic");
+    assert.equal(compatible?.modelFetch?.strategy, "openai-compatible");
     assert.equal(catalog.some((provider) => provider.supportedAdapters.includes("codex")), false);
+
+    const kimiCoding = catalog.find((provider) => provider.id === "kimi-for-coding");
+    assert.equal(kimiCoding?.apiFormat, "anthropic");
+    assert.deepEqual(kimiCoding?.supportedAdapters, ["opencode"]);
+    assert.equal(kimiCoding?.baseUrl, "https://api.kimi.com/coding/v1");
   });
 
   it("groups models by provider with counts", () => {

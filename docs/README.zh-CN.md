@@ -18,7 +18,7 @@ OpenForge 面向自托管开发机器和私有工作区。Gateway 负责文件�
 
 OpenForge 处于 MVP / 本地优先发布候选开发阶段。核心 Gateway、Web 控制台、tmux
 终端链路、认证、加密 API Key 存储、项目设置、适配器发现和管理界面已经具备本地
-用户测试条件。
+用户测试条件，并已支持模型服务商 Profile 和在线模型同步。
 
 Codex app-server 生命周期能力仍属于实验功能，并有意隐藏在 Web 控制台的实验功能
 区域。托管协作、计费、云部署和自主远程执行不属于当前本地优先 MVP 范围。
@@ -43,7 +43,8 @@ Codex app-server 生命周期能力仍属于实验功能，并有意隐藏在 We
 - 项目创建和导入流程，支持 AI 工具配置生成与合规检查。
 - 基于 tmux 的终端会话，浏览器断开或 Gateway 重启后仍可恢复。
 - 支持 Claude Code、OpenCode、Codex 的适配器发现和受控会话启动。
-- 模型和 API Key 管理，API Key 使用 AES-256-GCM 加密存储。
+- 模型服务商 Profile、加密 API Key 存储，以及 OpenAI-compatible 服务商端点的
+  在线模型同步。
 - Web 控制台提供 Agent、Skill、模板、插件、用量、历史、通知和设置界面。
 - 会话快照、终端专注模式、命令面板原型和本地诊断导出。
 - 通过 WebSocket 事件流提供会话状态、通知和缓存刷新。

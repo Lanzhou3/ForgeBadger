@@ -50,6 +50,7 @@ import {
   listSkillTemplates,
   listSkillSources,
   syncLocalSkills,
+  syncProviderModels,
   listPlugins,
   refreshCatalog,
   restoreTemplateVersion,
@@ -132,6 +133,18 @@ describe("api client", () => {
     expect(fetch).toHaveBeenCalledWith(
       "http://127.0.0.1:48731/api/v1/model-providers/provider-1",
       expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("syncs provider models through REST", async () => {
+    await syncProviderModels("provider-1", { credentialId: "credential-1" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/sync",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ credentialId: "credential-1" }),
+      })
     );
   });
 

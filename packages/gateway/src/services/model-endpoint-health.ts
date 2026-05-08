@@ -32,10 +32,8 @@ export async function checkModelEndpoint(input: CheckModelEndpointInput): Promis
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    let endpointUrl: URL;
-    try {
-      endpointUrl = new URL(input.endpoint);
-    } catch {
+    const validationError = await validatePublicHttpsEndpointUrl(input.endpoint, resolveHost);
+    if (validationError) {
       const latencyMs = Math.max(0, now() - start);
       const checkedAt = new Date().toISOString();
       return {
@@ -44,34 +42,7 @@ export async function checkModelEndpoint(input: CheckModelEndpointInput): Promis
         latencyMs,
         timeoutMs,
         checkedAt,
-        error: "Invalid endpoint URL"
-      };
-    }
-
-    if (endpointUrl.protocol !== "https:") {
-      const latencyMs = Math.max(0, now() - start);
-      const checkedAt = new Date().toISOString();
-      return {
-        healthy: false,
-        endpoint: input.endpoint,
-        latencyMs,
-        timeoutMs,
-        checkedAt,
-        error: "Only https protocol is allowed"
-      };
-    }
-
-    const blocked = await validateEndpointHost(endpointUrl.hostname, resolveHost);
-    if (blocked) {
-      const latencyMs = Math.max(0, now() - start);
-      const checkedAt = new Date().toISOString();
-      return {
-        healthy: false,
-        endpoint: input.endpoint,
-        latencyMs,
-        timeoutMs,
-        checkedAt,
-        error: blocked
+        error: validationError
       };
     }
 
@@ -107,6 +78,24 @@ export async function checkModelEndpoint(input: CheckModelEndpointInput): Promis
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function validatePublicHttpsEndpointUrl(
+  endpoint: string,
+  resolveHost: CheckModelEndpointInput["resolveHost"] = lookup
+): Promise<string | undefined> {
+  let endpointUrl: URL;
+  try {
+    endpointUrl = new URL(endpoint);
+  } catch {
+    return "Invalid endpoint URL";
+  }
+
+  if (endpointUrl.protocol !== "https:") {
+    return "Only https protocol is allowed";
+  }
+
+  return validateEndpointHost(endpointUrl.hostname, resolveHost);
 }
 
 async function validateEndpointHost(

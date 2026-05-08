@@ -22,8 +22,8 @@ WebSocket.
 
 OpenForge is in MVP / local-first release-candidate development. The core
 Gateway, Web console, tmux terminal flow, authentication, encrypted API key
-storage, project setup, adapter discovery, and management surfaces are in
-place for local user testing.
+storage, project setup, adapter discovery, provider model profiles, live model
+sync, and management surfaces are in place for local user testing.
 
 Codex app-server lifecycle work is currently experimental and intentionally
 guarded behind the Web console's experimental features area. Hosted
@@ -56,7 +56,8 @@ not part of the current local-first MVP.
   restarts.
 - Adapter discovery and gated session launch for Claude Code, OpenCode, and
   Codex.
-- Model and API key management with AES-256-GCM encrypted API key storage.
+- Provider model profiles with encrypted API key storage and live model sync
+  for OpenAI-compatible provider endpoints.
 - Agent, Skill, Template, plugin, usage, history, notification, and settings
   surfaces in the Web console.
 - Session snapshots, terminal focus mode, command palette prototype, and local

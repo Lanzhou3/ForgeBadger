@@ -24,6 +24,11 @@ import {
   previewModelProviderConfig,
   type ModelConfigApplyAdapter
 } from "../services/model-config-apply.js";
+import {
+  fetchProviderModels as fetchProviderModelsFromEndpoint,
+  type FetchedProviderModel,
+  type FetchProviderModelsInput
+} from "../services/provider-model-fetch.js";
 
 const adapterSchema = z.enum(["claude", "opencode", "codex"]);
 const createProviderSchema = z.object({
@@ -56,9 +61,18 @@ const applySchema = z.object({
 const endpointTestSchema = z.object({
   timeoutMs: z.number().int().min(100).max(15000).optional()
 });
+const syncModelsSchema = z.object({
+  credentialId: z.string().min(1).optional(),
+  timeoutMs: z.number().int().min(100).max(30000).optional()
+});
 
-export function createModelProviderRoutes(db: Database, masterKey: string): Router {
+export interface ModelProviderRouteOptions {
+  fetchProviderModels?: (input: FetchProviderModelsInput) => Promise<FetchedProviderModel[]>;
+}
+
+export function createModelProviderRoutes(db: Database, masterKey: string, options: ModelProviderRouteOptions = {}): Router {
   const router = Router();
+  const fetchProviderModels = options.fetchProviderModels ?? fetchProviderModelsFromEndpoint;
   router.use(authenticate);
 
   router.get("/catalog", (_req, res) => {
@@ -154,6 +168,57 @@ export function createModelProviderRoutes(db: Database, masterKey: string): Rout
     res.status(201).json({ code: 0, data: { model }, message: "" });
   });
 
+  router.post("/:id/models/sync", async (req, res) => {
+    const parseResult = syncModelsSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid model sync payload" });
+      return;
+    }
+    const repo = repoFor(db, masterKey, req);
+    const provider = repo.getProviderProfile(req.params.id);
+    if (!provider?.baseUrl) {
+      res.status(provider ? 400 : 404).json({
+        code: 1,
+        message: provider ? "Provider base URL is required" : "Provider not found"
+      });
+      return;
+    }
+
+    const credential = selectCredential(repo, provider.id, parseResult.data.credentialId);
+    if (parseResult.data.credentialId && !credential) {
+      res.status(400).json({ code: 1, message: "Credential does not belong to the selected provider" });
+      return;
+    }
+    if (provider.authType !== "none" && !credential) {
+      res.status(400).json({ code: 1, message: "Provider credential is required to sync models" });
+      return;
+    }
+
+    try {
+      const fetchedModels = await fetchProviderModels({
+        baseUrl: provider.baseUrl,
+        apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
+        modelsUrl: getProviderCatalogPreset(provider.providerKey)?.modelFetch?.modelsUrl,
+        ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
+      });
+      const created = syncFetchedModels(repo, provider, fetchedModels);
+      res.json({
+        code: 0,
+        data: {
+          fetchedCount: fetchedModels.length,
+          createdCount: created.length,
+          models: created
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Failed to sync provider models"
+      });
+    }
+  });
+
   router.post("/:id/credentials", (req, res) => {
     const parseResult = createCredentialSchema.safeParse(req.body ?? {});
     if (!parseResult.success) {
@@ -200,7 +265,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string): Rout
 function createProvider(repo: ModelProviderRepository, input: z.infer<typeof createProviderSchema>) {
   const preset = input.catalogId ? getProviderCatalogPreset(input.catalogId) : undefined;
   const provider = preset ? createFromPreset(repo, preset) : createCustom(repo, input);
-  const models = preset
+  const models = preset?.modelSource === "static"
     ? preset.defaultModels.map((model, index) => repo.createModelProfile({
       providerProfileId: provider.id,
       name: model.name,
@@ -327,6 +392,28 @@ function selectCredential(repo: ModelProviderRepository, providerId: string, cre
     return credential?.providerProfileId === providerId ? credential : undefined;
   }
   return repo.listCredentials(providerId)[0];
+}
+
+function syncFetchedModels(
+  repo: ModelProviderRepository,
+  provider: ProviderProfile,
+  fetchedModels: FetchedProviderModel[]
+): ModelProfile[] {
+  const existing = new Set(repo.listModelProfiles(provider.id).map((model) => model.modelId));
+  const created: ModelProfile[] = [];
+  for (const fetched of fetchedModels) {
+    if (existing.has(fetched.id)) continue;
+    const model = repo.createModelProfile({
+      providerProfileId: provider.id,
+      name: fetched.id,
+      modelId: fetched.id,
+      capabilities: ["chat"],
+      isDefault: existing.size === 0 && created.length === 0
+    });
+    existing.add(fetched.id);
+    created.push(model);
+  }
+  return created;
 }
 
 function repoFor(db: Database, masterKey: string, req: unknown): ModelProviderRepository {

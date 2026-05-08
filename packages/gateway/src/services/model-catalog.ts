@@ -10,6 +10,7 @@ export interface ModelPreset {
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
 export type ProviderSupportedAdapter = "claude" | "opencode";
+export type ProviderModelSource = "static" | "dynamic";
 
 export interface ProviderModelPreset {
   id: string;
@@ -27,6 +28,11 @@ export interface ProviderCatalogPreset {
   authType: ProviderAuthType;
   apiFormat: ProviderApiFormat;
   supportedAdapters: ProviderSupportedAdapter[];
+  modelSource: ProviderModelSource;
+  modelFetch?: {
+    strategy: "openai-compatible";
+    modelsUrl?: string;
+  };
   defaultModels: ProviderModelPreset[];
   env?: Record<string, string>;
   headers?: Record<string, string>;
@@ -90,10 +96,11 @@ const providerCatalog: ProviderCatalogPreset[] = [
     authType: "api_key",
     apiFormat: "anthropic",
     supportedAdapters: ["claude"],
+    modelSource: "static",
     defaultModels: [
-      { id: "claude-sonnet", name: "Claude Sonnet", modelId: "claude-sonnet-4-5", capabilities: ["chat", "code"] },
-      { id: "claude-opus", name: "Claude Opus", modelId: "claude-opus-4-1", capabilities: ["chat", "code", "reasoning"] },
-      { id: "claude-haiku", name: "Claude Haiku", modelId: "claude-haiku-4-5", capabilities: ["chat", "code", "fast"] }
+      { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", modelId: "claude-sonnet-4-5-20250929", capabilities: ["chat", "code"] },
+      { id: "claude-opus-4-5", name: "Claude Opus 4.5", modelId: "claude-opus-4-5-20251101", capabilities: ["chat", "code", "reasoning"] },
+      { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", modelId: "claude-haiku-4-5-20251001", capabilities: ["chat", "code", "fast"] }
     ]
   },
   {
@@ -104,6 +111,8 @@ const providerCatalog: ProviderCatalogPreset[] = [
     authType: "api_key",
     apiFormat: "openai",
     supportedAdapters: ["opencode"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
     defaultModels: [
       { id: "gpt-5-1", name: "GPT-5.1", modelId: "gpt-5.1", capabilities: ["chat", "code", "reasoning"] },
       { id: "gpt-4o", name: "GPT-4o", modelId: "gpt-4o", capabilities: ["chat", "vision"] }
@@ -117,6 +126,8 @@ const providerCatalog: ProviderCatalogPreset[] = [
     authType: "api_key",
     apiFormat: "openai-compatible",
     supportedAdapters: ["opencode"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
     defaultModels: [
       { id: "custom-chat", name: "Custom Chat", modelId: "custom-chat", capabilities: ["chat"] }
     ]
@@ -129,6 +140,8 @@ const providerCatalog: ProviderCatalogPreset[] = [
     authType: "api_key",
     apiFormat: "openai-compatible",
     supportedAdapters: ["opencode"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible", modelsUrl: "https://api.deepseek.com/models" },
     defaultModels: [
       { id: "deepseek-chat", name: "DeepSeek Chat", modelId: "deepseek-chat", capabilities: ["chat", "code"] },
       { id: "deepseek-reasoner", name: "DeepSeek Reasoner", modelId: "deepseek-reasoner", capabilities: ["chat", "code", "reasoning"] }
@@ -142,21 +155,68 @@ const providerCatalog: ProviderCatalogPreset[] = [
     authType: "api_key",
     apiFormat: "openai-compatible",
     supportedAdapters: ["opencode"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
     defaultModels: [
-      { id: "kimi-k2", name: "Kimi K2", modelId: "kimi-k2", capabilities: ["chat", "code"] }
+      { id: "kimi-k2-6", name: "Kimi K2.6", modelId: "kimi-k2.6", capabilities: ["chat", "code"] }
+    ]
+  },
+  {
+    id: "kimi-for-coding",
+    name: "Kimi For Coding",
+    description: "Kimi coding-plan endpoint for OpenCode via the Anthropic AI SDK provider.",
+    baseUrl: "https://api.kimi.com/coding/v1",
+    authType: "api_key",
+    apiFormat: "anthropic",
+    supportedAdapters: ["opencode"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
+    defaultModels: [
+      { id: "kimi-for-coding", name: "Kimi For Coding", modelId: "kimi-for-coding", capabilities: ["chat", "code"] }
+    ]
+  },
+  {
+    id: "kimi-for-coding-claude",
+    name: "Kimi For Coding (Claude Code)",
+    description: "Kimi coding-plan Anthropic-compatible endpoint for Claude Code config.",
+    baseUrl: "https://api.kimi.com/coding/",
+    authType: "api_key",
+    apiFormat: "anthropic",
+    supportedAdapters: ["claude"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
+    defaultModels: [
+      { id: "kimi-for-coding-claude", name: "Kimi For Coding", modelId: "kimi-for-coding", capabilities: ["chat", "code"] }
     ]
   },
   {
     id: "dashscope",
-    name: "Qwen/DashScope",
-    description: "Alibaba Cloud DashScope OpenAI-compatible API.",
+    name: "Bailian/DashScope",
+    description: "Alibaba Cloud Bailian DashScope OpenAI-compatible API.",
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     authType: "api_key",
     apiFormat: "openai-compatible",
     supportedAdapters: ["opencode"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
     defaultModels: [
-      { id: "qwen-plus", name: "Qwen Plus", modelId: "qwen-plus", capabilities: ["chat", "code"] },
-      { id: "qwen-max", name: "Qwen Max", modelId: "qwen-max", capabilities: ["chat", "code", "reasoning"] }
+      { id: "qwen3-coder-plus", name: "Qwen3 Coder Plus", modelId: "qwen3-coder-plus", capabilities: ["chat", "code"] },
+      { id: "qwen3-max", name: "Qwen3 Max", modelId: "qwen3-max", capabilities: ["chat", "code", "reasoning"] }
+    ]
+  },
+  {
+    id: "bailian-for-coding",
+    name: "Bailian For Coding",
+    description: "Alibaba Cloud Bailian coding-plan Anthropic-compatible endpoint for Claude Code.",
+    baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+    authType: "api_key",
+    apiFormat: "anthropic",
+    supportedAdapters: ["claude"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
+    defaultModels: [
+      { id: "bailian-coding-qwen3-coder-plus", name: "Qwen3 Coder Plus", modelId: "qwen3-coder-plus", capabilities: ["chat", "code"] },
+      { id: "bailian-coding-qwen3-max", name: "Qwen3 Max", modelId: "qwen3-max", capabilities: ["chat", "code", "reasoning"] }
     ]
   },
   {
@@ -167,20 +227,38 @@ const providerCatalog: ProviderCatalogPreset[] = [
     authType: "api_key",
     apiFormat: "openai-compatible",
     supportedAdapters: ["opencode"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
     defaultModels: [
-      { id: "glm-4-5", name: "GLM-4.5", modelId: "glm-4.5", capabilities: ["chat", "code"] }
+      { id: "glm-5", name: "GLM-5", modelId: "glm-5", capabilities: ["chat", "code"] }
     ]
   },
   {
     id: "minimax",
     name: "MiniMax",
-    description: "MiniMax OpenAI-compatible API.",
-    baseUrl: "https://api.minimax.io/v1",
+    description: "MiniMax coding-plan OpenAI-compatible API.",
+    baseUrl: "https://api.minimaxi.com/v1",
     authType: "api_key",
     apiFormat: "openai-compatible",
     supportedAdapters: ["opencode"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
     defaultModels: [
-      { id: "minimax-text", name: "MiniMax Text", modelId: "MiniMax-Text-01", capabilities: ["chat"] }
+      { id: "minimax-m2-7", name: "MiniMax M2.7", modelId: "MiniMax-M2.7", capabilities: ["chat", "code"] }
+    ]
+  },
+  {
+    id: "minimax-claude",
+    name: "MiniMax (Claude Code)",
+    description: "MiniMax coding-plan Anthropic-compatible endpoint for Claude Code.",
+    baseUrl: "https://api.minimaxi.com/anthropic",
+    authType: "api_key",
+    apiFormat: "anthropic",
+    supportedAdapters: ["claude"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
+    defaultModels: [
+      { id: "minimax-claude-m2-7", name: "MiniMax M2.7", modelId: "MiniMax-M2.7", capabilities: ["chat", "code"] }
     ]
   },
   {
@@ -191,6 +269,8 @@ const providerCatalog: ProviderCatalogPreset[] = [
     authType: "api_key",
     apiFormat: "openai-compatible",
     supportedAdapters: ["opencode"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
     defaultModels: [
       { id: "siliconflow-qwen", name: "Qwen Coder", modelId: "Qwen/Qwen2.5-Coder-32B-Instruct", capabilities: ["chat", "code"] }
     ]
@@ -203,6 +283,8 @@ const providerCatalog: ProviderCatalogPreset[] = [
     authType: "api_key",
     apiFormat: "openai-compatible",
     supportedAdapters: ["opencode"],
+    modelSource: "dynamic",
+    modelFetch: { strategy: "openai-compatible" },
     defaultModels: [
       { id: "openrouter-auto", name: "OpenRouter Auto", modelId: "openrouter/auto", capabilities: ["chat"] }
     ]
@@ -215,8 +297,10 @@ const providerCatalog: ProviderCatalogPreset[] = [
     authType: "api_key",
     apiFormat: "google",
     supportedAdapters: ["opencode"],
+    modelSource: "static",
     defaultModels: [
-      { id: "gemini-pro", name: "Gemini Pro", modelId: "gemini-pro", capabilities: ["chat", "code"] }
+      { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview", modelId: "gemini-3-flash-preview", capabilities: ["chat", "code"] },
+      { id: "gemini-3-pro-preview", name: "Gemini 3 Pro Preview", modelId: "gemini-3-pro-preview", capabilities: ["chat", "code", "reasoning"] }
     ]
   },
   {
@@ -227,8 +311,10 @@ const providerCatalog: ProviderCatalogPreset[] = [
     authType: "none",
     apiFormat: "bedrock",
     supportedAdapters: ["opencode"],
+    modelSource: "static",
     defaultModels: [
-      { id: "bedrock-claude", name: "Bedrock Claude", modelId: "anthropic.claude-3-5-sonnet-20241022-v2:0", capabilities: ["chat", "code"] }
+      { id: "bedrock-claude-opus-4-7", name: "Claude Opus 4.7", modelId: "global.anthropic.claude-opus-4-7", capabilities: ["chat", "code", "reasoning"] },
+      { id: "bedrock-claude-sonnet-4-6", name: "Claude Sonnet 4.6", modelId: "global.anthropic.claude-sonnet-4-6", capabilities: ["chat", "code"] }
     ]
   },
   {
@@ -239,6 +325,7 @@ const providerCatalog: ProviderCatalogPreset[] = [
     authType: "none",
     apiFormat: "local",
     supportedAdapters: ["opencode"],
+    modelSource: "static",
     defaultModels: [
       { id: "llama-local", name: "Local Llama", modelId: "llama3.1", capabilities: ["chat", "local"] }
     ]

@@ -14,6 +14,7 @@ import { signJwt } from "../src/auth/jwt.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createModelProviderRoutes } from "../src/routes/model-providers.js";
 import { createCodexSubscriptionRoutes } from "../src/routes/codex-subscription.js";
+import type { FetchProviderModelsInput } from "../src/services/provider-model-fetch.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
@@ -57,13 +58,18 @@ describe("model provider routes", () => {
     assert.equal(created.status, 201);
     const provider = created.body.data.provider;
     assert.equal(provider.providerKey, "deepseek");
-    assert.equal(created.body.data.models.length > 0, true);
+    assert.equal(created.body.data.models.length, 0);
+    const model = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/models`, {
+      name: "DeepSeek Chat",
+      modelId: "deepseek-chat",
+      capabilities: ["chat", "code"]
+    }, authHeaders());
 
     const root = await mkdtemp(path.join(tmpdir(), "openforge-provider-route-"));
     const preview = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/preview-apply`, {
       adapter: "opencode",
       projectRoot: root,
-      modelProfileId: created.body.data.models[0].id
+      modelProfileId: model.body.data.model.id
     }, authHeaders());
 
     assert.equal(preview.status, 200);
@@ -79,6 +85,14 @@ describe("model provider routes", () => {
     const openai = await makeRequest(app, "POST", "/api/v1/model-providers", {
       catalogId: "openai"
     }, authHeaders());
+    const deepseekModel = await makeRequest(app, "POST", `/api/v1/model-providers/${deepseek.body.data.provider.id}/models`, {
+      name: "DeepSeek Chat",
+      modelId: "deepseek-chat"
+    }, authHeaders());
+    const openaiModel = await makeRequest(app, "POST", `/api/v1/model-providers/${openai.body.data.provider.id}/models`, {
+      name: "GPT",
+      modelId: "gpt-test"
+    }, authHeaders());
     const credential = await makeRequest(app, "POST", `/api/v1/model-providers/${openai.body.data.provider.id}/credentials`, {
       plaintextSecret: "sk-openai"
     }, authHeaders());
@@ -87,12 +101,12 @@ describe("model provider routes", () => {
     const mismatchedModel = await makeRequest(app, "POST", `/api/v1/model-providers/${deepseek.body.data.provider.id}/preview-apply`, {
       adapter: "opencode",
       projectRoot: root,
-      modelProfileId: openai.body.data.models[0].id
+      modelProfileId: openaiModel.body.data.model.id
     }, authHeaders());
     const mismatchedCredential = await makeRequest(app, "POST", `/api/v1/model-providers/${deepseek.body.data.provider.id}/preview-apply`, {
       adapter: "opencode",
       projectRoot: root,
-      modelProfileId: deepseek.body.data.models[0].id,
+      modelProfileId: deepseekModel.body.data.model.id,
       credentialId: credential.body.data.credential.id
     }, authHeaders());
 
@@ -109,6 +123,10 @@ describe("model provider routes", () => {
       catalogId: "deepseek"
     }, authHeaders());
     const providerId = created.body.data.provider.id;
+    await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "DeepSeek Chat",
+      modelId: "deepseek-chat"
+    }, authHeaders());
     await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
       plaintextSecret: "sk-deepseek"
     }, authHeaders());
@@ -124,6 +142,45 @@ describe("model provider routes", () => {
     assert.equal(listed.body.data.credentials.some((credential: { providerProfileId: string }) => credential.providerProfileId === providerId), false);
   });
 
+  it("syncs missing provider models from the configured model endpoint", async () => {
+    const fetchedInputs: FetchProviderModelsInput[] = [];
+    const syncApp = express();
+    syncApp.locals.jwtSecret = secret;
+    syncApp.use(express.json());
+    syncApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
+      fetchProviderModels: async (input) => {
+        fetchedInputs.push(input);
+        return [
+          { id: "deepseek-v4-flash", ownedBy: "deepseek" },
+          { id: "deepseek-v4-pro", ownedBy: "deepseek" },
+        ];
+      },
+    }));
+    const created = await makeRequest(syncApp, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+    const providerId = created.body.data.provider.id;
+    const credential = await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
+      plaintextSecret: "sk-deepseek"
+    }, authHeaders());
+
+    const synced = await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/models/sync`, {
+      credentialId: credential.body.data.credential.id
+    }, authHeaders());
+
+    assert.equal(synced.status, 200);
+    assert.equal(synced.body.code, 0);
+    assert.equal(synced.body.data.fetchedCount, 2);
+    assert.equal(synced.body.data.createdCount, 2);
+    assert.equal(fetchedInputs[0]?.apiKey, "sk-deepseek");
+    assert.equal(fetchedInputs[0]?.baseUrl, "https://api.deepseek.com");
+    assert.equal(fetchedInputs[0]?.modelsUrl, "https://api.deepseek.com/models");
+    assert.deepEqual(
+      synced.body.data.models.map((model: { modelId: string }) => model.modelId),
+      ["deepseek-v4-flash", "deepseek-v4-pro"]
+    );
+  });
+
   it("returns envelope errors for invalid custom provider payloads and denied apply roots", async () => {
     const invalidCustom = await makeRequest(app, "POST", "/api/v1/model-providers", {
       name: "Missing fields"
@@ -134,10 +191,14 @@ describe("model provider routes", () => {
     const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
       catalogId: "deepseek"
     }, authHeaders());
+    const model = await makeRequest(app, "POST", `/api/v1/model-providers/${created.body.data.provider.id}/models`, {
+      name: "DeepSeek Chat",
+      modelId: "deepseek-chat"
+    }, authHeaders());
     const preview = await makeRequest(app, "POST", `/api/v1/model-providers/${created.body.data.provider.id}/preview-apply`, {
       adapter: "opencode",
       projectRoot: "/",
-      modelProfileId: created.body.data.models[0].id
+      modelProfileId: model.body.data.model.id
     }, authHeaders());
 
     assert.equal(preview.status, 400);

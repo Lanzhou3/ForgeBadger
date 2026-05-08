@@ -12,6 +12,7 @@ import {
   Layers3,
   Play,
   Plus,
+  RefreshCw,
   ServerCog,
   ShieldCheck,
   Trash2,
@@ -41,6 +42,7 @@ import {
   listModelProviders,
   listProviderCatalog,
   previewProviderApply,
+  syncProviderModels,
   type ModelProfile,
   type ProviderApplyAdapter,
   type ProviderApplyPreview,
@@ -213,6 +215,19 @@ export default function ModelsPage() {
     },
   });
 
+  const syncModelsMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedProvider) throw new Error(t("models.providerRequired"));
+      return syncProviderModels(selectedProvider.id, {
+        credentialId: selectedProvider.authType === "none" ? undefined : selectedCredentialId || undefined,
+      });
+    },
+    onSuccess: async (result) => {
+      setNotice(result.createdCount > 0 ? t("models.modelSyncComplete") : t("models.modelSyncNoChanges"));
+      await refreshProviders();
+    },
+  });
+
   const previewMutation = useMutation({
     mutationFn: () => {
       if (!selectedProviderId) throw new Error(t("models.providerRequired"));
@@ -274,6 +289,7 @@ export default function ModelsPage() {
     deleteProviderMutation.error ??
     credentialMutation.error ??
     modelMutation.error ??
+    syncModelsMutation.error ??
     previewMutation.error ??
     applyMutation.error;
   const codexStatus = codexStatusQuery.data?.status;
@@ -451,6 +467,22 @@ export default function ModelsPage() {
                   {t("models.addModel")}
                 </Button>
               </form>
+              <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                <div className="text-muted-foreground">{t("models.syncProviderModelsDescription")}</div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={
+                    !selectedProvider ||
+                    syncModelsMutation.isPending ||
+                    (selectedProvider.authType !== "none" && !selectedCredentialId)
+                  }
+                  onClick={() => syncModelsMutation.mutate()}
+                >
+                  <RefreshCw className={`size-4 ${syncModelsMutation.isPending ? "animate-spin" : ""}`} />
+                  {t("models.syncProviderModels")}
+                </Button>
+              </div>
               <ModelProfileTable
                 models={providerModels}
                 selectedModelId={selectedModelId}
@@ -585,8 +617,10 @@ function ProviderColumn({
               <div className="mt-3 flex flex-wrap gap-1">
                 <Badge variant="outline">{preset.apiFormat}</Badge>
                 <Badge variant="outline">{preset.authType}</Badge>
-                <Badge variant="secondary">
-                  {preset.defaultModels.length} {t("models.modelsWorkspace")}
+                <Badge variant={preset.modelSource === "dynamic" ? "secondary" : "outline"}>
+                  {preset.modelSource === "dynamic"
+                    ? t("models.modelSourceDynamic")
+                    : `${preset.defaultModels.length} ${t("models.modelsWorkspace")}`}
                 </Badge>
               </div>
             </div>

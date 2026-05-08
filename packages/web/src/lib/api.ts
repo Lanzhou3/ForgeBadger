@@ -339,6 +339,11 @@ export interface ProviderCatalogPreset {
   authType: ProviderAuthType;
   apiFormat: ProviderApiFormat;
   supportedAdapters: Array<"claude" | "opencode">;
+  modelSource: "static" | "dynamic";
+  modelFetch?: {
+    strategy: "openai-compatible";
+    modelsUrl?: string;
+  };
   defaultModels: ProviderCatalogModel[];
 }
 
@@ -364,6 +369,12 @@ export interface ModelProfile {
   capabilities: string[];
   status: string;
   isDefault: boolean;
+}
+
+export interface ProviderModelSyncResult {
+  fetchedCount: number;
+  createdCount: number;
+  models: ModelProfile[];
 }
 
 export interface ProviderCredentialSummary {
@@ -1565,6 +1576,16 @@ export async function createProviderModel(
     method: "POST",
     body: JSON.stringify(data),
   }) as Promise<{ model: ModelProfile }>;
+}
+
+export async function syncProviderModels(
+  providerId: string,
+  data: { credentialId?: string; timeoutMs?: number } = {}
+): Promise<ProviderModelSyncResult> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/models/sync`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<ProviderModelSyncResult>;
 }
 
 export async function previewProviderApply(
