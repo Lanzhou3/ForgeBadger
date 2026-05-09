@@ -149,7 +149,10 @@ export default function CodexAppServerPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+            <div
+              aria-label={t("codexAppServer.capabilityStateAria")}
+              className="rounded-md border border-border bg-muted/30 p-3 text-sm"
+            >
               <div className="flex items-center justify-between gap-3">
                 <span className="flex items-center gap-2 font-medium">
                   <ShieldCheck className="size-4 text-muted-foreground" />
@@ -283,7 +286,7 @@ export default function CodexAppServerPage() {
         </Card>
       </div>
 
-      <Card>
+      <Card aria-label={t("codexAppServer.activityFeedAria")}>
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">

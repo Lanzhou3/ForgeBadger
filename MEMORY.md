@@ -28,7 +28,10 @@
   lifecycle and notification events, and the Web event stream refreshes that
   feed when matching app-server activity events arrive. The activity feed now
   renders localized lifecycle/notification labels and safe details only, without
-  surfacing prompt/text/response-like metadata.
+  surfacing prompt/text/response-like metadata. Page-level Playwright coverage
+  now verifies the zero-quota Web boundary with mocked Gateway APIs: the page
+  renders capability/activity status, hides any prompt/turn send control, avoids
+  `/turn` requests, and does not display transcript-like metadata.
 - Terminal persistence remains tmux-backed. Gateway dependency reporting now
   includes a `terminalRuntime` status so the Web dashboard distinguishes native
   tmux support, missing tmux, and native Windows environments that require WSL
@@ -51,9 +54,9 @@
 
 1. Keep extending the guarded Web prototype around observable lifecycle and
    status only. Current Web surface supports lifecycle, initialize, thread
-   creation, stop, backend-backed capability display, and localized read-only
-   activity history with event-driven refresh; prompt/turn input remains
-   intentionally hidden to avoid accidental quota use.
+   creation, stop, backend-backed capability display, localized read-only
+   activity history with event-driven refresh, and a zero-quota page smoke test;
+   prompt/turn input remains intentionally hidden to avoid accidental quota use.
 2. Keep Codex app-server turn input disabled unless the Gateway is explicitly
    started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Gateway does not
    persist prompt/response transcript content; add user-facing retention

@@ -69,6 +69,10 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 - Web event handling invalidates only the `codex-app-server-activities` query
   when an `activity_created` event carries a Codex app-server activity type,
   avoiding broad dashboard/project refetches for app-server telemetry.
+- Web has a page-level Playwright smoke that mocks Gateway APIs and verifies the
+  `/codex-app-server` surface remains zero-quota: capability state and safe
+  activity metadata render, prompt/turn controls stay absent, no `/turn` route is
+  requested, and transcript-like metadata is not displayed.
 - `turn/start` is disabled by default at the Gateway route layer and requires
   `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1` before any real turn can be sent.
   When enabled, it remains protected by a session-scoped request rate limit in
@@ -99,3 +103,4 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 - `pnpm smoke:codex-app-server`
 - `pnpm --dir packages/web test src/lib/api.test.ts`
 - `pnpm --dir packages/web test src/lib/i18n.test.ts`
+- `pnpm --dir packages/web exec playwright test e2e/codex-app-server.spec.ts --project=chromium`
