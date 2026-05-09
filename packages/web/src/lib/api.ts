@@ -1144,9 +1144,7 @@ export async function getCodexAppServerCapabilities(): Promise<{ capabilities: C
 export async function startCodexAppServer(input: {
   projectId: string;
   runtimeMode: "app-server-stdio" | "app-server-websocket";
-  credentialMode?: CredentialMode;
-  modelId?: string;
-  apiKeyId?: string;
+  credentialMode?: "host_environment";
 }): Promise<{ session: CodexAppServerSession }> {
   return fetchJson("/api/v1/codex/app-server", {
     method: "POST",
@@ -1154,8 +1152,6 @@ export async function startCodexAppServer(input: {
       projectId: input.projectId,
       runtimeMode: input.runtimeMode,
       ...(input.credentialMode ? { credentialMode: input.credentialMode } : {}),
-      ...(input.modelId ? { modelId: input.modelId } : {}),
-      ...(input.apiKeyId ? { apiKeyId: input.apiKeyId } : {}),
     }),
   }) as Promise<{ session: CodexAppServerSession }>;
 }

@@ -29,6 +29,10 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
   manager list/get/stop are owner-scoped.
 - Secrets: route responses omit token and token-file path; stored API keys are
   decrypted only for launch env injection.
+- Subscription boundary: Codex app-server launch rejects `stored_encrypted_key`,
+  `apiKeyId`, and `modelId` inputs. This path intentionally uses the host Codex
+  subscription/account context and does not apply provider API-key or model
+  overrides.
 - Lifecycle: start/list/stop are exposed; per-user running process limit is
   enforced by the manager; Gateway close calls `stopAll()`.
 - Activity: start/stop create structured activity rows and event-bus events.

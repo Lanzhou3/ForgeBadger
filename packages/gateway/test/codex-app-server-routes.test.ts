@@ -168,6 +168,31 @@ describe("Codex app-server routes", () => {
     assert.equal(res.body.code, 1);
   });
 
+  it("rejects provider-managed credential fields for Codex app-server launch", async () => {
+    const cases = [
+      { credentialMode: "stored_encrypted_key" },
+      { apiKeyId: "key-1" },
+      { modelId: "model-1" }
+    ];
+
+    for (const input of cases) {
+      const res = await makeRequest(app, "POST", "/api/v1/codex/app-server", {
+        projectId,
+        runtimeMode: "app-server-stdio",
+        ...input
+      }, { Authorization: `Bearer ${token}` });
+
+      assert.equal(res.status, 400);
+      assert.equal(res.body.code, 1);
+      assert.match(res.body.message, /subscription-managed/i);
+    }
+
+    const list = await makeRequest(app, "GET", "/api/v1/codex/app-server", undefined, {
+      Authorization: `Bearer ${token}`
+    });
+    assert.equal(list.body.data.sessions.length, 0);
+  });
+
   it("sends initialize and thread requests but rejects turn input by default", async () => {
     const transport = new AutoResponseTransport();
     const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-rpc-"));

@@ -31,7 +31,10 @@
   surfacing prompt/text/response-like metadata. Page-level Playwright coverage
   now verifies the zero-quota Web boundary with mocked Gateway APIs: the page
   renders capability/activity status, hides any prompt/turn send control, avoids
-  `/turn` requests, and does not display transcript-like metadata.
+  `/turn` requests, and does not display transcript-like metadata. The start API
+  now rejects provider-managed credential fields (`stored_encrypted_key`,
+  `apiKeyId`, and `modelId`) for Codex app-server launch, keeping this path
+  subscription-managed instead of silently ignoring provider injection input.
 - Terminal persistence remains tmux-backed. Gateway dependency reporting now
   includes a `terminalRuntime` status so the Web dashboard distinguishes native
   tmux support, missing tmux, and native Windows environments that require WSL
@@ -60,7 +63,8 @@
 2. Keep Codex app-server turn input disabled unless the Gateway is explicitly
    started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Gateway does not
    persist prompt/response transcript content; add user-facing retention
-   controls before exposing real turn input in Web.
+   controls before exposing real turn input in Web. Do not add provider API-key
+   or model override application to this Codex app-server path.
 3. Run release-sized build/regression evidence when preparing the next beta
    handoff; the model provider closure already has API, unit, typecheck, and
    local browser smoke coverage.

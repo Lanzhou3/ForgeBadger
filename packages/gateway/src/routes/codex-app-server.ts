@@ -93,6 +93,12 @@ export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions)
       return;
     }
 
+    const credentialBoundary = validateCodexAppServerCredentialBoundary(parseResult.data);
+    if (!credentialBoundary.ok) {
+      res.status(400).json({ code: 1, message: credentialBoundary.message });
+      return;
+    }
+
     const launchEnvResult = buildLaunchEnv(options, userId, parseResult.data);
     if (!launchEnvResult.ok) {
       res.status(launchEnvResult.status).json({ code: 1, message: launchEnvResult.message });
@@ -219,6 +225,18 @@ type StartAppServerInput = z.infer<typeof startAppServerSchema>;
 type LaunchEnvResult =
   | { ok: true; env: Record<string, string>; secretEnvNames: string[] }
   | { ok: false; status: number; message: string };
+
+function validateCodexAppServerCredentialBoundary(
+  input: StartAppServerInput
+): { ok: true } | { ok: false; message: string } {
+  if (input.credentialMode !== "host_environment" || input.apiKeyId || input.modelId) {
+    return {
+      ok: false,
+      message: "Codex app-server is subscription-managed; provider credentials and model overrides are not supported"
+    };
+  }
+  return { ok: true };
+}
 
 function buildLaunchEnv(
   _options: CodexAppServerRoutesOptions,
