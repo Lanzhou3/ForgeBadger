@@ -20,7 +20,9 @@
   JSON-RPC wrapper. Real `app-server-websocket` initialize validation is closed
   for the current local toolchain through `pnpm smoke:codex-app-server`, using
   isolated temporary `HOME` and `CODEX_HOME`, capability-token WebSocket auth,
-  and no prompt/thread/turn requests.
+  and no prompt/thread/turn requests. The Web prototype is now framed as
+  "Codex Background Tasks" and reads `features.turnInputEnabled` from safe
+  session payloads so users can see that real task input is disabled by default.
 - Model provider management has moved to provider-scoped profiles. The latest
   model work added cc-switch-inspired provider presets, dynamic model sync for
   OpenAI-compatible model-list endpoints, provider-scoped model default/update/
@@ -37,9 +39,10 @@
 
 ## Next Work
 
-1. Extend the guarded Web prototype only after UX/security review. Current Web
-   surface supports lifecycle, initialize, thread creation, and stop;
-   prompt/turn input remains intentionally hidden to avoid accidental quota use.
+1. Keep extending the guarded Web prototype around observable lifecycle and
+   status only. Current Web surface supports lifecycle, initialize, thread
+   creation, stop, and capability display; prompt/turn input remains
+   intentionally hidden to avoid accidental quota use.
 2. Keep Codex app-server turn input disabled unless the Gateway is explicitly
    started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Gateway does not
    persist prompt/response transcript content; add user-facing retention

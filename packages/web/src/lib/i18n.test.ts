@@ -52,6 +52,9 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "models.deleteProviderInlineLabel")).toBe("删除服务商");
     expect(getTranslation("zh-TW", "models.deleteProviderConfirm")).toContain("供應商");
     expect(getTranslation("en", "models.codexOfficialDocs")).toContain("OpenAI Codex docs");
+    expect(getTranslation("zh-CN", "codexAppServer.title")).toBe("Codex 后台任务");
+    expect(getTranslation("zh-TW", "codexAppServer.turnDisabled")).toBe("任務輸入已關閉");
+    expect(getTranslation("en", "codexAppServer.turnDisabled")).toBe("Task input disabled");
   });
 
   it("normalizes unsupported language values to Simplified Chinese", () => {

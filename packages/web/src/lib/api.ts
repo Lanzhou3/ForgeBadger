@@ -137,6 +137,9 @@ export interface CodexAppServerSession {
   listen: string;
   pid?: number;
   errorMessage?: string;
+  features?: {
+    turnInputEnabled: boolean;
+  };
   createdAt: string;
   updatedAt: string;
 }

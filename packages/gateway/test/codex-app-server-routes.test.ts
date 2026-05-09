@@ -80,12 +80,14 @@ describe("Codex app-server routes", () => {
     assert.equal(start.body.data.session.runtimeMode, "app-server-websocket");
     assert.equal(start.body.data.session.status, "running");
     assert.equal(start.body.data.session.token, undefined);
+    assert.deepEqual(start.body.data.session.features, { turnInputEnabled: false });
 
     const list = await makeRequest(app, "GET", "/api/v1/codex/app-server", undefined, {
       Authorization: `Bearer ${token}`
     });
     assert.equal(list.status, 200);
     assert.equal(list.body.data.sessions.length, 1);
+    assert.deepEqual(list.body.data.sessions[0].features, { turnInputEnabled: false });
 
     const stop = await makeRequest(
       app,
@@ -144,6 +146,7 @@ describe("Codex app-server routes", () => {
       runtimeMode: "app-server-stdio"
     }, { Authorization: `Bearer ${token}` });
     const sessionId = start.body.data.session.id;
+    assert.deepEqual(start.body.data.session.features, { turnInputEnabled: false });
 
     const initialized = await makeRequest(
       app,
@@ -221,6 +224,7 @@ describe("Codex app-server routes", () => {
       runtimeMode: "app-server-stdio"
     }, { Authorization: `Bearer ${token}` });
     const sessionId = start.body.data.session.id;
+    assert.deepEqual(start.body.data.session.features, { turnInputEnabled: true });
 
     const turn = await makeRequest(
       app,

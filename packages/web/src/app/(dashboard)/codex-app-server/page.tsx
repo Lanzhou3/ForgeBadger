@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, CircleAlert, GitBranch, Play, RefreshCcw, ServerCog, Square } from "lucide-react";
+import { CheckCircle2, CircleAlert, GitBranch, Play, RefreshCcw, ServerCog, ShieldCheck, Square } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -97,7 +97,10 @@ export default function CodexAppServerPage() {
     <div className="space-y-4 p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">{t("codexAppServer.title")}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold">{t("codexAppServer.title")}</h1>
+            <Badge variant="secondary">{t("codexAppServer.experimental")}</Badge>
+          </div>
           <p className="mt-1 text-muted-foreground">{t("codexAppServer.subtitle")}</p>
         </div>
         <Button variant="outline" onClick={refreshAppServers}>
@@ -115,6 +118,19 @@ export default function CodexAppServerPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-2 font-medium">
+                  <ShieldCheck className="size-4 text-muted-foreground" />
+                  {t("codexAppServer.zeroQuotaState")}
+                </span>
+                <Badge variant="secondary">{t("codexAppServer.turnDisabled")}</Badge>
+              </div>
+              <div className="mt-2 text-muted-foreground">
+                {t("codexAppServer.transcriptOff")}
+              </div>
+            </div>
+
             <label className="block space-y-2 text-sm">
               <span className="font-medium">{t("common.project")}</span>
               <select
@@ -184,6 +200,11 @@ export default function CodexAppServerPage() {
                         <Badge variant={session.status === "running" ? "default" : "secondary"}>
                           {session.status}
                         </Badge>
+                        <Badge variant={session.features?.turnInputEnabled ? "default" : "secondary"}>
+                          {session.features?.turnInputEnabled
+                            ? t("codexAppServer.turnEnabled")
+                            : t("codexAppServer.turnDisabled")}
+                        </Badge>
                         <span className="font-mono text-xs text-muted-foreground">{session.runtimeMode}</span>
                       </div>
                       <div className="mt-2 truncate font-mono text-xs text-muted-foreground">
@@ -198,7 +219,7 @@ export default function CodexAppServerPage() {
                         onClick={() => initializeMutation.mutate(session.id)}
                       >
                         <CheckCircle2 className="mr-2 size-3" />
-                        initialize
+                        {t("codexAppServer.initialize")}
                       </Button>
                       <Button
                         variant="outline"
@@ -207,7 +228,7 @@ export default function CodexAppServerPage() {
                         onClick={() => threadMutation.mutate(session)}
                       >
                         <GitBranch className="mr-2 size-3" />
-                        thread
+                        {t("codexAppServer.createThread")}
                       </Button>
                       <Button
                         variant="ghost"

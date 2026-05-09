@@ -58,7 +58,7 @@ export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions)
     const userId = (req as unknown as AuthenticatedRequest).userId;
     res.json({
       code: 0,
-      data: { sessions: options.manager.list(userId).map(toSafeSessionPayload) },
+      data: { sessions: options.manager.list(userId).map((session) => toSafeSessionPayload(session, options)) },
       message: ""
     });
   });
@@ -96,7 +96,7 @@ export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions)
       recordAppServerActivity(options, userId, session, "codex_app_server_started", "info");
       res.status(201).json({
         code: 0,
-        data: { session: toSafeSessionPayload(session) },
+        data: { session: toSafeSessionPayload(session, options) },
         message: ""
       });
     } catch (error) {
@@ -114,7 +114,7 @@ export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions)
       recordAppServerActivity(options, userId, session, "codex_app_server_stopped", "info");
       res.json({
         code: 0,
-        data: { session: toSafeSessionPayload(session) },
+        data: { session: toSafeSessionPayload(session, options) },
         message: ""
       });
     } catch {
@@ -236,12 +236,20 @@ function recordAppServerActivity(
   });
 }
 
-function toSafeSessionPayload(session: CodexAppServerSession): Omit<
+function toSafeSessionPayload(
+  session: CodexAppServerSession,
+  options: CodexAppServerRoutesOptions
+): Omit<
   CodexAppServerSession,
   "token" | "tokenFile"
-> {
+> & { features: { turnInputEnabled: boolean } } {
   const { token: _token, tokenFile: _tokenFile, ...safe } = session;
-  return safe;
+  return {
+    ...safe,
+    features: {
+      turnInputEnabled: isTurnInputEnabled(options)
+    }
+  };
 }
 
 function getOwnedSession(
