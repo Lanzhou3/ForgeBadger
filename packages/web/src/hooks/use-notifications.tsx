@@ -41,6 +41,12 @@ interface NotificationContextValue {
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
+const codexAppServerActivityTypes = new Set([
+  "codex_app_server_started",
+  "codex_app_server_stopped",
+  "codex_app_server_notification",
+]);
+
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { t } = useLanguage();
@@ -191,7 +197,18 @@ export function eventQueryInvalidations(message: GatewayEvent): string[][] {
   ) {
     return [["sessions"], ["projects"], ["dashboard-summary"], ["activities"]];
   }
+  if (
+    type === "activity_created" &&
+    codexAppServerActivityTypes.has(getPayloadString(message.payload, "activity_type") ?? "")
+  ) {
+    return [["codex-app-server-activities"]];
+  }
   return [];
+}
+
+function getPayloadString(payload: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = payload?.[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function invalidateEventQueries(

@@ -62,6 +62,9 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
   the Gateway turn capability state from the capabilities endpoint and safe
   session payloads, plus a read-only recent activity feed for Codex app-server
   lifecycle and notification events.
+- Web event handling invalidates only the `codex-app-server-activities` query
+  when an `activity_created` event carries a Codex app-server activity type,
+  avoiding broad dashboard/project refetches for app-server telemetry.
 - `turn/start` is disabled by default at the Gateway route layer and requires
   `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1` before any real turn can be sent.
   When enabled, it remains protected by a session-scoped request rate limit in
