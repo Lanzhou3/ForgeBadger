@@ -293,10 +293,15 @@ describe("api client", () => {
   });
 
   it("lists filtered activity events", async () => {
-    await listActivities({ sessionId: "session-1", agentId: "agent-1", limit: 20 });
+    await listActivities({
+      sessionId: "session-1",
+      agentId: "agent-1",
+      types: ["codex_app_server_started", "codex_app_server_notification"],
+      limit: 20,
+    });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/activities?sessionId=session-1&agentId=agent-1&limit=20",
+      "http://127.0.0.1:48731/api/v1/activities?sessionId=session-1&agentId=agent-1&type=codex_app_server_started%2Ccodex_app_server_notification&limit=20",
       expect.objectContaining({ headers: expect.any(Object) })
     );
   });

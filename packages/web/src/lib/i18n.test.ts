@@ -54,6 +54,7 @@ describe("i18n", () => {
     expect(getTranslation("en", "models.codexOfficialDocs")).toContain("OpenAI Codex docs");
     expect(getTranslation("zh-CN", "codexAppServer.title")).toBe("Codex 后台任务");
     expect(getTranslation("zh-CN", "codexAppServer.capabilityState")).toBe("能力状态");
+    expect(getTranslation("zh-CN", "codexAppServer.recentActivity")).toBe("最近活动");
     expect(getTranslation("zh-TW", "codexAppServer.turnDisabled")).toBe("任務輸入已關閉");
     expect(getTranslation("en", "codexAppServer.turnDisabled")).toBe("Task input disabled");
   });

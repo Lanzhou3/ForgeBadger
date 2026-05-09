@@ -895,12 +895,14 @@ export async function listActivities(params: {
   sessionId?: string;
   projectId?: string;
   agentId?: string;
+  types?: string[];
   limit?: number;
 } = {}): Promise<{ activities: SessionActivity[] }> {
   const searchParams = new URLSearchParams();
   if (params.sessionId) searchParams.set("sessionId", params.sessionId);
   if (params.projectId) searchParams.set("projectId", params.projectId);
   if (params.agentId) searchParams.set("agentId", params.agentId);
+  if (params.types && params.types.length > 0) searchParams.set("type", params.types.join(","));
   if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
   const query = searchParams.toString();
   return fetchJson(`/api/v1/activities${query ? `?${query}` : ""}`) as Promise<{ activities: SessionActivity[] }>;

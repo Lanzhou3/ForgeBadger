@@ -29,6 +29,7 @@ export interface ListActivityOptions {
   sessionId?: string | undefined;
   projectId?: string | undefined;
   agentId?: string | undefined;
+  types?: string[] | undefined;
   limit?: number | undefined;
 }
 
@@ -66,6 +67,9 @@ export class ActivityRepository {
     }
     if (options.projectId) {
       filters.push(eq(sessionActivities.projectId, options.projectId));
+    }
+    if (options.types && options.types.length > 0) {
+      filters.push(inArray(sessionActivities.type, options.types));
     }
     if (options.agentId) {
       const sessionIds = this.drizzle

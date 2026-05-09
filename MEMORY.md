@@ -24,6 +24,8 @@
   "Codex Background Tasks" and reads the Gateway capability endpoint plus
   `features.turnInputEnabled` from safe session payloads so users can see that
   real task input is disabled by default even before a background session exists.
+  It also shows a read-only recent activity feed filtered to Codex app-server
+  lifecycle and notification events.
 - Model provider management has moved to provider-scoped profiles. The latest
   model work added cc-switch-inspired provider presets, dynamic model sync for
   OpenAI-compatible model-list endpoints, provider-scoped model default/update/
@@ -42,8 +44,9 @@
 
 1. Keep extending the guarded Web prototype around observable lifecycle and
    status only. Current Web surface supports lifecycle, initialize, thread
-   creation, stop, and backend-backed capability display; prompt/turn input
-   remains intentionally hidden to avoid accidental quota use.
+   creation, stop, backend-backed capability display, and read-only activity
+   history; prompt/turn input remains intentionally hidden to avoid accidental
+   quota use.
 2. Keep Codex app-server turn input disabled unless the Gateway is explicitly
    started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Gateway does not
    persist prompt/response transcript content; add user-facing retention

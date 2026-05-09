@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, CircleAlert, GitBranch, Play, RefreshCcw, ServerCog, ShieldCheck, Square } from "lucide-react";
+import { Activity, CheckCircle2, CircleAlert, GitBranch, Play, RefreshCcw, ServerCog, ShieldCheck, Square } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,14 +10,22 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   getCodexAppServerCapabilities,
   initializeCodexAppServer,
+  listActivities,
   listCodexAppServers,
   listProjects,
   startCodexAppServer,
   startCodexAppServerThread,
   stopCodexAppServer,
   type CodexAppServerSession,
+  type SessionActivity,
 } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
+
+const CODEX_APP_SERVER_ACTIVITY_TYPES = [
+  "codex_app_server_started",
+  "codex_app_server_stopped",
+  "codex_app_server_notification",
+];
 
 export default function CodexAppServerPage() {
   const { t } = useLanguage();
@@ -39,12 +47,20 @@ export default function CodexAppServerPage() {
     queryKey: ["codex-app-server-capabilities"],
     queryFn: getCodexAppServerCapabilities,
   });
+  const { data: activityData, isLoading: activitiesLoading } = useQuery({
+    queryKey: ["codex-app-server-activities"],
+    queryFn: () => listActivities({
+      types: CODEX_APP_SERVER_ACTIVITY_TYPES,
+      limit: 20,
+    }),
+  });
 
   const codexProjects = useMemo(
     () => (projectData?.projects ?? []).filter((project) => project.aiTool === "codex"),
     [projectData]
   );
   const sessions = appServerData?.sessions ?? [];
+  const activities = activityData?.activities ?? [];
   const capabilities = capabilityData?.capabilities ?? {
     initializeEnabled: true,
     threadCreationEnabled: true,
@@ -56,6 +72,7 @@ export default function CodexAppServerPage() {
   const refreshAppServers = () => {
     queryClient.invalidateQueries({ queryKey: ["codex-app-servers"] });
     queryClient.invalidateQueries({ queryKey: ["codex-app-server-capabilities"] });
+    queryClient.invalidateQueries({ queryKey: ["codex-app-server-activities"] });
   };
 
   const startMutation = useMutation({
@@ -265,6 +282,31 @@ export default function CodexAppServerPage() {
         </Card>
       </div>
 
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Activity className="size-4 text-muted-foreground" />
+              <CardTitle>{t("codexAppServer.recentActivity")}</CardTitle>
+            </div>
+            <Badge variant="secondary">{activities.length}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {activitiesLoading ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">{t("common.loading")}</div>
+          ) : activities.length === 0 ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">{t("codexAppServer.noActivity")}</div>
+          ) : (
+            <div className="divide-y divide-border">
+              {activities.map((activity) => (
+                <CodexAppServerActivityRow key={activity.id} activity={activity} />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {(operationError || operationResult) && (
         <Card>
           <CardContent className="space-y-3 p-4">
@@ -284,6 +326,28 @@ export default function CodexAppServerPage() {
       )}
     </div>
   );
+}
+
+function CodexAppServerActivityRow({ activity }: { activity: SessionActivity }) {
+  return (
+    <div className="grid gap-2 py-3 md:grid-cols-[180px_minmax(0,1fr)_120px] md:items-center">
+      <Badge variant={activity.status === "error" ? "destructive" : "secondary"} className="w-fit">
+        {activity.type}
+      </Badge>
+      <p className="min-w-0 break-words text-sm text-muted-foreground">{activity.message}</p>
+      <span className="text-xs text-muted-foreground md:text-right">
+        {formatCodexActivityTime(activity.createdAt)}
+      </span>
+    </div>
+  );
+}
+
+function formatCodexActivityTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleTimeString();
 }
 
 function reportError(error: unknown, setOperationError: (message: string) => void): void {

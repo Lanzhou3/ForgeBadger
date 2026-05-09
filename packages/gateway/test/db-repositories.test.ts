@@ -284,6 +284,35 @@ describe("db repositories", () => {
       assert.equal(repoA.list({ projectId: project.id, agentId: agentA.id }).length, 1);
       assert.equal(repoB.list({ projectId: project.id }).length, 0);
     });
+
+    it("filters activities by type", () => {
+      const userA = userRepo.create("activity-type-a@example.com", "hash");
+      const userB = userRepo.create("activity-type-b@example.com", "hash");
+      const repoA = new ActivityRepository(db, userA.id);
+      const repoB = new ActivityRepository(db, userB.id);
+
+      repoA.create({
+        type: "codex_app_server_started",
+        status: "info",
+        message: "Codex app-server running"
+      });
+      repoA.create({
+        type: "session_started",
+        status: "success",
+        message: "Session started"
+      });
+      repoB.create({
+        type: "codex_app_server_started",
+        status: "info",
+        message: "Other user event"
+      });
+
+      const activities = repoA.list({ types: ["codex_app_server_started"] });
+
+      assert.equal(activities.length, 1);
+      assert.equal(activities[0].type, "codex_app_server_started");
+      assert.equal(repoB.list({ types: ["codex_app_server_started"] }).length, 1);
+    });
   });
 
   describe("SessionRepository", () => {

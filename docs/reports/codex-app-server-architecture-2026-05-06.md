@@ -32,6 +32,9 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 - Lifecycle: start/list/stop are exposed; per-user running process limit is
   enforced by the manager; Gateway close calls `stopAll()`.
 - Activity: start/stop create structured activity rows and event-bus events.
+- Activity queries support a comma-separated `type` filter, allowing Web to
+  request only Codex app-server lifecycle and notification events without
+  loading unrelated session activity.
 - Gateway protocol helpers build `initialize`, `thread/start`, and `turn/start`
   requests, enforce request timeout and frame-size limits, validate inbound
   app-server frames, and close malformed inbound frames with a protocol error.
@@ -57,7 +60,8 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
   "Codex Background Tasks" for lifecycle, initialize, thread creation, and stop
   operations. It intentionally does not expose prompt/turn input yet and shows
   the Gateway turn capability state from the capabilities endpoint and safe
-  session payloads.
+  session payloads, plus a read-only recent activity feed for Codex app-server
+  lifecycle and notification events.
 - `turn/start` is disabled by default at the Gateway route layer and requires
   `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1` before any real turn can be sent.
   When enabled, it remains protected by a session-scoped request rate limit in
