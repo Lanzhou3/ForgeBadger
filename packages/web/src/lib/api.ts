@@ -144,6 +144,14 @@ export interface CodexAppServerSession {
   updatedAt: string;
 }
 
+export interface CodexAppServerCapabilities {
+  initializeEnabled: boolean;
+  threadCreationEnabled: boolean;
+  turnInputEnabled: boolean;
+  promptInputExposed: boolean;
+  transcriptPersistence: "disabled";
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -1103,6 +1111,12 @@ export async function connectSession(id: string): Promise<{ session: Session }> 
 
 export async function listCodexAppServers(): Promise<{ sessions: CodexAppServerSession[] }> {
   return fetchJson("/api/v1/codex/app-server") as Promise<{ sessions: CodexAppServerSession[] }>;
+}
+
+export async function getCodexAppServerCapabilities(): Promise<{ capabilities: CodexAppServerCapabilities }> {
+  return fetchJson("/api/v1/codex/app-server/capabilities") as Promise<{
+    capabilities: CodexAppServerCapabilities;
+  }>;
 }
 
 export async function startCodexAppServer(input: {

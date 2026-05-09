@@ -68,6 +68,57 @@ describe("Codex app-server routes", () => {
     }));
   });
 
+  it("reports Codex app-server capabilities without requiring an active session", async () => {
+    const capabilities = await makeRequest(app, "GET", "/api/v1/codex/app-server/capabilities", undefined, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(capabilities.status, 200);
+    assert.deepEqual(capabilities.body, {
+      code: 0,
+      data: {
+        capabilities: {
+          initializeEnabled: true,
+          threadCreationEnabled: true,
+          turnInputEnabled: false,
+          promptInputExposed: false,
+          transcriptPersistence: "disabled"
+        }
+      },
+      message: ""
+    });
+  });
+
+  it("reports turn input capability only when explicitly enabled", async () => {
+    app = express();
+    app.locals.jwtSecret = secret;
+    app.use(express.json());
+    app.use("/api/v1/codex/app-server", createCodexAppServerRoutes({
+      db,
+      manager: new CodexAppServerManager({
+        runtimeRoot: projectRoot,
+        spawn: () => ({
+          pid: 124,
+          on() {
+            return this;
+          },
+          kill() {
+            return true;
+          }
+        })
+      }),
+      turnInput: { enabled: true }
+    }));
+
+    const capabilities = await makeRequest(app, "GET", "/api/v1/codex/app-server/capabilities", undefined, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(capabilities.status, 200);
+    assert.equal(capabilities.body.data.capabilities.turnInputEnabled, true);
+    assert.equal(capabilities.body.data.capabilities.promptInputExposed, true);
+  });
+
   it("starts, lists, and stops a tenant-owned Codex app-server session", async () => {
     const start = await makeRequest(app, "POST", "/api/v1/codex/app-server", {
       projectId,

@@ -47,12 +47,28 @@ export interface CodexAppServerRoutesOptions {
   } | undefined;
 }
 
+export interface CodexAppServerCapabilities {
+  initializeEnabled: boolean;
+  threadCreationEnabled: boolean;
+  turnInputEnabled: boolean;
+  promptInputExposed: boolean;
+  transcriptPersistence: "disabled";
+}
+
 export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions): Router {
   const router = Router();
   const turnLimiter = new AppServerTurnRateLimiter(
     options.turnRateLimit ?? { maxRequests: 6, windowMs: 60_000 }
   );
   router.use(authenticate);
+
+  router.get("/capabilities", (_req, res) => {
+    res.json({
+      code: 0,
+      data: { capabilities: getCodexAppServerCapabilities(options) },
+      message: ""
+    });
+  });
 
   router.get("/", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
@@ -247,8 +263,19 @@ function toSafeSessionPayload(
   return {
     ...safe,
     features: {
-      turnInputEnabled: isTurnInputEnabled(options)
+      turnInputEnabled: getCodexAppServerCapabilities(options).turnInputEnabled
     }
+  };
+}
+
+function getCodexAppServerCapabilities(options: CodexAppServerRoutesOptions): CodexAppServerCapabilities {
+  const turnInputEnabled = isTurnInputEnabled(options);
+  return {
+    initializeEnabled: true,
+    threadCreationEnabled: true,
+    turnInputEnabled,
+    promptInputExposed: turnInputEnabled,
+    transcriptPersistence: "disabled"
   };
 }
 

@@ -19,6 +19,10 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 - Safe session payloads include `features.turnInputEnabled` so Web can display
   the real Gateway capability without exposing capability tokens or token-file
   paths.
+- `GET /api/v1/codex/app-server/capabilities` reports the app-server capability
+  surface without requiring an active app-server session. This keeps the Web
+  launch surface aligned with the Gateway feature flag before any Codex process
+  is started.
 - WebSocket mode: loopback URL plus capability token file written under the
   OpenForge runtime root with `0600` permissions.
 - Tenant boundary: project lookup uses `ProjectRepository(db, userId)` and
@@ -52,7 +56,8 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 - Web exposes a guarded `/codex-app-server` prototype surface as
   "Codex Background Tasks" for lifecycle, initialize, thread creation, and stop
   operations. It intentionally does not expose prompt/turn input yet and shows
-  the Gateway turn capability state from the safe session payload.
+  the Gateway turn capability state from the capabilities endpoint and safe
+  session payloads.
 - `turn/start` is disabled by default at the Gateway route layer and requires
   `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1` before any real turn can be sent.
   When enabled, it remains protected by a session-scoped request rate limit in
@@ -81,4 +86,5 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 - `test/codex-app-server-routes.test.ts`
 - `node --test scripts/smoke-codex-app-server.test.mjs`
 - `pnpm smoke:codex-app-server`
+- `pnpm --dir packages/web test src/lib/api.test.ts`
 - `pnpm --dir packages/web test src/lib/i18n.test.ts`

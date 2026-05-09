@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  getCodexAppServerCapabilities,
   initializeCodexAppServer,
   listCodexAppServers,
   listProjects,
@@ -34,15 +35,27 @@ export default function CodexAppServerPage() {
     queryKey: ["codex-app-servers"],
     queryFn: listCodexAppServers,
   });
+  const { data: capabilityData } = useQuery({
+    queryKey: ["codex-app-server-capabilities"],
+    queryFn: getCodexAppServerCapabilities,
+  });
 
   const codexProjects = useMemo(
     () => (projectData?.projects ?? []).filter((project) => project.aiTool === "codex"),
     [projectData]
   );
   const sessions = appServerData?.sessions ?? [];
+  const capabilities = capabilityData?.capabilities ?? {
+    initializeEnabled: true,
+    threadCreationEnabled: true,
+    turnInputEnabled: false,
+    promptInputExposed: false,
+    transcriptPersistence: "disabled" as const,
+  };
 
   const refreshAppServers = () => {
     queryClient.invalidateQueries({ queryKey: ["codex-app-servers"] });
+    queryClient.invalidateQueries({ queryKey: ["codex-app-server-capabilities"] });
   };
 
   const startMutation = useMutation({
@@ -122,9 +135,13 @@ export default function CodexAppServerPage() {
               <div className="flex items-center justify-between gap-3">
                 <span className="flex items-center gap-2 font-medium">
                   <ShieldCheck className="size-4 text-muted-foreground" />
-                  {t("codexAppServer.zeroQuotaState")}
+                  {t("codexAppServer.capabilityState")}
                 </span>
-                <Badge variant="secondary">{t("codexAppServer.turnDisabled")}</Badge>
+                <Badge variant={capabilities.turnInputEnabled ? "default" : "secondary"}>
+                  {capabilities.turnInputEnabled
+                    ? t("codexAppServer.turnEnabled")
+                    : t("codexAppServer.turnDisabled")}
+                </Badge>
               </div>
               <div className="mt-2 text-muted-foreground">
                 {t("codexAppServer.transcriptOff")}
