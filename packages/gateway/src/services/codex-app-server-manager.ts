@@ -17,6 +17,10 @@ import {
   type CodexThreadStartRequestInput,
   type CodexTurnStartRequestInput
 } from "./codex-app-server-client.js";
+import {
+  createCodexAppServerTransport,
+  type WebSocketTransportFactory
+} from "./codex-app-server-transports.js";
 
 export type CodexAppServerRuntimeMode = "app-server-stdio" | "app-server-websocket";
 export type CodexAppServerStatus = "running" | "stopped" | "error";
@@ -81,6 +85,7 @@ export interface CodexAppServerManagerOptions {
     session: CodexAppServerSession;
     child: CodexAppServerChild;
   }) => CodexAppServerTransport | undefined;
+  webSocketFactory?: WebSocketTransportFactory | undefined;
 }
 
 const APP_SERVER_ENV_ALLOWLIST = [
@@ -257,7 +262,8 @@ export class CodexAppServerManager extends EventEmitter {
     child: CodexAppServerChild
   ): CodexAppServerJsonRpcClient | undefined {
     const transport =
-      this.options.transportFactory?.({ session, child }) ?? createDefaultTransport(session, child);
+      this.options.transportFactory?.({ session, child }) ??
+      createCodexAppServerTransport(session, child, this.options.webSocketFactory);
     if (!transport) {
       return undefined;
     }
@@ -374,53 +380,4 @@ function defaultSpawn(command: string, args: string[], options: {
 function publicSession(session: ManagedCodexAppServerSession): CodexAppServerSession {
   const { child: _child, client: _client, ...rest } = session;
   return { ...rest };
-}
-
-function createDefaultTransport(
-  session: CodexAppServerSession,
-  child: CodexAppServerChild
-): CodexAppServerTransport | undefined {
-  if (session.runtimeMode === "app-server-stdio" && child.stdin && child.stdout) {
-    return new StdioJsonLineTransport(child);
-  }
-
-  return undefined;
-}
-
-class StdioJsonLineTransport implements CodexAppServerTransport {
-  private messageHandler: ((raw: string | Buffer) => void) | undefined;
-  private closeHandler: ((code?: number, reason?: string) => void) | undefined;
-  private buffer = "";
-
-  constructor(private readonly child: CodexAppServerChild) {
-    child.stdout?.on("data", (chunk: Buffer | string) => {
-      this.buffer += chunk.toString();
-      let newlineIndex = this.buffer.indexOf("\n");
-      while (newlineIndex >= 0) {
-        const frame = this.buffer.slice(0, newlineIndex).trim();
-        this.buffer = this.buffer.slice(newlineIndex + 1);
-        if (frame) this.messageHandler?.(frame);
-        newlineIndex = this.buffer.indexOf("\n");
-      }
-    });
-    child.on("exit", () => this.closeHandler?.(1000, "process exited"));
-    child.on("error", (error: Error) => this.closeHandler?.(1011, error.message));
-  }
-
-  send(data: string): void {
-    this.child.stdin?.write(`${data}\n`);
-  }
-
-  close(code?: number, reason?: string): void {
-    this.child.stdin?.end();
-    this.closeHandler?.(code, reason);
-  }
-
-  onMessage(handler: (raw: string | Buffer) => void): void {
-    this.messageHandler = handler;
-  }
-
-  onClose(handler: (code?: number, reason?: string) => void): void {
-    this.closeHandler = handler;
-  }
 }

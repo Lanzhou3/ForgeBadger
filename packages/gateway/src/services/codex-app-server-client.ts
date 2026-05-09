@@ -16,6 +16,13 @@ export interface CodexAppServerRequestOptions {
   params: Record<string, unknown>;
 }
 
+export interface CodexAppServerNotificationEnvelope<
+  TParams extends Record<string, unknown> | undefined = undefined
+> {
+  method: string;
+  params?: TParams;
+}
+
 export interface CodexInitializeRequestInput {
   id: JsonRpcId;
   clientVersion: string;
@@ -112,6 +119,21 @@ export function createCodexAppServerRequestEnvelope<TParams extends Record<strin
   };
 }
 
+export function createCodexAppServerNotificationEnvelope<
+  TParams extends Record<string, unknown> | undefined = undefined
+>(
+  input: { method: string; params?: TParams }
+): CodexAppServerNotificationEnvelope<TParams> {
+  return {
+    method: input.method,
+    ...(input.params !== undefined ? { params: input.params } : {})
+  };
+}
+
+export function createCodexAppServerInitializedNotification(): CodexAppServerNotificationEnvelope {
+  return createCodexAppServerNotificationEnvelope({ method: "initialized" });
+}
+
 export function createCodexAppServerInitializeRequest(
   input: CodexInitializeRequestInput
 ): CodexAppServerRequestEnvelope<{
@@ -143,8 +165,6 @@ export function createCodexAppServerThreadStartRequest(
   approvalPolicy?: string;
   sandbox?: string;
   serviceName: string;
-  experimentalRawEvents: boolean;
-  persistExtendedHistory: boolean;
 }> {
   return createCodexAppServerRequestEnvelope({
     id: input.id,
@@ -154,9 +174,7 @@ export function createCodexAppServerThreadStartRequest(
       ...(input.model ? { model: input.model } : {}),
       ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
       ...(input.sandbox ? { sandbox: input.sandbox } : {}),
-      serviceName: "openforge",
-      experimentalRawEvents: false,
-      persistExtendedHistory: false
+      serviceName: "openforge"
     }
   });
 }
@@ -306,7 +324,7 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
   }
 
   async initialize(input?: Partial<Omit<CodexInitializeRequestInput, "id">>): Promise<unknown> {
-    return this.request("initialize", {
+    const result = await this.request("initialize", {
       clientInfo: {
         name: "openforge",
         title: "OpenForge",
@@ -318,6 +336,8 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
           input?.optOutNotificationMethods ?? this.options.optOutNotificationMethods ?? []
       }
     });
+    this.sendNotification(createCodexAppServerInitializedNotification());
+    return result;
   }
 
   async startThread(input: Omit<CodexThreadStartRequestInput, "id">): Promise<unknown> {
@@ -326,9 +346,7 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
       ...(input.model ? { model: input.model } : {}),
       ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
       ...(input.sandbox ? { sandbox: input.sandbox } : {}),
-      serviceName: "openforge",
-      experimentalRawEvents: false,
-      persistExtendedHistory: false
+      serviceName: "openforge"
     });
   }
 
@@ -416,6 +434,14 @@ export class CodexAppServerJsonRpcClient extends EventEmitter {
     this.closed = true;
     this.rejectPending("Codex app-server client is closed");
     this.options.transport.close(code, reason);
+  }
+
+  private sendNotification(notification: CodexAppServerNotificationEnvelope): void {
+    const payload = JSON.stringify(notification);
+    if (Buffer.byteLength(payload, "utf8") > (this.options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES)) {
+      throw new Error("Codex app-server notification too large");
+    }
+    this.options.transport.send(payload);
   }
 
   private resolveResponse(frame: CodexAppServerResponseFrame): void {

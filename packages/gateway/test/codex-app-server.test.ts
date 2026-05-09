@@ -89,9 +89,7 @@ describe("Codex app-server helpers", () => {
           model: "gpt-5.4",
           approvalPolicy: "on-request",
           sandbox: "workspace-write",
-          serviceName: "openforge",
-          experimentalRawEvents: false,
-          persistExtendedHistory: false
+          serviceName: "openforge"
         }
       }
     );

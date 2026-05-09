@@ -13,6 +13,10 @@ import {
   createCodexAppServerNotificationEvent,
   type CodexAppServerTransport
 } from "../src/services/codex-app-server-client.js";
+import type {
+  WebSocketTransportConnection,
+  WebSocketTransportFactoryOptions
+} from "../src/services/codex-app-server-transports.js";
 
 class FakeChild extends EventEmitter implements CodexAppServerChild {
   killed = false;
@@ -53,6 +57,56 @@ describe("CodexAppServerManager", () => {
     assert.ok(session.tokenFile);
     assert.equal(await readFile(session.tokenFile, "utf8"), `${session.token}\n`);
     assert.equal((await stat(session.tokenFile)).mode & 0o777, 0o600);
+  });
+
+  it("initializes websocket app-server sessions through capability-token transport", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-ws-client-"));
+    const socket = new FakeWebSocketConnection();
+    let connectUrl = "";
+    let connectOptions: WebSocketTransportFactoryOptions | undefined;
+    const manager = new CodexAppServerManager({
+      runtimeRoot: root,
+      spawn: () => new FakeChild(1234),
+      webSocketFactory: (url, options) => {
+        connectUrl = url;
+        connectOptions = options;
+        return socket;
+      }
+    });
+
+    const session = await manager.start({
+      userId: "user-1",
+      projectId: "project-1",
+      projectRoot: "/workspace/project",
+      credentialMode: "host_environment",
+      runtimeMode: "app-server-websocket"
+    });
+    const pending = manager.initialize(session.id, "user-1");
+
+    assert.equal(connectUrl, session.listen);
+    assert.equal(connectOptions?.headers?.Authorization, `Bearer ${session.token}`);
+    assert.equal(socket.sent.length, 0);
+
+    socket.emitOpen();
+    const sent = JSON.parse(socket.sent[0] ?? "{}") as { id: number; method: string };
+    assert.equal(sent.method, "initialize");
+    socket.emitMessage(JSON.stringify({
+      id: sent.id,
+      result: {
+        userAgent: "openforge/0.130.0",
+        codexHome: root,
+        platformFamily: "unix",
+        platformOs: "linux"
+      }
+    }));
+
+    assert.deepEqual(await pending, {
+      userAgent: "openforge/0.130.0",
+      codexHome: root,
+      platformFamily: "unix",
+      platformOs: "linux"
+    });
+    assert.deepEqual(JSON.parse(socket.sent[1] ?? "{}"), { method: "initialized" });
   });
 
   it("allocates unique loopback ports for concurrent websocket starts", async () => {
@@ -287,5 +341,46 @@ class ManualTransport implements CodexAppServerTransport {
 
   emitMessage(raw: string): void {
     this.messageHandler?.(raw);
+  }
+}
+
+class FakeWebSocketConnection implements WebSocketTransportConnection {
+  readonly readyState = 0;
+  sent: string[] = [];
+  private openHandler: (() => void) | undefined;
+  private messageHandler: ((data: unknown) => void) | undefined;
+  private closeHandler: ((code: number, reason: Buffer) => void) | undefined;
+  private errorHandler: ((error: Error) => void) | undefined;
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+
+  close(code?: number, reason?: string): void {
+    this.closeHandler?.(code ?? 1000, Buffer.from(reason ?? ""));
+  }
+
+  on(event: "open", handler: () => void): this;
+  on(event: "message", handler: (data: unknown) => void): this;
+  on(event: "close", handler: (code: number, reason: Buffer) => void): this;
+  on(event: "error", handler: (error: Error) => void): this;
+  on(event: "open" | "message" | "close" | "error", handler: unknown): this {
+    if (event === "open") this.openHandler = handler as () => void;
+    if (event === "message") this.messageHandler = handler as (data: unknown) => void;
+    if (event === "close") this.closeHandler = handler as (code: number, reason: Buffer) => void;
+    if (event === "error") this.errorHandler = handler as (error: Error) => void;
+    return this;
+  }
+
+  emitOpen(): void {
+    this.openHandler?.();
+  }
+
+  emitMessage(data: string): void {
+    this.messageHandler?.(data);
+  }
+
+  emitError(error: Error): void {
+    this.errorHandler?.(error);
   }
 }

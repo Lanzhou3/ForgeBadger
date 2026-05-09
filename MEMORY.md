@@ -34,14 +34,18 @@
 
 ## Next Work
 
-1. Continue Phase B with transport-level real `codex app-server` initialize
-   response capture. Zero-quota validation on 2026-05-07 used an isolated
-   `/tmp/openforge-codex-isolated` HOME/CODEX_HOME, confirmed `codex-cli
-   0.128.0`, generated protocol bindings, and short-lived Unix-socket startup,
-   but one-shot initialize over stdio/proxy did not emit a response yet.
-2. Extend the guarded Web prototype only after initialize response capture.
-   Current Web surface supports lifecycle, initialize, thread creation, and stop;
-   prompt/turn input remains intentionally hidden to avoid accidental quota use.
+1. Continue Phase B with real `app-server-websocket` validation in an
+   unrestricted environment. Zero-quota validation on 2026-05-09 used isolated
+   `/tmp/openforge-codex-help-home` and `/tmp/openforge-codex-help-codex`,
+   confirmed `codex-cli 0.130.0`, generated protocol bindings, and captured a
+   real stdio `initialize` response without touching host Codex config or
+   starting a prompt turn. The Gateway now sends the required `initialized`
+   notification after `initialize` and has a default WebSocket transport that
+   presents capability tokens as `Authorization: Bearer <token>`.
+2. Extend the guarded Web prototype only after WebSocket transport validation
+   and UX/security review. Current Web surface supports lifecycle, initialize,
+   thread creation, and stop; prompt/turn input remains intentionally hidden to
+   avoid accidental quota use.
 3. Run release-sized build/regression evidence when preparing the next beta
    handoff; the model provider closure already has API, unit, typecheck, and
    local browser smoke coverage.

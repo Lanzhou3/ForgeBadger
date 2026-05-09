@@ -28,13 +28,16 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 - Gateway protocol helpers build `initialize`, `thread/start`, and `turn/start`
   requests, enforce request timeout and frame-size limits, validate inbound
   app-server frames, and close malformed inbound frames with a protocol error.
-- Request envelopes are aligned with `codex-cli 0.128.0` generated bindings:
-  frames use `{ id, method, params }` without a `jsonrpc` wrapper, thread start
-  sends `experimentalRawEvents: false` and `persistExtendedHistory: false`, and
-  text turn input includes `text_elements: []`.
+- Request envelopes are aligned with `codex-cli 0.130.0` generated bindings:
+  frames use `{ id, method, params }` without a `jsonrpc` wrapper, successful
+  `initialize` is acknowledged with an `initialized` notification, and text turn
+  input includes `text_elements: []`.
 - Managed app-server sessions can own a Gateway protocol client. Authenticated
   routes expose `initialize`, `thread`, and `turn` operations without exposing
   capability tokens or persisting prompt/response transcript content.
+- Managed `app-server-websocket` sessions now create a Gateway WebSocket
+  transport that sends one JSON-RPC message per text frame and presents the
+  capability token as `Authorization: Bearer <token>` during the handshake.
 - Codex app-server notifications are normalized into
   `codex_app_server_notification` activity rows and broadcast through the
   existing activity event path.
@@ -47,15 +50,15 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 ## Deferred
 
 - Production WebSocket transport validation against a real `codex app-server`
-  process.
+  process in an unrestricted environment.
 - Web prompt input or transcript UI.
 - Full prompt/response transcript persistence policy.
-- Exact real-process initialize response capture remains open: zero-quota local
-  validation on 2026-05-07 confirmed `codex-cli 0.128.0`, `app-server --help`,
-  generated TypeScript bindings, isolated Unix-socket app-server startup, and
-  proxy connection without touching the host Codex config; one-shot initialize
-  frames did not emit a response over stdio/proxy and need transport-level
-  follow-up.
+- Real-process stdio initialize response capture is closed for the current
+  local toolchain: zero-quota validation on 2026-05-09 used isolated
+  `/tmp/openforge-codex-help-home` and `/tmp/openforge-codex-help-codex`,
+  confirmed `codex-cli 0.130.0`, generated TypeScript bindings, and received an
+  `initialize` result containing `userAgent`, `codexHome`, `platformFamily`, and
+  `platformOs` without touching the host Codex config or starting a prompt turn.
 
 ## Verification
 

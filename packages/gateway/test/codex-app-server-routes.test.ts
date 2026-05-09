@@ -182,14 +182,14 @@ describe("Codex app-server routes", () => {
     assert.deepEqual(turn.body.data.result, { accepted: true });
 
     const sentMethods = transport.sent.map((payload) => JSON.parse(payload).method);
-    assert.deepEqual(sentMethods, ["initialize", "thread/start", "turn/start"]);
-    assert.equal(JSON.parse(transport.sent[1]).params.cwd, projectRoot);
-    assert.equal(JSON.parse(transport.sent[1]).params.approvalPolicy, "never");
-    assert.equal(JSON.parse(transport.sent[1]).params.sandbox, "read-only");
-    assert.equal(JSON.parse(transport.sent[1]).params.experimentalRawEvents, false);
-    assert.equal(JSON.parse(transport.sent[1]).params.persistExtendedHistory, false);
-    assert.equal(JSON.parse(transport.sent[2]).params.input[0].text, "Summarize the repo");
-    assert.deepEqual(JSON.parse(transport.sent[2]).params.input[0].text_elements, []);
+    assert.deepEqual(sentMethods, ["initialize", "initialized", "thread/start", "turn/start"]);
+    assert.equal(JSON.parse(transport.sent[2]).params.cwd, projectRoot);
+    assert.equal(JSON.parse(transport.sent[2]).params.approvalPolicy, "never");
+    assert.equal(JSON.parse(transport.sent[2]).params.sandbox, "read-only");
+    assert.equal(JSON.parse(transport.sent[2]).params.experimentalRawEvents, undefined);
+    assert.equal(JSON.parse(transport.sent[2]).params.persistExtendedHistory, undefined);
+    assert.equal(JSON.parse(transport.sent[3]).params.input[0].text, "Summarize the repo");
+    assert.deepEqual(JSON.parse(transport.sent[3]).params.input[0].text_elements, []);
   });
 
   it("rate limits repeated turn requests for the same app-server session", async () => {
@@ -267,6 +267,9 @@ class AutoResponseTransport implements CodexAppServerTransport {
   send(data: string): void {
     this.sent.push(data);
     const parsed = JSON.parse(data) as { id: string | number };
+    if (parsed.id === undefined) {
+      return;
+    }
     queueMicrotask(() => {
       this.messageHandler?.(JSON.stringify({
         jsonrpc: "2.0",

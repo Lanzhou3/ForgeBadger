@@ -5,6 +5,7 @@ import {
   CodexAppServerJsonRpcClient,
   type CodexAppServerTransport,
   createCodexAppServerInitializeRequest,
+  createCodexAppServerInitializedNotification,
   createCodexAppServerNotificationEvent,
   createCodexAppServerRequestEnvelope,
   createCodexAppServerThreadStartRequest,
@@ -88,9 +89,7 @@ describe("Codex app-server client helpers", () => {
           model: "gpt-5.4",
           approvalPolicy: "on-request",
           sandbox: "workspace-write",
-          serviceName: "openforge",
-          experimentalRawEvents: false,
-          persistExtendedHistory: false
+          serviceName: "openforge"
         }
       }
     );
@@ -244,6 +243,32 @@ describe("Codex app-server client helpers", () => {
       status: "warning",
       message: "Claude needs approval"
     });
+  });
+
+  it("acknowledges initialize with an initialized notification", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerJsonRpcClient({
+      transport,
+      clientVersion: "0.0.0"
+    });
+
+    const pending = client.initialize();
+    const sent = JSON.parse(transport.sent[0] ?? "{}") as { id: number; method: string };
+    assert.equal(sent.method, "initialize");
+    transport.emitMessage(
+      JSON.stringify({
+        id: sent.id,
+        result: {
+          userAgent: "openforge/0.130.0",
+          codexHome: "/tmp/codex-home",
+          platformFamily: "unix",
+          platformOs: "linux"
+        }
+      })
+    );
+
+    await assert.doesNotReject(pending);
+    assert.deepEqual(JSON.parse(transport.sent[1] ?? "{}"), createCodexAppServerInitializedNotification());
   });
 
   it("rejects pending requests when the transport closes", async () => {
