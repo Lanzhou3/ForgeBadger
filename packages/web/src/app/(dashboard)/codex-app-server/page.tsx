@@ -19,6 +19,7 @@ import {
   type CodexAppServerSession,
   type SessionActivity,
 } from "@/lib/api";
+import { describeCodexAppServerActivity } from "@/lib/codex-app-server-activity";
 import { useLanguage } from "@/hooks/use-language";
 
 const CODEX_APP_SERVER_ACTIVITY_TYPES = [
@@ -329,12 +330,20 @@ export default function CodexAppServerPage() {
 }
 
 function CodexAppServerActivityRow({ activity }: { activity: SessionActivity }) {
+  const { t } = useLanguage();
+  const presentation = describeCodexAppServerActivity(activity);
+
   return (
     <div className="grid gap-2 py-3 md:grid-cols-[180px_minmax(0,1fr)_120px] md:items-center">
-      <Badge variant={activity.status === "error" ? "destructive" : "secondary"} className="w-fit">
-        {activity.type}
+      <Badge variant={presentation.variant} className="w-fit">
+        {t(presentation.labelKey)}
       </Badge>
-      <p className="min-w-0 break-words text-sm text-muted-foreground">{activity.message}</p>
+      <div className="min-w-0 space-y-1">
+        <p className="break-words text-sm text-muted-foreground">{presentation.message}</p>
+        {presentation.detail && (
+          <p className="break-words font-mono text-xs text-muted-foreground">{presentation.detail}</p>
+        )}
+      </div>
       <span className="text-xs text-muted-foreground md:text-right">
         {formatCodexActivityTime(activity.createdAt)}
       </span>

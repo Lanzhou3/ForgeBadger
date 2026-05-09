@@ -152,6 +152,26 @@ export interface CodexAppServerCapabilities {
   transcriptPersistence: "disabled";
 }
 
+export interface DependencyStatus {
+  name: string;
+  available: boolean;
+  required?: boolean;
+  version?: string;
+  error?: string;
+}
+
+export interface TerminalRuntimeStatus {
+  persistence: "tmux";
+  mode: "native_tmux" | "wsl_required" | "tmux_missing" | string;
+  supported: boolean;
+  message: string;
+}
+
+export interface DependencyReport {
+  dependencies: DependencyStatus[];
+  terminalRuntime?: TerminalRuntimeStatus;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -851,10 +871,10 @@ export async function getMe() {
   return fetchEnvelope<User>("/api/v1/auth/me", { method: "GET" });
 }
 
-export async function getDependencies(): Promise<unknown> {
+export async function getDependencies(): Promise<DependencyReport> {
   return fetchJson("/api/v1/gate-a/dependencies", {
     cache: "no-store"
-  });
+  }) as Promise<DependencyReport>;
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {

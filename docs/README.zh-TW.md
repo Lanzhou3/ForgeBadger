@@ -87,6 +87,9 @@ templates/   內建 AI CLI 設定範本
 - 支援 SQLite 的本地檔案系統
 - 如需真實 AI CLI 工作階段，需要在 `PATH` 中安裝 Claude Code、OpenCode 和/或 Codex
 
+Windows 使用者如需使用內建瀏覽器終端機，請在 WSL 中執行 OpenForge。原生
+Windows 安裝仍可使用管理介面，但可還原的終端機工作階段依賴 tmux。
+
 ## 從 npm 安裝
 
 ```bash

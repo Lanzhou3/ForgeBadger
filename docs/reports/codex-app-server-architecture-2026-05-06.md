@@ -62,6 +62,10 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
   the Gateway turn capability state from the capabilities endpoint and safe
   session payloads, plus a read-only recent activity feed for Codex app-server
   lifecycle and notification events.
+- The Web recent activity feed maps raw `codex_app_server_*` activity types to
+  localized labels and only renders safe metadata such as runtime mode,
+  notification method, notification type, and thread id. Transcript-like
+  metadata keys such as prompt, text, or response are not surfaced in the UI.
 - Web event handling invalidates only the `codex-app-server-activities` query
   when an `activity_created` event carries a Codex app-server activity type,
   avoiding broad dashboard/project refetches for app-server telemetry.

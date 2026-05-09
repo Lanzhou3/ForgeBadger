@@ -26,7 +26,13 @@
   real task input is disabled by default even before a background session exists.
   It also shows a read-only recent activity feed filtered to Codex app-server
   lifecycle and notification events, and the Web event stream refreshes that
-  feed when matching app-server activity events arrive.
+  feed when matching app-server activity events arrive. The activity feed now
+  renders localized lifecycle/notification labels and safe details only, without
+  surfacing prompt/text/response-like metadata.
+- Terminal persistence remains tmux-backed. Gateway dependency reporting now
+  includes a `terminalRuntime` status so the Web dashboard distinguishes native
+  tmux support, missing tmux, and native Windows environments that require WSL
+  for the built-in browser terminal.
 - Model provider management has moved to provider-scoped profiles. The latest
   model work added cc-switch-inspired provider presets, dynamic model sync for
   OpenAI-compatible model-list endpoints, provider-scoped model default/update/
@@ -45,9 +51,9 @@
 
 1. Keep extending the guarded Web prototype around observable lifecycle and
    status only. Current Web surface supports lifecycle, initialize, thread
-   creation, stop, backend-backed capability display, and read-only activity
-   history with event-driven refresh; prompt/turn input remains intentionally
-   hidden to avoid accidental quota use.
+   creation, stop, backend-backed capability display, and localized read-only
+   activity history with event-driven refresh; prompt/turn input remains
+   intentionally hidden to avoid accidental quota use.
 2. Keep Codex app-server turn input disabled unless the Gateway is explicitly
    started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Gateway does not
    persist prompt/response transcript content; add user-facing retention

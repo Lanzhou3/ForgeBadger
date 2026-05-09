@@ -25,6 +25,20 @@ export interface DependencyStatus {
   error?: string;
 }
 
+export type TerminalRuntimeMode = "native_tmux" | "wsl_required" | "tmux_missing";
+
+export interface TerminalRuntimeStatus {
+  persistence: "tmux";
+  mode: TerminalRuntimeMode;
+  supported: boolean;
+  message: string;
+}
+
+export interface OpenForgeDependencyReport {
+  dependencies: DependencyStatus[];
+  terminalRuntime: TerminalRuntimeStatus;
+}
+
 interface DependencyCheck {
   command: string;
   args: string[];
@@ -97,6 +111,17 @@ export async function checkOpenForgeDependencies(
   );
 }
 
+export async function checkOpenForgeRuntimeDependencies(
+  runner: CommandRunner = runCommand,
+  platform: NodeJS.Platform = process.platform
+): Promise<OpenForgeDependencyReport> {
+  const dependencies = await checkOpenForgeDependencies(runner);
+  return {
+    dependencies,
+    terminalRuntime: describeTerminalRuntime(dependencies, platform)
+  };
+}
+
 export function runCommand(
   command: string,
   args: string[],
@@ -163,6 +188,37 @@ export function runCommand(
       resolve(result);
     }
   });
+}
+
+function describeTerminalRuntime(
+  dependencies: DependencyStatus[],
+  platform: NodeJS.Platform
+): TerminalRuntimeStatus {
+  if (platform === "win32") {
+    return {
+      persistence: "tmux",
+      mode: "wsl_required",
+      supported: false,
+      message: "Native Windows terminals require WSL because OpenForge persists sessions with tmux."
+    };
+  }
+
+  const tmux = dependencies.find((dependency) => dependency.name === "tmux");
+  if (tmux?.available) {
+    return {
+      persistence: "tmux",
+      mode: "native_tmux",
+      supported: true,
+      message: "tmux is available for persistent browser terminals."
+    };
+  }
+
+  return {
+    persistence: "tmux",
+    mode: "tmux_missing",
+    supported: false,
+    message: "Install tmux to enable persistent browser terminals."
+  };
 }
 
 function createBoundedOutput(): BoundedOutput {

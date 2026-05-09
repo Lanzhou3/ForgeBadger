@@ -105,6 +105,10 @@ Key rules:
 - Claude Code, OpenCode, and/or Codex installed on `PATH` for real AI CLI
   sessions
 
+On Windows, run OpenForge inside WSL for the built-in browser terminal. Native
+Windows installs can still use the management UI, but persistent terminal
+sessions depend on tmux.
+
 ## Install From npm
 
 ```bash

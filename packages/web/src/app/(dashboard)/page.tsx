@@ -33,6 +33,7 @@ import {
   getDashboardSummary,
 } from "@/lib/api";
 import { normalizeSessionStatus } from "@/lib/session-status";
+import { terminalRuntimeTranslationKey } from "@/lib/terminal-runtime";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function DashboardPage() {
@@ -54,6 +55,7 @@ export default function DashboardPage() {
   const dashboard = dashboardQuery.data;
   const dashboardStats = dashboard?.stats;
   const dashboardHealth = dashboard?.health;
+  const terminalRuntime = dependenciesQuery.data?.terminalRuntime;
 
   const stats = [
     {
@@ -104,8 +106,8 @@ export default function DashboardPage() {
     },
     {
       label: t("dashboard.dependenciesHealth"),
-      detail: t("dashboard.dependenciesHealthDescription"),
-      healthy: !dependenciesQuery.isError,
+      detail: t(terminalRuntimeTranslationKey(terminalRuntime?.mode)),
+      healthy: terminalRuntime?.supported ?? !dependenciesQuery.isError,
       icon: CheckCircle2,
       href: "/settings",
     },

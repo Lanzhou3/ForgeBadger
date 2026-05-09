@@ -5,6 +5,7 @@ import {
   checkCommand,
   checkGateADependencies,
   checkOpenForgeDependencies,
+  checkOpenForgeRuntimeDependencies,
   runCommand
 } from "../src/lib/dependency-check.js";
 
@@ -136,5 +137,61 @@ describe("checkOpenForgeDependencies", () => {
       { command: "opencode", args: ["--version"] },
       { command: "codex", args: ["--version"] }
     ]);
+  });
+});
+
+describe("checkOpenForgeRuntimeDependencies", () => {
+  it("reports native tmux terminal support on Unix-like systems when tmux is available", async () => {
+    const result = await checkOpenForgeRuntimeDependencies(
+      async (command) => ({
+        exitCode: command === "tmux" ? 0 : 127,
+        stdout: command === "tmux" ? "tmux 3.4\n" : "",
+        stderr: command === "tmux" ? "" : "not found"
+      }),
+      "linux"
+    );
+
+    assert.deepEqual(result.terminalRuntime, {
+      persistence: "tmux",
+      mode: "native_tmux",
+      supported: true,
+      message: "tmux is available for persistent browser terminals."
+    });
+  });
+
+  it("reports WSL guidance instead of native tmux support on Windows", async () => {
+    const result = await checkOpenForgeRuntimeDependencies(
+      async () => ({
+        exitCode: 127,
+        stdout: "",
+        stderr: "not found"
+      }),
+      "win32"
+    );
+
+    assert.deepEqual(result.terminalRuntime, {
+      persistence: "tmux",
+      mode: "wsl_required",
+      supported: false,
+      message: "Native Windows terminals require WSL because OpenForge persists sessions with tmux."
+    });
+  });
+
+  it("reports missing tmux when the host platform supports native terminal sessions but tmux is absent", async () => {
+    const result = await checkOpenForgeRuntimeDependencies(
+      async () => ({
+        exitCode: 127,
+        stdout: "",
+        stderr: "not found"
+      }),
+      "darwin"
+    );
+
+    assert.deepEqual(result.terminalRuntime, {
+      persistence: "tmux",
+      mode: "tmux_missing",
+      supported: false,
+      message: "Install tmux to enable persistent browser terminals."
+    });
   });
 });
