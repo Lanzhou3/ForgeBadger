@@ -49,13 +49,18 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 - Web exposes a guarded `/codex-app-server` prototype surface for lifecycle,
   initialize, thread creation, and stop operations. It intentionally does not
   expose prompt/turn input yet.
-- `turn/start` is protected by a session-scoped request rate limit in addition
-  to request size, timeout, process limits, and frame-size guards.
+- `turn/start` is disabled by default at the Gateway route layer and requires
+  `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1` before any real turn can be sent.
+  When enabled, it remains protected by a session-scoped request rate limit in
+  addition to request size, timeout, process limits, and frame-size guards.
+- Gateway does not persist prompt or response transcript content for app-server
+  calls; route responses are pass-through protocol results and normalized
+  notifications are recorded as activity metadata only.
 
 ## Deferred
 
 - Web prompt input or transcript UI.
-- Full prompt/response transcript persistence policy.
+- Full prompt/response transcript UI and user-facing retention controls.
 - Real-process stdio initialize response capture is closed for the current
   local toolchain: zero-quota validation on 2026-05-09 used isolated
   `/tmp/openforge-codex-help-home` and `/tmp/openforge-codex-help-codex`,

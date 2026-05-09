@@ -42,6 +42,9 @@ export interface CodexAppServerRoutesOptions {
     maxRequests: number;
     windowMs: number;
   } | undefined;
+  turnInput?: {
+    enabled: boolean;
+  } | undefined;
 }
 
 export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions): Router {
@@ -168,6 +171,17 @@ export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions)
       res.status(404).json({ code: 1, message: "Codex app-server session not found" });
       return;
     }
+    if (!isTurnInputEnabled(options)) {
+      res.status(403).json({
+        code: 1,
+        message: "Codex app-server turn input is disabled",
+        details: {
+          feature: "codex_app_server_turn_input",
+          enableWith: "OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1"
+        }
+      });
+      return;
+    }
     if (!turnLimiter.consume(userId, session.id)) {
       res.status(429).json({ code: 1, message: "Codex app-server turn rate limit exceeded" });
       return;
@@ -249,6 +263,14 @@ function sendRpcError(res: Response, error: unknown): void {
     return;
   }
   res.status(409).json({ code: 1, message });
+}
+
+function isTurnInputEnabled(options: CodexAppServerRoutesOptions): boolean {
+  return options.turnInput?.enabled === true;
+}
+
+export function isCodexAppServerTurnInputEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED?.trim() === "1";
 }
 
 export class AppServerTurnRateLimiter {

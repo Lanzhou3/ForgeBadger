@@ -115,7 +115,7 @@ describe("Codex app-server routes", () => {
     assert.equal(res.body.code, 1);
   });
 
-  it("sends initialize, thread, and turn requests through the managed app-server client", async () => {
+  it("sends initialize and thread requests but rejects turn input by default", async () => {
     const transport = new AutoResponseTransport();
     const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-rpc-"));
     const manager = new CodexAppServerManager({
@@ -178,18 +178,67 @@ describe("Codex app-server routes", () => {
       },
       { Authorization: `Bearer ${token}` }
     );
-    assert.equal(turn.status, 200);
-    assert.deepEqual(turn.body.data.result, { accepted: true });
+    assert.equal(turn.status, 403);
+    assert.equal(turn.body.code, 1);
+    assert.match(turn.body.message, /turn input is disabled/i);
 
     const sentMethods = transport.sent.map((payload) => JSON.parse(payload).method);
-    assert.deepEqual(sentMethods, ["initialize", "initialized", "thread/start", "turn/start"]);
+    assert.deepEqual(sentMethods, ["initialize", "initialized", "thread/start"]);
     assert.equal(JSON.parse(transport.sent[2]).params.cwd, projectRoot);
     assert.equal(JSON.parse(transport.sent[2]).params.approvalPolicy, "never");
     assert.equal(JSON.parse(transport.sent[2]).params.sandbox, "read-only");
     assert.equal(JSON.parse(transport.sent[2]).params.experimentalRawEvents, undefined);
     assert.equal(JSON.parse(transport.sent[2]).params.persistExtendedHistory, undefined);
-    assert.equal(JSON.parse(transport.sent[3]).params.input[0].text, "Summarize the repo");
-    assert.deepEqual(JSON.parse(transport.sent[3]).params.input[0].text_elements, []);
+  });
+
+  it("allows turn requests only when explicitly enabled", async () => {
+    const transport = new AutoResponseTransport();
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-turn-enabled-"));
+    const manager = new CodexAppServerManager({
+      runtimeRoot: root,
+      spawn: () => ({
+        pid: 457,
+        on() {
+          return this;
+        },
+        kill() {
+          return true;
+        }
+      }),
+      transportFactory: () => transport
+    });
+    app = express();
+    app.locals.jwtSecret = secret;
+    app.use(express.json());
+    app.use("/api/v1/codex/app-server", createCodexAppServerRoutes({
+      db,
+      manager,
+      turnInput: { enabled: true }
+    }));
+
+    const start = await makeRequest(app, "POST", "/api/v1/codex/app-server", {
+      projectId,
+      runtimeMode: "app-server-stdio"
+    }, { Authorization: `Bearer ${token}` });
+    const sessionId = start.body.data.session.id;
+
+    const turn = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/codex/app-server/${sessionId}/turn`,
+      {
+        threadId: "thr_123",
+        text: "Summarize the repo"
+      },
+      { Authorization: `Bearer ${token}` }
+    );
+
+    assert.equal(turn.status, 200);
+    assert.deepEqual(turn.body.data.result, { accepted: true });
+    assert.equal(transport.sent.length, 1);
+    assert.equal(JSON.parse(transport.sent[0]).method, "turn/start");
+    assert.equal(JSON.parse(transport.sent[0]).params.input[0].text, "Summarize the repo");
+    assert.deepEqual(JSON.parse(transport.sent[0]).params.input[0].text_elements, []);
   });
 
   it("rate limits repeated turn requests for the same app-server session", async () => {
@@ -214,6 +263,7 @@ describe("Codex app-server routes", () => {
     app.use("/api/v1/codex/app-server", createCodexAppServerRoutes({
       db,
       manager,
+      turnInput: { enabled: true },
       turnRateLimit: { maxRequests: 1, windowMs: 60_000 }
     }));
 

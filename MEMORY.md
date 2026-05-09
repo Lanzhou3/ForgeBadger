@@ -40,9 +40,10 @@
 1. Extend the guarded Web prototype only after UX/security review. Current Web
    surface supports lifecycle, initialize, thread creation, and stop;
    prompt/turn input remains intentionally hidden to avoid accidental quota use.
-2. Decide the prompt/response transcript policy before exposing any real turn
-   input. Keep Codex subscription-managed and do not inject provider/API-key
-   model configuration into Codex launch paths.
+2. Keep Codex app-server turn input disabled unless the Gateway is explicitly
+   started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Gateway does not
+   persist prompt/response transcript content; add user-facing retention
+   controls before exposing real turn input in Web.
 3. Run release-sized build/regression evidence when preparing the next beta
    handoff; the model provider closure already has API, unit, typecheck, and
    local browser smoke coverage.

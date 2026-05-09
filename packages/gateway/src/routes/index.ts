@@ -23,7 +23,10 @@ import { createPluginRoutes } from "./plugins.js";
 import { createNotificationRoutes } from "./notifications.js";
 import { createSessionHookRoutes } from "./session-hooks.js";
 import { createSnapshotRoutes } from "./snapshots.js";
-import { createCodexAppServerRoutes } from "./codex-app-server.js";
+import {
+  createCodexAppServerRoutes,
+  isCodexAppServerTurnInputEnabled
+} from "./codex-app-server.js";
 import { createCodexSubscriptionRoutes } from "./codex-subscription.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
@@ -68,7 +71,10 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     db: deps.db,
     manager: deps.codexAppServerManager,
     masterKey: deps.masterKey,
-    eventBus: deps.eventBus
+    eventBus: deps.eventBus,
+    turnInput: {
+      enabled: isCodexAppServerTurnInputEnabled()
+    }
   }));
   app.use("/api/v1/codex/subscription", createCodexSubscriptionRoutes());
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
