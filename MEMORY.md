@@ -1,6 +1,6 @@
 # OpenForge Project Memory
 
-> Updated: 2026-05-08
+> Updated: 2026-05-09
 
 ## Current Stage
 
@@ -16,8 +16,11 @@
 - Phase B Codex app-server work is active. The Gateway now owns Codex
   app-server protocol integration for managed sessions, normalizes Codex
   app-server notifications into OpenForge activity events, and aligns outgoing
-  frames with `codex-cli 0.128.0` generated bindings instead of a standard
-  JSON-RPC wrapper.
+  frames with `codex-cli 0.130.0` generated bindings instead of a standard
+  JSON-RPC wrapper. Real `app-server-websocket` initialize validation is closed
+  for the current local toolchain through `pnpm smoke:codex-app-server`, using
+  isolated temporary `HOME` and `CODEX_HOME`, capability-token WebSocket auth,
+  and no prompt/thread/turn requests.
 - Model provider management has moved to provider-scoped profiles. The latest
   model work added cc-switch-inspired provider presets, dynamic model sync for
   OpenAI-compatible model-list endpoints, provider-scoped model default/update/
@@ -34,18 +37,12 @@
 
 ## Next Work
 
-1. Continue Phase B with real `app-server-websocket` validation in an
-   unrestricted environment. Zero-quota validation on 2026-05-09 used isolated
-   `/tmp/openforge-codex-help-home` and `/tmp/openforge-codex-help-codex`,
-   confirmed `codex-cli 0.130.0`, generated protocol bindings, and captured a
-   real stdio `initialize` response without touching host Codex config or
-   starting a prompt turn. The Gateway now sends the required `initialized`
-   notification after `initialize` and has a default WebSocket transport that
-   presents capability tokens as `Authorization: Bearer <token>`.
-2. Extend the guarded Web prototype only after WebSocket transport validation
-   and UX/security review. Current Web surface supports lifecycle, initialize,
-   thread creation, and stop; prompt/turn input remains intentionally hidden to
-   avoid accidental quota use.
+1. Extend the guarded Web prototype only after UX/security review. Current Web
+   surface supports lifecycle, initialize, thread creation, and stop;
+   prompt/turn input remains intentionally hidden to avoid accidental quota use.
+2. Decide the prompt/response transcript policy before exposing any real turn
+   input. Keep Codex subscription-managed and do not inject provider/API-key
+   model configuration into Codex launch paths.
 3. Run release-sized build/regression evidence when preparing the next beta
    handoff; the model provider closure already has API, unit, typecheck, and
    local browser smoke coverage.

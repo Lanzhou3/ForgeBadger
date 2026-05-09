@@ -38,6 +38,11 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 - Managed `app-server-websocket` sessions now create a Gateway WebSocket
   transport that sends one JSON-RPC message per text frame and presents the
   capability token as `Authorization: Bearer <token>` during the handshake.
+- Real-process WebSocket initialize validation is repeatable through
+  `pnpm smoke:codex-app-server`. The smoke script runs `codex app-server` with
+  isolated temporary `HOME` and `CODEX_HOME`, uses a random capability-token
+  file, sends only `initialize` plus `initialized`, and reports
+  `promptOrTurnSent: false`.
 - Codex app-server notifications are normalized into
   `codex_app_server_notification` activity rows and broadcast through the
   existing activity event path.
@@ -49,8 +54,6 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 
 ## Deferred
 
-- Production WebSocket transport validation against a real `codex app-server`
-  process in an unrestricted environment.
 - Web prompt input or transcript UI.
 - Full prompt/response transcript persistence policy.
 - Real-process stdio initialize response capture is closed for the current
@@ -67,3 +70,5 @@ not as terminal byte output and not as a replacement for `/ws/terminal/:sessionI
 - `test/codex-app-server-events.test.ts`
 - `test/codex-app-server-manager.test.ts`
 - `test/codex-app-server-routes.test.ts`
+- `node --test scripts/smoke-codex-app-server.test.mjs`
+- `pnpm smoke:codex-app-server`
