@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("complete MVP-0 user journey", async ({ page }) => {
-  const suffix = Date.now();
+  const suffix = uniqueSuffix();
   const email = `test-${suffix}@example.com`;
   const password = "password12345";
   const projectName = `Test Project ${suffix}`;
@@ -35,27 +35,22 @@ test("complete MVP-0 user journey", async ({ page }) => {
   await expect(page).toHaveURL("/projects/new");
   await page.fill('input[name="name"]', projectName);
   await page.fill('input[name="path"]', projectPath);
-  await page.selectOption('select[name="aiTool"]', "claude");
   await page.click('button[type="submit"]');
 
-  // 6. Should redirect to projects list
-  await expect(page).toHaveURL("/projects");
-  await expect(page.getByText(projectName)).toBeVisible();
+  // 6. Should redirect to project details
+  await expect(page).toHaveURL(/\/projects\/.+/);
+  await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
 
-  // 7. Open project and create session (may fail if Gateway is not running)
-  try {
-    await page.getByRole("link", { name: projectName }).click();
-    await expect(page).toHaveURL(/\/projects\/.+/);
-    await page.click('text=New Session');
-    await page.waitForURL("/sessions", { timeout: 5000 });
+  // 7. Select runtime CLI at session creation time and create a session
+  await expect(page.locator("#runtime-adapter")).toBeEnabled({ timeout: 5000 });
+  await page.locator("#runtime-adapter").selectOption("claude");
+  await page.getByRole("button", { name: "New Session" }).click();
+  await page.waitForURL("/sessions", { timeout: 5000 });
 
-    // 8. Navigate to session terminal
-    await page.click('text=Connect');
-    await expect(page).toHaveURL(/\/sessions\/.+/);
-    await expect(page.locator('.xterm-screen')).toBeVisible({ timeout: 5000 });
-  } catch {
-    // Session creation requires Gateway; ignore if unavailable
-  }
+  // 8. Navigate to session terminal
+  await page.getByRole("link", { name: /Connect/ }).first().click();
+  await expect(page).toHaveURL(/\/sessions\/.+/);
+  await expect(page.locator(".xterm-screen")).toBeVisible({ timeout: 5000 });
 });
 
 test("auth guard redirects to login", async ({ page }) => {
@@ -64,7 +59,7 @@ test("auth guard redirects to login", async ({ page }) => {
 });
 
 test("login flow", async ({ page }) => {
-  const email = "e2e-test@example.com";
+  const email = `e2e-test-${uniqueSuffix()}@example.com`;
   const password = "password12345";
 
   // Register first via UI to ensure user exists
@@ -86,3 +81,7 @@ test("login flow", async ({ page }) => {
   await expect(page).toHaveURL("/");
   await expect(page.locator('h1', { hasText: 'Dashboard' })).toBeVisible();
 });
+
+function uniqueSuffix(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
