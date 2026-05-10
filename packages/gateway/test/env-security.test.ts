@@ -46,6 +46,7 @@ describe("loadEnv security configuration", () => {
 
     assert.equal(env.OPENFORGE_JWT_SECRET, jwtSecret);
     assert.equal(env.OPENFORGE_MASTER_KEY, masterKey);
+    assert.equal(env.OPENFORGE_TMUX_PREFIX, "of-");
   });
 
   it("accepts a 32-byte key encoded as 64 hex characters", () => {
@@ -55,5 +56,15 @@ describe("loadEnv security configuration", () => {
     });
 
     assert.equal(env.OPENFORGE_MASTER_KEY, hexMasterKey);
+  });
+
+  it("loads a custom tmux prefix", () => {
+    const env = loadEnv({
+      OPENFORGE_JWT_SECRET: jwtSecret,
+      OPENFORGE_MASTER_KEY: masterKey,
+      OPENFORGE_TMUX_PREFIX: "of-smoke-test-"
+    });
+
+    assert.equal(env.OPENFORGE_TMUX_PREFIX, "of-smoke-test-");
   });
 });

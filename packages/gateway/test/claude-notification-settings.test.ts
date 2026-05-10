@@ -19,6 +19,13 @@ describe("Claude notification settings", () => {
     assert.equal(permissionHook?.headers?.["x-openforge-session-id"], "$OPENFORGE_SESSION_ID");
     assert.equal(permissionHook?.headers?.["x-openforge-session-token"], "$OPENFORGE_ATTACH_TOKEN");
     assert.deepEqual(permissionHook?.allowedEnvVars, ["OPENFORGE_SESSION_ID", "OPENFORGE_ATTACH_TOKEN"]);
+    assert.deepEqual(settings.allowedHttpHookUrls, [
+      "http://127.0.0.1:48731/api/v1/session-hooks/claude-notification*"
+    ]);
+    assert.deepEqual(settings.httpHookAllowedEnvVars, [
+      "OPENFORGE_SESSION_ID",
+      "OPENFORGE_ATTACH_TOKEN"
+    ]);
     assert.equal(settings.hooks.PermissionDenied[0]?.hooks[0]?.type, "http");
     assert.equal(settings.hooks.Notification[0]?.matcher, "permission_prompt");
     const notificationHook = settings.hooks.Notification[0]?.hooks[0];
@@ -64,5 +71,35 @@ describe("Claude notification settings", () => {
     assert.equal(permissionHooks.length, 1);
     assert.match(permissionHooks[0].url, /second-session/);
     assert.doesNotMatch(permissionHooks[0].url, /first-session/);
+  });
+
+  it("preserves existing HTTP hook allowlists while adding OpenForge entries", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-hooks-allowlist-"));
+    const settingsPath = path.join(root, ".claude", "settings.local.json");
+    await mkdir(path.dirname(settingsPath), { recursive: true });
+    await writeFile(
+      settingsPath,
+      JSON.stringify(
+        {
+          allowedHttpHookUrls: ["https://hooks.example.com/*"],
+          httpHookAllowedEnvVars: ["EXISTING_TOKEN"]
+        },
+        null,
+        2
+      )
+    );
+
+    await ensureClaudeNotificationSettings(root, "http://127.0.0.1:48731", "session-allowlist");
+
+    const settings = JSON.parse(await readFile(settingsPath, "utf8"));
+    assert.deepEqual(settings.allowedHttpHookUrls, [
+      "https://hooks.example.com/*",
+      "http://127.0.0.1:48731/api/v1/session-hooks/claude-notification*"
+    ]);
+    assert.deepEqual(settings.httpHookAllowedEnvVars, [
+      "EXISTING_TOKEN",
+      "OPENFORGE_SESSION_ID",
+      "OPENFORGE_ATTACH_TOKEN"
+    ]);
   });
 });

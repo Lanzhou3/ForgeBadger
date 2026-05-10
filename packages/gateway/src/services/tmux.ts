@@ -13,6 +13,7 @@ export interface TmuxClient {
   killSession(name: string): Promise<void>;
   capturePane(name: string): Promise<string>;
   listSessions(): Promise<string[]>;
+  resizeWindow?(name: string, cols: number, rows: number): Promise<void>;
 }
 
 export function createTmuxClient(): TmuxClient {
@@ -31,7 +32,7 @@ export function createTmuxClient(): TmuxClient {
         args.push("-e", `${name}=${value}`);
       }
 
-      args.push(formatTmuxShellCommand(options.command, options.args));
+      args.push("--", options.command, ...options.args);
       await runTmux(args);
     },
 
@@ -51,20 +52,14 @@ export function createTmuxClient(): TmuxClient {
         .split("\n")
         .map((line) => line.trim())
         .filter(Boolean);
+    },
+
+    async resizeWindow(name, cols, rows) {
+      await runTmux(["resize-window", "-t", name, "-x", String(cols), "-y", String(rows)], {
+        ignoreFailure: true
+      });
     }
   };
-}
-
-export function formatTmuxShellCommand(command: string, args: string[]): string {
-  return [command, ...args].map(shellQuote).join(" ");
-}
-
-function shellQuote(value: string): string {
-  if (/^[a-zA-Z0-9_./:=+-]+$/.test(value)) {
-    return value;
-  }
-
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 interface RunOptions {

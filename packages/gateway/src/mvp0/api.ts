@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { hashSync, compareSync } from "bcrypt";
+import { hashSync, compareSync } from "bcryptjs";
 import { existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";

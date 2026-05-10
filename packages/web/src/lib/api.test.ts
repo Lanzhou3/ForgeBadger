@@ -12,6 +12,11 @@ import {
   createModel,
   createTemplate,
   createSession,
+  deleteProviderCredential,
+  deleteModelProvider,
+  deleteProviderModel,
+  chooseDefaultRuntimeAdapter,
+  isAdapterLaunchable,
   deleteModel,
   deleteAgent,
   deleteSkill,
@@ -20,6 +25,7 @@ import {
   discoverAdapters,
   exportTemplate,
   getDashboardSummary,
+  getDependencies,
   getConfigCompliance,
   getGlobalAiConfig,
   getProjectAgentSequence,
@@ -40,11 +46,16 @@ import {
   listCatalogItems,
   listCatalogSources,
   listNotifications,
+  listSessions,
   listSnapshots,
   listUsageRates,
   listSkillTemplates,
   listSkillSources,
   syncLocalSkills,
+  syncProviderModels,
+  rotateProviderCredential,
+  setDefaultProviderModel,
+  updateProviderModel,
   listPlugins,
   refreshCatalog,
   restoreTemplateVersion,
@@ -64,8 +75,15 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
   clearServerNotifications,
+  initializeCodexAppServer,
+  getCodexAppServerCapabilities,
+  listCodexAppServers,
   setDefaultModel,
+  startCodexAppServer,
+  startCodexAppServerThread,
+  startCodexAppServerTurn,
   setProjectSkill,
+  stopCodexAppServer,
   togglePlugin,
   updateAgent,
   updateAdminUser,
@@ -76,6 +94,7 @@ import {
   updateTemplateFile,
   updateModel,
   writeConfig,
+  type AdapterDiscovery,
 } from "./api";
 
 function mockEnvelope(data: unknown = {}) {
@@ -111,6 +130,77 @@ describe("api client", () => {
           endpoint: "https://api.anthropic.com",
         }),
       })
+    );
+  });
+
+  it("deletes model provider profiles through REST", async () => {
+    await deleteModelProvider("provider-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("syncs provider models through REST", async () => {
+    await syncProviderModels("provider-1", { credentialId: "credential-1" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/sync",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ credentialId: "credential-1" }),
+      })
+    );
+  });
+
+  it("manages provider model profiles through REST", async () => {
+    await updateProviderModel("provider-1", "model-1", {
+      name: "Updated",
+      capabilities: ["chat", "reasoning"],
+    });
+    await setDefaultProviderModel("provider-1", "model-1");
+    await deleteProviderModel("provider-1", "model-1");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/model-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ name: "Updated", capabilities: ["chat", "reasoning"] }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/model-1/set-default",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/model-1",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("manages provider credentials through REST", async () => {
+    await rotateProviderCredential("provider-1", "credential-1", {
+      label: "new",
+      plaintextSecret: "sk-new",
+    });
+    await deleteProviderCredential("provider-1", "credential-1");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/credentials/credential-1/rotate",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ label: "new", plaintextSecret: "sk-new" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/credentials/credential-1",
+      expect.objectContaining({ method: "DELETE" })
     );
   });
 
@@ -203,10 +293,15 @@ describe("api client", () => {
   });
 
   it("lists filtered activity events", async () => {
-    await listActivities({ sessionId: "session-1", agentId: "agent-1", limit: 20 });
+    await listActivities({
+      sessionId: "session-1",
+      agentId: "agent-1",
+      types: ["codex_app_server_started", "codex_app_server_notification"],
+      limit: 20,
+    });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/activities?sessionId=session-1&agentId=agent-1&limit=20",
+      "http://127.0.0.1:48731/api/v1/activities?sessionId=session-1&agentId=agent-1&type=codex_app_server_started%2Ccodex_app_server_notification&limit=20",
       expect.objectContaining({ headers: expect.any(Object) })
     );
   });
@@ -401,10 +496,11 @@ describe("api client", () => {
     );
   });
 
-  it("creates sessions with explicit model and stored credential selection", async () => {
+  it("creates sessions with explicit runtime adapter, model, and stored credential selection", async () => {
     await createSession({
       projectId: "project-1",
       credentialMode: "stored_encrypted_key",
+      aiTool: "opencode",
       modelId: "model-1",
       apiKeyId: "key-1",
     });
@@ -416,11 +512,134 @@ describe("api client", () => {
         body: JSON.stringify({
           projectId: "project-1",
           credentialMode: "stored_encrypted_key",
+          aiTool: "opencode",
           modelId: "model-1",
           apiKeyId: "key-1",
         }),
       })
     );
+  });
+
+  it("calls Codex app-server lifecycle and guarded RPC endpoints", async () => {
+    await getCodexAppServerCapabilities();
+    await listCodexAppServers();
+    await startCodexAppServer({
+      projectId: "project-1",
+      runtimeMode: "app-server-stdio",
+      credentialMode: "host_environment",
+    });
+    await initializeCodexAppServer("app-1");
+    await startCodexAppServerThread("app-1", {
+      cwd: "/tmp/project",
+      approvalPolicy: "never",
+      sandbox: "read-only",
+    });
+    await startCodexAppServerTurn("app-1", {
+      threadId: "thr_123",
+      text: "Summarize the repo",
+    });
+    await stopCodexAppServer("app-1");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/codex/app-server/capabilities",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/codex/app-server",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/codex/app-server",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          projectId: "project-1",
+          runtimeMode: "app-server-stdio",
+          credentialMode: "host_environment",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/initialize",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/thread",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          cwd: "/tmp/project",
+          approvalPolicy: "never",
+          sandbox: "read-only",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      6,
+      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/turn",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          threadId: "thr_123",
+          text: "Summarize the repo",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      7,
+      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/stop",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("chooses only launchable runtime adapters from discovery", () => {
+    const adapters: AdapterDiscovery[] = [
+      {
+        id: "claude",
+        label: "Claude Code",
+        command: "claude",
+        supportLevel: "supported",
+        launchEnabled: false,
+        configDir: ".claude",
+        runtimeModes: ["terminal"],
+        available: true,
+        status: "available",
+      },
+      {
+        id: "opencode",
+        label: "OpenCode",
+        command: "opencode",
+        supportLevel: "prototype",
+        launchEnabled: true,
+        configDir: ".opencode",
+        runtimeModes: ["terminal"],
+        available: false,
+        status: "missing",
+      },
+      {
+        id: "codex",
+        label: "Codex CLI",
+        command: "codex",
+        supportLevel: "prototype",
+        launchEnabled: true,
+        configDir: ".codex",
+        runtimeModes: ["terminal"],
+        available: true,
+        status: "available",
+      },
+    ];
+
+    expect(isAdapterLaunchable(adapters[0]!)).toBe(false);
+    expect(isAdapterLaunchable(adapters[1]!)).toBe(false);
+    expect(isAdapterLaunchable(adapters[2]!)).toBe(true);
+    expect(chooseDefaultRuntimeAdapter(adapters)).toBe("codex");
+    expect(chooseDefaultRuntimeAdapter(adapters, "codex")).toBe("codex");
+    expect(chooseDefaultRuntimeAdapter(adapters, "claude")).toBe("codex");
   });
 
   it("manages agents through REST", async () => {
@@ -793,107 +1012,46 @@ describe("api client", () => {
     );
   });
 
-  it("keeps project import successful when best-effort config generation conflicts", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            code: 0,
-            data: {
-              project: {
-                id: "project-1",
-                name: "Existing",
-                path: "/tmp/existing",
-                aiTool: "claude",
-              },
+  it("imports project records without CLI fields or automatic config generation", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          code: 0,
+          data: {
+            project: {
+              id: "project-1",
+              name: "Existing",
+              path: "/tmp/existing",
             },
-            message: "",
-          }),
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: false,
-        text: () =>
-          Promise.resolve(
-            JSON.stringify({
-              code: 1,
-              data: {
-                conflicts: [
-                  {
-                    relativePath: ".claude/CLAUDE.md",
-                    conflictType: "modified",
-                    allowedActions: ["skip", "overwrite"],
-                  },
-                ],
-              },
-              message: "Explicit config write decisions required",
-            })
-          ),
-      } as Response);
+          },
+          message: "",
+        }),
+    } as Response);
 
     const result = await importProjectWithConfig({
       path: "/tmp/existing",
       name: "Existing",
-      aiTool: "claude",
     });
 
     expect(result.project.id).toBe("project-1");
-    expect(result.configStatus).toBe("failed");
-    expect(result.configError).toContain("Explicit config write decisions required");
+    expect(result.configStatus).toBe("skipped");
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       "http://127.0.0.1:48731/api/v1/projects/import",
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/generate-config",
-      expect.objectContaining({ method: "POST" })
-    );
-  });
-
-  it("uses the matching built-in template when importing non-Claude projects", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            code: 0,
-            data: {
-              project: {
-                id: "project-2",
-                name: "Codex Project",
-                path: "/tmp/codex",
-                aiTool: "codex",
-              },
-            },
-            message: "",
-          }),
-      } as Response)
-      .mockImplementationOnce(() => mockEnvelope({ result: { writtenFiles: ["AGENTS.md"] } }));
-
-    await importProjectWithConfig({
-      path: "/tmp/codex",
-      name: "Codex Project",
-      aiTool: "codex",
-    });
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/projects/project-2/generate-config",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          templateId: "builtin-codex",
-          credentialMode: "host_environment"
+          path: "/tmp/existing",
+          name: "Existing",
         }),
       })
     );
   });
 
-  it("creates a project with the matching built-in template and generates config", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({
+  it("creates project records without CLI fields or automatic config generation", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
         ok: true,
         json: () =>
           Promise.resolve({
@@ -901,44 +1059,29 @@ describe("api client", () => {
             data: {
               project: {
                 id: "project-3",
-                name: "OpenCode Project",
-                path: "/tmp/opencode",
-                aiTool: "opencode",
+                name: "Runtime Agnostic Project",
+                path: "/tmp/runtime-agnostic",
               },
             },
             message: "",
           }),
-      } as Response)
-      .mockImplementationOnce(() => mockEnvelope({ result: { writtenFiles: ["AGENTS.md"] } }));
+      } as Response);
 
     const result = await createProjectWithConfig({
-      path: "/tmp/opencode",
-      name: "OpenCode Project",
-      aiTool: "opencode",
+      path: "/tmp/runtime-agnostic",
+      name: "Runtime Agnostic Project",
     });
 
-    expect(result.configStatus).toBe("applied");
+    expect(result.configStatus).toBe("skipped");
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       "http://127.0.0.1:48731/api/v1/projects",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          path: "/tmp/opencode",
-          name: "OpenCode Project",
-          aiTool: "opencode",
-          templateId: "builtin-opencode",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/projects/project-3/generate-config",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          templateId: "builtin-opencode",
-          credentialMode: "host_environment"
+          path: "/tmp/runtime-agnostic",
+          name: "Runtime Agnostic Project",
         }),
       })
     );
@@ -980,6 +1123,52 @@ describe("api client", () => {
         }),
       })
     );
+  });
+
+  it("loads dependency checks through the shared authenticated API client", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({ dependencies: [] })));
+
+    await getDependencies();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/gate-a/dependencies",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+  });
+
+  it("lists sessions with an optional project filter", async () => {
+    await listSessions({ projectId: "project-1" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/sessions?projectId=project-1",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+  });
+
+  it("sanitizes raw HTTP error bodies from Gateway requests", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 500,
+          statusText: "Internal Server Error",
+          text: () => Promise.resolve("stack trace: /tmp/openforge/private.ts"),
+        } as Response)
+      )
+    );
+
+    await expect(getDashboardSummary()).rejects.toThrow("Gateway request failed with HTTP 500");
+    await expect(getDashboardSummary()).rejects.not.toThrow("/tmp/openforge");
   });
 
   it("checks model health through REST", async () => {

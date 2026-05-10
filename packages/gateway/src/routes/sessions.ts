@@ -15,6 +15,7 @@ import { validateProjectRoot } from "../lib/safe-resolve.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
 import { SessionRepository, type Session } from "../db/repositories/session-repository.js";
 import { ModelRepository } from "../db/repositories/model-repository.js";
+import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import { ApiKeyRepository } from "../db/repositories/api-key-repository.js";
 import { PluginRepository } from "../db/repositories/plugin-repository.js";
 import type { Database } from "../db/types.js";
@@ -29,20 +30,25 @@ import { materializeClaudePluginPackages } from "../services/claude-plugin-packa
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
   credentialMode: z.enum(["host_environment", "stored_encrypted_key"]),
+  aiTool: z.enum(["claude", "opencode", "codex"]).optional(),
   apiKeyId: z.string().min(1).optional(),
   modelId: z.string().min(1).optional()
 }).superRefine((value, ctx) => {
-  if (value.credentialMode === "stored_encrypted_key" && !value.apiKeyId) {
+  if (value.credentialMode === "stored_encrypted_key" && !value.apiKeyId && !value.modelId) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["apiKeyId"],
-      message: "API key is required for stored credentials"
+      message: "API key or provider-backed model is required for stored credentials"
     });
   }
 });
 
 const switchModelSchema = z.object({
   modelId: z.string().min(1)
+});
+
+const listSessionsQuerySchema = z.object({
+  projectId: z.string().min(1).optional()
 });
 
 export function createSessionRoutes(
@@ -57,8 +63,16 @@ export function createSessionRoutes(
 
   router.get("/", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = listSessionsQuerySchema.safeParse(req.query ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid session query" });
+      return;
+    }
     const repo = new SessionRepository(db, userId);
-    const sessions = repo.list().map((session) => toSessionPayload(session));
+    const sessions = (parseResult.data.projectId
+      ? repo.listByProject(parseResult.data.projectId)
+      : repo.list()
+    ).map((session) => toSessionPayload(session));
     res.json({
       code: 0,
       data: { sessions },
@@ -74,11 +88,27 @@ export function createSessionRoutes(
       return;
     }
 
-    const { projectId, credentialMode, apiKeyId, modelId } = parseResult.data;
+    const { projectId, credentialMode, aiTool, apiKeyId, modelId } = parseResult.data;
     const projectRepo = new ProjectRepository(db, userId);
     const project = projectRepo.getById(projectId);
     if (!project) {
       res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    const adapter = normalizeAdapter(aiTool ?? project.aiTool);
+    if (!adapter) {
+      res.status(400).json({ code: 1, message: "Unsupported project adapter" });
+      return;
+    }
+    const credentialBoundary = validateCodexTerminalCredentialBoundary({
+      adapter,
+      credentialMode,
+      apiKeyId,
+      modelId
+    });
+    if (!credentialBoundary.ok) {
+      res.status(400).json({ code: 1, message: credentialBoundary.message });
       return;
     }
 
@@ -90,19 +120,14 @@ export function createSessionRoutes(
       }
     }
 
-    if (credentialMode === "stored_encrypted_key") {
+    if (credentialMode === "stored_encrypted_key" && apiKeyId) {
       const apiKeyRepo = new ApiKeyRepository(db, userId, masterKey);
-      if (!apiKeyId || !apiKeyRepo.getById(apiKeyId)) {
+      if (!apiKeyRepo.getById(apiKeyId)) {
         res.status(404).json({ code: 1, message: "API key not found" });
         return;
       }
     }
 
-    const adapter = normalizeAdapter(project.aiTool);
-    if (!adapter) {
-      res.status(400).json({ code: 1, message: "Unsupported project adapter" });
-      return;
-    }
     const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner);
     if (!launchStatus.launchEnabled) {
       res.status(409).json({
@@ -287,6 +312,16 @@ export function createSessionRoutes(
       res.status(400).json({ code: 1, message: "Unsupported session adapter" });
       return;
     }
+    const credentialBoundary = validateCodexTerminalCredentialBoundary({
+      adapter,
+      credentialMode: dbSession.credentialMode,
+      ...(dbSession.apiKeyId ? { apiKeyId: dbSession.apiKeyId } : {}),
+      ...(dbSession.modelId ? { modelId: dbSession.modelId } : {})
+    });
+    if (!credentialBoundary.ok) {
+      res.status(400).json({ code: 1, message: credentialBoundary.message });
+      return;
+    }
     const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner);
     if (!launchStatus.launchEnabled) {
       res.status(409).json({
@@ -397,7 +432,7 @@ export function createSessionRoutes(
     }
 
     try {
-      await sessionManager.stopSession(dbSession.id, dbSession.tmuxSession ?? undefined);
+      await sessionManager.stopSession(dbSession.id, dbSession.tmuxSession ?? undefined, userId);
 
       const oldStatus = dbSession.status;
       const updated = sessionRepo.update(dbSession.id, {
@@ -472,6 +507,13 @@ export function createSessionRoutes(
       res.status(404).json({ code: 1, message: "Session not found" });
       return;
     }
+    if (dbSession.aiTool === "codex") {
+      res.status(400).json({
+        code: 1,
+        message: "Codex sessions are subscription-managed; provider credentials and model overrides are not supported"
+      });
+      return;
+    }
 
     const updated = sessionRepo.update(dbSession.id, { modelId });
     recordSessionActivity(db, eventBus, userId, updated ?? dbSession, "model_switched", "info", `Model switched for ${dbSession.name}`, {
@@ -496,14 +538,14 @@ export function createSessionRoutes(
 
     if (dbSession.status === "running") {
       try {
-        await sessionManager.stopSession(dbSession.id, dbSession.tmuxSession ?? undefined);
+        await sessionManager.stopSession(dbSession.id, dbSession.tmuxSession ?? undefined, userId);
       } catch {
         // Deleting the database row should still be possible if the tmux pane is already gone.
       }
     }
 
-    sessionRepo.delete(req.params.id);
     recordSessionActivity(db, eventBus, userId, dbSession, "session_deleted", "warning", `Session ${dbSession.name} deleted`);
+    sessionRepo.delete(req.params.id);
     eventBus?.emitEvent({
       type: "session_deleted",
       userId,
@@ -557,6 +599,11 @@ export interface LaunchPlanInput {
 }
 
 export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
+  const credentialBoundary = validateCodexTerminalCredentialBoundary(input);
+  if (!credentialBoundary.ok) {
+    throw new Error(credentialBoundary.message);
+  }
+
   const env: Record<string, string> = {
     OPENFORGE_SESSION_ID: input.sessionId,
     OPENFORGE_GATEWAY_URL: getGatewayUrl()
@@ -564,21 +611,13 @@ export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
   const secretEnvNames: string[] = [];
   let selectedModel: AdapterModelSelection | undefined;
 
-  if (input.credentialMode === "stored_encrypted_key") {
-    if (!input.apiKeyId) {
-      throw new Error("API key is required for stored credentials");
-    }
-    const apiKeyRepo = new ApiKeyRepository(input.db, input.userId, input.masterKey);
-    const record = apiKeyRepo.getById(input.apiKeyId);
-    if (!record) {
-      throw new Error("API key not found");
-    }
-    const secretName = apiKeyEnvName(record.provider);
-    env[secretName] = apiKeyRepo.decryptForLaunch(input.apiKeyId);
-    secretEnvNames.push(secretName);
+  if (input.credentialMode === "stored_encrypted_key" && input.adapter !== "codex") {
+    const credential = resolveStoredCredential(input);
+    env[credential.envName] = credential.secret;
+    secretEnvNames.push(credential.envName);
   }
 
-  if (input.modelId) {
+  if (input.modelId && input.adapter !== "codex") {
     const model = new ModelRepository(input.db, input.userId).getById(input.modelId);
     if (!model) {
       throw new Error("Model not found");
@@ -588,8 +627,6 @@ export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
       env.ANTHROPIC_MODEL = model.modelId;
     } else if (input.adapter === "opencode") {
       env.OPENCODE_MODEL = model.modelId.includes("/") ? model.modelId : `${model.provider}/${model.modelId}`;
-    } else {
-      env.CODEX_MODEL = model.modelId;
     }
   }
 
@@ -602,6 +639,37 @@ export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
     model: selectedModel,
     pluginDirs: input.pluginDirs
   });
+}
+
+function resolveStoredCredential(input: LaunchPlanInput): { envName: string; secret: string } {
+  if (input.apiKeyId) {
+    const apiKeyRepo = new ApiKeyRepository(input.db, input.userId, input.masterKey);
+    const record = apiKeyRepo.getById(input.apiKeyId);
+    if (!record) {
+      throw new Error("API key not found");
+    }
+    return {
+      envName: apiKeyEnvName(record.provider),
+      secret: apiKeyRepo.decryptForLaunch(input.apiKeyId)
+    };
+  }
+
+  if (input.modelId) {
+    const providerRepo = new ModelProviderRepository(input.db, input.userId, input.masterKey);
+    const model = providerRepo.getModelProfile(input.modelId);
+    if (model) {
+      const credential = providerRepo.listCredentials(model.providerProfileId)[0];
+      if (!credential) {
+        throw new Error("Provider credential not found");
+      }
+      return {
+        envName: apiKeyEnvName(model.providerKey),
+        secret: providerRepo.decryptCredential(credential.id)
+      };
+    }
+  }
+
+  throw new Error("API key is required for stored credentials");
 }
 
 export async function prepareClaudeLaunchExtras(
@@ -626,6 +694,24 @@ export async function prepareClaudeLaunchExtras(
 
 export function normalizeAdapter(value: string): AdapterId | undefined {
   return isAdapterId(value) ? value : undefined;
+}
+
+function validateCodexTerminalCredentialBoundary(input: {
+  adapter: AdapterId;
+  credentialMode: CredentialMode;
+  apiKeyId?: string | undefined;
+  modelId?: string | undefined;
+}): { ok: true } | { ok: false; message: string } {
+  if (
+    input.adapter === "codex" &&
+    (input.credentialMode !== "host_environment" || input.apiKeyId || input.modelId)
+  ) {
+    return {
+      ok: false,
+      message: "Codex sessions are subscription-managed; provider credentials and model overrides are not supported"
+    };
+  }
+  return { ok: true };
 }
 
 function apiKeyEnvName(provider: string): string {

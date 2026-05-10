@@ -36,7 +36,7 @@ const createProjectSchema = z.object({
   path: z.string().min(1),
   description: z.string().optional(),
   techStack: z.string().optional(),
-  aiTool: aiToolSchema.default("claude"),
+  aiTool: aiToolSchema.optional(),
   templateId: z.string().optional()
 });
 
@@ -67,11 +67,13 @@ const agentSequenceSchema = z.object({
 });
 
 const defaultTemplateId = "builtin-claude-code";
+const legacyProjectConfigHint = "claude";
 const defaultTemplateIdsByAiTool: Record<z.infer<typeof aiToolSchema>, string> = {
   claude: defaultTemplateId,
   opencode: "builtin-opencode",
   codex: "builtin-codex"
 };
+const rootInstructionFileNames = ["AGENT.md", "AGENTS.md", "CLAUDE.md"] as const;
 
 export function createProjectRoutes(
   db: Database,
@@ -90,16 +92,17 @@ export function createProjectRoutes(
     }
 
     try {
-      const { name, path: rawPath, description, techStack, aiTool, templateId } = parseResult.data;
+      const { name, path: rawPath, description, techStack, templateId } = parseResult.data;
+      const projectConfigHint = parseResult.data.aiTool ?? legacyProjectConfigHint;
       const rootPath = await prepareCreatedProjectRoot(rawPath);
-      const resolvedTemplateId = resolveProjectTemplateId(db, userId, aiTool, templateId);
+      const resolvedTemplateId = resolveProjectTemplateId(db, userId, projectConfigHint, templateId);
       const repo = new ProjectRepository(db, userId);
       const project = repo.create({
         name,
         path: rootPath,
         description,
         techStack,
-        aiTool,
+        aiTool: projectConfigHint,
         templateId: resolvedTemplateId
       });
       res.status(201).json({
@@ -229,7 +232,12 @@ export function createProjectRoutes(
       }
       res.json({
         code: 0,
-        data: { path: resolved, exists: true, isDirectory: true },
+        data: {
+          path: resolved,
+          exists: true,
+          isDirectory: true,
+          instructionFiles: listRootInstructionFiles(resolved)
+        },
         message: ""
       });
     } catch (error) {
@@ -249,16 +257,17 @@ export function createProjectRoutes(
     }
 
     try {
-      const { name, path: rawPath, description, techStack, aiTool, templateId } = parseResult.data;
+      const { name, path: rawPath, description, techStack, templateId } = parseResult.data;
+      const projectConfigHint = parseResult.data.aiTool ?? legacyProjectConfigHint;
       const rootPath = await prepareImportedProjectRoot(rawPath);
-      const resolvedTemplateId = resolveProjectTemplateId(db, userId, aiTool, templateId);
+      const resolvedTemplateId = resolveProjectTemplateId(db, userId, projectConfigHint, templateId);
       const repo = new ProjectRepository(db, userId);
       const project = repo.import({
         name,
         path: rootPath,
         description,
         techStack,
-        aiTool,
+        aiTool: projectConfigHint,
         templateId: resolvedTemplateId
       });
       res.status(201).json({
@@ -292,7 +301,7 @@ export function createProjectRoutes(
           continue;
         }
         try {
-          await sessionManager.stopSession(session.id, session.tmuxSession);
+          await sessionManager.stopSession(session.id, session.tmuxSession, userId);
         } catch {
           // The project record can still be removed when an already-dead tmux pane is referenced.
         }
@@ -830,17 +839,41 @@ async function buildProjectConfigRenderPlan(
     },
     templateFiles: buildProjectConfigFiles({
       adapter: aiToolSchema.parse(project.aiTool),
-      templateFiles: template.files.map((file) => ({
+      templateFiles: normalizeTemplateFilesForProject(project, template.files.map((file) => ({
         id: String(file.id),
         relativePath: file.filePath,
         content: file.content
-      })),
+      }))),
       agents: agentRepo.list().filter((agent) => agent.projectId === project.id),
       skills: skillRepo.listByProject(project.id)
     }),
     credentialMode,
     dryRun
   });
+}
+
+function normalizeTemplateFilesForProject(
+  project: { aiTool: string; isImported: boolean; path: string },
+  files: Array<{ id: string; relativePath: string; content: string }>
+): Array<{ id: string; relativePath: string; content: string }> {
+  if (project.aiTool !== "claude" || !project.isImported) {
+    return files;
+  }
+
+  const hasRootClaude = existsSync(resolve(project.path, "CLAUDE.md"));
+  return files.flatMap((file) => {
+    if (file.relativePath === ".claude/settings.json") {
+      return [];
+    }
+    if (file.relativePath === ".claude/CLAUDE.md" && hasRootClaude) {
+      return [{ ...file, relativePath: "CLAUDE.md" }];
+    }
+    return [file];
+  });
+}
+
+function listRootInstructionFiles(projectRoot: string): string[] {
+  return rootInstructionFileNames.filter((fileName) => existsSync(resolve(projectRoot, fileName)));
 }
 
 function getGatewayUrl(): string {

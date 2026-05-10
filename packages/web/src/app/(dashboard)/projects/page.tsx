@@ -93,7 +93,6 @@ export default function ProjectsPage() {
               <TableRow>
                 <TableHead>{t("common.name")}</TableHead>
                 <TableHead>{t("common.path")}</TableHead>
-                <TableHead>{t("common.aiTool")}</TableHead>
                 <TableHead>{t("common.status")}</TableHead>
                 <TableHead className="text-right">{t("common.actions")}</TableHead>
               </TableRow>
@@ -112,7 +111,6 @@ export default function ProjectsPage() {
                   <TableCell className="max-w-xs truncate">
                     {project.path ?? project.rootPath}
                   </TableCell>
-                  <TableCell>{project.aiTool ?? "Claude"}</TableCell>
                   <TableCell>{project.status ?? "—"}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">

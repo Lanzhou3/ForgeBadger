@@ -55,10 +55,8 @@ export async function readProjectAiConfig(
   adapter: AdapterId
 ): Promise<ProjectAiConfigSnapshot> {
   const approvedRoot = validateProjectRoot(projectRoot);
-  const candidates = new Set([
-    ...candidateFilesForAdapter(adapter),
-    ...(await discoverExistingConfigFiles(approvedRoot))
-  ]);
+  const discoveredFiles = await discoverExistingConfigFiles(approvedRoot);
+  const candidates = new Set(projectCandidateFilesForAdapter(adapter, discoveredFiles));
   const files = await Promise.all([...candidates].sort().map((relativePath) => readProjectConfigFile(approvedRoot, relativePath)));
 
   return {
@@ -108,11 +106,37 @@ export async function writeProjectAiConfigFile(
   return readProjectAiConfig(approvedRoot, adapter);
 }
 
+function projectCandidateFilesForAdapter(adapter: AdapterId, discoveredFiles: string[]): string[] {
+  const candidates = new Set(discoveredFiles);
+
+  if (adapter === "claude") {
+    if (!hasInstructionFile(discoveredFiles, adapter)) {
+      candidates.add("CLAUDE.md");
+    }
+    candidates.delete(".claude/CLAUDE.md");
+    return [...candidates];
+  }
+
+  for (const relativePath of candidateFilesForAdapter(adapter)) {
+    candidates.add(relativePath);
+  }
+  return [...candidates];
+}
+
+function hasInstructionFile(files: string[], adapter: AdapterId): boolean {
+  const instructionFiles = new Set(primaryInstructionFilesForAdapter(adapter));
+  return files.some((file) => instructionFiles.has(file));
+}
+
+function primaryInstructionFilesForAdapter(adapter: AdapterId): string[] {
+  if (adapter === "claude") return ["CLAUDE.md"];
+  return ["AGENTS.md"];
+}
+
 function candidateFilesForAdapter(adapter: AdapterId): string[] {
   if (adapter === "claude") {
     return [
       "CLAUDE.md",
-      ".claude/CLAUDE.md",
       ".claude/settings.json",
       ".claude/settings.local.json",
       ".claude/hooks/openforge-guard.mjs"
@@ -273,7 +297,7 @@ function globalConfigRoot(adapter: AdapterId): string {
 
 function candidateGlobalFilesForAdapter(adapter: AdapterId): string[] {
   if (adapter === "claude") {
-    return ["CLAUDE.md", "settings.json", "settings.local.json"];
+    return ["settings.json"];
   }
   if (adapter === "opencode") {
     return ["AGENTS.md", "opencode.json", "opencode.jsonc"];

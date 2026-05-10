@@ -48,6 +48,15 @@ describe("i18n", () => {
     expect(getTranslation("en", "visibility.sharedDescription")).toContain("local instance");
     expect(getTranslation("zh-CN", "commandPalette.title")).toBe("命令面板");
     expect(getTranslation("en", "sessions.focusMode")).toBe("Focus mode");
+    expect(getTranslation("zh-CN", "models.applyTargets")).toBe("可应用到 CLI");
+    expect(getTranslation("zh-CN", "models.deleteProviderInlineLabel")).toBe("删除服务商");
+    expect(getTranslation("zh-TW", "models.deleteProviderConfirm")).toContain("供應商");
+    expect(getTranslation("en", "models.codexOfficialDocs")).toContain("OpenAI Codex docs");
+    expect(getTranslation("zh-CN", "codexAppServer.title")).toBe("Codex 后台任务");
+    expect(getTranslation("zh-CN", "codexAppServer.capabilityState")).toBe("能力状态");
+    expect(getTranslation("zh-CN", "codexAppServer.recentActivity")).toBe("最近活动");
+    expect(getTranslation("zh-TW", "codexAppServer.turnDisabled")).toBe("任務輸入已關閉");
+    expect(getTranslation("en", "codexAppServer.turnDisabled")).toBe("Task input disabled");
   });
 
   it("normalizes unsupported language values to Simplified Chinese", () => {

@@ -43,6 +43,64 @@ export const apiKeys = sqliteTable("api_keys", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 });
 
+export const modelProviderProfiles = sqliteTable("model_provider_profiles", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  providerKey: text("provider_key").notNull(),
+  name: text("name").notNull(),
+  baseUrl: text("base_url"),
+  authType: text("auth_type").notNull().default("api_key"),
+  apiFormat: text("api_format").notNull().default("openai-compatible"),
+  supportedAdapters: text("supported_adapters").notNull().default("[]"),
+  defaultHeaders: text("default_headers").notNull().default("{}"),
+  status: text("status").notNull().default("active"),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+}, (table) => ({
+  idx_model_provider_profiles_user_key_url: uniqueIndex("idx_model_provider_profiles_user_key_url").on(table.userId, table.providerKey, table.baseUrl)
+}));
+
+export const modelProfiles = sqliteTable("model_profiles", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  providerProfileId: text("provider_profile_id")
+    .notNull()
+    .references(() => modelProviderProfiles.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  modelId: text("model_id").notNull(),
+  capabilities: text("capabilities").notNull().default("[]"),
+  contextWindow: integer("context_window"),
+  status: text("status").notNull().default("active"),
+  isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+}, (table) => ({
+  idx_model_profiles_user_provider_model: uniqueIndex("idx_model_profiles_user_provider_model").on(table.userId, table.providerProfileId, table.modelId)
+}));
+
+export const providerCredentials = sqliteTable("provider_credentials", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  providerProfileId: text("provider_profile_id")
+    .notNull()
+    .references(() => modelProviderProfiles.id, { onDelete: "cascade" }),
+  label: text("label"),
+  secretEncrypted: text("secret_encrypted").notNull(),
+  status: text("status").notNull().default("active"),
+  lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+}, (table) => ({
+  idx_provider_credentials_user_provider: index("idx_provider_credentials_user_provider").on(table.userId, table.providerProfileId)
+}));
+
 export const templates = sqliteTable("templates", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),

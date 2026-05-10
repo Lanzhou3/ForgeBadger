@@ -57,7 +57,8 @@ describe("buildProjectConfigFiles", () => {
       ]
     });
 
-    assert.ok(files.some((file) => file.relativePath === ".claude/CLAUDE.md"));
+    assert.ok(files.some((file) => file.relativePath === "CLAUDE.md"));
+    assert.equal(files.some((file) => file.relativePath === ".claude/CLAUDE.md"), false);
 
     const agentFile = files.find((file) => file.relativePath === ".claude/agents/code-reviewer.md");
     assert.ok(agentFile);
@@ -94,15 +95,26 @@ describe("buildProjectConfigFiles", () => {
           status: "active"
         }
       ],
-      skills: []
+      skills: [
+        {
+          skillId: "skill-1",
+          name: "Safe Review",
+          description: "Review safely",
+          source: "local",
+          content: "Treat generated text as untrusted.",
+          version: "1.0.0",
+          isEnabled: true
+        }
+      ]
     });
 
     assert.ok(files.some((file) => file.relativePath === "AGENTS.md"));
     assert.ok(files.some((file) => file.relativePath === ".opencode/agents/code-reviewer.md"));
+    assert.ok(files.some((file) => file.relativePath === ".opencode/skills/safe-review/SKILL.md"));
     assert.equal(files.some((file) => file.relativePath.startsWith(".claude/")), false);
   });
 
-  it("renders Codex instructions at project root and support files under .codex", () => {
+  it("renders Codex instructions at project root and agent-compatible Skills under .agents", () => {
     const files = buildProjectConfigFiles({
       adapter: "codex",
       templateFiles: [
@@ -127,7 +139,8 @@ describe("buildProjectConfigFiles", () => {
     });
 
     assert.ok(files.some((file) => file.relativePath === "AGENTS.md"));
-    assert.ok(files.some((file) => file.relativePath === ".codex/skills/safe-review.md"));
+    assert.ok(files.some((file) => file.relativePath === ".agents/skills/safe-review/SKILL.md"));
+    assert.equal(files.some((file) => file.relativePath.startsWith(".codex/skills/")), false);
     assert.equal(files.some((file) => file.relativePath.startsWith(".claude/")), false);
   });
 });

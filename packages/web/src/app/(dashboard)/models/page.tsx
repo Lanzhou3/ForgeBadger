@@ -1,20 +1,21 @@
 "use client";
 
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Activity,
-  Brain,
+  Braces,
   CheckCircle2,
-  Globe,
+  Cloud,
+  Database,
+  ExternalLink,
   KeyRound,
-  Pencil,
+  Layers3,
+  Play,
   Plus,
-  RotateCw,
-  Save,
-  Star,
+  RefreshCw,
+  ServerCog,
+  ShieldCheck,
   Trash2,
-  X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -32,244 +33,378 @@ import {
 } from "@/components/ui/table";
 import { useLanguage } from "@/hooks/use-language";
 import {
-  checkModelEndpointHealth,
-  checkModelHealth,
-  createApiKey,
-  createModel,
-  deleteApiKey,
-  deleteModel,
-  listApiKeys,
-  listModelGroups,
-  listModelPresets,
-  listModels,
-  rotateApiKey,
-  setDefaultModel,
-  updateModel,
-  type ApiKeySummary,
-  type Model,
-  type ModelEndpointHealth,
-  type ModelHealth,
-  type ModelPreset,
+  applyProviderConfig,
+  createModelProvider,
+  createProviderCredential,
+  createProviderModel,
+  deleteProviderCredential,
+  deleteProviderModel,
+  deleteModelProvider,
+  getCodexSubscriptionStatus,
+  listModelProviders,
+  listProviderCatalog,
+  previewProviderApply,
+  rotateProviderCredential,
+  setDefaultProviderModel,
+  syncProviderModels,
+  updateProviderModel,
+  type ModelProfile,
+  type ProviderApplyAdapter,
+  type ProviderApplyPreview,
+  type ProviderCatalogPreset,
+  type ProviderCredentialSummary,
+  type ProviderProfile,
 } from "@/lib/api";
-import type { TranslationKey } from "@/lib/i18n";
 
-interface ModelFormState {
+interface CustomProviderForm {
   name: string;
-  provider: string;
+  providerKey: string;
+  baseUrl: string;
+}
+
+interface CredentialForm {
+  label: string;
+  plaintextSecret: string;
+}
+
+interface ModelForm {
+  name: string;
   modelId: string;
-  endpoint: string;
+  capabilities: string;
 }
 
-interface ApiKeyFormState {
-  name: string;
-  provider: string;
-  plaintextKey: string;
-}
-
-const emptyModelForm: ModelFormState = {
+const emptyCustomProvider: CustomProviderForm = {
   name: "",
-  provider: "anthropic",
-  modelId: "",
-  endpoint: "",
+  providerKey: "",
+  baseUrl: "",
 };
 
-const emptyApiKeyForm: ApiKeyFormState = {
+const emptyCredential: CredentialForm = {
+  label: "",
+  plaintextSecret: "",
+};
+
+const emptyModel: ModelForm = {
   name: "",
-  provider: "anthropic",
-  plaintextKey: "",
+  modelId: "",
+  capabilities: "chat,code",
 };
 
 export default function ModelsPage() {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const [modelForm, setModelForm] = useState<ModelFormState>(emptyModelForm);
-  const [editingModelId, setEditingModelId] = useState<string | null>(null);
-  const [apiKeyForm, setApiKeyForm] = useState<ApiKeyFormState>(emptyApiKeyForm);
-  const [rotatingKeyId, setRotatingKeyId] = useState<string | null>(null);
-  const [rotationValue, setRotationValue] = useState("");
+  const [selectedProviderId, setSelectedProviderId] = useState("");
+  const [customProvider, setCustomProvider] = useState<CustomProviderForm>(emptyCustomProvider);
+  const [credentialForm, setCredentialForm] = useState<CredentialForm>(emptyCredential);
+  const [modelForm, setModelForm] = useState<ModelForm>(emptyModel);
+  const [applyAdapter, setApplyAdapter] = useState<ProviderApplyAdapter>("claude");
+  const [projectRoot, setProjectRoot] = useState("");
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [selectedCredentialId, setSelectedCredentialId] = useState("");
+  const [applyPreview, setApplyPreview] = useState<ProviderApplyPreview | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [modelHealthById, setModelHealthById] = useState<Record<string, ModelHealth>>({});
-  const [endpointHealthById, setEndpointHealthById] = useState<Record<string, ModelEndpointHealth>>({});
 
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["models"],
-    queryFn: listModels,
+  const providerQuery = useQuery({
+    queryKey: ["model-providers"],
+    queryFn: listModelProviders,
+  });
+  const catalogQuery = useQuery({
+    queryKey: ["model-provider-catalog"],
+    queryFn: listProviderCatalog,
+  });
+  const codexStatusQuery = useQuery({
+    queryKey: ["codex-subscription-status"],
+    queryFn: getCodexSubscriptionStatus,
   });
 
-  const {
-    data: apiKeyData,
-    isLoading: apiKeysLoading,
-    isError: apiKeysError,
-    error: apiKeysErrorValue,
-  } = useQuery({
-    queryKey: ["api-keys"],
-    queryFn: listApiKeys,
+  const providers = providerQuery.data?.providers ?? [];
+  const models = providerQuery.data?.models ?? [];
+  const credentials = providerQuery.data?.credentials ?? [];
+  const catalog = catalogQuery.data?.providers ?? [];
+
+  useEffect(() => {
+    if (!selectedProviderId && providers[0]) {
+      setSelectedProviderId(providers[0].id);
+    }
+  }, [providers, selectedProviderId]);
+
+  const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
+  const providerModels = useMemo(
+    () => models.filter((model) => model.providerProfileId === selectedProviderId),
+    [models, selectedProviderId]
+  );
+  const providerCredentials = useMemo(
+    () => credentials.filter((credential) => credential.providerProfileId === selectedProviderId),
+    [credentials, selectedProviderId]
+  );
+  const selectedModel = useMemo(
+    () => providerModels.find((model) => model.id === selectedModelId),
+    [providerModels, selectedModelId]
+  );
+  const selectedCredential = useMemo(
+    () => providerCredentials.find((credential) => credential.id === selectedCredentialId),
+    [providerCredentials, selectedCredentialId]
+  );
+
+  useEffect(() => {
+    setSelectedModelId((current) =>
+      providerModels.some((model) => model.id === current) ? current : providerModels[0]?.id || ""
+    );
+    setSelectedCredentialId((current) =>
+      providerCredentials.some((credential) => credential.id === current) ? current : providerCredentials[0]?.id || ""
+    );
+    setApplyPreview(null);
+  }, [providerModels, providerCredentials]);
+
+  useEffect(() => {
+    if (selectedModel) {
+      setModelForm({
+        name: selectedModel.name,
+        modelId: selectedModel.modelId,
+        capabilities: selectedModel.capabilities.join(","),
+      });
+    } else {
+      setModelForm(emptyModel);
+    }
+  }, [selectedModel]);
+
+  useEffect(() => {
+    if (selectedCredential) {
+      setCredentialForm((form) => ({ ...form, label: selectedCredential.label ?? "" }));
+    }
+  }, [selectedCredential]);
+
+  const addPresetMutation = useMutation({
+    mutationFn: (catalogId: string) => createModelProvider({ catalogId }),
+    onSuccess: async (result) => {
+      setSelectedProviderId(result.provider.id);
+      setNotice(t("models.providerCreated"));
+      await refreshProviders();
+    },
   });
 
-  const { data: presetData } = useQuery({
-    queryKey: ["model-presets"],
-    queryFn: listModelPresets,
+  const customProviderMutation = useMutation({
+    mutationFn: () =>
+      createModelProvider({
+        name: customProvider.name.trim(),
+        providerKey: customProvider.providerKey.trim(),
+        baseUrl: customProvider.baseUrl.trim(),
+        authType: "api_key",
+        apiFormat: "openai-compatible",
+        supportedAdapters: ["opencode"],
+      }),
+    onSuccess: async (result) => {
+      setCustomProvider(emptyCustomProvider);
+      setSelectedProviderId(result.provider.id);
+      setNotice(t("models.providerCreated"));
+      await refreshProviders();
+    },
   });
 
-  const { data: groupData } = useQuery({
-    queryKey: ["model-groups"],
-    queryFn: listModelGroups,
+  const deleteProviderMutation = useMutation({
+    mutationFn: (providerId: string) => deleteModelProvider(providerId),
+    onSuccess: async (_result, providerId) => {
+      const nextProviderId = providers.find((provider) => provider.id !== providerId)?.id || "";
+      setSelectedProviderId(nextProviderId);
+      setSelectedModelId("");
+      setSelectedCredentialId("");
+      setApplyPreview(null);
+      setNotice(t("models.providerDeleted"));
+      await refreshProviders();
+    },
   });
 
-  const models = data?.models ?? [];
-  const modelGroups = groupData?.groups ?? [];
-  const modelPresets = presetData?.presets ?? [];
-  const apiKeys = apiKeyData?.apiKeys ?? [];
+  const credentialMutation = useMutation({
+    mutationFn: () =>
+      createProviderCredential(selectedProviderId, {
+        label: credentialForm.label.trim() || undefined,
+        plaintextSecret: credentialForm.plaintextSecret,
+      }),
+    onSuccess: async (result) => {
+      setCredentialForm(emptyCredential);
+      setSelectedCredentialId(result.credential.id);
+      setNotice(t("models.credentialSaved"));
+      await refreshProviders();
+    },
+  });
+
+  const rotateCredentialMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedCredentialId) throw new Error(t("models.credentialRequired"));
+      return rotateProviderCredential(selectedProviderId, selectedCredentialId, {
+        label: credentialForm.label.trim() || undefined,
+        plaintextSecret: credentialForm.plaintextSecret,
+      });
+    },
+    onSuccess: async (result) => {
+      setCredentialForm(emptyCredential);
+      setSelectedCredentialId(result.credential.id);
+      setNotice(t("models.credentialRotated"));
+      await refreshProviders();
+    },
+  });
+
+  const deleteCredentialMutation = useMutation({
+    mutationFn: (credentialId: string) => deleteProviderCredential(selectedProviderId, credentialId),
+    onSuccess: async (_result, credentialId) => {
+      const nextCredentialId = providerCredentials.find((credential) => credential.id !== credentialId)?.id || "";
+      setSelectedCredentialId(nextCredentialId);
+      setCredentialForm(emptyCredential);
+      setNotice(t("models.credentialDeleted"));
+      await refreshProviders();
+    },
+  });
 
   const modelMutation = useMutation({
-    mutationFn: () => {
-      const payload = {
+    mutationFn: () =>
+      createProviderModel(selectedProviderId, {
         name: modelForm.name.trim(),
-        provider: modelForm.provider.trim(),
         modelId: modelForm.modelId.trim(),
-        ...(modelForm.endpoint.trim() ? { endpoint: modelForm.endpoint.trim() } : {}),
-      };
-      return editingModelId ? updateModel(editingModelId, payload) : createModel(payload);
-    },
-    onSuccess: async () => {
-      setNotice(editingModelId ? t("models.updated") : t("models.created"));
-      setModelForm(emptyModelForm);
-      setEditingModelId(null);
-      await queryClient.invalidateQueries({ queryKey: ["models"] });
-      await queryClient.invalidateQueries({ queryKey: ["model-groups"] });
-    },
-  });
-
-  const defaultModelMutation = useMutation({
-    mutationFn: setDefaultModel,
-    onSuccess: async () => {
-      setNotice(t("models.defaultUpdated"));
-      await queryClient.invalidateQueries({ queryKey: ["models"] });
-      await queryClient.invalidateQueries({ queryKey: ["model-groups"] });
+        capabilities: modelForm.capabilities
+          .split(",")
+          .map((capability) => capability.trim())
+          .filter(Boolean),
+      }),
+    onSuccess: async (result) => {
+      setModelForm(emptyModel);
+      setSelectedModelId(result.model.id);
+      setNotice(t("models.modelProfileSaved"));
+      await refreshProviders();
     },
   });
 
-  const modelHealthMutation = useMutation({
-    mutationFn: checkModelHealth,
-    onSuccess: (result, modelId) => {
-      setModelHealthById((current) => ({ ...current, [modelId]: result.health }));
-      setNotice(
-        result.health.healthy
-          ? t("models.healthReadyDescription")
-          : t("models.healthNeedsAttentionDescription")
-      );
+  const updateModelMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedModelId) throw new Error(t("models.modelRequired"));
+      return updateProviderModel(selectedProviderId, selectedModelId, {
+        name: modelForm.name.trim(),
+        modelId: modelForm.modelId.trim(),
+        capabilities: modelForm.capabilities
+          .split(",")
+          .map((capability) => capability.trim())
+          .filter(Boolean),
+      });
     },
-  });
-
-  const endpointHealthMutation = useMutation({
-    mutationFn: (modelId: string) => checkModelEndpointHealth(modelId),
-    onSuccess: (result, modelId) => {
-      setEndpointHealthById((current) => ({ ...current, [modelId]: result.health }));
-      setNotice(
-        result.health.healthy
-          ? `${t("models.endpointHealthy")} · ${result.health.latencyMs}ms`
-          : result.health.error ?? t("models.endpointFailed")
-      );
+    onSuccess: async (result) => {
+      setSelectedModelId(result.model.id);
+      setNotice(t("models.updated"));
+      await refreshProviders();
     },
   });
 
   const deleteModelMutation = useMutation({
-    mutationFn: deleteModel,
-    onSuccess: async () => {
+    mutationFn: (modelId: string) => deleteProviderModel(selectedProviderId, modelId),
+    onSuccess: async (_result, modelId) => {
+      const nextModelId = providerModels.find((model) => model.id !== modelId)?.id || "";
+      setSelectedModelId(nextModelId);
+      setModelForm(nextModelId ? modelForm : emptyModel);
       setNotice(t("models.deleted"));
-      await queryClient.invalidateQueries({ queryKey: ["models"] });
-      await queryClient.invalidateQueries({ queryKey: ["model-groups"] });
+      await refreshProviders();
     },
   });
 
-  const apiKeyMutation = useMutation({
-    mutationFn: () =>
-      createApiKey({
-        name: apiKeyForm.name.trim(),
-        provider: apiKeyForm.provider.trim(),
-        plaintextKey: apiKeyForm.plaintextKey,
-      }),
-    onSuccess: async () => {
-      setNotice(t("models.apiKeyCreated"));
-      setApiKeyForm(emptyApiKeyForm);
-      await queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+  const setDefaultModelMutation = useMutation({
+    mutationFn: (modelId: string) => setDefaultProviderModel(selectedProviderId, modelId),
+    onSuccess: async (result) => {
+      setSelectedModelId(result.model.id);
+      setNotice(t("models.defaultUpdated"));
+      await refreshProviders();
     },
   });
 
-  const rotateMutation = useMutation({
-    mutationFn: (apiKeyId: string) => rotateApiKey(apiKeyId, rotationValue),
-    onSuccess: async () => {
-      setNotice(t("models.apiKeyRotated"));
-      setRotatingKeyId(null);
-      setRotationValue("");
-      await queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+  const syncModelsMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedProvider) throw new Error(t("models.providerRequired"));
+      return syncProviderModels(selectedProvider.id, {
+        credentialId: selectedProvider.authType === "none" ? undefined : selectedCredentialId || undefined,
+      });
+    },
+    onSuccess: async (result) => {
+      setNotice(result.createdCount > 0 ? t("models.modelSyncComplete") : t("models.modelSyncNoChanges"));
+      await refreshProviders();
     },
   });
 
-  const deleteApiKeyMutation = useMutation({
-    mutationFn: deleteApiKey,
-    onSuccess: async () => {
-      setNotice(t("models.apiKeyDeleted"));
-      await queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+  const previewMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedProviderId) throw new Error(t("models.providerRequired"));
+      return previewProviderApply(selectedProviderId, {
+        adapter: applyAdapter,
+        projectRoot: projectRoot.trim(),
+        modelProfileId: selectedModelId || undefined,
+        credentialId: selectedCredentialId || undefined,
+      });
+    },
+    onSuccess: (result) => {
+      setApplyPreview(result.preview);
+      setNotice(t("models.previewReady"));
     },
   });
+
+  const applyMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedProviderId) throw new Error(t("models.providerRequired"));
+      return applyProviderConfig(selectedProviderId, {
+        adapter: applyAdapter,
+        projectRoot: projectRoot.trim(),
+        modelProfileId: selectedModelId || undefined,
+        credentialId: selectedCredentialId || undefined,
+      });
+    },
+    onSuccess: (result) => {
+      setApplyPreview(result.result);
+      setNotice(t("models.applyComplete"));
+    },
+  });
+
+  function refreshProviders() {
+    setApplyPreview(null);
+    return queryClient.invalidateQueries({ queryKey: ["model-providers"] });
+  }
+
+  function submitCustomProvider(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    customProviderMutation.mutate();
+  }
+
+  function submitCredential(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    credentialMutation.mutate();
+  }
 
   function submitModel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setNotice(null);
-    modelMutation.mutate();
-  }
-
-  function submitApiKey(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setNotice(null);
-    apiKeyMutation.mutate();
-  }
-
-  function editModel(model: Model) {
-    setEditingModelId(model.id);
-    setModelForm({
-      name: model.name,
-      provider: model.provider,
-      modelId: model.modelId,
-      endpoint: model.endpoint ?? "",
-    });
-    setNotice(null);
-  }
-
-  function cancelModelEdit() {
-    setEditingModelId(null);
-    setModelForm(emptyModelForm);
-  }
-
-  function applyPreset(preset: ModelPreset) {
-    setEditingModelId(null);
-    setModelForm({
-      name: preset.label,
-      provider: preset.provider,
-      modelId: preset.modelId,
-      endpoint: preset.endpoint,
-    });
-    setNotice(null);
+    if (selectedModelId) {
+      updateModelMutation.mutate();
+    } else {
+      modelMutation.mutate();
+    }
   }
 
   const currentError =
+    providerQuery.error ??
+    catalogQuery.error ??
+    codexStatusQuery.error ??
+    addPresetMutation.error ??
+    customProviderMutation.error ??
+    deleteProviderMutation.error ??
+    credentialMutation.error ??
+    rotateCredentialMutation.error ??
+    deleteCredentialMutation.error ??
     modelMutation.error ??
-    defaultModelMutation.error ??
-    modelHealthMutation.error ??
-    endpointHealthMutation.error ??
+    updateModelMutation.error ??
     deleteModelMutation.error ??
-    apiKeyMutation.error ??
-    rotateMutation.error ??
-    deleteApiKeyMutation.error ??
-    error ??
-    apiKeysErrorValue;
+    setDefaultModelMutation.error ??
+    syncModelsMutation.error ??
+    previewMutation.error ??
+    applyMutation.error;
+  const codexStatus = codexStatusQuery.data?.status;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-5 p-6">
       <div>
         <h1 className="text-2xl font-semibold">{t("models.title")}</h1>
-        <p className="mt-1 text-muted-foreground">{t("models.subtitle")}</p>
+        <p className="mt-1 text-muted-foreground">{t("models.providerCenterSubtitle")}</p>
       </div>
 
       {notice && (
@@ -285,457 +420,730 @@ export default function ModelsPage() {
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Brain className="size-5" />
-              {t("models.catalog")}
-            </CardTitle>
-            <CardDescription>{t("models.catalogDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" onSubmit={submitModel}>
-              <div className="space-y-2">
-                <Label htmlFor="model-name">{t("common.name")}</Label>
+      <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)_360px]">
+        <ProviderColumn
+          catalog={catalog}
+          providers={providers}
+          selectedProviderId={selectedProviderId}
+          isLoading={providerQuery.isLoading || catalogQuery.isLoading}
+          isAdding={addPresetMutation.isPending}
+          isDeleting={deleteProviderMutation.isPending}
+          onSelectProvider={setSelectedProviderId}
+          onDeleteProvider={(providerId) => {
+            if (window.confirm(t("models.deleteProviderConfirm"))) {
+              deleteProviderMutation.mutate(providerId);
+            }
+          }}
+          onAddPreset={(preset) => addPresetMutation.mutate(preset.id)}
+          t={t}
+        />
+
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ServerCog className="size-5" />
+                {t("models.providerProfile")}
+              </CardTitle>
+              <CardDescription>{t("models.providerProfileDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {selectedProvider ? (
+                <ProviderSummary
+                  provider={selectedProvider}
+                  modelCount={providerModels.length}
+                  credentialCount={providerCredentials.length}
+                  isDeleting={deleteProviderMutation.isPending}
+                  onDelete={() => {
+                    if (window.confirm(t("models.deleteProviderConfirm"))) {
+                      deleteProviderMutation.mutate(selectedProvider.id);
+                    }
+                  }}
+                  t={t}
+                />
+              ) : (
+                <EmptyLine text={t("models.noProviderSelected")} />
+              )}
+              <form className="mt-4 grid gap-3 md:grid-cols-3" onSubmit={submitCustomProvider}>
+                <div className="space-y-2">
+                  <Label htmlFor="provider-name">{t("common.name")}</Label>
+                  <Input
+                    id="provider-name"
+                    value={customProvider.name}
+                    onChange={(event) => setCustomProvider((form) => ({ ...form, name: event.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="provider-key">{t("models.providerKey")}</Label>
+                  <Input
+                    id="provider-key"
+                    value={customProvider.providerKey}
+                    onChange={(event) => setCustomProvider((form) => ({ ...form, providerKey: event.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="provider-base-url">{t("models.endpoint")}</Label>
+                  <Input
+                    id="provider-base-url"
+                    value={customProvider.baseUrl}
+                    onChange={(event) => setCustomProvider((form) => ({ ...form, baseUrl: event.target.value }))}
+                    required
+                  />
+                </div>
+                <Button className="md:col-span-3" type="submit" disabled={customProviderMutation.isPending}>
+                  <Plus className="size-4" />
+                  {t("models.addCustomProvider")}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <KeyRound className="size-5" />
+                {t("models.credentials")}
+              </CardTitle>
+              <CardDescription>{t("models.credentialsDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto_auto]" onSubmit={submitCredential}>
                 <Input
-                  id="model-name"
+                  placeholder={t("models.credentialLabel")}
+                  value={credentialForm.label}
+                  onChange={(event) => setCredentialForm((form) => ({ ...form, label: event.target.value }))}
+                  disabled={!selectedProvider}
+                />
+                <Input
+                  type="password"
+                  placeholder={t("models.apiKey")}
+                  value={credentialForm.plaintextSecret}
+                  onChange={(event) => setCredentialForm((form) => ({ ...form, plaintextSecret: event.target.value }))}
+                  disabled={!selectedProvider}
+                  required
+                />
+                <Button type="submit" disabled={!selectedProvider || credentialMutation.isPending}>
+                  <Plus className="size-4" />
+                  {t("models.saveCredential")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!selectedCredentialId || !credentialForm.plaintextSecret || rotateCredentialMutation.isPending}
+                  onClick={() => rotateCredentialMutation.mutate()}
+                >
+                  <RefreshCw className="size-4" />
+                  {t("models.rotateSelectedCredential")}
+                </Button>
+              </form>
+              <CredentialTable
+                credentials={providerCredentials}
+                selectedCredentialId={selectedCredentialId}
+                onSelectCredential={setSelectedCredentialId}
+                onDeleteCredential={(credentialId) => {
+                  if (window.confirm(t("models.deleteCredentialConfirm"))) {
+                    deleteCredentialMutation.mutate(credentialId);
+                  }
+                }}
+                isDeleting={deleteCredentialMutation.isPending}
+                t={t}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Layers3 className="size-5" />
+                {t("models.modelsWorkspace")}
+              </CardTitle>
+              <CardDescription>{t("models.modelsWorkspaceDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <form className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto_auto]" onSubmit={submitModel}>
+                <Input
+                  placeholder={t("common.name")}
                   value={modelForm.name}
                   onChange={(event) => setModelForm((form) => ({ ...form, name: event.target.value }))}
+                  disabled={!selectedProvider}
                   required
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="model-provider">{t("models.provider")}</Label>
                 <Input
-                  id="model-provider"
-                  value={modelForm.provider}
-                  onChange={(event) => setModelForm((form) => ({ ...form, provider: event.target.value }))}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="model-id">{t("models.modelId")}</Label>
-                <Input
-                  id="model-id"
+                  placeholder={t("models.modelId")}
                   value={modelForm.modelId}
                   onChange={(event) => setModelForm((form) => ({ ...form, modelId: event.target.value }))}
+                  disabled={!selectedProvider}
                   required
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="model-endpoint">{t("models.endpoint")}</Label>
                 <Input
-                  id="model-endpoint"
-                  value={modelForm.endpoint}
-                  onChange={(event) => setModelForm((form) => ({ ...form, endpoint: event.target.value }))}
+                  placeholder={t("models.capabilities")}
+                  value={modelForm.capabilities}
+                  onChange={(event) => setModelForm((form) => ({ ...form, capabilities: event.target.value }))}
+                  disabled={!selectedProvider}
                 />
-              </div>
-              <div className="flex gap-2 md:col-span-2 xl:col-span-4">
-                <Button type="submit" disabled={modelMutation.isPending}>
-                  {editingModelId ? <Save className="size-4" /> : <Plus className="size-4" />}
-                  {modelMutation.isPending
-                    ? t("models.saving")
-                    : editingModelId
-                      ? t("models.saveModel")
-                      : t("models.addModel")}
+                <Button
+                  type="submit"
+                  disabled={!selectedProvider || modelMutation.isPending || updateModelMutation.isPending}
+                >
+                  {selectedModelId ? <CheckCircle2 className="size-4" /> : <Plus className="size-4" />}
+                  {selectedModelId ? t("models.saveModel") : t("models.addModel")}
                 </Button>
-                {editingModelId && (
-                  <Button type="button" variant="outline" onClick={cancelModelEdit}>
-                    <X className="size-4" />
-                    {t("common.cancel")}
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!selectedProvider}
+                  onClick={() => {
+                    setSelectedModelId("");
+                    setModelForm(emptyModel);
+                  }}
+                >
+                  <Plus className="size-4" />
+                  {t("models.newModel")}
+                </Button>
+              </form>
+              <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                <div className="text-muted-foreground">{t("models.syncProviderModelsDescription")}</div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={
+                    !selectedProvider ||
+                    syncModelsMutation.isPending ||
+                    (selectedProvider.authType !== "none" && !selectedCredentialId)
+                  }
+                  onClick={() => syncModelsMutation.mutate()}
+                >
+                  <RefreshCw className={`size-4 ${syncModelsMutation.isPending ? "animate-spin" : ""}`} />
+                  {t("models.syncProviderModels")}
+                </Button>
               </div>
-            </form>
-          </CardContent>
-        </Card>
+              <ModelProfileTable
+                models={providerModels}
+                selectedModelId={selectedModelId}
+                onSelectModel={setSelectedModelId}
+                onSetDefault={(modelId) => setDefaultModelMutation.mutate(modelId)}
+                onDeleteModel={(modelId) => {
+                  if (window.confirm(t("models.deleteModelConfirm"))) {
+                    deleteModelMutation.mutate(modelId);
+                  }
+                }}
+                isSettingDefault={setDefaultModelMutation.isPending}
+                isDeleting={deleteModelMutation.isPending}
+                t={t}
+              />
+            </CardContent>
+          </Card>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("models.presets")}</CardTitle>
-            <CardDescription>{t("models.presetsDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-2 sm:grid-cols-2">
-            {modelPresets.map((preset) => (
-              <Button
-                key={preset.id}
-                type="button"
-                variant="outline"
-                className="h-auto justify-start py-2 text-left"
-                onClick={() => applyPreset(preset)}
-              >
-                <span>
-                  <span className="block font-medium">{preset.label}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {preset.provider} · {preset.tier}
-                  </span>
-                </span>
-              </Button>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <KeyRound className="size-5" />
-              {t("models.apiKeys")}
-            </CardTitle>
-            <CardDescription>{t("models.apiKeysDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form className="grid gap-3 sm:grid-cols-2" onSubmit={submitApiKey}>
-              <div className="space-y-2">
-                <Label htmlFor="api-key-name">{t("common.name")}</Label>
-                <Input
-                  id="api-key-name"
-                  value={apiKeyForm.name}
-                  onChange={(event) => setApiKeyForm((form) => ({ ...form, name: event.target.value }))}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="api-key-provider">{t("models.provider")}</Label>
-                <Input
-                  id="api-key-provider"
-                  value={apiKeyForm.provider}
-                  onChange={(event) => setApiKeyForm((form) => ({ ...form, provider: event.target.value }))}
-                  required
-                />
-              </div>
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="api-key-value">{t("models.apiKey")}</Label>
-                <Input
-                  id="api-key-value"
-                  type="password"
-                  value={apiKeyForm.plaintextKey}
-                  onChange={(event) => setApiKeyForm((form) => ({ ...form, plaintextKey: event.target.value }))}
-                  required
-                />
-              </div>
-              <Button className="sm:col-span-2" type="submit" disabled={apiKeyMutation.isPending}>
-                <Plus className="size-4" />
-                {apiKeyMutation.isPending ? t("models.saving") : t("models.addApiKey")}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+        <ApplyColumn
+          provider={selectedProvider}
+          models={providerModels}
+          credentials={providerCredentials}
+          adapter={applyAdapter}
+          projectRoot={projectRoot}
+          selectedModelId={selectedModelId}
+          selectedCredentialId={selectedCredentialId}
+          preview={applyPreview}
+          codexStatus={codexStatus}
+          isPreviewing={previewMutation.isPending}
+          isApplying={applyMutation.isPending}
+          onAdapterChange={(adapter) => {
+            setApplyAdapter(adapter);
+            setApplyPreview(null);
+          }}
+          onProjectRootChange={setProjectRoot}
+          onModelChange={setSelectedModelId}
+          onCredentialChange={setSelectedCredentialId}
+          onPreview={() => previewMutation.mutate()}
+          onApply={() => applyMutation.mutate()}
+          t={t}
+        />
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("models.configuredModels")}</CardTitle>
-          <CardDescription>{t("models.configuredModelsDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent className="px-0">
-          {isLoading ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">{t("models.loading")}</div>
-          ) : isError ? (
-            <div className="py-8 text-center text-sm text-destructive">{t("models.failedLoad")}</div>
-          ) : models.length === 0 ? (
-            <EmptyState
-              icon={<Brain className="size-10 text-muted-foreground" />}
-              title={t("models.emptyTitle")}
-              description={t("models.emptyDescription")}
-            />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("common.name")}</TableHead>
-                  <TableHead>{t("models.provider")}</TableHead>
-                  <TableHead>{t("models.modelId")}</TableHead>
-                  <TableHead>{t("common.status")}</TableHead>
-                  <TableHead className="text-right">{t("common.actions")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(modelGroups.length > 0
-                  ? modelGroups.flatMap((group) => group.models.map((model) => ({ model, group })))
-                  : models.map((model) => ({ model, group: { provider: model.provider, count: 1 } }))
-                ).map(({ model, group }) => {
-                  const health = modelHealthById[model.id];
-                  const endpointHealth = endpointHealthById[model.id];
-                  return (
-                    <TableRow key={model.id}>
-                      <TableCell className="font-medium">
-                        <div className="flex flex-col gap-1">
-                          <span>{model.name}</span>
-                          {model.endpoint && (
-                            <span className="text-xs text-muted-foreground">{model.endpoint}</span>
-                          )}
-                          {health && (
-                            <span className={health.healthy ? "text-xs text-emerald-600 dark:text-emerald-300" : "text-xs text-destructive"}>
-                              {health.healthy
-                                ? t("models.healthReadyDescription")
-                                : t("models.healthNeedsAttentionDescription")}
-                            </span>
-                          )}
-                          {endpointHealth && (
-                            <span className={endpointHealth.healthy ? "text-xs text-emerald-600 dark:text-emerald-300" : "text-xs text-destructive"}>
-                              {endpointHealth.healthy
-                                ? `${t("models.endpointHealthy")} · ${endpointHealth.latencyMs}ms`
-                                : endpointHealth.error ?? t("models.endpointFailed")}
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-1">
-                          <span>{model.provider}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {t("models.providerGroup")}: {group.provider} ({group.count})
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">{model.modelId}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {model.isDefault ? (
-                            <Badge variant="default">{t("models.default")}</Badge>
-                          ) : (
-                            <Badge variant="outline">{model.status ?? "active"}</Badge>
-                          )}
-                          {health && (
-                            <Badge variant={health.healthy ? "secondary" : "destructive"}>
-                              {health.healthy ? t("models.healthReady") : t("models.healthNeedsAttention")}
-                            </Badge>
-                          )}
-                          {endpointHealth && (
-                            <Badge variant={endpointHealth.healthy ? "secondary" : "destructive"}>
-                              {endpointHealth.healthy ? t("models.endpointHealthy") : t("models.endpointFailed")}
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            title={t("models.editModel")}
-                            onClick={() => editModel(model)}
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            title={t("models.setDefault")}
-                            disabled={model.isDefault || defaultModelMutation.isPending}
-                            onClick={() => defaultModelMutation.mutate(model.id)}
-                          >
-                            <Star className="size-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            title={modelHealthMutation.isPending ? t("models.checkingHealth") : t("models.checkHealth")}
-                            disabled={modelHealthMutation.isPending}
-                            onClick={() => modelHealthMutation.mutate(model.id)}
-                          >
-                            <Activity className="size-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            title={endpointHealthMutation.isPending ? t("models.checkingEndpoint") : t("models.checkEndpoint")}
-                            disabled={!model.endpoint || endpointHealthMutation.isPending}
-                            onClick={() => endpointHealthMutation.mutate(model.id)}
-                          >
-                            <Globe className="size-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="text-destructive"
-                            title={t("models.deleteModel")}
-                            disabled={deleteModelMutation.isPending}
-                            onClick={() => {
-                              if (window.confirm(t("models.deleteModelConfirm"))) {
-                                deleteModelMutation.mutate(model.id);
-                              }
-                            }}
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("models.storedKeys")}</CardTitle>
-          <CardDescription>{t("models.storedKeysDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent className="px-0">
-          {apiKeysLoading ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">{t("models.loadingApiKeys")}</div>
-          ) : apiKeysError ? (
-            <div className="py-8 text-center text-sm text-destructive">{t("models.failedLoadApiKeys")}</div>
-          ) : apiKeys.length === 0 ? (
-            <EmptyState
-              icon={<KeyRound className="size-10 text-muted-foreground" />}
-              title={t("models.emptyApiKeysTitle")}
-              description={t("models.emptyApiKeysDescription")}
-            />
-          ) : (
-            <ApiKeyTable
-              apiKeys={apiKeys}
-              rotatingKeyId={rotatingKeyId}
-              rotationValue={rotationValue}
-              onRotationValueChange={setRotationValue}
-              onStartRotate={(apiKeyId) => {
-                setRotatingKeyId(apiKeyId);
-                setRotationValue("");
-                setNotice(null);
-              }}
-              onCancelRotate={() => {
-                setRotatingKeyId(null);
-                setRotationValue("");
-              }}
-              onRotate={(apiKeyId) => rotateMutation.mutate(apiKeyId)}
-              onDelete={(apiKeyId) => deleteApiKeyMutation.mutate(apiKeyId)}
-              isRotating={rotateMutation.isPending}
-              isDeleting={deleteApiKeyMutation.isPending}
-              t={t}
-            />
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
 
-interface EmptyStateProps {
-  icon: ReactNode;
-  title: string;
-  description: string;
-}
-
-function EmptyState({ icon, title, description }: EmptyStateProps) {
-  return (
-    <div className="flex flex-col items-center justify-center py-12 text-center">
-      {icon}
-      <h3 className="mt-4 text-lg font-medium">{title}</h3>
-      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-    </div>
-  );
-}
-
-interface ApiKeyTableProps {
-  apiKeys: ApiKeySummary[];
-  rotatingKeyId: string | null;
-  rotationValue: string;
-  onRotationValueChange: (value: string) => void;
-  onStartRotate: (apiKeyId: string) => void;
-  onCancelRotate: () => void;
-  onRotate: (apiKeyId: string) => void;
-  onDelete: (apiKeyId: string) => void;
-  isRotating: boolean;
+interface ProviderColumnProps {
+  catalog: ProviderCatalogPreset[];
+  providers: ProviderProfile[];
+  selectedProviderId: string;
+  isLoading: boolean;
+  isAdding: boolean;
   isDeleting: boolean;
-  t: (key: TranslationKey) => string;
+  onSelectProvider: (providerId: string) => void;
+  onDeleteProvider: (providerId: string) => void;
+  onAddPreset: (preset: ProviderCatalogPreset) => void;
+  t: (key: any) => string;
 }
 
-function ApiKeyTable({
-  apiKeys,
-  rotatingKeyId,
-  rotationValue,
-  onRotationValueChange,
-  onStartRotate,
-  onCancelRotate,
-  onRotate,
-  onDelete,
-  isRotating,
+function ProviderColumn({
+  catalog,
+  providers,
+  selectedProviderId,
+  isLoading,
+  isAdding,
   isDeleting,
-  t,
-}: ApiKeyTableProps) {
+  onSelectProvider,
+  onDeleteProvider,
+  onAddPreset,
+  t
+}: ProviderColumnProps) {
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Cloud className="size-5" />
+            {t("models.providers")}
+          </CardTitle>
+          <CardDescription>{t("models.providersDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {isLoading ? (
+            <EmptyLine text={t("common.loading")} />
+          ) : providers.length === 0 ? (
+            <EmptyLine text={t("models.emptyProviders")} />
+          ) : (
+            providers.map((provider) => (
+              <div
+                key={provider.id}
+                className={`flex w-full items-center gap-2 rounded-md border px-3 py-2 text-sm transition ${
+                  provider.id === selectedProviderId
+                    ? "border-primary bg-primary/10"
+                    : "border-border hover:bg-muted"
+                }`}
+              >
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() => onSelectProvider(provider.id)}
+                >
+                  <span className="block font-medium">{provider.name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{provider.baseUrl ?? provider.providerKey}</span>
+                </button>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+                  disabled={isDeleting}
+                  title={t("models.deleteProviderInlineLabel")}
+                  aria-label={t("models.deleteProviderInlineLabel")}
+                  onClick={() => onDeleteProvider(provider.id)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("models.providerCatalog")}</CardTitle>
+          <CardDescription>{t("models.providerCatalogDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {catalog.map((preset) => (
+            <div key={preset.id} className="rounded-md border p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium">{preset.name}</div>
+                  <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{preset.description}</div>
+                </div>
+                <Button size="sm" variant="outline" disabled={isAdding} onClick={() => onAddPreset(preset)}>
+                  <Plus className="size-4" />
+                </Button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1">
+                <Badge variant="outline">{preset.apiFormat}</Badge>
+                <Badge variant="outline">{preset.authType}</Badge>
+                <Badge variant={preset.modelSource === "dynamic" ? "secondary" : "outline"}>
+                  {preset.modelSource === "dynamic"
+                    ? t("models.modelSourceDynamic")
+                    : `${preset.defaultModels.length} ${t("models.modelsWorkspace")}`}
+                </Badge>
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ProviderSummary({ provider, modelCount, credentialCount, isDeleting, onDelete, t }: {
+  provider: ProviderProfile;
+  modelCount: number;
+  credentialCount: number;
+  isDeleting: boolean;
+  onDelete: () => void;
+  t: (key: any) => string;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">{provider.name}</div>
+          <div className="truncate text-xs text-muted-foreground">{provider.baseUrl ?? provider.providerKey}</div>
+        </div>
+        <Button type="button" size="sm" variant="outline" disabled={isDeleting} onClick={onDelete}>
+          <Trash2 className="size-4" />
+          {t("common.delete")}
+        </Button>
+      </div>
+      <div className="grid gap-3 md:grid-cols-4">
+        <SummaryCell label={t("models.providerKey")} value={provider.providerKey} />
+        <SummaryCell label={t("models.apiFormat")} value={provider.apiFormat} />
+        <SummaryCell label={t("models.modelsWorkspace")} value={String(modelCount)} />
+        <SummaryCell label={t("models.credentials")} value={String(credentialCount)} />
+      </div>
+      <div className="space-y-2">
+        <div className="text-xs text-muted-foreground">{t("models.applyTargets")}</div>
+        <div className="flex flex-wrap gap-2">
+          {provider.supportedAdapters.map((adapter) => (
+            <Badge key={adapter} variant="secondary">{adapter === "claude" ? "Claude Code" : "OpenCode"}</Badge>
+          ))}
+          <Badge variant="outline">{provider.authType}</Badge>
+          {provider.baseUrl && <Badge variant="outline">{provider.baseUrl}</Badge>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border bg-muted/30 px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="truncate text-sm font-medium">{value}</div>
+    </div>
+  );
+}
+
+function CredentialTable({ credentials, selectedCredentialId, onSelectCredential, onDeleteCredential, isDeleting, t }: {
+  credentials: ProviderCredentialSummary[];
+  selectedCredentialId: string;
+  onSelectCredential: (credentialId: string) => void;
+  onDeleteCredential: (credentialId: string) => void;
+  isDeleting: boolean;
+  t: (key: any) => string;
+}) {
+  if (credentials.length === 0) return <EmptyLine text={t("models.emptyCredentials")} />;
   return (
     <Table>
       <TableHeader>
         <TableRow>
           <TableHead>{t("common.name")}</TableHead>
-          <TableHead>{t("models.provider")}</TableHead>
           <TableHead>{t("models.apiKey")}</TableHead>
           <TableHead>{t("common.status")}</TableHead>
-          <TableHead className="text-right">{t("common.actions")}</TableHead>
+          <TableHead className="w-12" />
         </TableRow>
       </TableHeader>
       <TableBody>
-        {apiKeys.map((apiKey) => {
-          const isRotatingCurrent = rotatingKeyId === apiKey.id;
-          return (
-            <TableRow key={apiKey.id}>
-              <TableCell className="font-medium">{apiKey.label ?? apiKey.provider}</TableCell>
-              <TableCell>{apiKey.provider}</TableCell>
-              <TableCell className="font-mono text-xs">••••••••••••</TableCell>
-              <TableCell>
-                <Badge variant="outline">{apiKey.status ?? "active"}</Badge>
-              </TableCell>
-              <TableCell>
-                {isRotatingCurrent ? (
-                  <form
-                    className="flex justify-end gap-2"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      onRotate(apiKey.id);
-                    }}
-                  >
-                    <Input
-                      className="h-8 max-w-72"
-                      type="password"
-                      value={rotationValue}
-                      onChange={(event) => onRotationValueChange(event.target.value)}
-                      required
-                    />
-                    <Button type="submit" size="sm" disabled={isRotating}>
-                      <Save className="size-4" />
-                      {t("models.rotate")}
-                    </Button>
-                    <Button type="button" size="sm" variant="outline" onClick={onCancelRotate}>
-                      <X className="size-4" />
-                      {t("common.cancel")}
-                    </Button>
-                  </form>
-                ) : (
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title={t("models.rotateApiKey")}
-                      onClick={() => onStartRotate(apiKey.id)}
-                    >
-                      <RotateCw className="size-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-destructive"
-                      title={t("models.deleteApiKey")}
-                      disabled={isDeleting}
-                      onClick={() => {
-                        if (window.confirm(t("models.deleteApiKeyConfirm"))) {
-                          onDelete(apiKey.id);
-                        }
-                      }}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                )}
-              </TableCell>
-            </TableRow>
-          );
-        })}
+        {credentials.map((credential) => (
+          <TableRow
+            key={credential.id}
+            className={credential.id === selectedCredentialId ? "bg-muted/50" : ""}
+            onClick={() => onSelectCredential(credential.id)}
+          >
+            <TableCell className="font-medium">{credential.label ?? t("models.unnamedCredential")}</TableCell>
+            <TableCell className="font-mono text-xs">{credential.secretPreview}</TableCell>
+            <TableCell><Badge variant="outline">{credential.status}</Badge></TableCell>
+            <TableCell>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-8 text-muted-foreground hover:text-destructive"
+                disabled={isDeleting}
+                title={t("models.deleteCredential")}
+                aria-label={t("models.deleteCredential")}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeleteCredential(credential.id);
+                }}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </TableCell>
+          </TableRow>
+        ))}
       </TableBody>
     </Table>
   );
+}
+
+function ModelProfileTable({ models, selectedModelId, onSelectModel, onSetDefault, onDeleteModel, isSettingDefault, isDeleting, t }: {
+  models: ModelProfile[];
+  selectedModelId: string;
+  onSelectModel: (modelId: string) => void;
+  onSetDefault: (modelId: string) => void;
+  onDeleteModel: (modelId: string) => void;
+  isSettingDefault: boolean;
+  isDeleting: boolean;
+  t: (key: any) => string;
+}) {
+  if (models.length === 0) return <EmptyLine text={t("models.emptyModelsForProvider")} />;
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t("common.name")}</TableHead>
+          <TableHead>{t("models.modelId")}</TableHead>
+          <TableHead>{t("models.capabilities")}</TableHead>
+          <TableHead className="w-24" />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {models.map((model) => (
+          <TableRow
+            key={model.id}
+            className={model.id === selectedModelId ? "bg-muted/50" : ""}
+            onClick={() => onSelectModel(model.id)}
+          >
+            <TableCell className="font-medium">
+              {model.name} {model.isDefault && <Badge className="ml-2">{t("models.default")}</Badge>}
+            </TableCell>
+            <TableCell className="font-mono text-xs">{model.modelId}</TableCell>
+            <TableCell>
+              <div className="flex flex-wrap gap-1">
+                {model.capabilities.map((capability) => (
+                  <Badge key={capability} variant="outline">{capability}</Badge>
+                ))}
+              </div>
+            </TableCell>
+            <TableCell>
+              <div className="flex justify-end gap-1">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-8 text-muted-foreground hover:text-primary"
+                  disabled={model.isDefault || isSettingDefault}
+                  title={t("models.setDefault")}
+                  aria-label={t("models.setDefault")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSetDefault(model.id);
+                  }}
+                >
+                  <ShieldCheck className="size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-8 text-muted-foreground hover:text-destructive"
+                  disabled={isDeleting}
+                  title={t("models.deleteModel")}
+                  aria-label={t("models.deleteModel")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDeleteModel(model.id);
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function ApplyColumn({
+  provider,
+  models,
+  credentials,
+  adapter,
+  projectRoot,
+  selectedModelId,
+  selectedCredentialId,
+  preview,
+  codexStatus,
+  isPreviewing,
+  isApplying,
+  onAdapterChange,
+  onProjectRootChange,
+  onModelChange,
+  onCredentialChange,
+  onPreview,
+  onApply,
+  t,
+}: {
+  provider: ProviderProfile | undefined;
+  models: ModelProfile[];
+  credentials: ProviderCredentialSummary[];
+  adapter: ProviderApplyAdapter;
+  projectRoot: string;
+  selectedModelId: string;
+  selectedCredentialId: string;
+  preview: ProviderApplyPreview | null;
+  codexStatus: {
+    connectionState: string;
+    canUseAppServerIdentity: boolean;
+    sdk?: {
+      packageName: string;
+      installed: boolean;
+      docsUrl: string;
+      appServerDocsUrl: string;
+    };
+  } | undefined;
+  isPreviewing: boolean;
+  isApplying: boolean;
+  onAdapterChange: (adapter: ProviderApplyAdapter) => void;
+  onProjectRootChange: (projectRoot: string) => void;
+  onModelChange: (modelId: string) => void;
+  onCredentialChange: (credentialId: string) => void;
+  onPreview: () => void;
+  onApply: () => void;
+  t: (key: any) => string;
+}) {
+  const isCodex = adapter === "codex";
+  const applyDisabled = !provider || !projectRoot.trim() || !selectedModelId || isCodex;
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Play className="size-5" />
+            {t("models.applyWorkspace")}
+          </CardTitle>
+          <CardDescription>{t("models.applyWorkspaceDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="apply-adapter">{t("common.aiTool")}</Label>
+            <select
+              id="apply-adapter"
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={adapter}
+              onChange={(event) => onAdapterChange(event.target.value as ProviderApplyAdapter)}
+            >
+              <option value="claude">Claude Code</option>
+              <option value="opencode">OpenCode</option>
+              <option value="codex">Codex</option>
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="apply-root">{t("common.path")}</Label>
+            <Input
+              id="apply-root"
+              value={projectRoot}
+              onChange={(event) => onProjectRootChange(event.target.value)}
+              placeholder="/path/to/project"
+              disabled={isCodex}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="apply-model">{t("projects.model")}</Label>
+            <select
+              id="apply-model"
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={selectedModelId}
+              onChange={(event) => onModelChange(event.target.value)}
+              disabled={isCodex}
+            >
+              {models.map((model) => (
+                <option key={model.id} value={model.id}>{model.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="apply-credential">{t("models.credentials")}</Label>
+            <select
+              id="apply-credential"
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={selectedCredentialId}
+              onChange={(event) => onCredentialChange(event.target.value)}
+              disabled={isCodex}
+            >
+              <option value="">{t("projects.hostEnvironment")}</option>
+              {credentials.map((credential) => (
+                <option key={credential.id} value={credential.id}>
+                  {credential.label ?? t("models.unnamedCredential")}
+                </option>
+              ))}
+            </select>
+          </div>
+          {isCodex && (
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+              <div className="font-medium">{t("models.codexSubscription")}</div>
+              <div className="mt-1 text-muted-foreground">
+                {t("models.codexSubscriptionDescription")}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Badge variant="outline">
+                  {codexStatus?.connectionState ?? "not_connected"}
+                </Badge>
+                <Badge variant={codexStatus?.sdk?.installed ? "secondary" : "outline"}>
+                  {codexStatus?.sdk?.packageName ?? "@openai/codex-sdk"}
+                  {codexStatus?.sdk?.installed ? ` ${t("models.sdkInstalled")}` : ` ${t("models.sdkMissing")}`}
+                </Badge>
+              </div>
+              <a
+                className="mt-3 inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                href={codexStatus?.sdk?.docsUrl ?? "https://developers.openai.com/codex/sdk"}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("models.codexOfficialDocs")}
+                <ExternalLink className="size-3" />
+              </a>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="button" variant="outline" disabled={applyDisabled || isPreviewing} onClick={onPreview}>
+              <Braces className="size-4" />
+              {t("models.previewApply")}
+            </Button>
+            <Button type="button" disabled={applyDisabled || isApplying || !preview} onClick={onApply}>
+              <ShieldCheck className="size-4" />
+              {t("models.applyConfig")}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Database className="size-5" />
+            {t("models.applyPreview")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!preview ? (
+            <EmptyLine text={t("models.noPreview")} />
+          ) : (
+            <div className="space-y-3 text-sm">
+              <div className="flex flex-wrap gap-1">
+                {preview.changedFiles.map((file) => (
+                  <Badge key={file.relativePath} variant="outline">
+                    {file.operation}: {file.relativePath}
+                  </Badge>
+                ))}
+              </div>
+              <pre className="max-h-56 overflow-auto rounded-md bg-muted p-3 text-xs">
+                {JSON.stringify({ env: preview.env, secretEnvNames: preview.secretEnvNames }, null, 2)}
+              </pre>
+              {preview.backupPath && (
+                <div className="text-xs text-muted-foreground">{preview.backupPath}</div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function EmptyLine({ text }: { text: string }) {
+  return <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">{text}</div>;
 }

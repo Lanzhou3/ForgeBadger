@@ -2,18 +2,71 @@ import type { IPty } from "node-pty";
 import type { Server } from "node:http";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
-import { extractBearerToken, verifyJwt } from "../auth/index.js";
+import { verifyJwt } from "../auth/index.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
+import { extractWsAuthToken } from "./auth.js";
+import { WebSocketConnectionLimits } from "./connection-limits.js";
 
 const DEFAULT_MAX_MESSAGE_BYTES = 1024 * 1024;
 const TERMINAL_INPUT_RATE_LIMIT = 50;
 const TERMINAL_RATE_WINDOW_MS = 1000;
 const TERMINAL_HEARTBEAT_INTERVAL_MS = 30_000;
 const TERMINAL_HEARTBEAT_TIMEOUT_MS = 90_000;
+const DEFAULT_TERMINAL_WS_MAX_CONNECTIONS = 100;
+const DEFAULT_TERMINAL_WS_MAX_CONNECTIONS_PER_USER = 5;
+const TERMINAL_WS_AUTH_PROTOCOL = "openforge-terminal";
 
 export type TerminalMessage =
   | { type: "terminal_input"; payload: { data: string } }
   | { type: "terminal_resize"; payload: { cols: number; rows: number } };
+
+export interface TerminalResizable {
+  resize(cols: number, rows: number): void;
+}
+
+export interface TerminalWritable {
+  write(data: string): void;
+}
+
+export class TerminalInputBuffer {
+  private readonly pendingInput: string[] = [];
+
+  writeOrStore(pty: TerminalWritable | undefined, data: string): void {
+    if (pty) {
+      pty.write(data);
+      return;
+    }
+    this.pendingInput.push(data);
+  }
+
+  flush(pty: TerminalWritable): void {
+    for (const data of this.pendingInput) {
+      pty.write(data);
+    }
+    this.pendingInput.length = 0;
+  }
+}
+
+export class TerminalResizeBuffer {
+  private latestSize: { cols: number; rows: number } | undefined;
+
+  applyOrStore(pty: TerminalResizable | undefined, cols: number, rows: number): void {
+    if (pty) {
+      pty.resize(cols, rows);
+      this.latestSize = undefined;
+      return;
+    }
+    this.latestSize = { cols, rows };
+  }
+
+  flush(pty: TerminalResizable): void {
+    if (!this.latestSize) {
+      return;
+    }
+    pty.resize(this.latestSize.cols, this.latestSize.rows);
+    this.latestSize = undefined;
+  }
+}
 
 export interface ClosableSocket {
   close(code?: number, reason?: string): void;
@@ -34,6 +87,10 @@ export class TerminalConnectionRegistry {
     if (this.sockets.get(sessionId) === socket) {
       this.sockets.delete(sessionId);
     }
+  }
+
+  getSocket(sessionId: string): ClosableSocket | undefined {
+    return this.sockets.get(sessionId);
   }
 }
 
@@ -89,39 +146,19 @@ export interface TerminalWebSocketOptions {
   sessionManager: InMemorySessionManager;
   jwtSecret: string;
   registry?: TerminalConnectionRegistry;
-}
-
-function extractAuthToken(request: { headers: Record<string, string | string[] | undefined> }, url: URL): string | undefined {
-  // 1. Query param (backward compat)
-  const fromQuery = url.searchParams.get("authToken");
-  if (fromQuery) return fromQuery;
-
-  // 2. Authorization header (non-browser clients)
-  const fromBearer = extractBearerToken(request.headers.authorization);
-  if (fromBearer) return fromBearer;
-
-  // 3. Sec-WebSocket-Protocol header (browser clients)
-  const protocolHeader = request.headers["sec-websocket-protocol"];
-  if (typeof protocolHeader === "string") {
-    const parts = protocolHeader.split(",").map((p) => p.trim());
-    if (parts[0] === "openforge-terminal" && parts.length > 1) {
-      return parts[1];
-    }
-  }
-
-  return undefined;
+  maxConnections?: number;
+  maxConnectionsPerUser?: number;
 }
 
 export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void {
   const registry = options.registry ?? new TerminalConnectionRegistry();
+  const limits = new WebSocketConnectionLimits<WebSocket>({
+    maxGlobalConnections: options.maxConnections ?? DEFAULT_TERMINAL_WS_MAX_CONNECTIONS,
+    maxConnectionsPerUser:
+      options.maxConnectionsPerUser ?? DEFAULT_TERMINAL_WS_MAX_CONNECTIONS_PER_USER
+  });
   const wss = new WebSocketServer({
-    noServer: true,
-    handleProtocols(protocols) {
-      if (protocols.has("openforge-terminal")) {
-        return "openforge-terminal";
-      }
-      return false;
-    }
+    noServer: true
   });
 
   options.server.on("upgrade", (request, socket, head) => {
@@ -132,22 +169,46 @@ export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void
     }
 
     const sessionId = decodeURIComponent(match[1] ?? "");
-    const authToken = extractAuthToken(request, url);
+    const authToken = extractWsAuthToken(request.headers, TERMINAL_WS_AUTH_PROTOCOL);
+    if (!authToken) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
+    let userId: string;
+    try {
+      userId = verifyJwt(authToken, options.jwtSecret).userId;
+    } catch {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
     const attachToken = url.searchParams.get("attachToken") ?? "";
     const terminalAccessRequest: TerminalAccessRequest = {
-      attachToken,
-      jwtSecret: options.jwtSecret
+      authTokenUserId: userId,
+      attachToken
     };
-    if (authToken !== undefined) {
-      terminalAccessRequest.authToken = authToken;
+    const sessionSocket = registry.getSocket(sessionId);
+    if (sessionSocket) {
+      limits.release(sessionSocket as unknown as WebSocket);
     }
+
     wss.handleUpgrade(request, socket, head, (ws) => {
+      const acquire = limits.tryAcquire(ws, userId);
+      if (!acquire.accepted) {
+        ws.close(1008, `WebSocket connection limit exceeded: ${acquire.reason}`);
+        return;
+      }
+
       void handleTerminalSocket(
         ws,
         sessionId,
         terminalAccessRequest,
         options.sessionManager,
-        registry
+        registry,
+        limits
       );
     });
   });
@@ -158,8 +219,28 @@ async function handleTerminalSocket(
   sessionId: string,
   access: TerminalAccessRequest,
   sessionManager: InMemorySessionManager,
-  registry: TerminalConnectionRegistry
+  registry: TerminalConnectionRegistry,
+  limits: WebSocketConnectionLimits<WebSocket>
 ): Promise<void> {
+  let pty: IPty | undefined;
+  const inputBuffer = new TerminalInputBuffer();
+  const resizeBuffer = new TerminalResizeBuffer();
+  let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
+
+  const releaseResources = () => {
+    limits.release(ws);
+    registry.unregister(sessionId, ws);
+    clearInterval(heartbeatInterval);
+    if (pty) {
+      pty.kill();
+      pty = undefined;
+    }
+  };
+
+  ws.on("close", () => {
+    releaseResources();
+  });
+
   const session = sessionManager.getSession(sessionId);
   if (!session) {
     ws.close(4404, "session not found");
@@ -172,7 +253,41 @@ async function handleTerminalSocket(
 
   registry.register(sessionId, ws);
 
-  let pty: IPty | undefined;
+  const inputRateLimiter = new TerminalInputRateLimiter({
+    maxMessages: TERMINAL_INPUT_RATE_LIMIT,
+    windowMs: TERMINAL_RATE_WINDOW_MS
+  });
+
+  ws.on("message", (raw) => {
+    try {
+      const message = parseTerminalMessage(raw);
+      if (message.type === "terminal_input") {
+        if (!inputRateLimiter.consume()) {
+          ws.send(
+            JSON.stringify({
+              type: "terminal_error",
+              payload: { message: "terminal input rate limit exceeded" }
+            })
+          );
+          return;
+        }
+        inputBuffer.writeOrStore(pty, message.payload.data);
+        return;
+      }
+      resizeBuffer.applyOrStore(pty, message.payload.cols, message.payload.rows);
+      void sessionManager
+        .resizeSession(sessionId, message.payload.cols, message.payload.rows)
+        .catch(() => {});
+    } catch (error) {
+      ws.send(
+        JSON.stringify({
+          type: "terminal_error",
+          payload: { message: formatTerminalClientError(error) }
+        })
+      );
+    }
+  });
+
   try {
     const { spawn } = await import("node-pty");
     pty = spawn("tmux", ["attach-session", "-t", session.tmuxName], {
@@ -186,12 +301,15 @@ async function handleTerminalSocket(
     ws.send(
       JSON.stringify({
         type: "terminal_error",
-        payload: { message: error instanceof Error ? error.message : String(error) }
+        payload: { message: "Terminal attach failed" }
       })
     );
     ws.close(1011, "pty attach failed");
     return;
   }
+  const activePty = pty;
+  inputBuffer.flush(activePty);
+  resizeBuffer.flush(activePty);
 
   void sessionManager
     .captureHistory(sessionId)
@@ -206,9 +324,7 @@ async function handleTerminalSocket(
           JSON.stringify({
             type: "terminal_error",
             payload: {
-              message: `history restore failed: ${
-                error instanceof Error ? error.message : String(error)
-              }`
+              message: "Terminal history restore failed"
             }
           })
         );
@@ -227,17 +343,13 @@ async function handleTerminalSocket(
     }
   });
 
-  const inputRateLimiter = new TerminalInputRateLimiter({
-    maxMessages: TERMINAL_INPUT_RATE_LIMIT,
-    windowMs: TERMINAL_RATE_WINDOW_MS
-  });
   const heartbeat = new TerminalHeartbeat({
     timeoutMs: TERMINAL_HEARTBEAT_TIMEOUT_MS
   });
   ws.on("pong", () => {
     heartbeat.recordPong();
   });
-  const heartbeatInterval = setInterval(() => {
+  heartbeatInterval = setInterval(() => {
     if (ws.readyState !== WebSocket.OPEN) {
       return;
     }
@@ -248,42 +360,22 @@ async function handleTerminalSocket(
     ws.ping();
   }, TERMINAL_HEARTBEAT_INTERVAL_MS);
 
-  ws.on("message", (raw) => {
-    try {
-      const message = parseTerminalMessage(raw);
-      if (message.type === "terminal_input") {
-        if (!inputRateLimiter.consume()) {
-          ws.send(
-            JSON.stringify({
-              type: "terminal_error",
-              payload: { message: "terminal input rate limit exceeded" }
-            })
-          );
-          return;
-        }
-        pty.write(message.payload.data);
-        return;
-      }
-      pty.resize(message.payload.cols, message.payload.rows);
-    } catch (error) {
-      ws.send(
-        JSON.stringify({
-          type: "terminal_error",
-          payload: { message: error instanceof Error ? error.message : String(error) }
-        })
-      );
-    }
-  });
-
-  ws.on("close", () => {
-    clearInterval(heartbeatInterval);
-    registry.unregister(sessionId, ws);
-    pty?.kill();
+  ws.on("error", () => {
+    releaseResources();
   });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+export function formatTerminalClientError(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.message === "Malformed terminal message" || error.message === "Terminal message too large") {
+      return error.message;
+    }
+  }
+  return "Terminal request failed";
 }
 
 interface TerminalAccessSession {
@@ -292,9 +384,8 @@ interface TerminalAccessSession {
 }
 
 interface TerminalAccessRequest {
-  authToken?: string;
+  authTokenUserId: string;
   attachToken: string;
-  jwtSecret: string;
 }
 
 export function validateTerminalAccess(
@@ -313,19 +404,10 @@ export function authenticateTerminalRequest(
   session: TerminalAccessSession,
   request: TerminalAccessRequest
 ): boolean {
-  if (!request.authToken) {
-    return false;
-  }
-
-  try {
-    const claims = verifyJwt(request.authToken, request.jwtSecret);
-    return validateTerminalAccess(session, {
-      userId: claims.userId,
-      attachToken: request.attachToken
-    });
-  } catch {
-    return false;
-  }
+  return validateTerminalAccess(session, {
+    userId: request.authTokenUserId,
+    attachToken: request.attachToken
+  });
 }
 
 export function buildTmuxAttachEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

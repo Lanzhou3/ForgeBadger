@@ -78,6 +78,14 @@ export class SkillRepository {
       .all() as Skill[];
   }
 
+  listOwnedBySource(source: string): Skill[] {
+    return this.drizzle
+      .select()
+      .from(skills)
+      .where(and(eq(skills.userId, this.userId), eq(skills.source, source)))
+      .all() as Skill[];
+  }
+
   getById(id: string): Skill | undefined {
     const sharedVisibility = this.readableVisibility();
     return this.drizzle

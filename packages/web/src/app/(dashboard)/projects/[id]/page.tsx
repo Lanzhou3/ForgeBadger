@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { UIEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, ArrowDown, ArrowLeft, ArrowUp, FileCode2, FileText, Globe2, History, Play, Plus, Power, Save, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, FileCode2, FileText, Globe2, History, Play, Plus, Power, Save, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,7 @@ import {
   getGlobalAiConfig,
   getProjectAiConfig,
   getConfigCompliance,
+  discoverAdapters,
   listSessions,
   createSession,
   createDefaultAgentPack,
@@ -44,12 +46,15 @@ import {
   updateAgent,
   updateProjectAiConfigFile,
   updateProjectAgentSequence,
+  chooseDefaultRuntimeAdapter,
   defaultConfigConflictDecisions,
   defaultTemplateForAiTool,
+  isAdapterLaunchable,
   type ConfigConflict,
   type ConfigDecision,
   type ConfigComplianceReport,
   type CredentialMode,
+  type RuntimeAdapterId,
   type Agent,
   type AiConfigFile,
   type AiConfigFormField,
@@ -66,6 +71,8 @@ import {
 } from "@/lib/ai-config-forms";
 import { useLanguage } from "@/hooks/use-language";
 import { activityFiltersForProject } from "@/lib/snapshot-filters";
+import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highlight";
+import { cn } from "@/lib/utils";
 
 const builtinTemplateOptions = [
   { id: "builtin-claude-code", name: "Claude Code" },
@@ -83,6 +90,7 @@ export default function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState("sessions");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState("builtin-claude-code");
+  const [selectedRuntimeAdapter, setSelectedRuntimeAdapter] = useState<RuntimeAdapterId | "">("");
   const [credentialMode, setCredentialMode] = useState<CredentialMode>("host_environment");
   const [selectedApiKeyId, setSelectedApiKeyId] = useState("");
   const [configConflicts, setConfigConflicts] = useState<ConfigConflict[]>([]);
@@ -99,14 +107,15 @@ export default function ProjectDetailPage() {
   });
 
   const { data: sessionsData } = useQuery({
-    queryKey: ["sessions"],
-    queryFn: listSessions,
+    queryKey: ["sessions", { projectId: id }],
+    queryFn: () => listSessions({ projectId: id }),
+    enabled: !!id,
   });
 
   const { data: activitiesData } = useQuery({
     queryKey: ["activities", { projectId: id, agentId: activityAgentId || undefined }],
     queryFn: () => listActivities(activityFiltersForProject(id, activityAgentId)),
-    enabled: !!id,
+    enabled: !!id && activeTab === "activity",
   });
 
   const { data: agentsData } = useQuery({
@@ -146,6 +155,11 @@ export default function ProjectDetailPage() {
     queryFn: listTemplates,
   });
 
+  const { data: adapterDiscoveryData, isLoading: adapterDiscoveryLoading } = useQuery({
+    queryKey: ["adapters", "discovery"],
+    queryFn: discoverAdapters,
+  });
+
   const { data: projectAiConfigData, isLoading: projectAiConfigLoading } = useQuery({
     queryKey: ["project-ai-config", id],
     queryFn: () => getProjectAiConfig(id),
@@ -157,7 +171,6 @@ export default function ProjectDetailPage() {
     queryFn: () => getGlobalAiConfig(id),
     enabled: !!id,
   });
-
   const previewConfigMutation = useMutation({
     mutationFn: () => previewConfigSync(id, selectedTemplateId, credentialMode),
     onSuccess: (preview) => {
@@ -185,14 +198,20 @@ export default function ProjectDetailPage() {
   });
 
   const createSessionMutation = useMutation({
-    mutationFn: () => createSession({
-      projectId: id,
-      credentialMode,
-      ...(selectedModelId ? { modelId: selectedModelId } : {}),
-      ...(credentialMode === "stored_encrypted_key" && selectedApiKeyId
-        ? { apiKeyId: selectedApiKeyId }
-        : {}),
-    }),
+    mutationFn: () => {
+      if (!selectedRuntimeAdapter) {
+        throw new Error(t("projects.selectRuntimeCli"));
+      }
+      return createSession({
+        projectId: id,
+        credentialMode,
+        aiTool: selectedRuntimeAdapter,
+        ...(selectedModelId ? { modelId: selectedModelId } : {}),
+        ...(credentialMode === "stored_encrypted_key" && selectedApiKeyId
+          ? { apiKeyId: selectedApiKeyId }
+          : {}),
+      });
+    },
     onSuccess: () => {
       router.push("/sessions");
     },
@@ -250,9 +269,14 @@ export default function ProjectDetailPage() {
   });
 
   const project = projectData?.project;
-  const projectSessions =
-    sessionsData?.sessions?.filter((s) => s.projectId === id) ?? [];
-  const projectActivities = activitiesData?.activities ?? [];
+  const projectSessions = useMemo(
+    () => sessionsData?.sessions ?? [],
+    [sessionsData?.sessions]
+  );
+  const projectActivities = useMemo(
+    () => activitiesData?.activities ?? [],
+    [activitiesData?.activities]
+  );
   const projectAgents = useMemo(
     () => agentsData?.agents?.filter((a) => a.projectId === id) ?? [],
     [agentsData?.agents, id]
@@ -266,12 +290,24 @@ export default function ProjectDetailPage() {
     .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent));
   const skills = skillsData?.skills ?? [];
   const projectSkills = projectSkillsData?.skills ?? [];
-  const enabledSkillIds = new Set(
-    projectSkills.filter((skill) => skill.isEnabled).map((skill) => skill.skillId)
+  const projectSkillById = useMemo(
+    () => new Map(projectSkills.map((skill) => [skill.skillId, skill])),
+    [projectSkills]
+  );
+  const enabledSkillIds = useMemo(
+    () => new Set(projectSkills.filter((skill) => skill.isEnabled).map((skill) => skill.skillId)),
+    [projectSkills]
   );
   const models = modelsData?.models ?? [];
   const apiKeys = apiKeysData?.apiKeys ?? [];
   const templates = templatesData?.templates ?? [];
+  const runtimeAdapters = adapterDiscoveryData?.adapters ?? [];
+  const launchableRuntimeAdapters = useMemo(
+    () => runtimeAdapters.filter(isAdapterLaunchable),
+    [runtimeAdapters]
+  );
+  const selectedRuntimeOption = runtimeAdapters.find((adapter) => adapter.id === selectedRuntimeAdapter);
+  const selectedRuntimeLaunchable = selectedRuntimeOption ? isAdapterLaunchable(selectedRuntimeOption) : false;
   const projectAiConfig = projectAiConfigData;
   const globalAiConfig = globalAiConfigData;
   const selectedConfigFile = projectAiConfig?.files.find((file) => file.relativePath === selectedConfigPath);
@@ -279,8 +315,14 @@ export default function ProjectDetailPage() {
   const selectedCredentialNeedsKey = credentialMode === "stored_encrypted_key";
   const cannotCreateSession =
     createSessionMutation.isPending ||
+    adapterDiscoveryLoading ||
+    !selectedRuntimeAdapter ||
+    !selectedRuntimeLaunchable ||
     (selectedCredentialNeedsKey && !selectedApiKeyId);
   const configNeedsReview = searchParams.get("configStatus") === "failed";
+  const selectedModel = models.find((model) => model.id === selectedModelId);
+  const runningSessionCount = projectSessions.filter((session) => session.status === "running").length;
+  const enabledSkillCount = enabledSkillIds.size;
 
   useEffect(() => {
     if (!selectedModelId && defaultModel) {
@@ -289,12 +331,19 @@ export default function ProjectDetailPage() {
   }, [defaultModel, selectedModelId]);
 
   useEffect(() => {
-    setSelectedTemplateId(project?.templateId ?? defaultTemplateForAiTool(project?.aiTool));
+    const nextTemplateId = project?.templateId ?? defaultTemplateForAiTool(project?.aiTool);
+    setSelectedTemplateId((current) => current === nextTemplateId ? current : nextTemplateId);
   }, [project?.templateId, project?.aiTool]);
 
   useEffect(() => {
+    if (!adapterDiscoveryData?.adapters) return;
+    const nextAdapter = chooseDefaultRuntimeAdapter(adapterDiscoveryData.adapters, selectedRuntimeAdapter);
+    setSelectedRuntimeAdapter((current) => current === (nextAdapter ?? "") ? current : (nextAdapter ?? ""));
+  }, [adapterDiscoveryData?.adapters, selectedRuntimeAdapter]);
+
+  useEffect(() => {
     if (credentialMode === "stored_encrypted_key" && !selectedApiKeyId && apiKeys[0]) {
-      setSelectedApiKeyId(apiKeys[0].id);
+      setSelectedApiKeyId((current) => current || apiKeys[0]?.id || "");
     }
   }, [apiKeys, credentialMode, selectedApiKeyId]);
 
@@ -313,12 +362,14 @@ export default function ProjectDetailPage() {
     if (files.length === 0) return;
     const preferred = files.find((file) => file.exists && file.role === "instructions") ?? files[0];
     if (!selectedConfigPath || !files.some((file) => file.relativePath === selectedConfigPath)) {
-      setSelectedConfigPath(preferred?.relativePath ?? "");
+      const nextPath = preferred?.relativePath ?? "";
+      setSelectedConfigPath((current) => current === nextPath ? current : nextPath);
     }
   }, [projectAiConfig?.files, selectedConfigPath]);
 
   useEffect(() => {
-    setConfigDraft(selectedConfigFile?.content ?? "");
+    const nextDraft = selectedConfigFile?.content ?? "";
+    setConfigDraft((current) => current === nextDraft ? current : nextDraft);
   }, [selectedConfigFile?.content, selectedConfigFile?.relativePath]);
 
   const moveAgentInSequence = (agentId: string, direction: "up" | "down") => {
@@ -333,7 +384,7 @@ export default function ProjectDetailPage() {
   };
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="min-h-full space-y-5 bg-[linear-gradient(180deg,rgba(15,23,42,0.24),transparent_22%)] p-4 lg:p-6">
       <Button variant="ghost" size="sm" onClick={() => router.push("/projects")}>
         <ArrowLeft className="mr-2 size-4" />
         {t("projects.back")}
@@ -353,76 +404,83 @@ export default function ProjectDetailPage() {
         </Card>
       ) : (
         <>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold">{project.name}</h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {project.path ?? project.rootPath}
-              </p>
-              <div className="mt-2 flex items-center gap-2">
-                <Badge variant="secondary">{project.aiTool ?? "Claude"}</Badge>
-                {project.status && (
-                  <Badge variant="outline">{project.status}</Badge>
-                )}
+          <Card className="overflow-hidden border-border/70 bg-card/80 shadow-sm">
+            <CardContent className="p-0">
+              <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
+                <div className="space-y-5 p-5">
+                  <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.22em] text-muted-foreground">
+                    <span>Project Control</span>
+                    <span className="h-px w-8 bg-border" />
+                    {project.status && <Badge variant="outline">{project.status}</Badge>}
+                  </div>
+                  <div className="space-y-2">
+                    <h1 className="break-words text-2xl font-semibold tracking-tight">{project.name}</h1>
+                    <p className="break-all font-mono text-xs text-muted-foreground">
+                      {project.path ?? project.rootPath}
+                    </p>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <ProjectStat label={t("nav.sessions")} value={projectSessions.length} />
+                    <ProjectStat label={t("nav.agents")} value={projectAgents.length} />
+                    <ProjectStat label={t("nav.skills")} value={enabledSkillIds.size} />
+                  </div>
+                </div>
+                <div className="border-t border-border/70 bg-muted/20 p-5 lg:border-l lg:border-t-0">
+                  <div className="grid gap-2">
+                    <Button
+                      className="justify-start"
+                      onClick={() => createSessionMutation.mutate()}
+                      disabled={cannotCreateSession}
+                    >
+                      <Plus className="mr-2 size-4" />
+                      {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
+                    </Button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button asChild variant="outline" size="sm">
+                        <Link href={`/history?projectId=${project.id}`}>
+                          <History className="mr-2 size-4" />
+                          {t("nav.history")}
+                        </Link>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => complianceMutation.mutate()}
+                        disabled={complianceMutation.isPending}
+                      >
+                        <ShieldCheck className="mr-2 size-4" />
+                        {complianceMutation.isPending ? t("projects.checkingCompliance") : t("projects.checkCompliance")}
+                      </Button>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="justify-start"
+                      onClick={() => previewConfigMutation.mutate()}
+                      disabled={previewConfigMutation.isPending}
+                    >
+                      <FileCode2 className="mr-2 size-4" />
+                      {previewConfigMutation.isPending ? t("projects.generating") : t("projects.previewConfig")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="justify-start text-destructive"
+                      onClick={() => {
+                        if (window.confirm(t("projects.deleteConfirm"))) {
+                          deleteMutation.mutate();
+                        }
+                      }}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="mr-2 size-4" />
+                      {deleteMutation.isPending ? t("projects.deleting") : t("projects.deleteRecord")}
+                    </Button>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="flex gap-2">
-              <Button asChild variant="outline" size="sm">
-                <Link href={`/history?projectId=${project.id}`}>
-                  <History className="mr-2 size-4" />
-                  {t("nav.history")}
-                </Link>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => previewConfigMutation.mutate()}
-                disabled={previewConfigMutation.isPending}
-              >
-                <FileCode2 className="mr-2 size-4" />
-                {previewConfigMutation.isPending
-                  ? t("projects.generating")
-                  : t("projects.previewConfig")}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => complianceMutation.mutate()}
-                disabled={complianceMutation.isPending}
-              >
-                <ShieldCheck className="mr-2 size-4" />
-                {complianceMutation.isPending
-                  ? t("projects.checkingCompliance")
-                  : t("projects.checkCompliance")}
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => createSessionMutation.mutate()}
-                disabled={cannotCreateSession}
-              >
-                <Plus className="mr-2 size-4" />
-                {createSessionMutation.isPending
-                  ? t("projects.creating")
-                  : t("projects.newSession")}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-destructive"
-                onClick={() => {
-                  if (window.confirm(t("projects.deleteConfirm"))) {
-                    deleteMutation.mutate();
-                  }
-                }}
-                disabled={deleteMutation.isPending}
-              >
-                <Trash2 className="mr-2 size-4" />
-                {deleteMutation.isPending
-                  ? t("projects.deleting")
-                  : t("projects.deleteRecord")}
-              </Button>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
           {configNeedsReview && (
             <Card className="border-amber-500/50 bg-amber-500/10">
@@ -452,9 +510,49 @@ export default function ProjectDetailPage() {
             <CardHeader>
               <CardTitle className="text-base">{t("projects.launchOptions")}</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-3">
+            <CardContent className="grid gap-3 md:grid-cols-4">
               <div className="space-y-2">
-                <Label htmlFor="config-template">{t("projects.template")}</Label>
+                <Label htmlFor="runtime-adapter">{t("projects.runtimeCli")}</Label>
+                <select
+                  id="runtime-adapter"
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
+                  value={selectedRuntimeAdapter}
+                  onChange={(event) => setSelectedRuntimeAdapter(event.target.value as RuntimeAdapterId)}
+                  disabled={adapterDiscoveryLoading || runtimeAdapters.length === 0}
+                >
+                  <option value="">
+                    {adapterDiscoveryLoading
+                      ? t("projects.loadingRuntimeCli")
+                      : t("projects.selectRuntimeCli")}
+                  </option>
+                  {runtimeAdapters.map((adapter) => (
+                    <option
+                      key={adapter.id}
+                      value={adapter.id}
+                      disabled={!isAdapterLaunchable(adapter)}
+                    >
+                      {adapter.label}
+                      {!adapter.available
+                        ? ` (${t("projects.runtimeUnavailable")})`
+                        : !adapter.launchEnabled
+                          ? ` (${t("projects.runtimeLaunchDisabled")})`
+                          : ""}
+                    </option>
+                  ))}
+                </select>
+                {launchableRuntimeAdapters.length === 0 && !adapterDiscoveryLoading ? (
+                  <p className="flex items-center gap-1 text-xs text-destructive">
+                    <AlertTriangle className="size-3.5" />
+                    {t("projects.noLaunchableRuntimeCli")}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {t("projects.runtimeCliDescription")}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="config-template">{t("projects.configTemplate")}</Label>
                 <select
                   id="config-template"
                   className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -476,6 +574,9 @@ export default function ProjectDetailPage() {
                     </option>
                   ))}
                 </select>
+                <p className="text-xs text-muted-foreground">
+                  {t("projects.configTemplateDescription")}
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="session-model">{t("projects.model")}</Label>
@@ -494,7 +595,7 @@ export default function ProjectDetailPage() {
                 </select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="credential-mode">{t("projects.credentialMode")}</Label>
+                <Label htmlFor="credential-mode">{t("projects.authenticationMethod")}</Label>
                 <select
                   id="credential-mode"
                   className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -504,6 +605,11 @@ export default function ProjectDetailPage() {
                   <option value="host_environment">{t("projects.hostEnvironment")}</option>
                   <option value="stored_encrypted_key">{t("projects.storedCredential")}</option>
                 </select>
+                <p className="text-xs text-muted-foreground">
+                  {credentialMode === "host_environment"
+                    ? t("projects.hostEnvironmentDescription")
+                    : t("projects.storedCredentialDescription")}
+                </p>
               </div>
               {credentialMode === "stored_encrypted_key" && (
                 <div className="space-y-2">
@@ -532,8 +638,9 @@ export default function ProjectDetailPage() {
                 <CardTitle className="text-base">{t("projects.configPreview")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="text-sm text-muted-foreground">
-                  {t("projects.previewFiles")}: {previewConfigMutation.data?.plan.files.length ?? 0}
+                <div className="space-y-1 text-sm text-muted-foreground">
+                  <div>{t("projects.previewFiles")}: {previewConfigMutation.data?.plan.files.length ?? 0}</div>
+                  <p>{t("projects.configPreviewDescription")}</p>
                 </div>
                 {configConflicts.length > 0 ? (
                   <div className="space-y-2">
@@ -544,9 +651,37 @@ export default function ProjectDetailPage() {
                           key={conflict.relativePath}
                           className="flex flex-col gap-2 rounded-md border border-border bg-background p-3 md:flex-row md:items-center md:justify-between"
                         >
-                          <span>
-                            {conflict.relativePath} · {conflict.conflictType}
-                          </span>
+                          <div className="min-w-0 flex-1 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-xs text-foreground">{conflict.relativePath}</span>
+                              <Badge variant={conflict.conflictType === "modified" ? "destructive" : "secondary"}>
+                                {conflict.conflictType}
+                              </Badge>
+                            </div>
+                            <div className="flex flex-wrap gap-3 text-xs">
+                              {conflict.existingSha256 && (
+                                <span>{t("projects.existingHash")}: {shortHash(conflict.existingSha256)}</span>
+                              )}
+                              {conflict.incomingSha256 && (
+                                <span>{t("projects.incomingHash")}: {shortHash(conflict.incomingSha256)}</span>
+                              )}
+                            </div>
+                            {conflict.diffPreview && conflict.diffPreview.length > 0 && (
+                              <div className="overflow-hidden rounded-md border border-border bg-muted/40">
+                                {conflict.diffPreview.map((line) => (
+                                  <div key={line.line} className="grid gap-0 border-b border-border/60 last:border-b-0 md:grid-cols-[72px_1fr_1fr]">
+                                    <div className="bg-background/70 px-2 py-1 font-mono text-[11px] text-muted-foreground">L{line.line}</div>
+                                    <div className="min-w-0 border-border px-2 py-1 font-mono text-[11px] text-destructive md:border-l">
+                                      <span className="mr-1 select-none">-</span>{line.existing}
+                                    </div>
+                                    <div className="min-w-0 border-border px-2 py-1 font-mono text-[11px] text-emerald-600 md:border-l dark:text-emerald-400">
+                                      <span className="mr-1 select-none">+</span>{line.incoming}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                           {conflict.allowedActions.length > 0 ? (
                             <select
                               className="h-8 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -696,7 +831,8 @@ export default function ProjectDetailPage() {
           )}
 
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList>
+            <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:thin]">
+            <TabsList className="min-w-max">
               <TabsTrigger value="sessions">{t("nav.sessions")}</TabsTrigger>
               <TabsTrigger value="agents">{t("nav.agents")}</TabsTrigger>
               <TabsTrigger value="orchestration">{t("projects.orchestration")}</TabsTrigger>
@@ -704,6 +840,7 @@ export default function ProjectDetailPage() {
               <TabsTrigger value="config">{t("projects.aiConfig")}</TabsTrigger>
               <TabsTrigger value="activity">{t("sessions.activity")}</TabsTrigger>
             </TabsList>
+            </div>
 
             <TabsContent value="sessions" className="mt-4">
               {projectSessions.length === 0 ? (
@@ -941,21 +1078,34 @@ export default function ProjectDetailPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {skills.map((skill) => (
-                        <TableRow key={skill.id}>
-                          <TableCell className="font-medium">{skill.name}</TableCell>
-                          <TableCell>{skill.source}</TableCell>
-                          <TableCell>
-                            <Switch
-                              checked={enabledSkillIds.has(skill.id)}
-                              onCheckedChange={(enabled) =>
-                                projectSkillMutation.mutate({ skillId: skill.id, enabled })
-                              }
-                              disabled={projectSkillMutation.isPending}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {skills.map((skill) => {
+                        const projectSkill = projectSkillById.get(skill.id);
+                        return (
+                          <TableRow key={skill.id}>
+                            <TableCell className="font-medium">
+                              <div>{skill.name}</div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {projectSkillStateLabel(projectSkill?.selectionState, t)}
+                              </div>
+                            </TableCell>
+                            <TableCell>{skill.source}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <Switch
+                                  checked={enabledSkillIds.has(skill.id)}
+                                  onCheckedChange={(enabled) =>
+                                    projectSkillMutation.mutate({ skillId: skill.id, enabled })
+                                  }
+                                  disabled={projectSkillMutation.isPending}
+                                />
+                                <Badge variant={enabledSkillIds.has(skill.id) ? "default" : "secondary"}>
+                                  {enabledSkillIds.has(skill.id) ? t("common.enabled") : t("common.disabled")}
+                                </Badge>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </Card>
@@ -991,6 +1141,29 @@ export default function ProjectDetailPage() {
       )}
     </div>
   );
+}
+
+function shortHash(value: string): string {
+  return value.slice(0, 10);
+}
+
+function ProjectStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-border/70 bg-background/70 px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function projectSkillStateLabel(
+  state: string | undefined,
+  t: (key: "projects.skillProjectEnabled" | "projects.skillProjectDisabled" | "projects.skillInheritedDisabled" | "projects.skillInheritedEnabled") => string
+): string {
+  if (state === "project_enabled") return t("projects.skillProjectEnabled");
+  if (state === "project_disabled") return t("projects.skillProjectDisabled");
+  if (state === "inherited_disabled") return t("projects.skillInheritedDisabled");
+  return t("projects.skillInheritedEnabled");
 }
 
 function ProjectConfigPanel({
@@ -1051,7 +1224,7 @@ function ProjectConfigPanel({
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+    <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -1101,13 +1274,37 @@ function ProjectConfigPanel({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <textarea
-            className="min-h-[420px] w-full resize-y rounded-md border border-input bg-background p-3 font-mono text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            value={draft}
-            onChange={(event) => onDraftChange(event.target.value)}
-            spellCheck={false}
+          {matchingForms.length > 0 && (
+            <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+              <div className="text-sm font-medium">{t("projects.formFields")}</div>
+              {matchingForms.map((form) => (
+                <div key={form.filePath} className="space-y-2">
+                  <div className="text-xs text-muted-foreground">{form.title}</div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {form.fields.map((field) => (
+                      <AiConfigFieldControl
+                        key={field.key}
+                        field={field}
+                        fileType={selectedFile?.fileType ?? "text"}
+                        draft={draft}
+                        disabled={!selectedFile}
+                        onChange={(value) => updateDraftFromForm(field, value)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {formEditError && (
+                <p className="text-xs text-destructive">{formEditError}</p>
+              )}
+            </div>
+          )}
+          <SyntaxHighlightedEditor
+            content={draft}
+            fileType={selectedFile?.fileType ?? "text"}
             disabled={!selectedFile}
-            aria-label={selectedFile?.relativePath ?? t("projects.selectConfigFile")}
+            ariaLabel={selectedFile?.relativePath ?? t("projects.selectConfigFile")}
+            onChange={onDraftChange}
           />
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             {selectedFile && (
@@ -1126,39 +1323,7 @@ function ProjectConfigPanel({
         </CardContent>
       </Card>
 
-      <div className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">{t("projects.formFields")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {matchingForms.length === 0 ? (
-              <div className="text-sm text-muted-foreground">{t("projects.noFormFields")}</div>
-            ) : (
-              matchingForms.map((form) => (
-                <div key={form.filePath} className="space-y-2">
-                  <div className="text-sm font-medium">{form.title}</div>
-                  <div className="space-y-1">
-                    {form.fields.map((field) => (
-                      <AiConfigFieldControl
-                        key={field.key}
-                        field={field}
-                        fileType={selectedFile?.fileType ?? "text"}
-                        draft={draft}
-                        disabled={!selectedFile}
-                        onChange={(value) => updateDraftFromForm(field, value)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))
-            )}
-            {formEditError && (
-              <p className="text-xs text-destructive">{formEditError}</p>
-            )}
-          </CardContent>
-        </Card>
-
+      <div className="grid gap-4 xl:col-span-2">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -1267,6 +1432,110 @@ function AiConfigFieldControl({
   );
 }
 
+function SyntaxHighlightedEditor({
+  content,
+  fileType,
+  disabled,
+  ariaLabel,
+  onChange,
+  readOnly = false,
+  minHeightClassName = "min-h-[560px]"
+}: {
+  content: string;
+  fileType: string;
+  disabled: boolean;
+  ariaLabel: string;
+  onChange?: (content: string) => void;
+  readOnly?: boolean;
+  minHeightClassName?: string;
+}) {
+  const previewRef = useRef<HTMLPreElement | null>(null);
+  const gutterRef = useRef<HTMLDivElement | null>(null);
+  const hasHighlighting = supportsSyntaxHighlighting(fileType);
+  const highlightedParts = useMemo(
+    () => hasHighlighting ? highlightCode(content, fileType) : [{ text: content }],
+    [content, fileType, hasHighlighting]
+  );
+  const lineNumbers = useMemo(
+    () => Array.from({ length: Math.max(content.split("\n").length, 1) }, (_, index) => index + 1),
+    [content]
+  );
+
+  function syncPreviewScroll(event: UIEvent<HTMLTextAreaElement>) {
+    const preview = previewRef.current;
+    const gutter = gutterRef.current;
+    if (preview) {
+      preview.scrollTop = event.currentTarget.scrollTop;
+      preview.scrollLeft = event.currentTarget.scrollLeft;
+    }
+    if (gutter) {
+      gutter.scrollTop = event.currentTarget.scrollTop;
+    }
+  }
+
+  function syncGutterScroll(event: UIEvent<HTMLPreElement>) {
+    const gutter = gutterRef.current;
+    if (gutter) {
+      gutter.scrollTop = event.currentTarget.scrollTop;
+    }
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-input bg-[#05070a] shadow-inner shadow-black/30">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-800 bg-slate-950/80 px-3 py-2">
+        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-slate-400">
+          {readOnly ? "Readonly config" : "Live syntax editor"}
+        </span>
+        <Badge variant="outline" className="border-slate-700 bg-slate-900/80 text-[10px] text-slate-300">
+          {hasHighlighting ? fileType : "plain"}
+        </Badge>
+      </div>
+      <div className={cn("grid grid-cols-[3.5rem_minmax(0,1fr)]", minHeightClassName)}>
+        <div
+          ref={gutterRef}
+          aria-hidden="true"
+          className="overflow-hidden border-r border-slate-800 bg-slate-950/70 px-2 py-4 text-right font-mono text-[11px] leading-6 text-slate-600 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {lineNumbers.map((lineNumber) => (
+            <div key={lineNumber}>{lineNumber}</div>
+          ))}
+        </div>
+        <div className="relative min-w-0">
+          <pre
+            ref={previewRef}
+            aria-hidden={!readOnly}
+            onScroll={readOnly ? syncGutterScroll : undefined}
+            className={cn(
+              "inset-0 whitespace-pre p-4 font-mono text-[13px] leading-6 text-slate-200",
+              readOnly
+                ? "h-full max-h-[420px] overflow-auto"
+                : "pointer-events-none absolute overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            )}
+          >
+            {highlightedParts.map((part, index) => (
+              <span key={`${index}-${part.text}`} className={part.className}>
+                {part.text}
+              </span>
+            ))}
+          </pre>
+          {!readOnly && (
+            <textarea
+              className="absolute inset-0 h-full w-full resize-none overflow-auto border-0 bg-transparent p-4 font-mono text-[13px] leading-6 text-transparent caret-sky-300 outline-none selection:bg-sky-500/30 focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
+              value={content}
+              onChange={(event) => onChange?.(event.target.value)}
+              onScroll={syncPreviewScroll}
+              spellCheck={false}
+              disabled={disabled}
+              aria-label={ariaLabel}
+              wrap="off"
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GlobalConfigPreview({ file }: { file: AiConfigFile }) {
   const { t } = useLanguage();
   return (
@@ -1277,9 +1546,22 @@ function GlobalConfigPreview({ file }: { file: AiConfigFile }) {
           {file.exists ? t("projects.configExists") : t("projects.configMissing")}
         </Badge>
       </summary>
-      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs text-muted-foreground">
-        {file.content || t("projects.noGlobalConfigContent")}
-      </pre>
+      {file.content ? (
+        <div className="mt-2">
+          <SyntaxHighlightedEditor
+            content={file.content}
+            fileType={file.fileType}
+            disabled
+            readOnly
+            ariaLabel={file.relativePath}
+            minHeightClassName="min-h-[260px]"
+          />
+        </div>
+      ) : (
+        <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs leading-5 text-muted-foreground">
+          {t("projects.noGlobalConfigContent")}
+        </pre>
+      )}
     </details>
   );
 }

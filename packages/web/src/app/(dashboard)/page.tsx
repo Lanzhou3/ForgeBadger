@@ -32,6 +32,8 @@ import {
   listSessions,
   getDashboardSummary,
 } from "@/lib/api";
+import { normalizeSessionStatus } from "@/lib/session-status";
+import { terminalRuntimeTranslationKey } from "@/lib/terminal-runtime";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function DashboardPage() {
@@ -53,6 +55,7 @@ export default function DashboardPage() {
   const dashboard = dashboardQuery.data;
   const dashboardStats = dashboard?.stats;
   const dashboardHealth = dashboard?.health;
+  const terminalRuntime = dependenciesQuery.data?.terminalRuntime;
 
   const stats = [
     {
@@ -103,8 +106,8 @@ export default function DashboardPage() {
     },
     {
       label: t("dashboard.dependenciesHealth"),
-      detail: t("dashboard.dependenciesHealthDescription"),
-      healthy: !dependenciesQuery.isError,
+      detail: t(terminalRuntimeTranslationKey(terminalRuntime?.mode)),
+      healthy: terminalRuntime?.supported ?? !dependenciesQuery.isError,
       icon: CheckCircle2,
       href: "/settings",
     },
@@ -293,17 +296,18 @@ export default function DashboardPage() {
 
 function StatusBadge({ status }: { status: string }) {
   const { t } = useLanguage();
+  const normalizedStatus = normalizeSessionStatus(status);
   const variant =
-    status === "running"
+    normalizedStatus === "running"
       ? "default"
-      : status === "error"
+      : normalizedStatus === "error"
         ? "destructive"
         : "secondary";
   return (
     <Badge variant={variant as "default" | "destructive" | "secondary"}>
-      {status === "running"
+      {normalizedStatus === "running"
         ? t("sessions.running")
-        : status === "error"
+        : normalizedStatus === "error"
           ? t("sessions.error")
           : t("sessions.stopped")}
     </Badge>

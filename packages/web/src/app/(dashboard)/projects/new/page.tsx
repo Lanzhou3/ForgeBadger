@@ -24,7 +24,6 @@ import { useLanguage } from "@/hooks/use-language";
 const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
   path: z.string().min(1, "Path is required"),
-  aiTool: z.string().min(1, "AI Tool is required"),
   description: z.string().optional(),
 });
 
@@ -39,7 +38,6 @@ export default function NewProjectPage() {
     defaultValues: {
       name: "",
       path: "",
-      aiTool: "claude",
       description: "",
     },
   });
@@ -99,27 +97,6 @@ export default function NewProjectPage() {
                     <FormLabel>{t("common.path")}</FormLabel>
                     <FormControl>
                       <Input placeholder="/path/to/project" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="aiTool"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t("common.aiTool")}</FormLabel>
-                    <FormControl>
-                      <select
-                        {...field}
-                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
-                      >
-                        <option value="claude">Claude Code</option>
-                        <option value="opencode">OpenCode</option>
-                        <option value="codex">Codex CLI</option>
-                      </select>
                     </FormControl>
                     <FormMessage />
                   </FormItem>

@@ -40,7 +40,7 @@ import {
 } from "@/lib/visibility";
 import { useLanguage } from "@/hooks/use-language";
 
-const defaultFilePath = ".claude/CLAUDE.md";
+const defaultFilePath = "CLAUDE.md";
 const defaultTemplateContent = [
   "# {{projectName}}",
   "",

@@ -89,12 +89,12 @@ function builtInClaudeTemplate(): typeof templates.$inferInsert {
 
 function builtInClaudeFiles(): Array<typeof templateFiles.$inferInsert> {
   return [
-    {
-      templateId: BUILTIN_CLAUDE_TEMPLATE_ID,
-      filePath: ".claude/CLAUDE.md",
-      content: builtInClaudeMd(),
-      fileType: "markdown"
-    },
+      {
+        templateId: BUILTIN_CLAUDE_TEMPLATE_ID,
+        filePath: "CLAUDE.md",
+        content: builtInClaudeMd(),
+        fileType: "markdown"
+      },
     {
       templateId: BUILTIN_CLAUDE_TEMPLATE_ID,
       filePath: ".claude/settings.json",
@@ -299,7 +299,7 @@ function builtInClaudeMd(): string {
     "- Treat this file as shared project memory, not a scratchpad.",
     "- CLAUDE.md is startup context, not an enforcement layer. Use settings for hard permission policy.",
     "- Keep it concise, concrete, and easy to verify. Target fewer than 200 lines per memory file.",
-    "- Put narrow or file-specific rules in `.claude/rules/` instead of growing this file indefinitely.",
+      "- Put narrow or file-specific rules in `.claude/rules/` instead of growing this root file indefinitely.",
     "- Use `@path/to/file.md` imports only for stable, high-value context that should load at session start.",
     "- Run `/init` to let Claude propose project-specific memory improvements; set `CLAUDE_CODE_NEW_INIT=1` when you want the newer multi-phase setup for memory, Skills, and hooks.",
     "",
@@ -322,7 +322,7 @@ function builtInClaudeMd(): string {
     "## Instruction Priority",
     "",
     "- Follow direct user instructions first.",
-    "- Then follow repository instructions in `CLAUDE.md`, `.claude/CLAUDE.md`, and `.claude/rules/`.",
+    "- Then follow repository instructions in root `CLAUDE.md` and `.claude/rules/`.",
     "- Then follow narrower path-scoped rules and task-specific Skills when they apply.",
     "- If instructions conflict, pause and ask instead of guessing.",
     "",
@@ -370,7 +370,7 @@ function builtInClaudeMd(): string {
     "",
     "## Instruction Loading",
     "",
-    "- `CLAUDE.md` and `.claude/CLAUDE.md` are always-loaded project memory.",
+    "- Root `CLAUDE.md` is the shared project memory file Claude Code reads at startup.",
     "- Claude loads ancestor `CLAUDE.md` and `CLAUDE.local.md` files from filesystem root down to the launch directory; closer instructions are read later.",
     "- `CLAUDE.local.md` loads beside `CLAUDE.md`, is appended after the shared file at the same level, and must stay gitignored.",
     "- Subdirectory `CLAUDE.md` and `CLAUDE.local.md` files load on demand when Claude reads files in those directories.",
@@ -595,7 +595,7 @@ function builtInContributingMd(): string {
   return [
     "# Contributing",
     "",
-    "- Follow the repository instructions in `CLAUDE.md` and `.claude/CLAUDE.md`.",
+    "- Follow the repository instructions in root `CLAUDE.md` and `.claude/rules/`.",
     "- Keep changes scoped and include relevant verification evidence.",
     "- Do not commit secrets, generated credentials, database files, or local-only settings.",
     "- Prefer small, reviewable changes over broad rewrites.",

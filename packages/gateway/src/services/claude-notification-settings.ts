@@ -25,6 +25,8 @@ export interface ClaudeHookGroup {
 }
 
 export interface ClaudeHookSettings {
+  allowedHttpHookUrls: string[];
+  httpHookAllowedEnvVars: string[];
   hooks: Record<string, unknown> & {
     PermissionRequest: ClaudeHookGroup[];
     PermissionDenied: ClaudeHookGroup[];
@@ -35,6 +37,8 @@ export interface ClaudeHookSettings {
 export function buildOpenForgeClaudeHookSettings(gatewayUrl: string, sessionId?: string): ClaudeHookSettings {
   const httpHook = buildOpenForgeHttpHook(gatewayUrl, sessionId);
   return {
+    allowedHttpHookUrls: [openForgeHookUrlAllowlist(gatewayUrl)],
+    httpHookAllowedEnvVars: openForgeHookEnvVars(),
     hooks: {
       PermissionRequest: [
         {
@@ -99,6 +103,14 @@ function mergeOpenForgeHookSettings(
     "permission_prompt",
     openForgeHook
   );
+  next.allowedHttpHookUrls = mergeStringList(
+    next.allowedHttpHookUrls,
+    openForgeHookUrlAllowlist(gatewayUrl)
+  );
+  next.httpHookAllowedEnvVars = mergeStringList(
+    next.httpHookAllowedEnvVars,
+    ...openForgeHookEnvVars()
+  );
   next.hooks = hooks;
   return next;
 }
@@ -160,6 +172,34 @@ function buildOpenForgeHttpHook(gatewayUrl: string, sessionId?: string): ClaudeH
     allowedEnvVars: ["OPENFORGE_SESSION_ID", "OPENFORGE_ATTACH_TOKEN"],
     timeout: 5
   };
+}
+
+function openForgeHookUrlAllowlist(gatewayUrl: string): string {
+  const trimmed = gatewayUrl.replace(/\/+$/u, "");
+  try {
+    const url = new URL(trimmed);
+    return `${url.origin}/api/v1/session-hooks/claude-notification*`;
+  } catch {
+    return `${trimmed}/api/v1/session-hooks/claude-notification*`;
+  }
+}
+
+function openForgeHookEnvVars(): string[] {
+  return ["OPENFORGE_SESSION_ID", "OPENFORGE_ATTACH_TOKEN"];
+}
+
+function mergeStringList(value: unknown, ...items: string[]): string[] {
+  const current = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+
+  for (const item of items) {
+    if (!current.includes(item)) {
+      current.push(item);
+    }
+  }
+
+  return current;
 }
 
 function isSameOpenForgeHook(

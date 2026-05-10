@@ -30,7 +30,6 @@ type PathValues = z.infer<typeof pathSchema>;
 
 const confirmSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  aiTool: z.string().min(1, "AI Tool is required"),
 });
 
 type ConfirmValues = z.infer<typeof confirmSchema>;
@@ -55,7 +54,6 @@ export default function ImportProjectPage() {
     resolver: zodResolver(confirmSchema),
     defaultValues: {
       name: "",
-      aiTool: "claude",
     },
   });
 
@@ -75,7 +73,6 @@ export default function ImportProjectPage() {
       return importProjectWithConfig({
         path: scannedPath,
         name: values.name,
-        aiTool: values.aiTool,
       });
     },
     onSuccess: (result) => {
@@ -224,27 +221,6 @@ export default function ImportProjectPage() {
                       <FormLabel>{t("projects.projectName")}</FormLabel>
                       <FormControl>
                         <Input placeholder="My Project" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={confirmForm.control}
-                  name="aiTool"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t("common.aiTool")}</FormLabel>
-                      <FormControl>
-                        <select
-                          {...field}
-                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
-                      >
-                        <option value="claude">Claude Code</option>
-                        <option value="opencode">OpenCode</option>
-                        <option value="codex">Codex CLI</option>
-                      </select>
                       </FormControl>
                       <FormMessage />
                     </FormItem>

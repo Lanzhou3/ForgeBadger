@@ -17,8 +17,23 @@ test-results/
 /AGENTS.md
 /AGENT.md
 docs/*
+!docs/reports/
+docs/reports/*
+!docs/reports/cli-adapter-smoke-2026-05-04.md
+!docs/reports/cli-adapter-smoke-results-2026-05-04.json
+!docs/reports/realconfig-copy-prompt-smoke-2026-05-04.md
+!docs/reports/release-acceptance-2026-05-04.md
+!docs/reports/browser-terminal-smoke-2026-05-06.md
+!docs/reports/claude-permission-smoke-2026-05-07.md
+!docs/reports/codex-app-server-architecture-2026-05-06.md
+!docs/reports/regression-2026-05-06.md
+!docs/reports/release-candidate-2026-05-06.md
+!docs/reports/phase-b-codex-app-server-acceptance-2026-05-10.md
+!docs/reports/beta-handoff-2026-05-10.md
 !docs/README.zh-CN.md
 !docs/README.zh-TW.md
+!docs/assets/
+!docs/assets/openforge-wordmark.png
 
 # Local AI CLI config, personal project overrides, and repository agent notes.
 .codex

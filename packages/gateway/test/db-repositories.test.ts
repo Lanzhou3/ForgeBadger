@@ -20,6 +20,7 @@ import {
   TemplateRepository,
   UserRepository
 } from "../src/db/repositories/index.js";
+import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -283,6 +284,35 @@ describe("db repositories", () => {
       assert.equal(repoA.list({ projectId: project.id, agentId: agentA.id }).length, 1);
       assert.equal(repoB.list({ projectId: project.id }).length, 0);
     });
+
+    it("filters activities by type", () => {
+      const userA = userRepo.create("activity-type-a@example.com", "hash");
+      const userB = userRepo.create("activity-type-b@example.com", "hash");
+      const repoA = new ActivityRepository(db, userA.id);
+      const repoB = new ActivityRepository(db, userB.id);
+
+      repoA.create({
+        type: "codex_app_server_started",
+        status: "info",
+        message: "Codex app-server running"
+      });
+      repoA.create({
+        type: "session_started",
+        status: "success",
+        message: "Session started"
+      });
+      repoB.create({
+        type: "codex_app_server_started",
+        status: "info",
+        message: "Other user event"
+      });
+
+      const activities = repoA.list({ types: ["codex_app_server_started"] });
+
+      assert.equal(activities.length, 1);
+      assert.equal(activities[0].type, "codex_app_server_started");
+      assert.equal(repoB.list({ types: ["codex_app_server_started"] }).length, 1);
+    });
   });
 
   describe("SessionRepository", () => {
@@ -336,6 +366,43 @@ describe("db repositories", () => {
         workingDir: "/tmp/pa"
       });
       assert.equal(repoB.getById(session.id), undefined);
+    });
+
+    it("lists sessions by project while preserving tenant isolation", () => {
+      const userA = userRepo.create("session-project-a@example.com", "hash");
+      const userB = userRepo.create("session-project-b@example.com", "hash");
+      const projectRepoA = new ProjectRepository(db, userA.id);
+      const projectA = projectRepoA.create({ name: "Project A", path: "/tmp/pa", aiTool: "claude" });
+      const projectB = projectRepoA.create({ name: "Project B", path: "/tmp/pb", aiTool: "claude" });
+      const projectForOtherUser = new ProjectRepository(db, userB.id).create({
+        name: "Project Other",
+        path: "/tmp/po",
+        aiTool: "claude"
+      });
+      const repoA = new SessionRepository(db, userA.id);
+      const repoB = new SessionRepository(db, userB.id);
+
+      const sessionA = repoA.create({
+        projectId: projectA.id,
+        name: "S A",
+        aiTool: "claude",
+        workingDir: "/tmp/pa"
+      });
+      repoA.create({
+        projectId: projectB.id,
+        name: "S B",
+        aiTool: "claude",
+        workingDir: "/tmp/pb"
+      });
+      repoB.create({
+        projectId: projectForOtherUser.id,
+        name: "S Other",
+        aiTool: "claude",
+        workingDir: "/tmp/po"
+      });
+
+      assert.deepEqual(repoA.listByProject(projectA.id).map((session) => session.id), [sessionA.id]);
+      assert.deepEqual(repoB.listByProject(projectA.id), []);
     });
 
     it("persists terminal attach and credential launch metadata", () => {
@@ -397,7 +464,8 @@ describe("db repositories", () => {
       const withFiles = repo.getById(claude.id);
       assert.ok(withFiles);
       assert.ok(withFiles!.files);
-      assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/CLAUDE.md"));
+      assert.ok(withFiles!.files!.some((f) => f.filePath === "CLAUDE.md"));
+      assert.equal(withFiles!.files!.some((f) => f.filePath === ".claude/CLAUDE.md"), false);
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/settings.json"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === "WORKFLOW.md"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === "PLAN.md"));
@@ -410,7 +478,7 @@ describe("db repositories", () => {
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/rules/testing.md"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/hooks/openforge-guard.mjs"));
       assert.equal(withFiles!.files!.some((f) => f.filePath === ".claude/hooks/openforge-notification.mjs"), false);
-      const claudeMd = withFiles!.files!.find((f) => f.filePath === ".claude/CLAUDE.md")?.content ?? "";
+      const claudeMd = withFiles!.files!.find((f) => f.filePath === "CLAUDE.md")?.content ?? "";
       assert.match(claudeMd, /Common Commands/);
       assert.match(claudeMd, /Architecture/);
       assert.match(claudeMd, /Context Management/);
@@ -469,13 +537,17 @@ describe("db repositories", () => {
 
       const repo = new TemplateRepository(db, user.id);
       const refreshed = repo.getById("builtin-claude-code");
-      const claudeMd = refreshed?.files?.find((file) => file.filePath === ".claude/CLAUDE.md")?.content ?? "";
+      const claudeMd = refreshed?.files?.find((file) => file.filePath === "CLAUDE.md")?.content ?? "";
 
       assert.equal(refreshed?.version, "2.1.0");
       assert.match(claudeMd, /Context Management/);
       assert.match(claudeMd, /Operating Pattern/);
       assert.equal(
         refreshed?.files?.some((file) => file.filePath === ".claude/hooks/openforge-notification.mjs"),
+        false
+      );
+      assert.equal(
+        refreshed?.files?.some((file) => file.filePath === ".claude/CLAUDE.md"),
         false
       );
     });
@@ -489,7 +561,7 @@ describe("db repositories", () => {
       assert.ok(withFiles);
       assert.equal(withFiles!.name, "Claude Code");
       assert.ok(withFiles!.files);
-      assert.ok(withFiles!.files!.some((file) => file.filePath === ".claude/CLAUDE.md"));
+      assert.ok(withFiles!.files!.some((file) => file.filePath === "CLAUDE.md"));
     });
 
     it("returns OpenCode and Codex built-in templates by id before templates have been listed", () => {
@@ -547,7 +619,7 @@ describe("db repositories", () => {
       assert.equal(cloned.userId, user.id);
 
       const clonedDetails = repo.getById(cloned.id);
-      assert.ok(clonedDetails?.files?.some((file) => file.filePath === ".claude/CLAUDE.md"));
+      assert.ok(clonedDetails?.files?.some((file) => file.filePath === "CLAUDE.md"));
 
       const created = repo.create({
         name: "Scratch",
@@ -665,13 +737,39 @@ describe("db repositories", () => {
       const m1 = repo.create({ name: "M1", provider: "p", modelId: "m1" });
       const m2 = repo.create({ name: "M2", provider: "p", modelId: "m2" });
 
-      repo.setDefault(m1.id);
-      repo.setDefault(m2.id);
+      assert.ok(repo.setDefault(m1.id));
+      assert.ok(repo.setDefault(m2.id));
 
       const updatedM1 = repo.getById(m1.id);
       const updatedM2 = repo.getById(m2.id);
       assert.equal(updatedM1!.isDefault, false);
       assert.equal(updatedM2!.isDefault, true);
+    });
+
+    it("sets default for provider-backed models without legacy rows", () => {
+      const user = userRepo.create("provider-default@example.com", "hash");
+      const providerRepo = new ModelProviderRepository(db, user.id, "0123456789abcdef0123456789abcdef");
+      const provider = providerRepo.createProviderProfile({
+        name: "DeepSeek",
+        providerKey: "deepseek",
+        baseUrl: "https://api.deepseek.com",
+        authType: "api_key",
+        apiFormat: "openai-compatible",
+        supportedAdapters: ["opencode"]
+      });
+      const model = providerRepo.createModelProfile({
+        providerProfileId: provider.id,
+        name: "DeepSeek Chat",
+        modelId: "deepseek-chat",
+        mirrorLegacy: false
+      });
+      const repo = new ModelRepository(db, user.id);
+
+      const updated = repo.setDefault(model.id);
+
+      assert.ok(updated);
+      assert.equal(updated.id, model.id);
+      assert.equal(updated.isDefault, true);
     });
 
     it("enforces tenant isolation for models", () => {

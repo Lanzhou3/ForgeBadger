@@ -1,0 +1,411 @@
+import { Router, type Response } from "express";
+import { z } from "zod";
+
+import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
+import { ProjectRepository } from "../db/repositories/project-repository.js";
+import type { Database } from "../db/types.js";
+import type { CredentialMode } from "../adapters/claude.js";
+import {
+  CodexAppServerManager,
+  type CodexAppServerRuntimeMode,
+  type CodexAppServerSession
+} from "../services/codex-app-server-manager.js";
+import { recordActivity } from "../services/activity-events.js";
+import type { OpenForgeEventBus } from "../services/event-bus.js";
+
+const startAppServerSchema = z.object({
+  projectId: z.string().min(1),
+  runtimeMode: z.enum(["app-server-stdio", "app-server-websocket"]).default("app-server-stdio"),
+  credentialMode: z.enum(["host_environment", "stored_encrypted_key"]).default("host_environment"),
+  apiKeyId: z.string().min(1).optional(),
+  modelId: z.string().min(1).optional()
+});
+
+const threadStartSchema = z.object({
+  cwd: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  approvalPolicy: z.enum(["untrusted", "on-failure", "on-request", "never"]).optional(),
+  sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional()
+});
+
+const turnStartSchema = z.object({
+  threadId: z.string().min(1),
+  text: z.string().min(1).max(32 * 1024)
+});
+
+export interface CodexAppServerRoutesOptions {
+  db: Database;
+  manager: CodexAppServerManager;
+  masterKey?: string | undefined;
+  eventBus?: OpenForgeEventBus | undefined;
+  turnRateLimit?: {
+    maxRequests: number;
+    windowMs: number;
+  } | undefined;
+  turnInput?: {
+    enabled: boolean;
+  } | undefined;
+}
+
+export interface CodexAppServerCapabilities {
+  initializeEnabled: boolean;
+  threadCreationEnabled: boolean;
+  turnInputEnabled: boolean;
+  promptInputExposed: boolean;
+  transcriptPersistence: "disabled";
+}
+
+export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions): Router {
+  const router = Router();
+  const turnLimiter = new AppServerTurnRateLimiter(
+    options.turnRateLimit ?? { maxRequests: 6, windowMs: 60_000 }
+  );
+  router.use(authenticate);
+
+  router.get("/capabilities", (_req, res) => {
+    res.json({
+      code: 0,
+      data: { capabilities: getCodexAppServerCapabilities(options) },
+      message: ""
+    });
+  });
+
+  router.get("/", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    res.json({
+      code: 0,
+      data: { sessions: options.manager.list(userId).map((session) => toSafeSessionPayload(session, options)) },
+      message: ""
+    });
+  });
+
+  router.post("/", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = startAppServerSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid Codex app-server payload" });
+      return;
+    }
+
+    const project = new ProjectRepository(options.db, userId).getById(parseResult.data.projectId);
+    if (!project || project.aiTool !== "codex") {
+      res.status(404).json({ code: 1, message: "Codex project not found" });
+      return;
+    }
+
+    const credentialBoundary = validateCodexAppServerCredentialBoundary(parseResult.data);
+    if (!credentialBoundary.ok) {
+      res.status(400).json({ code: 1, message: credentialBoundary.message });
+      return;
+    }
+
+    const launchEnvResult = buildLaunchEnv(options, userId, parseResult.data);
+    if (!launchEnvResult.ok) {
+      res.status(launchEnvResult.status).json({ code: 1, message: launchEnvResult.message });
+      return;
+    }
+
+    try {
+      const session = await options.manager.start({
+        userId,
+        projectId: project.id,
+        projectRoot: project.path,
+        credentialMode: parseResult.data.credentialMode,
+        runtimeMode: parseResult.data.runtimeMode,
+        env: launchEnvResult.env,
+        secretEnvNames: launchEnvResult.secretEnvNames
+      });
+      recordAppServerActivity(options, userId, session, "codex_app_server_started", "info");
+      res.status(201).json({
+        code: 0,
+        data: { session: toSafeSessionPayload(session, options) },
+        message: ""
+      });
+    } catch (error) {
+      res.status(409).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Failed to start Codex app-server"
+      });
+    }
+  });
+
+  router.post("/:id/stop", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    try {
+      const session = options.manager.stop(req.params.id, userId);
+      recordAppServerActivity(options, userId, session, "codex_app_server_stopped", "info");
+      res.json({
+        code: 0,
+        data: { session: toSafeSessionPayload(session, options) },
+        message: ""
+      });
+    } catch {
+      res.status(404).json({ code: 1, message: "Codex app-server session not found" });
+    }
+  });
+
+  router.post("/:id/initialize", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const session = getOwnedSession(options, req.params.id, userId);
+    if (!session) {
+      res.status(404).json({ code: 1, message: "Codex app-server session not found" });
+      return;
+    }
+
+    try {
+      const result = await options.manager.initialize(req.params.id, userId);
+      recordAppServerActivity(options, userId, session, "codex_app_server_initialized", "info", {
+        method: "initialize"
+      });
+      res.json({ code: 0, data: { result }, message: "" });
+    } catch (error) {
+      sendRpcError(res, error);
+    }
+  });
+
+  router.post("/:id/thread", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const session = getOwnedSession(options, req.params.id, userId);
+    if (!session) {
+      res.status(404).json({ code: 1, message: "Codex app-server session not found" });
+      return;
+    }
+
+    const parseResult = threadStartSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid Codex thread payload" });
+      return;
+    }
+
+    try {
+      const result = await options.manager.startThread(req.params.id, userId, {
+        cwd: parseResult.data.cwd ?? session.projectRoot,
+        ...(parseResult.data.model ? { model: parseResult.data.model } : {}),
+        ...(parseResult.data.approvalPolicy ? { approvalPolicy: parseResult.data.approvalPolicy } : {}),
+        ...(parseResult.data.sandbox ? { sandbox: parseResult.data.sandbox } : {})
+      });
+      recordAppServerActivity(options, userId, session, "codex_app_server_thread_started", "info", {
+        method: "thread/start",
+        ...threadMetadata(result)
+      });
+      res.json({ code: 0, data: { result }, message: "" });
+    } catch (error) {
+      sendRpcError(res, error);
+    }
+  });
+
+  router.post("/:id/turn", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = turnStartSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid Codex turn payload" });
+      return;
+    }
+    const session = getOwnedSession(options, req.params.id, userId);
+    if (!session) {
+      res.status(404).json({ code: 1, message: "Codex app-server session not found" });
+      return;
+    }
+    if (!isTurnInputEnabled(options)) {
+      res.status(403).json({
+        code: 1,
+        message: "Codex app-server turn input is disabled",
+        details: {
+          feature: "codex_app_server_turn_input",
+          enableWith: "OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1"
+        }
+      });
+      return;
+    }
+    if (!turnLimiter.consume(userId, session.id)) {
+      res.status(429).json({ code: 1, message: "Codex app-server turn rate limit exceeded" });
+      return;
+    }
+
+    try {
+      const result = await options.manager.startTurn(req.params.id, userId, parseResult.data);
+      res.json({ code: 0, data: { result }, message: "" });
+    } catch (error) {
+      sendRpcError(res, error);
+    }
+  });
+
+  return router;
+}
+
+type StartAppServerInput = z.infer<typeof startAppServerSchema>;
+
+type LaunchEnvResult =
+  | { ok: true; env: Record<string, string>; secretEnvNames: string[] }
+  | { ok: false; status: number; message: string };
+
+function validateCodexAppServerCredentialBoundary(
+  input: StartAppServerInput
+): { ok: true } | { ok: false; message: string } {
+  if (input.credentialMode !== "host_environment" || input.apiKeyId || input.modelId) {
+    return {
+      ok: false,
+      message: "Codex app-server is subscription-managed; provider credentials and model overrides are not supported"
+    };
+  }
+  return { ok: true };
+}
+
+function buildLaunchEnv(
+  _options: CodexAppServerRoutesOptions,
+  _userId: string,
+  _input: StartAppServerInput
+): LaunchEnvResult {
+  return { ok: true, env: {}, secretEnvNames: [] };
+}
+
+function recordAppServerActivity(
+  options: CodexAppServerRoutesOptions,
+  userId: string,
+  session: CodexAppServerSession,
+  type: string,
+  status: "info" | "warning" | "error",
+  metadata: Record<string, unknown> = {}
+): void {
+  recordActivity({
+    db: options.db,
+    eventBus: options.eventBus,
+    userId,
+    projectId: session.projectId,
+    type,
+    status,
+    message: appServerActivityMessage(type, session),
+    metadata: {
+      appServerSessionId: session.id,
+      runtimeMode: session.runtimeMode,
+      listen: session.listen,
+      ...(session.pid !== undefined ? { pid: session.pid } : {}),
+      ...metadata
+    }
+  });
+}
+
+function appServerActivityMessage(type: string, session: CodexAppServerSession): string {
+  if (type === "codex_app_server_started") {
+    return "Codex app-server started";
+  }
+  if (type === "codex_app_server_stopped") {
+    return "Codex app-server stopped";
+  }
+  if (type === "codex_app_server_initialized") {
+    return "Codex app-server initialized";
+  }
+  if (type === "codex_app_server_thread_started") {
+    return "Codex app-server thread started";
+  }
+  return `Codex app-server ${session.status}`;
+}
+
+function threadMetadata(result: unknown): Record<string, string> {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return {};
+  }
+  const record = result as Record<string, unknown>;
+  const threadId = stringResultField(record.threadId) ?? stringResultField(record.thread_id) ?? stringResultField(record.id);
+  return threadId ? { threadId } : {};
+}
+
+function stringResultField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function toSafeSessionPayload(
+  session: CodexAppServerSession,
+  options: CodexAppServerRoutesOptions
+): Omit<
+  CodexAppServerSession,
+  "token" | "tokenFile"
+> & { features: { turnInputEnabled: boolean } } {
+  const { token: _token, tokenFile: _tokenFile, ...safe } = session;
+  return {
+    ...safe,
+    features: {
+      turnInputEnabled: getCodexAppServerCapabilities(options).turnInputEnabled
+    }
+  };
+}
+
+function getCodexAppServerCapabilities(options: CodexAppServerRoutesOptions): CodexAppServerCapabilities {
+  const turnInputEnabled = isTurnInputEnabled(options);
+  return {
+    initializeEnabled: true,
+    threadCreationEnabled: true,
+    turnInputEnabled,
+    promptInputExposed: turnInputEnabled,
+    transcriptPersistence: "disabled"
+  };
+}
+
+function getOwnedSession(
+  options: CodexAppServerRoutesOptions,
+  id: string,
+  userId: string
+): CodexAppServerSession | null {
+  try {
+    return options.manager.get(id, userId);
+  } catch {
+    return null;
+  }
+}
+
+function sendRpcError(res: Response, error: unknown): void {
+  const message = error instanceof Error ? error.message : "Codex app-server request failed";
+  if (message.includes("not found")) {
+    res.status(404).json({ code: 1, message: "Codex app-server session not found" });
+    return;
+  }
+  res.status(409).json({ code: 1, message });
+}
+
+function isTurnInputEnabled(options: CodexAppServerRoutesOptions): boolean {
+  return options.turnInput?.enabled === true;
+}
+
+export function isCodexAppServerTurnInputEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED?.trim() === "1";
+}
+
+export class AppServerTurnRateLimiter {
+  private readonly buckets = new Map<string, { count: number; resetAt: number }>();
+
+  constructor(private readonly options: { maxRequests: number; windowMs: number }) {}
+
+  consume(userId: string, sessionId: string, now = Date.now()): boolean {
+    this.pruneExpired(now);
+    const key = `${userId}:${sessionId}`;
+    const current = this.buckets.get(key);
+    if (!current || current.resetAt <= now) {
+      this.buckets.set(key, {
+        count: 1,
+        resetAt: now + this.options.windowMs
+      });
+      return true;
+    }
+
+    if (current.count >= this.options.maxRequests) {
+      return false;
+    }
+
+    current.count += 1;
+    return true;
+  }
+
+  size(): number {
+    return this.buckets.size;
+  }
+
+  private pruneExpired(now: number): void {
+    for (const [key, bucket] of this.buckets) {
+      if (bucket.resetAt <= now) {
+        this.buckets.delete(key);
+      }
+    }
+  }
+}
+
+export type { CodexAppServerRuntimeMode, CredentialMode };

@@ -1,4 +1,4 @@
-import { gatewayBaseUrl } from "./api";
+import { getGatewayBaseUrl } from "./runtime-config";
 
 export interface TerminalWebSocketAuth {
   authToken: string;
@@ -8,7 +8,7 @@ export interface TerminalWebSocketAuth {
 export function terminalWebSocketUrl(
   sessionId: string,
   auth: TerminalWebSocketAuth,
-  baseUrl = gatewayBaseUrl
+  baseUrl = getGatewayBaseUrl()
 ): string {
   const url = new URL(baseUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -21,10 +21,13 @@ export function terminalWebSocketProtocols(authToken: string): string[] {
   return ["openforge-terminal", authToken];
 }
 
-export function eventsWebSocketUrl(authToken: string, baseUrl = gatewayBaseUrl): string {
+export function eventsWebSocketUrl(baseUrl = getGatewayBaseUrl()): string {
   const url = new URL(baseUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = "/ws/events";
-  url.searchParams.set("token", authToken);
   return url.toString();
+}
+
+export function eventsWebSocketProtocols(authToken: string): string[] {
+  return ["openforge-events", authToken];
 }

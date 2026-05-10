@@ -26,7 +26,8 @@ export async function detectConfigConflicts(plan: RenderPlan): Promise<ConflictR
       existingSha256,
       incomingSha256: file.sha256,
       conflictType,
-      allowedActions: conflictType === "exists" ? ["skip"] : ["skip", "overwrite"]
+      allowedActions: conflictType === "exists" ? ["skip"] : ["skip", "overwrite"],
+      ...(conflictType === "modified" ? { diffPreview: buildDiffPreview(existingContent, file.content) } : {})
     });
   }
 
@@ -63,6 +64,36 @@ async function readExistingFile(
     }
     throw error;
   }
+}
+
+function buildDiffPreview(existingContent: string, incomingContent: string): Array<{ line: number; existing: string; incoming: string }> {
+  const existingLines = existingContent.split(/\r?\n/);
+  const incomingLines = incomingContent.split(/\r?\n/);
+  const maxLines = Math.max(existingLines.length, incomingLines.length);
+  const preview: Array<{ line: number; existing: string; incoming: string }> = [];
+
+  for (let index = 0; index < maxLines && preview.length < 8; index += 1) {
+    const existing = existingLines[index] ?? "";
+    const incoming = incomingLines[index] ?? "";
+    if (existing === incoming) {
+      continue;
+    }
+    preview.push({
+      line: index + 1,
+      existing: redactSensitiveLine(existing),
+      incoming: redactSensitiveLine(incoming)
+    });
+  }
+
+  return preview;
+}
+
+function redactSensitiveLine(value: string): string {
+  const trimmed = value.length > 160 ? `${value.slice(0, 157)}...` : value;
+  if (/api[_-]?key|token|secret|password|authorization/i.test(trimmed)) {
+    return "[redacted sensitive line]";
+  }
+  return trimmed;
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

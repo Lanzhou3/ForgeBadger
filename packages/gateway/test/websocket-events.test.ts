@@ -5,10 +5,11 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer as createHttpServer } from "node:http";
 import WebSocket from "ws";
 
-import { createGatewayApp } from "../src/server.js";
-import { startupGateway } from "../src/services/startup.js";
+import { createGatewayApp, createServer } from "../src/server.js";
+import { attachEventsWebSocket } from "../src/websocket/events.js";
 import { signJwt } from "../src/auth/jwt.js";
 import { OpenForgeEventBus } from "../src/services/event-bus.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
@@ -104,7 +105,32 @@ describe("events WebSocket", () => {
 
   it("connection with valid JWT succeeds", async () => {
     const token = signJwt({ userId: "user_123", email: "test@example.com" }, jwtSecret);
-    const ws = new WebSocket(`${serverUrl}/ws/events?token=${token}`);
+    const ws = new WebSocket(`${serverUrl}/ws/events`, ["openforge-events", token]);
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Connection timeout")), 2000);
+      ws.on("open", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      ws.on("error", (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+
+    const closePromise = waitForClose(ws);
+    ws.close();
+    await closePromise;
+  });
+
+  it("accepts token through Authorization header", async () => {
+    const token = signJwt({ userId: "user_123", email: "test@example.com" }, jwtSecret);
+    const ws = new WebSocket(`${serverUrl}/ws/events`, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
 
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("Connection timeout")), 2000);
@@ -140,8 +166,8 @@ describe("events WebSocket", () => {
     const tokenA = signJwt({ userId: "user_a", email: "a@example.com" }, jwtSecret);
     const tokenB = signJwt({ userId: "user_b", email: "b@example.com" }, jwtSecret);
 
-    const wsA = new WebSocket(`${serverUrl}/ws/events?token=${tokenA}`);
-    const wsB = new WebSocket(`${serverUrl}/ws/events?token=${tokenB}`);
+    const wsA = new WebSocket(`${serverUrl}/ws/events`, ["openforge-events", tokenA]);
+    const wsB = new WebSocket(`${serverUrl}/ws/events`, ["openforge-events", tokenB]);
 
     await Promise.all([
       new Promise<void>((resolve) => wsA.once("open", resolve)),
@@ -174,5 +200,108 @@ describe("events WebSocket", () => {
     wsA.close();
     wsB.close();
     await Promise.all([closeA, closeB]);
+  });
+
+  it("does not authenticate from query token", async () => {
+    const token = signJwt({ userId: "user_123", email: "test@example.com" }, jwtSecret);
+    const ws = new WebSocket(`${serverUrl}/ws/events?token=${token}`);
+    const result = await new Promise<{ code: number }>((resolve) => {
+      ws.on("close", (code) => {
+        resolve({ code });
+      });
+      ws.on("error", () => {
+        resolve({ code: 1006 });
+      });
+    });
+
+    assert.equal(result.code, 1006);
+  });
+});
+
+describe("events websocket connection limits", () => {
+  let db: Database;
+  let server: ReturnType<typeof createHttpServer>;
+  let serverUrl: string;
+
+  beforeEach(async () => {
+    db = createTestDb();
+    const eventBus = new OpenForgeEventBus();
+    const sessionManager = new InMemorySessionManager({
+      async createSession() {},
+      async killSession() {},
+      async capturePane() {
+        return "";
+      },
+      async listSessions() {
+        return [];
+      }
+    });
+    const apiKeyStore = new InMemoryApiKeyStore({ masterKey });
+    const app = createServer({
+      db,
+      jwtSecret,
+      masterKey,
+      sessionManager,
+      apiKeyStore,
+      eventBus
+    });
+
+    server = createHttpServer(app);
+    attachEventsWebSocket({
+      server,
+      eventBus,
+      jwtSecret,
+      maxConnections: 1,
+      maxConnectionsPerUser: 1
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => {
+        const address = server.address();
+        if (address && typeof address === "object") {
+          serverUrl = `ws://127.0.0.1:${address.port}`;
+        }
+        resolve();
+      });
+    });
+  });
+
+  afterEach(() => {
+    return new Promise<void>((resolve) => {
+      server.close(() => {
+        db.close();
+        resolve();
+      });
+    });
+  });
+
+  it("enforces per-user event websocket limits", async () => {
+    const tokenA = signJwt({ userId: "user_a", email: "a@example.com" }, jwtSecret);
+
+    const wsA = new WebSocket(`${serverUrl}/ws/events`, ["openforge-events", tokenA]);
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Connection timeout")), 2000);
+      wsA.on("open", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      wsA.on("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+
+    const wsB = new WebSocket(`${serverUrl}/ws/events`, ["openforge-events", tokenA]);
+    const result = await new Promise<{ code: number }>((resolve) => {
+      wsB.on("close", (code) => {
+        resolve({ code });
+      });
+      wsB.on("error", () => {
+        resolve({ code: 1006 });
+      });
+    });
+
+    wsA.close();
+    assert.equal(result.code, 1008);
   });
 });

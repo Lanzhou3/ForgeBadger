@@ -27,6 +27,7 @@ export interface LocalSkillSyncResult {
   discoveredCount: number;
   createdCount: number;
   updatedCount: number;
+  deletedCount: number;
   skippedCount: number;
 }
 
@@ -74,6 +75,7 @@ export function syncLocalSkills(
     discoveredCount: discovered.length,
     createdCount: 0,
     updatedCount: 0,
+    deletedCount: 0,
     skippedCount: 0
   };
 
@@ -104,31 +106,10 @@ export function syncLocalSkills(
   return result;
 }
 
-export function defaultLocalSkillRoots(cwd: string, env: NodeJS.ProcessEnv): string[] {
-  const configured = env.OPENFORGE_SKILL_DIRS?.split(path.delimiter)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-  const claudeConfigDir = env.CLAUDE_CONFIG_DIR?.trim()
-    ? expandHome(env.CLAUDE_CONFIG_DIR.trim())
-    : path.join(homedir(), ".claude");
-  const agentsHome = env.AGENTS_HOME?.trim()
-    ? expandHome(env.AGENTS_HOME.trim())
-    : path.join(homedir(), ".agents");
-  const codexHome = env.CODEX_HOME?.trim()
-    ? expandHome(env.CODEX_HOME.trim())
-    : path.join(homedir(), ".codex");
-
+export function defaultLocalSkillRoots(_cwd: string, _env: NodeJS.ProcessEnv): string[] {
   return uniqueRoots([
-    ...(configured?.map(expandHome) ?? []),
-    ...ancestorProjectSkillRoots(cwd),
-    path.join(claudeConfigDir, "skills"),
-    path.join(claudeConfigDir, "commands"),
-    path.join(agentsHome, "skills"),
-    path.join(codexHome, "skills"),
-    path.join(codexHome, "plugins", "cache"),
-    path.join(claudeConfigDir, "plugins", "cache"),
-    path.join(claudeConfigDir, "plugins", "marketplaces")
+    path.join(homedir(), ".claude", "skills"),
+    path.join(homedir(), ".agents", "skills")
   ]);
 }
 
@@ -139,18 +120,6 @@ function skillChanged(existing: Skill, incoming: CreateSkillInput): boolean {
     existing.content !== incoming.content ||
     existing.version !== (incoming.version ?? "1.0.0")
   );
-}
-
-function ancestorProjectSkillRoots(cwd: string): string[] {
-  const roots: string[] = [];
-  let current = path.resolve(cwd);
-  while (true) {
-    roots.push(path.join(current, ".claude", "skills"));
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return roots;
 }
 
 function findSkillFiles(root: string, limit: number): string[] {
@@ -183,16 +152,15 @@ function walk(current: string, depth: number, files: string[], limit: number, vi
     }
 
     if (!stats?.isFile()) continue;
-    if (isSkillMarkdownFile(realPath, entry.name, depth)) {
+    if (isSkillMarkdownFile(entry.name)) {
       files.push(realPath);
     }
   }
 }
 
-function isSkillMarkdownFile(filePath: string, fileName: string, depth: number): boolean {
+function isSkillMarkdownFile(fileName: string): boolean {
   if (fileName === "SKILL.md") return true;
-  if (!fileName.endsWith(".md")) return false;
-  return depth === 0 || path.basename(path.dirname(filePath)) === "commands";
+  return false;
 }
 
 function readSkillFile(filePath: string): Omit<DiscoveredLocalSkill, "path" | "root"> | undefined {

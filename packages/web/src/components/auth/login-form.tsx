@@ -73,12 +73,16 @@ export function LoginForm() {
       {errors.root && (
         <p className="text-sm text-destructive">{errors.root.message}</p>
       )}
-      <Button type="submit" disabled={isSubmitting}>
+      <Button
+        type="submit"
+        disabled={isSubmitting}
+        className="bg-brand text-brand-foreground hover:bg-brand/90"
+      >
         {isSubmitting ? "Signing in..." : "Sign in"}
       </Button>
       <p className="text-sm text-muted-foreground">
         Don&apos;t have an account?{" "}
-        <Link href="/register" className="text-primary underline">
+        <Link href="/register" className="text-brand underline">
           Register
         </Link>
       </p>

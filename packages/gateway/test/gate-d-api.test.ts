@@ -167,8 +167,7 @@ describe("Gate D auth and project API contracts", () => {
       password: "correct horse battery staple"
     });
     const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-template-project-"));
-    await mkdir(path.join(rootPath, ".claude"), { recursive: true });
-    await writeFile(path.join(rootPath, ".claude", "CLAUDE.md"), "existing", "utf8");
+    await writeFile(path.join(rootPath, "CLAUDE.md"), "existing", "utf8");
     const project = await api.createProject(user.body.data.user.id, {
       name: "Template Project",
       rootPath
@@ -183,18 +182,18 @@ describe("Gate D auth and project API contracts", () => {
       credentialMode: "host_environment"
     });
     assert.equal(preview.status, 200);
-    assert.equal(preview.body.data.plan.files[0].relativePath, ".claude/CLAUDE.md");
-    assert.equal(preview.body.data.conflicts[0].relativePath, ".claude/CLAUDE.md");
+    assert.equal(preview.body.data.plan.files[0].relativePath, "CLAUDE.md");
+    assert.equal(preview.body.data.conflicts[0].relativePath, "CLAUDE.md");
 
     const skipped = await api.writeProjectConfig(user.body.data.user.id, {
       projectId: project.body.data.project.id,
       templateId: "builtin-claude-code",
       credentialMode: "host_environment",
-      decisions: { ".claude/CLAUDE.md": "skip" }
+      decisions: { "CLAUDE.md": "skip" }
     });
     assert.equal(skipped.status, 200);
-    assert.deepEqual(skipped.body.data.result.skippedFiles, [".claude/CLAUDE.md"]);
-    assert.equal(await readFile(path.join(rootPath, ".claude", "CLAUDE.md"), "utf8"), "existing");
+    assert.deepEqual(skipped.body.data.result.skippedFiles, ["CLAUDE.md"]);
+    assert.equal(await readFile(path.join(rootPath, "CLAUDE.md"), "utf8"), "existing");
   });
 
   it("creates and lists Claude sessions for the authenticated user's project", async () => {

@@ -95,6 +95,33 @@ describe("detectConfigConflicts", () => {
     assert.equal(conflicts[0]?.incomingSha256, sha256("# Incoming"));
   });
 
+  it("includes readable line-level previews for modified conflicts", async () => {
+    const root = await projectRoot();
+    await mkdir(join(root, ".claude"), { recursive: true });
+    await writeFile(join(root, ".claude", "CLAUDE.md"), "# Existing\nkeep this", "utf8");
+    const plan = createRenderPlan({
+      projectId: "project_1",
+      targetRoot: root,
+      templateId: "claude-default",
+      credentialMode: "host_environment",
+      dryRun: true,
+      variables: { projectName: "Incoming" },
+      templateFiles: [
+        {
+          id: "template_file_1",
+          relativePath: ".claude/CLAUDE.md",
+          content: "# {{projectName}}\nkeep this"
+        }
+      ]
+    });
+
+    const conflicts = await detectConfigConflicts(plan);
+
+    assert.deepEqual(conflicts[0]?.diffPreview, [
+      { line: 1, existing: "# Existing", incoming: "# Incoming" }
+    ]);
+  });
+
   it("reports unsafe_path for absolute, traversal, encoded traversal, and unicode traversal-like paths", async () => {
     const root = await projectRoot();
     const plan = createRenderPlan({

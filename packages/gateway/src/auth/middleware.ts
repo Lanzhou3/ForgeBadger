@@ -15,8 +15,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
   }
   const token = authHeader.slice(7);
   try {
-    const env = loadEnv();
-    const payload = verifyJwt(token, env.OPENFORGE_JWT_SECRET);
+    const payload = verifyJwt(token, resolveJwtSecret(req));
     (req as AuthenticatedRequest).userId = payload.userId;
     next();
   } catch {
@@ -34,4 +33,13 @@ export function extractBearerToken(authorization: string | string[] | undefined)
   }
   const match = /^Bearer (?<token>.+)$/iu.exec(authorization);
   return match?.groups?.token;
+}
+
+function resolveJwtSecret(req: Request): string {
+  const jwtSecret = req.app?.locals?.jwtSecret;
+  if (typeof jwtSecret === "string" && jwtSecret.length > 0) {
+    return jwtSecret;
+  }
+
+  return loadEnv().OPENFORGE_JWT_SECRET;
 }

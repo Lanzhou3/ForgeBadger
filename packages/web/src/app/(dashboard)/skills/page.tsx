@@ -249,7 +249,7 @@ export default function SkillsPage() {
                 {t("skills.discoveryRoots")}: {data.discovery.discoveredRoots?.length ?? 0} / {data.discovery.roots.length}
               </Badge>
               <span>
-                {t("skills.localSyncSummary")}: {data.discovery.createdCount} / {data.discovery.updatedCount} / {data.discovery.skippedCount}
+                {t("skills.localSyncSummary")}: {data.discovery.createdCount} / {data.discovery.updatedCount} / {data.discovery.deletedCount} / {data.discovery.skippedCount}
               </span>
             </div>
             <p className="text-xs">{t("skills.discoveryHint")}</p>

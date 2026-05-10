@@ -33,7 +33,15 @@ function adaptTemplateFiles(
   adapter: AdapterId
 ): TemplateFileInput[] {
   if (adapter === "claude") {
-    return files;
+    return files.map((file) => {
+      if (file.relativePath === ".claude/CLAUDE.md") {
+        return {
+          ...file,
+          relativePath: "CLAUDE.md"
+        };
+      }
+      return file;
+    });
   }
   const root = adapterConfigRoot(adapter);
   return files.flatMap((file) => {
@@ -82,14 +90,20 @@ function agentToTemplateFile(agent: ProjectConfigAgent, adapter: AdapterId): Tem
 }
 
 function skillToTemplateFile(skill: ProjectSkill, adapter: AdapterId): TemplateFileInput {
+  const slug = slugify(skill.name);
   const content = [
+    "---",
+    `name: ${slug}`,
+    skill.description ? `description: ${skill.description}` : undefined,
+    "---",
+    "",
     `# ${skill.name}`,
     "",
     skill.description ?? "",
     "",
     skill.content,
     ""
-  ].join("\n");
+  ].filter((line): line is string => line !== undefined).join("\n");
 
   return {
     id: `skill:${skill.skillId}`,
@@ -99,12 +113,11 @@ function skillToTemplateFile(skill: ProjectSkill, adapter: AdapterId): TemplateF
 }
 
 function skillConfigPath(name: string, adapter: AdapterId): string {
-  const root = adapterConfigRoot(adapter);
   const slug = slugify(name);
-  if (adapter === "claude") {
-    return `${root}/skills/${slug}/SKILL.md`;
+  if (adapter === "codex") {
+    return `.agents/skills/${slug}/SKILL.md`;
   }
-  return `${root}/skills/${slug}.md`;
+  return `${adapterConfigRoot(adapter)}/skills/${slug}/SKILL.md`;
 }
 
 function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" {

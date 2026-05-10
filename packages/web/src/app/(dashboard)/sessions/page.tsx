@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, RotateCcw, Search, Square, TerminalSquare, Trash2 } from "lucide-react";
@@ -18,6 +18,9 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { deleteSession, listSessions, startSession, stopSession } from "@/lib/api";
+import { notifySessionTabsChanged } from "@/components/session-tabs";
+import { pruneSessionTabs, sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
+import { normalizeSessionStatus, sessionMatchesStatusFilter } from "@/lib/session-status";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function SessionsPage() {
@@ -48,10 +51,18 @@ export default function SessionsPage() {
   });
 
   const sessions = data?.sessions ?? [];
+  useEffect(() => {
+    if (!data) {
+      return;
+    }
+    pruneSessionTabs(new Set(sessions.map((session) => session.id)));
+    notifySessionTabsChanged();
+  }, [data, sessions]);
+
   const filteredSessions = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return sessions.filter((session) => {
-      const matchesStatus = statusFilter === "all" || session.status === statusFilter;
+      const matchesStatus = sessionMatchesStatusFilter(session.status, statusFilter);
       if (!matchesStatus) {
         return false;
       }
@@ -66,6 +77,7 @@ export default function SessionsPage() {
         session.projectId,
         session.aiTool,
         session.status,
+        normalizeSessionStatus(session.status),
       ].some((value) => value?.toLowerCase().includes(normalizedQuery));
     });
   }, [query, sessions, statusFilter]);
@@ -181,7 +193,15 @@ export default function SessionsPage() {
                               <TableCell>
                                 <div className="flex justify-end gap-1">
                                   {isRunning ? (
-                                    <Button asChild variant="ghost" size="sm">
+                                    <Button
+                                      asChild
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        upsertSessionTab(sessionToTab(session));
+                                        notifySessionTabsChanged();
+                                      }}
+                                    >
                                       <Link href={`/sessions/${session.id}`}>
                                         <Play className="mr-2 size-3" />
                                         {t("common.connect")}
@@ -244,14 +264,15 @@ export default function SessionsPage() {
 
 function SessionStatusBadge({ status }: { status: string }) {
   const { t } = useLanguage();
-  if (status === "running") {
+  const normalizedStatus = normalizeSessionStatus(status);
+  if (normalizedStatus === "running") {
     return (
       <Badge variant="default" className="bg-green-600 hover:bg-green-600">
         {t("sessions.running")}
       </Badge>
     );
   }
-  if (status === "error") {
+  if (normalizedStatus === "error") {
     return <Badge variant="destructive">{t("sessions.error")}</Badge>;
   }
   return <Badge variant="secondary">{t("sessions.stopped")}</Badge>;

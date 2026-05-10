@@ -14,6 +14,7 @@ import { createSessionRoutes, createGateASessionRoutes } from "./sessions.js";
 import { createTemplateRoutes } from "./templates.js";
 import { createUsageRoutes } from "./usage.js";
 import { createModelRoutes } from "./models.js";
+import { createModelProviderRoutes } from "./model-providers.js";
 import { createAgentRoutes } from "./agents.js";
 import { createSkillRoutes } from "./skills.js";
 import { createApiKeyRoutes } from "./api-keys.js";
@@ -22,6 +23,12 @@ import { createPluginRoutes } from "./plugins.js";
 import { createNotificationRoutes } from "./notifications.js";
 import { createSessionHookRoutes } from "./session-hooks.js";
 import { createSnapshotRoutes } from "./snapshots.js";
+import {
+  createCodexAppServerRoutes,
+  isCodexAppServerTurnInputEnabled
+} from "./codex-app-server.js";
+import { createCodexSubscriptionRoutes } from "./codex-subscription.js";
+import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
@@ -53,10 +60,26 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/templates", createTemplateRoutes(deps.db));
   app.use("/api/v1/usage", createUsageRoutes(deps.db));
   app.use("/api/v1/models", createModelRoutes(deps.db));
+  app.use("/api/v1/model-providers", createModelProviderRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/agents", createAgentRoutes(deps.db));
   app.use("/api/v1", createSkillRoutes(deps.db));
   app.use("/api/v1/plugins", createPluginRoutes(deps.db));
   app.use("/api/v1/notifications", createNotificationRoutes(deps.db));
   app.use("/api/v1/api-keys", createApiKeyRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/dashboard", createDashboardRoutes(deps.db, deps.masterKey));
+  app.use("/api/v1/codex/app-server", createCodexAppServerRoutes({
+    db: deps.db,
+    manager: deps.codexAppServerManager,
+    masterKey: deps.masterKey,
+    eventBus: deps.eventBus,
+    turnInput: {
+      enabled: isCodexAppServerTurnInputEnabled()
+    }
+  }));
+  app.use("/api/v1/codex/subscription", createCodexSubscriptionRoutes());
+  app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
+    db: deps.db,
+    masterKey: deps.masterKey,
+    appVersion: deps.appVersion
+  }));
 }

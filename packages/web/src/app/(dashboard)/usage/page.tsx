@@ -31,6 +31,7 @@ import {
   type Model
 } from "@/lib/api";
 import { formatDurationMs, formatEstimatedUsd } from "@/lib/usage-format";
+import { syncUsageRateValues } from "@/lib/usage-rates";
 import { useLanguage } from "@/hooks/use-language";
 
 interface UsageRow {
@@ -80,13 +81,7 @@ export default function UsagePage() {
   );
 
   useEffect(() => {
-    setRateValues(() => {
-      const next: Record<string, string> = {};
-      for (const model of models) {
-        next[model.id] = String(rateByModel.get(model.id) ?? 0);
-      }
-      return next;
-    });
+    setRateValues((current) => syncUsageRateValues(current, models, rateByModel));
   }, [models, rateByModel]);
 
   const rateMutation = useMutation({

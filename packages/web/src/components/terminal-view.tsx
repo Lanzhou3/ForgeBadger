@@ -6,6 +6,11 @@ import type { Terminal as TerminalInstance } from "@xterm/xterm";
 
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/hooks/use-language";
+import { copySelectedTerminalText, shouldCopyTerminalSelection } from "@/lib/terminal-copy";
+import { createTerminalInputMessage, createTerminalResizeMessage } from "@/lib/terminal-messages";
+import { parseTerminalWebSocketMessage } from "@/lib/terminal-websocket-messages";
+import { replaceTerminalInputListener, type DisposableInputListener } from "@/lib/terminal-input-listener";
+import { cn } from "@/lib/utils";
 import { terminalWebSocketProtocols, terminalWebSocketUrl } from "../lib/ws";
 
 type ConnectionStatus =
@@ -39,7 +44,7 @@ export function TerminalView({
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptCountRef = useRef(0);
-  const inputDisposableRef = useRef<{ dispose(): void } | null>(null);
+  const inputDisposableRef = useRef<DisposableInputListener | null>(null);
   const resizeHandlerRef = useRef<(() => void) | null>(null);
   const mountedRef = useRef(true);
 
@@ -78,12 +83,13 @@ export function TerminalView({
       const fitAddon = fitAddonRef.current;
       if (terminal && fitAddon) {
         fitAddon.fit();
-        socket.send(
-          JSON.stringify({
-            type: "terminal_resize",
-            payload: { cols: terminal.cols, rows: terminal.rows }
-          })
-        );
+        const resizeMessage = createTerminalResizeMessage({
+          cols: terminal.cols,
+          rows: terminal.rows
+        });
+        if (resizeMessage) {
+          socket.send(resizeMessage);
+        }
       }
     });
 
@@ -91,16 +97,14 @@ export function TerminalView({
       const terminal = terminalRef.current;
       if (!terminal) return;
 
-      const message = JSON.parse(String(event.data)) as {
-        type: string;
-        payload: Record<string, unknown>;
-      };
+      const message = parseTerminalWebSocketMessage(String(event.data));
+      if (!message) return;
 
-      if (message.type === "terminal_output" && typeof message.payload.data === "string") {
+      if (message.type === "terminal_output") {
         terminal.write(message.payload.data);
       }
 
-      if (message.type === "terminal_error" && typeof message.payload.message === "string") {
+      if (message.type === "terminal_error") {
         terminal.writeln(`\r\n[openforge] ${message.payload.message}`);
       }
     });
@@ -110,10 +114,12 @@ export function TerminalView({
       socketRef.current = null;
 
       if (event.wasClean) {
+        replaceTerminalInputListener(inputDisposableRef, null);
         setStatus("disconnected");
         return;
       }
 
+      replaceTerminalInputListener(inputDisposableRef, null);
       const nextAttempt = attemptCountRef.current + 1;
       attemptCountRef.current = nextAttempt;
       setAttemptCount(nextAttempt);
@@ -133,12 +139,13 @@ export function TerminalView({
 
     const terminal = terminalRef.current;
     if (terminal) {
+      replaceTerminalInputListener(inputDisposableRef, null);
       const disposable = terminal.onData((data) => {
         if (socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: "terminal_input", payload: { data } }));
+          socket.send(createTerminalInputMessage(data));
         }
       });
-      inputDisposableRef.current = disposable;
+      replaceTerminalInputListener(inputDisposableRef, disposable);
     }
   }, [sessionId, authToken, attachToken, terminalReady]);
 
@@ -167,12 +174,20 @@ export function TerminalView({
             cursorBlink: true,
             fontFamily:
               'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-            fontSize: 13,
+            fontSize: 14,
             theme: {
               background: "#05070a",
               foreground: "#e5edf7",
               cursor: "#5cc8ff"
             }
+          });
+          terminal.attachCustomKeyEventHandler((event) => {
+            if (event.type !== "keydown") return true;
+            if (!shouldCopyTerminalSelection(event, terminal.hasSelection())) return true;
+
+            event.preventDefault();
+            void copySelectedTerminalText(terminal);
+            return false;
           });
           const fitAddon = new fit.FitAddon();
           terminal.loadAddon(fitAddon);
@@ -216,10 +231,7 @@ export function TerminalView({
     return () => {
       mountedRef.current = false;
       clearReconnectTimer();
-      if (inputDisposableRef.current) {
-        inputDisposableRef.current.dispose();
-        inputDisposableRef.current = null;
-      }
+      replaceTerminalInputListener(inputDisposableRef, null);
       if (socketRef.current) {
         socketRef.current.close();
         socketRef.current = null;
@@ -241,12 +253,13 @@ export function TerminalView({
 
       fitAddon.fit();
       if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(
-          JSON.stringify({
-            type: "terminal_resize",
-            payload: { cols: terminal.cols, rows: terminal.rows }
-          })
-        );
+        const resizeMessage = createTerminalResizeMessage({
+          cols: terminal.cols,
+          rows: terminal.rows
+        });
+        if (resizeMessage) {
+          socket.send(resizeMessage);
+        }
       }
     };
 
@@ -272,15 +285,31 @@ export function TerminalView({
 
   const showReconnectingOverlay = status === "reconnecting";
   const showFailedOverlay = status === "failed";
+  const statusTone =
+    status === "connected"
+      ? "bg-emerald-500"
+      : status === "reconnecting"
+        ? "bg-amber-400"
+        : status === "failed"
+          ? "bg-red-500"
+          : "bg-muted-foreground";
 
   return (
     <div
       data-testid="terminal-frame"
       className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-[#05070a]"
     >
-      <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        <span>session {sessionId}</span>
-        <span>{status}</span>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={cn("size-2 rounded-full", statusTone)} aria-hidden="true" />
+          <span aria-live="polite">{status}</span>
+          {attemptCount > 0 && status !== "connected" && (
+            <span className="text-amber-300">
+              {attemptCount}/{MAX_RECONNECT_ATTEMPTS}
+            </span>
+          )}
+        </div>
+        <span className="min-w-0 truncate font-mono">session {sessionId}</span>
       </div>
       {!authToken || !attachToken ? (
         <div className="p-4 text-sm text-destructive">
@@ -297,7 +326,7 @@ export function TerminalView({
           <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-10">
             <div className="text-center">
               <p className="text-yellow-400 text-sm font-mono">
-                {t("terminal.reconnecting")}... ({attemptCount}/{MAX_RECONNECT_ATTEMPTS})
+                {t("terminal.reconnecting")}… ({attemptCount}/{MAX_RECONNECT_ATTEMPTS})
               </p>
             </div>
           </div>

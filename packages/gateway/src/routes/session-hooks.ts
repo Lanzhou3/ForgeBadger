@@ -40,6 +40,13 @@ export function createSessionHookRoutes(db: Database, eventBus: OpenForgeEventBu
   const router = Router();
 
   router.post("/claude-notification/:sessionId", (req, res) => {
+    traceClaudeNotificationHook("received", {
+      route: "/claude-notification/:sessionId",
+      sessionIdFromPath: req.params.sessionId,
+      sessionIdHeaderPresent: Boolean(req.header("x-openforge-session-id")),
+      sessionTokenPresent: Boolean(req.header("x-openforge-session-token")),
+      bodyKeys: getBodyKeys(req.body)
+    });
     const result = handleClaudeNotificationHook(
       db,
       eventBus,
@@ -47,10 +54,23 @@ export function createSessionHookRoutes(db: Database, eventBus: OpenForgeEventBu
       req.header("x-openforge-session-token"),
       req.params.sessionId || req.header("x-openforge-session-id")
     );
+    traceClaudeNotificationHook("result", {
+      route: "/claude-notification/:sessionId",
+      status: result.status,
+      code: result.body.code,
+      accepted: result.body.data?.accepted ?? false,
+      message: result.body.message
+    });
     res.status(result.status).json(result.body);
   });
 
   router.post("/claude-notification", (req, res) => {
+    traceClaudeNotificationHook("received", {
+      route: "/claude-notification",
+      sessionIdHeaderPresent: Boolean(req.header("x-openforge-session-id")),
+      sessionTokenPresent: Boolean(req.header("x-openforge-session-token")),
+      bodyKeys: getBodyKeys(req.body)
+    });
     const result = handleClaudeNotificationHook(
       db,
       eventBus,
@@ -58,6 +78,13 @@ export function createSessionHookRoutes(db: Database, eventBus: OpenForgeEventBu
       req.header("x-openforge-session-token"),
       req.header("x-openforge-session-id")
     );
+    traceClaudeNotificationHook("result", {
+      route: "/claude-notification",
+      status: result.status,
+      code: result.body.code,
+      accepted: result.body.data?.accepted ?? false,
+      message: result.body.message
+    });
     res.status(result.status).json(result.body);
   });
 
@@ -74,10 +101,20 @@ export function handleClaudeNotificationHook(
   const dbClient = drizzle(db);
   const parsed = parseClaudeHookBody(body, sessionIdHeader);
   if (!parsed) {
+    traceClaudeNotificationHook("reject", {
+      reason: "invalid_input",
+      sessionIdHeaderPresent: Boolean(sessionIdHeader?.trim()),
+      bodyKeys: getBodyKeys(body)
+    });
     return { status: 400, body: { code: 1, message: "Invalid input" } };
   }
 
   if (!sessionToken) {
+    traceClaudeNotificationHook("reject", {
+      reason: "missing_session_token",
+      sessionId: parsed.sessionId,
+      hookEventName: parsed.event.hook_event_name ?? "Notification"
+    });
     return { status: 401, body: { code: 1, message: "Missing session token" } };
   }
 
@@ -88,6 +125,11 @@ export function handleClaudeNotificationHook(
     .get() as Session | undefined;
 
   if (!session || !session.attachToken || session.attachToken !== sessionToken) {
+    traceClaudeNotificationHook("reject", {
+      reason: "invalid_session_token",
+      sessionId: parsed.sessionId,
+      hookEventName: parsed.event.hook_event_name ?? "Notification"
+    });
     return { status: 401, body: { code: 1, message: "Invalid session token" } };
   }
 
@@ -199,4 +241,31 @@ function isPermissionPromptMessage(message?: string): boolean {
 function inferPermissionToolName(message?: string): string | undefined {
   const match = message?.match(/permission\s+to\s+use\s+([A-Za-z0-9_.:-]+)/i);
   return match?.[1];
+}
+
+function getBodyKeys(body: unknown): string[] {
+  if (!isRecord(body)) {
+    return [];
+  }
+  return Object.keys(body).slice(0, 20);
+}
+
+function traceClaudeNotificationHook(stage: string, details: Record<string, unknown>): void {
+  if (process.env.OPENFORGE_DEBUG_SESSION_HOOKS?.trim() !== "1") {
+    return;
+  }
+
+  process.stderr.write(
+    `${JSON.stringify({
+      level: "info",
+      action: "session_hooks.claude_notification",
+      stage,
+      timestamp: new Date().toISOString(),
+      ...details
+    })}\n`
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

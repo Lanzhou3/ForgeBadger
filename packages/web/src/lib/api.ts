@@ -1,5 +1,6 @@
 import { getToken } from "@/lib/auth";
 import type { StoredNotification } from "@/lib/notifications";
+import { getGatewayBaseUrl } from "@/lib/runtime-config";
 
 export interface GateASession {
   id: string;
@@ -124,6 +125,53 @@ export interface Session {
   apiKeyId?: string | null;
 }
 
+export interface CodexAppServerSession {
+  id: string;
+  userId: string;
+  projectId: string;
+  projectRoot: string;
+  runtimeMode: "app-server-stdio" | "app-server-websocket";
+  status: "running" | "stopped" | "error";
+  command: string;
+  args: string[];
+  listen: string;
+  pid?: number;
+  errorMessage?: string;
+  features?: {
+    turnInputEnabled: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CodexAppServerCapabilities {
+  initializeEnabled: boolean;
+  threadCreationEnabled: boolean;
+  turnInputEnabled: boolean;
+  promptInputExposed: boolean;
+  transcriptPersistence: "disabled";
+}
+
+export interface DependencyStatus {
+  name: string;
+  available: boolean;
+  required?: boolean;
+  version?: string;
+  error?: string;
+}
+
+export interface TerminalRuntimeStatus {
+  persistence: "tmux";
+  mode: "native_tmux" | "wsl_required" | "tmux_missing" | string;
+  supported: boolean;
+  message: string;
+}
+
+export interface DependencyReport {
+  dependencies: DependencyStatus[];
+  terminalRuntime?: TerminalRuntimeStatus;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -185,6 +233,7 @@ export interface SkillDiscovery {
   discoveredCount: number;
   createdCount: number;
   updatedCount: number;
+  deletedCount: number;
   skippedCount: number;
 }
 
@@ -251,6 +300,7 @@ export interface ProjectSkill {
   content: string;
   version: string;
   isEnabled: boolean;
+  selectionState?: "inherited_enabled" | "inherited_disabled" | "project_enabled" | "project_disabled";
 }
 
 export interface Model {
@@ -298,6 +348,94 @@ export interface ModelGroup {
   provider: string;
   count: number;
   models: Model[];
+}
+
+export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
+export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
+export type ProviderApplyAdapter = "claude" | "opencode" | "codex";
+
+export interface ProviderCatalogModel {
+  id: string;
+  name: string;
+  modelId: string;
+  capabilities: string[];
+  contextWindow?: number;
+}
+
+export interface ProviderCatalogPreset {
+  id: string;
+  name: string;
+  description: string;
+  baseUrl: string;
+  authType: ProviderAuthType;
+  apiFormat: ProviderApiFormat;
+  supportedAdapters: Array<"claude" | "opencode">;
+  modelSource: "static" | "dynamic";
+  modelFetch?: {
+    strategy: "openai-compatible";
+    modelsUrl?: string;
+  };
+  defaultModels: ProviderCatalogModel[];
+}
+
+export interface ProviderProfile {
+  id: string;
+  providerKey: string;
+  name: string;
+  baseUrl: string | null;
+  authType: ProviderAuthType;
+  apiFormat: ProviderApiFormat;
+  supportedAdapters: Array<"claude" | "opencode">;
+  status: string;
+}
+
+export interface ModelProfile {
+  id: string;
+  providerProfileId: string;
+  providerKey: string;
+  providerName: string;
+  baseUrl: string | null;
+  name: string;
+  modelId: string;
+  capabilities: string[];
+  status: string;
+  isDefault: boolean;
+}
+
+export interface ProviderModelSyncResult {
+  fetchedCount: number;
+  createdCount: number;
+  models: ModelProfile[];
+}
+
+export interface ProviderCredentialSummary {
+  id: string;
+  providerProfileId: string;
+  label: string | null;
+  status: string;
+  secretPreview: string;
+}
+
+export interface ProviderApplyPreview {
+  adapter: ProviderApplyAdapter;
+  env: Record<string, string>;
+  secretEnvNames: string[];
+  changedFiles: Array<{ relativePath: string; operation: "create" | "update" }>;
+  backupPath?: string;
+}
+
+export interface CodexSubscriptionStatus {
+  providerApplyEnabled: boolean;
+  identitySource: "chatgpt_subscription_sdk";
+  connectionState: "connected" | "not_connected" | "pending_sdk_connection";
+  accountLabel: string | null;
+  canUseAppServerIdentity: boolean;
+  sdk: {
+    packageName: string;
+    installed: boolean;
+    docsUrl: string;
+    appServerDocsUrl: string;
+  };
 }
 
 export interface Plugin {
@@ -417,11 +555,14 @@ export interface AdapterDiscovery {
   supportLevel: "supported" | "prototype";
   launchEnabled: boolean;
   configDir: string;
+  runtimeModes: Array<"terminal" | "app-server-stdio" | "app-server-websocket" | string>;
   available: boolean;
   status: "available" | "missing";
   version?: string;
   error?: string;
 }
+
+export type RuntimeAdapterId = AdapterDiscovery["id"];
 
 export type CredentialMode = "host_environment" | "stored_encrypted_key";
 
@@ -537,6 +678,9 @@ export interface ConfigConflict {
   relativePath: string;
   conflictType: string;
   allowedActions: string[];
+  existingSha256?: string;
+  incomingSha256?: string;
+  diffPreview?: Array<{ line: number; existing: string; incoming: string }>;
 }
 
 export interface ConfigPreview {
@@ -642,22 +786,21 @@ interface ApiEnvelope<T> {
   message: string;
 }
 
-export const gatewayBaseUrl =
-  process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://127.0.0.1:48731";
+const DEFAULT_API_TIMEOUT_MS = 30_000;
+
+export const gatewayBaseUrl = getGatewayBaseUrl();
+
+export function apiUrl(path: string): string {
+  const baseUrl = getGatewayBaseUrl().replace(/\/+$/, "");
+  return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+}
 
 export async function fetchJson<T = unknown>(path: string, options: RequestInit = {}) {
   const token = getToken();
-  const res = await fetch(`${gatewayBaseUrl}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
+  const { request, cleanup } = buildApiRequest(options, token);
+  const res = await fetch(apiUrl(path), request).finally(cleanup);
   if (!res.ok) {
-    const text = await res.text().catch(() => "Unknown error");
-    throw new Error(text);
+    throw new Error(formatHttpError(res));
   }
   const envelope = (await res.json()) as ApiEnvelope<T>;
   if (envelope.code !== 0) {
@@ -668,23 +811,46 @@ export async function fetchJson<T = unknown>(path: string, options: RequestInit 
 
 export async function fetchEnvelope<T = unknown>(path: string, options: RequestInit = {}) {
   const token = getToken();
-  const res = await fetch(`${gatewayBaseUrl}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
+  const { request, cleanup } = buildApiRequest(options, token);
+  const res = await fetch(apiUrl(path), request).finally(cleanup);
   if (!res.ok) {
-    const text = await res.text().catch(() => "Unknown error");
-    throw new Error(text);
+    throw new Error(formatHttpError(res));
   }
   const envelope = (await res.json()) as ApiEnvelope<T>;
   if (envelope.code !== 0) {
     throw new Error(envelope.message || "API request failed");
   }
   return envelope;
+}
+
+function buildApiRequest(options: RequestInit, token: string | null): {
+  request: RequestInit;
+  cleanup: () => void;
+} {
+  const controller = options.signal ? undefined : new AbortController();
+  const timeout = controller
+    ? setTimeout(() => controller.abort(), DEFAULT_API_TIMEOUT_MS)
+    : undefined;
+  return {
+    request: {
+      ...options,
+      signal: options.signal ?? controller?.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    },
+    cleanup: () => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    },
+  };
+}
+
+function formatHttpError(res: Response): string {
+  return `Gateway request failed with HTTP ${res.status}`;
 }
 
 export async function login(email: string, password: string) {
@@ -705,11 +871,10 @@ export async function getMe() {
   return fetchEnvelope<User>("/api/v1/auth/me", { method: "GET" });
 }
 
-export async function getDependencies(): Promise<unknown> {
-  const response = await fetch(`${gatewayBaseUrl}/api/v1/gate-a/dependencies`, {
+export async function getDependencies(): Promise<DependencyReport> {
+  return fetchJson("/api/v1/gate-a/dependencies", {
     cache: "no-store"
-  });
-  return response.json();
+  }) as Promise<DependencyReport>;
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
@@ -750,12 +915,14 @@ export async function listActivities(params: {
   sessionId?: string;
   projectId?: string;
   agentId?: string;
+  types?: string[];
   limit?: number;
 } = {}): Promise<{ activities: SessionActivity[] }> {
   const searchParams = new URLSearchParams();
   if (params.sessionId) searchParams.set("sessionId", params.sessionId);
   if (params.projectId) searchParams.set("projectId", params.projectId);
   if (params.agentId) searchParams.set("agentId", params.agentId);
+  if (params.types && params.types.length > 0) searchParams.set("type", params.types.join(","));
   if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
   const query = searchParams.toString();
   return fetchJson(`/api/v1/activities${query ? `?${query}` : ""}`) as Promise<{ activities: SessionActivity[] }>;
@@ -830,6 +997,21 @@ export function defaultTemplateForAiTool(aiTool?: string | null): string {
   return "builtin-claude-code";
 }
 
+export function isAdapterLaunchable(adapter: Pick<AdapterDiscovery, "available" | "launchEnabled">): boolean {
+  return adapter.available && adapter.launchEnabled;
+}
+
+export function chooseDefaultRuntimeAdapter(
+  adapters: readonly AdapterDiscovery[],
+  preferred?: RuntimeAdapterId | string | null
+): RuntimeAdapterId | undefined {
+  const preferredAdapter = adapters.find((adapter) => adapter.id === preferred);
+  if (preferredAdapter && isAdapterLaunchable(preferredAdapter)) {
+    return preferredAdapter.id;
+  }
+  return adapters.find(isAdapterLaunchable)?.id;
+}
+
 export async function listProjects(): Promise<{ projects: Project[] }> {
   return fetchJson("/api/v1/projects") as Promise<{ projects: Project[] }>;
 }
@@ -837,16 +1019,13 @@ export async function listProjects(): Promise<{ projects: Project[] }> {
 export async function createProject(data: {
   name: string;
   path: string;
-  aiTool: string;
+  aiTool?: RuntimeAdapterId;
   description?: string;
   templateId?: string;
 }): Promise<{ project: Project }> {
   return fetchJson("/api/v1/projects", {
     method: "POST",
-    body: JSON.stringify({
-      ...data,
-      templateId: data.templateId ?? defaultTemplateForAiTool(data.aiTool),
-    }),
+    body: JSON.stringify(data),
   }) as Promise<{ project: Project }>;
 }
 
@@ -913,13 +1092,19 @@ export async function generateConfig(
 }
 
 // Sessions
-export async function listSessions(): Promise<{ sessions: Session[] }> {
-  return fetchJson("/api/v1/sessions") as Promise<{ sessions: Session[] }>;
+export function listSessions(): Promise<{ sessions: Session[] }>;
+export function listSessions(params: { projectId?: string }): Promise<{ sessions: Session[] }>;
+export async function listSessions(params: { projectId?: string } = {}): Promise<{ sessions: Session[] }> {
+  const searchParams = new URLSearchParams();
+  if (params.projectId) searchParams.set("projectId", params.projectId);
+  const query = searchParams.toString();
+  return fetchJson(`/api/v1/sessions${query ? `?${query}` : ""}`) as Promise<{ sessions: Session[] }>;
 }
 
 export async function createSession(data: {
   projectId: string;
   credentialMode: CredentialMode;
+  aiTool?: RuntimeAdapterId;
   modelId?: string;
   apiKeyId?: string;
 }): Promise<{ session: Session }> {
@@ -944,6 +1129,70 @@ export async function deleteSession(id: string): Promise<unknown> {
 
 export async function connectSession(id: string): Promise<{ session: Session }> {
   return fetchJson(`/api/v1/sessions/${id}/connect`, { method: "POST" }) as Promise<{ session: Session }>;
+}
+
+export async function listCodexAppServers(): Promise<{ sessions: CodexAppServerSession[] }> {
+  return fetchJson("/api/v1/codex/app-server") as Promise<{ sessions: CodexAppServerSession[] }>;
+}
+
+export async function getCodexAppServerCapabilities(): Promise<{ capabilities: CodexAppServerCapabilities }> {
+  return fetchJson("/api/v1/codex/app-server/capabilities") as Promise<{
+    capabilities: CodexAppServerCapabilities;
+  }>;
+}
+
+export async function startCodexAppServer(input: {
+  projectId: string;
+  runtimeMode: "app-server-stdio" | "app-server-websocket";
+  credentialMode?: "host_environment";
+}): Promise<{ session: CodexAppServerSession }> {
+  return fetchJson("/api/v1/codex/app-server", {
+    method: "POST",
+    body: JSON.stringify({
+      projectId: input.projectId,
+      runtimeMode: input.runtimeMode,
+      ...(input.credentialMode ? { credentialMode: input.credentialMode } : {}),
+    }),
+  }) as Promise<{ session: CodexAppServerSession }>;
+}
+
+export async function initializeCodexAppServer(id: string): Promise<{ result: unknown }> {
+  return fetchJson(`/api/v1/codex/app-server/${id}/initialize`, { method: "POST" }) as Promise<{
+    result: unknown;
+  }>;
+}
+
+export async function startCodexAppServerThread(
+  id: string,
+  input: {
+    cwd?: string;
+    model?: string;
+    approvalPolicy?: string;
+    sandbox?: string;
+  } = {}
+): Promise<{ result: unknown }> {
+  return fetchJson(`/api/v1/codex/app-server/${id}/thread`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ result: unknown }>;
+}
+
+export async function startCodexAppServerTurn(
+  id: string,
+  input: { threadId: string; text: string }
+): Promise<{ result: unknown }> {
+  // Guarded prototype API only. The current Web surface intentionally does not
+  // expose prompt/turn controls unless Gateway enables turn input explicitly.
+  return fetchJson(`/api/v1/codex/app-server/${id}/turn`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ result: unknown }>;
+}
+
+export async function stopCodexAppServer(id: string): Promise<{ session: CodexAppServerSession }> {
+  return fetchJson(`/api/v1/codex/app-server/${id}/stop`, { method: "POST" }) as Promise<{
+    session: CodexAppServerSession;
+  }>;
 }
 
 // Agents
@@ -1110,6 +1359,7 @@ export interface ScanResult {
   path: string;
   exists: boolean;
   isDirectory: boolean;
+  instructionFiles?: string[];
 }
 
 export async function scanProject(path: string): Promise<ScanResult> {
@@ -1122,13 +1372,14 @@ export async function scanProject(path: string): Promise<ScanResult> {
 export interface ImportProjectInput {
   path: string;
   name: string;
-  aiTool: string;
+  aiTool?: RuntimeAdapterId;
   templateId?: string;
+  skipConfigGeneration?: boolean;
 }
 
 export interface ProjectWithConfigResult {
   project: Project;
-  configStatus: "applied" | "failed";
+  configStatus: "applied" | "failed" | "skipped";
   configError?: string;
 }
 
@@ -1138,8 +1389,10 @@ export async function importProject(input: ImportProjectInput): Promise<{ projec
   return fetchJson("/api/v1/projects/import", {
     method: "POST",
     body: JSON.stringify({
-      ...input,
-      templateId: input.templateId ?? defaultTemplateForAiTool(input.aiTool),
+      path: input.path,
+      name: input.name,
+      ...(input.aiTool ? { aiTool: input.aiTool } : {}),
+      ...(input.templateId ? { templateId: input.templateId } : {}),
     }),
   }) as Promise<{ project: Project }>;
 }
@@ -1148,38 +1401,20 @@ export async function importProjectWithConfig(
   input: ImportProjectInput
 ): Promise<ImportProjectWithConfigResult> {
   const { project } = await importProject(input);
-  try {
-    await generateConfig(project.id, project.templateId ?? input.templateId ?? defaultTemplateForAiTool(input.aiTool));
-    return { project, configStatus: "applied" };
-  } catch (error) {
-    return {
-      project,
-      configStatus: "failed",
-      configError: error instanceof Error ? error.message : "Config generation failed",
-    };
-  }
+  return { project, configStatus: "skipped" };
 }
 
 export async function createProjectWithConfig(
   input: {
     path: string;
     name: string;
-    aiTool: string;
+    aiTool?: RuntimeAdapterId;
     description?: string;
     templateId?: string;
   }
 ): Promise<ProjectWithConfigResult> {
   const { project } = await createProject(input);
-  try {
-    await generateConfig(project.id, project.templateId ?? input.templateId ?? defaultTemplateForAiTool(input.aiTool));
-    return { project, configStatus: "applied" };
-  } catch (error) {
-    return {
-      project,
-      configStatus: "failed",
-      configError: error instanceof Error ? error.message : "Config generation failed",
-    };
-  }
+  return { project, configStatus: "skipped" };
 }
 
 // Templates
@@ -1323,6 +1558,137 @@ export async function checkModelEndpointHealth(
   }) as Promise<{ health: ModelEndpointHealth }>;
 }
 
+export async function listProviderCatalog(): Promise<{ providers: ProviderCatalogPreset[] }> {
+  return fetchJson("/api/v1/model-providers/catalog") as Promise<{ providers: ProviderCatalogPreset[] }>;
+}
+
+export async function listModelProviders(): Promise<{
+  providers: ProviderProfile[];
+  models: ModelProfile[];
+  credentials: ProviderCredentialSummary[];
+}> {
+  return fetchJson("/api/v1/model-providers") as Promise<{
+    providers: ProviderProfile[];
+    models: ModelProfile[];
+    credentials: ProviderCredentialSummary[];
+  }>;
+}
+
+export async function createModelProvider(data: {
+  catalogId?: string;
+  name?: string;
+  providerKey?: string;
+  baseUrl?: string;
+  authType?: ProviderAuthType;
+  apiFormat?: ProviderApiFormat;
+  supportedAdapters?: Array<"claude" | "opencode">;
+}): Promise<{ provider: ProviderProfile; models: ModelProfile[] }> {
+  return fetchJson("/api/v1/model-providers", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ provider: ProviderProfile; models: ModelProfile[] }>;
+}
+
+export async function deleteModelProvider(providerId: string): Promise<unknown> {
+  return fetchJson(`/api/v1/model-providers/${providerId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function createProviderCredential(
+  providerId: string,
+  data: { label?: string; plaintextSecret: string }
+): Promise<{ credential: ProviderCredentialSummary }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/credentials`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ credential: ProviderCredentialSummary }>;
+}
+
+export async function rotateProviderCredential(
+  providerId: string,
+  credentialId: string,
+  data: { label?: string; plaintextSecret: string }
+): Promise<{ credential: ProviderCredentialSummary }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/credentials/${credentialId}/rotate`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ credential: ProviderCredentialSummary }>;
+}
+
+export async function deleteProviderCredential(providerId: string, credentialId: string): Promise<unknown> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/credentials/${credentialId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function createProviderModel(
+  providerId: string,
+  data: { name: string; modelId: string; capabilities?: string[]; isDefault?: boolean }
+): Promise<{ model: ModelProfile }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/models`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ model: ModelProfile }>;
+}
+
+export async function updateProviderModel(
+  providerId: string,
+  modelId: string,
+  data: { name?: string; modelId?: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean }
+): Promise<{ model: ModelProfile }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/models/${modelId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  }) as Promise<{ model: ModelProfile }>;
+}
+
+export async function setDefaultProviderModel(providerId: string, modelId: string): Promise<{ model: ModelProfile }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/models/${modelId}/set-default`, {
+    method: "POST",
+  }) as Promise<{ model: ModelProfile }>;
+}
+
+export async function deleteProviderModel(providerId: string, modelId: string): Promise<unknown> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/models/${modelId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function syncProviderModels(
+  providerId: string,
+  data: { credentialId?: string; timeoutMs?: number } = {}
+): Promise<ProviderModelSyncResult> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/models/sync`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<ProviderModelSyncResult>;
+}
+
+export async function previewProviderApply(
+  providerId: string,
+  data: { adapter: ProviderApplyAdapter; projectRoot: string; modelProfileId?: string; credentialId?: string }
+): Promise<{ preview: ProviderApplyPreview }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/preview-apply`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ preview: ProviderApplyPreview }>;
+}
+
+export async function applyProviderConfig(
+  providerId: string,
+  data: { adapter: ProviderApplyAdapter; projectRoot: string; modelProfileId?: string; credentialId?: string }
+): Promise<{ result: ProviderApplyPreview }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/apply`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ result: ProviderApplyPreview }>;
+}
+
+export async function getCodexSubscriptionStatus(): Promise<{ status: CodexSubscriptionStatus }> {
+  return fetchJson("/api/v1/codex/subscription/status") as Promise<{ status: CodexSubscriptionStatus }>;
+}
+
 export async function listApiKeys(): Promise<{ apiKeys: ApiKeySummary[] }> {
   return fetchJson("/api/v1/api-keys") as Promise<{ apiKeys: ApiKeySummary[] }>;
 }
@@ -1389,7 +1755,7 @@ export async function getConfigCompliance(
 export async function writeConfig(
   projectId: string,
   templateId = "builtin-claude-code",
-  decisions: Record<string, "skip" | "overwrite"> = { ".claude/CLAUDE.md": "overwrite" }
+  decisions: Record<string, "skip" | "overwrite"> = { "CLAUDE.md": "overwrite" }
 ): Promise<ConfigWriteResult> {
   return fetchJson(`/api/v1/projects/${encodeURIComponent(projectId)}/config/write`, {
     method: "POST",

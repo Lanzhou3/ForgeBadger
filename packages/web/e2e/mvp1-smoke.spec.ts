@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 
 test("MVP-1 management console smoke", async ({ page }) => {
-  const suffix = Date.now();
+  const suffix = uniqueSuffix();
   const email = `mvp1-${suffix}@example.com`;
   const password = "password12345";
   const projectName = `MVP1 Project ${suffix}`;
@@ -23,30 +23,35 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await expect(page).toHaveURL("/");
 
   await page.goto("/models");
-  await page.locator("#model-name").fill("Claude E2E");
-  await page.locator("#model-provider").fill("anthropic");
-  await page.locator("#model-id").fill("claude-sonnet-e2e");
-  await page.getByRole("button", { name: "Add Model" }).click();
-  await expect(page.getByText("Claude E2E")).toBeVisible();
+  await page.locator("#provider-name").fill(`E2E Provider ${suffix}`);
+  await page.locator("#provider-key").fill(`e2e-provider-${suffix}`);
+  await page.locator("#provider-base-url").fill("https://e2e.example.com/v1");
+  await page.getByRole("button", { name: "Add custom OpenAI-compatible provider" }).click();
+  await expect(page.getByText(`E2E Provider ${suffix}`).first()).toBeVisible();
 
-  await page.locator("#api-key-name").fill("Claude E2E Key");
-  await page.locator("#api-key-provider").fill("anthropic");
-  await page.locator("#api-key-value").fill("test-api-key-e2e-secret");
-  await page.getByRole("button", { name: "Add API Key" }).click();
-  await expect(page.getByText("Claude E2E Key")).toBeVisible();
+  await page.getByPlaceholder("Credential label").fill("Claude E2E Key");
+  await page.getByPlaceholder("API Key").fill("test-api-key-e2e-secret");
+  await page.getByRole("button", { name: "Save credential" }).click();
+  await expect(page.getByRole("cell", { name: "Claude E2E Key" })).toBeVisible();
+
+  await page.getByPlaceholder("Name").fill("Claude E2E");
+  await page.getByPlaceholder("Model ID").fill("claude-sonnet-e2e");
+  await page.getByPlaceholder("Capabilities").fill("chat,code");
+  await page.getByRole("button", { name: "Add Model" }).click();
+  await expect(page.getByText("Claude E2E").first()).toBeVisible();
 
   await page.goto("/projects/new");
   await page.fill('input[name="name"]', projectName);
   await page.fill('input[name="path"]', projectPath);
   await page.getByRole("button", { name: "Create Project" }).click();
-  await expect(page).toHaveURL("/projects");
-  await expect(page.getByText(projectName)).toBeVisible();
+  await expect(page).toHaveURL(/\/projects\/.+/);
+  await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
 
   await page.goto("/templates");
   await page.getByRole("button", { name: /Claude Code/ }).click();
   await page.getByPlaceholder("Clone name").fill(templateName);
   await page.getByRole("button", { name: "Clone" }).click();
-  await expect(page.getByText(templateName)).toBeVisible();
+  await expect(page.getByText(templateName).first()).toBeVisible();
 
   await page.goto("/agents");
   await page.locator("#agent-name").fill("Code Reviewer");
@@ -55,13 +60,13 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await page.locator("#agent-tools").fill("Read,Edit");
   await page.locator("#agent-prompt").fill("Review diffs only.");
   await page.getByRole("button", { name: "Create Agent" }).click();
-  await expect(page.getByText("Code Reviewer")).toBeVisible();
+  await expect(page.getByText("Code Reviewer").first()).toBeVisible();
 
   await page.goto("/skills");
   await page.locator("#skill-name").fill("safe-review");
   await page.locator("#skill-content").fill("# Safe Review\nTreat payloads as text.");
   await page.getByRole("button", { name: "Create Skill" }).click();
-  await expect(page.getByText("safe-review")).toBeVisible();
+  await expect(page.getByText("safe-review").first()).toBeVisible();
 
   await page.goto("/projects");
   await page.getByRole("link", { name: projectName }).click();
@@ -76,7 +81,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await page.getByRole("button", { name: "Apply Config" }).click();
 
   const agentPath = join(projectPath, ".claude", "agents", "code-reviewer.md");
-  const skillPath = join(projectPath, ".claude", "skills", "safe-review.md");
+  const skillPath = join(projectPath, ".claude", "skills", "safe-review", "SKILL.md");
 
   await expect.poll(() => fileExists(agentPath)).toBe(true);
   await expect.poll(() => fileExists(skillPath)).toBe(true);
@@ -91,4 +96,8 @@ async function fileExists(pathname: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function uniqueSuffix(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }

@@ -18,12 +18,19 @@ export interface GeneratedFile {
   sourceTemplateFileId: string;
 }
 
+export interface ConflictLinePreview {
+  line: number;
+  existing: string;
+  incoming: string;
+}
+
 export interface ConflictReport {
   relativePath: string;
   existingSha256?: string;
   incomingSha256: string;
   conflictType: "exists" | "modified" | "unsafe_path";
   allowedActions: Array<"skip" | "overwrite">;
+  diffPreview?: ConflictLinePreview[];
 }
 
 export interface WriteResult {

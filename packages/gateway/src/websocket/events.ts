@@ -3,14 +3,21 @@ import { WebSocket, WebSocketServer } from "ws";
 
 import { verifyJwt } from "../auth/jwt.js";
 import type { OpenForgeEventBus, OpenForgeEvent } from "../services/event-bus.js";
+import { extractWsAuthToken } from "./auth.js";
+import { WebSocketConnectionLimits } from "./connection-limits.js";
 
 const EVENTS_HEARTBEAT_INTERVAL_MS = 30_000;
 const EVENTS_HEARTBEAT_TIMEOUT_MS = 90_000;
+const DEFAULT_EVENTS_WS_MAX_CONNECTIONS = 300;
+const DEFAULT_EVENTS_WS_MAX_CONNECTIONS_PER_USER = 10;
+const EVENTS_WS_AUTH_PROTOCOL = "openforge-events";
 
 export interface EventsWebSocketOptions {
   server: Server;
   eventBus: OpenForgeEventBus;
   jwtSecret: string;
+  maxConnections?: number;
+  maxConnectionsPerUser?: number;
 }
 
 interface EventsClient {
@@ -20,7 +27,14 @@ interface EventsClient {
 }
 
 export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({
+    noServer: true
+  });
+  const limits = new WebSocketConnectionLimits<WebSocket>({
+    maxGlobalConnections: options.maxConnections ?? DEFAULT_EVENTS_WS_MAX_CONNECTIONS,
+    maxConnectionsPerUser:
+      options.maxConnectionsPerUser ?? DEFAULT_EVENTS_WS_MAX_CONNECTIONS_PER_USER
+  });
   const clients = new Map<WebSocket, EventsClient>();
 
   options.server.on("upgrade", (request, socket, head) => {
@@ -29,7 +43,7 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
       return;
     }
 
-    const token = url.searchParams.get("token");
+    const token = extractWsAuthToken(request.headers, EVENTS_WS_AUTH_PROTOCOL);
     if (!token) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
@@ -47,6 +61,12 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
     }
 
     wss.handleUpgrade(request, socket, head, (ws) => {
+      const acquire = limits.tryAcquire(ws, userId);
+      if (!acquire.accepted) {
+        ws.close(1008, `WebSocket connection limit exceeded: ${acquire.reason}`);
+        return;
+      }
+
       const client: EventsClient = {
         ws,
         userId,
@@ -54,16 +74,18 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
       };
       clients.set(ws, client);
 
-      ws.on("pong", () => {
-        client.lastPongAt = Date.now();
-      });
-
       ws.on("close", () => {
         clients.delete(ws);
+        limits.release(ws);
       });
 
       ws.on("error", () => {
         clients.delete(ws);
+        limits.release(ws);
+      });
+
+      ws.on("pong", () => {
+        client.lastPongAt = Date.now();
       });
     });
   });

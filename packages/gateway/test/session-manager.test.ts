@@ -51,6 +51,21 @@ describe("InMemorySessionManager", () => {
     ]);
   });
 
+  it("preserves caller user id when stopping a stale tmux-backed session", async () => {
+    const calls: string[] = [];
+    const manager = new InMemorySessionManager(fakeTmux(calls));
+
+    const stopped = await manager.stopSession(
+      "session_stale",
+      "of-user_123-session_stale",
+      "user_123456"
+    );
+
+    assert.equal(stopped.status, "exited");
+    assert.equal(stopped.userId, "user_123456");
+    assert.deepEqual(calls, ["kill:of-user_123-session_stale"]);
+  });
+
   it("returns captured history from tmux", async () => {
     const manager = new InMemorySessionManager(fakeTmux([]));
     const session = await manager.createSession({
@@ -62,6 +77,28 @@ describe("InMemorySessionManager", () => {
     const history = await manager.captureHistory(session.id);
 
     assert.equal(history, "hello from tmux");
+  });
+
+  it("resizes the backing tmux window for an active session", async () => {
+    const calls: string[] = [];
+    const manager = new InMemorySessionManager({
+      ...fakeTmux(calls),
+      async resizeWindow(name, cols, rows) {
+        calls.push(`resize:${name}:${cols}x${rows}`);
+      }
+    });
+    const session = await manager.createSession({
+      userId: "user_123456",
+      sessionId: "session_abcdef",
+      launchPlan: launchPlan()
+    });
+
+    await manager.resizeSession(session.id, 180, 50);
+
+    assert.deepEqual(calls, [
+      "create:of-user_123-session_abcdef",
+      "resize:of-user_123-session_abcdef:180x50"
+    ]);
   });
 
   it("marks launch failures as errors", async () => {
@@ -152,6 +189,39 @@ describe("InMemorySessionManager", () => {
 
     assert.deepEqual(result.killedOrphans, ["of-gate-a-u-session_orphan"]);
     assert.deepEqual(calls, ["kill:of-gate-a-u-session_orphan"]);
+  });
+
+  it("only recovers and kills sessions matching the configured tmux prefix", async () => {
+    const calls: string[] = [];
+    const manager = new InMemorySessionManager({
+      async createSession() {},
+      async killSession(name) {
+        calls.push(`kill:${name}`);
+      },
+      async capturePane() {
+        return "";
+      },
+      async listSessions() {
+        return ["of-user123-session", "smoke-user123-known", "smoke-user123-orphan"];
+      }
+    }, new MemoryRecoveryStore([
+      {
+        id: "session_known",
+        userId: "gate-a-user",
+        tmuxName: "smoke-user123-known",
+        launchPlan: launchPlan(),
+        createdAt: "2026-04-27T00:00:00.000Z"
+      }
+    ]), undefined, { tmuxPrefix: "smoke-" });
+
+    const result = await manager.recoverOpenForgeSessions({
+      userId: "gate-a-user",
+      cwd: "/tmp"
+    });
+
+    assert.equal(result.recovered[0]?.tmuxName, "smoke-user123-known");
+    assert.deepEqual(result.killedOrphans, ["smoke-user123-orphan"]);
+    assert.deepEqual(calls, ["kill:smoke-user123-orphan"]);
   });
 
   it("writes successfully created sessions to the recovery index", async () => {

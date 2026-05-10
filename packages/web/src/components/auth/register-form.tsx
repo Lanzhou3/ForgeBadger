@@ -93,12 +93,16 @@ export function RegisterForm() {
       {errors.root && (
         <p className="text-sm text-destructive">{errors.root.message}</p>
       )}
-      <Button type="submit" disabled={isSubmitting}>
+      <Button
+        type="submit"
+        disabled={isSubmitting}
+        className="bg-brand text-brand-foreground hover:bg-brand/90"
+      >
         {isSubmitting ? "Creating account..." : "Create account"}
       </Button>
       <p className="text-sm text-muted-foreground">
         Already have an account?{" "}
-        <Link href="/login" className="text-primary underline">
+        <Link href="/login" className="text-brand underline">
           Sign in
         </Link>
       </p>
