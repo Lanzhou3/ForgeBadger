@@ -24,8 +24,8 @@ jobs:
     timeout-minutes: 45
     env:
       OPENFORGE_HOST: 127.0.0.1
-      OPENFORGE_PORT: 48731
-      OPENFORGE_WEB_PORT: 48732
+      OPENFORGE_PORT: "48731"
+      OPENFORGE_WEB_PORT: "48732"
       OPENFORGE_GATEWAY_URL: http://127.0.0.1:48731
       NEXT_PUBLIC_GATEWAY_URL: http://127.0.0.1:48731
       OPENFORGE_DB_PATH: /tmp/openforge-ci.db
@@ -80,7 +80,7 @@ jobs:
     env:
       NEXT_PUBLIC_GATEWAY_URL: http://127.0.0.1:48731
       OPENFORGE_WEB_URL: http://127.0.0.1:48752
-      OPENFORGE_WEB_PORT: 48752
+      OPENFORGE_WEB_PORT: "48752"
       NEXT_TELEMETRY_DISABLED: "1"
       CI: "true"
     steps:
