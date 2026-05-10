@@ -25,14 +25,25 @@ export interface CliDependencyStatus {
   error?: string;
 }
 
+export type CliTerminalRuntimeMode = "native_tmux" | "wsl_required" | "tmux_missing";
+
+export interface CliTerminalRuntimeStatus {
+  persistence: "tmux";
+  mode: CliTerminalRuntimeMode;
+  supported: boolean;
+  message: string;
+}
+
 interface CliDependencyCheck {
   name: string;
   args: string[];
   required: boolean;
 }
 
+const TMUX_DEPENDENCY_CHECK: CliDependencyCheck = { name: "tmux", args: ["-V"], required: true };
+
 const CLI_DEPENDENCY_CHECKS: CliDependencyCheck[] = [
-  { name: "tmux", args: ["-V"], required: true },
+  TMUX_DEPENDENCY_CHECK,
   { name: "claude", args: ["--version"], required: false },
   { name: "opencode", args: ["--version"], required: false },
   { name: "codex", args: ["--version"], required: false }
@@ -51,6 +62,54 @@ export async function checkCliDependencies(
   runner: CliCommandRunner = runCommand
 ): Promise<CliDependencyStatus[]> {
   return Promise.all(CLI_DEPENDENCY_CHECKS.map((check) => checkDependency(check, runner)));
+}
+
+export interface CliTerminalRuntimeCheckOptions {
+  runner?: CliCommandRunner | undefined;
+  platform?: NodeJS.Platform | undefined;
+}
+
+export async function checkCliTerminalRuntime(
+  options: CliTerminalRuntimeCheckOptions = {}
+): Promise<CliTerminalRuntimeStatus> {
+  const platform = options.platform ?? process.platform;
+  if (platform === "win32") {
+    return describeCliTerminalRuntime([], platform);
+  }
+
+  const tmux = await checkDependency(TMUX_DEPENDENCY_CHECK, options.runner ?? runCommand);
+  return describeCliTerminalRuntime([tmux], platform);
+}
+
+export function describeCliTerminalRuntime(
+  dependencies: CliDependencyStatus[],
+  platform: NodeJS.Platform = process.platform
+): CliTerminalRuntimeStatus {
+  if (platform === "win32") {
+    return {
+      persistence: "tmux",
+      mode: "wsl_required",
+      supported: false,
+      message: "Native Windows terminals require WSL because OpenForge persists sessions with tmux."
+    };
+  }
+
+  const tmux = dependencies.find((dependency) => dependency.name === "tmux");
+  if (tmux?.available) {
+    return {
+      persistence: "tmux",
+      mode: "native_tmux",
+      supported: true,
+      message: "tmux is available for persistent browser terminals."
+    };
+  }
+
+  return {
+    persistence: "tmux",
+    mode: "tmux_missing",
+    supported: false,
+    message: "Install tmux to enable persistent browser terminals."
+  };
 }
 
 async function checkDependency(

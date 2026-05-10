@@ -1,4 +1,8 @@
-import { checkCliDependencies, type CliCommandRunner } from "../runtime/dependency-check.js";
+import {
+  checkCliDependencies,
+  describeCliTerminalRuntime,
+  type CliCommandRunner
+} from "../runtime/dependency-check.js";
 import { loadOrCreateRuntimeConfig, type RuntimeConfig } from "../runtime/config.js";
 
 interface OutputWriter {
@@ -8,6 +12,7 @@ interface OutputWriter {
 export interface DoctorOptions {
   dependencyRunner?: CliCommandRunner;
   loadConfig?: () => Promise<RuntimeConfig>;
+  platform?: NodeJS.Platform;
   stdout?: OutputWriter;
   stderr?: OutputWriter;
 }
@@ -26,6 +31,8 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<number> {
     const error = item.error ? ` - ${item.error}` : "";
     stdout.write(`${marker} ${item.name}${version}${error}\n`);
   }
+  const terminalRuntime = describeCliTerminalRuntime(dependencies, options.platform);
+  stdout.write(`terminal ${terminalRuntime.mode} - ${terminalRuntime.message}\n`);
 
   if (requiredMissing.length > 0) {
     stderr.write("Required dependencies are missing. Install them before launching terminal sessions.\n");

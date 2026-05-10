@@ -16,6 +16,10 @@ import {
   writeWebRuntimeConfig,
   type WriteWebRuntimeConfigOptions
 } from "../runtime/web-runtime.js";
+import {
+  checkCliTerminalRuntime,
+  type CliCommandRunner
+} from "../runtime/dependency-check.js";
 
 interface OutputWriter {
   write(chunk: string): unknown;
@@ -30,7 +34,10 @@ export interface RunStartOptions extends LoadRuntimeConfigOptions {
   writeRuntimeConfig?: (options: WriteWebRuntimeConfigOptions) => Promise<string>;
   spawn?: (entry: string, env: NodeJS.ProcessEnv) => ChildProcess;
   installShutdown?: (children: ChildProcess[]) => ShutdownCleanup | void;
+  dependencyRunner?: CliCommandRunner;
+  platform?: NodeJS.Platform;
   stdout?: OutputWriter;
+  stderr?: OutputWriter;
 }
 
 interface ChildResult {
@@ -63,10 +70,18 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
   const spawnProcess = options.spawn ?? spawnNode;
   const installShutdown = options.installShutdown ?? installShutdownHandlers;
   const stdout = options.stdout ?? process.stdout;
+  const stderr = options.stderr ?? process.stderr;
 
   const config = await loadConfig(toRuntimeConfigOptions(options));
   const paths = resolvePaths();
   assertDistinctBindEndpoints(config);
+  if (options.dependencyRunner || options.spawn === undefined) {
+    await warnIfTerminalRuntimeUnsupported({
+      dependencyRunner: options.dependencyRunner,
+      platform: options.platform ?? process.platform,
+      stderr
+    });
+  }
 
   const gatewayUrl = buildBrowserUrl(config.gateway.host, config.gateway.port);
   const webUrl = buildBrowserUrl(config.web.host, config.web.port);
@@ -111,6 +126,23 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
   } finally {
     cleanupShutdown();
   }
+}
+
+async function warnIfTerminalRuntimeUnsupported(options: {
+  dependencyRunner?: CliCommandRunner | undefined;
+  platform: NodeJS.Platform;
+  stderr: OutputWriter;
+}): Promise<void> {
+  const terminalRuntime = await checkCliTerminalRuntime({
+    ...(options.dependencyRunner ? { runner: options.dependencyRunner } : {}),
+    platform: options.platform
+  });
+  if (terminalRuntime.supported) {
+    return;
+  }
+  options.stderr.write(
+    `Terminal warning: ${terminalRuntime.message} Run \`openforge doctor\` for dependency details.\n`
+  );
 }
 
 function toRuntimeConfigOptions(options: RunStartOptions): LoadRuntimeConfigOptions {

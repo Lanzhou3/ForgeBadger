@@ -284,6 +284,74 @@ describe("runStart", () => {
     assert.match(stdout.text, /OpenForge Gateway: http:\/\/127\.0\.0\.1:48731\n/);
   });
 
+  it("warns native Windows users to run terminal sessions inside WSL while starting management services", async () => {
+    const stderr = createMemoryWriter();
+    const children: FakeChild[] = [];
+    let dependencyChecks = 0;
+
+    const codePromise = runStart({
+      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      resolvePaths: () => createInstalledPaths(),
+      checkPort: async () => undefined,
+      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      dependencyRunner: async () => {
+        dependencyChecks += 1;
+        return { exitCode: 0, stdout: "tmux 3.4\n", stderr: "" };
+      },
+      platform: "win32",
+      spawn: () => {
+        const child = new FakeChild();
+        children.push(child);
+        return child;
+      },
+      installShutdown: (spawnedChildren) => {
+        setImmediate(() => spawnedChildren[1]?.emit("exit", 0, null));
+      },
+      stdout: createMemoryWriter(),
+      stderr
+    });
+
+    const code = await codePromise;
+
+    assert.equal(code, 0);
+    assert.equal(children.length, 2);
+    assert.equal(dependencyChecks, 0);
+    assert.match(stderr.text, /Native Windows terminals require WSL/);
+    assert.match(stderr.text, /openforge doctor/);
+  });
+
+  it("checks only tmux before warning about missing Unix terminal persistence", async () => {
+    const stderr = createMemoryWriter();
+    const seen: Array<{ command: string; args: string[] }> = [];
+
+    const codePromise = runStart({
+      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      resolvePaths: () => createInstalledPaths(),
+      checkPort: async () => undefined,
+      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      dependencyRunner: async (command, args) => {
+        seen.push({ command, args });
+        return { exitCode: 127, stdout: "", stderr: "tmux not found" };
+      },
+      platform: "linux",
+      spawn: () => new FakeChild(),
+      installShutdown: (spawnedChildren) => {
+        setImmediate(() => spawnedChildren[1]?.emit("exit", 0, null));
+      },
+      stdout: createMemoryWriter(),
+      stderr
+    });
+
+    const code = await codePromise;
+
+    assert.equal(code, 0);
+    assert.deepEqual(seen, [{ command: "tmux", args: ["-V"] }]);
+    assert.match(stderr.text, /Install tmux to enable persistent browser terminals/);
+    assert.match(stderr.text, /openforge doctor/);
+  });
+
   it("formats IPv6 browser URLs with brackets", async () => {
     // Arrange
     const stdout = createMemoryWriter();

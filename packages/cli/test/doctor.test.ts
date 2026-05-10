@@ -7,7 +7,12 @@ import { pathToFileURL } from "node:url";
 
 import { runDoctor } from "../src/commands/doctor.js";
 import { isMainModule, runCli } from "../src/index.js";
-import { checkCliDependencies, runCommand } from "../src/runtime/dependency-check.js";
+import {
+  checkCliDependencies,
+  checkCliTerminalRuntime,
+  describeCliTerminalRuntime,
+  runCommand
+} from "../src/runtime/dependency-check.js";
 import type { RuntimeConfig } from "../src/runtime/config.js";
 
 describe("checkCliDependencies", () => {
@@ -44,6 +49,68 @@ describe("checkCliDependencies", () => {
         { name: "codex", available: false, required: false, version: undefined, error: "not found" }
       ]
     );
+  });
+});
+
+describe("describeCliTerminalRuntime", () => {
+  it("explains that native Windows needs WSL for tmux-backed terminals", () => {
+    const runtime = describeCliTerminalRuntime([
+      { name: "tmux", available: true, required: true, version: "tmux 3.4" }
+    ], "win32");
+
+    assert.deepEqual(runtime, {
+      persistence: "tmux",
+      mode: "wsl_required",
+      supported: false,
+      message: "Native Windows terminals require WSL because OpenForge persists sessions with tmux."
+    });
+  });
+
+  it("reports tmux_missing when Unix-like hosts do not have tmux", () => {
+    const runtime = describeCliTerminalRuntime([
+      { name: "tmux", available: false, required: true, error: "not found" }
+    ], "linux");
+
+    assert.deepEqual(runtime, {
+      persistence: "tmux",
+      mode: "tmux_missing",
+      supported: false,
+      message: "Install tmux to enable persistent browser terminals."
+    });
+  });
+});
+
+describe("checkCliTerminalRuntime", () => {
+  it("checks only tmux for Unix-like terminal runtime startup warnings", async () => {
+    const seen: Array<{ command: string; args: string[] }> = [];
+
+    const runtime = await checkCliTerminalRuntime({
+      platform: "linux",
+      runner: async (command, args) => {
+        seen.push({ command, args });
+        return { exitCode: 0, stdout: "tmux 3.4\n", stderr: "" };
+      }
+    });
+
+    assert.deepEqual(seen, [{ command: "tmux", args: ["-V"] }]);
+    assert.equal(runtime.mode, "native_tmux");
+    assert.equal(runtime.supported, true);
+  });
+
+  it("does not shell out before reporting native Windows WSL guidance", async () => {
+    let called = false;
+
+    const runtime = await checkCliTerminalRuntime({
+      platform: "win32",
+      runner: async () => {
+        called = true;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+    });
+
+    assert.equal(called, false);
+    assert.equal(runtime.mode, "wsl_required");
+    assert.equal(runtime.supported, false);
   });
 });
 
@@ -115,6 +182,7 @@ describe("runDoctor", () => {
     assert.match(stdout.text, /ok tmux tmux 3\.4\n/);
     assert.match(stdout.text, /ok claude claude 1\.2\.3\n/);
     assert.match(stdout.text, /optional-missing opencode - not found\n/);
+    assert.match(stdout.text, /terminal native_tmux - tmux is available for persistent browser terminals\.\n/);
     assert.equal(stderr.text, "");
   });
 
@@ -135,7 +203,29 @@ describe("runDoctor", () => {
 
     assert.equal(code, 1);
     assert.match(stdout.text, /missing tmux - tmux not found\n/);
+    assert.match(stdout.text, /terminal tmux_missing - Install tmux to enable persistent browser terminals\.\n/);
     assert.match(stderr.text, /Required dependencies are missing/);
+  });
+
+  it("prints native Windows WSL terminal guidance", async () => {
+    const stdout = createMemoryWriter();
+    const stderr = createMemoryWriter();
+
+    const code = await runDoctor({
+      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      dependencyRunner: async (command) => ({
+        exitCode: 0,
+        stdout: `${command} ok\n`,
+        stderr: ""
+      }),
+      platform: "win32",
+      stdout,
+      stderr
+    });
+
+    assert.equal(code, 0);
+    assert.match(stdout.text, /terminal wsl_required - Native Windows terminals require WSL/);
+    assert.equal(stderr.text, "");
   });
 });
 

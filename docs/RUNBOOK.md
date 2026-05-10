@@ -1,6 +1,6 @@
 # OpenForge Runbook
 
-> Status: MVP-0 baseline | Date: 2026-04-26
+> Status: MVP local-first beta operations | Date: 2026-05-10
 
 This runbook captures operational checks and failure handling for the MVP-0 Claude Code local control loop.
 
@@ -15,6 +15,10 @@ NPM runtime:
 - Node.js 20+
 - tmux 3.2+
 - SQLite-compatible filesystem
+
+The built-in browser terminal is supported on Unix-like hosts with tmux. On
+Windows, run OpenForge inside WSL for terminal sessions; native Windows is only
+expected to support non-terminal management UI workflows.
 
 Optional runtime dependencies:
 
@@ -73,6 +77,9 @@ Expected:
 
 - Node.js is 20 or newer.
 - tmux is installed.
+- `openforge doctor` reports `terminal native_tmux` for supported terminal use.
+  `terminal wsl_required` means rerun inside WSL; `terminal tmux_missing` means
+  install tmux before launching browser terminal sessions.
 - pnpm is installed for source development workflows.
 - Claude Code, OpenCode, or Codex is available on `PATH` only when that adapter
   is being used for real sessions.
@@ -87,10 +94,26 @@ openforge start --gateway-port 48731 --web-port 48732
 ```
 
 `openforge start` starts the Gateway/Web child processes and prints the Web
-console URL. If the browser cannot connect immediately, wait for initialization
-or inspect logs and `openforge doctor` output. Runtime state defaults to
-`~/.openforge`; use `OPENFORGE_STATE_DIR` when testing against disposable state
-or running multiple isolated installs.
+console URL. It also prints a non-blocking terminal warning when the current
+host cannot support tmux-backed browser terminals. If the browser cannot connect
+immediately, wait for initialization or inspect logs and `openforge doctor`
+output. Runtime state defaults to `~/.openforge`; use `OPENFORGE_STATE_DIR`
+when testing against disposable state or running multiple isolated installs.
+
+Windows native hosts can still start the management UI, but browser terminal
+sessions require WSL because OpenForge persists terminal sessions with tmux.
+Recommended recovery path:
+
+1. Install WSL, for example `wsl --install -d Ubuntu`.
+2. Open the WSL distribution and install Node.js 20+ plus tmux.
+3. On Ubuntu/Debian WSL, install tmux with `sudo apt update && sudo apt install -y tmux`.
+4. Re-run `openforge doctor` inside WSL and confirm `terminal native_tmux`.
+5. Re-run `openforge start` inside WSL for terminal-enabled browser sessions.
+
+For Unix-like hosts where `openforge doctor` reports `terminal tmux_missing`,
+install tmux with the platform package manager, then re-run `openforge doctor`
+before launching terminal sessions. Examples: `sudo apt install tmux` on
+Ubuntu/Debian or `brew install tmux` on macOS.
 
 ## 5. Gateway Startup Behavior
 
@@ -108,6 +131,7 @@ On startup, Gateway must:
 
 | Failure | Expected behavior |
 |---------|-------------------|
+| Native Windows terminal runtime | Keep management UI startup possible, but warn that browser terminal sessions require WSL |
 | Missing `tmux` | Block session launch with dependency error and install guidance |
 | Missing Claude Code | Block session launch with adapter dependency error |
 | API key decrypt fails | Block launch; do not create tmux session |
