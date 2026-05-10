@@ -1181,6 +1181,8 @@ export async function startCodexAppServerTurn(
   id: string,
   input: { threadId: string; text: string }
 ): Promise<{ result: unknown }> {
+  // Guarded prototype API only. The current Web surface intentionally does not
+  // expose prompt/turn controls unless Gateway enables turn input explicitly.
   return fetchJson(`/api/v1/codex/app-server/${id}/turn`, {
     method: "POST",
     body: JSON.stringify(input),

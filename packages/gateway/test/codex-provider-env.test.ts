@@ -64,7 +64,7 @@ describe("Codex provider env isolation", () => {
     assert.deepEqual(plan.args, ["--model", "deepseek/deepseek-chat"]);
   });
 
-  it("does not inject model or third-party API key env into Codex terminal launches", () => {
+  it("rejects model or third-party API key selection for Codex terminal launches", () => {
     const db = createTestDb();
     const userId = new UserRepository(db).create("codex-env@example.com", "hash").id;
     const model = new ModelRepository(db, userId).create({
@@ -78,21 +78,32 @@ describe("Codex provider env isolation", () => {
       plaintextKey: "secret-value"
     });
 
-    const plan = createLaunchPlan({
-      db,
-      userId,
-      masterKey,
-      adapter: "codex",
-      projectRoot: "/workspace/app",
-      sessionId: "session-1",
-      credentialMode: "stored_encrypted_key",
-      apiKeyId: apiKey.id,
-      modelId: model.id
-    });
-
-    assert.equal(plan.env.CODEX_MODEL, undefined);
-    assert.equal(plan.env.OPENAI_API_KEY, undefined);
-    assert.deepEqual(plan.secretEnvNames, []);
-    assert.deepEqual(plan.args, []);
+    assert.throws(
+      () => createLaunchPlan({
+        db,
+        userId,
+        masterKey,
+        adapter: "codex",
+        projectRoot: "/workspace/app",
+        sessionId: "session-1",
+        credentialMode: "stored_encrypted_key",
+        apiKeyId: apiKey.id,
+        modelId: model.id
+      }),
+      /subscription-managed/i
+    );
+    assert.throws(
+      () => createLaunchPlan({
+        db,
+        userId,
+        masterKey,
+        adapter: "codex",
+        projectRoot: "/workspace/app",
+        sessionId: "session-1",
+        credentialMode: "host_environment",
+        modelId: model.id
+      }),
+      /subscription-managed/i
+    );
   });
 });

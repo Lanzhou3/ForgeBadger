@@ -44,6 +44,9 @@ const NotificationContext = createContext<NotificationContextValue | null>(null)
 const codexAppServerActivityTypes = new Set([
   "codex_app_server_started",
   "codex_app_server_stopped",
+  "codex_app_server_error",
+  "codex_app_server_initialized",
+  "codex_app_server_thread_started",
   "codex_app_server_notification",
 ]);
 
@@ -201,7 +204,7 @@ export function eventQueryInvalidations(message: GatewayEvent): string[][] {
     type === "activity_created" &&
     codexAppServerActivityTypes.has(getPayloadString(message.payload, "activity_type") ?? "")
   ) {
-    return [["codex-app-server-activities"]];
+    return [["codex-app-server-activities"], ["codex-app-servers"]];
   }
   return [];
 }

@@ -227,7 +227,7 @@ describe("CodexAppServerManager", () => {
     assert.equal(stopped.status, "stopped");
   });
 
-  it("removes websocket token files and list entries when a session stops", async () => {
+  it("removes websocket token files and keeps stopped sessions observable", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-cleanup-"));
     const child = new FakeChild(3333);
     const manager = new CodexAppServerManager({
@@ -247,8 +247,92 @@ describe("CodexAppServerManager", () => {
     const stopped = manager.stop(session.id, "user-1");
 
     assert.equal(stopped.status, "stopped");
-    assert.equal(manager.list("user-1").length, 0);
+    const listed = manager.list("user-1");
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]?.status, "stopped");
+    assert.equal(listed[0]?.token, undefined);
+    assert.equal(listed[0]?.tokenFile, undefined);
     await assert.rejects(() => stat(session.tokenFile as string), { code: "ENOENT" });
+  });
+
+  it("keeps naturally exited sessions visible as stopped and unusable for protocol requests", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-exited-"));
+    const child = new FakeChild(3334);
+    const manager = new CodexAppServerManager({
+      runtimeRoot: root,
+      spawn: () => child
+    });
+    const lifecycleEvents: unknown[] = [];
+    manager.on("lifecycle", (event) => lifecycleEvents.push(event));
+
+    const session = await manager.start({
+      userId: "user-1",
+      projectId: "project-1",
+      projectRoot: "/workspace/project",
+      credentialMode: "host_environment",
+      runtimeMode: "app-server-websocket"
+    });
+    assert.ok(session.tokenFile);
+
+    child.emit("exit", 0);
+
+    const listed = manager.list("user-1");
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]?.status, "stopped");
+    assert.equal(listed[0]?.token, undefined);
+    assert.equal(listed[0]?.tokenFile, undefined);
+    assert.deepEqual(lifecycleEvents, [{
+      userId: "user-1",
+      projectId: "project-1",
+      appServerSessionId: session.id,
+      runtimeMode: "app-server-websocket",
+      listen: session.listen,
+      pid: 3334,
+      type: "codex_app_server_stopped",
+      status: "info",
+      message: "Codex app-server stopped"
+    }]);
+    await assert.rejects(() => stat(session.tokenFile as string), { code: "ENOENT" });
+    assert.throws(() => manager.initialize(session.id, "user-1"), /not running/i);
+  });
+
+  it("keeps child errors visible with the last error message", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-error-"));
+    const child = new FakeChild(3335);
+    const manager = new CodexAppServerManager({
+      runtimeRoot: root,
+      spawn: () => child
+    });
+    const lifecycleEvents: unknown[] = [];
+    manager.on("lifecycle", (event) => lifecycleEvents.push(event));
+
+    const session = await manager.start({
+      userId: "user-1",
+      projectId: "project-1",
+      projectRoot: "/workspace/project",
+      credentialMode: "host_environment",
+      runtimeMode: "app-server-stdio"
+    });
+
+    child.emit("error", new Error("process crashed"));
+
+    const listed = manager.list("user-1");
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]?.status, "error");
+    assert.equal(listed[0]?.errorMessage, "process crashed");
+    assert.deepEqual(lifecycleEvents, [{
+      userId: "user-1",
+      projectId: "project-1",
+      appServerSessionId: session.id,
+      runtimeMode: "app-server-stdio",
+      listen: "stdio://",
+      pid: 3335,
+      type: "codex_app_server_error",
+      status: "error",
+      message: "process crashed",
+      errorMessage: "process crashed"
+    }]);
+    assert.throws(() => manager.startThread(session.id, "user-1", { cwd: "/workspace/project" }), /not running/i);
   });
 
   it("cleans all managed websocket token files on stopAll", async () => {
@@ -279,7 +363,7 @@ describe("CodexAppServerManager", () => {
 
     manager.stopAll();
 
-    assert.equal(manager.list("user-1").length, 0);
+    assert.deepEqual(manager.list("user-1").map((session) => session.status), ["stopped", "stopped"]);
     await assert.rejects(() => stat(first.tokenFile as string), { code: "ENOENT" });
     await assert.rejects(() => stat(second.tokenFile as string), { code: "ENOENT" });
   });
@@ -316,7 +400,7 @@ describe("CodexAppServerManager", () => {
       activityType: "permission_prompt",
       status: "warning",
       method: "notification/prompt",
-      message: "approval needed"
+      message: "Codex app-server permission prompt"
     }]);
   });
 });

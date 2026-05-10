@@ -18,12 +18,58 @@ describe("describeCodexAppServerActivity", () => {
       type: "codex_app_server_stopped",
       message: "Codex app-server stopped",
     });
+    const error = activity({
+      type: "codex_app_server_error",
+      status: "error",
+      message: "codex crashed",
+      metadata: {
+        errorMessage: "internal detail",
+        runtimeMode: "app-server-stdio",
+      },
+    });
 
     expect(describeCodexAppServerActivity(started)).toMatchObject({
       labelKey: "codexAppServer.activity.started",
       detail: "app-server-websocket",
     });
     expect(describeCodexAppServerActivity(stopped).labelKey).toBe("codexAppServer.activity.stopped");
+    expect(describeCodexAppServerActivity(error)).toMatchObject({
+      labelKey: "codexAppServer.activity.error",
+      detail: "app-server-stdio",
+      variant: "destructive",
+    });
+    expect(JSON.stringify(describeCodexAppServerActivity(error))).not.toContain("internal detail");
+  });
+
+  it("maps initialize and thread activity types to safe operational details", () => {
+    const initialized = describeCodexAppServerActivity(activity({
+      type: "codex_app_server_initialized",
+      message: "Codex app-server initialized",
+      metadata: {
+        method: "initialize",
+        runtimeMode: "app-server-stdio",
+        listen: "stdio://",
+      },
+    }));
+    const thread = describeCodexAppServerActivity(activity({
+      type: "codex_app_server_thread_started",
+      message: "Codex app-server thread started",
+      metadata: {
+        method: "thread/start",
+        threadId: "thread-1",
+        prompt: "secret prompt",
+      },
+    }));
+
+    expect(initialized).toMatchObject({
+      labelKey: "codexAppServer.activity.initialized",
+      detail: "initialize · app-server-stdio",
+    });
+    expect(thread).toMatchObject({
+      labelKey: "codexAppServer.activity.threadStarted",
+      detail: "thread/start · thread-1",
+    });
+    expect(JSON.stringify(thread)).not.toContain("secret");
   });
 
   it("shows notification method and type without leaking transcript-like metadata", () => {

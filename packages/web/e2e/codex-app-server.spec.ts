@@ -25,9 +25,19 @@ test("Codex background task page shows zero-quota status and safe activity metad
   await expect(page.getByRole("button", { name: "Initialize" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create thread" })).toBeVisible();
   await expect(page.getByRole("button", { name: /turn|prompt|send/i })).toHaveCount(0);
+  await expect(page.getByText("ws://127.0.0.1:45200")).toBeVisible();
+  await expect(page.getByText("9876")).toBeVisible();
+  await expect(page.getByText(/token/i)).toHaveCount(0);
+  await expect(page.getByText("Codex app-server process error")).toBeVisible();
+  await expect(page.getByText("internal crash stack")).toHaveCount(0);
 
   const activityFeed = page.getByLabel("Codex app-server activity feed");
+  await expect(activityFeed.getByText("Channel initialized")).toBeVisible();
+  await expect(activityFeed.getByText("Thread created")).toBeVisible();
+  await expect(activityFeed.getByText("Channel error")).toBeVisible();
   await expect(activityFeed.getByText("Background notification")).toBeVisible();
+  await expect(activityFeed.getByText("initialize · app-server-websocket")).toBeVisible();
+  await expect(activityFeed.getByText("thread/start · thread-1")).toBeVisible();
   await expect(activityFeed.getByText("permission_prompt · notification/prompt · thread-1")).toBeVisible();
   await expect(activityFeed.getByText("secret prompt")).toHaveCount(0);
   await expect(activityFeed.getByText("secret response")).toHaveCount(0);
@@ -91,9 +101,11 @@ async function mockCodexAppServerApis(page: import("@playwright/test").Page, req
             command: "codex",
             args: ["app-server"],
             listen: "ws://127.0.0.1:45200",
+            pid: 9876,
+            errorMessage: "internal crash stack",
             features: { turnInputEnabled: false },
             createdAt: "2026-05-09T00:00:00.000Z",
-            updatedAt: "2026-05-09T00:00:00.000Z",
+            updatedAt: "2026-05-09T00:01:00.000Z",
           }],
         }),
       });
@@ -103,6 +115,37 @@ async function mockCodexAppServerApis(page: import("@playwright/test").Page, req
       await route.fulfill({
         json: envelope({
           activities: [{
+            id: "activity-4",
+            type: "codex_app_server_error",
+            status: "error",
+            message: "codex crashed",
+            metadata: {
+              runtimeMode: "app-server-websocket",
+              errorMessage: "internal crash stack",
+            },
+            createdAt: "2026-05-09T00:03:00.000Z",
+          }, {
+            id: "activity-3",
+            type: "codex_app_server_thread_started",
+            status: "info",
+            message: "Codex app-server thread started",
+            metadata: {
+              method: "thread/start",
+              threadId: "thread-1",
+              prompt: "secret prompt",
+            },
+            createdAt: "2026-05-09T00:02:00.000Z",
+          }, {
+            id: "activity-2",
+            type: "codex_app_server_initialized",
+            status: "info",
+            message: "Codex app-server initialized",
+            metadata: {
+              method: "initialize",
+              runtimeMode: "app-server-websocket",
+            },
+            createdAt: "2026-05-09T00:01:00.000Z",
+          }, {
             id: "activity-1",
             type: "codex_app_server_notification",
             status: "warning",

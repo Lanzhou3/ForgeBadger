@@ -61,6 +61,19 @@ export interface CodexAppServerNotificationEvent {
   message: string;
 }
 
+export interface CodexAppServerLifecycleEvent {
+  userId: string;
+  projectId: string;
+  appServerSessionId: string;
+  runtimeMode: CodexAppServerRuntimeMode;
+  listen: string;
+  pid?: number | undefined;
+  type: "codex_app_server_stopped" | "codex_app_server_error";
+  status: "info" | "error";
+  message: string;
+  errorMessage?: string | undefined;
+}
+
 export interface StartCodexAppServerInput {
   userId: string;
   projectId: string;
@@ -163,15 +176,18 @@ export class CodexAppServerManager extends EventEmitter {
       if (!current || current.status !== "running") return;
       current.status = "stopped";
       current.updatedAt = new Date();
-      this.releaseSession(current);
+      this.cleanupSessionResources(current);
+      this.emitLifecycle(current, "codex_app_server_stopped", "info", "Codex app-server stopped");
     });
     child.on("error", (error: Error) => {
       const current = this.sessions.get(id);
-      if (!current) return;
+      if (!current || current.status !== "running") return;
+      const errorMessage = safeAppServerErrorMessage(error);
       current.status = "error";
-      current.errorMessage = error.message;
+      current.errorMessage = errorMessage;
       current.updatedAt = new Date();
-      this.releaseSession(current);
+      this.cleanupSessionResources(current);
+      this.emitLifecycle(current, "codex_app_server_error", "error", errorMessage, errorMessage);
     });
     session.client = this.createClient(session, child);
     this.sessions.set(id, session);
@@ -198,22 +214,22 @@ export class CodexAppServerManager extends EventEmitter {
       throw new Error("Codex app-server session not found");
     }
     if (session.status === "running") {
+      session.status = "stopped";
+      session.updatedAt = new Date();
       session.child.kill("SIGTERM");
+      this.cleanupSessionResources(session);
     }
-    session.status = "stopped";
-    session.updatedAt = new Date();
-    this.releaseSession(session);
     return publicSession(session);
   }
 
   stopAll(): void {
     for (const session of [...this.sessions.values()]) {
       if (session.status === "running") {
+        session.status = "stopped";
+        session.updatedAt = new Date();
         session.child.kill("SIGTERM");
+        this.cleanupSessionResources(session);
       }
-      session.status = "stopped";
-      session.updatedAt = new Date();
-      this.releaseSession(session);
     }
   }
 
@@ -251,6 +267,9 @@ export class CodexAppServerManager extends EventEmitter {
     if (!session || session.userId !== userId) {
       throw new Error("Codex app-server session not found");
     }
+    if (session.status !== "running") {
+      throw new Error("Codex app-server session is not running");
+    }
     if (!session.client) {
       throw new Error("Codex app-server protocol client is not available");
     }
@@ -286,6 +305,27 @@ export class CodexAppServerManager extends EventEmitter {
         } satisfies CodexAppServerNotificationEvent);
       }
     });
+  }
+
+  private emitLifecycle(
+    session: ManagedCodexAppServerSession,
+    type: CodexAppServerLifecycleEvent["type"],
+    status: CodexAppServerLifecycleEvent["status"],
+    message: string,
+    errorMessage?: string
+  ): void {
+    this.emit("lifecycle", {
+      userId: session.userId,
+      projectId: session.projectId,
+      appServerSessionId: session.id,
+      runtimeMode: session.runtimeMode,
+      listen: session.listen,
+      ...(session.pid !== undefined ? { pid: session.pid } : {}),
+      type,
+      status,
+      message,
+      ...(errorMessage ? { errorMessage } : {})
+    } satisfies CodexAppServerLifecycleEvent);
   }
 
   private async authForRuntime(
@@ -331,13 +371,15 @@ export class CodexAppServerManager extends EventEmitter {
     throw new Error("No Codex app-server loopback ports are available");
   }
 
-  private releaseSession(session: ManagedCodexAppServerSession): void {
+  private cleanupSessionResources(session: ManagedCodexAppServerSession): void {
     session.client?.close();
     releaseLoopbackPort(this.reservedLoopbackPorts, session.listen);
     if (session.tokenFile) {
       rmSync(session.tokenFile, { force: true });
     }
-    this.sessions.delete(session.id);
+    delete session.client;
+    delete session.token;
+    delete session.tokenFile;
   }
 }
 
@@ -364,6 +406,25 @@ function releaseLoopbackPort(reservedPorts: Set<number>, listen: string): void {
     return;
   }
   reservedPorts.delete(Number(match[1]));
+}
+
+function safeAppServerErrorMessage(error: Error): string {
+  const message = error.message.trim().replace(/\s+/g, " ");
+  if (!message || isUnsafeErrorMessage(message)) {
+    return "Codex app-server process error";
+  }
+  return message.length > 160 ? `${message.slice(0, 157)}...` : message;
+}
+
+function isUnsafeErrorMessage(message: string): boolean {
+  return (
+    /(?:^|\s)at\s+\S+/i.test(message) ||
+    /(?:^|[\s(["'])\/(?:root|home|users|var|tmp|data)\//i.test(message) ||
+    /[A-Za-z]:\\/i.test(message) ||
+    /(?:api[_-]?key|token|secret|password|authorization|bearer)/i.test(message) ||
+    /-----BEGIN [A-Z ]+-----/.test(message) ||
+    /\b[A-Za-z0-9_-]{32,}\b/.test(message)
+  );
 }
 
 function defaultSpawn(command: string, args: string[], options: {

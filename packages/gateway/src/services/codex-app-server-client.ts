@@ -283,26 +283,48 @@ export function normalizeCodexAppServerNotification(
     ? frame.params.notification
     : undefined;
   const threadId = readString(frame.params.threadId) ?? readString(frame.params.thread_id);
-  const notificationType =
+  const notificationType = safeProtocolLabel(
     readString(notification?.type) ??
     readString(frame.params.notification_type) ??
     readString(frame.params.hook_event_name) ??
-    frame.method;
-  const message =
-    readString(notification?.message) ??
-    readString(notification?.text) ??
-    readString(frame.params.message) ??
-    "Codex app-server notification";
+    frame.method,
+    "unknown"
+  );
+  const method = safeProtocolLabel(frame.method, "unknown");
   const status = inputStatusForNotification(notificationType, frame.method);
 
   return {
     type: "codex_app_server_notification",
-    method: frame.method,
-    ...(threadId ? { threadId } : {}),
+    method,
+    ...(threadId ? { threadId: safeProtocolLabel(threadId, "unknown") } : {}),
     activityType: notificationType,
     status,
-    message
+    message: safeNotificationMessage(notificationType, status)
   };
+}
+
+function safeNotificationMessage(
+  activityType: string,
+  status: "info" | "warning" | "error"
+): string {
+  if (activityType === "permission_prompt") {
+    return "Codex app-server permission prompt";
+  }
+  if (status === "error") {
+    return "Codex app-server error notification";
+  }
+  if (status === "warning") {
+    return "Codex app-server warning notification";
+  }
+  return "Codex app-server notification";
+}
+
+function safeProtocolLabel(value: string, fallback: string): string {
+  const trimmed = value.trim();
+  if (/^[A-Za-z0-9_./:-]{1,80}$/.test(trimmed)) {
+    return trimmed;
+  }
+  return fallback;
 }
 
 export class CodexAppServerJsonRpcClient extends EventEmitter {

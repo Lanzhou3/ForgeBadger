@@ -13,6 +13,9 @@ export interface CodexAppServerActivityPresentation {
 const ACTIVITY_LABELS: Record<string, TranslationKey> = {
   codex_app_server_started: "codexAppServer.activity.started",
   codex_app_server_stopped: "codexAppServer.activity.stopped",
+  codex_app_server_error: "codexAppServer.activity.error",
+  codex_app_server_initialized: "codexAppServer.activity.initialized",
+  codex_app_server_thread_started: "codexAppServer.activity.threadStarted",
   codex_app_server_notification: "codexAppServer.activity.notification",
 };
 

@@ -17,15 +17,23 @@ describe("eventQueryInvalidations", () => {
   });
 
   it("refreshes the Codex app-server activity feed for app-server activity events", () => {
-    expect(
-      eventQueryInvalidations({
-        type: "activity_created",
-        payload: {
-          project_id: "project-1",
-          activity_type: "codex_app_server_notification",
-        },
-      })
-    ).toEqual([["codex-app-server-activities"]]);
+    for (const activityType of [
+      "codex_app_server_notification",
+      "codex_app_server_initialized",
+      "codex_app_server_thread_started",
+      "codex_app_server_stopped",
+      "codex_app_server_error",
+    ]) {
+      expect(
+        eventQueryInvalidations({
+          type: "activity_created",
+          payload: {
+            project_id: "project-1",
+            activity_type: activityType,
+          },
+        })
+      ).toEqual([["codex-app-server-activities"], ["codex-app-servers"]]);
+    }
   });
 
   it("keeps session lifecycle events connected to session, project, dashboard, and activity queries", () => {

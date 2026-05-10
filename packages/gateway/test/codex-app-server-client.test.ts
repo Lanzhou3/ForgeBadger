@@ -177,7 +177,7 @@ describe("Codex app-server client helpers", () => {
         threadId: "thr_123",
         activityType: "permission_prompt",
         status: "warning",
-        message: "Claude needs approval"
+        message: "Codex app-server permission prompt"
       }
     );
 
@@ -197,6 +197,30 @@ describe("Codex app-server client helpers", () => {
             message: "Claude needs approval"
           }
         }
+      }
+    );
+  });
+
+  it("redacts notification text before activity normalization", () => {
+    assert.deepEqual(
+      normalizeCodexAppServerNotification({
+        kind: "notification",
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: "thr_secret",
+          notification: {
+            type: "agentMessage/delta",
+            text: "OPENAI_API_KEY=sk-test secret prompt text"
+          }
+        }
+      }),
+      {
+        type: "codex_app_server_notification",
+        method: "item/agentMessage/delta",
+        threadId: "thr_secret",
+        activityType: "agentMessage/delta",
+        status: "info",
+        message: "Codex app-server notification"
       }
     );
   });
@@ -241,7 +265,7 @@ describe("Codex app-server client helpers", () => {
       threadId: "thr_123",
       activityType: "permission_prompt",
       status: "warning",
-      message: "Claude needs approval"
+      message: "Codex app-server permission prompt"
     });
   });
 

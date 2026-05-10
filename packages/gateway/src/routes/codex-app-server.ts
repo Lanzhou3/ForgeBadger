@@ -146,8 +146,17 @@ export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions)
 
   router.post("/:id/initialize", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
+    const session = getOwnedSession(options, req.params.id, userId);
+    if (!session) {
+      res.status(404).json({ code: 1, message: "Codex app-server session not found" });
+      return;
+    }
+
     try {
       const result = await options.manager.initialize(req.params.id, userId);
+      recordAppServerActivity(options, userId, session, "codex_app_server_initialized", "info", {
+        method: "initialize"
+      });
       res.json({ code: 0, data: { result }, message: "" });
     } catch (error) {
       sendRpcError(res, error);
@@ -174,6 +183,10 @@ export function createCodexAppServerRoutes(options: CodexAppServerRoutesOptions)
         ...(parseResult.data.model ? { model: parseResult.data.model } : {}),
         ...(parseResult.data.approvalPolicy ? { approvalPolicy: parseResult.data.approvalPolicy } : {}),
         ...(parseResult.data.sandbox ? { sandbox: parseResult.data.sandbox } : {})
+      });
+      recordAppServerActivity(options, userId, session, "codex_app_server_thread_started", "info", {
+        method: "thread/start",
+        ...threadMetadata(result)
       });
       res.json({ code: 0, data: { result }, message: "" });
     } catch (error) {
@@ -251,7 +264,8 @@ function recordAppServerActivity(
   userId: string,
   session: CodexAppServerSession,
   type: string,
-  status: "info" | "warning" | "error"
+  status: "info" | "warning" | "error",
+  metadata: Record<string, unknown> = {}
 ): void {
   recordActivity({
     db: options.db,
@@ -260,14 +274,44 @@ function recordAppServerActivity(
     projectId: session.projectId,
     type,
     status,
-    message: `Codex app-server ${session.status}`,
-    metadata: JSON.stringify({
+    message: appServerActivityMessage(type, session),
+    metadata: {
       appServerSessionId: session.id,
       runtimeMode: session.runtimeMode,
       listen: session.listen,
-      pid: session.pid
-    })
+      ...(session.pid !== undefined ? { pid: session.pid } : {}),
+      ...metadata
+    }
   });
+}
+
+function appServerActivityMessage(type: string, session: CodexAppServerSession): string {
+  if (type === "codex_app_server_started") {
+    return "Codex app-server started";
+  }
+  if (type === "codex_app_server_stopped") {
+    return "Codex app-server stopped";
+  }
+  if (type === "codex_app_server_initialized") {
+    return "Codex app-server initialized";
+  }
+  if (type === "codex_app_server_thread_started") {
+    return "Codex app-server thread started";
+  }
+  return `Codex app-server ${session.status}`;
+}
+
+function threadMetadata(result: unknown): Record<string, string> {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return {};
+  }
+  const record = result as Record<string, unknown>;
+  const threadId = stringResultField(record.threadId) ?? stringResultField(record.thread_id) ?? stringResultField(record.id);
+  return threadId ? { threadId } : {};
+}
+
+function stringResultField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function toSafeSessionPayload(

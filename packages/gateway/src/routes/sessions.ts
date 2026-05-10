@@ -96,6 +96,22 @@ export function createSessionRoutes(
       return;
     }
 
+    const adapter = normalizeAdapter(aiTool ?? project.aiTool);
+    if (!adapter) {
+      res.status(400).json({ code: 1, message: "Unsupported project adapter" });
+      return;
+    }
+    const credentialBoundary = validateCodexTerminalCredentialBoundary({
+      adapter,
+      credentialMode,
+      apiKeyId,
+      modelId
+    });
+    if (!credentialBoundary.ok) {
+      res.status(400).json({ code: 1, message: credentialBoundary.message });
+      return;
+    }
+
     if (modelId) {
       const modelRepo = new ModelRepository(db, userId);
       if (!modelRepo.getById(modelId)) {
@@ -112,11 +128,6 @@ export function createSessionRoutes(
       }
     }
 
-    const adapter = normalizeAdapter(aiTool ?? project.aiTool);
-    if (!adapter) {
-      res.status(400).json({ code: 1, message: "Unsupported project adapter" });
-      return;
-    }
     const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner);
     if (!launchStatus.launchEnabled) {
       res.status(409).json({
@@ -299,6 +310,16 @@ export function createSessionRoutes(
     const adapter = normalizeAdapter(dbSession.aiTool);
     if (!adapter) {
       res.status(400).json({ code: 1, message: "Unsupported session adapter" });
+      return;
+    }
+    const credentialBoundary = validateCodexTerminalCredentialBoundary({
+      adapter,
+      credentialMode: dbSession.credentialMode,
+      ...(dbSession.apiKeyId ? { apiKeyId: dbSession.apiKeyId } : {}),
+      ...(dbSession.modelId ? { modelId: dbSession.modelId } : {})
+    });
+    if (!credentialBoundary.ok) {
+      res.status(400).json({ code: 1, message: credentialBoundary.message });
       return;
     }
     const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner);
@@ -486,6 +507,13 @@ export function createSessionRoutes(
       res.status(404).json({ code: 1, message: "Session not found" });
       return;
     }
+    if (dbSession.aiTool === "codex") {
+      res.status(400).json({
+        code: 1,
+        message: "Codex sessions are subscription-managed; provider credentials and model overrides are not supported"
+      });
+      return;
+    }
 
     const updated = sessionRepo.update(dbSession.id, { modelId });
     recordSessionActivity(db, eventBus, userId, updated ?? dbSession, "model_switched", "info", `Model switched for ${dbSession.name}`, {
@@ -571,6 +599,11 @@ export interface LaunchPlanInput {
 }
 
 export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
+  const credentialBoundary = validateCodexTerminalCredentialBoundary(input);
+  if (!credentialBoundary.ok) {
+    throw new Error(credentialBoundary.message);
+  }
+
   const env: Record<string, string> = {
     OPENFORGE_SESSION_ID: input.sessionId,
     OPENFORGE_GATEWAY_URL: getGatewayUrl()
@@ -661,6 +694,24 @@ export async function prepareClaudeLaunchExtras(
 
 export function normalizeAdapter(value: string): AdapterId | undefined {
   return isAdapterId(value) ? value : undefined;
+}
+
+function validateCodexTerminalCredentialBoundary(input: {
+  adapter: AdapterId;
+  credentialMode: CredentialMode;
+  apiKeyId?: string | undefined;
+  modelId?: string | undefined;
+}): { ok: true } | { ok: false; message: string } {
+  if (
+    input.adapter === "codex" &&
+    (input.credentialMode !== "host_environment" || input.apiKeyId || input.modelId)
+  ) {
+    return {
+      ok: false,
+      message: "Codex sessions are subscription-managed; provider credentials and model overrides are not supported"
+    };
+  }
+  return { ok: true };
 }
 
 function apiKeyEnvName(provider: string): string {

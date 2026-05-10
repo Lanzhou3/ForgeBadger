@@ -13,6 +13,7 @@ import { beforeEach, describe, it } from "node:test";
 import { signJwt } from "../src/auth/jwt.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
+import { ActivityRepository } from "../src/db/repositories/activity-repository.js";
 import { CodexAppServerManager } from "../src/services/codex-app-server-manager.js";
 import type { CodexAppServerTransport } from "../src/services/codex-app-server-client.js";
 import { AppServerTurnRateLimiter, createCodexAppServerRoutes } from "../src/routes/codex-app-server.js";
@@ -34,12 +35,14 @@ describe("Codex app-server routes", () => {
   let app: express.Express;
   let db: Database.Database;
   let token: string;
+  let userId: string;
   let projectId: string;
   let projectRoot: string;
 
   beforeEach(async () => {
     db = createTestDb();
     const user = new UserRepository(db).create("codex-route@example.com", "hash");
+    userId = user.id;
     token = signJwt({ userId: user.id, email: user.email }, secret);
     projectRoot = await mkdtemp(path.join(tmpdir(), "openforge-codex-route-"));
     const project = new ProjectRepository(db, user.id).create({
@@ -149,6 +152,16 @@ describe("Codex app-server routes", () => {
     );
     assert.equal(stop.status, 200);
     assert.equal(stop.body.data.session.status, "stopped");
+
+    const activities = new ActivityRepository(db, userId).list({ projectId });
+    const startedActivity = activities.find((activity) => activity.type === "codex_app_server_started");
+    assert.ok(startedActivity);
+    assert.deepEqual(JSON.parse(startedActivity.metadata ?? "{}"), {
+      appServerSessionId: start.body.data.session.id,
+      runtimeMode: "app-server-websocket",
+      listen: "ws://127.0.0.1:45200",
+      pid: 123
+    });
   });
 
   it("rejects non-Codex projects", async () => {
@@ -245,7 +258,7 @@ describe("Codex app-server routes", () => {
       { Authorization: `Bearer ${token}` }
     );
     assert.equal(thread.status, 200);
-    assert.deepEqual(thread.body.data.result, { accepted: true });
+    assert.deepEqual(thread.body.data.result, { accepted: true, threadId: "thread-1" });
 
     const turn = await makeRequest(
       app,
@@ -268,6 +281,83 @@ describe("Codex app-server routes", () => {
     assert.equal(JSON.parse(transport.sent[2]).params.sandbox, "read-only");
     assert.equal(JSON.parse(transport.sent[2]).params.experimentalRawEvents, undefined);
     assert.equal(JSON.parse(transport.sent[2]).params.persistExtendedHistory, undefined);
+
+    const activities = new ActivityRepository(db, userId).list({ projectId });
+    const initializedActivity = activities.find((activity) => activity.type === "codex_app_server_initialized");
+    const threadActivity = activities.find((activity) => activity.type === "codex_app_server_thread_started");
+    assert.ok(initializedActivity);
+    assert.ok(threadActivity);
+    assert.deepEqual(JSON.parse(initializedActivity.metadata ?? "{}"), {
+      appServerSessionId: sessionId,
+      runtimeMode: "app-server-stdio",
+      listen: "stdio://",
+      pid: 456,
+      method: "initialize"
+    });
+    assert.deepEqual(JSON.parse(threadActivity.metadata ?? "{}"), {
+      appServerSessionId: sessionId,
+      runtimeMode: "app-server-stdio",
+      listen: "stdio://",
+      pid: 456,
+      method: "thread/start",
+      threadId: "thread-1"
+    });
+  });
+
+  it("keeps stopped sessions visible but rejects protocol operations against them", async () => {
+    const transport = new AutoResponseTransport();
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-stopped-route-"));
+    const manager = new CodexAppServerManager({
+      runtimeRoot: root,
+      spawn: () => ({
+        pid: 458,
+        on() {
+          return this;
+        },
+        kill() {
+          return true;
+        }
+      }),
+      transportFactory: () => transport
+    });
+    app = express();
+    app.locals.jwtSecret = secret;
+    app.use(express.json());
+    app.use("/api/v1/codex/app-server", createCodexAppServerRoutes({
+      db,
+      manager
+    }));
+
+    const start = await makeRequest(app, "POST", "/api/v1/codex/app-server", {
+      projectId,
+      runtimeMode: "app-server-stdio"
+    }, { Authorization: `Bearer ${token}` });
+    const sessionId = start.body.data.session.id;
+
+    const stop = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/codex/app-server/${sessionId}/stop`,
+      undefined,
+      { Authorization: `Bearer ${token}` }
+    );
+    const initialize = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/codex/app-server/${sessionId}/initialize`,
+      undefined,
+      { Authorization: `Bearer ${token}` }
+    );
+    const list = await makeRequest(app, "GET", "/api/v1/codex/app-server", undefined, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(stop.status, 200);
+    assert.equal(initialize.status, 409);
+    assert.match(initialize.body.message, /not running/i);
+    assert.equal(list.body.data.sessions.length, 1);
+    assert.equal(list.body.data.sessions[0].status, "stopped");
+    assert.equal(transport.sent.length, 0);
   });
 
   it("allows turn requests only when explicitly enabled", async () => {
@@ -396,7 +486,7 @@ class AutoResponseTransport implements CodexAppServerTransport {
 
   send(data: string): void {
     this.sent.push(data);
-    const parsed = JSON.parse(data) as { id: string | number };
+    const parsed = JSON.parse(data) as { id: string | number; method?: string };
     if (parsed.id === undefined) {
       return;
     }
@@ -404,7 +494,9 @@ class AutoResponseTransport implements CodexAppServerTransport {
       this.messageHandler?.(JSON.stringify({
         jsonrpc: "2.0",
         id: parsed.id,
-        result: { accepted: true }
+        result: parsed.method === "thread/start"
+          ? { accepted: true, threadId: "thread-1" }
+          : { accepted: true }
       }));
     });
   }

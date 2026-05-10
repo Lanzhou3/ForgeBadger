@@ -25,6 +25,9 @@ import { useLanguage } from "@/hooks/use-language";
 const CODEX_APP_SERVER_ACTIVITY_TYPES = [
   "codex_app_server_started",
   "codex_app_server_stopped",
+  "codex_app_server_error",
+  "codex_app_server_initialized",
+  "codex_app_server_thread_started",
   "codex_app_server_notification",
 ];
 
@@ -248,6 +251,16 @@ export default function CodexAppServerPage() {
                       <div className="mt-2 truncate font-mono text-xs text-muted-foreground">
                         {session.projectRoot}
                       </div>
+                      <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+                        <CodexSessionMetric label={t("codexAppServer.endpoint")} value={session.listen} />
+                        <CodexSessionMetric label={t("codexAppServer.processId")} value={session.pid ? String(session.pid) : "-"} />
+                        <CodexSessionMetric label={t("codexAppServer.updatedAt")} value={formatCodexActivityTime(session.updatedAt)} />
+                      </div>
+                      {session.errorMessage && (
+                        <div className="mt-2 break-words text-xs text-destructive">
+                          {safeCodexAppServerErrorMessage(session.errorMessage, t("codexAppServer.processError"))}
+                        </div>
+                      )}
                     </div>
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button
@@ -332,6 +345,15 @@ export default function CodexAppServerPage() {
   );
 }
 
+function CodexSessionMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="font-medium text-foreground">{label}</div>
+      <div className="truncate font-mono">{value}</div>
+    </div>
+  );
+}
+
 function CodexAppServerActivityRow({ activity }: { activity: SessionActivity }) {
   const { t } = useLanguage();
   const presentation = describeCodexAppServerActivity(activity);
@@ -360,6 +382,26 @@ function formatCodexActivityTime(value: string): string {
     return value;
   }
   return date.toLocaleTimeString();
+}
+
+function safeCodexAppServerErrorMessage(value: string, fallback: string): string {
+  const message = value.trim().replace(/\s+/g, " ");
+  if (!message || isUnsafeErrorMessage(message)) {
+    return fallback;
+  }
+  return message.length > 160 ? `${message.slice(0, 157)}...` : message;
+}
+
+function isUnsafeErrorMessage(message: string): boolean {
+  return (
+    /(?:^|\s)at\s+\S+/i.test(message) ||
+    /\bstack\b/i.test(message) ||
+    /(?:^|[\s(["'])\/(?:root|home|users|var|tmp|data)\//i.test(message) ||
+    /[A-Za-z]:\\/i.test(message) ||
+    /(?:api[_-]?key|token|secret|password|authorization|bearer)/i.test(message) ||
+    /-----BEGIN [A-Z ]+-----/.test(message) ||
+    /\b[A-Za-z0-9_-]{32,}\b/.test(message)
+  );
 }
 
 function reportError(error: unknown, setOperationError: (message: string) => void): void {
