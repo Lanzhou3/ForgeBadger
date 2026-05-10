@@ -170,7 +170,14 @@ Run all package checks when preparing a release-sized change:
 pnpm -r typecheck
 pnpm -r test
 pnpm -r build
+pnpm build:npm
+pnpm verify:npm
+pnpm smoke:npm
 ```
+
+For Codex Background Tasks release acceptance, also run
+`pnpm smoke:codex-app-server` on a host with Codex CLI installed. The Web
+prototype intentionally keeps prompt/turn input disabled for beta feedback.
 
 ## Documentation
 

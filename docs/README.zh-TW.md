@@ -150,7 +150,13 @@ git diff --check
 pnpm -r typecheck
 pnpm -r test
 pnpm -r build
+pnpm build:npm
+pnpm verify:npm
+pnpm smoke:npm
 ```
+
+Codex Background Tasks 的發布驗收還需要在已安裝 Codex CLI 的主機上執行
+`pnpm smoke:codex-app-server`。Beta 階段 Web 原型會繼續隱藏 prompt/turn 輸入。
 
 ## 文件
 

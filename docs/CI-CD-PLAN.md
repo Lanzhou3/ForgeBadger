@@ -1,6 +1,6 @@
 # OpenForge CI/CD Plan
 
-> Status: MVP-6 release readiness | Date: 2026-05-02
+> Status: local-first beta release gates | Date: 2026-05-10
 
 This plan defines the minimum checks for a local/self-hosted OpenForge release.
 It is written so the same commands can run in CI or in a release engineer's
@@ -12,28 +12,30 @@ terminal.
 
 ```bash
 pnpm install --frozen-lockfile
+node --test scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
 pnpm -r typecheck
-pnpm --filter @openforge/gateway test
-pnpm --filter @openforge/web test
+pnpm -r test
+pnpm --dir packages/gateway test test/model-provider-routes.test.ts test/model-provider-repository.test.ts test/model-config-apply.test.ts test/codex-provider-env.test.ts test/session-adapter-decoupling.test.ts
 git diff --check
 ```
 
 Acceptance:
 
+- Script-level smoke harness tests pass.
 - TypeScript emits no type errors.
-- Gateway `node:test` suites pass.
-- Web Vitest suites pass.
+- CLI, Gateway `node:test`, and Web Vitest suites pass.
+- Provider SSOT and Codex subscription-boundary regressions pass.
 - `git diff --check` reports no whitespace errors.
 
 ### Build Checks
 
 ```bash
-pnpm --filter @openforge/gateway build
-pnpm --filter @openforge/web build
+pnpm -r build
 ```
 
 Acceptance:
 
+- CLI, Gateway, and Web builds complete.
 - Gateway compiles and copies database migrations into `dist`.
 - Web Next.js build completes in an unrestricted runtime.
 
@@ -80,6 +82,33 @@ Known skip:
   evidence.
 - `openforge doctor` must fail when required dependencies such as `tmux` are not
   installed. Treat that as an environment failure, not a passing smoke.
+
+### Codex Background Task Gates
+
+The safe beta surface for Codex app-server is observable control plane only.
+
+```bash
+pnpm --dir packages/web exec playwright test e2e/codex-app-server.spec.ts --project=chromium --reporter=line
+pnpm smoke:codex-app-server
+```
+
+Acceptance:
+
+- The Playwright smoke proves the Web page renders safe status/activity
+  metadata, hides prompt/turn/send controls, and does not request `/turn`.
+- `pnpm smoke:codex-app-server` starts a real Codex app-server process, sends
+  only initialize/initialized messages, reports `promptOrTurnSent: false`, and
+  uses isolated temporary `HOME` and `CODEX_HOME`.
+- Host Codex config/auth fingerprints should be checked for final acceptance
+  when the real smoke is run manually.
+
+Known skip:
+
+- CI may not have Codex CLI installed. In that case, skip only the real
+  `pnpm smoke:codex-app-server` process check, record the skip reason, and keep
+  the Web zero-quota smoke required.
+- Do not replace the real process check with mocked Playwright evidence; they
+  prove different boundaries.
 
 ### E2E Smoke
 
@@ -146,6 +175,12 @@ Gate 2 - Automated verification:
 - Static and unit checks pass.
 - Gateway build passes.
 - Web build passes or has a documented sandbox-only skip.
+- CLI build passes.
+- Script harness tests pass.
+- Provider/Codex boundary regression passes.
+- Codex app-server Web smoke passes.
+- Real Codex app-server process smoke passes on a Codex-enabled host, or the
+  candidate keeps the explicit environment caveat.
 - NPM package checks pass or have a documented npm registry/native dependency
   skip with exact stdout/stderr.
 - E2E smoke passes or has a documented environment skip.
@@ -156,10 +191,25 @@ Gate 3 - Manual acceptance:
 - A real Claude Code session receives terminal input and preserves state across
   refresh.
 - Claude Code permission notification hook produces an OpenForge notification.
+- Physical Windows/WSL trial evidence is recorded before removing the native
+  Windows terminal caveat.
 - Rollback steps have been rehearsed on a disposable database or are explicitly
   accepted as manual fallback.
 
-## 4. Deployment Policy
+## 4. Automation Matrix
+
+| Gate | CI default | Manual release acceptance |
+| --- | --- | --- |
+| Workspace typecheck/test/build | Required | Re-run when cutting a candidate |
+| Provider/Codex boundary regression | Required | Re-run if model/provider code changed |
+| NPM build/verify/smoke | Required on Ubuntu CI with tmux | Re-run before publish or tag |
+| Codex app-server Web smoke | Required with mocked Gateway APIs | Re-run if Web control-plane UI changed |
+| Real Codex app-server initialize smoke | Conditional on `codex` CLI availability | Required before removing Codex process caveat |
+| Browser terminal end-to-end smoke | Environment-gated | Required on release host |
+| Real Claude Code permission prompt smoke | Environment-gated | Required when Claude behavior is in scope |
+| Physical Windows/WSL terminal smoke | Not covered by Ubuntu CI | Required before removing Windows caveat |
+
+## 5. Deployment Policy
 
 Current MVP deployment is local process based. Do not add cloud deployment,
 auto-update, hosted telemetry, or marketplace publishing without a separate

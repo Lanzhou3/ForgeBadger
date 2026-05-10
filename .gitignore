@@ -12,6 +12,9 @@ test-results/
 !.env.example
 .openforge/
 .github/
+!.github/
+!.github/workflows/
+!.github/workflows/ci.yml
 .claude/
 /CLAUDE.md
 /AGENTS.md
@@ -32,8 +35,16 @@ docs/reports/*
 !docs/reports/beta-handoff-2026-05-10.md
 !docs/README.zh-CN.md
 !docs/README.zh-TW.md
+!docs/DEVELOPMENT-PLAN.md
+!docs/MVP-10-TASKS.md
+!docs/SMOKE-TEST.md
+!docs/TRIAL-CHECKLIST.md
+!docs/TRIAL-FEEDBACK.md
+!docs/TRIAL-RUNBOOK.md
+!docs/TROUBLESHOOTING.md
 !docs/assets/
 !docs/assets/openforge-wordmark.png
+!docs/reports/post-beta-release-gates-2026-05-10.md
 
 # Local AI CLI config, personal project overrides, and repository agent notes.
 .codex

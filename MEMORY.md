@@ -52,6 +52,13 @@
   terminal. `openforge start` keeps management services startable but prints a
   terminal-runtime warning when the host cannot support tmux-backed browser
   terminals.
+- Post-beta release gate work is now recorded in
+  `docs/reports/post-beta-release-gates-2026-05-10.md`. `.github/workflows/ci.yml`
+  is tracked and covers workspace typecheck/test/build, script harness tests,
+  Provider/Codex boundary regression, Codex Background Tasks Web smoke, npm
+  build/verify/smoke, and environment-gated release notes. The Playwright config
+  now forces loopback hosts into `NO_PROXY` so proxy settings cannot make the
+  webServer readiness check mistake a proxy 400 for a running Next dev server.
 - Model provider management has moved to provider-scoped profiles. The latest
   model work added cc-switch-inspired provider presets, dynamic model sync for
   OpenAI-compatible model-list endpoints, provider-scoped model default/update/
@@ -81,7 +88,10 @@
    explicit TTL or pagination strategy instead of deleting them immediately and
    losing observable process state.
 3. Run a physical Windows/WSL manual smoke when that platform is available; the
-   current pass covers CLI mode behavior and runbook remediation, not a real
-   Windows host.
-4. Keep SSH/remote execution as a separate architecture item, not part of the
+   current pass covers CLI mode behavior, CI/release gate automation, checklist
+   fields, and runbook remediation, not a real Windows host.
+4. Start Phase C from beta feedback and first-user hardening: dependency
+   failure states, CLI availability recovery, provider configuration recovery,
+   diagnostics review, and platform-specific remediation.
+5. Keep SSH/remote execution as a separate architecture item, not part of the
    local Codex app-server prototype.
