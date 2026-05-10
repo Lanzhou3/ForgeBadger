@@ -60,3 +60,14 @@ recorded. A-stage first-user trial readiness is now closed by the browser
 terminal and real Claude permission-prompt evidence in
 `docs/reports/browser-terminal-smoke-2026-05-06.md` and
 `docs/reports/claude-permission-smoke-2026-05-07.md`.
+
+## 2026-05-10 Beta Handoff Update
+
+Phase B Codex Background Tasks, Provider/Codex boundary hardening, Windows/tmux
+CLI guidance, and release-sized package gates are covered by
+`docs/reports/beta-handoff-2026-05-10.md` and
+`docs/reports/phase-b-codex-app-server-acceptance-2026-05-10.md`.
+
+The beta decision keeps Codex app-server prompt/turn input disabled in Web.
+`/turn` remains an authenticated Gateway prototype route that returns `403`
+unless `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1` is explicitly set.
