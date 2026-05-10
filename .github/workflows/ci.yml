@@ -14,8 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NO_PROXY: 127.0.0.1,localhost,::1
-  no_proxy: 127.0.0.1,localhost,::1
+  NO_PROXY: "127.0.0.1,localhost,::1"
 
 jobs:
   verify:
@@ -23,14 +22,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      OPENFORGE_HOST: 127.0.0.1
+      OPENFORGE_HOST: "127.0.0.1"
       OPENFORGE_PORT: "48731"
       OPENFORGE_WEB_PORT: "48732"
-      OPENFORGE_GATEWAY_URL: http://127.0.0.1:48731
-      NEXT_PUBLIC_GATEWAY_URL: http://127.0.0.1:48731
-      OPENFORGE_DB_PATH: /tmp/openforge-ci.db
-      OPENFORGE_MASTER_KEY: 0000000000000000000000000000000000000000000000000000000000000000
-      OPENFORGE_JWT_SECRET: ci-jwt-secret-not-for-production
+      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731"
+      NEXT_PUBLIC_GATEWAY_URL: "http://127.0.0.1:48731"
+      OPENFORGE_DB_PATH: "/tmp/openforge-ci.db"
+      OPENFORGE_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      OPENFORGE_JWT_SECRET: "ci-jwt-secret-not-for-production"
       NEXT_TELEMETRY_DISABLED: "1"
       CI: "true"
 
@@ -78,8 +77,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      NEXT_PUBLIC_GATEWAY_URL: http://127.0.0.1:48731
-      OPENFORGE_WEB_URL: http://127.0.0.1:48752
+      NEXT_PUBLIC_GATEWAY_URL: "http://127.0.0.1:48731"
+      OPENFORGE_WEB_URL: "http://127.0.0.1:48752"
       OPENFORGE_WEB_PORT: "48752"
       NEXT_TELEMETRY_DISABLED: "1"
       CI: "true"
