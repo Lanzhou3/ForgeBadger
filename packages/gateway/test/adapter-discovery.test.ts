@@ -37,4 +37,38 @@ describe("adapter discovery", () => {
     assert.equal(codex?.supportLevel, "supported");
     assert.equal(codex?.launchEnabled, true);
   });
+
+  it("disables terminal launch on native Windows even when adapter commands exist", async () => {
+    const runner: CommandRunner = async (command) => ({
+      exitCode: 0,
+      stdout: `${command} 1.0.0\n`,
+      stderr: ""
+    });
+
+    const adapters = await discoverAdapters(runner, "win32");
+
+    assert.equal(adapters.every((adapter) => adapter.available), true);
+    assert.equal(adapters.every((adapter) => adapter.launchEnabled === false), true);
+    assert.match(
+      adapters.find((adapter) => adapter.id === "claude")?.error ?? "",
+      /Native Windows terminals require WSL/
+    );
+  });
+
+  it("disables terminal launch when tmux is missing on Unix-like hosts", async () => {
+    const runner: CommandRunner = async (command) => ({
+      exitCode: command === "tmux" ? 127 : 0,
+      stdout: command === "tmux" ? "" : `${command} 1.0.0\n`,
+      stderr: command === "tmux" ? "tmux not found" : ""
+    });
+
+    const adapters = await discoverAdapters(runner, "linux");
+
+    assert.equal(adapters.every((adapter) => adapter.available), true);
+    assert.equal(adapters.every((adapter) => adapter.launchEnabled === false), true);
+    assert.match(
+      adapters.find((adapter) => adapter.id === "codex")?.error ?? "",
+      /Install tmux/
+    );
+  });
 });

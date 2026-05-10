@@ -275,7 +275,11 @@ function AdapterItem({ adapter }: { adapter: AdapterDiscovery }) {
           <Badge variant={adapter.supportLevel === "supported" ? "secondary" : "outline"}>
             {adapter.supportLevel === "supported" ? t("settings.supported") : t("settings.prototype")}
           </Badge>
-          {adapter.launchEnabled && <Badge>{t("settings.launchEnabled")}</Badge>}
+          {adapter.launchEnabled ? (
+            <Badge>{t("settings.launchEnabled")}</Badge>
+          ) : (
+            <Badge variant="outline">{t("settings.launchDisabled")}</Badge>
+          )}
         </div>
       </div>
       <div className="mt-2 text-xs text-muted-foreground">

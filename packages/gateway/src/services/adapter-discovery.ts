@@ -1,4 +1,9 @@
-import { checkCommand, type CommandRunner } from "../lib/dependency-check.js";
+import {
+  checkOpenForgeRuntimeDependencies,
+  type CommandRunner,
+  type DependencyStatus,
+  type TerminalRuntimeStatus
+} from "../lib/dependency-check.js";
 
 export type AdapterId = "claude" | "opencode" | "codex";
 export type AdapterRuntimeMode = "terminal" | "app-server-stdio" | "app-server-websocket";
@@ -75,24 +80,56 @@ export function getAdapterDefinition(adapterId: AdapterId): AdapterDefinition {
 
 export async function getAdapterLaunchStatus(
   adapterId: AdapterId,
-  runner?: CommandRunner
+  runner?: CommandRunner,
+  platform: NodeJS.Platform = process.platform
 ): Promise<AdapterDiscoveryResult> {
   const definition = getAdapterDefinition(adapterId);
-  const status = await checkCommand(definition.command, definition.versionArgs, runner);
-  return {
-    ...definition,
-    launchEnabled: definition.launchEnabled && status.available,
-    available: status.available,
-    status: status.available ? "available" : "missing",
-    ...(status.version ? { version: status.version } : {}),
-    ...(status.error ? { error: status.error } : {})
-  };
+  const report = await checkOpenForgeRuntimeDependencies(runner, platform);
+  return toAdapterDiscoveryResult(
+    definition,
+    getDependencyStatus(report.dependencies, definition.command),
+    report.terminalRuntime
+  );
 }
 
 export async function discoverAdapters(
-  runner?: CommandRunner
+  runner?: CommandRunner,
+  platform: NodeJS.Platform = process.platform
 ): Promise<AdapterDiscoveryResult[]> {
-  return Promise.all(
-    adapterDefinitions.map((definition) => getAdapterLaunchStatus(definition.id, runner))
+  const report = await checkOpenForgeRuntimeDependencies(runner, platform);
+  return adapterDefinitions.map((definition) =>
+    toAdapterDiscoveryResult(
+      definition,
+      getDependencyStatus(report.dependencies, definition.command),
+      report.terminalRuntime
+    )
   );
+}
+
+function getDependencyStatus(dependencies: DependencyStatus[], command: string): DependencyStatus {
+  return dependencies.find((dependency) => dependency.name === command) ?? {
+    name: command,
+    available: false,
+    error: `${command} was not checked`
+  };
+}
+
+function toAdapterDiscoveryResult(
+  definition: AdapterDefinition,
+  status: DependencyStatus,
+  terminalRuntime: TerminalRuntimeStatus
+): AdapterDiscoveryResult {
+  const terminalLaunchSupported = !definition.runtimeModes.includes("terminal") || terminalRuntime.supported;
+  const terminalError = terminalLaunchSupported ? undefined : terminalRuntime.message;
+  const error = status.error ?? terminalError;
+
+  return {
+    ...definition,
+    runtimeModes: [...definition.runtimeModes],
+    launchEnabled: definition.launchEnabled && status.available && terminalLaunchSupported,
+    available: status.available,
+    status: status.available ? "available" : "missing",
+    ...(status.version ? { version: status.version } : {}),
+    ...(error ? { error } : {})
+  };
 }
