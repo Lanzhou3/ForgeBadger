@@ -60,6 +60,9 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "codexAppServer.recentActivity")).toBe("最近活动");
     expect(getTranslation("zh-TW", "codexAppServer.turnDisabled")).toBe("任務輸入已關閉");
     expect(getTranslation("en", "codexAppServer.turnDisabled")).toBe("Task input disabled");
+    expect(getTranslation("zh-CN", "nav.copilot")).toBe("Copilot");
+    expect(getTranslation("zh-TW", "copilot.providerSetupRequired")).toContain("模型供應商");
+    expect(getTranslation("en", "copilot.proposedAction")).toBe("Proposed action");
   });
 
   it("normalizes unsupported language values to Simplified Chinese", () => {

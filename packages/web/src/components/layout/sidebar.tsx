@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   FolderOpen,
   TerminalSquare,
+  Sparkles,
   Bot,
   Wrench,
   Puzzle,
@@ -36,6 +37,7 @@ export const navItems = [
   { labelKey: "nav.dashboard", href: "/", icon: LayoutDashboard },
   { labelKey: "nav.projects", href: "/projects", icon: FolderOpen },
   { labelKey: "nav.sessions", href: "/sessions", icon: TerminalSquare },
+  { labelKey: "nav.copilot", href: "/copilot", icon: Sparkles },
   { labelKey: "nav.agents", href: "/agents", icon: Bot },
   { labelKey: "nav.skills", href: "/skills", icon: Wrench },
   { labelKey: "nav.plugins", href: "/plugins", icon: Puzzle },
@@ -59,7 +61,7 @@ function NavLinks({ collapsed = false, onNavigate }: { collapsed?: boolean; onNa
       {visibleItems.map((item, index) => {
         const isActive =
           pathname === item.href || pathname.startsWith(`${item.href}/`);
-        const showSeparator = [3, 8].includes(index);
+        const showSeparator = [4, 9].includes(index);
         return (
           <div key={item.href}>
             {showSeparator && <div className="mx-3 my-2 h-px bg-border/70" aria-hidden="true" />}

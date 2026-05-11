@@ -6,7 +6,9 @@ import {
   checkModelHealth,
   checkModelEndpointHealth,
   cloneTemplate,
+  cancelCopilotRun,
   createProjectWithConfig,
+  createCopilotRun,
   createTemplateFromProject,
   createSkill,
   createModel,
@@ -25,6 +27,8 @@ import {
   discoverAdapters,
   exportDiagnostics,
   exportTemplate,
+  getCopilotCapabilities,
+  getCopilotRun,
   getDashboardSummary,
   getDependencies,
   getConfigCompliance,
@@ -46,6 +50,7 @@ import {
   listAuditLogs,
   listCatalogItems,
   listCatalogSources,
+  listCopilotRuns,
   listNotifications,
   listSessions,
   listSnapshots,
@@ -235,6 +240,43 @@ describe("api client", () => {
     );
     expect(result.report.app.name).toBe("OpenForge");
     expect(result.report.environment.OPENFORGE_PORT).toBe("48731");
+  });
+
+  it("calls Copilot REST helpers", async () => {
+    await getCopilotCapabilities();
+    await createCopilotRun({ prompt: "Summarize Gateway health" });
+    await listCopilotRuns();
+    await getCopilotRun("run-1");
+    await cancelCopilotRun("run-1");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/copilot/capabilities",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/copilot/runs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ prompt: "Summarize Gateway health" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/copilot/runs",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1/cancel",
+      expect.objectContaining({ method: "POST" })
+    );
   });
 
   it("creates Gate A sessions with the current login token", async () => {

@@ -152,6 +152,45 @@ export interface CodexAppServerCapabilities {
   transcriptPersistence: "disabled";
 }
 
+export interface CopilotCapabilities {
+  supportedProviderFormats: Array<"openai" | "openai-compatible" | "anthropic" | string>;
+  toolExecutionEnabled: boolean;
+  pendingActionApprovalEnabled?: boolean;
+}
+
+export interface CopilotRun {
+  id: string;
+  status: "queued" | "running" | "waiting_for_approval" | "completed" | "failed" | "cancelled" | string;
+  goal: string;
+  source: string;
+  sourceRefId?: string | null;
+  providerProfileId?: string | null;
+  modelProfileId?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  createdAt?: number | null;
+  updatedAt?: number | null;
+  completedAt?: number | null;
+}
+
+export interface CopilotRunEvent {
+  id: string;
+  runId: string;
+  type: string;
+  sequence: number;
+  message?: string | null;
+  payload?: Record<string, unknown>;
+  createdAt?: number | null;
+}
+
+export interface CreateCopilotRunInput {
+  prompt: string;
+  providerProfileId?: string;
+  modelProfileId?: string;
+  source?: "dashboard" | "project" | "session" | "settings" | "copilot";
+  sourceRefId?: string;
+}
+
 export interface DependencyStatus {
   name: string;
   available: boolean;
@@ -1218,6 +1257,35 @@ export async function stopCodexAppServer(id: string): Promise<{ session: CodexAp
   return fetchJson(`/api/v1/codex/app-server/${id}/stop`, { method: "POST" }) as Promise<{
     session: CodexAppServerSession;
   }>;
+}
+
+// Copilot
+export async function getCopilotCapabilities(): Promise<CopilotCapabilities> {
+  return fetchJson("/api/v1/copilot/capabilities") as Promise<CopilotCapabilities>;
+}
+
+export async function createCopilotRun(
+  input: CreateCopilotRunInput
+): Promise<{ run: CopilotRun; events: CopilotRunEvent[] }> {
+  return fetchJson("/api/v1/copilot/runs", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ run: CopilotRun; events: CopilotRunEvent[] }>;
+}
+
+export async function listCopilotRuns(limit?: number): Promise<{ runs: CopilotRun[] }> {
+  const query = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
+  return fetchJson(`/api/v1/copilot/runs${query}`) as Promise<{ runs: CopilotRun[] }>;
+}
+
+export async function getCopilotRun(id: string): Promise<{ run: CopilotRun; events: CopilotRunEvent[] }> {
+  return fetchJson(`/api/v1/copilot/runs/${id}`) as Promise<{ run: CopilotRun; events: CopilotRunEvent[] }>;
+}
+
+export async function cancelCopilotRun(id: string): Promise<{ run: CopilotRun; events: CopilotRunEvent[] }> {
+  return fetchJson(`/api/v1/copilot/runs/${id}/cancel`, {
+    method: "POST",
+  }) as Promise<{ run: CopilotRun; events: CopilotRunEvent[] }>;
 }
 
 // Agents
