@@ -210,7 +210,7 @@ test("Copilot page prevents duplicate pending-action submissions", async ({ page
     status: "pending",
     input: { kind: "decision", scope: "global", text: "Remember release gates." },
   };
-  const approvedAction = { ...pendingAction, status: "approved" };
+  const approvedAction = { ...pendingAction, status: "approved", result: { entry: { id: "memory-entry-1" } } };
   const completedRunDetail = {
     run: {
       id: "run-approval",
@@ -272,6 +272,7 @@ test("Copilot page prevents duplicate pending-action submissions", async ({ page
   await expect.poll(() => approveRequests).toBe(1);
   await expect(page.getByText("completed").first()).toBeVisible();
   await expect(page.getByText("Action approved")).toBeVisible();
+  await expect(page.getByText("memory-entry-1")).toBeVisible();
 });
 
 test("Copilot page reflects rejected pending actions immediately", async ({ page }) => {

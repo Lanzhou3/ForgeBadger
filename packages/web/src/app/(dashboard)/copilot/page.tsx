@@ -589,7 +589,7 @@ function PendingActions({
               </div>
             )}
             <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted/30 p-2 text-xs text-muted-foreground">
-              {JSON.stringify(action.input ?? action.result ?? {}, null, 2)}
+              {JSON.stringify(action.result ?? action.input ?? {}, null, 2)}
             </pre>
             {action.status === "pending" && (
               <div className="mt-3 flex justify-end gap-2">
