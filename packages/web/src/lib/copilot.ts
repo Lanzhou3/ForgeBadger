@@ -53,6 +53,12 @@ export interface ResolveCopilotRunSelectionInput {
   runs: Array<{ id: string }>;
 }
 
+export interface FindCurrentLiveCopilotRunInput<T extends { id?: string; status: string }> {
+  activeRun?: T | null;
+  selectedRun?: T | null;
+  runs: T[];
+}
+
 export interface CopilotPendingActionSummaryInput {
   type: string;
   input?: Record<string, unknown>;
@@ -63,6 +69,25 @@ export interface CopilotPendingActionSummary {
   detail: string;
   preview?: string;
 }
+
+export interface CopilotStartBlockerInput {
+  promptReady: boolean;
+  providerConfigured: boolean;
+  modelSelectionReady: boolean;
+  modelProvidersLoading: boolean;
+  modelProvidersLoadFailed: boolean;
+  createPending: boolean;
+  liveRunStatus?: string | null;
+}
+
+export type CopilotStartBlocker =
+  | "prompt"
+  | "provider_setup"
+  | "model_providers_loading"
+  | "model_providers_failed"
+  | "model_selection"
+  | "live_run"
+  | "creating";
 
 export function getCopilotStatusTone(status: string): CopilotStatusTone {
   return statusTones[status] ?? "muted";
@@ -116,6 +141,42 @@ export function resolveCopilotRunSelection(input: ResolveCopilotRunSelectionInpu
 
 export function isCopilotRunLive(status: string): boolean {
   return status === "queued" || status === "running" || status === "waiting_for_approval";
+}
+
+export function findLiveCopilotRun<T extends { status: string }>(runs: T[]): T | null {
+  return runs.find((run) => isCopilotRunLive(run.status)) ?? null;
+}
+
+export function findCurrentLiveCopilotRun<T extends { id?: string; status: string }>(
+  input: FindCurrentLiveCopilotRunInput<T>
+): T | null {
+  const seenIds = new Set<string>();
+  const currentRuns: T[] = [];
+  const addRun = (run?: T | null) => {
+    if (!run) return;
+    if (run.id) {
+      if (seenIds.has(run.id)) return;
+      seenIds.add(run.id);
+    }
+    currentRuns.push(run);
+  };
+
+  addRun(input.selectedRun);
+  for (const run of input.runs) addRun(run);
+  addRun(input.activeRun);
+
+  return findLiveCopilotRun(currentRuns);
+}
+
+export function getCopilotStartBlocker(input: CopilotStartBlockerInput): CopilotStartBlocker | null {
+  if (!input.promptReady) return "prompt";
+  if (!input.providerConfigured) return "provider_setup";
+  if (input.modelProvidersLoading) return "model_providers_loading";
+  if (input.modelProvidersLoadFailed) return "model_providers_failed";
+  if (!input.modelSelectionReady) return "model_selection";
+  if (input.liveRunStatus && isCopilotRunLive(input.liveRunStatus)) return "live_run";
+  if (input.createPending) return "creating";
+  return null;
 }
 
 function summarizeMemoryWrite(payload: Record<string, unknown>): CopilotPendingActionSummary {

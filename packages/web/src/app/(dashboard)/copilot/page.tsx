@@ -27,11 +27,13 @@ import {
   type ProviderProfile,
 } from "@/lib/api";
 import {
+  findCurrentLiveCopilotRun,
   getCopilotEventLabel,
   getCopilotEventLabelKey,
   getCopilotPendingActionLabel,
   getCopilotPendingActionLabelKey,
   getCopilotPendingActionSummary,
+  getCopilotStartBlocker,
   getCopilotStatusTone,
   isCopilotRunLive,
   resolveCopilotRunSelection,
@@ -132,6 +134,12 @@ export default function CopilotPage() {
   const latestRun = selectedRunState?.run ?? runs.find((run) => run.id === resolvedRunId) ?? runs[0] ?? null;
   const timelineEvents = selectedRunState?.events ?? [];
   const pendingActions = selectedRunState?.pendingActions ?? [];
+  const liveRun = findCurrentLiveCopilotRun({
+    activeRun: activeRun?.run ?? null,
+    selectedRun: selectedRunData?.run ?? null,
+    runs,
+  });
+  const liveRunActive = Boolean(liveRun);
   const promptReady = prompt.trim().length > 0;
   const providerSetupError = isProviderSetupError(errorCode);
   const providerConfigured = capabilityData?.providerConfigured !== false;
@@ -192,13 +200,16 @@ export default function CopilotPage() {
     },
     onError: (error) => applyErrorState(error, setErrorMessage, setErrorCode),
   });
-  const canStartCopilotRun =
-    promptReady &&
-    providerConfigured &&
-    modelSelectionReady &&
-    !modelProvidersLoading &&
-    !modelProvidersLoadFailed &&
-    !createMutation.isPending;
+  const startBlocker = getCopilotStartBlocker({
+    promptReady,
+    providerConfigured,
+    modelSelectionReady,
+    modelProvidersLoading,
+    modelProvidersLoadFailed,
+    createPending: createMutation.isPending,
+    liveRunStatus: liveRun?.status ?? null,
+  });
+  const canStartCopilotRun = startBlocker === null;
 
   const cancelMutation = useMutation({
     mutationFn: (id: string) => cancelCopilotRun(id),
@@ -402,6 +413,8 @@ export default function CopilotPage() {
                         {t("copilot.configureProvider")}
                       </Link>
                     </span>
+                  ) : liveRunActive ? (
+                    t("copilot.runAlreadyActive")
                   ) : (
                     modelProvidersLoading
                       ? t("common.loading")
@@ -415,12 +428,12 @@ export default function CopilotPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {latestRun && isCopilotRunLive(latestRun.status) && (
+                  {liveRun && (
                     <Button
                       type="button"
                       variant="outline"
                       disabled={cancelMutation.isPending}
-                      onClick={() => cancelMutation.mutate(latestRun.id)}
+                      onClick={() => cancelMutation.mutate(liveRun.id)}
                     >
                       <Square className="mr-2 size-4" />
                       {t("copilot.stop")}

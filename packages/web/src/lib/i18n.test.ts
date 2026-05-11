@@ -65,6 +65,7 @@ describe("i18n", () => {
     expect(getTranslation("en", "copilot.proposedAction")).toBe("Proposed action");
     expect(getTranslation("zh-CN", "copilot.configureProvider")).toBe("配置模型服务商");
     expect(getTranslation("en", "copilot.providerSelect")).toBe("Copilot provider");
+    expect(getTranslation("en", "copilot.runAlreadyActive")).toContain("already active");
     expect(getTranslation("zh-CN", "copilot.modelProvidersLoadFailed")).toContain("模型服务商");
     expect(getTranslation("zh-TW", "copilot.noSelectableProviders")).toContain("供應商");
     expect(getTranslation("zh-TW", "copilot.event.toolRequested")).toBe("工具請求");

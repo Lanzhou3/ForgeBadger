@@ -7,6 +7,9 @@ import {
   getCopilotPendingActionLabel,
   getCopilotPendingActionLabelKey,
   getCopilotPendingActionSummary,
+  getCopilotStartBlocker,
+  findLiveCopilotRun,
+  findCurrentLiveCopilotRun,
   resolveCopilotRunSelection,
   isCopilotRunLive,
 } from "./copilot";
@@ -148,5 +151,60 @@ describe("copilot display helpers", () => {
     expect(isCopilotRunLive("waiting_for_approval")).toBe(true);
     expect(isCopilotRunLive("completed")).toBe(false);
     expect(isCopilotRunLive("failed")).toBe(false);
+  });
+
+  it("finds a live Copilot run even when a completed run is selected first", () => {
+    expect(
+      findLiveCopilotRun([
+        { id: "run-completed", status: "completed" },
+        { id: "run-running", status: "running" },
+      ])
+    ).toEqual({ id: "run-running", status: "running" });
+    expect(findLiveCopilotRun([{ id: "run-completed", status: "completed" }])).toBeNull();
+  });
+
+  it("prefers live Copilot detail state over stale completed list state", () => {
+    expect(
+      findCurrentLiveCopilotRun({
+        activeRun: null,
+        selectedRun: { id: "run-1", status: "running" },
+        runs: [{ id: "run-1", status: "completed" }],
+      })
+    ).toEqual({ id: "run-1", status: "running" });
+  });
+
+  it("ignores stale active Copilot state when refreshed detail is terminal", () => {
+    expect(
+      findCurrentLiveCopilotRun({
+        activeRun: { id: "run-1", status: "running" },
+        selectedRun: { id: "run-1", status: "cancelled" },
+        runs: [{ id: "run-1", status: "cancelled" }],
+      })
+    ).toBeNull();
+  });
+
+  it("blocks starting another Copilot run while a live run exists", () => {
+    expect(
+      getCopilotStartBlocker({
+        promptReady: true,
+        providerConfigured: true,
+        modelSelectionReady: true,
+        modelProvidersLoading: false,
+        modelProvidersLoadFailed: false,
+        createPending: false,
+        liveRunStatus: "running",
+      })
+    ).toBe("live_run");
+    expect(
+      getCopilotStartBlocker({
+        promptReady: true,
+        providerConfigured: true,
+        modelSelectionReady: true,
+        modelProvidersLoading: false,
+        modelProvidersLoadFailed: false,
+        createPending: false,
+        liveRunStatus: "completed",
+      })
+    ).toBeNull();
   });
 });

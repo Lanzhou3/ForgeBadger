@@ -148,6 +148,29 @@ test("Copilot page disables start when model provider selection cannot load", as
   await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
 });
 
+test("Copilot page disables start while another run is live", async ({ page }) => {
+  await mockCopilotApis(page, {
+    runs: [{
+      id: "run-1",
+      status: "completed",
+      goal: "Previous completed run",
+      source: "copilot",
+    }, {
+      id: "run-live",
+      status: "running",
+      goal: "Summarize current release state",
+      source: "copilot",
+    }],
+  });
+
+  await page.goto("/copilot");
+  await page.getByLabel("Copilot prompt").fill("Start a second run");
+
+  await expect(page.getByText("A Copilot run is already active.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+});
+
 test("Copilot page sends the selected provider and model when starting a run", async ({ page }) => {
   let createBody: Record<string, unknown> | undefined;
   await mockCopilotApis(page, {
