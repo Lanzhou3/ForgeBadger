@@ -27,6 +27,7 @@ import {
   getCopilotEventLabelKey,
   getCopilotPendingActionLabel,
   getCopilotPendingActionLabelKey,
+  getCopilotPendingActionSummary,
   getCopilotStatusTone,
   isCopilotRunLive,
   resolveCopilotRunSelection,
@@ -457,12 +458,23 @@ function PendingActions({
       {actions.map((action) => {
         const isProcessing = processingActionId === action.id;
         const actionsDisabled = Boolean(processingActionId);
+        const summary = getCopilotPendingActionSummary(action);
         return (
           <div key={action.id} className="rounded-md border border-border p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-medium">{getActionLabel(action.type)}</div>
               <Badge variant={action.status === "pending" ? "secondary" : "outline"}>{action.status}</Badge>
             </div>
+            {summary && (
+              <div className="mt-2 rounded-md bg-muted/20 p-2 text-xs">
+                <div className="font-medium text-foreground">{summary.detail}</div>
+                {summary.preview && (
+                  <div className="mt-1 break-words leading-5 text-muted-foreground">
+                    {summary.preview}
+                  </div>
+                )}
+              </div>
+            )}
             <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted/30 p-2 text-xs text-muted-foreground">
               {JSON.stringify(action.input ?? action.result ?? {}, null, 2)}
             </pre>

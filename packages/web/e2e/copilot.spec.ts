@@ -149,6 +149,9 @@ test("Copilot page prevents duplicate pending-action submissions", async ({ page
   await page.goto("/copilot");
   const approve = page.getByRole("button", { name: "Approve" });
   await expect(approve).toBeVisible();
+  const actionSummary = page.getByText("decision / global").locator("xpath=..");
+  await expect(actionSummary).toBeVisible();
+  await expect(actionSummary.getByText("Remember release gates.", { exact: true })).toBeVisible();
 
   await approve.dblclick();
 

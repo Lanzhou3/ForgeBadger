@@ -6,6 +6,7 @@ import {
   getCopilotEventLabelKey,
   getCopilotPendingActionLabel,
   getCopilotPendingActionLabelKey,
+  getCopilotPendingActionSummary,
   resolveCopilotRunSelection,
   isCopilotRunLive,
 } from "./copilot";
@@ -42,6 +43,64 @@ describe("copilot display helpers", () => {
     expect(getCopilotPendingActionLabelKey("openforge.propose_memory_write")).toBe("copilot.pendingAction.memoryWrite");
     expect(getCopilotPendingActionLabelKey("openforge.propose_diagnostics_export")).toBe("copilot.pendingAction.diagnosticsExport");
     expect(getCopilotPendingActionLabelKey("custom.pending_action")).toBeNull();
+  });
+
+  it("summarizes memory write pending actions without requiring raw JSON", () => {
+    expect(
+      getCopilotPendingActionSummary({
+        type: "openforge.propose_memory_write",
+        input: {
+          kind: "decision",
+          scope: "global",
+          text: "Remember that provider-backed profiles are the source of truth.",
+        },
+      })
+    ).toEqual({
+      detail: "decision / global",
+      preview: "Remember that provider-backed profiles are the source of truth.",
+    });
+  });
+
+  it("summarizes session creation and diagnostics pending actions", () => {
+    expect(
+      getCopilotPendingActionSummary({
+        type: "openforge.propose_session_create",
+        input: { aiTool: "codex", projectId: "project-123", name: "Release smoke" },
+      })
+    ).toEqual({
+      detail: "codex / project-123",
+      preview: "Release smoke",
+    });
+    expect(
+      getCopilotPendingActionSummary({
+        type: "openforge.propose_diagnostics_export",
+        input: { reason: "Collect final release gate evidence." },
+      })
+    ).toEqual({
+      detail: "Diagnostics export",
+      preview: "Collect final release gate evidence.",
+    });
+  });
+
+  it("summarizes troubleshooting steps and ignores unknown pending action payloads", () => {
+    expect(
+      getCopilotPendingActionSummary({
+        type: "openforge.propose_troubleshooting_steps",
+        input: {
+          summary: "Gateway login fails",
+          steps: ["Check provider config", "Retry login"],
+        },
+      })
+    ).toEqual({
+      detail: "Gateway login fails",
+      preview: "Check provider config / Retry login",
+    });
+    expect(
+      getCopilotPendingActionSummary({
+        type: "custom.pending_action",
+        input: { text: "Unrecognized payload" },
+      })
+    ).toBeNull();
   });
 
   it("resolves selected Copilot run id from user selection, active run, or latest history", () => {
