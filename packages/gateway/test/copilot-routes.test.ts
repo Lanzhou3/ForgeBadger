@@ -14,7 +14,7 @@ import { ModelProviderRepository } from "../src/db/repositories/model-provider-r
 import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
 import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
 import { createCopilotRoutes } from "../src/routes/copilot.js";
-import type { CopilotModelClient, CopilotModelRequest } from "../src/services/copilot/types.js";
+import type { CopilotModelClient, CopilotModelEvent, CopilotModelRequest } from "../src/services/copilot/types.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
@@ -37,6 +37,7 @@ describe("copilot routes", () => {
   let otherToken: string;
   let userId: string;
   let otherUserId: string;
+  let modelEvents: CopilotModelEvent[];
   const calls: CopilotModelRequest[] = [];
 
   beforeEach(() => {
@@ -48,13 +49,14 @@ describe("copilot routes", () => {
     token = signJwt({ userId: user.id, email: user.email }, secret);
     otherToken = signJwt({ userId: otherUser.id, email: otherUser.email }, secret);
     calls.length = 0;
+    modelEvents = [{ type: "assistant_message", text: "Gateway is healthy." }];
     app = express();
     app.locals.jwtSecret = secret;
     app.use(express.json());
     app.use("/api/v1/copilot", createCopilotRoutes({
       db,
       masterKey,
-      modelClientFactory: () => fakeModelClient(calls)
+      modelClientFactory: () => fakeModelClient(calls, () => modelEvents)
     }));
   });
 
@@ -107,6 +109,106 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.events[0].type, "assistant_message");
     assert.equal(res.body.data.events[0].message, "Gateway is healthy.");
     assert.equal(calls[0]?.input, "Summarize Gateway health");
+  });
+
+  it("keeps approval-required tool runs waiting for approval", async () => {
+    createOpenAiProvider();
+    modelEvents = [{
+      type: "tool_call_requested",
+      id: "tool-call-1",
+      name: "openforge.propose_memory_write",
+      input: {
+        kind: "decision",
+        scope: "global",
+        text: "Remember provider SSOT."
+      }
+    }];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Remember this decision",
+      source: "copilot"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.run.status, "waiting_for_approval");
+    assert.equal(res.body.data.run.completedAt, null);
+    assert.equal(res.body.data.pendingActions.length, 1);
+    assert.equal(res.body.data.pendingActions[0].type, "openforge.propose_memory_write");
+  });
+
+  it("does not cancel terminal Copilot runs", async () => {
+    const repo = new CopilotRepository(db, userId);
+    const run = repo.createRun({
+      status: "completed",
+      source: "copilot",
+      goal: "Already done"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${run.id}/cancel`,
+      undefined,
+      authHeaders()
+    );
+
+    assert.equal(res.status, 409);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_run_not_cancellable");
+    assert.equal(new CopilotRepository(db, userId).getRun(run.id)?.status, "completed");
+  });
+
+  it("rejects outstanding pending actions when cancelling a waiting run", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_memory_write", {
+      kind: "decision",
+      scope: "global",
+      text: "Remember release gates."
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/cancel`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.run.status, "cancelled");
+    assert.equal(action?.status, "rejected");
+  });
+
+  it("does not approve pending actions for non-waiting runs", async () => {
+    const repo = new CopilotRepository(db, userId);
+    const run = repo.createRun({
+      status: "cancelled",
+      source: "copilot",
+      goal: "Cancelled pending action"
+    });
+    const action = repo.createPendingAction(run.id, {
+      type: "openforge.propose_memory_write",
+      input: {
+        kind: "decision",
+        scope: "global",
+        text: "Should not be stored."
+      }
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${run.id}/pending-actions/${action.id}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    assert.equal(res.status, 409);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_run_not_approvable");
+    assert.equal(new CopilotMemoryRepository(db, userId).listEntries({}).length, 0);
   });
 
   it("rejects pending-action approval outside the current user", async () => {
@@ -256,11 +358,14 @@ describe("copilot routes", () => {
   }
 });
 
-function fakeModelClient(calls: CopilotModelRequest[]): CopilotModelClient {
+function fakeModelClient(
+  calls: CopilotModelRequest[],
+  events: () => CopilotModelEvent[]
+): CopilotModelClient {
   return {
     async createResponse(request) {
       calls.push(request);
-      return [{ type: "assistant_message", text: "Gateway is healthy." }];
+      return events();
     }
   };
 }

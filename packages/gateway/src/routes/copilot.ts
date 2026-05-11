@@ -85,15 +85,32 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
 
   router.post("/runs/:id/cancel", (req, res) => {
     const repo = repoFor(options.db, req);
-    const run = repo.updateRun(req.params.id, { status: "cancelled", completedAt: Date.now() });
-    if (!run) return res.status(404).json({ code: 1, message: "Copilot run not found" });
+    const current = repo.getRun(req.params.id);
+    if (!current) return res.status(404).json({ code: 1, message: "Copilot run not found" });
+    if (!isCancellableRunStatus(current.status)) {
+      return res.status(409).json({
+        code: 1,
+        message: "Copilot run cannot be cancelled from its current status",
+        details: { code: "copilot_run_not_cancellable", status: current.status }
+      });
+    }
+    rejectPendingActions(repo, current.id);
+    const run = repo.updateRun(current.id, { status: "cancelled", completedAt: Date.now() }) ?? current;
     res.json(successEnvelope(run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
   });
 
   router.post("/runs/:id/pending-actions/:actionId/approve", (req, res) => {
     const repo = repoFor(options.db, req);
-    const action = findPendingAction(repo, req.params.id, req.params.actionId);
-    if (!action) return res.status(404).json({ code: 1, message: "Pending action not found" });
+    const target = findPendingActionTarget(repo, req.params.id, req.params.actionId);
+    if (!target) return res.status(404).json({ code: 1, message: "Pending action not found" });
+    if (!isApprovalRunStatus(target.run.status)) {
+      return res.status(409).json({
+        code: 1,
+        message: "Copilot run is not waiting for approval",
+        details: { code: "copilot_run_not_approvable", status: target.run.status }
+      });
+    }
+    const action = target.action;
     if (action.status !== "pending") return res.status(400).json({ code: 1, message: "Pending action is not approvable" });
     const result = approvePendingAction(action, options, userIdFor(req));
     if (isApprovalError(result)) {
@@ -111,9 +128,16 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
 
   router.post("/runs/:id/pending-actions/:actionId/reject", (req, res) => {
     const repo = repoFor(options.db, req);
-    const action = findPendingAction(repo, req.params.id, req.params.actionId);
-    if (!action) return res.status(404).json({ code: 1, message: "Pending action not found" });
-    const updated = repo.updatePendingAction(action.id, { status: "rejected" });
+    const target = findPendingActionTarget(repo, req.params.id, req.params.actionId);
+    if (!target) return res.status(404).json({ code: 1, message: "Pending action not found" });
+    if (!isApprovalRunStatus(target.run.status)) {
+      return res.status(409).json({
+        code: 1,
+        message: "Copilot run is not waiting for approval",
+        details: { code: "copilot_run_not_approvable", status: target.run.status }
+      });
+    }
+    const updated = repo.updatePendingAction(target.action.id, { status: "rejected" });
     res.json({ code: 0, data: { action: updated }, message: "" });
   });
 
@@ -152,14 +176,34 @@ function sendInvalid(res: { status: (code: number) => { json: (body: unknown) =>
   res.status(400).json({ code: 1, message });
 }
 
-function findPendingAction(
+function isCancellableRunStatus(status: string): boolean {
+  return status === "queued" || status === "running" || status === "waiting_for_approval";
+}
+
+function isApprovalRunStatus(status: string): boolean {
+  return status === "waiting_for_approval";
+}
+
+function rejectPendingActions(repo: CopilotRepository, runId: string): void {
+  for (const action of repo.listPendingActions(runId)) {
+    if (action.status === "pending") {
+      repo.updatePendingAction(action.id, {
+        status: "rejected",
+        result: { reason: "run_cancelled" }
+      });
+    }
+  }
+}
+
+function findPendingActionTarget(
   repo: CopilotRepository,
   runId: string,
   actionId: string
-): CopilotPendingAction | undefined {
-  if (!repo.getRun(runId)) return undefined;
+): { run: CopilotRun; action: CopilotPendingAction } | undefined {
+  const run = repo.getRun(runId);
+  if (!run) return undefined;
   const action = repo.getPendingAction(actionId);
-  return action?.runId === runId ? action : undefined;
+  return action?.runId === runId ? { run, action } : undefined;
 }
 
 function approvePendingAction(

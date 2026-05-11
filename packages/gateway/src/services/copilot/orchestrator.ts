@@ -105,6 +105,10 @@ export class CopilotOrchestrator {
       message: toolCall.name,
       payload: { toolCallId: toolCall.id, output: result.output }
     });
+    if (result.requiresApproval) {
+      const waiting = repo.updateRun(run.id, { status: "waiting_for_approval" }) ?? run;
+      return { ok: true, run: waiting, events: [...events, toolResult] };
+    }
     const completed = repo.updateRun(run.id, { status: "completed", completedAt: Date.now() }) ?? run;
     return { ok: true, run: completed, events: [...events, toolResult] };
   }

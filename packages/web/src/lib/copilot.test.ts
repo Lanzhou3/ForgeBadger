@@ -33,7 +33,7 @@ describe("copilot display helpers", () => {
       resolveCopilotRunSelection({
         selectedRunId: "run-selected",
         activeRunId: "run-active",
-        runs: [{ id: "run-latest" }],
+        runs: [{ id: "run-selected" }, { id: "run-latest" }],
       })
     ).toBe("run-selected");
     expect(
@@ -48,6 +48,22 @@ describe("copilot display helpers", () => {
       })
     ).toBe("run-latest");
     expect(resolveCopilotRunSelection({ runs: [] })).toBeNull();
+  });
+
+  it("ignores stale Copilot run selections that are no longer in history", () => {
+    expect(
+      resolveCopilotRunSelection({
+        selectedRunId: "run-stale",
+        activeRunId: "run-active",
+        runs: [{ id: "run-active" }, { id: "run-latest" }],
+      })
+    ).toBe("run-active");
+    expect(
+      resolveCopilotRunSelection({
+        selectedRunId: "run-stale",
+        runs: [{ id: "run-latest" }],
+      })
+    ).toBe("run-latest");
   });
 
   it("identifies Copilot run states that should keep refreshing", () => {

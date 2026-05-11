@@ -39,7 +39,10 @@ export function getCopilotPendingActionLabel(type: string): string {
 }
 
 export function resolveCopilotRunSelection(input: ResolveCopilotRunSelectionInput): string | null {
-  return input.selectedRunId ?? input.activeRunId ?? input.runs[0]?.id ?? null;
+  const runIds = new Set(input.runs.map((run) => run.id));
+  if (input.selectedRunId && runIds.has(input.selectedRunId)) return input.selectedRunId;
+  if (input.activeRunId) return input.activeRunId;
+  return input.runs[0]?.id ?? null;
 }
 
 export function isCopilotRunLive(status: string): boolean {
