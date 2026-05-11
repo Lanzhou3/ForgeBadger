@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   getCopilotStatusTone,
   getCopilotEventLabel,
+  getCopilotEventLabelKey,
   getCopilotPendingActionLabel,
+  getCopilotPendingActionLabelKey,
   resolveCopilotRunSelection,
   isCopilotRunLive,
 } from "./copilot";
@@ -22,10 +24,22 @@ describe("copilot display helpers", () => {
     expect(getCopilotEventLabel("openforge.custom_event")).toBe("Openforge custom event");
   });
 
+  it("maps known event types to localized label keys", () => {
+    expect(getCopilotEventLabelKey("assistant_message")).toBe("copilot.event.assistantMessage");
+    expect(getCopilotEventLabelKey("tool_call_requested")).toBe("copilot.event.toolRequested");
+    expect(getCopilotEventLabelKey("openforge.custom_event")).toBeNull();
+  });
+
   it("falls back to readable labels for unknown pending action types", () => {
     expect(getCopilotPendingActionLabel("openforge.propose_setting_update")).toBe("Setting update");
     expect(getCopilotPendingActionLabel("openforge.propose_memory_write")).toBe("Memory write");
     expect(getCopilotPendingActionLabel("custom.pending_action")).toBe("Custom pending action");
+  });
+
+  it("maps known pending action types to localized label keys", () => {
+    expect(getCopilotPendingActionLabelKey("openforge.propose_memory_write")).toBe("copilot.pendingAction.memoryWrite");
+    expect(getCopilotPendingActionLabelKey("openforge.propose_diagnostics_export")).toBe("copilot.pendingAction.diagnosticsExport");
+    expect(getCopilotPendingActionLabelKey("custom.pending_action")).toBeNull();
   });
 
   it("resolves selected Copilot run id from user selection, active run, or latest history", () => {

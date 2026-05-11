@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Clock3, Play, RefreshCcw, Sparkles, Square } from "lucide-react";
 
@@ -22,7 +23,9 @@ import {
 } from "@/lib/api";
 import {
   getCopilotEventLabel,
+  getCopilotEventLabelKey,
   getCopilotPendingActionLabel,
+  getCopilotPendingActionLabelKey,
   getCopilotStatusTone,
   isCopilotRunLive,
   resolveCopilotRunSelection,
@@ -233,7 +236,19 @@ export default function CopilotPage() {
               />
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div id="copilot-prompt-hint" className="text-sm text-muted-foreground">
-                  {providerSetupRequired ? t("copilot.providerSetupRequired") : statusSummary}
+                  {providerSetupRequired ? (
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span>{t("copilot.providerSetupRequired")}</span>
+                      <Link
+                        href="/models"
+                        className="font-medium text-brand underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        {t("copilot.configureProvider")}
+                      </Link>
+                    </span>
+                  ) : (
+                    statusSummary
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {latestRun?.status === "running" && (
@@ -289,6 +304,10 @@ export default function CopilotPage() {
                         ? t("common.loading")
                         : t("copilot.noEvents")
                   }
+                  getEventLabel={(type) => {
+                    const labelKey = getCopilotEventLabelKey(type);
+                    return labelKey ? t(labelKey) : getCopilotEventLabel(type);
+                  }}
                 />
               ) : (
                 <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
@@ -312,6 +331,10 @@ export default function CopilotPage() {
                 loadingLabel={t("common.loading")}
                 processingActionId={processingActionId}
                 proposedActionLabel={t("copilot.proposedAction")}
+                getActionLabel={(type) => {
+                  const labelKey = getCopilotPendingActionLabelKey(type);
+                  return labelKey ? t(labelKey) : getCopilotPendingActionLabel(type);
+                }}
                 onApprove={(action) => {
                   if (!markProcessingAction(action.id, processingActionIdRef, setProcessingActionId)) return;
                   approveMutation.mutate(action);
@@ -375,6 +398,7 @@ function PendingActions({
   loadingLabel,
   processingActionId,
   proposedActionLabel,
+  getActionLabel,
   onApprove,
   onReject,
 }: {
@@ -384,6 +408,7 @@ function PendingActions({
   loadingLabel: string;
   processingActionId: string | null;
   proposedActionLabel: string;
+  getActionLabel: (type: string) => string;
   onApprove: (action: CopilotPendingAction) => void;
   onReject: (action: CopilotPendingAction) => void;
 }) {
@@ -403,7 +428,7 @@ function PendingActions({
         return (
           <div key={action.id} className="rounded-md border border-border p-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-medium">{getCopilotPendingActionLabel(action.type)}</div>
+              <div className="text-sm font-medium">{getActionLabel(action.type)}</div>
               <Badge variant={action.status === "pending" ? "secondary" : "outline"}>{action.status}</Badge>
             </div>
             <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted/30 p-2 text-xs text-muted-foreground">
@@ -462,7 +487,15 @@ function QueryErrorNotice({
   );
 }
 
-function RunTimeline({ events, noEventsLabel }: { events: CopilotRunEvent[]; noEventsLabel: string }) {
+function RunTimeline({
+  events,
+  noEventsLabel,
+  getEventLabel,
+}: {
+  events: CopilotRunEvent[];
+  noEventsLabel: string;
+  getEventLabel: (type: string) => string;
+}) {
   if (events.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
@@ -476,7 +509,7 @@ function RunTimeline({ events, noEventsLabel }: { events: CopilotRunEvent[]; noE
       {events.map((event) => (
         <div key={event.id} className="rounded-md border border-border bg-muted/20 p-3">
           <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-            <span>{getCopilotEventLabel(event.type)}</span>
+            <span>{getEventLabel(event.type)}</span>
             <span>#{event.sequence}</span>
           </div>
           {event.message && (

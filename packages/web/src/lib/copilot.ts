@@ -1,3 +1,5 @@
+import type { TranslationKey } from "./i18n";
+
 export type CopilotStatusTone = "success" | "danger" | "warning" | "info" | "muted";
 
 const statusTones: Record<string, CopilotStatusTone> = {
@@ -13,11 +15,30 @@ const eventLabels: Record<string, string> = {
   assistant_message: "Assistant message",
   run_failed: "Run failed",
   tool_call_requested: "Tool requested",
+  tool_result: "Tool result",
+};
+
+const eventLabelKeys: Record<string, TranslationKey> = {
+  assistant_message: "copilot.event.assistantMessage",
+  run_failed: "copilot.event.runFailed",
+  tool_call_requested: "copilot.event.toolRequested",
+  tool_result: "copilot.event.toolResult",
 };
 
 const pendingActionLabels: Record<string, string> = {
   "openforge.propose_setting_update": "Setting update",
   "openforge.propose_memory_write": "Memory write",
+  "openforge.propose_session_create": "Session create",
+  "openforge.propose_diagnostics_export": "Diagnostics export",
+  "openforge.propose_troubleshooting_steps": "Troubleshooting steps",
+};
+
+const pendingActionLabelKeys: Record<string, TranslationKey> = {
+  "openforge.propose_setting_update": "copilot.pendingAction.settingUpdate",
+  "openforge.propose_memory_write": "copilot.pendingAction.memoryWrite",
+  "openforge.propose_session_create": "copilot.pendingAction.sessionCreate",
+  "openforge.propose_diagnostics_export": "copilot.pendingAction.diagnosticsExport",
+  "openforge.propose_troubleshooting_steps": "copilot.pendingAction.troubleshootingSteps",
 };
 
 export interface ResolveCopilotRunSelectionInput {
@@ -34,8 +55,16 @@ export function getCopilotEventLabel(type: string): string {
   return eventLabels[type] ?? humanizeToken(type);
 }
 
+export function getCopilotEventLabelKey(type: string): TranslationKey | null {
+  return eventLabelKeys[type] ?? null;
+}
+
 export function getCopilotPendingActionLabel(type: string): string {
   return pendingActionLabels[type] ?? humanizeToken(type);
+}
+
+export function getCopilotPendingActionLabelKey(type: string): TranslationKey | null {
+  return pendingActionLabelKeys[type] ?? null;
 }
 
 export function resolveCopilotRunSelection(input: ResolveCopilotRunSelectionInput): string | null {

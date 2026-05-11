@@ -67,6 +67,7 @@ test("Copilot page disables start when no provider is configured", async ({ page
   await page.getByLabel("Copilot prompt").fill("Summarize release state");
 
   await expect(page.getByText("Configure an OpenAI or Anthropic model provider first.").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
   await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
 });
 
