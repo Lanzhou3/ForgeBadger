@@ -38,7 +38,7 @@ describe("copilot routes", () => {
   let userId: string;
   let otherUserId: string;
   let modelEvents: CopilotModelEvent[];
-  let modelEventResponses: CopilotModelEvent[][];
+  let modelEventResponses: Array<CopilotModelEvent[] | Error>;
   const calls: CopilotModelRequest[] = [];
 
   beforeEach(() => {
@@ -58,7 +58,11 @@ describe("copilot routes", () => {
     app.use("/api/v1/copilot", createCopilotRoutes({
       db,
       masterKey,
-      modelClientFactory: () => fakeModelClient(calls, () => modelEventResponses.shift() ?? modelEvents)
+      modelClientFactory: () => fakeModelClient(calls, () => {
+        const response = modelEventResponses.shift();
+        if (response instanceof Error) throw response;
+        return response ?? modelEvents;
+      })
     }));
   });
 
@@ -183,6 +187,57 @@ describe("copilot routes", () => {
       res.body.data.events.at(-1)?.message,
       "Dashboard is ready after checking tool results."
     );
+  });
+
+  it("marks runs failed when the initial model request throws", async () => {
+    createOpenAiProvider();
+    modelEventResponses = [new Error("network failure token=secret-value")];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Summarize Gateway health",
+      source: "copilot"
+    }, authHeaders());
+
+    const run = new CopilotRepository(db, userId).listRuns()[0];
+    assert.equal(res.status, 502);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_model_request_failed");
+    assert.equal(res.body.details.run.status, "failed");
+    assert.equal(run?.status, "failed");
+    assert.equal(run?.errorCode, "copilot_model_request_failed");
+    assert.equal(new CopilotRepository(db, userId).listEvents(run?.id ?? "").at(-1)?.type, "run_failed");
+    assert.doesNotMatch(JSON.stringify(res.body), /secret-value/);
+  });
+
+  it("marks runs failed when the post-tool model answer throws", async () => {
+    createOpenAiProvider();
+    modelEventResponses = [
+      [{
+        type: "tool_call_requested",
+        id: "tool-call-1",
+        name: "openforge.get_dashboard_summary",
+        input: {}
+      }],
+      new Error("follow-up failure sk-secret-value")
+    ];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Summarize dashboard health",
+      source: "dashboard"
+    }, authHeaders());
+
+    const run = new CopilotRepository(db, userId).listRuns()[0];
+    const events = new CopilotRepository(db, userId).listEvents(run?.id ?? "");
+    assert.equal(res.status, 502);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_model_request_failed");
+    assert.equal(run?.status, "failed");
+    assert.deepEqual(events.map((event) => event.type), [
+      "tool_call_requested",
+      "tool_result",
+      "run_failed"
+    ]);
+    assert.doesNotMatch(JSON.stringify(res.body), /sk-secret-value/);
   });
 
   it("does not cancel terminal Copilot runs", async () => {

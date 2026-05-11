@@ -73,9 +73,15 @@ export class CopilotOrchestrator {
     selection: CopilotProviderSelection,
     prompt: string
   ): Promise<RunCopilotTextResult> {
-    const events = await this.modelClientFor(selection).createResponse(
-      toModelRequest(selection, prompt, this.toolRegistry)
+    const response = await this.requestModel(
+      repo,
+      run,
+      selection,
+      toModelRequest(selection, prompt, this.toolRegistry),
+      []
     );
+    if (!response.ok) return response.result;
+    const events = response.events;
     const overflow = events.length > run.maxSteps;
     if (overflow) return this.failBeforeModel(repo, run, maxStepsError(run.maxSteps), 400);
     const stored = events.map((event) => storeModelEvent(repo, run.id, event));
@@ -128,9 +134,15 @@ export class CopilotOrchestrator {
     output: unknown,
     events: CopilotRunEvent[]
   ): Promise<RunCopilotTextResult> {
-    const followUp = await this.modelClientFor(selection).createResponse(
-      toToolResultModelRequest(selection, run.goal, toolCall.name, output)
+    const response = await this.requestModel(
+      repo,
+      run,
+      selection,
+      toToolResultModelRequest(selection, run.goal, toolCall.name, output),
+      events
     );
+    if (!response.ok) return response.result;
+    const followUp = response.events;
     if (events.length + followUp.length > run.maxSteps) {
       return this.failAfterEvents(repo, run, maxStepsError(run.maxSteps), events, 400);
     }
@@ -147,6 +159,26 @@ export class CopilotOrchestrator {
     }
     const completed = repo.updateRun(run.id, { status: "completed", completedAt: Date.now() }) ?? run;
     return { ok: true, run: completed, events: allEvents };
+  }
+
+  private async requestModel(
+    repo: CopilotRepository,
+    run: CopilotRun,
+    selection: CopilotProviderSelection,
+    request: CopilotModelRequest,
+    previousEvents: CopilotRunEvent[]
+  ): Promise<
+    | { ok: true; events: CopilotModelEvent[] }
+    | { ok: false; result: RunCopilotTextResult }
+  > {
+    try {
+      return { ok: true, events: await this.modelClientFor(selection).createResponse(request) };
+    } catch {
+      return {
+        ok: false,
+        result: this.failWithRunEvent(repo, run, modelRequestError(), previousEvents, 502)
+      };
+    }
   }
 
   private failBeforeModel(
@@ -178,6 +210,21 @@ export class CopilotOrchestrator {
       completedAt: Date.now()
     }) ?? run;
     return { ok: false, status, error, run: failed, events };
+  }
+
+  private failWithRunEvent(
+    repo: CopilotRepository,
+    run: CopilotRun,
+    error: CopilotServiceError,
+    events: CopilotRunEvent[],
+    status: number
+  ): RunCopilotTextResult {
+    const failedEvent = storeModelEvent(repo, run.id, {
+      type: "run_failed",
+      code: error.code,
+      message: error.message
+    });
+    return this.failAfterEvents(repo, run, error, [...events, failedEvent], status);
   }
 
   private modelClientFor(selection: CopilotProviderSelection): CopilotModelClient {
@@ -283,5 +330,12 @@ function maxStepsError(maxSteps: number): CopilotServiceError {
   return {
     code: "copilot_max_steps_exceeded",
     message: `Copilot run exceeded max step count ${maxSteps}`
+  };
+}
+
+function modelRequestError(): CopilotServiceError {
+  return {
+    code: "copilot_model_request_failed",
+    message: "Copilot model request failed"
   };
 }
