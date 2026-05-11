@@ -1,15 +1,28 @@
 import { z } from "zod";
 
 import { ActivityRepository, type SessionActivity } from "../../db/repositories/activity-repository.js";
+import { CopilotRepository } from "../../db/repositories/copilot-repository.js";
 import { ProjectRepository, type Project } from "../../db/repositories/project-repository.js";
 import { SessionRepository, type Session } from "../../db/repositories/session-repository.js";
 import { discoverAdapters } from "../adapter-discovery.js";
 import { getDashboardSummary } from "../dashboard-summary.js";
-import type { CopilotToolDefinition } from "./tool-registry.js";
+import type { CopilotToolContext, CopilotToolDefinition } from "./tool-registry.js";
 
 const emptyInput = z.object({}).strict();
 const limitInput = z.object({
   limit: z.number().int().min(1).max(50).optional()
+}).strict();
+const proposeSessionCreateInput = z.object({
+  projectId: z.string().min(1),
+  aiTool: z.string().min(1),
+  name: z.string().min(1).optional()
+}).strict();
+const proposeDiagnosticsExportInput = z.object({
+  reason: z.string().min(1).optional()
+}).strict();
+const proposeTroubleshootingStepsInput = z.object({
+  summary: z.string().min(1).optional(),
+  steps: z.array(z.string().min(1)).min(1).max(10).optional()
 }).strict();
 
 export function createCopilotReadTools(): CopilotToolDefinition[] {
@@ -69,6 +82,33 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
           .list({ limit: readLimit(input) })
           .map(toActivitySummary)
       })
+    },
+    {
+      name: "openforge.propose_session_create",
+      description: "Prepare a session creation draft for user approval.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeSessionCreateInput,
+      execute: async (input, context) =>
+        createPendingProposal(context, "openforge.propose_session_create", input)
+    },
+    {
+      name: "openforge.propose_diagnostics_export",
+      description: "Prepare a local diagnostics export for user approval.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeDiagnosticsExportInput,
+      execute: async (input, context) =>
+        createPendingProposal(context, "openforge.propose_diagnostics_export", input)
+    },
+    {
+      name: "openforge.propose_troubleshooting_steps",
+      description: "Prepare troubleshooting steps for user approval.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeTroubleshootingStepsInput,
+      execute: async (input, context) =>
+        createPendingProposal(context, "openforge.propose_troubleshooting_steps", input)
     }
   ];
 }
@@ -122,4 +162,26 @@ function parseMetadata(metadata: string | null): unknown {
   } catch {
     return null;
   }
+}
+
+function createPendingProposal(
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId">,
+  type: string,
+  input: unknown
+) {
+  if (!context.runId) {
+    throw new Error("Copilot run is required for pending actions");
+  }
+  const action = new CopilotRepository(context.db, context.userId).createPendingAction(context.runId, {
+    type,
+    input: input && typeof input === "object" && !Array.isArray(input)
+      ? input as Record<string, unknown>
+      : {}
+  });
+  return {
+    actionId: action.id,
+    type: action.type,
+    status: action.status,
+    summary: "Pending user approval"
+  };
 }

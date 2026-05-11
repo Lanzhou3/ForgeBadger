@@ -185,6 +185,19 @@ export interface CopilotRunEvent {
   createdAt?: number | null;
 }
 
+export interface CopilotPendingAction {
+  id: string;
+  runId: string;
+  type: string;
+  status: "pending" | "approved" | "rejected" | string;
+  input?: Record<string, unknown>;
+  result?: Record<string, unknown> | null;
+  approvedBy?: string | null;
+  approvedAt?: number | null;
+  createdAt?: number | null;
+  updatedAt?: number | null;
+}
+
 export interface CreateCopilotRunInput {
   prompt: string;
   providerProfileId?: string;
@@ -1268,11 +1281,11 @@ export async function getCopilotCapabilities(): Promise<CopilotCapabilities> {
 
 export async function createCopilotRun(
   input: CreateCopilotRunInput
-): Promise<{ run: CopilotRun; events: CopilotRunEvent[] }> {
+): Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }> {
   return fetchJson("/api/v1/copilot/runs", {
     method: "POST",
     body: JSON.stringify(input),
-  }) as Promise<{ run: CopilotRun; events: CopilotRunEvent[] }>;
+  }) as Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }>;
 }
 
 export async function listCopilotRuns(limit?: number): Promise<{ runs: CopilotRun[] }> {
@@ -1280,14 +1293,40 @@ export async function listCopilotRuns(limit?: number): Promise<{ runs: CopilotRu
   return fetchJson(`/api/v1/copilot/runs${query}`) as Promise<{ runs: CopilotRun[] }>;
 }
 
-export async function getCopilotRun(id: string): Promise<{ run: CopilotRun; events: CopilotRunEvent[] }> {
-  return fetchJson(`/api/v1/copilot/runs/${id}`) as Promise<{ run: CopilotRun; events: CopilotRunEvent[] }>;
+export async function getCopilotRun(
+  id: string
+): Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions: CopilotPendingAction[] }> {
+  return fetchJson(`/api/v1/copilot/runs/${id}`) as Promise<{
+    run: CopilotRun;
+    events: CopilotRunEvent[];
+    pendingActions: CopilotPendingAction[];
+  }>;
 }
 
-export async function cancelCopilotRun(id: string): Promise<{ run: CopilotRun; events: CopilotRunEvent[] }> {
+export async function cancelCopilotRun(
+  id: string
+): Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }> {
   return fetchJson(`/api/v1/copilot/runs/${id}/cancel`, {
     method: "POST",
-  }) as Promise<{ run: CopilotRun; events: CopilotRunEvent[] }>;
+  }) as Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }>;
+}
+
+export async function approveCopilotPendingAction(
+  runId: string,
+  actionId: string
+): Promise<{ action: CopilotPendingAction }> {
+  return fetchJson(`/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`, {
+    method: "POST",
+  }) as Promise<{ action: CopilotPendingAction }>;
+}
+
+export async function rejectCopilotPendingAction(
+  runId: string,
+  actionId: string
+): Promise<{ action: CopilotPendingAction }> {
+  return fetchJson(`/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/reject`, {
+    method: "POST",
+  }) as Promise<{ action: CopilotPendingAction }>;
 }
 
 // Agents

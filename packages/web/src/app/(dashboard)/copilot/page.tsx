@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Clock3, Play, RefreshCcw, Sparkles, Square } from "lucide-react";
 
@@ -9,18 +9,22 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLanguage } from "@/hooks/use-language";
 import {
+  approveCopilotPendingAction,
   cancelCopilotRun,
   createCopilotRun,
   getCopilotCapabilities,
   listCopilotRuns,
+  rejectCopilotPendingAction,
+  type CopilotPendingAction,
   type CopilotRun,
   type CopilotRunEvent,
 } from "@/lib/api";
-import { getCopilotEventLabel, getCopilotStatusTone } from "@/lib/copilot";
+import { getCopilotEventLabel, getCopilotPendingActionLabel, getCopilotStatusTone } from "@/lib/copilot";
 
 interface ActiveRunState {
   run: CopilotRun;
   events: CopilotRunEvent[];
+  pendingActions?: CopilotPendingAction[];
 }
 
 export default function CopilotPage() {
@@ -42,6 +46,7 @@ export default function CopilotPage() {
   const runs = runData?.runs ?? [];
   const latestRun = activeRun?.run ?? runs[0] ?? null;
   const timelineEvents = activeRun?.events ?? [];
+  const pendingActions = activeRun?.pendingActions ?? [];
   const promptReady = prompt.trim().length > 0;
   const providerSetupError = isProviderSetupError(errorMessage);
 
@@ -69,6 +74,18 @@ export default function CopilotPage() {
       setActiveRun(result);
       queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
     },
+    onError: (error) => setErrorMessage(readErrorMessage(error)),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: (action: CopilotPendingAction) => approveCopilotPendingAction(action.runId, action.id),
+    onSuccess: ({ action }) => updatePendingAction(action, setActiveRun),
+    onError: (error) => setErrorMessage(readErrorMessage(error)),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: (action: CopilotPendingAction) => rejectCopilotPendingAction(action.runId, action.id),
+    onSuccess: ({ action }) => updatePendingAction(action, setActiveRun),
     onError: (error) => setErrorMessage(readErrorMessage(error)),
   });
 
@@ -161,34 +178,102 @@ export default function CopilotPage() {
           </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Clock3 className="size-4 text-muted-foreground" />
-              <CardTitle>{t("copilot.runs")}</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {runs.length === 0 ? (
-              <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                {runsLoading ? t("common.loading") : t("copilot.noRuns")}
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("copilot.pendingActions")}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PendingActions
+                actions={pendingActions}
+                approveLabel={t("copilot.approve")}
+                rejectLabel={t("copilot.reject")}
+                proposedActionLabel={t("copilot.proposedAction")}
+                onApprove={(action) => approveMutation.mutate(action)}
+                onReject={(action) => rejectMutation.mutate(action)}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Clock3 className="size-4 text-muted-foreground" />
+                <CardTitle>{t("copilot.runs")}</CardTitle>
               </div>
-            ) : (
-              runs.map((run) => (
-                <div key={run.id} className="rounded-md border border-border p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0 truncate text-sm font-medium">{run.goal}</div>
-                    <StatusBadge status={run.status} />
-                  </div>
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    {run.source}
-                  </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {runs.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                  {runsLoading ? t("common.loading") : t("copilot.noRuns")}
                 </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+              ) : (
+                runs.map((run) => (
+                  <div key={run.id} className="rounded-md border border-border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 truncate text-sm font-medium">{run.goal}</div>
+                      <StatusBadge status={run.status} />
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {run.source}
+                    </div>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function PendingActions({
+  actions,
+  approveLabel,
+  rejectLabel,
+  proposedActionLabel,
+  onApprove,
+  onReject,
+}: {
+  actions: CopilotPendingAction[];
+  approveLabel: string;
+  rejectLabel: string;
+  proposedActionLabel: string;
+  onApprove: (action: CopilotPendingAction) => void;
+  onReject: (action: CopilotPendingAction) => void;
+}) {
+  if (actions.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+        {proposedActionLabel}: 0
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {actions.map((action) => (
+        <div key={action.id} className="rounded-md border border-border p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-medium">{getCopilotPendingActionLabel(action.type)}</div>
+            <Badge variant={action.status === "pending" ? "secondary" : "outline"}>{action.status}</Badge>
+          </div>
+          <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted/30 p-2 text-xs text-muted-foreground">
+            {JSON.stringify(action.input ?? action.result ?? {}, null, 2)}
+          </pre>
+          {action.status === "pending" && (
+            <div className="mt-3 flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={() => onReject(action)}>
+                {rejectLabel}
+              </Button>
+              <Button size="sm" onClick={() => onApprove(action)}>
+                {approveLabel}
+              </Button>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -233,4 +318,19 @@ function readErrorMessage(error: unknown): string {
 
 function isProviderSetupError(message: string): boolean {
   return message.includes("copilot_provider_not_configured") || message.includes("HTTP 400");
+}
+
+function updatePendingAction(
+  action: CopilotPendingAction,
+  setActiveRun: Dispatch<SetStateAction<ActiveRunState | null>>
+): void {
+  setActiveRun((current) => {
+    if (!current) return current;
+    return {
+      ...current,
+      pendingActions: (current.pendingActions ?? []).map((item) =>
+        item.id === action.id ? action : item
+      ),
+    };
+  });
 }

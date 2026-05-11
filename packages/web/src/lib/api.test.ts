@@ -6,6 +6,7 @@ import {
   checkModelHealth,
   checkModelEndpointHealth,
   cloneTemplate,
+  approveCopilotPendingAction,
   cancelCopilotRun,
   createProjectWithConfig,
   createCopilotRun,
@@ -78,6 +79,7 @@ import {
   previewSkillSource,
   previewTemplateFromProject,
   rotateApiKey,
+  rejectCopilotPendingAction,
   markAllNotificationsRead,
   markNotificationRead,
   clearServerNotifications,
@@ -248,6 +250,8 @@ describe("api client", () => {
     await listCopilotRuns();
     await getCopilotRun("run-1");
     await cancelCopilotRun("run-1");
+    await approveCopilotPendingAction("run-1", "action-1");
+    await rejectCopilotPendingAction("run-1", "action-1");
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -275,6 +279,16 @@ describe("api client", () => {
     expect(fetch).toHaveBeenNthCalledWith(
       5,
       "http://127.0.0.1:48731/api/v1/copilot/runs/run-1/cancel",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      6,
+      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1/pending-actions/action-1/approve",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      7,
+      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1/pending-actions/action-1/reject",
       expect.objectContaining({ method: "POST" })
     );
   });

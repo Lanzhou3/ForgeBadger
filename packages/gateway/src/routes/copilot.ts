@@ -2,9 +2,10 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
-import type { CopilotRun, CopilotRunEvent } from "../db/repositories/copilot-repository.js";
+import type { CopilotPendingAction, CopilotRun, CopilotRunEvent } from "../db/repositories/copilot-repository.js";
 import { CopilotRepository } from "../db/repositories/copilot-repository.js";
 import type { Database } from "../db/types.js";
+import { buildLocalDiagnosticsExport } from "../services/diagnostics.js";
 import { CopilotOrchestrator, type CopilotOrchestratorOptions } from "../services/copilot/orchestrator.js";
 import { createCopilotReadTools } from "../services/copilot/read-tools.js";
 
@@ -23,6 +24,7 @@ const listRunsSchema = z.object({
 export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   db: Database;
   masterKey: string;
+  appVersion?: string;
 }
 
 export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
@@ -37,7 +39,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         toolExecutionEnabled: true,
         readTools: createCopilotReadTools().map((tool) => tool.name),
         approvalRequiredForWrites: true,
-        pendingActionApprovalEnabled: false
+        pendingActionApprovalEnabled: true
       },
       message: ""
     });
@@ -66,7 +68,8 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         res.status(result.status).json(errorEnvelope(result.error.message, result.error.code, result.run, result.events));
         return;
       }
-      res.status(201).json(successEnvelope(result.run, result.events));
+      const repo = new CopilotRepository(options.db, userIdFor(req));
+      res.status(201).json(successEnvelope(result.run, result.events, repo.listPendingActions(result.run.id)));
     } catch {
       res.status(500).json({ code: 1, message: "Failed to create copilot run" });
     }
@@ -76,14 +79,37 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     const repo = repoFor(options.db, req);
     const run = repo.getRun(req.params.id);
     if (!run) return res.status(404).json({ code: 1, message: "Copilot run not found" });
-    res.json(successEnvelope(run, repo.listEvents(run.id)));
+    res.json(successEnvelope(run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
   });
 
   router.post("/runs/:id/cancel", (req, res) => {
     const repo = repoFor(options.db, req);
     const run = repo.updateRun(req.params.id, { status: "cancelled", completedAt: Date.now() });
     if (!run) return res.status(404).json({ code: 1, message: "Copilot run not found" });
-    res.json(successEnvelope(run, repo.listEvents(run.id)));
+    res.json(successEnvelope(run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
+  });
+
+  router.post("/runs/:id/pending-actions/:actionId/approve", (req, res) => {
+    const repo = repoFor(options.db, req);
+    const action = findPendingAction(repo, req.params.id, req.params.actionId);
+    if (!action) return res.status(404).json({ code: 1, message: "Pending action not found" });
+    if (action.status !== "pending") return res.status(400).json({ code: 1, message: "Pending action is not approvable" });
+    const result = approvePendingAction(action, options, userIdFor(req));
+    const updated = repo.updatePendingAction(action.id, {
+      status: "approved",
+      result,
+      approvedBy: userIdFor(req),
+      approvedAt: Date.now()
+    });
+    res.json({ code: 0, data: { action: updated }, message: "" });
+  });
+
+  router.post("/runs/:id/pending-actions/:actionId/reject", (req, res) => {
+    const repo = repoFor(options.db, req);
+    const action = findPendingAction(repo, req.params.id, req.params.actionId);
+    if (!action) return res.status(404).json({ code: 1, message: "Pending action not found" });
+    const updated = repo.updatePendingAction(action.id, { status: "rejected" });
+    res.json({ code: 0, data: { action: updated }, message: "" });
   });
 
   return router;
@@ -97,10 +123,14 @@ function userIdFor(req: unknown): string {
   return (req as AuthenticatedRequest).userId;
 }
 
-function successEnvelope(run: CopilotRun, events: CopilotRunEvent[]) {
+function successEnvelope(
+  run: CopilotRun,
+  events: CopilotRunEvent[],
+  pendingActions: CopilotPendingAction[] = []
+) {
   return {
     code: 0,
-    data: { run, events },
+    data: { run, events, pendingActions },
     message: ""
   };
 }
@@ -115,4 +145,35 @@ function errorEnvelope(message: string, code: string, run: CopilotRun, events: C
 
 function sendInvalid(res: { status: (code: number) => { json: (body: unknown) => void } }, message: string): void {
   res.status(400).json({ code: 1, message });
+}
+
+function findPendingAction(
+  repo: CopilotRepository,
+  runId: string,
+  actionId: string
+): CopilotPendingAction | undefined {
+  if (!repo.getRun(runId)) return undefined;
+  const action = repo.getPendingAction(actionId);
+  return action?.runId === runId ? action : undefined;
+}
+
+function approvePendingAction(
+  action: CopilotPendingAction,
+  options: CopilotRoutesOptions,
+  userId: string
+): Record<string, unknown> {
+  if (action.type === "openforge.propose_diagnostics_export") {
+    return {
+      report: buildLocalDiagnosticsExport({
+        db: options.db,
+        userId,
+        masterKey: options.masterKey,
+        appVersion: options.appVersion ?? "0.0.0"
+      })
+    };
+  }
+  if (action.type === "openforge.propose_session_create") {
+    return { draft: action.input, executed: false };
+  }
+  return { steps: action.input, executed: false };
 }

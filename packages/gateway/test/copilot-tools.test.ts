@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { ActivityRepository } from "../src/db/repositories/activity-repository.js";
+import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
+import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { createCopilotToolRegistry, executeCopilotTool } from "../src/services/copilot/tool-registry.js";
 import { createCopilotReadTools } from "../src/services/copilot/read-tools.js";
 
@@ -115,7 +117,50 @@ describe("copilot tools", () => {
     assert.deepEqual(names, ["Owned"]);
   });
 
-  function context(id: string) {
-    return { db, userId: id, masterKey };
+  it("creates session-create proposals as pending actions without creating sessions", async () => {
+    const run = new CopilotRepository(db, userId).createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Prepare session"
+    });
+
+    const result = await executeCopilotTool(
+      registry,
+      "openforge.propose_session_create",
+      { projectId: "project-1", aiTool: "claude", name: "Draft session" },
+      context(userId, run.id)
+    );
+
+    const actions = new CopilotRepository(db, userId).listPendingActions(run.id);
+    assert.equal(result.ok, true);
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0]?.status, "pending");
+    assert.equal(actions[0]?.type, "openforge.propose_session_create");
+    assert.equal(new SessionRepository(db, userId).list().length, 0);
+  });
+
+  it("creates diagnostics-export proposals as pending actions without returning diagnostics", async () => {
+    const run = new CopilotRepository(db, userId).createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Prepare diagnostics"
+    });
+
+    const result = await executeCopilotTool(
+      registry,
+      "openforge.propose_diagnostics_export",
+      { reason: "Gateway launch failed" },
+      context(userId, run.id)
+    );
+
+    const actions = new CopilotRepository(db, userId).listPendingActions(run.id);
+    assert.equal(result.ok, true);
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0]?.type, "openforge.propose_diagnostics_export");
+    assert.deepEqual((result as { ok: true; output: { actionId: string } }).output.actionId, actions[0]?.id);
+  });
+
+  function context(id: string, runId?: string) {
+    return { db, userId: id, masterKey, ...(runId ? { runId } : {}) };
   }
 });

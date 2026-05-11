@@ -233,6 +233,16 @@ export class CopilotRepository {
     return rows.map(toEvent);
   }
 
+  listPendingActions(runId: string): CopilotPendingAction[] {
+    if (!this.getRun(runId)) return [];
+    const rows = this.db.prepare(`
+      SELECT * FROM copilot_pending_actions
+      WHERE user_id = ? AND run_id = ?
+      ORDER BY created_at ASC
+    `).all(this.userId, runId) as CopilotPendingActionRow[];
+    return rows.map(toPendingAction);
+  }
+
   createPendingAction(runId: string, input: CreatePendingActionInput): CopilotPendingAction {
     if (!this.getRun(runId)) throw new Error("Copilot run not found");
     const id = randomUUID();
@@ -243,6 +253,13 @@ export class CopilotRepository {
       ) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
     `).run(id, this.userId, runId, input.type, JSON.stringify(input.input ?? {}), now, now);
     return this.getPendingAction(id) as CopilotPendingAction;
+  }
+
+  getPendingAction(id: string): CopilotPendingAction | undefined {
+    const row = this.db.prepare(`
+      SELECT * FROM copilot_pending_actions WHERE id = ? AND user_id = ?
+    `).get(id, this.userId) as CopilotPendingActionRow | undefined;
+    return row ? toPendingAction(row) : undefined;
   }
 
   updatePendingAction(
@@ -283,12 +300,6 @@ export class CopilotRepository {
     return row ? toEvent(row) : undefined;
   }
 
-  private getPendingAction(id: string): CopilotPendingAction | undefined {
-    const row = this.db.prepare(`
-      SELECT * FROM copilot_pending_actions WHERE id = ? AND user_id = ?
-    `).get(id, this.userId) as CopilotPendingActionRow | undefined;
-    return row ? toPendingAction(row) : undefined;
-  }
 }
 
 function toRun(row: CopilotRunRow): CopilotRun {

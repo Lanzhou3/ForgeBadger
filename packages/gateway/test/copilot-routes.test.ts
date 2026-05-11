@@ -11,6 +11,7 @@ import { beforeEach, describe, it } from "node:test";
 import { signJwt } from "../src/auth/jwt.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
+import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
 import { createCopilotRoutes } from "../src/routes/copilot.js";
 import type { CopilotModelClient, CopilotModelRequest } from "../src/services/copilot/types.js";
 
@@ -32,14 +33,19 @@ describe("copilot routes", () => {
   let app: express.Express;
   let db: Database.Database;
   let token: string;
+  let otherToken: string;
   let userId: string;
+  let otherUserId: string;
   const calls: CopilotModelRequest[] = [];
 
   beforeEach(() => {
     db = createTestDb();
     const user = new UserRepository(db).create("copilot-routes@example.com", "hash");
+    const otherUser = new UserRepository(db).create("other-copilot-routes@example.com", "hash");
     userId = user.id;
+    otherUserId = otherUser.id;
     token = signJwt({ userId: user.id, email: user.email }, secret);
+    otherToken = signJwt({ userId: otherUser.id, email: otherUser.email }, secret);
     calls.length = 0;
     app = express();
     app.locals.jwtSecret = secret;
@@ -101,6 +107,50 @@ describe("copilot routes", () => {
     assert.equal(calls[0]?.input, "Summarize Gateway health");
   });
 
+  it("rejects pending-action approval outside the current user", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_diagnostics_export");
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      otherAuthHeaders()
+    );
+
+    assert.equal(res.status, 404);
+    assert.equal(res.body.code, 1);
+  });
+
+  it("marks pending actions rejected", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_troubleshooting_steps");
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/reject`,
+      undefined,
+      authHeaders()
+    );
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.action.status, "rejected");
+  });
+
+  it("requires authenticated route approval so the model cannot self-approve", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_diagnostics_export");
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`
+    );
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.code, 1);
+  });
+
   function createOpenAiProvider(): void {
     const repo = new ModelProviderRepository(db, userId, masterKey);
     const provider = repo.createProviderProfile({
@@ -128,6 +178,27 @@ describe("copilot routes", () => {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     };
+  }
+
+  function otherAuthHeaders(): Record<string, string> {
+    return {
+      Authorization: `Bearer ${otherToken}`,
+      "Content-Type": "application/json"
+    };
+  }
+
+  function createPendingAction(ownerId: string, type: string) {
+    const repo = new CopilotRepository(db, ownerId);
+    const run = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Approve action"
+    });
+    const action = repo.createPendingAction(run.id, {
+      type,
+      input: { reason: "test" }
+    });
+    return { runId: run.id, actionId: action.id };
   }
 });
 
