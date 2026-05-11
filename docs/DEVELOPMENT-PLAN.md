@@ -16,6 +16,7 @@
 > 2026-05-07 补充：Phase A release evidence 已由真实浏览器终端 smoke 和真实 Claude Code 权限提示 smoke 闭合；Phase B Codex app-server 进入 Gateway 协议集成推进，已补 `initialize`/`thread`/`turn` 路由、managed client、malformed frame 处理、notification activity normalization、Web guarded control-plane surface 和 turn rate limit。当前项目进度记忆见根目录 `MEMORY.md`。
 > 2026-05-10 补充：Phase B Codex Background Tasks 已作为 observable control-plane prototype 接受 beta feedback，Web 仍不开放 prompt/turn 输入，`/turn` 默认 403 且仅作为 feature-flag prototype。Provider SSOT 与 Codex subscription boundary 已完成回归，Windows/tmux/WSL 指引已落地；真实 Windows/WSL 主机 smoke 仍为平台 caveat。下一阶段 Phase C 聚焦首次试用、依赖失败态、诊断反馈、CI/release gate 自动化和平台验收闭环，不扩大 Codex turn 输入范围。
 > 2026-05-11 补充：SSH/remote execution 独立架构规格已确认，见 `docs/superpowers/specs/2026-05-11-ssh-remote-execution-design.md`；该方向仍不属于当前 beta release gate 实现范围，当前状态为待拆解实施计划，后续应在单独 feature slice 中开发。
+> 2026-05-11 补充：Platform AI Copilot 第一版已进入独立架构规格草案，见 `docs/superpowers/specs/2026-05-11-platform-ai-copilot-design.md`；第一版定位为 provider-backed、read-heavy、approval-gated 的平台操作助手，不开放自主开发、自动 tmux 输入、任意 shell 或 Codex app-server prompt/turn 输入。
 
 ---
 
