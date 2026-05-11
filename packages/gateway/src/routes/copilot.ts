@@ -31,6 +31,7 @@ export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
 
 export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
   const router = Router();
+  const activeRunUsers = new Set<string>();
   router.use(authenticate);
 
   router.get("/capabilities", (req, res) => {
@@ -63,9 +64,17 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
   router.post("/runs", async (req, res) => {
     const parseResult = createRunSchema.safeParse(req.body ?? {});
     if (!parseResult.success) return sendInvalid(res, "Invalid copilot run payload");
+    const userId = userIdFor(req);
+    if (activeRunUsers.has(userId)) {
+      return sendRunAlreadyActive(res);
+    }
+    const repo = new CopilotRepository(options.db, userId);
+    const existingActiveRun = repo.listRuns(200).find((run) => isLiveRunStatus(run.status));
+    if (existingActiveRun) return sendRunAlreadyActive(res, existingActiveRun);
+    activeRunUsers.add(userId);
     try {
       const result = await new CopilotOrchestrator(options).runText({
-        userId: userIdFor(req),
+        userId,
         prompt: parseResult.data.prompt,
         source: parseResult.data.source,
         ...(parseResult.data.providerProfileId ? { providerProfileId: parseResult.data.providerProfileId } : {}),
@@ -76,10 +85,11 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         res.status(result.status).json(errorEnvelope(result.error.message, result.error.code, result.run, result.events));
         return;
       }
-      const repo = new CopilotRepository(options.db, userIdFor(req));
       res.status(201).json(successEnvelope(result.run, result.events, repo.listPendingActions(result.run.id)));
     } catch {
       res.status(500).json({ code: 1, message: "Failed to create copilot run" });
+    } finally {
+      activeRunUsers.delete(userId);
     }
   });
 
@@ -207,8 +217,26 @@ function isCancellableRunStatus(status: string): boolean {
   return status === "queued" || status === "running" || status === "waiting_for_approval";
 }
 
+function isLiveRunStatus(status: string): boolean {
+  return status === "queued" || status === "running" || status === "waiting_for_approval";
+}
+
 function isApprovalRunStatus(status: string): boolean {
   return status === "waiting_for_approval";
+}
+
+function sendRunAlreadyActive(
+  res: { status: (code: number) => { json: (body: unknown) => void } },
+  run?: Pick<CopilotRun, "id" | "status">
+): void {
+  res.status(409).json({
+    code: 1,
+    message: "Copilot run already active for this user",
+    details: {
+      code: "copilot_run_already_active",
+      ...(run ? { runId: run.id, status: run.status } : {})
+    }
+  });
 }
 
 function rejectPendingActions(repo: CopilotRepository, runId: string): void {
