@@ -867,11 +867,23 @@ interface ApiEnvelope<T> {
   code: number;
   data?: T;
   message: string;
+  details?: Record<string, unknown>;
 }
 
 const DEFAULT_API_TIMEOUT_MS = 30_000;
 
 export const gatewayBaseUrl = getGatewayBaseUrl();
+
+export class GatewayApiError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly details?: Record<string, unknown>
+  ) {
+    super(message);
+    this.name = "GatewayApiError";
+  }
+}
 
 export function apiUrl(path: string): string {
   const baseUrl = getGatewayBaseUrl().replace(/\/+$/, "");
@@ -882,12 +894,15 @@ export async function fetchJson<T = unknown>(path: string, options: RequestInit 
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
   const res = await fetch(apiUrl(path), request).finally(cleanup);
+  const envelope = await readApiEnvelope<T>(res);
   if (!res.ok) {
-    throw new Error(formatHttpError(res));
+    throw errorFromResponse(res, envelope);
   }
-  const envelope = (await res.json()) as ApiEnvelope<T>;
+  if (!envelope) {
+    throw new GatewayApiError("API request failed", res.status);
+  }
   if (envelope.code !== 0) {
-    throw new Error(envelope.message || "API request failed");
+    throw errorFromEnvelope(envelope, res.status);
   }
   return envelope.data as T;
 }
@@ -896,12 +911,15 @@ export async function fetchEnvelope<T = unknown>(path: string, options: RequestI
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
   const res = await fetch(apiUrl(path), request).finally(cleanup);
+  const envelope = await readApiEnvelope<T>(res);
   if (!res.ok) {
-    throw new Error(formatHttpError(res));
+    throw errorFromResponse(res, envelope);
   }
-  const envelope = (await res.json()) as ApiEnvelope<T>;
+  if (!envelope) {
+    throw new GatewayApiError("API request failed", res.status);
+  }
   if (envelope.code !== 0) {
-    throw new Error(envelope.message || "API request failed");
+    throw errorFromEnvelope(envelope, res.status);
   }
   return envelope;
 }
@@ -934,6 +952,29 @@ function buildApiRequest(options: RequestInit, token: string | null): {
 
 function formatHttpError(res: Response): string {
   return `Gateway request failed with HTTP ${res.status}`;
+}
+
+async function readApiEnvelope<T>(res: Response): Promise<ApiEnvelope<T> | null> {
+  try {
+    return (await res.json()) as ApiEnvelope<T>;
+  } catch {
+    return null;
+  }
+}
+
+function errorFromResponse<T>(res: Response, envelope: ApiEnvelope<T> | null): GatewayApiError {
+  if (envelope && isErrorEnvelope(envelope)) {
+    return errorFromEnvelope(envelope, res.status);
+  }
+  return new GatewayApiError(formatHttpError(res), res.status);
+}
+
+function errorFromEnvelope<T>(envelope: ApiEnvelope<T>, status?: number): GatewayApiError {
+  return new GatewayApiError(envelope.message || "API request failed", status, envelope.details);
+}
+
+function isErrorEnvelope<T>(envelope: ApiEnvelope<T>): boolean {
+  return envelope.code !== 0 || Boolean(envelope.message) || Boolean(envelope.details);
 }
 
 export async function login(email: string, password: string) {

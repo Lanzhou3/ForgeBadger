@@ -13,6 +13,7 @@ import {
   approveCopilotPendingAction,
   cancelCopilotRun,
   createCopilotRun,
+  GatewayApiError,
   getCopilotCapabilities,
   getCopilotRun,
   listCopilotRuns,
@@ -64,6 +65,7 @@ export default function CopilotPage() {
   const [processingActionId, setProcessingActionId] = useState<string | null>(null);
   const processingActionIdRef = useRef<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [errorCode, setErrorCode] = useState("");
 
   const {
     data: capabilityData,
@@ -115,7 +117,7 @@ export default function CopilotPage() {
   const timelineEvents = selectedRunState?.events ?? [];
   const pendingActions = selectedRunState?.pendingActions ?? [];
   const promptReady = prompt.trim().length > 0;
-  const providerSetupError = isProviderSetupError(errorMessage);
+  const providerSetupError = isProviderSetupError(errorCode);
   const providerConfigured = capabilityData?.providerConfigured !== false;
   const providerSetupRequired = !providerConfigured || providerSetupError;
 
@@ -129,50 +131,50 @@ export default function CopilotPage() {
     mutationFn: (value: string) => createCopilotRun({ prompt: value.trim(), source: "copilot" }),
     onSuccess: (result) => {
       setPrompt("");
-      setErrorMessage("");
+      clearErrorState(setErrorMessage, setErrorCode);
       setActiveRun(result);
       setSelectedRunId(result.run.id);
       queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
       queryClient.invalidateQueries({ queryKey: ["copilot-run", result.run.id] });
     },
-    onError: (error) => setErrorMessage(readErrorMessage(error)),
+    onError: (error) => applyErrorState(error, setErrorMessage, setErrorCode),
   });
 
   const cancelMutation = useMutation({
     mutationFn: (id: string) => cancelCopilotRun(id),
     onSuccess: (result) => {
-      setErrorMessage("");
+      clearErrorState(setErrorMessage, setErrorCode);
       setActiveRun(result);
       setSelectedRunId(result.run.id);
       queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
       queryClient.invalidateQueries({ queryKey: ["copilot-run", result.run.id] });
     },
-    onError: (error) => setErrorMessage(readErrorMessage(error)),
+    onError: (error) => applyErrorState(error, setErrorMessage, setErrorCode),
   });
 
   const approveMutation = useMutation({
     mutationFn: (action: CopilotPendingAction) => approveCopilotPendingAction(action.runId, action.id),
     onSuccess: (result) => {
-      setErrorMessage("");
+      clearErrorState(setErrorMessage, setErrorCode);
       applyPendingActionResult(result, setActiveRun);
       cachePendingActionResult(result, queryClient);
       queryClient.invalidateQueries({ queryKey: ["copilot-run", result.action.runId] });
       queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
     },
-    onError: (error) => setErrorMessage(readErrorMessage(error)),
+    onError: (error) => applyErrorState(error, setErrorMessage, setErrorCode),
     onSettled: () => clearProcessingAction(processingActionIdRef, setProcessingActionId),
   });
 
   const rejectMutation = useMutation({
     mutationFn: (action: CopilotPendingAction) => rejectCopilotPendingAction(action.runId, action.id),
     onSuccess: (result) => {
-      setErrorMessage("");
+      clearErrorState(setErrorMessage, setErrorCode);
       applyPendingActionResult(result, setActiveRun);
       cachePendingActionResult(result, queryClient);
       queryClient.invalidateQueries({ queryKey: ["copilot-run", result.action.runId] });
       queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
     },
-    onError: (error) => setErrorMessage(readErrorMessage(error)),
+    onError: (error) => applyErrorState(error, setErrorMessage, setErrorCode),
     onSettled: () => clearProcessingAction(processingActionIdRef, setProcessingActionId),
   });
 
@@ -313,7 +315,12 @@ export default function CopilotPage() {
                   className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
                 >
                   <CircleAlert className="mt-0.5 size-4 shrink-0" />
-                  <span>{providerSetupError ? t("copilot.providerSetupRequired") : errorMessage}</span>
+                  <span>
+                    {providerSetupError ? t("copilot.providerSetupRequired") : errorMessage}
+                    {errorCode && (
+                      <span className="mt-1 block font-mono text-xs">{errorCode}</span>
+                    )}
+                  </span>
                 </div>
               )}
             </CardContent>
@@ -419,7 +426,7 @@ export default function CopilotPage() {
                     }`}
                     onClick={() => {
                       setSelectedRunId(run.id);
-                      setErrorMessage("");
+                      clearErrorState(setErrorMessage, setErrorCode);
                     }}
                   >
                     <div className="flex items-center justify-between gap-3">
@@ -695,6 +702,28 @@ function readErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Copilot request failed";
 }
 
+function readGatewayErrorCode(error: unknown): string {
+  const code = error instanceof GatewayApiError ? error.details?.code : undefined;
+  return typeof code === "string" ? code : "";
+}
+
+function applyErrorState(
+  error: unknown,
+  setErrorMessage: Dispatch<SetStateAction<string>>,
+  setErrorCode: Dispatch<SetStateAction<string>>
+): void {
+  setErrorMessage(readErrorMessage(error));
+  setErrorCode(readGatewayErrorCode(error));
+}
+
+function clearErrorState(
+  setErrorMessage: Dispatch<SetStateAction<string>>,
+  setErrorCode: Dispatch<SetStateAction<string>>
+): void {
+  setErrorMessage("");
+  setErrorCode("");
+}
+
 function normalizeRunErrorDetail(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -719,8 +748,8 @@ function clearProcessingAction(
   setProcessingActionId(null);
 }
 
-function isProviderSetupError(message: string): boolean {
-  return message.includes("copilot_provider_not_configured") || message.includes("HTTP 400");
+function isProviderSetupError(code: string): boolean {
+  return code === "copilot_provider_not_configured";
 }
 
 function updatePendingAction(

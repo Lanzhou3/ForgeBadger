@@ -293,6 +293,29 @@ describe("api client", () => {
     );
   });
 
+  it("preserves Gateway error details for Copilot requests", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 400,
+          json: () => Promise.resolve({
+            code: 1,
+            message: "Configure an OpenAI or Anthropic model provider first.",
+            details: { code: "copilot_provider_not_configured" },
+          }),
+        } as Response)
+      )
+    );
+
+    await expect(createCopilotRun({ prompt: "Summarize Gateway health" })).rejects.toMatchObject({
+      message: "Configure an OpenAI or Anthropic model provider first.",
+      status: 400,
+      details: { code: "copilot_provider_not_configured" },
+    });
+  });
+
   it("creates Gate A sessions with the current login token", async () => {
     vi.stubGlobal("window", {});
     vi.stubGlobal("localStorage", {

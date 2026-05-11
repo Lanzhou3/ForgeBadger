@@ -124,6 +124,29 @@ test("Copilot page disables start when no provider is configured", async ({ page
   await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
 });
 
+test("Copilot page shows structured provider setup errors from run creation", async ({ page }) => {
+  await mockCopilotApis(page, {
+    onCreateRun: async (route) => {
+      await route.fulfill({
+        status: 400,
+        json: {
+          code: 1,
+          message: "Configure an OpenAI or Anthropic model provider first.",
+          details: { code: "copilot_provider_not_configured" },
+        },
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByLabel("Copilot prompt").fill("Summarize release state");
+  await page.getByRole("button", { name: "Start" }).click();
+
+  await expect(page.getByRole("alert").filter({ hasText: "copilot_provider_not_configured" })).toBeVisible();
+  await expect(page.getByText("Configure an OpenAI or Anthropic model provider first.").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
+});
+
 test("Copilot starter prompts fill the prompt without starting a run", async ({ page }) => {
   let createRequests = 0;
   await mockCopilotApis(page, {
