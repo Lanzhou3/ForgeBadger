@@ -124,6 +124,8 @@ describe("copilot routes", () => {
     assert.equal(res.body.message, "");
     assert.equal(res.body.data.run.status, "completed");
     assert.equal(res.body.data.run.stepCount, 1);
+    assert.equal(res.body.data.run.providerProfileName, "OpenAI");
+    assert.equal(res.body.data.run.modelProfileName, "GPT");
     assert.equal(res.body.data.events[0].type, "assistant_message");
     assert.equal(res.body.data.events[0].message, "Gateway is healthy.");
     assert.equal(calls[0]?.input, "Summarize Gateway health");

@@ -15,7 +15,9 @@ export interface CopilotRun {
   userId: string;
   status: CopilotRunStatus | string;
   providerProfileId: string | null;
+  providerProfileName: string | null;
   modelProfileId: string | null;
+  modelProfileName: string | null;
   source: string;
   sourceRefId: string | null;
   goal: string;
@@ -96,7 +98,9 @@ interface CopilotRunRow {
   user_id: string;
   status: string;
   provider_profile_id: string | null;
+  provider_profile_name: string | null;
   model_profile_id: string | null;
+  model_profile_name: string | null;
   source: string;
   source_ref_id: string | null;
   goal: string;
@@ -163,16 +167,17 @@ export class CopilotRepository {
 
   getRun(id: string): CopilotRun | undefined {
     const row = this.db.prepare(`
-      SELECT * FROM copilot_runs WHERE id = ? AND user_id = ?
+      ${copilotRunSelectSql()}
+      WHERE cr.id = ? AND cr.user_id = ?
     `).get(id, this.userId) as CopilotRunRow | undefined;
     return row ? toRun(row) : undefined;
   }
 
   listRuns(limit = 50): CopilotRun[] {
     const rows = this.db.prepare(`
-      SELECT * FROM copilot_runs
-      WHERE user_id = ?
-      ORDER BY created_at DESC
+      ${copilotRunSelectSql()}
+      WHERE cr.user_id = ?
+      ORDER BY cr.created_at DESC
       LIMIT ?
     `).all(this.userId, clampLimit(limit)) as CopilotRunRow[];
     return rows.map(toRun);
@@ -348,7 +353,9 @@ function toRun(row: CopilotRunRow): CopilotRun {
     userId: row.user_id,
     status: row.status,
     providerProfileId: row.provider_profile_id,
+    providerProfileName: row.provider_profile_name,
     modelProfileId: row.model_profile_id,
+    modelProfileName: row.model_profile_name,
     source: row.source,
     sourceRefId: row.source_ref_id,
     goal: row.goal,
@@ -360,6 +367,17 @@ function toRun(row: CopilotRunRow): CopilotRun {
     updatedAt: row.updated_at,
     completedAt: row.completed_at
   };
+}
+
+function copilotRunSelectSql(): string {
+  return `
+      SELECT cr.*, mpp.name AS provider_profile_name, mp.name AS model_profile_name
+      FROM copilot_runs cr
+      LEFT JOIN model_provider_profiles mpp
+        ON mpp.id = cr.provider_profile_id AND mpp.user_id = cr.user_id
+      LEFT JOIN model_profiles mp
+        ON mp.id = cr.model_profile_id AND mp.user_id = cr.user_id
+    `;
 }
 
 function toEvent(row: CopilotRunEventRow): CopilotRunEvent {

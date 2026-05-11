@@ -91,6 +91,8 @@ test("Copilot page shows provider and model metadata for selected runs", async (
     source: "copilot",
     providerProfileId: "provider-openai",
     modelProfileId: "model-gpt-5",
+    providerProfileName: "OpenAI production",
+    modelProfileName: "GPT-5 coding",
     stepCount: 3,
     maxSteps: 8,
     completedAt: 1778490000000,
@@ -106,11 +108,11 @@ test("Copilot page shows provider and model metadata for selected runs", async (
 
   await page.goto("/copilot");
 
-  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("provider-openai");
-  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("model-gpt-5");
+  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("OpenAI production");
+  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("GPT-5 coding");
   await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("3/8");
-  await expect(page.getByLabel("Copilot run metadata for Summarize Gateway health")).toContainText("provider-openai");
-  await expect(page.getByLabel("Copilot run metadata for Summarize Gateway health")).toContainText("model-gpt-5");
+  await expect(page.getByLabel("Copilot run metadata for Summarize Gateway health")).toContainText("OpenAI production");
+  await expect(page.getByLabel("Copilot run metadata for Summarize Gateway health")).toContainText("GPT-5 coding");
   await expect(page.getByLabel("Copilot run metadata for Summarize Gateway health")).toContainText("3/8");
 });
 

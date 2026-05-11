@@ -473,8 +473,14 @@ function RunMetadata({
 }) {
   const items = [
     { label: sourceLabel, value: normalizeRunErrorDetail(run.source) },
-    { label: providerLabel, value: normalizeRunErrorDetail(run.providerProfileId) },
-    { label: modelLabel, value: normalizeRunErrorDetail(run.modelProfileId) },
+    {
+      label: providerLabel,
+      value: normalizeRunErrorDetail(run.providerProfileName) ?? normalizeRunErrorDetail(run.providerProfileId),
+    },
+    {
+      label: modelLabel,
+      value: normalizeRunErrorDetail(run.modelProfileName) ?? normalizeRunErrorDetail(run.modelProfileId),
+    },
     { label: stepsLabel, value: formatRunSteps(run.stepCount, run.maxSteps) },
   ].filter((item): item is { label: string; value: string } => Boolean(item.value));
   if (items.length === 0) return null;
