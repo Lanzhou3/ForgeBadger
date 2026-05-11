@@ -7,7 +7,14 @@ import {
   selectCopilotProvider,
   type CopilotProviderSelection
 } from "./provider-selection.js";
+import { createCopilotReadTools } from "./read-tools.js";
 import { redactCopilotPayload, redactCopilotText } from "./redaction.js";
+import {
+  createCopilotToolRegistry,
+  executeCopilotTool,
+  toModelToolDefinitions,
+  type CopilotToolRegistry
+} from "./tool-registry.js";
 
 export interface CopilotOrchestratorOptions {
   db: Database;
@@ -31,9 +38,11 @@ export type RunCopilotTextResult =
 
 export class CopilotOrchestrator {
   private readonly modelClientFactory: ((selection: CopilotProviderSelection) => CopilotModelClient) | undefined;
+  private readonly toolRegistry: CopilotToolRegistry;
 
   constructor(private readonly options: CopilotOrchestratorOptions) {
     this.modelClientFactory = options.modelClientFactory;
+    this.toolRegistry = createCopilotToolRegistry(createCopilotReadTools());
   }
 
   async runText(input: RunCopilotTextInput): Promise<RunCopilotTextResult> {
@@ -64,16 +73,40 @@ export class CopilotOrchestrator {
     selection: CopilotProviderSelection,
     prompt: string
   ): Promise<RunCopilotTextResult> {
-    const events = await this.modelClientFor(selection).createResponse(toModelRequest(selection, prompt));
+    const events = await this.modelClientFor(selection).createResponse(
+      toModelRequest(selection, prompt, this.toolRegistry)
+    );
     const overflow = events.length > run.maxSteps;
     if (overflow) return this.failBeforeModel(repo, run, maxStepsError(run.maxSteps), 400);
     const stored = events.map((event) => storeModelEvent(repo, run.id, event));
     const failed = events.find((event) => event.type === "run_failed");
     if (failed) return this.failAfterEvents(repo, run, failed, stored, 502);
     const toolCall = events.find((event) => event.type === "tool_call_requested");
-    if (toolCall) return this.failAfterEvents(repo, run, toolDisabledError(), stored, 400);
+    if (toolCall) return await this.executeReadTool(repo, run, toolCall, stored);
     const completed = repo.updateRun(run.id, { status: "completed", completedAt: Date.now() }) ?? run;
     return { ok: true, run: completed, events: stored };
+  }
+
+  private async executeReadTool(
+    repo: CopilotRepository,
+    run: CopilotRun,
+    toolCall: Extract<CopilotModelEvent, { type: "tool_call_requested" }>,
+    events: CopilotRunEvent[]
+  ): Promise<RunCopilotTextResult> {
+    const result = await executeCopilotTool(this.toolRegistry, toolCall.name, toolCall.input, {
+      db: this.options.db,
+      userId: run.userId,
+      masterKey: this.options.masterKey,
+      runId: run.id
+    });
+    if (!result.ok) return this.failAfterEvents(repo, run, result.error, events, 400);
+    const toolResult = repo.addEvent(run.id, {
+      type: "tool_result",
+      message: toolCall.name,
+      payload: { toolCallId: toolCall.id, output: result.output }
+    });
+    const completed = repo.updateRun(run.id, { status: "completed", completedAt: Date.now() }) ?? run;
+    return { ok: true, run: completed, events: [...events, toolResult] };
   }
 
   private failBeforeModel(
@@ -134,7 +167,11 @@ function toCreateRunInput(input: RunCopilotTextInput) {
   };
 }
 
-function toModelRequest(selection: CopilotProviderSelection, prompt: string): CopilotModelRequest {
+function toModelRequest(
+  selection: CopilotProviderSelection,
+  prompt: string,
+  toolRegistry: CopilotToolRegistry
+): CopilotModelRequest {
   return {
     model: selection.model.modelId,
     instructions: [
@@ -143,6 +180,7 @@ function toModelRequest(selection: CopilotProviderSelection, prompt: string): Co
       "Do not request terminal input, shell execution, file writes, or autonomous project changes."
     ].join("\n"),
     input: prompt,
+    tools: toModelToolDefinitions(toolRegistry),
     maxOutputTokens: 1024
   };
 }
@@ -178,12 +216,5 @@ function maxStepsError(maxSteps: number): CopilotServiceError {
   return {
     code: "copilot_max_steps_exceeded",
     message: `Copilot run exceeded max step count ${maxSteps}`
-  };
-}
-
-function toolDisabledError(): CopilotServiceError {
-  return {
-    code: "copilot_tools_disabled",
-    message: "Copilot tool execution is disabled in this release"
   };
 }

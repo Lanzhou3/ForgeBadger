@@ -51,13 +51,15 @@ describe("copilot routes", () => {
     }));
   });
 
-  it("returns Copilot capabilities with tools disabled", async () => {
+  it("returns Copilot capabilities with read tools enabled", async () => {
     const res = await makeRequest(app, "GET", "/api/v1/copilot/capabilities", undefined, authHeaders());
 
     assert.equal(res.status, 200);
     assert.equal(res.body.code, 0);
     assert.deepEqual(res.body.data.supportedProviderFormats, ["openai", "openai-compatible", "anthropic"]);
-    assert.equal(res.body.data.toolExecutionEnabled, false);
+    assert.equal(res.body.data.toolExecutionEnabled, true);
+    assert.equal(res.body.data.approvalRequiredForWrites, true);
+    assert.ok(res.body.data.readTools.includes("openforge.get_dashboard_summary"));
   });
 
   it("rejects unauthenticated run creation", async () => {

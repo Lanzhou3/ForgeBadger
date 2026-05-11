@@ -6,6 +6,7 @@ import type { CopilotRun, CopilotRunEvent } from "../db/repositories/copilot-rep
 import { CopilotRepository } from "../db/repositories/copilot-repository.js";
 import type { Database } from "../db/types.js";
 import { CopilotOrchestrator, type CopilotOrchestratorOptions } from "../services/copilot/orchestrator.js";
+import { createCopilotReadTools } from "../services/copilot/read-tools.js";
 
 const createRunSchema = z.object({
   prompt: z.string().trim().min(1).max(32 * 1024),
@@ -33,7 +34,9 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
       code: 0,
       data: {
         supportedProviderFormats: ["openai", "openai-compatible", "anthropic"],
-        toolExecutionEnabled: false,
+        toolExecutionEnabled: true,
+        readTools: createCopilotReadTools().map((tool) => tool.name),
+        approvalRequiredForWrites: true,
         pendingActionApprovalEnabled: false
       },
       message: ""
