@@ -42,13 +42,27 @@ export default function CopilotPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
 
-  const { data: capabilityData, isLoading: capabilitiesLoading } = useQuery({
+  const {
+    data: capabilityData,
+    isLoading: capabilitiesLoading,
+    isError: capabilitiesLoadFailed,
+    error: capabilitiesError,
+    refetch: refetchCapabilities,
+  } = useQuery({
     queryKey: ["copilot-capabilities"],
     queryFn: getCopilotCapabilities,
+    retry: false,
   });
-  const { data: runData, isLoading: runsLoading } = useQuery({
+  const {
+    data: runData,
+    isLoading: runsLoading,
+    isError: runsLoadFailed,
+    error: runsError,
+    refetch: refetchRuns,
+  } = useQuery({
     queryKey: ["copilot-runs"],
     queryFn: () => listCopilotRuns(20),
+    retry: false,
   });
 
   const runs = runData?.runs ?? [];
@@ -57,10 +71,17 @@ export default function CopilotPage() {
     activeRunId: activeRun?.run.id,
     runs,
   });
-  const { data: selectedRunData, isFetching: selectedRunLoading } = useQuery({
+  const {
+    data: selectedRunData,
+    isFetching: selectedRunLoading,
+    isError: selectedRunLoadFailed,
+    error: selectedRunError,
+    refetch: refetchSelectedRun,
+  } = useQuery({
     queryKey: ["copilot-run", resolvedRunId],
     queryFn: () => getCopilotRun(resolvedRunId as string),
     enabled: Boolean(resolvedRunId),
+    retry: false,
     refetchInterval: (query) =>
       isCopilotRunLive(query.state.data?.run.status ?? "") ? 4_000 : false,
   });
@@ -148,6 +169,39 @@ export default function CopilotPage() {
         </Button>
       </div>
 
+      <div className="space-y-2">
+        {capabilitiesLoadFailed && (
+          <QueryErrorNotice
+            title={t("copilot.capabilitiesLoadFailed")}
+            message={readErrorMessage(capabilitiesError)}
+            retryLabel={t("copilot.retry")}
+            onRetry={() => {
+              void refetchCapabilities();
+            }}
+          />
+        )}
+        {runsLoadFailed && (
+          <QueryErrorNotice
+            title={t("copilot.runsLoadFailed")}
+            message={readErrorMessage(runsError)}
+            retryLabel={t("copilot.retry")}
+            onRetry={() => {
+              void refetchRuns();
+            }}
+          />
+        )}
+        {selectedRunLoadFailed && resolvedRunId && (
+          <QueryErrorNotice
+            title={t("copilot.runDetailsLoadFailed")}
+            message={readErrorMessage(selectedRunError)}
+            retryLabel={t("copilot.retry")}
+            onRetry={() => {
+              void refetchSelectedRun();
+            }}
+          />
+        )}
+      </div>
+
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
           <Card>
@@ -158,14 +212,19 @@ export default function CopilotPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
+              <label htmlFor="copilot-prompt" className="sr-only">
+                {t("copilot.promptLabel")}
+              </label>
               <textarea
+                id="copilot-prompt"
+                aria-describedby={`copilot-prompt-hint${errorMessage ? " copilot-error" : ""}`}
                 className="min-h-[132px] w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 value={prompt}
                 placeholder={t("copilot.promptPlaceholder")}
                 onChange={(event) => setPrompt(event.target.value)}
               />
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-sm text-muted-foreground">
+                <div id="copilot-prompt-hint" className="text-sm text-muted-foreground">
                   {providerSetupError ? t("copilot.providerSetupRequired") : statusSummary}
                 </div>
                 <div className="flex items-center gap-2">
@@ -191,7 +250,12 @@ export default function CopilotPage() {
                 </div>
               </div>
               {errorMessage && (
-                <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                <div
+                  id="copilot-error"
+                  role="alert"
+                  aria-live="polite"
+                  className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+                >
                   <CircleAlert className="mt-0.5 size-4 shrink-0" />
                   <span>{providerSetupError ? t("copilot.providerSetupRequired") : errorMessage}</span>
                 </div>
@@ -210,11 +274,17 @@ export default function CopilotPage() {
               {latestRun ? (
                 <RunTimeline
                   events={timelineEvents}
-                  noEventsLabel={selectedRunLoading ? t("common.loading") : t("copilot.noEvents")}
+                  noEventsLabel={
+                    selectedRunLoadFailed
+                      ? t("copilot.runDetailsUnavailable")
+                      : selectedRunLoading
+                        ? t("common.loading")
+                        : t("copilot.noEvents")
+                  }
                 />
               ) : (
                 <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
-                  {runsLoading ? t("common.loading") : t("copilot.noRuns")}
+                  {runsLoadFailed ? t("copilot.runsUnavailable") : runsLoading ? t("common.loading") : t("copilot.noRuns")}
                 </div>
               )}
             </CardContent>
@@ -248,7 +318,7 @@ export default function CopilotPage() {
             <CardContent className="space-y-2">
               {runs.length === 0 ? (
                 <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                  {runsLoading ? t("common.loading") : t("copilot.noRuns")}
+                  {runsLoadFailed ? t("copilot.runsUnavailable") : runsLoading ? t("common.loading") : t("copilot.noRuns")}
                 </div>
               ) : (
                 runs.map((run) => (
@@ -328,6 +398,37 @@ function PendingActions({
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function QueryErrorNotice({
+  title,
+  message,
+  retryLabel,
+  onRetry,
+}: {
+  title: string;
+  message: string;
+  retryLabel: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      aria-live="polite"
+      className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <CircleAlert className="mt-0.5 size-4 shrink-0" />
+        <div className="min-w-0">
+          <div className="font-medium">{title}</div>
+          <div className="mt-1 break-words text-destructive/90">{message}</div>
+        </div>
+      </div>
+      <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+        {retryLabel}
+      </Button>
     </div>
   );
 }
