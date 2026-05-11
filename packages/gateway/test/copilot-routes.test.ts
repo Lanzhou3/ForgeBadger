@@ -139,6 +139,23 @@ describe("copilot routes", () => {
     assert.equal(calls[0]?.input, "Summarize Gateway health");
   });
 
+  it("redacts secret-looking prompts before persistence and model requests", async () => {
+    createOpenAiProvider();
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Diagnose launch with token=secret-value and OPENFORGE_ATTACH_TOKEN=attach-secret",
+      source: "copilot"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    const run = new CopilotRepository(db, userId).listRuns()[0];
+    assert.match(run?.goal ?? "", /token=\[REDACTED\]/);
+    assert.match(run?.goal ?? "", /OPENFORGE_ATTACH_TOKEN=\[REDACTED\]/);
+    assert.doesNotMatch(run?.goal ?? "", /secret-value|attach-secret/);
+    assert.doesNotMatch(String(calls[0]?.input ?? ""), /secret-value|attach-secret/);
+    assert.match(String(calls[0]?.input ?? ""), /token=\[REDACTED\]/);
+  });
+
   it("rejects concurrent Copilot runs for the same user while allowing other users", async () => {
     createOpenAiProvider();
     createOpenAiProvider(otherUserId);

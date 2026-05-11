@@ -54,7 +54,8 @@ export class CopilotOrchestrator {
 
   async runText(input: RunCopilotTextInput): Promise<RunCopilotTextResult> {
     const repo = new CopilotRepository(this.options.db, input.userId);
-    let run = repo.createRun(toCreateRunInput(input));
+    const redactedPrompt = redactCopilotText(input.prompt);
+    let run = repo.createRun(toCreateRunInput({ ...input, prompt: redactedPrompt }));
     const control = this.runControls.start(run.id);
     try {
       const selectionInput = {
@@ -78,7 +79,7 @@ export class CopilotOrchestrator {
         userId: input.userId,
         masterKey: this.options.masterKey,
         source: input.source,
-        prompt: input.prompt,
+        prompt: redactedPrompt,
         toolRegistry: this.toolRegistry
       });
       const recallEvent = recall.event ? repo.addEvent(run.id, recall.event) : null;
@@ -99,7 +100,7 @@ export class CopilotOrchestrator {
         repo,
         recalledRun,
         selected.selection,
-        input.prompt,
+        redactedPrompt,
         recall.context,
         previousEvents,
         control.signal
