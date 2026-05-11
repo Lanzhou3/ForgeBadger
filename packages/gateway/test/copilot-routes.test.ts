@@ -123,6 +123,7 @@ describe("copilot routes", () => {
     assert.equal(res.body.code, 0);
     assert.equal(res.body.message, "");
     assert.equal(res.body.data.run.status, "completed");
+    assert.equal(res.body.data.run.stepCount, 1);
     assert.equal(res.body.data.events[0].type, "assistant_message");
     assert.equal(res.body.data.events[0].message, "Gateway is healthy.");
     assert.equal(calls[0]?.input, "Summarize Gateway health");
@@ -149,6 +150,7 @@ describe("copilot routes", () => {
     assert.equal(res.status, 201);
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.run.status, "waiting_for_approval");
+    assert.equal(res.body.data.run.stepCount, 2);
     assert.equal(res.body.data.run.completedAt, null);
     assert.equal(calls.length, 1);
     assert.equal(res.body.data.pendingActions.length, 1);
@@ -175,6 +177,7 @@ describe("copilot routes", () => {
     assert.equal(res.status, 201);
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.run.status, "completed");
+    assert.equal(res.body.data.run.stepCount, 3);
     assert.equal(calls.length, 2);
     assert.equal(calls[1]?.tools, undefined);
     assert.match(calls[1]?.input ?? "", /openforge\.get_dashboard_summary/);

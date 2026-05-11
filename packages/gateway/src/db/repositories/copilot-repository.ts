@@ -235,6 +235,7 @@ export class CopilotRepository {
     if (!this.getRun(runId)) throw new Error("Copilot run not found");
     const id = randomUUID();
     const sequence = this.nextSequence(runId);
+    const now = Date.now();
     this.db.prepare(`
       INSERT INTO copilot_run_events (
         id, user_id, run_id, type, sequence, message, payload_json, created_at
@@ -247,7 +248,17 @@ export class CopilotRepository {
       sequence,
       input.message ?? null,
       JSON.stringify(input.payload ?? {}),
-      Date.now()
+      now
+    );
+    this.db.prepare(`
+      UPDATE copilot_runs
+      SET step_count = ?, updated_at = ?
+      WHERE id = ? AND user_id = ?
+    `).run(
+      sequence,
+      now,
+      runId,
+      this.userId
     );
     return this.getEvent(id) as CopilotRunEvent;
   }

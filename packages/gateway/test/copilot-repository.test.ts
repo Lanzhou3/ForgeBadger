@@ -79,6 +79,27 @@ describe("CopilotRepository", () => {
     assert.deepEqual(repo.listEvents(run.id).map((event) => event.sequence), [1, 2]);
   });
 
+  it("updates the run step count as events are appended", () => {
+    const run = repo.createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Track run progress"
+    });
+
+    repo.addEvent(run.id, {
+      type: "assistant_message",
+      message: "First step",
+      payload: { text: "First step" }
+    });
+    repo.addEvent(run.id, {
+      type: "tool_result",
+      message: "openforge.get_dashboard_summary",
+      payload: { output: { ok: true } }
+    });
+
+    assert.equal(repo.getRun(run.id)?.stepCount, 2);
+  });
+
   it("creates pending actions in pending state", () => {
     const run = repo.createRun({
       status: "waiting_for_approval",
