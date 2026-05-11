@@ -328,20 +328,29 @@ export default function CopilotPage() {
             </CardHeader>
             <CardContent>
               {latestRun ? (
-                <RunTimeline
-                  events={timelineEvents}
-                  noEventsLabel={
-                    selectedRunLoadFailed
-                      ? t("copilot.runDetailsUnavailable")
-                      : selectedRunLoading
-                        ? t("common.loading")
-                        : t("copilot.noEvents")
-                  }
-                  getEventLabel={(type) => {
-                    const labelKey = getCopilotEventLabelKey(type);
-                    return labelKey ? t(labelKey) : getCopilotEventLabel(type);
-                  }}
-                />
+                <div className="space-y-3">
+                  <RunFailureNotice
+                    title={t("copilot.runFailureTitle")}
+                    codeLabel={t("copilot.errorCode")}
+                    messageLabel={t("copilot.errorMessage")}
+                    errorCode={latestRun.errorCode}
+                    errorMessage={latestRun.errorMessage}
+                  />
+                  <RunTimeline
+                    events={timelineEvents}
+                    noEventsLabel={
+                      selectedRunLoadFailed
+                        ? t("copilot.runDetailsUnavailable")
+                        : selectedRunLoading
+                          ? t("common.loading")
+                          : t("copilot.noEvents")
+                    }
+                    getEventLabel={(type) => {
+                      const labelKey = getCopilotEventLabelKey(type);
+                      return labelKey ? t(labelKey) : getCopilotEventLabel(type);
+                    }}
+                  />
+                </div>
               ) : (
                 <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
                   {runsLoadFailed ? t("copilot.runsUnavailable") : runsLoading ? t("common.loading") : t("copilot.noRuns")}
@@ -419,6 +428,49 @@ export default function CopilotPage() {
             </CardContent>
           </Card>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function RunFailureNotice({
+  title,
+  codeLabel,
+  messageLabel,
+  errorCode,
+  errorMessage,
+}: {
+  title: string;
+  codeLabel: string;
+  messageLabel: string;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+}) {
+  const code = normalizeRunErrorDetail(errorCode);
+  const message = normalizeRunErrorDetail(errorMessage);
+  if (!code && !message) return null;
+
+  return (
+    <div
+      role="alert"
+      aria-live="polite"
+      className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+    >
+      <CircleAlert className="mt-0.5 size-4 shrink-0" />
+      <div className="min-w-0 space-y-2">
+        <div className="font-medium">{title}</div>
+        {code && (
+          <div className="min-w-0">
+            <div className="text-xs font-medium uppercase tracking-normal text-destructive/80">{codeLabel}</div>
+            <div className="break-all font-mono text-xs text-destructive">{code}</div>
+          </div>
+        )}
+        {message && (
+          <div className="min-w-0">
+            <div className="text-xs font-medium uppercase tracking-normal text-destructive/80">{messageLabel}</div>
+            <div className="break-words text-destructive/90">{message}</div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -592,6 +644,11 @@ function StatusBadge({ status }: { status: string }) {
 
 function readErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Copilot request failed";
+}
+
+function normalizeRunErrorDetail(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 function markProcessingAction(

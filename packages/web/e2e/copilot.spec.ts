@@ -57,6 +57,32 @@ test("Copilot page surfaces selected run detail errors", async ({ page }) => {
   await expect(page.getByText("No timeline events yet.")).toHaveCount(0);
 });
 
+test("Copilot page shows failed run error details without timeline events", async ({ page }) => {
+  const failedRun = {
+    id: "run-1",
+    status: "failed",
+    goal: "Summarize Gateway health",
+    source: "copilot",
+    errorCode: "copilot_model_request_failed",
+    errorMessage: "Copilot model request failed",
+    completedAt: 1778490000000,
+  };
+  await mockCopilotApis(page, {
+    runs: [failedRun],
+    runDetail: {
+      run: failedRun,
+      events: [],
+      pendingActions: [],
+    },
+  });
+
+  await page.goto("/copilot");
+
+  await expect(page.getByRole("alert").filter({ hasText: "Copilot run failed" })).toBeVisible();
+  await expect(page.getByText("copilot_model_request_failed")).toBeVisible();
+  await expect(page.getByText("Copilot model request failed")).toBeVisible();
+});
+
 test("Copilot page disables start when no provider is configured", async ({ page }) => {
   await mockCopilotApis(page, {
     providerConfigured: false,
