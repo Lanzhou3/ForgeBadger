@@ -130,6 +130,115 @@ test("Copilot page disables start when no provider is configured", async ({ page
   await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
 });
 
+test("Copilot page disables start when model provider selection cannot load", async ({ page }) => {
+  await mockCopilotApis(page, {
+    onModelProviders: async (route) => {
+      await route.fulfill({
+        status: 500,
+        json: { code: 1, message: "model provider list failed" },
+      });
+    },
+    runs: [],
+  });
+
+  await page.goto("/copilot");
+  await page.getByLabel("Copilot prompt").fill("Summarize release state");
+
+  await expect(page.getByRole("alert").filter({ hasText: "Failed to load Copilot model providers" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
+});
+
+test("Copilot page sends the selected provider and model when starting a run", async ({ page }) => {
+  let createBody: Record<string, unknown> | undefined;
+  await mockCopilotApis(page, {
+    modelProviders: {
+      providers: [
+        {
+          id: "provider-openai",
+          providerKey: "openai",
+          name: "OpenAI production",
+          baseUrl: "https://api.openai.com/v1",
+          authType: "api_key",
+          apiFormat: "openai",
+          supportedAdapters: ["opencode"],
+          status: "active",
+        },
+        {
+          id: "provider-anthropic",
+          providerKey: "anthropic",
+          name: "Anthropic production",
+          baseUrl: "https://api.anthropic.com",
+          authType: "api_key",
+          apiFormat: "anthropic",
+          supportedAdapters: ["opencode"],
+          status: "active",
+        },
+      ],
+      models: [
+        {
+          id: "model-gpt-5",
+          providerProfileId: "provider-openai",
+          providerKey: "openai",
+          providerName: "OpenAI production",
+          baseUrl: "https://api.openai.com/v1",
+          name: "GPT-5 coding",
+          modelId: "gpt-5.1",
+          capabilities: ["code"],
+          status: "active",
+          isDefault: true,
+        },
+        {
+          id: "model-claude-opus",
+          providerProfileId: "provider-anthropic",
+          providerKey: "anthropic",
+          providerName: "Anthropic production",
+          baseUrl: "https://api.anthropic.com",
+          name: "Claude Opus",
+          modelId: "claude-opus-4.5",
+          capabilities: ["code"],
+          status: "active",
+          isDefault: true,
+        },
+      ],
+      credentials: [],
+    },
+    onCreateRun: async (route) => {
+      createBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-selected-model",
+            status: "completed",
+            goal: "Summarize Gateway health",
+            source: "copilot",
+            providerProfileId: "provider-anthropic",
+            providerProfileName: "Anthropic production",
+            modelProfileId: "model-claude-opus",
+            modelProfileName: "Claude Opus",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByLabel("Copilot provider").selectOption("provider-anthropic");
+  await expect(page.getByLabel("Copilot model")).toHaveValue("model-claude-opus");
+  await page.getByLabel("Copilot prompt").fill("Summarize Gateway health");
+  await page.getByRole("button", { name: "Start" }).click();
+
+  await expect.poll(() => createBody).toMatchObject({
+    prompt: "Summarize Gateway health",
+    source: "copilot",
+    providerProfileId: "provider-anthropic",
+    modelProfileId: "model-claude-opus",
+  });
+  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("Anthropic production");
+  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("Claude Opus");
+});
+
 test("Copilot page shows structured provider setup errors from run creation", async ({ page }) => {
   await mockCopilotApis(page, {
     onCreateRun: async (route) => {
@@ -348,8 +457,14 @@ async function mockCopilotApis(
     onApprove?: (route: Route) => Promise<void>;
     onReject?: (route: Route) => Promise<void>;
     onCreateRun?: (route: Route) => Promise<void>;
+    onModelProviders?: (route: Route) => Promise<void>;
     providerConfigured?: boolean;
     runs?: Array<Record<string, unknown>>;
+    modelProviders?: {
+      providers: Array<Record<string, unknown>>;
+      models: Array<Record<string, unknown>>;
+      credentials: Array<Record<string, unknown>>;
+    };
     runDetail?: {
       run: Record<string, unknown>;
       events: Array<Record<string, unknown>>;
@@ -367,6 +482,41 @@ async function mockCopilotApis(
           email: "copilot-e2e@example.com",
           role: "admin",
           status: "active",
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/model-providers") {
+      if (overrides.onModelProviders) {
+        await overrides.onModelProviders(route);
+        return;
+      }
+      await route.fulfill({
+        json: envelope(overrides.modelProviders ?? {
+          providers: [{
+            id: "provider-openai",
+            providerKey: "openai",
+            name: "OpenAI production",
+            baseUrl: "https://api.openai.com/v1",
+            authType: "api_key",
+            apiFormat: "openai",
+            supportedAdapters: ["opencode"],
+            status: "active",
+          }],
+          models: [{
+            id: "model-gpt-5",
+            providerProfileId: "provider-openai",
+            providerKey: "openai",
+            providerName: "OpenAI production",
+            baseUrl: "https://api.openai.com/v1",
+            name: "GPT-5 coding",
+            modelId: "gpt-5.1",
+            capabilities: ["code"],
+            status: "active",
+            isDefault: true,
+          }],
+          credentials: [],
         }),
       });
       return;

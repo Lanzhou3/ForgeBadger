@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { CircleAlert, Clock3, Play, RefreshCcw, Sparkles, Square } from "lucide-react";
@@ -16,12 +16,15 @@ import {
   GatewayApiError,
   getCopilotCapabilities,
   getCopilotRun,
+  listModelProviders,
   listCopilotRuns,
   rejectCopilotPendingAction,
   type CopilotPendingActionDecision,
   type CopilotPendingAction,
   type CopilotRun,
   type CopilotRunEvent,
+  type ModelProfile,
+  type ProviderProfile,
 } from "@/lib/api";
 import {
   getCopilotEventLabel,
@@ -62,6 +65,8 @@ export default function CopilotPage() {
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<ActiveRunState | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState("");
+  const [selectedModelProfileId, setSelectedModelProfileId] = useState("");
   const [processingActionId, setProcessingActionId] = useState<string | null>(null);
   const processingActionIdRef = useRef<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
@@ -76,6 +81,17 @@ export default function CopilotPage() {
   } = useQuery({
     queryKey: ["copilot-capabilities"],
     queryFn: getCopilotCapabilities,
+    retry: false,
+  });
+  const {
+    data: modelProviderData,
+    isLoading: modelProvidersLoading,
+    isError: modelProvidersLoadFailed,
+    error: modelProvidersError,
+    refetch: refetchModelProviders,
+  } = useQuery({
+    queryKey: ["model-providers"],
+    queryFn: listModelProviders,
     retry: false,
   });
   const {
@@ -108,10 +124,10 @@ export default function CopilotPage() {
     enabled: Boolean(resolvedRunId),
     retry: false,
     refetchInterval: (query) =>
-      isCopilotRunLive(query.state.data?.run.status ?? "") ? 4_000 : false,
+      isCopilotRunLive(query.state.data?.run?.status ?? "") ? 4_000 : false,
   });
   const selectedRunState =
-    selectedRunData ??
+    (selectedRunData?.run ? selectedRunData : null) ??
     (activeRun && activeRun.run.id === resolvedRunId ? activeRun : null);
   const latestRun = selectedRunState?.run ?? runs.find((run) => run.id === resolvedRunId) ?? runs[0] ?? null;
   const timelineEvents = selectedRunState?.events ?? [];
@@ -120,6 +136,38 @@ export default function CopilotPage() {
   const providerSetupError = isProviderSetupError(errorCode);
   const providerConfigured = capabilityData?.providerConfigured !== false;
   const providerSetupRequired = !providerConfigured || providerSetupError;
+  const supportedProviderFormats = useMemo(
+    () => capabilityData?.supportedProviderFormats ?? ["openai", "openai-compatible", "anthropic"],
+    [capabilityData]
+  );
+  const copilotProviders = useMemo(
+    () =>
+      (modelProviderData?.providers ?? []).filter((provider) =>
+        isSelectableCopilotProvider(provider, supportedProviderFormats)
+      ),
+    [modelProviderData?.providers, supportedProviderFormats]
+  );
+  const providerModels = useMemo(
+    () =>
+      (modelProviderData?.models ?? []).filter((model) =>
+        model.providerProfileId === selectedProviderId && isSelectableCopilotModel(model)
+      ),
+    [modelProviderData?.models, selectedProviderId]
+  );
+
+  useEffect(() => {
+    setSelectedProviderId((current) =>
+      copilotProviders.some((provider) => provider.id === current) ? current : copilotProviders[0]?.id ?? ""
+    );
+  }, [copilotProviders]);
+
+  useEffect(() => {
+    setSelectedModelProfileId((current) => {
+      if (providerModels.some((model) => model.id === current)) return current;
+      return providerModels.find((model) => model.isDefault)?.id ?? providerModels[0]?.id ?? "";
+    });
+  }, [providerModels]);
+  const modelSelectionReady = Boolean(selectedProviderId && selectedModelProfileId);
 
   const statusSummary = useMemo(() => {
     const capabilities = capabilityData;
@@ -128,7 +176,12 @@ export default function CopilotPage() {
   }, [capabilityData]);
 
   const createMutation = useMutation({
-    mutationFn: (value: string) => createCopilotRun({ prompt: value.trim(), source: "copilot" }),
+    mutationFn: (value: string) => createCopilotRun({
+      prompt: value.trim(),
+      source: "copilot",
+      ...(selectedProviderId ? { providerProfileId: selectedProviderId } : {}),
+      ...(selectedModelProfileId ? { modelProfileId: selectedModelProfileId } : {}),
+    }),
     onSuccess: (result) => {
       setPrompt("");
       clearErrorState(setErrorMessage, setErrorCode);
@@ -139,6 +192,13 @@ export default function CopilotPage() {
     },
     onError: (error) => applyErrorState(error, setErrorMessage, setErrorCode),
   });
+  const canStartCopilotRun =
+    promptReady &&
+    providerConfigured &&
+    modelSelectionReady &&
+    !modelProvidersLoading &&
+    !modelProvidersLoadFailed &&
+    !createMutation.isPending;
 
   const cancelMutation = useMutation({
     mutationFn: (id: string) => cancelCopilotRun(id),
@@ -233,6 +293,16 @@ export default function CopilotPage() {
             }}
           />
         )}
+        {modelProvidersLoadFailed && (
+          <QueryErrorNotice
+            title={t("copilot.modelProvidersLoadFailed")}
+            message={readErrorMessage(modelProvidersError)}
+            retryLabel={t("copilot.retry")}
+            onRetry={() => {
+              void refetchModelProviders();
+            }}
+          />
+        )}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -269,6 +339,57 @@ export default function CopilotPage() {
                   </Button>
                 ))}
               </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="space-y-1 text-sm font-medium" htmlFor="copilot-provider">
+                  <span>{t("copilot.providerSelect")}</span>
+                  <select
+                    id="copilot-provider"
+                    aria-label={t("copilot.providerSelect")}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={selectedProviderId}
+                    disabled={modelProvidersLoading || copilotProviders.length === 0}
+                    onChange={(event) => {
+                      setSelectedProviderId(event.target.value);
+                      setSelectedModelProfileId("");
+                    }}
+                  >
+                    {copilotProviders.length === 0 ? (
+                      <option value="">
+                        {modelProvidersLoading ? t("common.loading") : t("copilot.noSelectableProviders")}
+                      </option>
+                    ) : (
+                      copilotProviders.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+                <label className="space-y-1 text-sm font-medium" htmlFor="copilot-model">
+                  <span>{t("copilot.modelSelect")}</span>
+                  <select
+                    id="copilot-model"
+                    aria-label={t("copilot.modelSelect")}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={selectedModelProfileId}
+                    disabled={modelProvidersLoading || providerModels.length === 0}
+                    onChange={(event) => setSelectedModelProfileId(event.target.value)}
+                  >
+                    {providerModels.length === 0 ? (
+                      <option value="">
+                        {modelProvidersLoading ? t("common.loading") : t("copilot.noSelectableModels")}
+                      </option>
+                    ) : (
+                      providerModels.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+              </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div id="copilot-prompt-hint" className="text-sm text-muted-foreground">
                   {providerSetupRequired ? (
@@ -282,7 +403,15 @@ export default function CopilotPage() {
                       </Link>
                     </span>
                   ) : (
-                    statusSummary
+                    modelProvidersLoading
+                      ? t("common.loading")
+                      : modelProvidersLoadFailed
+                        ? t("copilot.modelProvidersLoadFailed")
+                        : !selectedProviderId
+                          ? t("copilot.noSelectableProviders")
+                          : !selectedModelProfileId
+                            ? t("copilot.noSelectableModels")
+                            : statusSummary
                   )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -299,7 +428,7 @@ export default function CopilotPage() {
                   )}
                   <Button
                     type="button"
-                    disabled={!promptReady || createMutation.isPending || !providerConfigured}
+                    disabled={!canStartCopilotRun}
                     onClick={() => createMutation.mutate(prompt)}
                   >
                     <Play className="mr-2 size-4" />
@@ -498,6 +627,14 @@ function RunMetadata({
       ))}
     </dl>
   );
+}
+
+function isSelectableCopilotProvider(provider: ProviderProfile, supportedProviderFormats: string[]) {
+  return provider.status === "active" && supportedProviderFormats.includes(provider.apiFormat);
+}
+
+function isSelectableCopilotModel(model: ModelProfile) {
+  return model.status === "active";
 }
 
 function RunFailureNotice({
