@@ -154,6 +154,7 @@ export interface CodexAppServerCapabilities {
 
 export interface CopilotCapabilities {
   supportedProviderFormats: Array<"openai" | "openai-compatible" | "anthropic" | string>;
+  providerConfigured?: boolean;
   toolExecutionEnabled: boolean;
   readTools?: string[];
   approvalRequiredForWrites?: boolean;

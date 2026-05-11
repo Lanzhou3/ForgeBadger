@@ -57,11 +57,83 @@ test("Copilot page surfaces selected run detail errors", async ({ page }) => {
   await expect(page.getByText("No timeline events yet.")).toHaveCount(0);
 });
 
+test("Copilot page disables start when no provider is configured", async ({ page }) => {
+  await mockCopilotApis(page, {
+    providerConfigured: false,
+    runs: [],
+  });
+
+  await page.goto("/copilot");
+  await page.getByLabel("Copilot prompt").fill("Summarize release state");
+
+  await expect(page.getByText("Configure an OpenAI or Anthropic model provider first.").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
+});
+
+test("Copilot page prevents duplicate pending-action submissions", async ({ page }) => {
+  let approveRequests = 0;
+  await mockCopilotApis(page, {
+    runs: [{
+      id: "run-approval",
+      status: "waiting_for_approval",
+      goal: "Remember release decision",
+      source: "copilot",
+    }],
+    runDetail: {
+      run: {
+        id: "run-approval",
+        status: "waiting_for_approval",
+        goal: "Remember release decision",
+        source: "copilot",
+      },
+      events: [],
+      pendingActions: [{
+        id: "action-1",
+        runId: "run-approval",
+        type: "openforge.propose_memory_write",
+        status: "pending",
+        input: { kind: "decision", scope: "global", text: "Remember release gates." },
+      }],
+    },
+    onApprove: async (route) => {
+      approveRequests += 1;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await route.fulfill({
+        json: envelope({
+          action: {
+            id: "action-1",
+            runId: "run-approval",
+            type: "openforge.propose_memory_write",
+            status: "approved",
+            input: { kind: "decision", scope: "global", text: "Remember release gates." },
+          },
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  const approve = page.getByRole("button", { name: "Approve" });
+  await expect(approve).toBeVisible();
+
+  await approve.dblclick();
+
+  await expect.poll(() => approveRequests).toBe(1);
+});
+
 async function mockCopilotApis(
   page: Page,
   overrides: {
     onRuns?: (route: Route) => Promise<void>;
     onRunDetail?: (route: Route) => Promise<void>;
+    onApprove?: (route: Route) => Promise<void>;
+    providerConfigured?: boolean;
+    runs?: Array<Record<string, unknown>>;
+    runDetail?: {
+      run: Record<string, unknown>;
+      events: Array<Record<string, unknown>>;
+      pendingActions: Array<Record<string, unknown>>;
+    };
   } = {}
 ) {
   await page.route("**/api/v1/**", async (route) => {
@@ -83,6 +155,7 @@ async function mockCopilotApis(
       await route.fulfill({
         json: envelope({
           supportedProviderFormats: ["openai", "anthropic"],
+          providerConfigured: overrides.providerConfigured ?? true,
           toolExecutionEnabled: true,
           readTools: ["openforge.get_dashboard_summary"],
           approvalRequiredForWrites: true,
@@ -99,7 +172,7 @@ async function mockCopilotApis(
       }
       await route.fulfill({
         json: envelope({
-          runs: [{
+          runs: overrides.runs ?? [{
             id: "run-1",
             status: "completed",
             goal: "Summarize Gateway health",
@@ -108,6 +181,31 @@ async function mockCopilotApis(
           }],
         }),
       });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/runs/run-approval") {
+      await route.fulfill({
+        json: envelope(overrides.runDetail ?? {
+          run: {
+            id: "run-approval",
+            status: "waiting_for_approval",
+            goal: "Remember release decision",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/runs/run-approval/pending-actions/action-1/approve") {
+      if (overrides.onApprove) {
+        await overrides.onApprove(route);
+        return;
+      }
+      await route.fulfill({ json: envelope({}) });
       return;
     }
 

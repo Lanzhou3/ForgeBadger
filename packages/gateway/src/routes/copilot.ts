@@ -8,6 +8,7 @@ import type { Database } from "../db/types.js";
 import { buildLocalDiagnosticsExport } from "../services/diagnostics.js";
 import { approveCopilotMemoryWrite } from "../services/copilot/memory.js";
 import { CopilotOrchestrator, type CopilotOrchestratorOptions } from "../services/copilot/orchestrator.js";
+import { selectCopilotProvider } from "../services/copilot/provider-selection.js";
 import { createCopilotReadTools } from "../services/copilot/read-tools.js";
 
 const createRunSchema = z.object({
@@ -32,11 +33,17 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
   const router = Router();
   router.use(authenticate);
 
-  router.get("/capabilities", (_req, res) => {
+  router.get("/capabilities", (req, res) => {
     res.json({
       code: 0,
       data: {
         supportedProviderFormats: ["openai", "openai-compatible", "anthropic"],
+        providerConfigured: selectCopilotProvider({
+          db: options.db,
+          userId: userIdFor(req),
+          masterKey: options.masterKey,
+          allowOpenAiCompatible: true
+        }).ok,
         toolExecutionEnabled: true,
         readTools: createCopilotReadTools().filter((tool) => tool.risk === "read").map((tool) => tool.name),
         approvalRequiredForWrites: true,

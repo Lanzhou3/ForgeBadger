@@ -67,9 +67,20 @@ describe("copilot routes", () => {
     assert.equal(res.body.code, 0);
     assert.deepEqual(res.body.data.supportedProviderFormats, ["openai", "openai-compatible", "anthropic"]);
     assert.equal(res.body.data.toolExecutionEnabled, true);
+    assert.equal(res.body.data.providerConfigured, false);
     assert.equal(res.body.data.approvalRequiredForWrites, true);
     assert.ok(res.body.data.readTools.includes("openforge.get_dashboard_summary"));
     assert.equal(res.body.data.readTools.includes("openforge.propose_session_create"), false);
+  });
+
+  it("reports Copilot provider readiness when a compatible provider is configured", async () => {
+    createOpenAiProvider();
+
+    const res = await makeRequest(app, "GET", "/api/v1/copilot/capabilities", undefined, authHeaders());
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.providerConfigured, true);
   });
 
   it("rejects unauthenticated run creation", async () => {

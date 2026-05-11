@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Clock3, Play, RefreshCcw, Sparkles, Square } from "lucide-react";
 
@@ -40,6 +40,8 @@ export default function CopilotPage() {
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<ActiveRunState | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [processingActionId, setProcessingActionId] = useState<string | null>(null);
+  const processingActionIdRef = useRef<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
 
   const {
@@ -93,6 +95,8 @@ export default function CopilotPage() {
   const pendingActions = selectedRunState?.pendingActions ?? [];
   const promptReady = prompt.trim().length > 0;
   const providerSetupError = isProviderSetupError(errorMessage);
+  const providerConfigured = capabilityData?.providerConfigured !== false;
+  const providerSetupRequired = !providerConfigured || providerSetupError;
 
   const statusSummary = useMemo(() => {
     const capabilities = capabilityData;
@@ -128,21 +132,25 @@ export default function CopilotPage() {
   const approveMutation = useMutation({
     mutationFn: (action: CopilotPendingAction) => approveCopilotPendingAction(action.runId, action.id),
     onSuccess: ({ action }) => {
+      setErrorMessage("");
       updatePendingAction(action, setActiveRun);
       queryClient.invalidateQueries({ queryKey: ["copilot-run", action.runId] });
       queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
     },
     onError: (error) => setErrorMessage(readErrorMessage(error)),
+    onSettled: () => clearProcessingAction(processingActionIdRef, setProcessingActionId),
   });
 
   const rejectMutation = useMutation({
     mutationFn: (action: CopilotPendingAction) => rejectCopilotPendingAction(action.runId, action.id),
     onSuccess: ({ action }) => {
+      setErrorMessage("");
       updatePendingAction(action, setActiveRun);
       queryClient.invalidateQueries({ queryKey: ["copilot-run", action.runId] });
       queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
     },
     onError: (error) => setErrorMessage(readErrorMessage(error)),
+    onSettled: () => clearProcessingAction(processingActionIdRef, setProcessingActionId),
   });
 
   return (
@@ -225,7 +233,7 @@ export default function CopilotPage() {
               />
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div id="copilot-prompt-hint" className="text-sm text-muted-foreground">
-                  {providerSetupError ? t("copilot.providerSetupRequired") : statusSummary}
+                  {providerSetupRequired ? t("copilot.providerSetupRequired") : statusSummary}
                 </div>
                 <div className="flex items-center gap-2">
                   {latestRun?.status === "running" && (
@@ -241,7 +249,7 @@ export default function CopilotPage() {
                   )}
                   <Button
                     type="button"
-                    disabled={!promptReady || createMutation.isPending}
+                    disabled={!promptReady || createMutation.isPending || !providerConfigured}
                     onClick={() => createMutation.mutate(prompt)}
                   >
                     <Play className="mr-2 size-4" />
@@ -301,9 +309,17 @@ export default function CopilotPage() {
                 actions={pendingActions}
                 approveLabel={t("copilot.approve")}
                 rejectLabel={t("copilot.reject")}
+                loadingLabel={t("common.loading")}
+                processingActionId={processingActionId}
                 proposedActionLabel={t("copilot.proposedAction")}
-                onApprove={(action) => approveMutation.mutate(action)}
-                onReject={(action) => rejectMutation.mutate(action)}
+                onApprove={(action) => {
+                  if (!markProcessingAction(action.id, processingActionIdRef, setProcessingActionId)) return;
+                  approveMutation.mutate(action);
+                }}
+                onReject={(action) => {
+                  if (!markProcessingAction(action.id, processingActionIdRef, setProcessingActionId)) return;
+                  rejectMutation.mutate(action);
+                }}
               />
             </CardContent>
           </Card>
@@ -356,6 +372,8 @@ function PendingActions({
   actions,
   approveLabel,
   rejectLabel,
+  loadingLabel,
+  processingActionId,
   proposedActionLabel,
   onApprove,
   onReject,
@@ -363,6 +381,8 @@ function PendingActions({
   actions: CopilotPendingAction[];
   approveLabel: string;
   rejectLabel: string;
+  loadingLabel: string;
+  processingActionId: string | null;
   proposedActionLabel: string;
   onApprove: (action: CopilotPendingAction) => void;
   onReject: (action: CopilotPendingAction) => void;
@@ -377,27 +397,36 @@ function PendingActions({
 
   return (
     <div className="space-y-3">
-      {actions.map((action) => (
-        <div key={action.id} className="rounded-md border border-border p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-medium">{getCopilotPendingActionLabel(action.type)}</div>
-            <Badge variant={action.status === "pending" ? "secondary" : "outline"}>{action.status}</Badge>
-          </div>
-          <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted/30 p-2 text-xs text-muted-foreground">
-            {JSON.stringify(action.input ?? action.result ?? {}, null, 2)}
-          </pre>
-          {action.status === "pending" && (
-            <div className="mt-3 flex justify-end gap-2">
-              <Button size="sm" variant="outline" onClick={() => onReject(action)}>
-                {rejectLabel}
-              </Button>
-              <Button size="sm" onClick={() => onApprove(action)}>
-                {approveLabel}
-              </Button>
+      {actions.map((action) => {
+        const isProcessing = processingActionId === action.id;
+        const actionsDisabled = Boolean(processingActionId);
+        return (
+          <div key={action.id} className="rounded-md border border-border p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">{getCopilotPendingActionLabel(action.type)}</div>
+              <Badge variant={action.status === "pending" ? "secondary" : "outline"}>{action.status}</Badge>
             </div>
-          )}
-        </div>
-      ))}
+            <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted/30 p-2 text-xs text-muted-foreground">
+              {JSON.stringify(action.input ?? action.result ?? {}, null, 2)}
+            </pre>
+            {action.status === "pending" && (
+              <div className="mt-3 flex justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={actionsDisabled}
+                  onClick={() => onReject(action)}
+                >
+                  {isProcessing ? loadingLabel : rejectLabel}
+                </Button>
+                <Button size="sm" disabled={actionsDisabled} onClick={() => onApprove(action)}>
+                  {isProcessing ? loadingLabel : approveLabel}
+                </Button>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -469,6 +498,25 @@ function StatusBadge({ status }: { status: string }) {
 
 function readErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Copilot request failed";
+}
+
+function markProcessingAction(
+  actionId: string,
+  processingActionIdRef: { current: string | null },
+  setProcessingActionId: Dispatch<SetStateAction<string | null>>
+): boolean {
+  if (processingActionIdRef.current) return false;
+  processingActionIdRef.current = actionId;
+  setProcessingActionId(actionId);
+  return true;
+}
+
+function clearProcessingAction(
+  processingActionIdRef: { current: string | null },
+  setProcessingActionId: Dispatch<SetStateAction<string | null>>
+): void {
+  processingActionIdRef.current = null;
+  setProcessingActionId(null);
 }
 
 function isProviderSetupError(message: string): boolean {
