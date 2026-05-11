@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
+import { AuditLogRepository } from "../db/repositories/audit-log-repository.js";
 import type { CopilotPendingAction, CopilotRun, CopilotRunEvent } from "../db/repositories/copilot-repository.js";
 import { CopilotRepository } from "../db/repositories/copilot-repository.js";
 import type { Database } from "../db/types.js";
@@ -10,6 +11,7 @@ import { approveCopilotMemoryWrite } from "../services/copilot/memory.js";
 import { CopilotOrchestrator, type CopilotOrchestratorOptions } from "../services/copilot/orchestrator.js";
 import { selectCopilotProvider } from "../services/copilot/provider-selection.js";
 import { createCopilotReadTools } from "../services/copilot/read-tools.js";
+import { redactCopilotPayload } from "../services/copilot/redaction.js";
 
 const createRunSchema = z.object({
   prompt: z.string().trim().min(1).max(32 * 1024),
@@ -140,6 +142,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
       approvedBy: userIdFor(req),
       approvedAt: Date.now()
     });
+    recordPendingActionAudit(options.db, userIdFor(req), req.ip, action, "approved", result);
     recordPendingActionDecision(repo, action, "approved");
     const run = completeRunIfNoPendingActions(repo, target.run);
     res.json(pendingActionEnvelope(updated as CopilotPendingAction, run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
@@ -156,10 +159,12 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         details: { code: "copilot_run_not_approvable", status: target.run.status }
       });
     }
+    const result = { reason: "user_rejected" };
     const updated = repo.updatePendingAction(target.action.id, {
       status: "rejected",
-      result: { reason: "user_rejected" }
+      result
     });
+    recordPendingActionAudit(options.db, userIdFor(req), req.ip, target.action, "rejected", result);
     recordPendingActionDecision(repo, target.action, "rejected");
     const run = completeRunIfNoPendingActions(repo, target.run);
     res.json(pendingActionEnvelope(updated as CopilotPendingAction, run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
@@ -266,6 +271,44 @@ function recordPendingActionDecision(
   });
 }
 
+function recordPendingActionAudit(
+  db: Database,
+  userId: string,
+  ipAddress: string | undefined,
+  action: CopilotPendingAction,
+  decision: "approved" | "rejected",
+  result: Record<string, unknown>
+): void {
+  new AuditLogRepository(db, userId).create({
+    action: decision === "approved" ? "copilot.pending_action.approve" : "copilot.pending_action.reject",
+    resourceType: "copilot_run",
+    resourceId: action.runId,
+    details: {
+      runId: action.runId,
+      actionId: action.id,
+      actionType: action.type,
+      decision,
+      ...(decision === "approved" ? { approvedBy: userId } : { rejectedBy: userId }),
+      input: redactCopilotPayload(action.input),
+      result: redactCopilotAuditResult(result)
+    },
+    ipAddress
+  });
+}
+
+function redactCopilotAuditResult(result: Record<string, unknown>): unknown {
+  const redacted = redactCopilotPayload(result);
+  if (!isRecord(redacted) || !isRecord(redacted.report)) return redacted;
+  const report = redacted.report;
+  return {
+    report: {
+      generatedAt: report.generatedAt,
+      app: report.app,
+      counts: report.counts
+    }
+  };
+}
+
 function completeRunIfNoPendingActions(repo: CopilotRepository, run: CopilotRun): CopilotRun {
   const hasPendingActions = repo.listPendingActions(run.id).some((action) => action.status === "pending");
   const current = repo.getRun(run.id) ?? run;
@@ -321,4 +364,8 @@ function isApprovalError(result: Record<string, unknown>): result is { error: { 
       typeof (error as { code?: unknown }).code === "string" &&
       typeof (error as { message?: unknown }).message === "string"
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

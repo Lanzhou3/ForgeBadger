@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { beforeEach, describe, it } from "node:test";
 
 import { signJwt } from "../src/auth/jwt.js";
+import { AuditLogRepository } from "../src/db/repositories/audit-log-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
@@ -490,6 +491,45 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.action.status, "rejected");
   });
 
+  it("writes an audit log when rejecting a Copilot pending action", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_troubleshooting_steps", {
+      steps: ["Check provider setup"],
+      note: "token=secret-value"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/reject`,
+      undefined,
+      authHeaders()
+    );
+
+    const auditLogs = new AuditLogRepository(db, userId).list({
+      action: "copilot.pending_action.reject",
+      resourceType: "copilot_run",
+      resourceId: runId
+    });
+    const details = JSON.parse(auditLogs[0]?.details ?? "{}") as {
+      actionId?: string;
+      actionType?: string;
+      decision?: string;
+      rejectedBy?: string;
+      input?: { note?: string };
+      result?: { reason?: string };
+    };
+
+    assert.equal(res.status, 200);
+    assert.equal(auditLogs.length, 1);
+    assert.equal(details.actionId, actionId);
+    assert.equal(details.actionType, "openforge.propose_troubleshooting_steps");
+    assert.equal(details.decision, "rejected");
+    assert.equal(details.rejectedBy, userId);
+    assert.equal(details.input?.note, "token=[REDACTED]");
+    assert.equal(details.result?.reason, "user_rejected");
+    assert.doesNotMatch(JSON.stringify(details), /secret-value/);
+  });
+
   it("completes waiting runs and records an event after rejecting the last pending action", async () => {
     const { runId, actionId } = createPendingAction(userId, "openforge.propose_troubleshooting_steps");
 
@@ -552,6 +592,49 @@ describe("copilot routes", () => {
       (res.body.data.action.result as { entry: { id: string } }).entry.id,
       entries[0]?.id
     );
+  });
+
+  it("writes a redacted audit log when approving a Copilot pending action", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_memory_write", {
+      kind: "decision",
+      scope: "global",
+      text: "Remember token=secret-value and provider SSOT.",
+      metadata: { apiKey: "sk-secret-value" }
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const auditLogs = new AuditLogRepository(db, userId).list({
+      action: "copilot.pending_action.approve",
+      resourceType: "copilot_run",
+      resourceId: runId
+    });
+    const details = JSON.parse(auditLogs[0]?.details ?? "{}") as {
+      actionId?: string;
+      actionType?: string;
+      decision?: string;
+      approvedBy?: string;
+      input?: { text?: string; metadata?: { apiKey?: string } };
+      result?: { entry?: { id?: string } };
+    };
+
+    assert.equal(res.status, 200);
+    assert.equal(auditLogs.length, 1);
+    assert.equal(details.actionId, actionId);
+    assert.equal(details.actionType, "openforge.propose_memory_write");
+    assert.equal(details.decision, "approved");
+    assert.equal(details.approvedBy, userId);
+    assert.equal(details.input?.text, "Remember token=[REDACTED] and provider SSOT.");
+    assert.equal(details.input?.metadata?.apiKey, "[REDACTED]");
+    assert.equal(details.result?.entry?.id, res.body.data.action.result.entry.id);
+    assert.doesNotMatch(JSON.stringify(details), /secret-value/);
+    assert.doesNotMatch(JSON.stringify(details), /sk-secret-value/);
   });
 
   it("completes waiting runs and records an event after approving the last pending action", async () => {
