@@ -38,6 +38,7 @@ describe("copilot routes", () => {
   let userId: string;
   let otherUserId: string;
   let modelEvents: CopilotModelEvent[];
+  let modelEventResponses: CopilotModelEvent[][];
   const calls: CopilotModelRequest[] = [];
 
   beforeEach(() => {
@@ -50,13 +51,14 @@ describe("copilot routes", () => {
     otherToken = signJwt({ userId: otherUser.id, email: otherUser.email }, secret);
     calls.length = 0;
     modelEvents = [{ type: "assistant_message", text: "Gateway is healthy." }];
+    modelEventResponses = [];
     app = express();
     app.locals.jwtSecret = secret;
     app.use(express.json());
     app.use("/api/v1/copilot", createCopilotRoutes({
       db,
       masterKey,
-      modelClientFactory: () => fakeModelClient(calls, () => modelEvents)
+      modelClientFactory: () => fakeModelClient(calls, () => modelEventResponses.shift() ?? modelEvents)
     }));
   });
 
@@ -144,8 +146,43 @@ describe("copilot routes", () => {
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.run.status, "waiting_for_approval");
     assert.equal(res.body.data.run.completedAt, null);
+    assert.equal(calls.length, 1);
     assert.equal(res.body.data.pendingActions.length, 1);
     assert.equal(res.body.data.pendingActions[0].type, "openforge.propose_memory_write");
+  });
+
+  it("generates a final assistant answer after read-only tool results", async () => {
+    createOpenAiProvider();
+    modelEventResponses = [
+      [{
+        type: "tool_call_requested",
+        id: "tool-call-1",
+        name: "openforge.get_dashboard_summary",
+        input: {}
+      }],
+      [{ type: "assistant_message", text: "Dashboard is ready after checking tool results." }]
+    ];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Summarize dashboard health",
+      source: "dashboard"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.run.status, "completed");
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1]?.tools, undefined);
+    assert.match(calls[1]?.input ?? "", /openforge\.get_dashboard_summary/);
+    assert.match(calls[1]?.input ?? "", /Summarize dashboard health/);
+    assert.deepEqual(
+      res.body.data.events.map((event: { type: string }) => event.type),
+      ["tool_call_requested", "tool_result", "assistant_message"]
+    );
+    assert.equal(
+      res.body.data.events.at(-1)?.message,
+      "Dashboard is ready after checking tool results."
+    );
   });
 
   it("does not cancel terminal Copilot runs", async () => {

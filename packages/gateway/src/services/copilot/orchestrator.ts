@@ -82,7 +82,7 @@ export class CopilotOrchestrator {
     const failed = events.find((event) => event.type === "run_failed");
     if (failed) return this.failAfterEvents(repo, run, failed, stored, 502);
     const toolCall = events.find((event) => event.type === "tool_call_requested");
-    if (toolCall) return await this.executeReadTool(repo, run, toolCall, stored);
+    if (toolCall) return await this.executeReadTool(repo, run, selection, toolCall, stored);
     const completed = repo.updateRun(run.id, { status: "completed", completedAt: Date.now() }) ?? run;
     return { ok: true, run: completed, events: stored };
   }
@@ -90,6 +90,7 @@ export class CopilotOrchestrator {
   private async executeReadTool(
     repo: CopilotRepository,
     run: CopilotRun,
+    selection: CopilotProviderSelection,
     toolCall: Extract<CopilotModelEvent, { type: "tool_call_requested" }>,
     events: CopilotRunEvent[]
   ): Promise<RunCopilotTextResult> {
@@ -109,8 +110,43 @@ export class CopilotOrchestrator {
       const waiting = repo.updateRun(run.id, { status: "waiting_for_approval" }) ?? run;
       return { ok: true, run: waiting, events: [...events, toolResult] };
     }
+    return await this.answerFromToolResult(
+      repo,
+      run,
+      selection,
+      toolCall,
+      result.output,
+      [...events, toolResult]
+    );
+  }
+
+  private async answerFromToolResult(
+    repo: CopilotRepository,
+    run: CopilotRun,
+    selection: CopilotProviderSelection,
+    toolCall: Extract<CopilotModelEvent, { type: "tool_call_requested" }>,
+    output: unknown,
+    events: CopilotRunEvent[]
+  ): Promise<RunCopilotTextResult> {
+    const followUp = await this.modelClientFor(selection).createResponse(
+      toToolResultModelRequest(selection, run.goal, toolCall.name, output)
+    );
+    if (events.length + followUp.length > run.maxSteps) {
+      return this.failAfterEvents(repo, run, maxStepsError(run.maxSteps), events, 400);
+    }
+    const stored = followUp.map((event) => storeModelEvent(repo, run.id, event));
+    const allEvents = [...events, ...stored];
+    const failed = followUp.find((event) => event.type === "run_failed");
+    if (failed) return this.failAfterEvents(repo, run, failed, allEvents, 502);
+    const unexpectedToolCall = followUp.find((event) => event.type === "tool_call_requested");
+    if (unexpectedToolCall) {
+      return this.failAfterEvents(repo, run, {
+        code: "copilot_unexpected_tool_call",
+        message: "Copilot requested another tool after tool results were submitted"
+      }, allEvents, 400);
+    }
     const completed = repo.updateRun(run.id, { status: "completed", completedAt: Date.now() }) ?? run;
-    return { ok: true, run: completed, events: [...events, toolResult] };
+    return { ok: true, run: completed, events: allEvents };
   }
 
   private failBeforeModel(
@@ -185,6 +221,33 @@ function toModelRequest(
     ].join("\n"),
     input: prompt,
     tools: toModelToolDefinitions(toolRegistry),
+    maxOutputTokens: 1024
+  };
+}
+
+function toToolResultModelRequest(
+  selection: Pick<CopilotProviderSelection, "model">,
+  originalPrompt: string,
+  toolName: string,
+  output: unknown
+): CopilotModelRequest {
+  return {
+    model: selection.model.modelId,
+    instructions: [
+      "You are OpenForge Copilot.",
+      "Answer operational questions about the OpenForge control plane.",
+      "Use the provided OpenForge tool result to answer the user's original request.",
+      "Do not request terminal input, shell execution, file writes, or autonomous project changes."
+    ].join("\n"),
+    input: [
+      "Original user request:",
+      originalPrompt,
+      "",
+      `Tool ${toolName} returned:`,
+      JSON.stringify(redactCopilotPayload(output), null, 2),
+      "",
+      "Write a concise, actionable answer for the user."
+    ].join("\n"),
     maxOutputTokens: 1024
   };
 }
