@@ -30,6 +30,22 @@ import {
   isCopilotRunLive,
   resolveCopilotRunSelection,
 } from "@/lib/copilot";
+import type { TranslationKey } from "@/lib/i18n";
+
+const starterPrompts: Array<{ labelKey: TranslationKey; promptKey: TranslationKey }> = [
+  {
+    labelKey: "copilot.starter.launchReadiness",
+    promptKey: "copilot.starter.launchReadinessPrompt",
+  },
+  {
+    labelKey: "copilot.starter.releaseGates",
+    promptKey: "copilot.starter.releaseGatesPrompt",
+  },
+  {
+    labelKey: "copilot.starter.providerSetup",
+    promptKey: "copilot.starter.providerSetupPrompt",
+  },
+];
 
 interface ActiveRunState {
   run: CopilotRun;
@@ -234,6 +250,19 @@ export default function CopilotPage() {
                 placeholder={t("copilot.promptPlaceholder")}
                 onChange={(event) => setPrompt(event.target.value)}
               />
+              <div className="flex flex-wrap gap-2" aria-label={t("copilot.starterPrompts")}>
+                {starterPrompts.map((starter) => (
+                  <Button
+                    key={starter.labelKey}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPrompt(t(starter.promptKey))}
+                  >
+                    {t(starter.labelKey)}
+                  </Button>
+                ))}
+              </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div id="copilot-prompt-hint" className="text-sm text-muted-foreground">
                   {providerSetupRequired ? (

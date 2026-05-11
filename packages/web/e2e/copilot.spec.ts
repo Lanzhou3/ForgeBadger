@@ -71,6 +71,22 @@ test("Copilot page disables start when no provider is configured", async ({ page
   await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
 });
 
+test("Copilot starter prompts fill the prompt without starting a run", async ({ page }) => {
+  let createRequests = 0;
+  await mockCopilotApis(page, {
+    onCreateRun: async (route) => {
+      createRequests += 1;
+      await route.fulfill({ json: envelope({}) });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByRole("button", { name: "Diagnose launch readiness" }).click();
+
+  await expect(page.getByLabel("Copilot prompt")).toHaveValue(/session launch readiness/i);
+  await expect.poll(() => createRequests).toBe(0);
+});
+
 test("Copilot page prevents duplicate pending-action submissions", async ({ page }) => {
   let approveRequests = 0;
   await mockCopilotApis(page, {
@@ -128,6 +144,7 @@ async function mockCopilotApis(
     onRuns?: (route: Route) => Promise<void>;
     onRunDetail?: (route: Route) => Promise<void>;
     onApprove?: (route: Route) => Promise<void>;
+    onCreateRun?: (route: Route) => Promise<void>;
     providerConfigured?: boolean;
     runs?: Array<Record<string, unknown>>;
     runDetail?: {
@@ -163,6 +180,15 @@ async function mockCopilotApis(
           pendingActionApprovalEnabled: true,
         }),
       });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/runs" && route.request().method() === "POST") {
+      if (overrides.onCreateRun) {
+        await overrides.onCreateRun(route);
+        return;
+      }
+      await route.fulfill({ json: envelope({}) });
       return;
     }
 

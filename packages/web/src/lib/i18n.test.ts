@@ -66,6 +66,8 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "copilot.configureProvider")).toBe("配置模型服务商");
     expect(getTranslation("zh-TW", "copilot.event.toolRequested")).toBe("工具請求");
     expect(getTranslation("en", "copilot.pendingAction.memoryWrite")).toBe("Memory write");
+    expect(getTranslation("en", "copilot.starter.launchReadiness")).toBe("Diagnose launch readiness");
+    expect(getTranslation("zh-CN", "copilot.starter.releaseGates")).toBe("总结发布门禁");
   });
 
   it("normalizes unsupported language values to Simplified Chinese", () => {
