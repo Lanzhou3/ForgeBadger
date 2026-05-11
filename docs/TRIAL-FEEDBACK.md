@@ -71,6 +71,11 @@ project secrets, or the `openforge.token` value.
 
 - Console errors:
 - Network failures:
+- Copilot provider configured: yes / no / skipped
+- Copilot prompt used:
+- Copilot read-tool evidence observed:
+- Copilot pending-action approve/reject result:
+- Confirmed no terminal/shell/Codex turn input in Copilot: yes / no
 - Screenshots or written observations:
 - Terminal attach result:
 - Terminal input/output result:

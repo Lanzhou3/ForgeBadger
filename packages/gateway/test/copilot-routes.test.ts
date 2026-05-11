@@ -66,6 +66,7 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.toolExecutionEnabled, true);
     assert.equal(res.body.data.approvalRequiredForWrites, true);
     assert.ok(res.body.data.readTools.includes("openforge.get_dashboard_summary"));
+    assert.equal(res.body.data.readTools.includes("openforge.propose_session_create"), false);
   });
 
   it("rejects unauthenticated run creation", async () => {

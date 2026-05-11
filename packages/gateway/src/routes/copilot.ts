@@ -37,7 +37,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
       data: {
         supportedProviderFormats: ["openai", "openai-compatible", "anthropic"],
         toolExecutionEnabled: true,
-        readTools: createCopilotReadTools().map((tool) => tool.name),
+        readTools: createCopilotReadTools().filter((tool) => tool.risk === "read").map((tool) => tool.name),
         approvalRequiredForWrites: true,
         pendingActionApprovalEnabled: true
       },

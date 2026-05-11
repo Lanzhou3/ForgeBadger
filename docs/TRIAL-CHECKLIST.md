@@ -70,6 +70,15 @@ write what Claude Code asked, what OpenForge showed, and what happened next
 - [ ] Added screenshots or written observations.
 - [ ] Added reproduction steps for each issue.
 
+## Copilot Smoke
+
+- [ ] Configured an OpenAI or Anthropic model provider with a test credential.
+- [ ] Opened `/copilot` from the sidebar.
+- [ ] Asked Copilot to diagnose session launch readiness.
+- [ ] Verified the response uses platform state such as adapter discovery or recent activity.
+- [ ] Verified proposed actions appear as pending actions before approval.
+- [ ] Verified no terminal input control, raw shell control, or Codex `/turn` input appears.
+
 Diagnostics export notes:
 
 ```text

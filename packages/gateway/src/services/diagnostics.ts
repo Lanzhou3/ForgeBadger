@@ -44,6 +44,13 @@ export interface LocalDiagnosticsExport {
     command: string;
     runtimeModes: string[];
   }>;
+  copilot: {
+    capabilities: {
+      enabled: boolean;
+      toolExecutionEnabled: boolean;
+      approvalRequiredForWrites: boolean;
+    };
+  };
   environment: Record<string, unknown>;
 }
 
@@ -83,6 +90,13 @@ export function buildLocalDiagnosticsExport(
       command: adapter.command,
       runtimeModes: [...adapter.runtimeModes]
     })),
+    copilot: {
+      capabilities: {
+        enabled: true,
+        toolExecutionEnabled: true,
+        approvalRequiredForWrites: true
+      }
+    },
     environment: redactDiagnosticValue(pickDiagnosticEnv(input.env ?? process.env)) as Record<string, unknown>
   };
 }
