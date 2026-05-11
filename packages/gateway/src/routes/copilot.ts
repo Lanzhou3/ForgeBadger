@@ -8,7 +8,7 @@ import { CopilotRepository } from "../db/repositories/copilot-repository.js";
 import type { Database } from "../db/types.js";
 import { buildLocalDiagnosticsExport } from "../services/diagnostics.js";
 import { approveCopilotMemoryWrite } from "../services/copilot/memory.js";
-import { CopilotOrchestrator, type CopilotOrchestratorOptions } from "../services/copilot/orchestrator.js";
+import { CopilotOrchestrator, CopilotRunControlRegistry, type CopilotOrchestratorOptions } from "../services/copilot/orchestrator.js";
 import { selectCopilotProvider } from "../services/copilot/provider-selection.js";
 import { createCopilotReadTools } from "../services/copilot/read-tools.js";
 import { redactCopilotPayload } from "../services/copilot/redaction.js";
@@ -34,6 +34,7 @@ export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
 export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
   const router = Router();
   const activeRunUsers = new Set<string>();
+  const runControls = options.runControls ?? new CopilotRunControlRegistry();
   router.use(authenticate);
 
   router.get("/capabilities", (req, res) => {
@@ -75,7 +76,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     if (existingActiveRun) return sendRunAlreadyActive(res, existingActiveRun);
     activeRunUsers.add(userId);
     try {
-      const result = await new CopilotOrchestrator(options).runText({
+      const result = await new CopilotOrchestrator({ ...options, runControls }).runText({
         userId,
         prompt: parseResult.data.prompt,
         source: parseResult.data.source,
@@ -115,6 +116,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     }
     rejectPendingActions(repo, current.id);
     const run = repo.updateRun(current.id, { status: "cancelled", completedAt: Date.now() }) ?? current;
+    runControls.cancel(current.id);
     res.json(successEnvelope(run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
   });
 

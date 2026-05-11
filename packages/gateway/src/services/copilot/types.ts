@@ -19,8 +19,12 @@ export interface CopilotModelRequest {
   maxOutputTokens?: number;
 }
 
+export interface CopilotModelRequestOptions {
+  signal?: AbortSignal;
+}
+
 export interface CopilotModelClient {
-  createResponse(request: CopilotModelRequest): Promise<CopilotModelEvent[]>;
+  createResponse(request: CopilotModelRequest, options?: CopilotModelRequestOptions): Promise<CopilotModelEvent[]>;
 }
 
 export interface CopilotServiceError {

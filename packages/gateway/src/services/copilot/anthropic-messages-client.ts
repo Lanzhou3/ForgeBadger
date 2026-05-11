@@ -5,7 +5,7 @@ import {
   toProviderToolName,
   type CopilotFetch
 } from "./model-client.js";
-import type { CopilotModelEvent, CopilotModelRequest, CopilotToolDefinition } from "./types.js";
+import type { CopilotModelEvent, CopilotModelRequest, CopilotModelRequestOptions, CopilotToolDefinition } from "./types.js";
 
 export interface AnthropicMessagesClientOptions {
   baseUrl: string | null;
@@ -23,7 +23,7 @@ export class AnthropicMessagesClient extends FetchCopilotModelClient {
     this.apiKey = options.apiKey;
   }
 
-  async createResponse(request: CopilotModelRequest): Promise<CopilotModelEvent[]> {
+  async createResponse(request: CopilotModelRequest, options?: CopilotModelRequestOptions): Promise<CopilotModelEvent[]> {
     if (!this.baseUrl) return providerNotConfigured();
     const response = await this.fetchImpl(anthropicMessagesUrl(this.baseUrl), {
       method: "POST",
@@ -32,7 +32,8 @@ export class AnthropicMessagesClient extends FetchCopilotModelClient {
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(anthropicRequestBody(request))
+      body: JSON.stringify(anthropicRequestBody(request)),
+      ...(options?.signal ? { signal: options.signal } : {})
     });
     const body = await this.readJson(response);
     if (!response.ok) return httpFailure(response.status, body);

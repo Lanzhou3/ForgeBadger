@@ -21,6 +21,8 @@ export interface CopilotOrchestratorOptions {
   db: Database;
   masterKey: string;
   modelClientFactory?: (selection: CopilotProviderSelection) => CopilotModelClient;
+  modelRequestTimeoutMs?: number;
+  runControls?: CopilotRunControlRegistry;
 }
 
 export interface RunCopilotTextInput {
@@ -40,58 +42,71 @@ export type RunCopilotTextResult =
 export class CopilotOrchestrator {
   private readonly modelClientFactory: ((selection: CopilotProviderSelection) => CopilotModelClient) | undefined;
   private readonly toolRegistry: CopilotToolRegistry;
+  private readonly runControls: CopilotRunControlRegistry;
+  private readonly modelRequestTimeoutMs: number;
 
   constructor(private readonly options: CopilotOrchestratorOptions) {
     this.modelClientFactory = options.modelClientFactory;
     this.toolRegistry = createCopilotToolRegistry(createCopilotReadTools());
+    this.runControls = options.runControls ?? new CopilotRunControlRegistry();
+    this.modelRequestTimeoutMs = options.modelRequestTimeoutMs ?? 60_000;
   }
 
   async runText(input: RunCopilotTextInput): Promise<RunCopilotTextResult> {
     const repo = new CopilotRepository(this.options.db, input.userId);
     let run = repo.createRun(toCreateRunInput(input));
-    const selectionInput = {
-      db: this.options.db,
-      userId: input.userId,
-      masterKey: this.options.masterKey,
-      allowOpenAiCompatible: true
-    };
-    const selected = selectCopilotProvider({
-      ...selectionInput,
-      ...(input.providerProfileId ? { providerProfileId: input.providerProfileId } : {}),
-      ...(input.modelProfileId ? { modelProfileId: input.modelProfileId } : {})
-    });
-    if (!selected.ok) return this.failBeforeModel(repo, run, selected.error, 400);
-    run = repo.updateRun(run.id, {
-      providerProfileId: selected.selection.provider.id,
-      modelProfileId: selected.selection.model.id
-    }) ?? run;
-    const recall = await runCopilotActiveRecall({
-      db: this.options.db,
-      userId: input.userId,
-      masterKey: this.options.masterKey,
-      source: input.source,
-      prompt: input.prompt,
-      toolRegistry: this.toolRegistry
-    });
-    const recallEvent = recall.event ? repo.addEvent(run.id, recall.event) : null;
-    const recalledRun = repo.getRun(run.id) ?? run;
-    if (recalledRun.stepCount >= recalledRun.maxSteps) {
-      return this.failAfterEvents(
+    const control = this.runControls.start(run.id);
+    try {
+      const selectionInput = {
+        db: this.options.db,
+        userId: input.userId,
+        masterKey: this.options.masterKey,
+        allowOpenAiCompatible: true
+      };
+      const selected = selectCopilotProvider({
+        ...selectionInput,
+        ...(input.providerProfileId ? { providerProfileId: input.providerProfileId } : {}),
+        ...(input.modelProfileId ? { modelProfileId: input.modelProfileId } : {})
+      });
+      if (!selected.ok) return this.failBeforeModel(repo, run, selected.error, 400);
+      run = repo.updateRun(run.id, {
+        providerProfileId: selected.selection.provider.id,
+        modelProfileId: selected.selection.model.id
+      }) ?? run;
+      const recall = await runCopilotActiveRecall({
+        db: this.options.db,
+        userId: input.userId,
+        masterKey: this.options.masterKey,
+        source: input.source,
+        prompt: input.prompt,
+        toolRegistry: this.toolRegistry
+      });
+      const recallEvent = recall.event ? repo.addEvent(run.id, recall.event) : null;
+      const recalledRun = repo.getRun(run.id) ?? run;
+      const previousEvents = recallEvent ? [recallEvent] : [];
+      const cancelled = this.cancelledResultIfNeeded(repo, recalledRun, previousEvents, control.signal);
+      if (cancelled) return cancelled;
+      if (recalledRun.stepCount >= recalledRun.maxSteps) {
+        return this.failAfterEvents(
+          repo,
+          recalledRun,
+          maxStepsError(recalledRun.maxSteps),
+          previousEvents,
+          400
+        );
+      }
+      return await this.callModel(
         repo,
         recalledRun,
-        maxStepsError(recalledRun.maxSteps),
-        recallEvent ? [recallEvent] : [],
-        400
+        selected.selection,
+        input.prompt,
+        recall.context,
+        previousEvents,
+        control.signal
       );
+    } finally {
+      control.finish();
     }
-    return await this.callModel(
-      repo,
-      recalledRun,
-      selected.selection,
-      input.prompt,
-      recall.context,
-      recallEvent ? [recallEvent] : []
-    );
   }
 
   private async callModel(
@@ -100,14 +115,16 @@ export class CopilotOrchestrator {
     selection: CopilotProviderSelection,
     prompt: string,
     recallContext: string | null,
-    previousEvents: CopilotRunEvent[]
+    previousEvents: CopilotRunEvent[],
+    runSignal: AbortSignal
   ): Promise<RunCopilotTextResult> {
     const response = await this.requestModel(
       repo,
       run,
       selection,
       toModelRequest(selection, prompt, this.toolRegistry, recallContext),
-      previousEvents
+      previousEvents,
+      runSignal
     );
     if (!response.ok) return response.result;
     const events = response.events;
@@ -118,7 +135,7 @@ export class CopilotOrchestrator {
     const failed = events.find((event) => event.type === "run_failed");
     if (failed) return this.failAfterEvents(repo, run, failed, allEvents, 502);
     const toolCall = events.find((event) => event.type === "tool_call_requested");
-    if (toolCall) return await this.executeReadTool(repo, run, selection, toolCall, allEvents);
+    if (toolCall) return await this.executeReadTool(repo, run, selection, toolCall, allEvents, runSignal);
     const completed = repo.updateRun(run.id, { status: "completed", completedAt: Date.now() }) ?? run;
     return { ok: true, run: completed, events: allEvents };
   }
@@ -128,14 +145,19 @@ export class CopilotOrchestrator {
     run: CopilotRun,
     selection: CopilotProviderSelection,
     toolCall: Extract<CopilotModelEvent, { type: "tool_call_requested" }>,
-    events: CopilotRunEvent[]
+    events: CopilotRunEvent[],
+    runSignal: AbortSignal
   ): Promise<RunCopilotTextResult> {
+    const cancelledBeforeTool = this.cancelledResultIfNeeded(repo, run, events, runSignal);
+    if (cancelledBeforeTool) return cancelledBeforeTool;
     const result = await executeCopilotTool(this.toolRegistry, toolCall.name, toolCall.input, {
       db: this.options.db,
       userId: run.userId,
       masterKey: this.options.masterKey,
       runId: run.id
     });
+    const cancelledAfterTool = this.cancelledResultIfNeeded(repo, run, events, runSignal);
+    if (cancelledAfterTool) return cancelledAfterTool;
     if (!result.ok) return this.failAfterEvents(repo, run, result.error, events, 400);
     const toolResult = repo.addEvent(run.id, {
       type: "tool_result",
@@ -152,7 +174,8 @@ export class CopilotOrchestrator {
       selection,
       toolCall,
       result.output,
-      [...events, toolResult]
+      [...events, toolResult],
+      runSignal
     );
   }
 
@@ -162,14 +185,16 @@ export class CopilotOrchestrator {
     selection: CopilotProviderSelection,
     toolCall: Extract<CopilotModelEvent, { type: "tool_call_requested" }>,
     output: unknown,
-    events: CopilotRunEvent[]
+    events: CopilotRunEvent[],
+    runSignal: AbortSignal
   ): Promise<RunCopilotTextResult> {
     const response = await this.requestModel(
       repo,
       run,
       selection,
       toToolResultModelRequest(selection, run.goal, toolCall.name, output),
-      events
+      events,
+      runSignal
     );
     if (!response.ok) return response.result;
     const followUp = response.events;
@@ -196,18 +221,50 @@ export class CopilotOrchestrator {
     run: CopilotRun,
     selection: CopilotProviderSelection,
     request: CopilotModelRequest,
-    previousEvents: CopilotRunEvent[]
+    previousEvents: CopilotRunEvent[],
+    runSignal: AbortSignal
   ): Promise<
     | { ok: true; events: CopilotModelEvent[] }
     | { ok: false; result: RunCopilotTextResult }
   > {
+    const cancelledBeforeRequest = this.cancelledResultIfNeeded(repo, run, previousEvents, runSignal);
+    if (cancelledBeforeRequest) return { ok: false, result: cancelledBeforeRequest };
+    const requestController = new AbortController();
+    let timedOut = false;
+    const abortFromRun = () => requestController.abort();
+    if (runSignal.aborted) abortFromRun();
+    else runSignal.addEventListener("abort", abortFromRun, { once: true });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      requestController.abort();
+    }, this.modelRequestTimeoutMs);
     try {
-      return { ok: true, events: await this.modelClientFor(selection).createResponse(request) };
+      const events = await this.modelClientFor(selection).createResponse(request, { signal: requestController.signal });
+      const cancelled = this.cancelledResultIfNeeded(repo, run, previousEvents, runSignal);
+      if (cancelled) return { ok: false, result: cancelled };
+      if (timedOut) {
+        return {
+          ok: false,
+          result: this.failWithRunEvent(repo, run, modelRequestTimeoutError(this.modelRequestTimeoutMs), previousEvents, 504)
+        };
+      }
+      return { ok: true, events };
     } catch {
+      const cancelled = this.cancelledResultIfNeeded(repo, run, previousEvents, runSignal);
+      if (cancelled) return { ok: false, result: cancelled };
+      if (timedOut) {
+        return {
+          ok: false,
+          result: this.failWithRunEvent(repo, run, modelRequestTimeoutError(this.modelRequestTimeoutMs), previousEvents, 504)
+        };
+      }
       return {
         ok: false,
         result: this.failWithRunEvent(repo, run, modelRequestError(), previousEvents, 502)
       };
+    } finally {
+      clearTimeout(timeout);
+      runSignal.removeEventListener("abort", abortFromRun);
     }
   }
 
@@ -269,6 +326,53 @@ export class CopilotOrchestrator {
       baseUrl: selection.provider.baseUrl,
       apiKey: selection.apiKey ?? ""
     });
+  }
+
+  private cancelledResultIfNeeded(
+    repo: CopilotRepository,
+    run: CopilotRun,
+    events: CopilotRunEvent[],
+    runSignal: AbortSignal
+  ): RunCopilotTextResult | null {
+    const current = repo.getRun(run.id) ?? run;
+    if (current.status !== "cancelled" && !runSignal.aborted) return null;
+    const cancelled = current.status === "cancelled"
+      ? current
+      : repo.updateRun(run.id, { status: "cancelled", completedAt: Date.now() }) ?? current;
+    return {
+      ok: false,
+      status: 409,
+      error: runCancelledError(),
+      run: cancelled,
+      events
+    };
+  }
+}
+
+interface CopilotRunControlHandle {
+  signal: AbortSignal;
+  finish: () => void;
+}
+
+export class CopilotRunControlRegistry {
+  private readonly controllers = new Map<string, AbortController>();
+
+  start(runId: string): CopilotRunControlHandle {
+    const controller = new AbortController();
+    this.controllers.set(runId, controller);
+    return {
+      signal: controller.signal,
+      finish: () => {
+        if (this.controllers.get(runId) === controller) this.controllers.delete(runId);
+      }
+    };
+  }
+
+  cancel(runId: string): boolean {
+    const controller = this.controllers.get(runId);
+    if (!controller || controller.signal.aborted) return false;
+    controller.abort();
+    return true;
   }
 }
 
@@ -368,5 +472,19 @@ function modelRequestError(): CopilotServiceError {
   return {
     code: "copilot_model_request_failed",
     message: "Copilot model request failed"
+  };
+}
+
+function modelRequestTimeoutError(timeoutMs: number): CopilotServiceError {
+  return {
+    code: "copilot_model_request_timeout",
+    message: `Copilot model request timed out after ${timeoutMs}ms`
+  };
+}
+
+function runCancelledError(): CopilotServiceError {
+  return {
+    code: "copilot_run_cancelled",
+    message: "Copilot run was cancelled"
   };
 }

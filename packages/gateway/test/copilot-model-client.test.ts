@@ -183,6 +183,24 @@ describe("copilot model client", () => {
     }]);
   });
 
+  it("passes abort signals through to OpenAI Responses fetch", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const controller = new AbortController();
+    const client = new OpenAiResponsesClient({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-openai",
+      fetch: fakeFetch(requests, { output_text: "Ready." })
+    });
+
+    await client.createResponse({
+      model: "gpt-5.1",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Status?"
+    }, { signal: controller.signal });
+
+    assert.equal(requests[0]?.init.signal, controller.signal);
+  });
+
   it("normalizes Anthropic Messages text output", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const client = new AnthropicMessagesClient({
@@ -240,6 +258,26 @@ describe("copilot model client", () => {
         additionalProperties: false
       }
     }]);
+  });
+
+  it("passes abort signals through to Anthropic Messages fetch", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const controller = new AbortController();
+    const client = new AnthropicMessagesClient({
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant",
+      fetch: fakeFetch(requests, {
+        content: [{ type: "text", text: "Ready." }]
+      })
+    });
+
+    await client.createResponse({
+      model: "claude-sonnet-4-5",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Status?"
+    }, { signal: controller.signal });
+
+    assert.equal(requests[0]?.init.signal, controller.signal);
   });
 
   it("normalizes provider-safe tool names back to OpenForge tool names", async () => {

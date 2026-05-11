@@ -41,6 +41,7 @@ describe("copilot routes", () => {
   let modelEvents: CopilotModelEvent[];
   let modelEventResponses: Array<CopilotModelEvent[] | Error>;
   let modelResponseWait: Promise<void> | null;
+  let modelRequestSignals: Array<AbortSignal | undefined>;
   const calls: CopilotModelRequest[] = [];
 
   beforeEach(() => {
@@ -52,6 +53,7 @@ describe("copilot routes", () => {
     token = signJwt({ userId: user.id, email: user.email }, secret);
     otherToken = signJwt({ userId: otherUser.id, email: otherUser.email }, secret);
     calls.length = 0;
+    modelRequestSignals = [];
     modelEvents = [{ type: "assistant_message", text: "Gateway is healthy." }];
     modelEventResponses = [];
     modelResponseWait = null;
@@ -61,7 +63,8 @@ describe("copilot routes", () => {
     app.use("/api/v1/copilot", createCopilotRoutes({
       db,
       masterKey,
-      modelClientFactory: () => fakeModelClient(calls, async () => {
+      modelClientFactory: () => fakeModelClient(calls, async (_request, options) => {
+        modelRequestSignals.push(options?.signal);
         if (modelResponseWait) await modelResponseWait;
         const response = modelEventResponses.shift();
         if (response instanceof Error) throw response;
@@ -430,6 +433,83 @@ describe("copilot routes", () => {
     assert.equal(action?.status, "rejected");
   });
 
+  it("keeps cancelled running runs cancelled when the model request finishes later", async () => {
+    createOpenAiProvider();
+    const release = deferred<void>();
+    modelResponseWait = release.promise;
+    const server = http.createServer(app);
+    const baseUrl = await listen(server);
+
+    try {
+      const first = fetch(`${baseUrl}/api/v1/copilot/runs`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ prompt: "Long model call", source: "copilot" })
+      });
+      await waitFor(() => calls.length === 1);
+      const run = new CopilotRepository(db, userId).listRuns()[0];
+      assert.ok(run);
+
+      const cancelRes = await fetch(`${baseUrl}/api/v1/copilot/runs/${run.id}/cancel`, {
+        method: "POST",
+        headers: authHeaders()
+      });
+      const cancelBody = await cancelRes.json();
+      release.resolve();
+
+      const firstRes = await first;
+      const firstBody = await firstRes.json();
+      const repo = new CopilotRepository(db, userId);
+
+      assert.equal(cancelRes.status, 200);
+      assert.equal(cancelBody.data.run.status, "cancelled");
+      assert.equal(firstRes.status, 409);
+      assert.equal(firstBody.details.code, "copilot_run_cancelled");
+      assert.equal(repo.getRun(run.id)?.status, "cancelled");
+      assert.equal(repo.listEvents(run.id).length, 0);
+      assert.equal(modelRequestSignals[0]?.aborted, true);
+    } finally {
+      release.resolve();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("fails running Copilot runs when the model request times out", async () => {
+    createOpenAiProvider();
+    let timeoutSignal: AbortSignal | undefined;
+    const timeoutApp = express();
+    timeoutApp.locals.jwtSecret = secret;
+    timeoutApp.use(express.json());
+    timeoutApp.use("/api/v1/copilot", createCopilotRoutes({
+      db,
+      masterKey,
+      modelRequestTimeoutMs: 5,
+      modelClientFactory: () => ({
+        async createResponse(_request: CopilotModelRequest, options?: { signal?: AbortSignal }) {
+          timeoutSignal = options?.signal;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          return [{ type: "assistant_message", text: "Late answer" }];
+        }
+      } as CopilotModelClient)
+    }));
+
+    const res = await makeRequest(timeoutApp, "POST", "/api/v1/copilot/runs", {
+      prompt: "Long model call",
+      source: "copilot"
+    }, authHeaders());
+
+    const repo = new CopilotRepository(db, userId);
+    const run = repo.listRuns()[0];
+    const events = repo.listEvents(run?.id ?? "");
+    assert.equal(res.status, 504);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_model_request_timeout");
+    assert.equal(run?.status, "failed");
+    assert.equal(events.at(-1)?.type, "run_failed");
+    assert.equal(events.at(-1)?.payload.code, "copilot_model_request_timeout");
+    assert.equal(timeoutSignal?.aborted, true);
+  });
+
   it("does not approve pending actions for non-waiting runs", async () => {
     const repo = new CopilotRepository(db, userId);
     const run = repo.createRun({
@@ -734,12 +814,12 @@ describe("copilot routes", () => {
 
 function fakeModelClient(
   calls: CopilotModelRequest[],
-  events: () => CopilotModelEvent[] | Promise<CopilotModelEvent[]>
+  events: (request: CopilotModelRequest, options?: { signal?: AbortSignal }) => CopilotModelEvent[] | Promise<CopilotModelEvent[]>
 ): CopilotModelClient {
   return {
-    async createResponse(request) {
+    async createResponse(request: CopilotModelRequest, options?: { signal?: AbortSignal }) {
       calls.push(request);
-      return await events();
+      return await events(request, options);
     }
   };
 }
