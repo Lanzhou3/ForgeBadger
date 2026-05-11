@@ -169,6 +169,8 @@ export interface CopilotRun {
   sourceRefId?: string | null;
   providerProfileId?: string | null;
   modelProfileId?: string | null;
+  stepCount?: number | null;
+  maxSteps?: number | null;
   errorCode?: string | null;
   errorMessage?: string | null;
   createdAt?: number | null;

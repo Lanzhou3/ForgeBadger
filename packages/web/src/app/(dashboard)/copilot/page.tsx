@@ -341,6 +341,7 @@ export default function CopilotPage() {
                     sourceLabel={t("copilot.source")}
                     providerLabel={t("copilot.provider")}
                     modelLabel={t("copilot.model")}
+                    stepsLabel={t("copilot.steps")}
                     ariaLabel={t("copilot.selectedRunMetadata")}
                   />
                   <RunFailureNotice
@@ -438,6 +439,7 @@ export default function CopilotPage() {
                       sourceLabel={t("copilot.source")}
                       providerLabel={t("copilot.provider")}
                       modelLabel={t("copilot.model")}
+                      stepsLabel={t("copilot.steps")}
                       ariaLabel={`${t("copilot.runMetadataFor")} ${run.goal}`}
                       compact
                     />
@@ -457,6 +459,7 @@ function RunMetadata({
   sourceLabel,
   providerLabel,
   modelLabel,
+  stepsLabel,
   ariaLabel,
   compact = false,
 }: {
@@ -464,6 +467,7 @@ function RunMetadata({
   sourceLabel: string;
   providerLabel: string;
   modelLabel: string;
+  stepsLabel: string;
   ariaLabel: string;
   compact?: boolean;
 }) {
@@ -471,6 +475,7 @@ function RunMetadata({
     { label: sourceLabel, value: normalizeRunErrorDetail(run.source) },
     { label: providerLabel, value: normalizeRunErrorDetail(run.providerProfileId) },
     { label: modelLabel, value: normalizeRunErrorDetail(run.modelProfileId) },
+    { label: stepsLabel, value: formatRunSteps(run.stepCount, run.maxSteps) },
   ].filter((item): item is { label: string; value: string } => Boolean(item.value));
   if (items.length === 0) return null;
 
@@ -727,6 +732,18 @@ function clearErrorState(
 function normalizeRunErrorDetail(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function formatRunSteps(stepCount: number | null | undefined, maxSteps: number | null | undefined): string | null {
+  const step = normalizeRunStep(stepCount);
+  if (step === null) return null;
+  const max = normalizeRunStep(maxSteps);
+  return max !== null && max > 0 ? `${step}/${max}` : String(step);
+}
+
+function normalizeRunStep(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  return Math.trunc(value);
 }
 
 function markProcessingAction(
