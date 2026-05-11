@@ -550,21 +550,38 @@ function RunTimeline({
 
   return (
     <div className="space-y-3">
-      {events.map((event) => (
-        <div key={event.id} className="rounded-md border border-border bg-muted/20 p-3">
-          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-            <span>{getEventLabel(event.type)}</span>
-            <span>#{event.sequence}</span>
-          </div>
-          {event.message && (
-            <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
-              {event.message}
+      {events.map((event) => {
+        const payloadPreview = formatEventPayloadPreview(event);
+        return (
+          <div key={event.id} className="rounded-md border border-border bg-muted/20 p-3">
+            <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+              <span>{getEventLabel(event.type)}</span>
+              <span>#{event.sequence}</span>
             </div>
-          )}
-        </div>
-      ))}
+            {event.message && (
+              <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
+                {event.message}
+              </div>
+            )}
+            {payloadPreview && (
+              <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-background/70 p-2 text-xs text-muted-foreground">
+                {payloadPreview}
+              </pre>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
+}
+
+function formatEventPayloadPreview(event: CopilotRunEvent): string | null {
+  if (event.type === "assistant_message" || !event.payload) return null;
+  const serialized = JSON.stringify(event.payload, null, 2);
+  if (!serialized || serialized === "{}") return null;
+  const maxLength = 2_000;
+  if (serialized.length <= maxLength) return serialized;
+  return `${serialized.slice(0, maxLength).trimEnd()}\n...`;
 }
 
 function StatusBadge({ status }: { status: string }) {

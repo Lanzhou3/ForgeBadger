@@ -87,6 +87,40 @@ test("Copilot starter prompts fill the prompt without starting a run", async ({ 
   await expect.poll(() => createRequests).toBe(0);
 });
 
+test("Copilot page shows tool result payload details", async ({ page }) => {
+  await mockCopilotApis(page, {
+    runDetail: {
+      run: {
+        id: "run-1",
+        status: "completed",
+        goal: "Summarize Gateway health",
+        source: "copilot",
+        completedAt: 1778490000000,
+      },
+      events: [{
+        id: "event-tool-result",
+        runId: "run-1",
+        type: "tool_result",
+        sequence: 1,
+        message: "openforge.get_dashboard_summary",
+        payload: {
+          output: {
+            status: "ready",
+            projectCount: 2,
+          },
+        },
+      }],
+      pendingActions: [],
+    },
+  });
+
+  await page.goto("/copilot");
+
+  await expect(page.getByText("Tool result")).toBeVisible();
+  await expect(page.getByText("projectCount")).toBeVisible();
+  await expect(page.getByText("ready")).toBeVisible();
+});
+
 test("Copilot page prevents duplicate pending-action submissions", async ({ page }) => {
   let approveRequests = 0;
   const pendingAction = {
@@ -341,7 +375,7 @@ async function mockCopilotApis(
         return;
       }
       await route.fulfill({
-        json: envelope({
+        json: envelope(overrides.runDetail ?? {
           run: {
             id: "run-1",
             status: "completed",
