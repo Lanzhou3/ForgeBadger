@@ -415,7 +415,7 @@ export default function CopilotPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {latestRun?.status === "running" && (
+                  {latestRun && isCopilotRunLive(latestRun.status) && (
                     <Button
                       type="button"
                       variant="outline"

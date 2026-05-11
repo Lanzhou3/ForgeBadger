@@ -449,6 +449,58 @@ test("Copilot page reflects rejected pending actions immediately", async ({ page
   await expect(page.getByText("Action rejected")).toBeVisible();
 });
 
+test("Copilot page can cancel runs waiting for approval", async ({ page }) => {
+  let cancelRequests = 0;
+  const pendingAction = {
+    id: "action-1",
+    runId: "run-approval",
+    type: "openforge.propose_troubleshooting_steps",
+    status: "pending",
+    input: { steps: ["Check provider setup"] },
+  };
+  let currentRunDetail = {
+    run: {
+      id: "run-approval",
+      status: "waiting_for_approval",
+      goal: "Prepare troubleshooting",
+      source: "copilot",
+    },
+    events: [],
+    pendingActions: [pendingAction],
+  };
+  await mockCopilotApis(page, {
+    runs: [{
+      id: "run-approval",
+      status: "waiting_for_approval",
+      goal: "Prepare troubleshooting",
+      source: "copilot",
+    }],
+    onRunDetail: async (route) => {
+      await route.fulfill({ json: envelope(currentRunDetail) });
+    },
+    onCancel: async (route) => {
+      cancelRequests += 1;
+      currentRunDetail = {
+        run: {
+          ...currentRunDetail.run,
+          status: "cancelled",
+          completedAt: 1778490000000,
+        },
+        events: currentRunDetail.events,
+        pendingActions: [{ ...pendingAction, status: "rejected", result: { reason: "run_cancelled" } }],
+      };
+      await route.fulfill({ json: envelope(currentRunDetail) });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByRole("button", { name: "Stop" }).click();
+
+  await expect.poll(() => cancelRequests).toBe(1);
+  await expect(page.getByText("cancelled").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
+});
+
 async function mockCopilotApis(
   page: Page,
   overrides: {
@@ -456,6 +508,7 @@ async function mockCopilotApis(
     onRunDetail?: (route: Route) => Promise<void>;
     onApprove?: (route: Route) => Promise<void>;
     onReject?: (route: Route) => Promise<void>;
+    onCancel?: (route: Route) => Promise<void>;
     onCreateRun?: (route: Route) => Promise<void>;
     onModelProviders?: (route: Route) => Promise<void>;
     providerConfigured?: boolean;
@@ -596,6 +649,15 @@ async function mockCopilotApis(
     if (url.pathname === "/api/v1/copilot/runs/run-approval/pending-actions/action-1/reject") {
       if (overrides.onReject) {
         await overrides.onReject(route);
+        return;
+      }
+      await route.fulfill({ json: envelope({}) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/runs/run-approval/cancel") {
+      if (overrides.onCancel) {
+        await overrides.onCancel(route);
         return;
       }
       await route.fulfill({ json: envelope({}) });
