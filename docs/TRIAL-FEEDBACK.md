@@ -75,6 +75,8 @@ project secrets, or the `openforge.token` value.
 - Copilot prompt used:
 - Copilot read-tool evidence observed:
 - Copilot pending-action approve/reject result:
+- Copilot memory write proposal tested: yes / no / skipped
+- Copilot memory notes:
 - Confirmed no terminal/shell/Codex turn input in Copilot: yes / no
 - Screenshots or written observations:
 - Terminal attach result:

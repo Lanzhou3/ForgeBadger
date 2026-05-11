@@ -37,7 +37,7 @@ describe("db schema", () => {
   it("creates all expected tables after migration", () => {
     const tables = db
       .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle_%' ORDER BY name"
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle_%' AND name NOT GLOB 'copilot_memory_fts_*' ORDER BY name"
       )
       .all() as Array<{ name: string }>;
     const names = tables.map((t) => t.name);
@@ -47,6 +47,9 @@ describe("db schema", () => {
       "audit_logs",
       "catalog_items",
       "catalog_sources",
+      "copilot_memory_entries",
+      "copilot_memory_fts",
+      "copilot_memory_notes",
       "copilot_pending_actions",
       "copilot_run_events",
       "copilot_runs",

@@ -60,6 +60,7 @@ describe("diagnostics routes", () => {
     assert.equal(res.body.data.report.counts.apiKeys, 1);
     assert.equal(res.body.data.report.copilot.capabilities.enabled, true);
     assert.equal(res.body.data.report.copilot.capabilities.approvalRequiredForWrites, true);
+    assert.equal(res.body.data.report.copilot.capabilities.memoryEnabled, true);
     assert.equal(JSON.stringify(res.body).includes("sk-route-secret"), false);
   });
 });

@@ -12,6 +12,7 @@ import { signJwt } from "../src/auth/jwt.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
+import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
 import { createCopilotRoutes } from "../src/routes/copilot.js";
 import type { CopilotModelClient, CopilotModelRequest } from "../src/services/copilot/types.js";
 
@@ -152,6 +153,58 @@ describe("copilot routes", () => {
     assert.equal(res.body.code, 1);
   });
 
+  it("approves canonical memory-write actions into redacted durable memory", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_memory_write", {
+      kind: "decision",
+      scope: "global",
+      text: "Remember token=secret-value and provider SSOT.",
+      metadata: { source: "route-test" }
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const entries = new CopilotMemoryRepository(db, userId).listEntries({ scope: "global" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.action.status, "approved");
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0]?.sourceRunId, runId);
+    assert.match(entries[0]?.redactedText ?? "", /token=\[REDACTED\]/);
+    assert.doesNotMatch(entries[0]?.redactedText ?? "", /secret-value/);
+    assert.equal(
+      (res.body.data.action.result as { entry: { id: string } }).entry.id,
+      entries[0]?.id
+    );
+  });
+
+  it("does not approve invalid stored memory-write actions", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_memory_write", {
+      kind: "decision",
+      scope: "global"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_memory_write_invalid");
+    assert.equal(action?.status, "pending");
+    assert.equal(new CopilotMemoryRepository(db, userId).listEntries({}).length, 0);
+  });
+
   function createOpenAiProvider(): void {
     const repo = new ModelProviderRepository(db, userId, masterKey);
     const provider = repo.createProviderProfile({
@@ -188,7 +241,7 @@ describe("copilot routes", () => {
     };
   }
 
-  function createPendingAction(ownerId: string, type: string) {
+  function createPendingAction(ownerId: string, type: string, input: Record<string, unknown> = { reason: "test" }) {
     const repo = new CopilotRepository(db, ownerId);
     const run = repo.createRun({
       status: "waiting_for_approval",
@@ -197,7 +250,7 @@ describe("copilot routes", () => {
     });
     const action = repo.createPendingAction(run.id, {
       type,
-      input: { reason: "test" }
+      input
     });
     return { runId: run.id, actionId: action.id };
   }

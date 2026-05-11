@@ -92,6 +92,13 @@
       "when": 1778544000000,
       "tag": "0013_copilot",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1778547600000,
+      "tag": "0014_copilot_memory",
+      "breakpoints": true
     }
   ]
 }

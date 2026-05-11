@@ -6,7 +6,9 @@ import { ProjectRepository, type Project } from "../../db/repositories/project-r
 import { SessionRepository, type Session } from "../../db/repositories/session-repository.js";
 import { discoverAdapters } from "../adapter-discovery.js";
 import { getDashboardSummary } from "../dashboard-summary.js";
+import { createCopilotMemoryTools } from "./memory.js";
 import type { CopilotToolContext, CopilotToolDefinition } from "./tool-registry.js";
+import { redactCopilotPayload } from "./redaction.js";
 
 const emptyInput = z.object({}).strict();
 const limitInput = z.object({
@@ -109,7 +111,8 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       inputSchema: proposeTroubleshootingStepsInput,
       execute: async (input, context) =>
         createPendingProposal(context, "openforge.propose_troubleshooting_steps", input)
-    }
+    },
+    ...createCopilotMemoryTools()
   ];
 }
 
@@ -174,9 +177,7 @@ function createPendingProposal(
   }
   const action = new CopilotRepository(context.db, context.userId).createPendingAction(context.runId, {
     type,
-    input: input && typeof input === "object" && !Array.isArray(input)
-      ? input as Record<string, unknown>
-      : {}
+    input: safeActionInput(input)
   });
   return {
     actionId: action.id,
@@ -184,4 +185,11 @@ function createPendingProposal(
     status: action.status,
     summary: "Pending user approval"
   };
+}
+
+function safeActionInput(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const redacted = redactCopilotPayload(input);
+  if (!redacted || typeof redacted !== "object" || Array.isArray(redacted)) return {};
+  return redacted as Record<string, unknown>;
 }

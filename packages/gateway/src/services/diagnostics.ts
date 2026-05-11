@@ -6,6 +6,8 @@ import {
   agents,
   apiKeys,
   auditLogs,
+  copilotMemoryEntries,
+  copilotMemoryNotes,
   models,
   notifications,
   projects,
@@ -49,6 +51,8 @@ export interface LocalDiagnosticsExport {
       enabled: boolean;
       toolExecutionEnabled: boolean;
       approvalRequiredForWrites: boolean;
+      memoryEnabled: boolean;
+      memoryWritesRequireApproval: boolean;
     };
   };
   environment: Record<string, unknown>;
@@ -82,7 +86,9 @@ export function buildLocalDiagnosticsExport(
       models: countTable(input.db, models, models.userId, input.userId),
       apiKeys: countTable(input.db, apiKeys, apiKeys.userId, input.userId),
       notifications: countTable(input.db, notifications, notifications.userId, input.userId),
-      auditLogs: countTable(input.db, auditLogs, auditLogs.userId, input.userId)
+      auditLogs: countTable(input.db, auditLogs, auditLogs.userId, input.userId),
+      copilotMemoryEntries: countTable(input.db, copilotMemoryEntries, copilotMemoryEntries.userId, input.userId),
+      copilotMemoryNotes: countTable(input.db, copilotMemoryNotes, copilotMemoryNotes.userId, input.userId)
     },
     dashboardHealth: summary.health,
     adapters: listAdapterDefinitions().map((adapter) => ({
@@ -94,7 +100,9 @@ export function buildLocalDiagnosticsExport(
       capabilities: {
         enabled: true,
         toolExecutionEnabled: true,
-        approvalRequiredForWrites: true
+        approvalRequiredForWrites: true,
+        memoryEnabled: true,
+        memoryWritesRequireApproval: true
       }
     },
     environment: redactDiagnosticValue(pickDiagnosticEnv(input.env ?? process.env)) as Record<string, unknown>

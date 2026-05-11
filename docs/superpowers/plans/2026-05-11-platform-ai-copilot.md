@@ -935,6 +935,11 @@ git commit -m "docs: document platform copilot"
 This is a follow-up task after the provider-backed Copilot and approval-gated
 tool surface are stable. Do not block the first implementation PR on this task.
 
+Status: implemented in the product-grade Copilot follow-up slice. The shipped
+scope is explicit tenant-scoped SQLite memory with bounded FTS search,
+`memory_search`, `memory_get`, approval-gated `propose_memory_write`, diagnostics
+counts/capabilities, and no embeddings or active recall pass.
+
 **Files:**
 - Create: `packages/gateway/src/db/migrations/0014_copilot_memory.sql`
 - Create: `packages/gateway/src/db/repositories/copilot-memory-repository.ts`
@@ -948,7 +953,7 @@ tool surface are stable. Do not block the first implementation PR on this task.
 - Test: `packages/gateway/test/copilot-tools.test.ts`
 - Test: `packages/gateway/test/copilot-routes.test.ts`
 
-- [ ] **Step 1: Write memory persistence tests first**
+- [x] **Step 1: Write memory persistence tests first**
 
 Cover:
 
@@ -958,7 +963,7 @@ Cover:
 - cross-user reads return empty results;
 - secret-looking values are redacted before persistence.
 
-- [ ] **Step 2: Add tenant-scoped memory schema**
+- [x] **Step 2: Add tenant-scoped memory schema**
 
 Start with SQLite/FTS only:
 
@@ -972,7 +977,7 @@ Start with SQLite/FTS only:
 Do not add embeddings in this task. Embeddings require a separate privacy and
 provider-cost review.
 
-- [ ] **Step 3: Implement `CopilotMemoryRepository`**
+- [x] **Step 3: Implement `CopilotMemoryRepository`**
 
 Required methods:
 
@@ -986,7 +991,7 @@ listEntries(input: ListMemoryInput): CopilotMemoryEntry[];
 
 Every method must apply `WHERE user_id = ?`.
 
-- [ ] **Step 4: Add memory tools**
+- [x] **Step 4: Add memory tools**
 
 Add tools:
 
@@ -999,6 +1004,9 @@ Add tools:
 
 - [ ] **Step 5: Optional active recall pass**
 
+Not implemented in this slice. Memory access is available only through explicit
+tools and user-approved writes.
+
 If added in this task, active recall must be opt-in per Copilot run or
 user-facing Copilot source, not platform-wide. It must:
 
@@ -1008,7 +1016,7 @@ user-facing Copilot source, not platform-wide. It must:
 - open a circuit breaker after repeated timeouts;
 - continue the main run with no injected memory when recall fails or is weak.
 
-- [ ] **Step 6: Update docs and diagnostics**
+- [x] **Step 6: Update docs and diagnostics**
 
 Document:
 
@@ -1017,7 +1025,7 @@ Document:
 - no raw terminal transcript indexing;
 - embeddings are not part of the first memory release.
 
-- [ ] **Step 7: Run verification**
+- [x] **Step 7: Run verification**
 
 Run:
 

@@ -76,6 +76,8 @@ write what Claude Code asked, what OpenForge showed, and what happened next
 - [ ] Opened `/copilot` from the sidebar.
 - [ ] Asked Copilot to diagnose session launch readiness.
 - [ ] Verified the response uses platform state such as adapter discovery or recent activity.
+- [ ] If Copilot proposed a memory write, verified it appeared as a pending action before approval.
+- [ ] Approved or rejected the memory write and confirmed it did not expose pasted secrets.
 - [ ] Verified proposed actions appear as pending actions before approval.
 - [ ] Verified no terminal input control, raw shell control, or Codex `/turn` input appears.
 

@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { ActivityRepository } from "../src/db/repositories/activity-repository.js";
+import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
 import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { createCopilotToolRegistry, executeCopilotTool } from "../src/services/copilot/tool-registry.js";
@@ -158,6 +159,87 @@ describe("copilot tools", () => {
     assert.equal(actions.length, 1);
     assert.equal(actions[0]?.type, "openforge.propose_diagnostics_export");
     assert.deepEqual((result as { ok: true; output: { actionId: string } }).output.actionId, actions[0]?.id);
+  });
+
+  it("searches Copilot memory through bounded tenant-scoped tools", async () => {
+    const memory = new CopilotMemoryRepository(db, userId);
+    const entry = memory.createEntry({
+      kind: "decision",
+      scope: "global",
+      text: "Copilot memory recall must stay explicit and bounded."
+    });
+    memory.createNote({
+      text: "Working note: memory recall can include notes when requested."
+    });
+    new CopilotMemoryRepository(db, otherUserId).createEntry({
+      kind: "decision",
+      scope: "global",
+      text: "Foreign memory recall should not appear."
+    });
+
+    const entriesOnly = await executeCopilotTool(
+      registry,
+      "openforge.memory_search",
+      { query: "memory recall", includeNotes: false, limit: 10 },
+      context(userId)
+    );
+    const withNotes = await executeCopilotTool(
+      registry,
+      "openforge.memory_search",
+      { query: "memory recall", includeNotes: true, limit: 10 },
+      context(userId)
+    );
+
+    assert.equal(entriesOnly.ok, true);
+    assert.equal(withNotes.ok, true);
+    if (!entriesOnly.ok || !withNotes.ok) return;
+    assert.deepEqual((entriesOnly.output as { results: Array<{ id: string }> }).results.map((item) => item.id), [entry.id]);
+    assert.equal((withNotes.output as { results: unknown[] }).results.length, 2);
+  });
+
+  it("gets a single Copilot memory item through tenant-scoped tools", async () => {
+    const entry = new CopilotMemoryRepository(db, userId).createEntry({
+      kind: "fact",
+      scope: "global",
+      text: "Gateway owns Copilot provider calls."
+    });
+
+    const result = await executeCopilotTool(
+      registry,
+      "openforge.memory_get",
+      { id: entry.id, type: "entry" },
+      context(userId)
+    );
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal((result.output as { item: { id: string } | null }).item?.id, entry.id);
+    assert.equal((result.output as { item: { redactedText: string } }).item.redactedText, entry.redactedText);
+  });
+
+  it("creates memory-write proposals without durable writes", async () => {
+    const run = new CopilotRepository(db, userId).createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Prepare memory"
+    });
+
+    const result = await executeCopilotTool(
+      registry,
+      "openforge.propose_memory_write",
+      {
+        kind: "decision",
+        scope: "global",
+        text: "Remember that provider SSOT is the model baseline."
+      },
+      context(userId, run.id)
+    );
+
+    const actions = new CopilotRepository(db, userId).listPendingActions(run.id);
+    assert.equal(result.ok, true);
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0]?.type, "openforge.propose_memory_write");
+    assert.equal(new CopilotMemoryRepository(db, userId).listEntries({}).length, 0);
   });
 
   function context(id: string, runId?: string) {

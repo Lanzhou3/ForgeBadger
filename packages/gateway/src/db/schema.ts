@@ -172,6 +172,57 @@ export const copilotPendingActions = sqliteTable(
   })
 );
 
+export const copilotMemoryEntries = sqliteTable(
+  "copilot_memory_entries",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    scope: text("scope").notNull(),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    sourceRunId: text("source_run_id").references(() => copilotRuns.id, { onDelete: "set null" }),
+    redactedText: text("redacted_text").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_copilot_memory_entries_user_scope: index("idx_copilot_memory_entries_user_scope").on(table.userId, table.scope, table.createdAt),
+    idx_copilot_memory_entries_user_project: index("idx_copilot_memory_entries_user_project").on(table.userId, table.projectId, table.createdAt)
+  })
+);
+
+export const copilotMemoryNotes = sqliteTable(
+  "copilot_memory_notes",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    sessionId: text("session_id").references(() => sessions.id, { onDelete: "set null" }),
+    sourceRunId: text("source_run_id").references(() => copilotRuns.id, { onDelete: "set null" }),
+    redactedText: text("redacted_text").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date())
+  },
+  (table) => ({
+    idx_copilot_memory_notes_user_created: index("idx_copilot_memory_notes_user_created").on(table.userId, table.createdAt),
+    idx_copilot_memory_notes_user_project: index("idx_copilot_memory_notes_user_project").on(table.userId, table.projectId, table.createdAt)
+  })
+);
+
+export const copilotMemoryFts = sqliteTable("copilot_memory_fts", {
+  memoryId: text("memory_id"),
+  userId: text("user_id"),
+  itemType: text("item_type"),
+  scope: text("scope"),
+  projectId: text("project_id"),
+  redactedText: text("redacted_text")
+});
+
 export const templates = sqliteTable("templates", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),

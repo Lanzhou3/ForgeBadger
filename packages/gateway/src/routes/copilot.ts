@@ -6,6 +6,7 @@ import type { CopilotPendingAction, CopilotRun, CopilotRunEvent } from "../db/re
 import { CopilotRepository } from "../db/repositories/copilot-repository.js";
 import type { Database } from "../db/types.js";
 import { buildLocalDiagnosticsExport } from "../services/diagnostics.js";
+import { approveCopilotMemoryWrite } from "../services/copilot/memory.js";
 import { CopilotOrchestrator, type CopilotOrchestratorOptions } from "../services/copilot/orchestrator.js";
 import { createCopilotReadTools } from "../services/copilot/read-tools.js";
 
@@ -95,6 +96,10 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     if (!action) return res.status(404).json({ code: 1, message: "Pending action not found" });
     if (action.status !== "pending") return res.status(400).json({ code: 1, message: "Pending action is not approvable" });
     const result = approvePendingAction(action, options, userIdFor(req));
+    if (isApprovalError(result)) {
+      res.status(400).json({ code: 1, message: result.error.message, details: { code: result.error.code } });
+      return;
+    }
     const updated = repo.updatePendingAction(action.id, {
       status: "approved",
       result,
@@ -175,5 +180,20 @@ function approvePendingAction(
   if (action.type === "openforge.propose_session_create") {
     return { draft: action.input, executed: false };
   }
+  if (action.type === "openforge.propose_memory_write") {
+    return approveCopilotMemoryWrite(action, { db: options.db, userId });
+  }
   return { steps: action.input, executed: false };
+}
+
+function isApprovalError(result: Record<string, unknown>): result is { error: { code: string; message: string } } {
+  const error = result.error;
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      "message" in error &&
+      typeof (error as { code?: unknown }).code === "string" &&
+      typeof (error as { message?: unknown }).message === "string"
+  );
 }
