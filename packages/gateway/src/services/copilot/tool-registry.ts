@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { CommandRunner } from "../../lib/dependency-check.js";
 import type { Database } from "../../db/types.js";
 import type { CopilotServiceError } from "./types.js";
-import { redactCopilotPayload } from "./redaction.js";
+import { hasBlockedCopilotSensitiveOutput, redactCopilotPayload } from "./redaction.js";
 
 export type CopilotToolRisk = "read" | "prepare" | "write";
 
@@ -34,6 +34,8 @@ export type ExecuteCopilotToolResult =
   | { ok: true; output: unknown; requiresApproval: boolean }
   | { ok: false; error: CopilotServiceError };
 
+const MAX_COPILOT_TOOL_OUTPUT_BYTES = 64 * 1024;
+
 export function createCopilotToolRegistry(
   tools: CopilotToolDefinition[]
 ): CopilotToolRegistry {
@@ -56,9 +58,13 @@ export async function executeCopilotTool(
   const parsed = tool.inputSchema.safeParse(input);
   if (!parsed.success) return fail("copilot_tool_validation_failed", "Copilot tool input is invalid");
   const output = await tool.execute(parsed.data, context);
+  const redactedOutput = redactCopilotPayload(output);
+  if (isBlockedToolOutput(redactedOutput)) {
+    return fail("copilot_redaction_blocked_output", "Copilot tool output was blocked by safety policy");
+  }
   return {
     ok: true,
-    output: redactCopilotPayload(output),
+    output: redactedOutput,
     requiresApproval: tool.requiresApproval
   };
 }
@@ -77,4 +83,18 @@ export function toModelToolDefinitions(registry: CopilotToolRegistry) {
 
 function fail(code: string, message: string): { ok: false; error: CopilotServiceError } {
   return { ok: false, error: { code, message } };
+}
+
+function isBlockedToolOutput(output: unknown): boolean {
+  const serialized = serializeToolOutput(output);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_COPILOT_TOOL_OUTPUT_BYTES) return true;
+  return hasBlockedCopilotSensitiveOutput(serialized);
+}
+
+function serializeToolOutput(output: unknown): string {
+  try {
+    return JSON.stringify(output) ?? String(output);
+  } catch {
+    return "[unserializable]";
+  }
 }

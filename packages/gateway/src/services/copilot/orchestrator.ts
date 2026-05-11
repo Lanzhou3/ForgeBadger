@@ -158,7 +158,7 @@ export class CopilotOrchestrator {
     });
     const cancelledAfterTool = this.cancelledResultIfNeeded(repo, run, events, runSignal);
     if (cancelledAfterTool) return cancelledAfterTool;
-    if (!result.ok) return this.failAfterEvents(repo, run, result.error, events, 400);
+    if (!result.ok) return this.failWithRunEvent(repo, run, result.error, events, 400);
     const toolResult = repo.addEvent(run.id, {
       type: "tool_result",
       message: toolCall.name,

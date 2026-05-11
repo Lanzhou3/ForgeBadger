@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
+import { z } from "zod";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -96,6 +97,48 @@ describe("copilot tools", () => {
     assert.match(json, /Bearer \[REDACTED\]/);
     assert.match(json, /sk-\[REDACTED\]/);
     assert.doesNotMatch(json, /secret-token/);
+  });
+
+  it("blocks oversized tool outputs before returning them", async () => {
+    const unsafeRegistry = createCopilotToolRegistry([{
+      name: "openforge.large_test_output",
+      description: "Return an oversized test payload.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: z.object({}),
+      async execute() {
+        return { text: "x".repeat(70 * 1024) };
+      }
+    }]);
+
+    const result = await executeCopilotTool(unsafeRegistry, "openforge.large_test_output", {}, context(userId));
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "copilot_redaction_blocked_output");
+  });
+
+  it("blocks tool outputs that still contain private-key material after redaction", async () => {
+    const unsafeRegistry = createCopilotToolRegistry([{
+      name: "openforge.private_key_test_output",
+      description: "Return suspected private-key material.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: z.object({}),
+      async execute() {
+        return {
+          text: [
+            "-----BEGIN OPENSSH PRIVATE KEY-----",
+            "not-a-real-key",
+            "-----END OPENSSH PRIVATE KEY-----"
+          ].join("\n")
+        };
+      }
+    }]);
+
+    const result = await executeCopilotTool(unsafeRegistry, "openforge.private_key_test_output", {}, context(userId));
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "copilot_redaction_blocked_output");
   });
 
   it("exposes model-facing JSON schemas for tool parameters", () => {

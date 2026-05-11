@@ -10,6 +10,7 @@ import { beforeEach, describe, it } from "node:test";
 
 import { signJwt } from "../src/auth/jwt.js";
 import { AuditLogRepository } from "../src/db/repositories/audit-log-repository.js";
+import { ActivityRepository } from "../src/db/repositories/activity-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
@@ -336,6 +337,40 @@ describe("copilot routes", () => {
       res.body.data.events.at(-1)?.message,
       "Dashboard is ready after checking tool results."
     );
+  });
+
+  it("fails closed when a read tool output exceeds the Copilot safety limit", async () => {
+    createOpenAiProvider();
+    const activities = new ActivityRepository(db, userId);
+    for (let index = 0; index < 50; index += 1) {
+      activities.create({
+        type: "copilot_large_activity",
+        message: `Large activity ${index} ${"x".repeat(2 * 1024)}`
+      });
+    }
+    modelEvents = [{
+      type: "tool_call_requested",
+      id: "tool-call-1",
+      name: "openforge.get_recent_activity",
+      input: { limit: 50 }
+    }];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Summarize recent activity",
+      source: "dashboard"
+    }, authHeaders());
+
+    const run = new CopilotRepository(db, userId).listRuns()[0];
+    const events = new CopilotRepository(db, userId).listEvents(run?.id ?? "");
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_redaction_blocked_output");
+    assert.equal(run?.status, "failed");
+    assert.deepEqual(events.map((event) => event.type), [
+      "tool_call_requested",
+      "run_failed"
+    ]);
+    assert.equal(calls.length, 1);
   });
 
   it("marks runs failed when the initial model request throws", async () => {
