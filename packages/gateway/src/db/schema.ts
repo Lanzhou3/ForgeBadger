@@ -101,6 +101,77 @@ export const providerCredentials = sqliteTable("provider_credentials", {
   idx_provider_credentials_user_provider: index("idx_provider_credentials_user_provider").on(table.userId, table.providerProfileId)
 }));
 
+export const copilotRuns = sqliteTable(
+  "copilot_runs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    providerProfileId: text("provider_profile_id").references(() => modelProviderProfiles.id, { onDelete: "set null" }),
+    modelProfileId: text("model_profile_id").references(() => modelProfiles.id, { onDelete: "set null" }),
+    source: text("source").notNull(),
+    sourceRefId: text("source_ref_id"),
+    goal: text("goal").notNull(),
+    stepCount: integer("step_count").notNull().default(0),
+    maxSteps: integer("max_steps").notNull().default(8),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+    completedAt: integer("completed_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idx_copilot_runs_user_created: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt)
+  })
+);
+
+export const copilotRunEvents = sqliteTable(
+  "copilot_run_events",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: text("run_id")
+      .notNull()
+      .references(() => copilotRuns.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    sequence: integer("sequence").notNull(),
+    message: text("message"),
+    payloadJson: text("payload_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date())
+  },
+  (table) => ({
+    idx_copilot_run_events_run_sequence: uniqueIndex("idx_copilot_run_events_run_sequence").on(table.runId, table.sequence)
+  })
+);
+
+export const copilotPendingActions = sqliteTable(
+  "copilot_pending_actions",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: text("run_id")
+      .notNull()
+      .references(() => copilotRuns.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    status: text("status").notNull(),
+    inputJson: text("input_json").notNull().default("{}"),
+    resultJson: text("result_json"),
+    approvedBy: text("approved_by"),
+    approvedAt: integer("approved_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_copilot_pending_actions_run: index("idx_copilot_pending_actions_run").on(table.runId, table.status)
+  })
+);
+
 export const templates = sqliteTable("templates", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
