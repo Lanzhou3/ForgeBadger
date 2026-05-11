@@ -10,6 +10,9 @@ import {
   getCopilotStartBlocker,
   findLiveCopilotRun,
   findCurrentLiveCopilotRun,
+  buildCopilotLaunchHref,
+  resolveCopilotLaunchContext,
+  getCopilotLaunchPromptKey,
   resolveCopilotRunSelection,
   isCopilotRunLive,
 } from "./copilot";
@@ -206,5 +209,34 @@ describe("copilot display helpers", () => {
         liveRunStatus: "completed",
       })
     ).toBeNull();
+  });
+
+  it("builds Copilot launch hrefs with bounded source context", () => {
+    expect(
+      buildCopilotLaunchHref({
+        source: "project",
+        sourceRefId: "project 1",
+        intent: "project_readiness",
+      })
+    ).toBe("/copilot?source=project&sourceRefId=project+1&intent=project_readiness");
+    expect(buildCopilotLaunchHref({ source: "dashboard" })).toBe("/copilot?source=dashboard");
+  });
+
+  it("resolves Copilot launch context from URL parameters", () => {
+    const params = new URLSearchParams("source=session&sourceRefId=session-1&intent=session_readiness");
+    expect(resolveCopilotLaunchContext(params)).toEqual({
+      source: "session",
+      sourceRefId: "session-1",
+      intent: "session_readiness",
+    });
+    expect(resolveCopilotLaunchContext(new URLSearchParams("source=terminal&sourceRefId=x"))).toEqual({
+      source: "copilot",
+    });
+  });
+
+  it("maps Copilot launch intents to starter prompt keys", () => {
+    expect(getCopilotLaunchPromptKey("project_readiness")).toBe("copilot.contextPrompt.projectReadiness");
+    expect(getCopilotLaunchPromptKey("session_readiness")).toBe("copilot.contextPrompt.sessionReadiness");
+    expect(getCopilotLaunchPromptKey("unknown")).toBeNull();
   });
 });

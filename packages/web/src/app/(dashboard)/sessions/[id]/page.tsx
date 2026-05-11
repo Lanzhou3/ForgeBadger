@@ -4,7 +4,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Square, Activity, History, Maximize2, Minimize2 } from "lucide-react";
+import { ArrowLeft, Square, Activity, History, Maximize2, Minimize2, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ import { getToken } from "@/lib/auth";
 import { sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import { useLanguage } from "@/hooks/use-language";
+import { buildCopilotLaunchHref } from "@/lib/copilot";
 
 export default function TerminalPage() {
   const params = useParams();
@@ -23,6 +24,11 @@ export default function TerminalPage() {
   const { t } = useLanguage();
   const id = params.id as string;
   const [focusMode, setFocusMode] = useState(false);
+  const sessionCopilotHref = buildCopilotLaunchHref({
+    source: "session",
+    sourceRefId: id,
+    intent: "session_readiness",
+  });
 
   const authToken = getToken() ?? "";
   const attachTokenOverride = searchParams.get("attachToken");
@@ -163,6 +169,12 @@ export default function TerminalPage() {
             <Link href={`/history?sessionId=${id}`}>
               <History className="mr-2 size-3" />
               {t("nav.history")}
+            </Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link href={sessionCopilotHref}>
+              <Sparkles className="size-3 sm:mr-2" />
+              <span className="hidden sm:inline">{t("copilot.askCopilot")}</span>
             </Link>
           </Button>
           <Button

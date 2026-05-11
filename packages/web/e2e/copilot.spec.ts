@@ -262,6 +262,39 @@ test("Copilot page sends the selected provider and model when starting a run", a
   await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("Claude Opus");
 });
 
+test("Copilot page starts runs with launch context from the URL", async ({ page }) => {
+  let createBody: Record<string, unknown> | undefined;
+  await mockCopilotApis(page, {
+    onCreateRun: async (route) => {
+      createBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-project-context",
+            status: "completed",
+            goal: "Project readiness",
+            source: "project",
+            sourceRefId: "project-1",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot?source=project&sourceRefId=project-1&intent=project_readiness");
+
+  await expect(page.getByLabel("Copilot prompt")).toHaveValue(/project's runtime readiness/i);
+  await page.getByRole("button", { name: "Start" }).click();
+  await expect.poll(() => createBody).toMatchObject({
+    source: "project",
+    sourceRefId: "project-1",
+    providerProfileId: "provider-openai",
+    modelProfileId: "model-gpt-5",
+  });
+});
+
 test("Copilot page shows structured provider setup errors from run creation", async ({ page }) => {
   await mockCopilotApis(page, {
     onCreateRun: async (route) => {

@@ -14,6 +14,7 @@ import {
   Wrench,
   Plus,
   ArrowRight,
+  Sparkles,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,6 +33,7 @@ import {
   listSessions,
   getDashboardSummary,
 } from "@/lib/api";
+import { buildCopilotLaunchHref } from "@/lib/copilot";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import { terminalRuntimeTranslationKey } from "@/lib/terminal-runtime";
 import { useLanguage } from "@/hooks/use-language";
@@ -56,6 +58,10 @@ export default function DashboardPage() {
   const dashboardStats = dashboard?.stats;
   const dashboardHealth = dashboard?.health;
   const terminalRuntime = dependenciesQuery.data?.terminalRuntime;
+  const dashboardCopilotHref = buildCopilotLaunchHref({
+    source: "dashboard",
+    intent: "launch_readiness",
+  });
 
   const stats = [
     {
@@ -158,11 +164,19 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">{t("dashboard.title")}</h1>
-        <p className="mt-1 text-muted-foreground">
-          {t("dashboard.subtitle")}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">{t("dashboard.title")}</h1>
+          <p className="mt-1 text-muted-foreground">
+            {t("dashboard.subtitle")}
+          </p>
+        </div>
+        <Button asChild variant="outline">
+          <Link href={dashboardCopilotHref}>
+            <Sparkles className="mr-2 size-4" />
+            {t("copilot.askCopilot")}
+          </Link>
+        </Button>
       </div>
 
       {/* Stat cards */}

@@ -89,6 +89,44 @@ export type CopilotStartBlocker =
   | "live_run"
   | "creating";
 
+export type CopilotLaunchSource = "dashboard" | "project" | "session" | "settings" | "copilot";
+export type CopilotLaunchIntent =
+  | "launch_readiness"
+  | "project_readiness"
+  | "session_readiness"
+  | "provider_setup";
+
+export interface CopilotLaunchHrefInput {
+  source: CopilotLaunchSource;
+  sourceRefId?: string | null;
+  intent?: CopilotLaunchIntent | null;
+}
+
+export interface CopilotLaunchContext {
+  source: CopilotLaunchSource;
+  sourceRefId?: string;
+  intent?: CopilotLaunchIntent;
+}
+
+export interface CopilotLaunchSearchParams {
+  get(name: string): string | null;
+}
+
+const launchSources = new Set<CopilotLaunchSource>(["dashboard", "project", "session", "settings", "copilot"]);
+const launchIntents = new Set<CopilotLaunchIntent>([
+  "launch_readiness",
+  "project_readiness",
+  "session_readiness",
+  "provider_setup",
+]);
+
+const launchPromptKeys: Record<CopilotLaunchIntent, TranslationKey> = {
+  launch_readiness: "copilot.starter.launchReadinessPrompt",
+  project_readiness: "copilot.contextPrompt.projectReadiness",
+  session_readiness: "copilot.contextPrompt.sessionReadiness",
+  provider_setup: "copilot.starter.providerSetupPrompt",
+};
+
 export function getCopilotStatusTone(status: string): CopilotStatusTone {
   return statusTones[status] ?? "muted";
 }
@@ -179,6 +217,32 @@ export function getCopilotStartBlocker(input: CopilotStartBlockerInput): Copilot
   return null;
 }
 
+export function buildCopilotLaunchHref(input: CopilotLaunchHrefInput): string {
+  const params = new URLSearchParams({ source: input.source });
+  const sourceRefId = input.sourceRefId?.trim();
+  if (sourceRefId) params.set("sourceRefId", sourceRefId);
+  if (input.intent) params.set("intent", input.intent);
+  return `/copilot?${params.toString()}`;
+}
+
+export function resolveCopilotLaunchContext(params: CopilotLaunchSearchParams): CopilotLaunchContext {
+  const source = readLaunchSource(params.get("source"));
+  if (!source) return { source: "copilot" };
+
+  const sourceRefId = params.get("sourceRefId")?.trim();
+  const intent = readLaunchIntent(params.get("intent"));
+  return {
+    source,
+    ...(source !== "copilot" && sourceRefId ? { sourceRefId } : {}),
+    ...(intent ? { intent } : {}),
+  };
+}
+
+export function getCopilotLaunchPromptKey(intent: string | null | undefined): TranslationKey | null {
+  const launchIntent = readLaunchIntent(intent);
+  return launchIntent ? launchPromptKeys[launchIntent] : null;
+}
+
 function summarizeMemoryWrite(payload: Record<string, unknown>): CopilotPendingActionSummary {
   const detail = joinPresent([
     readString(payload, "kind") ?? "memory",
@@ -254,4 +318,12 @@ function humanizeToken(value: string): string {
     .toLowerCase();
   if (!normalized) return "Unknown";
   return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
+}
+
+function readLaunchSource(value: string | null): CopilotLaunchSource | null {
+  return value && launchSources.has(value as CopilotLaunchSource) ? (value as CopilotLaunchSource) : null;
+}
+
+function readLaunchIntent(value: string | null | undefined): CopilotLaunchIntent | null {
+  return value && launchIntents.has(value as CopilotLaunchIntent) ? (value as CopilotLaunchIntent) : null;
 }

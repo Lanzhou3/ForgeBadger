@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { CircleAlert, Clock3, Play, RefreshCcw, Sparkles, Square } from "lucide-react";
 
@@ -28,6 +29,7 @@ import {
 } from "@/lib/api";
 import {
   findCurrentLiveCopilotRun,
+  getCopilotLaunchPromptKey,
   getCopilotEventLabel,
   getCopilotEventLabelKey,
   getCopilotPendingActionLabel,
@@ -36,6 +38,7 @@ import {
   getCopilotStartBlocker,
   getCopilotStatusTone,
   isCopilotRunLive,
+  resolveCopilotLaunchContext,
   resolveCopilotRunSelection,
 } from "@/lib/copilot";
 import type { TranslationKey } from "@/lib/i18n";
@@ -63,6 +66,7 @@ interface ActiveRunState {
 
 export default function CopilotPage() {
   const { t } = useLanguage();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<ActiveRunState | null>(null);
@@ -73,6 +77,16 @@ export default function CopilotPage() {
   const processingActionIdRef = useRef<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [errorCode, setErrorCode] = useState("");
+  const appliedLaunchPromptRef = useRef<string | null>(null);
+  const launchContext = useMemo(() => resolveCopilotLaunchContext(searchParams), [searchParams]);
+  const launchPromptKey = getCopilotLaunchPromptKey(launchContext.intent);
+  const launchPrompt = launchPromptKey ? t(launchPromptKey) : "";
+
+  useEffect(() => {
+    if (!launchPrompt || appliedLaunchPromptRef.current === launchPrompt) return;
+    setPrompt((current) => (current.trim() ? current : launchPrompt));
+    appliedLaunchPromptRef.current = launchPrompt;
+  }, [launchPrompt]);
 
   const {
     data: capabilityData,
@@ -186,7 +200,8 @@ export default function CopilotPage() {
   const createMutation = useMutation({
     mutationFn: (value: string) => createCopilotRun({
       prompt: value.trim(),
-      source: "copilot",
+      source: launchContext.source,
+      ...(launchContext.sourceRefId ? { sourceRefId: launchContext.sourceRefId } : {}),
       ...(selectedProviderId ? { providerProfileId: selectedProviderId } : {}),
       ...(selectedModelProfileId ? { modelProfileId: selectedModelProfileId } : {}),
     }),
