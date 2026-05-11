@@ -131,6 +131,81 @@ describe("copilot routes", () => {
     assert.equal(calls[0]?.input, "Summarize Gateway health");
   });
 
+  it("injects bounded active memory recall for Copilot page runs", async () => {
+    createOpenAiProvider();
+    new CopilotMemoryRepository(db, userId).createEntry({
+      kind: "decision",
+      scope: "global",
+      text: "Provider SSOT is required for Copilot model configuration."
+    });
+    new CopilotMemoryRepository(db, otherUserId).createEntry({
+      kind: "decision",
+      scope: "global",
+      text: "Foreign provider SSOT memory must not be recalled."
+    });
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "How should provider SSOT work for Copilot?",
+      source: "copilot"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.match(calls[0]?.input ?? "", /Relevant OpenForge memory/);
+    assert.match(calls[0]?.input ?? "", /Provider SSOT is required/);
+    assert.doesNotMatch(calls[0]?.input ?? "", /Foreign provider/);
+    assert.deepEqual(
+      res.body.data.events.map((event: { type: string }) => event.type),
+      ["memory_recalled", "assistant_message"]
+    );
+    assert.equal(res.body.data.run.stepCount, 2);
+  });
+
+  it("does not inject active memory recall outside the Copilot page source", async () => {
+    createOpenAiProvider();
+    new CopilotMemoryRepository(db, userId).createEntry({
+      kind: "decision",
+      scope: "global",
+      text: "Provider SSOT is required for Copilot model configuration."
+    });
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "How should provider SSOT work for Copilot?",
+      source: "dashboard"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(calls[0]?.input, "How should provider SSOT work for Copilot?");
+    assert.deepEqual(
+      res.body.data.events.map((event: { type: string }) => event.type),
+      ["assistant_message"]
+    );
+  });
+
+  it("continues Copilot page runs without injected memory when active recall fails", async () => {
+    createOpenAiProvider();
+    new CopilotMemoryRepository(db, userId).createEntry({
+      kind: "decision",
+      scope: "global",
+      text: "Provider SSOT is required for Copilot model configuration."
+    });
+    db.prepare("DROP TABLE copilot_memory_fts").run();
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "How should provider SSOT work for Copilot?",
+      source: "copilot"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(calls[0]?.input, "How should provider SSOT work for Copilot?");
+    assert.deepEqual(
+      res.body.data.events.map((event: { type: string }) => event.type),
+      ["assistant_message"]
+    );
+  });
+
   it("keeps approval-required tool runs waiting for approval", async () => {
     createOpenAiProvider();
     modelEvents = [{

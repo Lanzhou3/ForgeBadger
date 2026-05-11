@@ -937,8 +937,9 @@ tool surface are stable. Do not block the first implementation PR on this task.
 
 Status: implemented in the product-grade Copilot follow-up slice. The shipped
 scope is explicit tenant-scoped SQLite memory with bounded FTS search,
-`memory_search`, `memory_get`, approval-gated `propose_memory_write`, diagnostics
-counts/capabilities, and no embeddings or active recall pass.
+`memory_search`, `memory_get`, approval-gated `propose_memory_write`,
+user-facing Copilot-source active recall, diagnostics counts/capabilities, and
+no embeddings.
 
 **Files:**
 - Create: `packages/gateway/src/db/migrations/0014_copilot_memory.sql`
@@ -1002,10 +1003,13 @@ Add tools:
 - `openforge.propose_memory_write`: creates a pending action; it does not write
   durable memory directly.
 
-- [ ] **Step 5: Optional active recall pass**
+- [x] **Step 5: Optional active recall pass**
 
-Not implemented in this slice. Memory access is available only through explicit
-tools and user-approved writes.
+Implemented for `source: "copilot"` runs only. Gateway runs a short pre-model
+recall pass through `openforge.memory_search`, injects bounded snippets into
+the first model request when relevant memory exists, records a
+`memory_recalled` event, and continues with the original prompt if recall times
+out, fails, or returns weak results. Memory writes remain user-approved only.
 
 If added in this task, active recall must be opt-in per Copilot run or
 user-facing Copilot source, not platform-wide. It must:

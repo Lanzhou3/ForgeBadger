@@ -65,6 +65,7 @@ describe("i18n", () => {
     expect(getTranslation("en", "copilot.proposedAction")).toBe("Proposed action");
     expect(getTranslation("zh-CN", "copilot.configureProvider")).toBe("配置模型服务商");
     expect(getTranslation("zh-TW", "copilot.event.toolRequested")).toBe("工具請求");
+    expect(getTranslation("zh-CN", "copilot.event.memoryRecalled")).toBe("记忆召回");
     expect(getTranslation("en", "copilot.event.pendingActionApproved")).toBe("Action approved");
     expect(getTranslation("zh-CN", "copilot.event.pendingActionRejected")).toBe("操作已拒绝");
     expect(getTranslation("en", "copilot.pendingAction.memoryWrite")).toBe("Memory write");

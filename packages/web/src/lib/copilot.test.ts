@@ -27,6 +27,7 @@ describe("copilot display helpers", () => {
 
   it("maps known event types to localized label keys", () => {
     expect(getCopilotEventLabelKey("assistant_message")).toBe("copilot.event.assistantMessage");
+    expect(getCopilotEventLabelKey("memory_recalled")).toBe("copilot.event.memoryRecalled");
     expect(getCopilotEventLabelKey("tool_call_requested")).toBe("copilot.event.toolRequested");
     expect(getCopilotEventLabelKey("pending_action_approved")).toBe("copilot.event.pendingActionApproved");
     expect(getCopilotEventLabelKey("pending_action_rejected")).toBe("copilot.event.pendingActionRejected");

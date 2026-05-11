@@ -1,6 +1,7 @@
 import { CopilotRepository, type CopilotRun, type CopilotRunEvent } from "../../db/repositories/copilot-repository.js";
 import type { Database } from "../../db/types.js";
 import { AnthropicMessagesClient } from "./anthropic-messages-client.js";
+import { runCopilotActiveRecall } from "./active-recall.js";
 import type { CopilotModelClient, CopilotModelEvent, CopilotModelRequest, CopilotServiceError } from "./types.js";
 import { OpenAiResponsesClient } from "./openai-responses-client.js";
 import {
@@ -64,33 +65,62 @@ export class CopilotOrchestrator {
       providerProfileId: selected.selection.provider.id,
       modelProfileId: selected.selection.model.id
     }) ?? run;
-    return await this.callModel(repo, run, selected.selection, input.prompt);
+    const recall = await runCopilotActiveRecall({
+      db: this.options.db,
+      userId: input.userId,
+      masterKey: this.options.masterKey,
+      source: input.source,
+      prompt: input.prompt,
+      toolRegistry: this.toolRegistry
+    });
+    const recallEvent = recall.event ? repo.addEvent(run.id, recall.event) : null;
+    const recalledRun = repo.getRun(run.id) ?? run;
+    if (recalledRun.stepCount >= recalledRun.maxSteps) {
+      return this.failAfterEvents(
+        repo,
+        recalledRun,
+        maxStepsError(recalledRun.maxSteps),
+        recallEvent ? [recallEvent] : [],
+        400
+      );
+    }
+    return await this.callModel(
+      repo,
+      recalledRun,
+      selected.selection,
+      input.prompt,
+      recall.context,
+      recallEvent ? [recallEvent] : []
+    );
   }
 
   private async callModel(
     repo: CopilotRepository,
     run: CopilotRun,
     selection: CopilotProviderSelection,
-    prompt: string
+    prompt: string,
+    recallContext: string | null,
+    previousEvents: CopilotRunEvent[]
   ): Promise<RunCopilotTextResult> {
     const response = await this.requestModel(
       repo,
       run,
       selection,
-      toModelRequest(selection, prompt, this.toolRegistry),
-      []
+      toModelRequest(selection, prompt, this.toolRegistry, recallContext),
+      previousEvents
     );
     if (!response.ok) return response.result;
     const events = response.events;
-    const overflow = events.length > run.maxSteps;
-    if (overflow) return this.failBeforeModel(repo, run, maxStepsError(run.maxSteps), 400);
+    const overflow = previousEvents.length + events.length > run.maxSteps;
+    if (overflow) return this.failAfterEvents(repo, run, maxStepsError(run.maxSteps), previousEvents, 400);
     const stored = events.map((event) => storeModelEvent(repo, run.id, event));
+    const allEvents = [...previousEvents, ...stored];
     const failed = events.find((event) => event.type === "run_failed");
-    if (failed) return this.failAfterEvents(repo, run, failed, stored, 502);
+    if (failed) return this.failAfterEvents(repo, run, failed, allEvents, 502);
     const toolCall = events.find((event) => event.type === "tool_call_requested");
-    if (toolCall) return await this.executeReadTool(repo, run, selection, toolCall, stored);
+    if (toolCall) return await this.executeReadTool(repo, run, selection, toolCall, allEvents);
     const completed = repo.updateRun(run.id, { status: "completed", completedAt: Date.now() }) ?? run;
-    return { ok: true, run: completed, events: stored };
+    return { ok: true, run: completed, events: allEvents };
   }
 
   private async executeReadTool(
@@ -257,7 +287,8 @@ function toCreateRunInput(input: RunCopilotTextInput) {
 function toModelRequest(
   selection: CopilotProviderSelection,
   prompt: string,
-  toolRegistry: CopilotToolRegistry
+  toolRegistry: CopilotToolRegistry,
+  recallContext: string | null
 ): CopilotModelRequest {
   return {
     model: selection.model.modelId,
@@ -266,7 +297,7 @@ function toModelRequest(
       "Answer operational questions about the OpenForge control plane.",
       "Do not request terminal input, shell execution, file writes, or autonomous project changes."
     ].join("\n"),
-    input: prompt,
+    input: recallContext ? [recallContext, "", "User request:", prompt].join("\n") : prompt,
     tools: toModelToolDefinitions(toolRegistry),
     maxOutputTokens: 1024
   };

@@ -13,6 +13,7 @@ const statusTones: Record<string, CopilotStatusTone> = {
 
 const eventLabels: Record<string, string> = {
   assistant_message: "Assistant message",
+  memory_recalled: "Memory recalled",
   run_failed: "Run failed",
   tool_call_requested: "Tool requested",
   tool_result: "Tool result",
@@ -22,6 +23,7 @@ const eventLabels: Record<string, string> = {
 
 const eventLabelKeys: Record<string, TranslationKey> = {
   assistant_message: "copilot.event.assistantMessage",
+  memory_recalled: "copilot.event.memoryRecalled",
   run_failed: "copilot.event.runFailed",
   tool_call_requested: "copilot.event.toolRequested",
   tool_result: "copilot.event.toolResult",
