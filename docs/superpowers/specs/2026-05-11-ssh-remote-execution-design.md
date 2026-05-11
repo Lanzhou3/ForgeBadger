@@ -1,7 +1,7 @@
 # SSH Remote Execution Design
 
 Date: 2026-05-11
-Status: Draft for review
+Status: Confirmed; ready for implementation-plan breakdown
 Scope: architecture review for future SSH-backed execution targets
 
 ## Roadmap Context
