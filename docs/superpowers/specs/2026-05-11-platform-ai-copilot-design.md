@@ -1,7 +1,7 @@
 # Platform AI Copilot Design
 
 Date: 2026-05-11
-Status: Draft for review
+Status: Confirmed; ready for implementation-plan breakdown
 Scope: first platform-side AI Copilot architecture, before implementation-plan breakdown
 
 ## Roadmap Context
