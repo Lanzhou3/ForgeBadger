@@ -83,6 +83,33 @@ test("Copilot page shows failed run error details without timeline events", asyn
   await expect(page.getByText("Copilot model request failed")).toBeVisible();
 });
 
+test("Copilot page shows provider and model metadata for selected runs", async ({ page }) => {
+  const run = {
+    id: "run-1",
+    status: "completed",
+    goal: "Summarize Gateway health",
+    source: "copilot",
+    providerProfileId: "provider-openai",
+    modelProfileId: "model-gpt-5",
+    completedAt: 1778490000000,
+  };
+  await mockCopilotApis(page, {
+    runs: [run],
+    runDetail: {
+      run,
+      events: [],
+      pendingActions: [],
+    },
+  });
+
+  await page.goto("/copilot");
+
+  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("provider-openai");
+  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("model-gpt-5");
+  await expect(page.getByLabel("Copilot run metadata for Summarize Gateway health")).toContainText("provider-openai");
+  await expect(page.getByLabel("Copilot run metadata for Summarize Gateway health")).toContainText("model-gpt-5");
+});
+
 test("Copilot page disables start when no provider is configured", async ({ page }) => {
   await mockCopilotApis(page, {
     providerConfigured: false,

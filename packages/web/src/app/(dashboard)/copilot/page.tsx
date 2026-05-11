@@ -329,6 +329,13 @@ export default function CopilotPage() {
             <CardContent>
               {latestRun ? (
                 <div className="space-y-3">
+                  <RunMetadata
+                    run={latestRun}
+                    sourceLabel={t("copilot.source")}
+                    providerLabel={t("copilot.provider")}
+                    modelLabel={t("copilot.model")}
+                    ariaLabel={t("copilot.selectedRunMetadata")}
+                  />
                   <RunFailureNotice
                     title={t("copilot.runFailureTitle")}
                     codeLabel={t("copilot.errorCode")}
@@ -419,9 +426,14 @@ export default function CopilotPage() {
                       <div className="min-w-0 truncate text-sm font-medium">{run.goal}</div>
                       <StatusBadge status={run.status} />
                     </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      {run.source}
-                    </div>
+                    <RunMetadata
+                      run={run}
+                      sourceLabel={t("copilot.source")}
+                      providerLabel={t("copilot.provider")}
+                      modelLabel={t("copilot.model")}
+                      ariaLabel={`${t("copilot.runMetadataFor")} ${run.goal}`}
+                      compact
+                    />
                   </button>
                 ))
               )}
@@ -430,6 +442,43 @@ export default function CopilotPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function RunMetadata({
+  run,
+  sourceLabel,
+  providerLabel,
+  modelLabel,
+  ariaLabel,
+  compact = false,
+}: {
+  run: CopilotRun;
+  sourceLabel: string;
+  providerLabel: string;
+  modelLabel: string;
+  ariaLabel: string;
+  compact?: boolean;
+}) {
+  const items = [
+    { label: sourceLabel, value: normalizeRunErrorDetail(run.source) },
+    { label: providerLabel, value: normalizeRunErrorDetail(run.providerProfileId) },
+    { label: modelLabel, value: normalizeRunErrorDetail(run.modelProfileId) },
+  ].filter((item): item is { label: string; value: string } => Boolean(item.value));
+  if (items.length === 0) return null;
+
+  return (
+    <dl
+      aria-label={ariaLabel}
+      className={`flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground ${compact ? "mt-2" : ""}`}
+    >
+      {items.map((item) => (
+        <div key={item.label} className="flex min-w-0 items-center gap-1">
+          <dt className="shrink-0 font-medium text-muted-foreground/80">{item.label}</dt>
+          <dd className="min-w-0 max-w-full truncate font-mono text-muted-foreground">{item.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
