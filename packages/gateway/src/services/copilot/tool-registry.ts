@@ -21,6 +21,7 @@ export interface CopilotToolDefinition {
   risk: CopilotToolRisk;
   requiresApproval: boolean;
   inputSchema: z.ZodType<unknown>;
+  modelInputSchema?: Record<string, unknown>;
   execute(input: unknown, context: CopilotToolContext): Promise<unknown>;
 }
 
@@ -66,7 +67,11 @@ export function toModelToolDefinitions(registry: CopilotToolRegistry) {
   return [...registry.tools.values()].map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: { type: "object" }
+    inputSchema: tool.modelInputSchema ?? {
+      type: "object",
+      properties: {},
+      additionalProperties: false
+    }
   }));
 }
 

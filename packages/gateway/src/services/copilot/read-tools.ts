@@ -27,6 +27,49 @@ const proposeTroubleshootingStepsInput = z.object({
   steps: z.array(z.string().min(1)).min(1).max(10).optional()
 }).strict();
 
+const emptyModelInputSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false
+};
+const limitModelInputSchema = {
+  type: "object",
+  properties: {
+    limit: { type: "integer", minimum: 1, maximum: 50 }
+  },
+  additionalProperties: false
+};
+const proposeSessionCreateModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    aiTool: { type: "string", minLength: 1 },
+    name: { type: "string", minLength: 1 }
+  },
+  required: ["projectId", "aiTool"],
+  additionalProperties: false
+};
+const proposeDiagnosticsExportModelInputSchema = {
+  type: "object",
+  properties: {
+    reason: { type: "string", minLength: 1 }
+  },
+  additionalProperties: false
+};
+const proposeTroubleshootingStepsModelInputSchema = {
+  type: "object",
+  properties: {
+    summary: { type: "string", minLength: 1 },
+    steps: {
+      type: "array",
+      items: { type: "string", minLength: 1 },
+      minItems: 1,
+      maxItems: 10
+    }
+  },
+  additionalProperties: false
+};
+
 export function createCopilotReadTools(): CopilotToolDefinition[] {
   return [
     {
@@ -35,6 +78,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       risk: "read",
       requiresApproval: false,
       inputSchema: emptyInput,
+      modelInputSchema: emptyModelInputSchema,
       execute: async (_input, context) => getDashboardSummary(context.db, context.userId, context.masterKey)
     },
     {
@@ -43,6 +87,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       risk: "read",
       requiresApproval: false,
       inputSchema: limitInput,
+      modelInputSchema: limitModelInputSchema,
       execute: async (input, context) => ({
         projects: new ProjectRepository(context.db, context.userId)
           .list()
@@ -56,6 +101,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       risk: "read",
       requiresApproval: false,
       inputSchema: limitInput,
+      modelInputSchema: limitModelInputSchema,
       execute: async (input, context) => ({
         sessions: new SessionRepository(context.db, context.userId)
           .list()
@@ -69,6 +115,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       risk: "read",
       requiresApproval: false,
       inputSchema: emptyInput,
+      modelInputSchema: emptyModelInputSchema,
       execute: async (_input, context) => ({
         adapters: await discoverAdapters(context.adapterCommandRunner)
       })
@@ -79,6 +126,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       risk: "read",
       requiresApproval: false,
       inputSchema: limitInput,
+      modelInputSchema: limitModelInputSchema,
       execute: async (input, context) => ({
         activities: new ActivityRepository(context.db, context.userId)
           .list({ limit: readLimit(input) })
@@ -91,6 +139,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       risk: "prepare",
       requiresApproval: true,
       inputSchema: proposeSessionCreateInput,
+      modelInputSchema: proposeSessionCreateModelInputSchema,
       execute: async (input, context) =>
         createPendingProposal(context, "openforge.propose_session_create", input)
     },
@@ -100,6 +149,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       risk: "prepare",
       requiresApproval: true,
       inputSchema: proposeDiagnosticsExportInput,
+      modelInputSchema: proposeDiagnosticsExportModelInputSchema,
       execute: async (input, context) =>
         createPendingProposal(context, "openforge.propose_diagnostics_export", input)
     },
@@ -109,6 +159,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       risk: "prepare",
       requiresApproval: true,
       inputSchema: proposeTroubleshootingStepsInput,
+      modelInputSchema: proposeTroubleshootingStepsModelInputSchema,
       execute: async (input, context) =>
         createPendingProposal(context, "openforge.propose_troubleshooting_steps", input)
     },

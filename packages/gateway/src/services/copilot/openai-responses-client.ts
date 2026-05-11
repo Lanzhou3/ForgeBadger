@@ -1,5 +1,11 @@
-import { FetchCopilotModelClient, type CopilotFetch } from "./model-client.js";
-import type { CopilotModelEvent, CopilotModelRequest } from "./types.js";
+import {
+  FetchCopilotModelClient,
+  fromProviderToolName,
+  normalizeToolInputSchema,
+  toProviderToolName,
+  type CopilotFetch
+} from "./model-client.js";
+import type { CopilotModelEvent, CopilotModelRequest, CopilotToolDefinition } from "./types.js";
 
 export interface OpenAiResponsesClientOptions {
   baseUrl: string | null;
@@ -39,7 +45,17 @@ function openAiRequestBody(request: CopilotModelRequest): Record<string, unknown
     instructions: request.instructions,
     input: request.input,
     max_output_tokens: request.maxOutputTokens ?? 1024,
-    ...(request.tools ? { tools: request.tools } : {})
+    ...(request.tools ? { tools: request.tools.map(toOpenAiToolDefinition) } : {})
+  };
+}
+
+function toOpenAiToolDefinition(tool: CopilotToolDefinition): Record<string, unknown> {
+  return {
+    type: "function",
+    name: toProviderToolName(tool.name),
+    ...(tool.description ? { description: tool.description } : {}),
+    parameters: normalizeToolInputSchema(tool.inputSchema),
+    strict: false
   };
 }
 
@@ -70,7 +86,7 @@ function readOpenAiTextBlocks(item: unknown): string[] {
 function readOpenAiToolCall(item: unknown): CopilotModelEvent[] {
   if (readString(item, "type") !== "function_call") return [];
   const id = readString(item, "call_id") ?? readString(item, "id") ?? "tool-call";
-  const name = readString(item, "name") ?? "unknown";
+  const name = fromProviderToolName(readString(item, "name") ?? "unknown");
   return [{ type: "tool_call_requested", id, name, input: parseJson(readString(item, "arguments")) }];
 }
 

@@ -25,6 +25,39 @@ const proposeMemoryWriteInput = z.object({
   projectId: z.string().min(1).nullable().optional(),
   metadata: z.record(z.unknown()).optional()
 }).strict();
+const memorySearchModelInputSchema = {
+  type: "object",
+  properties: {
+    query: { type: "string", minLength: 1, maxLength: 512 },
+    scope: { type: "string", enum: ["global", "project", "session"] },
+    projectId: { type: ["string", "null"], minLength: 1 },
+    includeNotes: { type: "boolean" },
+    limit: { type: "integer", minimum: 1, maximum: 20 }
+  },
+  required: ["query"],
+  additionalProperties: false
+};
+const memoryGetModelInputSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", minLength: 1 },
+    type: { type: "string", enum: ["entry", "note"] }
+  },
+  required: ["id"],
+  additionalProperties: false
+};
+const proposeMemoryWriteModelInputSchema = {
+  type: "object",
+  properties: {
+    kind: { type: "string", enum: ["fact", "preference", "decision", "project_note"] },
+    scope: { type: "string", enum: ["global", "project", "session"] },
+    text: { type: "string", minLength: 1, maxLength: 8192 },
+    projectId: { type: ["string", "null"], minLength: 1 },
+    metadata: { type: "object" }
+  },
+  required: ["kind", "scope", "text"],
+  additionalProperties: false
+};
 
 export function createCopilotMemoryTools(): CopilotToolDefinition[] {
   return [
@@ -34,6 +67,7 @@ export function createCopilotMemoryTools(): CopilotToolDefinition[] {
       risk: "read",
       requiresApproval: false,
       inputSchema: memorySearchInput,
+      modelInputSchema: memorySearchModelInputSchema,
       execute: async (input, context) => searchMemory(input, context)
     },
     {
@@ -42,6 +76,7 @@ export function createCopilotMemoryTools(): CopilotToolDefinition[] {
       risk: "read",
       requiresApproval: false,
       inputSchema: memoryGetInput,
+      modelInputSchema: memoryGetModelInputSchema,
       execute: async (input, context) => getMemory(input, context)
     },
     {
@@ -50,6 +85,7 @@ export function createCopilotMemoryTools(): CopilotToolDefinition[] {
       risk: "prepare",
       requiresApproval: true,
       inputSchema: proposeMemoryWriteInput,
+      modelInputSchema: proposeMemoryWriteModelInputSchema,
       execute: async (input, context) => proposeMemoryWrite(input, context)
     }
   ];

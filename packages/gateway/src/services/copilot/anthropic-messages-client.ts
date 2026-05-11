@@ -1,5 +1,11 @@
-import { FetchCopilotModelClient, type CopilotFetch } from "./model-client.js";
-import type { CopilotModelEvent, CopilotModelRequest } from "./types.js";
+import {
+  FetchCopilotModelClient,
+  fromProviderToolName,
+  normalizeToolInputSchema,
+  toProviderToolName,
+  type CopilotFetch
+} from "./model-client.js";
+import type { CopilotModelEvent, CopilotModelRequest, CopilotToolDefinition } from "./types.js";
 
 export interface AnthropicMessagesClientOptions {
   baseUrl: string | null;
@@ -40,7 +46,15 @@ function anthropicRequestBody(request: CopilotModelRequest): Record<string, unkn
     max_tokens: request.maxOutputTokens ?? 1024,
     system: request.instructions,
     messages: [{ role: "user", content: request.input }],
-    ...(request.tools ? { tools: request.tools } : {})
+    ...(request.tools ? { tools: request.tools.map(toAnthropicToolDefinition) } : {})
+  };
+}
+
+function toAnthropicToolDefinition(tool: CopilotToolDefinition): Record<string, unknown> {
+  return {
+    name: toProviderToolName(tool.name),
+    ...(tool.description ? { description: tool.description } : {}),
+    input_schema: normalizeToolInputSchema(tool.inputSchema)
   };
 }
 
@@ -66,7 +80,7 @@ function toToolCall(block: unknown): CopilotModelEvent {
   return {
     type: "tool_call_requested",
     id: readString(block, "id") ?? "tool-call",
-    name: readString(block, "name") ?? "unknown",
+    name: fromProviderToolName(readString(block, "name") ?? "unknown"),
     input: readObject(block, "input") ?? {}
   };
 }

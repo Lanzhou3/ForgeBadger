@@ -146,6 +146,43 @@ describe("copilot model client", () => {
     assert.equal((requests[0]?.init.headers as Record<string, string>).Authorization, "Bearer sk-openai");
   });
 
+  it("serializes OpenAI Responses tools as function definitions", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const client = new OpenAiResponsesClient({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-openai",
+      fetch: fakeFetch(requests, { output_text: "Ready." })
+    });
+
+    await client.createResponse({
+      model: "gpt-5.1",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Status?",
+      tools: [{
+        name: "openforge.get_dashboard_summary",
+        description: "Read dashboard health.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        }
+      }]
+    });
+
+    const body = JSON.parse(String(requests[0]?.init.body)) as { tools: unknown[] };
+    assert.deepEqual(body.tools, [{
+      type: "function",
+      name: "openforge__dot__get_dashboard_summary",
+      description: "Read dashboard health.",
+      parameters: {
+        type: "object",
+        properties: {},
+        additionalProperties: false
+      },
+      strict: false
+    }]);
+  });
+
   it("normalizes Anthropic Messages text output", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const client = new AnthropicMessagesClient({
@@ -166,6 +203,91 @@ describe("copilot model client", () => {
     assert.deepEqual(events, [{ type: "assistant_message", text: "Gateway is healthy." }]);
     assert.equal(requests[0]?.url, "https://api.anthropic.com/v1/messages");
     assert.equal((requests[0]?.init.headers as Record<string, string>)["x-api-key"], "sk-ant");
+  });
+
+  it("serializes Anthropic Messages tools with input_schema", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const client = new AnthropicMessagesClient({
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant",
+      fetch: fakeFetch(requests, {
+        content: [{ type: "text", text: "Ready." }]
+      })
+    });
+
+    await client.createResponse({
+      model: "claude-sonnet-4-5",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Status?",
+      tools: [{
+        name: "openforge.get_dashboard_summary",
+        description: "Read dashboard health.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        }
+      }]
+    });
+
+    const body = JSON.parse(String(requests[0]?.init.body)) as { tools: unknown[] };
+    assert.deepEqual(body.tools, [{
+      name: "openforge__dot__get_dashboard_summary",
+      description: "Read dashboard health.",
+      input_schema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false
+      }
+    }]);
+  });
+
+  it("normalizes provider-safe tool names back to OpenForge tool names", async () => {
+    const openAiClient = new OpenAiResponsesClient({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-openai",
+      fetch: fakeFetch([], {
+        output: [{
+          type: "function_call",
+          call_id: "call-1",
+          name: "openforge__dot__memory_search",
+          arguments: "{\"query\":\"release gates\"}"
+        }]
+      })
+    });
+    const anthropicClient = new AnthropicMessagesClient({
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant",
+      fetch: fakeFetch([], {
+        content: [{
+          type: "tool_use",
+          id: "toolu-1",
+          name: "openforge__dot__memory_get",
+          input: { id: "memory-1" }
+        }]
+      })
+    });
+
+    assert.deepEqual(await openAiClient.createResponse({
+      model: "gpt-5.1",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Search memory"
+    }), [{
+      type: "tool_call_requested",
+      id: "call-1",
+      name: "openforge.memory_search",
+      input: { query: "release gates" }
+    }]);
+    assert.deepEqual(await anthropicClient.createResponse({
+      model: "claude-sonnet-4-5",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Get memory"
+    }), [{
+      type: "tool_call_requested",
+      id: "toolu-1",
+      name: "openforge.memory_get",
+      input: { id: "memory-1" }
+    }]);
   });
 
   it("redacts common credential forms without removing normal project names", () => {

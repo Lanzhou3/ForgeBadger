@@ -12,7 +12,7 @@ import { ActivityRepository } from "../src/db/repositories/activity-repository.j
 import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
 import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
-import { createCopilotToolRegistry, executeCopilotTool } from "../src/services/copilot/tool-registry.js";
+import { createCopilotToolRegistry, executeCopilotTool, toModelToolDefinitions } from "../src/services/copilot/tool-registry.js";
 import { createCopilotReadTools } from "../src/services/copilot/read-tools.js";
 
 const masterKey = "abcdef0123456789abcdef0123456789";
@@ -96,6 +96,32 @@ describe("copilot tools", () => {
     assert.match(json, /Bearer \[REDACTED\]/);
     assert.match(json, /sk-\[REDACTED\]/);
     assert.doesNotMatch(json, /secret-token/);
+  });
+
+  it("exposes model-facing JSON schemas for tool parameters", () => {
+    const definitions = toModelToolDefinitions(registry);
+    const listProjects = definitions.find((tool) => tool.name === "openforge.list_projects");
+    const memorySearch = definitions.find((tool) => tool.name === "openforge.memory_search");
+
+    assert.deepEqual(listProjects?.inputSchema, {
+      type: "object",
+      properties: {
+        limit: { type: "integer", minimum: 1, maximum: 50 }
+      },
+      additionalProperties: false
+    });
+    assert.deepEqual(memorySearch?.inputSchema, {
+      type: "object",
+      properties: {
+        query: { type: "string", minLength: 1, maxLength: 512 },
+        scope: { type: "string", enum: ["global", "project", "session"] },
+        projectId: { type: ["string", "null"], minLength: 1 },
+        includeNotes: { type: "boolean" },
+        limit: { type: "integer", minimum: 1, maximum: 20 }
+      },
+      required: ["query"],
+      additionalProperties: false
+    });
   });
 
   it("keeps read tools tenant-scoped", async () => {

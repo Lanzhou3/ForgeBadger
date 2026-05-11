@@ -2,6 +2,12 @@ import type { CopilotModelClient, CopilotModelRequest, CopilotModelEvent } from 
 
 export type CopilotFetch = typeof fetch;
 
+const defaultToolInputSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false
+} as const;
+
 export abstract class FetchCopilotModelClient implements CopilotModelClient {
   protected readonly fetchImpl: CopilotFetch;
 
@@ -18,4 +24,19 @@ export abstract class FetchCopilotModelClient implements CopilotModelClient {
       return {};
     }
   }
+}
+
+export function toProviderToolName(name: string): string {
+  const encoded = name.replace(/\./gu, "__dot__");
+  return encoded.replace(/[^A-Za-z0-9_-]/gu, "_").slice(0, 64);
+}
+
+export function fromProviderToolName(name: string): string {
+  return name.replace(/__dot__/gu, ".");
+}
+
+export function normalizeToolInputSchema(
+  inputSchema: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  return inputSchema ?? defaultToolInputSchema;
 }
