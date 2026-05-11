@@ -199,6 +199,13 @@ export interface CopilotPendingAction {
   updatedAt?: number | null;
 }
 
+export interface CopilotPendingActionDecision {
+  action: CopilotPendingAction;
+  run?: CopilotRun;
+  events?: CopilotRunEvent[];
+  pendingActions?: CopilotPendingAction[];
+}
+
 export interface CreateCopilotRunInput {
   prompt: string;
   providerProfileId?: string;
@@ -1315,19 +1322,19 @@ export async function cancelCopilotRun(
 export async function approveCopilotPendingAction(
   runId: string,
   actionId: string
-): Promise<{ action: CopilotPendingAction }> {
+): Promise<CopilotPendingActionDecision> {
   return fetchJson(`/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`, {
     method: "POST",
-  }) as Promise<{ action: CopilotPendingAction }>;
+  }) as Promise<CopilotPendingActionDecision>;
 }
 
 export async function rejectCopilotPendingAction(
   runId: string,
   actionId: string
-): Promise<{ action: CopilotPendingAction }> {
+): Promise<CopilotPendingActionDecision> {
   return fetchJson(`/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/reject`, {
     method: "POST",
-  }) as Promise<{ action: CopilotPendingAction }>;
+  }) as Promise<CopilotPendingActionDecision>;
 }
 
 // Agents

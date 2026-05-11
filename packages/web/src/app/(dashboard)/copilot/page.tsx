@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { CircleAlert, Clock3, Play, RefreshCcw, Sparkles, Square } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import {
   getCopilotRun,
   listCopilotRuns,
   rejectCopilotPendingAction,
+  type CopilotPendingActionDecision,
   type CopilotPendingAction,
   type CopilotRun,
   type CopilotRunEvent,
@@ -150,10 +151,11 @@ export default function CopilotPage() {
 
   const approveMutation = useMutation({
     mutationFn: (action: CopilotPendingAction) => approveCopilotPendingAction(action.runId, action.id),
-    onSuccess: ({ action }) => {
+    onSuccess: (result) => {
       setErrorMessage("");
-      updatePendingAction(action, setActiveRun);
-      queryClient.invalidateQueries({ queryKey: ["copilot-run", action.runId] });
+      applyPendingActionResult(result, setActiveRun);
+      cachePendingActionResult(result, queryClient);
+      queryClient.invalidateQueries({ queryKey: ["copilot-run", result.action.runId] });
       queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
     },
     onError: (error) => setErrorMessage(readErrorMessage(error)),
@@ -162,10 +164,11 @@ export default function CopilotPage() {
 
   const rejectMutation = useMutation({
     mutationFn: (action: CopilotPendingAction) => rejectCopilotPendingAction(action.runId, action.id),
-    onSuccess: ({ action }) => {
+    onSuccess: (result) => {
       setErrorMessage("");
-      updatePendingAction(action, setActiveRun);
-      queryClient.invalidateQueries({ queryKey: ["copilot-run", action.runId] });
+      applyPendingActionResult(result, setActiveRun);
+      cachePendingActionResult(result, queryClient);
+      queryClient.invalidateQueries({ queryKey: ["copilot-run", result.action.runId] });
       queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
     },
     onError: (error) => setErrorMessage(readErrorMessage(error)),
@@ -597,5 +600,32 @@ function updatePendingAction(
         item.id === action.id ? action : item
       ),
     };
+  });
+}
+
+function applyPendingActionResult(
+  result: CopilotPendingActionDecision,
+  setActiveRun: Dispatch<SetStateAction<ActiveRunState | null>>
+): void {
+  if (!result.run) {
+    updatePendingAction(result.action, setActiveRun);
+    return;
+  }
+  setActiveRun({
+    run: result.run,
+    events: result.events ?? [],
+    pendingActions: result.pendingActions ?? [],
+  });
+}
+
+function cachePendingActionResult(
+  result: CopilotPendingActionDecision,
+  queryClient: QueryClient
+): void {
+  if (!result.run) return;
+  queryClient.setQueryData(["copilot-run", result.run.id], {
+    run: result.run,
+    events: result.events ?? [],
+    pendingActions: result.pendingActions ?? [],
   });
 }

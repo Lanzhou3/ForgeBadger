@@ -202,6 +202,35 @@ export class CopilotRepository {
     return this.getRun(id);
   }
 
+  updateRunIfStatus(
+    id: string,
+    expectedStatus: string,
+    input: UpdateCopilotRunInput
+  ): CopilotRun | undefined {
+    const existing = this.getRun(id);
+    if (!existing) return undefined;
+    this.db.prepare(`
+      UPDATE copilot_runs
+      SET status = ?, provider_profile_id = ?, model_profile_id = ?,
+        step_count = ?, error_code = ?, error_message = ?,
+        completed_at = ?, updated_at = ?
+      WHERE id = ? AND user_id = ? AND status = ?
+    `).run(
+      input.status ?? existing.status,
+      input.providerProfileId === undefined ? existing.providerProfileId : input.providerProfileId,
+      input.modelProfileId === undefined ? existing.modelProfileId : input.modelProfileId,
+      input.stepCount ?? existing.stepCount,
+      input.errorCode === undefined ? existing.errorCode : input.errorCode,
+      input.errorMessage === undefined ? existing.errorMessage : input.errorMessage,
+      input.completedAt === undefined ? existing.completedAt : input.completedAt,
+      Date.now(),
+      id,
+      this.userId,
+      expectedStatus
+    );
+    return this.getRun(id);
+  }
+
   addEvent(runId: string, input: CreateCopilotRunEventInput): CopilotRunEvent {
     if (!this.getRun(runId)) throw new Error("Copilot run not found");
     const id = randomUUID();

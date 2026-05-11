@@ -89,6 +89,40 @@ test("Copilot starter prompts fill the prompt without starting a run", async ({ 
 
 test("Copilot page prevents duplicate pending-action submissions", async ({ page }) => {
   let approveRequests = 0;
+  const pendingAction = {
+    id: "action-1",
+    runId: "run-approval",
+    type: "openforge.propose_memory_write",
+    status: "pending",
+    input: { kind: "decision", scope: "global", text: "Remember release gates." },
+  };
+  const approvedAction = { ...pendingAction, status: "approved" };
+  const completedRunDetail = {
+    run: {
+      id: "run-approval",
+      status: "completed",
+      goal: "Remember release decision",
+      source: "copilot",
+    },
+    events: [{
+      id: "event-approved",
+      runId: "run-approval",
+      type: "pending_action_approved",
+      sequence: 1,
+      message: "openforge.propose_memory_write",
+    }],
+    pendingActions: [approvedAction],
+  };
+  let currentRunDetail = {
+    run: {
+      id: "run-approval",
+      status: "waiting_for_approval",
+      goal: "Remember release decision",
+      source: "copilot",
+    },
+    events: [],
+    pendingActions: [pendingAction],
+  };
   await mockCopilotApis(page, {
     runs: [{
       id: "run-approval",
@@ -96,34 +130,17 @@ test("Copilot page prevents duplicate pending-action submissions", async ({ page
       goal: "Remember release decision",
       source: "copilot",
     }],
-    runDetail: {
-      run: {
-        id: "run-approval",
-        status: "waiting_for_approval",
-        goal: "Remember release decision",
-        source: "copilot",
-      },
-      events: [],
-      pendingActions: [{
-        id: "action-1",
-        runId: "run-approval",
-        type: "openforge.propose_memory_write",
-        status: "pending",
-        input: { kind: "decision", scope: "global", text: "Remember release gates." },
-      }],
+    onRunDetail: async (route) => {
+      await route.fulfill({ json: envelope(currentRunDetail) });
     },
     onApprove: async (route) => {
       approveRequests += 1;
       await new Promise((resolve) => setTimeout(resolve, 250));
+      currentRunDetail = completedRunDetail;
       await route.fulfill({
         json: envelope({
-          action: {
-            id: "action-1",
-            runId: "run-approval",
-            type: "openforge.propose_memory_write",
-            status: "approved",
-            input: { kind: "decision", scope: "global", text: "Remember release gates." },
-          },
+          action: approvedAction,
+          ...completedRunDetail,
         }),
       });
     },
@@ -136,6 +153,71 @@ test("Copilot page prevents duplicate pending-action submissions", async ({ page
   await approve.dblclick();
 
   await expect.poll(() => approveRequests).toBe(1);
+  await expect(page.getByText("completed").first()).toBeVisible();
+  await expect(page.getByText("Action approved")).toBeVisible();
+});
+
+test("Copilot page reflects rejected pending actions immediately", async ({ page }) => {
+  const pendingAction = {
+    id: "action-1",
+    runId: "run-approval",
+    type: "openforge.propose_troubleshooting_steps",
+    status: "pending",
+    input: { steps: ["Check provider setup"] },
+  };
+  const rejectedAction = { ...pendingAction, status: "rejected" };
+  const completedRunDetail = {
+    run: {
+      id: "run-approval",
+      status: "completed",
+      goal: "Prepare troubleshooting",
+      source: "copilot",
+    },
+    events: [{
+      id: "event-rejected",
+      runId: "run-approval",
+      type: "pending_action_rejected",
+      sequence: 1,
+      message: "openforge.propose_troubleshooting_steps",
+    }],
+    pendingActions: [rejectedAction],
+  };
+  let currentRunDetail = {
+    run: {
+      id: "run-approval",
+      status: "waiting_for_approval",
+      goal: "Prepare troubleshooting",
+      source: "copilot",
+    },
+    events: [],
+    pendingActions: [pendingAction],
+  };
+  await mockCopilotApis(page, {
+    runs: [{
+      id: "run-approval",
+      status: "waiting_for_approval",
+      goal: "Prepare troubleshooting",
+      source: "copilot",
+    }],
+    onRunDetail: async (route) => {
+      await route.fulfill({ json: envelope(currentRunDetail) });
+    },
+    onReject: async (route) => {
+      currentRunDetail = completedRunDetail;
+      await route.fulfill({
+        json: envelope({
+          action: rejectedAction,
+          ...completedRunDetail,
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByRole("button", { name: "Reject" }).click();
+
+  await expect(page.getByText("completed").first()).toBeVisible();
+  await expect(page.getByText("Action rejected")).toBeVisible();
 });
 
 async function mockCopilotApis(
@@ -144,6 +226,7 @@ async function mockCopilotApis(
     onRuns?: (route: Route) => Promise<void>;
     onRunDetail?: (route: Route) => Promise<void>;
     onApprove?: (route: Route) => Promise<void>;
+    onReject?: (route: Route) => Promise<void>;
     onCreateRun?: (route: Route) => Promise<void>;
     providerConfigured?: boolean;
     runs?: Array<Record<string, unknown>>;
@@ -212,6 +295,10 @@ async function mockCopilotApis(
     }
 
     if (url.pathname === "/api/v1/copilot/runs/run-approval") {
+      if (overrides.onRunDetail) {
+        await overrides.onRunDetail(route);
+        return;
+      }
       await route.fulfill({
         json: envelope(overrides.runDetail ?? {
           run: {
@@ -230,6 +317,15 @@ async function mockCopilotApis(
     if (url.pathname === "/api/v1/copilot/runs/run-approval/pending-actions/action-1/approve") {
       if (overrides.onApprove) {
         await overrides.onApprove(route);
+        return;
+      }
+      await route.fulfill({ json: envelope({}) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/runs/run-approval/pending-actions/action-1/reject") {
+      if (overrides.onReject) {
+        await overrides.onReject(route);
         return;
       }
       await route.fulfill({ json: envelope({}) });

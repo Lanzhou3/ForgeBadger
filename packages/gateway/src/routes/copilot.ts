@@ -130,7 +130,9 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
       approvedBy: userIdFor(req),
       approvedAt: Date.now()
     });
-    res.json({ code: 0, data: { action: updated }, message: "" });
+    recordPendingActionDecision(repo, action, "approved");
+    const run = completeRunIfNoPendingActions(repo, target.run);
+    res.json(pendingActionEnvelope(updated as CopilotPendingAction, run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
   });
 
   router.post("/runs/:id/pending-actions/:actionId/reject", (req, res) => {
@@ -144,8 +146,13 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         details: { code: "copilot_run_not_approvable", status: target.run.status }
       });
     }
-    const updated = repo.updatePendingAction(target.action.id, { status: "rejected" });
-    res.json({ code: 0, data: { action: updated }, message: "" });
+    const updated = repo.updatePendingAction(target.action.id, {
+      status: "rejected",
+      result: { reason: "user_rejected" }
+    });
+    recordPendingActionDecision(repo, target.action, "rejected");
+    const run = completeRunIfNoPendingActions(repo, target.run);
+    res.json(pendingActionEnvelope(updated as CopilotPendingAction, run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
   });
 
   return router;
@@ -167,6 +174,19 @@ function successEnvelope(
   return {
     code: 0,
     data: { run, events, pendingActions },
+    message: ""
+  };
+}
+
+function pendingActionEnvelope(
+  action: CopilotPendingAction,
+  run: CopilotRun,
+  events: CopilotRunEvent[],
+  pendingActions: CopilotPendingAction[]
+) {
+  return {
+    code: 0,
+    data: { action, run, events, pendingActions },
     message: ""
   };
 }
@@ -200,6 +220,32 @@ function rejectPendingActions(repo: CopilotRepository, runId: string): void {
       });
     }
   }
+}
+
+function recordPendingActionDecision(
+  repo: CopilotRepository,
+  action: CopilotPendingAction,
+  decision: "approved" | "rejected"
+): CopilotRunEvent {
+  return repo.addEvent(action.runId, {
+    type: `pending_action_${decision}`,
+    message: action.type,
+    payload: {
+      actionId: action.id,
+      actionType: action.type,
+      status: decision
+    }
+  });
+}
+
+function completeRunIfNoPendingActions(repo: CopilotRepository, run: CopilotRun): CopilotRun {
+  const hasPendingActions = repo.listPendingActions(run.id).some((action) => action.status === "pending");
+  const current = repo.getRun(run.id) ?? run;
+  if (hasPendingActions || current.status !== "waiting_for_approval") return current;
+  return repo.updateRunIfStatus(current.id, "waiting_for_approval", {
+    status: "completed",
+    completedAt: Date.now()
+  }) ?? current;
 }
 
 function findPendingActionTarget(

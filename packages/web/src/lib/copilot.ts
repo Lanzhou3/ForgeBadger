@@ -16,6 +16,8 @@ const eventLabels: Record<string, string> = {
   run_failed: "Run failed",
   tool_call_requested: "Tool requested",
   tool_result: "Tool result",
+  pending_action_approved: "Action approved",
+  pending_action_rejected: "Action rejected",
 };
 
 const eventLabelKeys: Record<string, TranslationKey> = {
@@ -23,6 +25,8 @@ const eventLabelKeys: Record<string, TranslationKey> = {
   run_failed: "copilot.event.runFailed",
   tool_call_requested: "copilot.event.toolRequested",
   tool_result: "copilot.event.toolResult",
+  pending_action_approved: "copilot.event.pendingActionApproved",
+  pending_action_rejected: "copilot.event.pendingActionRejected",
 };
 
 const pendingActionLabels: Record<string, string> = {

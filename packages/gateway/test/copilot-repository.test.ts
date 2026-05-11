@@ -96,6 +96,24 @@ describe("CopilotRepository", () => {
     assert.deepEqual(action.input, { key: "theme", value: "dark" });
   });
 
+  it("updates runs only when the current status matches", () => {
+    const run = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Complete after approval"
+    });
+
+    const cancelled = repo.updateRun(run.id, { status: "cancelled" });
+    const result = repo.updateRunIfStatus(run.id, "waiting_for_approval", {
+      status: "completed",
+      completedAt: Date.now()
+    });
+
+    assert.equal(cancelled?.status, "cancelled");
+    assert.equal(result?.status, "cancelled");
+    assert.equal(repo.getRun(run.id)?.status, "cancelled");
+  });
+
   it("prevents cross-user reads and writes", () => {
     const run = repo.createRun({
       status: "running",

@@ -253,6 +253,27 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.action.status, "rejected");
   });
 
+  it("completes waiting runs and records an event after rejecting the last pending action", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_troubleshooting_steps");
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/reject`,
+      undefined,
+      authHeaders()
+    );
+
+    const repo = new CopilotRepository(db, userId);
+    const events = repo.listEvents(runId);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.run.status, "completed");
+    assert.equal(typeof res.body.data.run.completedAt, "number");
+    assert.equal(repo.getRun(runId)?.status, "completed");
+    assert.equal(events.at(-1)?.type, "pending_action_rejected");
+    assert.equal(events.at(-1)?.message, "openforge.propose_troubleshooting_steps");
+  });
+
   it("requires authenticated route approval so the model cannot self-approve", async () => {
     const { runId, actionId } = createPendingAction(userId, "openforge.propose_diagnostics_export");
 
@@ -294,6 +315,28 @@ describe("copilot routes", () => {
       (res.body.data.action.result as { entry: { id: string } }).entry.id,
       entries[0]?.id
     );
+  });
+
+  it("completes waiting runs and records an event after approving the last pending action", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_diagnostics_export");
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const repo = new CopilotRepository(db, userId);
+    const events = repo.listEvents(runId);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.action.status, "approved");
+    assert.equal(res.body.data.run.status, "completed");
+    assert.equal(typeof res.body.data.run.completedAt, "number");
+    assert.equal(repo.getRun(runId)?.status, "completed");
+    assert.equal(events.at(-1)?.type, "pending_action_approved");
+    assert.equal(events.at(-1)?.message, "openforge.propose_diagnostics_export");
   });
 
   it("does not approve invalid stored memory-write actions", async () => {
