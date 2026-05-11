@@ -13,13 +13,20 @@ import {
   cancelCopilotRun,
   createCopilotRun,
   getCopilotCapabilities,
+  getCopilotRun,
   listCopilotRuns,
   rejectCopilotPendingAction,
   type CopilotPendingAction,
   type CopilotRun,
   type CopilotRunEvent,
 } from "@/lib/api";
-import { getCopilotEventLabel, getCopilotPendingActionLabel, getCopilotStatusTone } from "@/lib/copilot";
+import {
+  getCopilotEventLabel,
+  getCopilotPendingActionLabel,
+  getCopilotStatusTone,
+  isCopilotRunLive,
+  resolveCopilotRunSelection,
+} from "@/lib/copilot";
 
 interface ActiveRunState {
   run: CopilotRun;
@@ -32,6 +39,7 @@ export default function CopilotPage() {
   const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<ActiveRunState | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
 
   const { data: capabilityData, isLoading: capabilitiesLoading } = useQuery({
@@ -44,9 +52,24 @@ export default function CopilotPage() {
   });
 
   const runs = runData?.runs ?? [];
-  const latestRun = activeRun?.run ?? runs[0] ?? null;
-  const timelineEvents = activeRun?.events ?? [];
-  const pendingActions = activeRun?.pendingActions ?? [];
+  const resolvedRunId = resolveCopilotRunSelection({
+    selectedRunId,
+    activeRunId: activeRun?.run.id,
+    runs,
+  });
+  const { data: selectedRunData, isFetching: selectedRunLoading } = useQuery({
+    queryKey: ["copilot-run", resolvedRunId],
+    queryFn: () => getCopilotRun(resolvedRunId as string),
+    enabled: Boolean(resolvedRunId),
+    refetchInterval: (query) =>
+      isCopilotRunLive(query.state.data?.run.status ?? "") ? 4_000 : false,
+  });
+  const selectedRunState =
+    selectedRunData ??
+    (activeRun && activeRun.run.id === resolvedRunId ? activeRun : null);
+  const latestRun = selectedRunState?.run ?? runs.find((run) => run.id === resolvedRunId) ?? runs[0] ?? null;
+  const timelineEvents = selectedRunState?.events ?? [];
+  const pendingActions = selectedRunState?.pendingActions ?? [];
   const promptReady = prompt.trim().length > 0;
   const providerSetupError = isProviderSetupError(errorMessage);
 
@@ -62,7 +85,9 @@ export default function CopilotPage() {
       setPrompt("");
       setErrorMessage("");
       setActiveRun(result);
+      setSelectedRunId(result.run.id);
       queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
+      queryClient.invalidateQueries({ queryKey: ["copilot-run", result.run.id] });
     },
     onError: (error) => setErrorMessage(readErrorMessage(error)),
   });
@@ -72,20 +97,30 @@ export default function CopilotPage() {
     onSuccess: (result) => {
       setErrorMessage("");
       setActiveRun(result);
+      setSelectedRunId(result.run.id);
       queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
+      queryClient.invalidateQueries({ queryKey: ["copilot-run", result.run.id] });
     },
     onError: (error) => setErrorMessage(readErrorMessage(error)),
   });
 
   const approveMutation = useMutation({
     mutationFn: (action: CopilotPendingAction) => approveCopilotPendingAction(action.runId, action.id),
-    onSuccess: ({ action }) => updatePendingAction(action, setActiveRun),
+    onSuccess: ({ action }) => {
+      updatePendingAction(action, setActiveRun);
+      queryClient.invalidateQueries({ queryKey: ["copilot-run", action.runId] });
+      queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
+    },
     onError: (error) => setErrorMessage(readErrorMessage(error)),
   });
 
   const rejectMutation = useMutation({
     mutationFn: (action: CopilotPendingAction) => rejectCopilotPendingAction(action.runId, action.id),
-    onSuccess: ({ action }) => updatePendingAction(action, setActiveRun),
+    onSuccess: ({ action }) => {
+      updatePendingAction(action, setActiveRun);
+      queryClient.invalidateQueries({ queryKey: ["copilot-run", action.runId] });
+      queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
+    },
     onError: (error) => setErrorMessage(readErrorMessage(error)),
   });
 
@@ -101,7 +136,12 @@ export default function CopilotPage() {
         </div>
         <Button
           variant="outline"
-          onClick={() => queryClient.invalidateQueries({ queryKey: ["copilot-runs"] })}
+          onClick={() => {
+            queryClient.invalidateQueries({ queryKey: ["copilot-runs"] });
+            if (resolvedRunId) {
+              queryClient.invalidateQueries({ queryKey: ["copilot-run", resolvedRunId] });
+            }
+          }}
         >
           <RefreshCcw className="mr-2 size-4" />
           {t("copilot.refresh")}
@@ -168,7 +208,10 @@ export default function CopilotPage() {
             </CardHeader>
             <CardContent>
               {latestRun ? (
-                <RunTimeline events={timelineEvents} noEventsLabel={t("copilot.noEvents")} />
+                <RunTimeline
+                  events={timelineEvents}
+                  noEventsLabel={selectedRunLoading ? t("common.loading") : t("copilot.noEvents")}
+                />
               ) : (
                 <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
                   {runsLoading ? t("common.loading") : t("copilot.noRuns")}
@@ -209,7 +252,18 @@ export default function CopilotPage() {
                 </div>
               ) : (
                 runs.map((run) => (
-                  <div key={run.id} className="rounded-md border border-border p-3">
+                  <button
+                    key={run.id}
+                    type="button"
+                    aria-pressed={run.id === resolvedRunId}
+                    className={`w-full rounded-md border p-3 text-left transition-colors hover:border-brand/60 hover:bg-muted/30 ${
+                      run.id === resolvedRunId ? "border-brand/60 bg-brand/10" : "border-border"
+                    }`}
+                    onClick={() => {
+                      setSelectedRunId(run.id);
+                      setErrorMessage("");
+                    }}
+                  >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0 truncate text-sm font-medium">{run.goal}</div>
                       <StatusBadge status={run.status} />
@@ -217,7 +271,7 @@ export default function CopilotPage() {
                     <div className="mt-2 text-xs text-muted-foreground">
                       {run.source}
                     </div>
-                  </div>
+                  </button>
                 ))
               )}
             </CardContent>

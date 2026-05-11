@@ -20,6 +20,12 @@ const pendingActionLabels: Record<string, string> = {
   "openforge.propose_memory_write": "Memory write",
 };
 
+export interface ResolveCopilotRunSelectionInput {
+  selectedRunId?: string | null;
+  activeRunId?: string | null;
+  runs: Array<{ id: string }>;
+}
+
 export function getCopilotStatusTone(status: string): CopilotStatusTone {
   return statusTones[status] ?? "muted";
 }
@@ -30,6 +36,14 @@ export function getCopilotEventLabel(type: string): string {
 
 export function getCopilotPendingActionLabel(type: string): string {
   return pendingActionLabels[type] ?? humanizeToken(type);
+}
+
+export function resolveCopilotRunSelection(input: ResolveCopilotRunSelectionInput): string | null {
+  return input.selectedRunId ?? input.activeRunId ?? input.runs[0]?.id ?? null;
+}
+
+export function isCopilotRunLive(status: string): boolean {
+  return status === "queued" || status === "running" || status === "waiting_for_approval";
 }
 
 function humanizeToken(value: string): string {
