@@ -18,6 +18,9 @@
 - Existing route mount pattern: `packages/gateway/src/routes/index.ts`
 - Existing Web API client: `packages/web/src/lib/api.ts`
 - Sidebar navigation: `packages/web/src/components/layout/sidebar.tsx`
+- OpenClaw reference: provider-owned runtime seams, memory recall tools, active
+  memory gating, session tool visibility, and exec approval canonical-plan
+  handling.
 
 ## Scope Boundaries
 
@@ -38,6 +41,31 @@ This plan excludes:
 - Dependency install or git operations.
 - Codex app-server prompt or `/turn` UI.
 - SSH/remote execution integration.
+- Cross-session send/spawn or autonomous sub-agent orchestration.
+- Silent long-term memory writes.
+
+## OpenClaw Reference Constraints
+
+The OpenClaw reference should influence module boundaries, not relax OpenForge
+safety. Apply these constraints while implementing:
+
+- Keep the first provider implementation concrete, but isolate provider-specific
+  transport, tool-schema, auth-hint, and failover behavior behind
+  `CopilotModelClient` / provider-selection seams so future provider quirks do
+  not leak across the orchestrator.
+- Treat memory as explicit Gateway-owned product state. OpenClaw uses Markdown
+  memory files; OpenForge should use tenant-scoped SQLite rows first, with
+  optional Markdown export/import later.
+- Add memory recall only as bounded tools (`openforge.memory_search`,
+  `openforge.memory_get`) and add memory writes only as prepared actions
+  (`openforge.propose_memory_write`).
+- If an active-recall pass is added, it can call only memory tools, must have a
+  hard timeout and circuit breaker, and must continue the run with no memory
+  context when recall is unavailable or weak.
+- Do not add OpenClaw-style host exec, session send, session spawn, or
+  background sub-agent tools to this Copilot release.
+- Pending-action approval must execute the canonical stored action payload. Do
+  not trust a fresh client payload at approval time.
 
 ## File Map
 
@@ -902,6 +930,114 @@ git commit -m "docs: document platform copilot"
 
 ---
 
+### Task 8: Copilot Memory Module Follow-Up
+
+This is a follow-up task after the provider-backed Copilot and approval-gated
+tool surface are stable. Do not block the first implementation PR on this task.
+
+**Files:**
+- Create: `packages/gateway/src/db/migrations/0014_copilot_memory.sql`
+- Create: `packages/gateway/src/db/repositories/copilot-memory-repository.ts`
+- Create: `packages/gateway/src/services/copilot/memory.ts`
+- Modify: `packages/gateway/src/services/copilot/tool-registry.ts`
+- Modify: `packages/gateway/src/services/copilot/read-tools.ts`
+- Modify: `packages/gateway/src/services/copilot/orchestrator.ts`
+- Modify: `packages/gateway/src/routes/copilot.ts`
+- Modify: `packages/gateway/src/db/schema.ts`
+- Test: `packages/gateway/test/copilot-memory-repository.test.ts`
+- Test: `packages/gateway/test/copilot-tools.test.ts`
+- Test: `packages/gateway/test/copilot-routes.test.ts`
+
+- [ ] **Step 1: Write memory persistence tests first**
+
+Cover:
+
+- durable memory rows are scoped by `user_id`;
+- project-scoped and global memory can be listed separately;
+- working notes are not returned as durable memory unless explicitly queried;
+- cross-user reads return empty results;
+- secret-looking values are redacted before persistence.
+
+- [ ] **Step 2: Add tenant-scoped memory schema**
+
+Start with SQLite/FTS only:
+
+- `copilot_memory_entries`: durable curated facts, preferences, decisions,
+  project notes, `scope`, `project_id`, `source_run_id`, `redacted_text`,
+  timestamps.
+- `copilot_memory_notes`: recent working notes and observations, scoped by user,
+  project/session when available, timestamps.
+- `copilot_memory_fts`: FTS5 table over redacted durable text and note text.
+
+Do not add embeddings in this task. Embeddings require a separate privacy and
+provider-cost review.
+
+- [ ] **Step 3: Implement `CopilotMemoryRepository`**
+
+Required methods:
+
+```ts
+createEntry(input: CreateMemoryEntryInput): CopilotMemoryEntry;
+createNote(input: CreateMemoryNoteInput): CopilotMemoryNote;
+search(input: SearchMemoryInput): CopilotMemorySearchResult[];
+getEntry(id: string): CopilotMemoryEntry | undefined;
+listEntries(input: ListMemoryInput): CopilotMemoryEntry[];
+```
+
+Every method must apply `WHERE user_id = ?`.
+
+- [ ] **Step 4: Add memory tools**
+
+Add tools:
+
+- `openforge.memory_search`: bounded FTS/BM25 search with max result clamp,
+  redacted snippets, and source metadata.
+- `openforge.memory_get`: exact bounded read of one memory entry or note the
+  user can access.
+- `openforge.propose_memory_write`: creates a pending action; it does not write
+  durable memory directly.
+
+- [ ] **Step 5: Optional active recall pass**
+
+If added in this task, active recall must be opt-in per Copilot run or
+user-facing Copilot source, not platform-wide. It must:
+
+- use only memory tools;
+- include only the current prompt and small recent Copilot context;
+- timeout quickly;
+- open a circuit breaker after repeated timeouts;
+- continue the main run with no injected memory when recall fails or is weak.
+
+- [ ] **Step 6: Update docs and diagnostics**
+
+Document:
+
+- memory is explicit and tenant-scoped;
+- no silent long-term writes;
+- no raw terminal transcript indexing;
+- embeddings are not part of the first memory release.
+
+- [ ] **Step 7: Run verification**
+
+Run:
+
+```bash
+pnpm --dir packages/gateway test -- test/copilot-memory-repository.test.ts test/copilot-tools.test.ts test/copilot-routes.test.ts
+pnpm --dir packages/gateway typecheck
+git diff --check
+```
+
+Expected: PASS.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add packages/gateway/src/db/schema.ts packages/gateway/src/db/migrations/0014_copilot_memory.sql packages/gateway/src/db/repositories/copilot-memory-repository.ts packages/gateway/src/services/copilot packages/gateway/src/routes/copilot.ts packages/gateway/test/copilot-memory-repository.test.ts packages/gateway/test/copilot-tools.test.ts packages/gateway/test/copilot-routes.test.ts docs
+git commit -m "feat: add copilot memory"
+```
+
+---
+
 ## Final Acceptance Checklist
 
 - [ ] Copilot provider selection uses Provider SSOT and encrypted provider credentials.
@@ -910,9 +1046,12 @@ git commit -m "docs: document platform copilot"
 - [ ] Web does not call provider APIs directly.
 - [ ] No Next.js API routes are added.
 - [ ] No terminal input, shell, file write, dependency install, git operation, or Codex app-server `/turn` tool exists.
+- [ ] No OpenClaw-style session send/spawn or host exec tool exists.
 - [ ] Tool execution is Gateway-validated with zod schemas.
 - [ ] Pending actions require explicit user approval.
+- [ ] Pending-action approval executes the stored canonical action payload.
 - [ ] Audit or run events record model calls and tool actions without storing secrets.
+- [ ] If memory is implemented, it is tenant-scoped, redacted, bounded, and explicit.
 - [ ] Gateway tests pass.
 - [ ] Web tests pass.
 - [ ] Gateway and Web typechecks pass.
@@ -920,4 +1059,4 @@ git commit -m "docs: document platform copilot"
 
 ## Suggested Implementation Order
 
-For the first implementation PR, stop after Task 4 if risk or time grows. That produces a useful Copilot text-run surface without tools. Continue to Task 5 and Task 6 only after the provider-backed text run is stable and reviewed.
+For the first implementation PR, stop after Task 4 if risk or time grows. That produces a useful Copilot text-run surface without tools. Continue to Task 5 and Task 6 only after the provider-backed text run is stable and reviewed. Treat Task 8 as a follow-up memory PR after the base Copilot safety and approval path are proven.

@@ -1,8 +1,8 @@
 # Platform AI Copilot Design
 
 Date: 2026-05-11
-Status: Confirmed; ready for implementation-plan breakdown
-Scope: first platform-side AI Copilot architecture, before implementation-plan breakdown
+Status: Confirmed; implementation plan updated with OpenClaw reference input
+Scope: first platform-side AI Copilot architecture, before implementation
 
 ## Roadmap Context
 
@@ -178,6 +178,51 @@ Requirements:
 If no compatible provider is configured, Copilot UI should show a setup state
 that links to model/provider configuration.
 
+### OpenClaw reference adaptation
+
+OpenClaw is a useful reference for the AI/provider/memory shape, but its product
+model is a personal assistant with broad host and session tools. OpenForge should
+borrow the seams, not the default power level.
+
+Adopt:
+
+- provider-specific behavior behind explicit provider/runtime seams;
+- memory recall as a bounded tool surface, not hidden global state;
+- session visibility checks before any cross-session read;
+- short timeouts, circuit breakers, and fail-closed behavior around recall;
+- approval records that capture the exact prepared action being approved.
+
+Do not adopt in the first Copilot release:
+
+- host exec/raw shell tools;
+- cross-session send/spawn tools;
+- channel integrations or direct-message pairing flows;
+- automatic memory writes from every conversation;
+- model-controlled terminal input.
+
+Provider implication: keep the first implementation small with concrete OpenAI
+Responses and Anthropic Messages adapters, but shape `CopilotModelClient` and
+provider selection so provider-specific transport quirks, tool schema cleanup,
+auth hints, and failover classification can become provider-owned extensions
+later instead of hardcoded conditionals spread through the orchestrator.
+
+Memory implication: add memory as a separate Copilot module after the base
+provider-backed run works. OpenClaw's useful pattern is layered memory plus
+tools:
+
+- a curated durable layer for preferences, standing decisions, and stable facts;
+- a working-note layer for recent context and observations;
+- `memory_search` / `memory_get` style bounded recall tools;
+- an optional active-recall pass that can only call memory tools and must return
+  no context when relevance is weak.
+
+For OpenForge, the source of truth should be tenant-scoped Gateway persistence,
+not arbitrary workspace Markdown. A later export/sync can render Markdown for
+human review, but product memory must preserve user isolation, redaction,
+auditing, and diagnostics omission rules. The first memory implementation should
+start with SQLite FTS/BM25 over curated Copilot memory rows and only add vector
+embeddings after the Provider SSOT and privacy controls are proven.
+
 ### Copilot runs
 
 A Copilot run is a bounded model/tool loop started by a user prompt or a
@@ -241,12 +286,15 @@ Read tools:
 - `openforge.get_adapter_discovery`
 - `openforge.get_diagnostics_summary`
 - `openforge.get_recent_activity`
+- later, after the memory module exists: `openforge.memory_search`
+- later, after the memory module exists: `openforge.memory_get`
 
 Prepare tools:
 
 - `openforge.propose_session_create`
 - `openforge.propose_diagnostics_export`
 - `openforge.propose_troubleshooting_steps`
+- later, after the memory module exists: `openforge.propose_memory_write`
 
 Approval-gated actions:
 
@@ -263,6 +311,7 @@ Excluded tools:
 - dependency install;
 - git commit/push/merge;
 - Codex app-server `turn/start`.
+- cross-session send/spawn or sub-agent orchestration.
 
 ## Approval Model
 
@@ -290,11 +339,14 @@ Required controls:
 - Per-user run concurrency limit.
 - Request timeout and cancellation.
 - Provider credential redaction.
+- Memory recall result truncation and redaction before tool output is persisted.
 - Attach-token redaction.
 - API key, bearer token, password, private-key, and `sk-` style redaction.
 - No terminal transcript persistence by default.
 - Audit events for run start, tool call, pending action creation, approval,
   rejection, completion, and failure.
+- Approved actions must execute the canonical stored action payload, not a
+  client-supplied payload from the approval request.
 
 The Copilot must fail closed. If a tool result is too large, contains suspected
 secrets, or crosses a path/tenant boundary, Gateway returns a redacted error
@@ -397,7 +449,25 @@ Acceptance:
 - Web distinguishes proposed, approved, rejected, and executed actions.
 - Audit logs link approval to the user and Copilot run.
 
-### Phase 4: UX hardening and beta feedback
+### Phase 4: Copilot memory module
+
+Add tenant-scoped memory after the base Copilot and tool registry are stable.
+
+First memory release:
+
+- Durable memory rows for stable preferences, project decisions, and operator
+  notes.
+- Working memory notes for recent Copilot observations.
+- SQLite FTS search with bounded snippets and line/row references.
+- `openforge.memory_search` and `openforge.memory_get` read tools.
+- `openforge.propose_memory_write` prepare action; no silent writes.
+- Optional active-recall pre-run pass only on user-facing Copilot runs, with
+  small context, hard timeout, and fail-closed "no useful memory" behavior.
+
+Later memory releases can add embeddings, MMR/diversity, temporal decay, and
+Markdown export/import once provider/privacy boundaries are validated.
+
+### Phase 5: UX hardening and beta feedback
 
 Add focused docs, diagnostics fields, starter prompts, and manual smoke.
 
@@ -429,6 +499,14 @@ Each of these must have its own security review before implementation.
 - Anthropic Claude tool use:
   `https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools`
   and `https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview`.
+- OpenClaw reference points:
+  `https://github.com/openclaw/openclaw`,
+  `https://docs.openclaw.ai/concepts/model-providers`,
+  `https://docs.openclaw.ai/concepts/memory`,
+  `https://docs.openclaw.ai/concepts/memory-search`,
+  `https://docs.openclaw.ai/concepts/active-memory`,
+  `https://docs.openclaw.ai/concepts/session-tool`,
+  and `https://docs.openclaw.ai/tools/exec-approvals`.
 
 ## Decision
 
