@@ -39,7 +39,7 @@ export function selectCopilotProvider(input: SelectCopilotProviderInput): Select
     selection: {
       provider: selected.provider,
       model: selected.model,
-      format: selected.provider.apiFormat,
+      format: selected.provider.apiFormat as CopilotProviderFormat,
       clientKind: clientKind.kind,
       apiKey: credential.apiKey
     }

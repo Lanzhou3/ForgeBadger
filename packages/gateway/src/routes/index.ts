@@ -29,6 +29,7 @@ import {
 } from "./codex-app-server.js";
 import { createCodexSubscriptionRoutes } from "./codex-subscription.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
+import { createCopilotRoutes } from "./copilot.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
@@ -81,5 +82,9 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     db: deps.db,
     masterKey: deps.masterKey,
     appVersion: deps.appVersion
+  }));
+  app.use("/api/v1/copilot", createCopilotRoutes({
+    db: deps.db,
+    masterKey: deps.masterKey
   }));
 }
