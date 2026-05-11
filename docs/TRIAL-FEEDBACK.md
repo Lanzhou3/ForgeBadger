@@ -33,8 +33,14 @@ codex --version
 
 Diagnostics are generated locally and are not uploaded automatically.
 
+Preferred path:
+
 1. Log in to the Web console.
-2. Export diagnostics from the authenticated local API:
+2. Open Settings.
+3. Click **Export diagnostics JSON**.
+4. Attach the downloaded redacted diagnostics file to the issue or handoff note.
+
+Fallback local API path:
 
 ```bash
 curl --noproxy '*' -fsS \
@@ -42,10 +48,9 @@ curl --noproxy '*' -fsS \
   http://127.0.0.1:48731/api/v1/diagnostics/export
 ```
 
-3. For local trial use, get `<token>` from the logged-in browser session:
+For local trial use, get `<token>` from the logged-in browser session:
    browser developer tools -> Application or Storage -> Local Storage ->
    `openforge.token`.
-4. Attach the redacted diagnostics output to the issue or handoff note.
 
 Do not include plaintext API keys, passwords, tokens, private keys, unrelated
 project secrets, or the `openforge.token` value.

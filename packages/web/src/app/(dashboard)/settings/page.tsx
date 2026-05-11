@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Cpu, FlaskConical, Globe2, KeyRound, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
+import { Bell, Cpu, Download, FlaskConical, Globe2, KeyRound, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,7 @@ import {
   setBrowserNotificationPreference,
   type BrowserNotificationPermission,
 } from "@/lib/browser-notifications";
-import { discoverAdapters, listAuditLogs, type AdapterDiscovery } from "@/lib/api";
+import { discoverAdapters, exportDiagnostics, listAuditLogs, type AdapterDiscovery, type LocalDiagnosticsExport } from "@/lib/api";
 import type { Language } from "@/lib/i18n";
 
 const languageOptions = [
@@ -37,6 +37,7 @@ export default function SettingsPage() {
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(false);
   const [browserNotificationPermission, setBrowserNotificationPermission] =
     useState<BrowserNotificationPermission>("unsupported");
+  const [diagnosticsState, setDiagnosticsState] = useState<"idle" | "exporting" | "success" | "error">("idle");
   const { data: adapterData, isLoading: adaptersLoading } = useQuery({
     queryKey: ["adapter-discovery"],
     queryFn: discoverAdapters,
@@ -67,6 +68,17 @@ export default function SettingsPage() {
     const allowed = permission === "granted";
     setBrowserNotificationPreference(allowed);
     setBrowserNotificationsEnabled(allowed);
+  }
+
+  async function handleDiagnosticsExport() {
+    setDiagnosticsState("exporting");
+    try {
+      const { report } = await exportDiagnostics();
+      downloadDiagnosticsReport(report);
+      setDiagnosticsState("success");
+    } catch {
+      setDiagnosticsState("error");
+    }
   }
 
   return (
@@ -223,6 +235,39 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
+                <Download className="size-4 text-muted-foreground" />
+                <CardTitle>{t("settings.diagnostics")}</CardTitle>
+              </div>
+              <CardDescription>
+                {t("settings.diagnosticsDescription")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-start"
+                onClick={handleDiagnosticsExport}
+                disabled={diagnosticsState === "exporting"}
+              >
+                <Download className="mr-2 size-4" />
+                {diagnosticsState === "exporting"
+                  ? t("settings.diagnosticsExporting")
+                  : t("settings.diagnosticsExport")}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                {diagnosticsState === "success"
+                  ? t("settings.diagnosticsExported")
+                  : diagnosticsState === "error"
+                    ? t("settings.diagnosticsExportFailed")
+                    : t("settings.diagnosticsNotice")}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
                 <ScrollText className="size-4 text-muted-foreground" />
                 <CardTitle>{t("settings.auditHistory")}</CardTitle>
               </div>
@@ -254,6 +299,19 @@ export default function SettingsPage() {
       </div>
     </div>
   );
+}
+
+function downloadDiagnosticsReport(report: LocalDiagnosticsExport) {
+  const generatedAt = report.generatedAt.replace(/[:.]/g, "-");
+  const blob = new Blob([`${JSON.stringify(report, null, 2)}\n`], {
+    type: "application/json"
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `openforge-diagnostics-${generatedAt}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function AdapterItem({ adapter }: { adapter: AdapterDiscovery }) {

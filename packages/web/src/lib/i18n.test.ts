@@ -7,6 +7,9 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "settings.title")).toBe("设置");
     expect(getTranslation("zh-TW", "settings.title")).toBe("設定");
     expect(getTranslation("en", "settings.title")).toBe("Settings");
+    expect(getTranslation("zh-CN", "settings.diagnostics")).toBe("诊断导出");
+    expect(getTranslation("zh-TW", "settings.diagnosticsExport")).toContain("診斷 JSON");
+    expect(getTranslation("en", "settings.diagnosticsNotice")).toContain("not uploaded automatically");
     expect(getTranslation("zh-CN", "projects.configNeedsReviewTitle")).toBe("配置需要处理");
     expect(getTranslation("zh-TW", "projects.configNeedsReviewTitle")).toBe("設定需要處理");
     expect(getTranslation("en", "projects.configNeedsReviewTitle")).toBe("Config needs review");

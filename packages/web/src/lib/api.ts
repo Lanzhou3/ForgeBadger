@@ -172,6 +172,27 @@ export interface DependencyReport {
   terminalRuntime?: TerminalRuntimeStatus;
 }
 
+export interface LocalDiagnosticsExport {
+  generatedAt: string;
+  app: {
+    name: "OpenForge";
+    version: string;
+  };
+  runtime: {
+    node: string;
+    platform: string;
+    arch: string;
+  };
+  counts: Record<string, number>;
+  dashboardHealth: unknown;
+  adapters: Array<{
+    id: string;
+    command: string;
+    runtimeModes: string[];
+  }>;
+  environment: Record<string, unknown>;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -909,6 +930,10 @@ export async function listAuditLogs(
   if (options.action) searchParams.set("action", options.action);
   const query = searchParams.toString();
   return fetchJson(`/api/v1/audit-logs${query ? `?${query}` : ""}`) as Promise<{ auditLogs: AuditLog[] }>;
+}
+
+export async function exportDiagnostics(): Promise<{ report: LocalDiagnosticsExport }> {
+  return fetchJson("/api/v1/diagnostics/export") as Promise<{ report: LocalDiagnosticsExport }>;
 }
 
 export async function listActivities(params: {

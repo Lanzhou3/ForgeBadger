@@ -64,7 +64,7 @@ write what Claude Code asked, what OpenForge showed, and what happened next
 
 ## Diagnostics And Evidence
 
-- [ ] Exported diagnostics, if available.
+- [ ] Exported diagnostics from Settings.
 - [ ] Checked browser console for errors.
 - [ ] Checked browser Network tab for failed requests.
 - [ ] Added screenshots or written observations.

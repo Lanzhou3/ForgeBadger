@@ -23,6 +23,7 @@ import {
   deleteTemplate,
   defaultConfigConflictDecisions,
   discoverAdapters,
+  exportDiagnostics,
   exportTemplate,
   getDashboardSummary,
   getDependencies,
@@ -211,6 +212,29 @@ describe("api client", () => {
       "http://127.0.0.1:48731/api/v1/adapters/discovery",
       expect.objectContaining({ headers: expect.any(Object) })
     );
+  });
+
+  it("exports local diagnostics through REST", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({
+      report: {
+        generatedAt: "2026-05-11T00:00:00.000Z",
+        app: { name: "OpenForge", version: "0.0.0" },
+        runtime: { node: "v22.0.0", platform: "linux", arch: "x64" },
+        counts: { projects: 1 },
+        dashboardHealth: {},
+        adapters: [{ id: "claude", command: "claude", runtimeModes: ["terminal"] }],
+        environment: { OPENFORGE_PORT: "48731" },
+      },
+    })));
+
+    const result = await exportDiagnostics();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/diagnostics/export",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(result.report.app.name).toBe("OpenForge");
+    expect(result.report.environment.OPENFORGE_PORT).toBe("48731");
   });
 
   it("creates Gate A sessions with the current login token", async () => {
