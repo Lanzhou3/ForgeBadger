@@ -203,6 +203,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
             counts: diagnostics.counts,
             dashboardHealth: diagnostics.dashboardHealth,
             adapters: diagnostics.adapters,
+            modelProviders: diagnostics.modelProviders,
             copilot: diagnostics.copilot
           }
         };

@@ -13,6 +13,7 @@ import { ProjectRepository } from "../src/db/repositories/project-repository.js"
 import { ActivityRepository } from "../src/db/repositories/activity-repository.js";
 import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
 import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
+import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { createCopilotToolRegistry, executeCopilotTool, toModelToolDefinitions } from "../src/services/copilot/tool-registry.js";
 import { createCopilotReadTools } from "../src/services/copilot/read-tools.js";
@@ -182,6 +183,35 @@ describe("copilot tools", () => {
       path: "/tmp/openforge",
       aiTool: "claude"
     });
+    const providers = new ModelProviderRepository(db, userId, masterKey);
+    const provider = providers.createProviderProfile({
+      name: "OpenAI",
+      providerKey: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      authType: "api_key",
+      apiFormat: "openai",
+      supportedAdapters: ["opencode"],
+      defaultHeaders: { "x-secret-header": "secret-header-value" }
+    });
+    providers.createModelProfile({
+      providerProfileId: provider.id,
+      name: "GPT 5.1",
+      modelId: "gpt-5.1",
+      isDefault: true
+    });
+    providers.createCredential({
+      providerProfileId: provider.id,
+      label: "Prod key",
+      plaintextSecret: "sk-provider-secret"
+    });
+    new ModelProviderRepository(db, otherUserId, masterKey).createProviderProfile({
+      name: "Foreign Provider",
+      providerKey: "anthropic",
+      baseUrl: "https://api.anthropic.com",
+      authType: "api_key",
+      apiFormat: "anthropic",
+      supportedAdapters: ["claude"]
+    });
 
     const result = await executeCopilotTool(
       registry,
@@ -192,9 +222,53 @@ describe("copilot tools", () => {
 
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    const output = result.output as { diagnostics: { counts: { projects: number }; environment?: unknown } };
+    const output = result.output as {
+      diagnostics: {
+        counts: { projects: number };
+        environment?: unknown;
+        modelProviders: {
+          counts: {
+            providers: number;
+            activeProviders: number;
+            models: number;
+            activeModels: number;
+            credentials: number;
+            activeCredentials: number;
+            defaultModels: number;
+          };
+          apiFormats: Record<string, number>;
+          providers: Array<{
+            name: string;
+            apiFormat: string;
+            readyForUse: boolean;
+            credentialCount: number;
+            activeCredentialCount: number;
+            modelCount: number;
+            activeModelCount: number;
+            hasDefaultModel: boolean;
+          }>;
+        };
+      };
+    };
+    const json = JSON.stringify(output);
     assert.equal(output.diagnostics.counts.projects, 1);
+    assert.equal(output.diagnostics.modelProviders.counts.providers, 1);
+    assert.equal(output.diagnostics.modelProviders.counts.activeProviders, 1);
+    assert.equal(output.diagnostics.modelProviders.counts.models, 1);
+    assert.equal(output.diagnostics.modelProviders.counts.activeModels, 1);
+    assert.equal(output.diagnostics.modelProviders.counts.credentials, 1);
+    assert.equal(output.diagnostics.modelProviders.counts.activeCredentials, 1);
+    assert.equal(output.diagnostics.modelProviders.counts.defaultModels, 1);
+    assert.equal(output.diagnostics.modelProviders.apiFormats.openai, 1);
+    assert.equal(output.diagnostics.modelProviders.providers[0]?.name, "OpenAI");
+    assert.equal(output.diagnostics.modelProviders.providers[0]?.readyForUse, true);
+    assert.equal(output.diagnostics.modelProviders.providers[0]?.credentialCount, 1);
+    assert.equal(output.diagnostics.modelProviders.providers[0]?.activeCredentialCount, 1);
+    assert.equal(output.diagnostics.modelProviders.providers[0]?.modelCount, 1);
+    assert.equal(output.diagnostics.modelProviders.providers[0]?.activeModelCount, 1);
+    assert.equal(output.diagnostics.modelProviders.providers[0]?.hasDefaultModel, true);
     assert.equal("environment" in output.diagnostics, false);
+    assert.doesNotMatch(json, /sk-provider-secret|secret-header-value|Foreign Provider/);
   });
 
   it("redacts tool outputs before returning them", async () => {

@@ -191,6 +191,13 @@ Read tools are allowlisted and validated server-side. Current read tools are:
 - `openforge.memory_search`
 - `openforge.memory_get`
 
+`openforge.get_diagnostics_summary` returns the bounded diagnostics subset
+needed for in-chat recovery: generated time, runtime metadata, tenant resource
+counts, dashboard health, adapter discovery, Provider SSOT readiness summaries,
+and Copilot capability/count metadata. It does not include the full diagnostics
+environment block, plaintext provider secrets, encrypted credential material,
+credential previews, provider default headers, or foreign-tenant providers.
+
 Read-tool outputs are redacted before persistence or model follow-up, then
 checked against size and residual-sensitive-output safety limits. Blocked tool
 outputs fail closed with `details.code = "copilot_redaction_blocked_output"`,
