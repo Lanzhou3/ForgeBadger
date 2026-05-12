@@ -23,7 +23,7 @@ const sessionDetailInput = z.object({
 }).strict();
 const proposeSessionCreateInput = z.object({
   projectId: z.string().min(1),
-  aiTool: z.string().min(1),
+  aiTool: z.enum(["claude", "opencode", "codex"]),
   name: z.string().min(1).optional()
 }).strict();
 const proposeDiagnosticsExportInput = z.object({
@@ -66,7 +66,7 @@ const proposeSessionCreateModelInputSchema = {
   type: "object",
   properties: {
     projectId: { type: "string", minLength: 1 },
-    aiTool: { type: "string", minLength: 1 },
+    aiTool: { type: "string", enum: ["claude", "opencode", "codex"] },
     name: { type: "string", minLength: 1 }
   },
   required: ["projectId", "aiTool"],

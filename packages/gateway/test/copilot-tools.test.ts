@@ -266,6 +266,7 @@ describe("copilot tools", () => {
     const listProjects = definitions.find((tool) => tool.name === "openforge.list_projects");
     const projectDetail = definitions.find((tool) => tool.name === "openforge.get_project_detail");
     const sessionDetail = definitions.find((tool) => tool.name === "openforge.get_session_detail");
+    const proposeSessionCreate = definitions.find((tool) => tool.name === "openforge.propose_session_create");
     const memorySearch = definitions.find((tool) => tool.name === "openforge.memory_search");
 
     assert.deepEqual(listProjects?.inputSchema, {
@@ -289,6 +290,16 @@ describe("copilot tools", () => {
         sessionId: { type: "string", minLength: 1 }
       },
       required: ["sessionId"],
+      additionalProperties: false
+    });
+    assert.deepEqual(proposeSessionCreate?.inputSchema, {
+      type: "object",
+      properties: {
+        projectId: { type: "string", minLength: 1 },
+        aiTool: { type: "string", enum: ["claude", "opencode", "codex"] },
+        name: { type: "string", minLength: 1 }
+      },
+      required: ["projectId", "aiTool"],
       additionalProperties: false
     });
     assert.deepEqual(memorySearch?.inputSchema, {
@@ -344,6 +355,26 @@ describe("copilot tools", () => {
     assert.equal(actions.length, 1);
     assert.equal(actions[0]?.status, "pending");
     assert.equal(actions[0]?.type, "openforge.propose_session_create");
+    assert.equal(new SessionRepository(db, userId).list().length, 0);
+  });
+
+  it("rejects session-create proposals for unsupported adapters", async () => {
+    const run = new CopilotRepository(db, userId).createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Prepare session"
+    });
+
+    const result = await executeCopilotTool(
+      registry,
+      "openforge.propose_session_create",
+      { projectId: "project-1", aiTool: "shell", name: "Invalid draft" },
+      context(userId, run.id)
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "copilot_tool_validation_failed");
+    assert.equal(new CopilotRepository(db, userId).listPendingActions(run.id).length, 0);
     assert.equal(new SessionRepository(db, userId).list().length, 0);
   });
 
