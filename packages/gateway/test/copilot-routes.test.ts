@@ -153,6 +153,23 @@ describe("copilot routes", () => {
     assert.equal(calls[0]?.input, "Summarize Gateway health");
   });
 
+  it("creates a default run with a later ready provider when the default provider lacks credentials", async () => {
+    createOpenAiProvider(userId, { isDefault: true, withCredential: false });
+    createOpenAiProvider(userId, { providerKey: "anthropic", isDefault: false, withCredential: true });
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Summarize Gateway health",
+      source: "dashboard"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.run.status, "completed");
+    assert.equal(res.body.data.run.providerProfileName, "Anthropic");
+    assert.equal(res.body.data.run.modelProfileName, "Claude");
+    assert.equal(calls[0]?.model, "claude-sonnet-4-5");
+  });
+
   it("writes audit logs for Copilot run start and completion", async () => {
     createOpenAiProvider();
 
