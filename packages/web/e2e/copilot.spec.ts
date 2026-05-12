@@ -508,6 +508,56 @@ test("Copilot page links to provider setup when no providers have active credent
   await page.goto("/copilot");
   await page.getByLabel("Copilot prompt").fill("Summarize Gateway health");
 
+  await expect(page.getByText("A compatible model provider needs an active API key.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
+  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
+});
+
+test("Copilot page explains when compatible providers have no active models", async ({ page }) => {
+  await mockCopilotApis(page, {
+    providerConfigured: true,
+    runs: [],
+    modelProviders: {
+      providers: [
+        {
+          id: "provider-no-model",
+          providerKey: "anthropic",
+          name: "Anthropic without model",
+          baseUrl: "https://api.anthropic.com",
+          authType: "api_key",
+          apiFormat: "anthropic",
+          supportedAdapters: ["opencode"],
+          status: "active",
+        },
+      ],
+      models: [
+        {
+          id: "model-disabled",
+          providerProfileId: "provider-no-model",
+          providerKey: "anthropic",
+          providerName: "Anthropic without model",
+          baseUrl: "https://api.anthropic.com",
+          name: "Disabled Claude",
+          modelId: "claude-opus-4.5",
+          capabilities: ["code"],
+          status: "disabled",
+          isDefault: true,
+        },
+      ],
+      credentials: [{
+        id: "credential-ready",
+        providerProfileId: "provider-no-model",
+        label: "Ready key",
+        status: "active",
+        secretPreview: "secret-preview",
+      }],
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByLabel("Copilot prompt").fill("Summarize Gateway health");
+
+  await expect(page.getByText("A compatible model provider needs an active model.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
   await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
 });

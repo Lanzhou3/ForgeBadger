@@ -22,6 +22,7 @@ Codex app-server turn control.
 | Explicit Provider/Model selection in Web | `packages/web/e2e/copilot.spec.ts` covers selected provider/model run creation and metadata display; `packages/web/src/lib/copilot.test.ts` covers selectable providers plus credential-ready and active-model filtering. | Covered by Web unit and E2E tests |
 | Reject visually selectable providers without active credentials | Commit `068e41d` added selectable-provider filtering; `packages/web/e2e/copilot.spec.ts` includes "skips providers without active credentials". | Covered |
 | Reject visually selectable providers without active models | Commit `1d24513` added active-model filtering for Web provider selection; `packages/web/e2e/copilot.spec.ts` includes "skips providers without active models". | Covered |
+| First-user provider setup recovery | The Copilot page now explains provider setup blockers as no compatible provider, missing active credential, or missing active model; `packages/web/src/lib/copilot.test.ts` covers readiness classification and `packages/web/e2e/copilot.spec.ts` covers the visible credential/model recovery messages. `docs/TRIAL-CHECKLIST.md` asks trial users to record the visible blocker. | Covered |
 | Project/session launch context | `docs/API.md` documents bounded tenant-scoped `sourceRefId` model-context injection for `source: "project"` and `source: "session"`; `packages/gateway/test/copilot-routes.test.ts` covers project context, session context, and cross-tenant non-leakage. | Covered |
 | Old live run recovery | `docs/API.md` documents `GET /copilot/runs` live-run recovery beyond the requested history limit; `packages/gateway/test/copilot-routes.test.ts` covers an older `running` run still appearing with `limit=20`, so Web can select and cancel it. | Covered |
 | Web/Gateway model timeout alignment | `docs/API.md` documents Gateway's 60 second model timeout and Web's 65 second Copilot run creation timeout; `packages/web/src/lib/api.test.ts` verifies the longer client timeout. | Covered |
@@ -49,8 +50,10 @@ Codex app-server turn control.
   the first release scope above, not for self-directed coding, shell execution,
   terminal control, or Codex app-server prompt workflows.
 - Phase C first-user hardening remains open in `MEMORY.md`: dependency failure
-  states, CLI availability recovery, provider configuration recovery,
-  diagnostics review, and platform-specific remediation.
+  states, CLI availability recovery, diagnostics review, platform-specific
+  remediation, and real user feedback. Provider configuration recovery now has
+  more specific Copilot-page blocker messages, but still needs first-user
+  confirmation with a disposable provider.
 
 ## Acceptance Judgment
 

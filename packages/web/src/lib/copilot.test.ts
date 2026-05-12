@@ -9,6 +9,7 @@ import {
   getCopilotPendingActionSummary,
   getCopilotErrorMessageKey,
   getCopilotStartBlocker,
+  getCopilotProviderReadiness,
   getSelectableCopilotProviders,
   findLiveCopilotRun,
   findCurrentLiveCopilotRun,
@@ -281,6 +282,76 @@ describe("copilot display helpers", () => {
         supportedProviderFormats: ["openai", "openai-compatible", "anthropic"],
       }).map((provider) => provider.id)
     ).toEqual(["provider-with-key", "local-provider"]);
+  });
+
+  it("explains why Copilot provider setup is not ready", () => {
+    const providers = [
+      {
+        id: "provider-missing-key",
+        status: "active",
+        apiFormat: "openai",
+        authType: "api_key",
+      },
+      {
+        id: "provider-missing-model",
+        status: "active",
+        apiFormat: "anthropic",
+        authType: "api_key",
+      },
+      {
+        id: "disabled-provider",
+        status: "disabled",
+        apiFormat: "openai",
+        authType: "api_key",
+      },
+    ];
+
+    expect(
+      getCopilotProviderReadiness({
+        providers: [],
+        credentials: [],
+        models: [],
+        supportedProviderFormats: ["openai", "openai-compatible", "anthropic"],
+      }).code
+    ).toBe("no_compatible_provider");
+    expect(
+      getCopilotProviderReadiness({
+        providers,
+        credentials: [],
+        models: [
+          { providerProfileId: "provider-missing-key", status: "active" },
+          { providerProfileId: "provider-missing-model", status: "active" },
+        ],
+        supportedProviderFormats: ["openai", "openai-compatible", "anthropic"],
+      }).code
+    ).toBe("missing_active_credential");
+    expect(
+      getCopilotProviderReadiness({
+        providers,
+        credentials: [
+          { providerProfileId: "provider-missing-model", status: "active" },
+        ],
+        models: [
+          { providerProfileId: "provider-missing-model", status: "disabled" },
+        ],
+        supportedProviderFormats: ["openai", "openai-compatible", "anthropic"],
+      }).code
+    ).toBe("missing_active_model");
+    expect(
+      getCopilotProviderReadiness({
+        providers,
+        credentials: [
+          { providerProfileId: "provider-missing-model", status: "active" },
+        ],
+        models: [
+          { providerProfileId: "provider-missing-model", status: "active" },
+        ],
+        supportedProviderFormats: ["openai", "openai-compatible", "anthropic"],
+      })
+    ).toMatchObject({
+      code: "ready",
+      readyProviderCount: 1,
+    });
   });
 
   it("builds Copilot launch hrefs with bounded source context", () => {

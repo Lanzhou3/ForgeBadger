@@ -149,6 +149,19 @@ export interface SelectableCopilotProvidersInput<TProvider extends CopilotProvid
   supportedProviderFormats: string[];
 }
 
+export type CopilotProviderReadinessCode =
+  | "ready"
+  | "no_compatible_provider"
+  | "missing_active_credential"
+  | "missing_active_model";
+
+export interface CopilotProviderReadiness {
+  code: CopilotProviderReadinessCode;
+  compatibleProviderCount: number;
+  credentialReadyProviderCount: number;
+  readyProviderCount: number;
+}
+
 const launchSources = new Set<CopilotLaunchSource>(["dashboard", "project", "session", "settings", "copilot"]);
 const launchIntents = new Set<CopilotLaunchIntent>([
   "launch_readiness",
@@ -264,6 +277,31 @@ export function getSelectableCopilotProviders<TProvider extends CopilotProviderC
   );
 }
 
+export function getCopilotProviderReadiness(
+  input: SelectableCopilotProvidersInput<CopilotProviderChoice>
+): CopilotProviderReadiness {
+  const compatibleProviders = input.providers.filter((provider) =>
+    isCompatibleCopilotProvider(provider, input.supportedProviderFormats)
+  );
+  const credentialReadyProviders = compatibleProviders.filter((provider) =>
+    hasCopilotProviderCredential(provider, input.credentials)
+  );
+  const readyProviders = credentialReadyProviders.filter((provider) =>
+    hasSelectableCopilotModel(provider, input.models)
+  );
+
+  return {
+    code: resolveCopilotProviderReadinessCode(
+      compatibleProviders.length,
+      credentialReadyProviders.length,
+      readyProviders.length
+    ),
+    compatibleProviderCount: compatibleProviders.length,
+    credentialReadyProviderCount: credentialReadyProviders.length,
+    readyProviderCount: readyProviders.length,
+  };
+}
+
 export function buildCopilotLaunchHref(input: CopilotLaunchHrefInput): string {
   const params = new URLSearchParams({ source: input.source });
   const sourceRefId = input.sourceRefId?.trim();
@@ -297,11 +335,25 @@ function isSelectableCopilotProvider(
   models: CopilotModelChoice[]
 ): boolean {
   return (
-    provider.status === "active" &&
-    supportedProviderFormats.includes(provider.apiFormat) &&
+    isCompatibleCopilotProvider(provider, supportedProviderFormats) &&
     hasCopilotProviderCredential(provider, credentials) &&
     hasSelectableCopilotModel(provider, models)
   );
+}
+
+function isCompatibleCopilotProvider(provider: CopilotProviderChoice, supportedProviderFormats: string[]): boolean {
+  return provider.status === "active" && supportedProviderFormats.includes(provider.apiFormat);
+}
+
+function resolveCopilotProviderReadinessCode(
+  compatibleProviderCount: number,
+  credentialReadyProviderCount: number,
+  readyProviderCount: number
+): CopilotProviderReadinessCode {
+  if (compatibleProviderCount === 0) return "no_compatible_provider";
+  if (credentialReadyProviderCount === 0) return "missing_active_credential";
+  if (readyProviderCount === 0) return "missing_active_model";
+  return "ready";
 }
 
 function hasCopilotProviderCredential(

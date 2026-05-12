@@ -74,6 +74,8 @@ write what Claude Code asked, what OpenForge showed, and what happened next
 
 - [ ] Configured an OpenAI or Anthropic model provider with an active model and
       test credential.
+- [ ] If Copilot is blocked, recorded the visible provider readiness reason:
+      no compatible provider / missing active credential / missing active model.
 - [ ] Opened `/copilot` from the sidebar.
 - [ ] Asked Copilot to diagnose session launch readiness.
 - [ ] Verified the response uses platform state such as adapter discovery or recent activity.

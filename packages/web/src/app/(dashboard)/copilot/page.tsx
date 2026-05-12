@@ -35,6 +35,7 @@ import {
   getCopilotPendingActionLabel,
   getCopilotPendingActionLabelKey,
   getCopilotPendingActionSummary,
+  getCopilotProviderReadiness,
   getSelectableCopilotProviders,
   getCopilotStartBlocker,
   getCopilotStatusTone,
@@ -177,6 +178,21 @@ export default function CopilotPage() {
       supportedProviderFormats,
     ]
   );
+  const providerReadiness = useMemo(
+    () =>
+      getCopilotProviderReadiness({
+        providers: modelProviderData?.providers ?? [],
+        credentials: modelProviderData?.credentials ?? [],
+        models: modelProviderData?.models ?? [],
+        supportedProviderFormats,
+      }),
+    [
+      modelProviderData?.credentials,
+      modelProviderData?.models,
+      modelProviderData?.providers,
+      supportedProviderFormats,
+    ]
+  );
   const providerModels = useMemo(
     () =>
       (modelProviderData?.models ?? []).filter((model) =>
@@ -187,8 +203,12 @@ export default function CopilotPage() {
   const providerSelectionUnavailable =
     !modelProvidersLoading &&
     !modelProvidersLoadFailed &&
-    (copilotProviders.length === 0 || (copilotProviders.length > 0 && providerModels.length === 0));
+    providerReadiness.code !== "ready";
   const providerSetupRequired = !providerConfigured || providerSetupError || providerSelectionUnavailable;
+  const providerSetupMessageKey = getProviderSetupMessageKey(
+    providerConfigured,
+    providerReadiness.code
+  );
 
   useEffect(() => {
     setSelectedProviderId((current) =>
@@ -230,7 +250,7 @@ export default function CopilotPage() {
   });
   const startBlocker = getCopilotStartBlocker({
     promptReady,
-    providerConfigured,
+    providerConfigured: providerConfigured && !providerSelectionUnavailable,
     modelSelectionReady,
     modelProvidersLoading,
     modelProvidersLoadFailed,
@@ -433,7 +453,7 @@ export default function CopilotPage() {
                 <div id="copilot-prompt-hint" className="text-sm text-muted-foreground">
                   {providerSetupRequired ? (
                     <span className="flex flex-wrap items-center gap-2">
-                      <span>{t("copilot.providerSetupRequired")}</span>
+                      <span>{t(providerSetupMessageKey)}</span>
                       <Link
                         href="/models"
                         className="font-medium text-brand underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -956,6 +976,17 @@ function clearProcessingAction(
 
 function isProviderSetupError(code: string): boolean {
   return code === "copilot_provider_not_configured";
+}
+
+function getProviderSetupMessageKey(
+  providerConfigured: boolean,
+  readinessCode: ReturnType<typeof getCopilotProviderReadiness>["code"]
+): TranslationKey {
+  if (!providerConfigured) return "copilot.providerSetupRequired";
+  if (readinessCode === "no_compatible_provider") return "copilot.providerReadiness.noCompatibleProvider";
+  if (readinessCode === "missing_active_credential") return "copilot.providerReadiness.missingActiveCredential";
+  if (readinessCode === "missing_active_model") return "copilot.providerReadiness.missingActiveModel";
+  return "copilot.providerSetupRequired";
 }
 
 function updatePendingAction(
