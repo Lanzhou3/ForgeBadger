@@ -30,6 +30,10 @@ const sessionCreateApprovalSchema = z.object({
   aiTool: z.enum(["claude", "opencode", "codex"]),
   name: z.string().min(1).optional()
 }).strict();
+const troubleshootingStepsApprovalSchema = z.object({
+  summary: z.string().min(1).optional(),
+  steps: z.array(z.string().min(1)).min(1).max(10).optional()
+}).strict();
 
 export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   db: Database;
@@ -548,7 +552,15 @@ function approvePendingAction(
   if (action.type === "openforge.propose_memory_write") {
     return approveCopilotMemoryWrite(action, { db: options.db, userId });
   }
-  return { steps: action.input, executed: false };
+  if (action.type === "openforge.propose_troubleshooting_steps") {
+    return approveCopilotTroubleshootingSteps(action);
+  }
+  return {
+    error: {
+      code: "copilot_pending_action_unsupported",
+      message: "Copilot pending action type is not supported"
+    }
+  };
 }
 
 function approveCopilotSessionCreateDraft(
@@ -575,6 +587,19 @@ function approveCopilotSessionCreateDraft(
     };
   }
   return { draft: parsed.data, executed: false };
+}
+
+function approveCopilotTroubleshootingSteps(action: CopilotPendingAction): Record<string, unknown> {
+  const parsed = troubleshootingStepsApprovalSchema.safeParse(action.input);
+  if (!parsed.success) {
+    return {
+      error: {
+        code: "copilot_troubleshooting_steps_invalid",
+        message: "Copilot troubleshooting steps payload is invalid"
+      }
+    };
+  }
+  return { steps: parsed.data, executed: false };
 }
 
 function isApprovalError(result: Record<string, unknown>): result is { error: { code: string; message: string } } {

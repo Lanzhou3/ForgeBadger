@@ -1139,6 +1139,46 @@ describe("copilot routes", () => {
     assert.equal(action?.status, "pending");
   });
 
+  it("does not approve unknown stored pending-action types", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_shell_command", {
+      command: "echo unsafe"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_pending_action_unsupported");
+    assert.equal(action?.status, "pending");
+  });
+
+  it("does not approve invalid stored troubleshooting-step actions", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_troubleshooting_steps", {
+      steps: []
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_troubleshooting_steps_invalid");
+    assert.equal(action?.status, "pending");
+  });
+
   function createOpenAiProvider(
     ownerId = userId,
     options: { isDefault?: boolean; providerKey?: "openai" | "anthropic"; withCredential?: boolean } = {}
