@@ -48,6 +48,10 @@ const pendingActionLabelKeys: Record<string, TranslationKey> = {
 const errorMessageKeys: Record<string, TranslationKey> = {
   copilot_provider_not_configured: "copilot.error.providerNotConfigured",
   copilot_provider_unsupported: "copilot.error.providerUnsupported",
+  copilot_provider_auth_failed: "copilot.error.providerAuthFailed",
+  copilot_provider_rate_limited: "copilot.error.providerRateLimited",
+  copilot_provider_unavailable: "copilot.error.providerUnavailable",
+  copilot_provider_request_failed: "copilot.error.providerRequestFailed",
   copilot_model_request_failed: "copilot.error.modelRequestFailed",
   copilot_model_request_timeout: "copilot.error.modelRequestTimeout",
   copilot_redaction_blocked_output: "copilot.error.redactionBlockedOutput",

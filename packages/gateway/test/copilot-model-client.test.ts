@@ -201,6 +201,57 @@ describe("copilot model client", () => {
     assert.equal(requests[0]?.init.signal, controller.signal);
   });
 
+  it("classifies OpenAI provider HTTP failures without leaking provider error secrets", async () => {
+    const authFailure = new OpenAiResponsesClient({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-openai",
+      fetch: fakeFetch([], {
+        error: { message: "Invalid API key token=secret-value" }
+      }, 401)
+    });
+    const rateLimit = new OpenAiResponsesClient({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-openai",
+      fetch: fakeFetch([], {
+        error: { message: "Rate limit exceeded" }
+      }, 429)
+    });
+    const unavailable = new OpenAiResponsesClient({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-openai",
+      fetch: fakeFetch([], {
+        error: { message: "Upstream overloaded" }
+      }, 503)
+    });
+
+    const authEvents = await authFailure.createResponse({
+      model: "gpt-5.1",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Status?"
+    });
+    const rateEvents = await rateLimit.createResponse({
+      model: "gpt-5.1",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Status?"
+    });
+    const unavailableEvents = await unavailable.createResponse({
+      model: "gpt-5.1",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Status?"
+    });
+
+    assert.deepEqual(authEvents, [{
+      type: "run_failed",
+      code: "copilot_provider_auth_failed",
+      message: "Invalid API key token=[REDACTED]"
+    }]);
+    assert.equal(rateEvents[0]?.type, "run_failed");
+    assert.equal(rateEvents[0]?.code, "copilot_provider_rate_limited");
+    assert.equal(unavailableEvents[0]?.type, "run_failed");
+    assert.equal(unavailableEvents[0]?.code, "copilot_provider_unavailable");
+    assert.doesNotMatch(JSON.stringify([authEvents, rateEvents, unavailableEvents]), /secret-value/);
+  });
+
   it("normalizes Anthropic Messages text output", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const client = new AnthropicMessagesClient({
@@ -278,6 +329,57 @@ describe("copilot model client", () => {
     }, { signal: controller.signal });
 
     assert.equal(requests[0]?.init.signal, controller.signal);
+  });
+
+  it("classifies Anthropic provider HTTP failures without leaking provider error secrets", async () => {
+    const authFailure = new AnthropicMessagesClient({
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant",
+      fetch: fakeFetch([], {
+        error: { message: "Permission denied api_key: visible-secret" }
+      }, 403)
+    });
+    const rateLimit = new AnthropicMessagesClient({
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant",
+      fetch: fakeFetch([], {
+        error: { message: "Too many requests" }
+      }, 429)
+    });
+    const unavailable = new AnthropicMessagesClient({
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant",
+      fetch: fakeFetch([], {
+        error: { message: "Service unavailable" }
+      }, 500)
+    });
+
+    const authEvents = await authFailure.createResponse({
+      model: "claude-sonnet-4-5",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Status?"
+    });
+    const rateEvents = await rateLimit.createResponse({
+      model: "claude-sonnet-4-5",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Status?"
+    });
+    const unavailableEvents = await unavailable.createResponse({
+      model: "claude-sonnet-4-5",
+      instructions: "Answer as OpenForge Copilot.",
+      input: "Status?"
+    });
+
+    assert.deepEqual(authEvents, [{
+      type: "run_failed",
+      code: "copilot_provider_auth_failed",
+      message: "Permission denied api_key: [REDACTED]"
+    }]);
+    assert.equal(rateEvents[0]?.type, "run_failed");
+    assert.equal(rateEvents[0]?.code, "copilot_provider_rate_limited");
+    assert.equal(unavailableEvents[0]?.type, "run_failed");
+    assert.equal(unavailableEvents[0]?.code, "copilot_provider_unavailable");
+    assert.doesNotMatch(JSON.stringify([authEvents, rateEvents, unavailableEvents]), /visible-secret/);
   });
 
   it("normalizes provider-safe tool names back to OpenForge tool names", async () => {
@@ -378,12 +480,13 @@ describe("copilot model client", () => {
 
 function fakeFetch(
   requests: Array<{ url: string; init: RequestInit }>,
-  body: unknown
+  body: unknown,
+  status = 200
 ): typeof fetch {
   return (async (input: string | URL | Request, init?: RequestInit) => {
     requests.push({ url: String(input), init: init ?? {} });
     return new Response(JSON.stringify(body), {
-      status: 200,
+      status,
       headers: { "Content-Type": "application/json" }
     });
   }) as typeof fetch;

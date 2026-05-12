@@ -56,6 +56,10 @@ describe("copilot display helpers", () => {
   it("maps known Copilot error codes to localized message keys", () => {
     expect(getCopilotErrorMessageKey("copilot_provider_not_configured")).toBe("copilot.error.providerNotConfigured");
     expect(getCopilotErrorMessageKey("copilot_provider_unsupported")).toBe("copilot.error.providerUnsupported");
+    expect(getCopilotErrorMessageKey("copilot_provider_auth_failed")).toBe("copilot.error.providerAuthFailed");
+    expect(getCopilotErrorMessageKey("copilot_provider_rate_limited")).toBe("copilot.error.providerRateLimited");
+    expect(getCopilotErrorMessageKey("copilot_provider_unavailable")).toBe("copilot.error.providerUnavailable");
+    expect(getCopilotErrorMessageKey("copilot_provider_request_failed")).toBe("copilot.error.providerRequestFailed");
     expect(getCopilotErrorMessageKey("copilot_model_request_failed")).toBe("copilot.error.modelRequestFailed");
     expect(getCopilotErrorMessageKey("copilot_model_request_timeout")).toBe("copilot.error.modelRequestTimeout");
     expect(getCopilotErrorMessageKey("copilot_redaction_blocked_output")).toBe("copilot.error.redactionBlockedOutput");

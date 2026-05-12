@@ -5,6 +5,7 @@ import {
   toProviderToolName,
   type CopilotFetch
 } from "./model-client.js";
+import { providerHttpFailure } from "./provider-http-failure.js";
 import type { CopilotModelEvent, CopilotModelRequest, CopilotModelRequestOptions, CopilotToolDefinition } from "./types.js";
 
 export interface OpenAiResponsesClientOptions {
@@ -107,7 +108,7 @@ function providerNotConfigured(): CopilotModelEvent[] {
 
 function httpFailure(status: number, body: unknown): CopilotModelEvent[] {
   const message = readString(body, "error") ?? readString(readObject(body, "error"), "message") ?? `Provider request failed with HTTP ${status}`;
-  return [{ type: "run_failed", code: "copilot_provider_request_failed", message }];
+  return providerHttpFailure(status, message);
 }
 
 function readArray(value: unknown, key: string): unknown[] {
