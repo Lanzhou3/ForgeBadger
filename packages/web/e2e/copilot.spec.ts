@@ -369,6 +369,107 @@ test("Copilot page skips providers without active credentials", async ({ page })
   });
 });
 
+test("Copilot page skips providers without active models", async ({ page }) => {
+  let createBody: Record<string, unknown> | undefined;
+  await mockCopilotApis(page, {
+    modelProviders: {
+      providers: [
+        {
+          id: "provider-no-models",
+          providerKey: "openai",
+          name: "OpenAI no active models",
+          baseUrl: "https://api.openai.com/v1",
+          authType: "api_key",
+          apiFormat: "openai",
+          supportedAdapters: ["opencode"],
+          status: "active",
+        },
+        {
+          id: "provider-ready",
+          providerKey: "anthropic",
+          name: "Anthropic ready",
+          baseUrl: "https://api.anthropic.com",
+          authType: "api_key",
+          apiFormat: "anthropic",
+          supportedAdapters: ["opencode"],
+          status: "active",
+        },
+      ],
+      models: [
+        {
+          id: "model-disabled",
+          providerProfileId: "provider-no-models",
+          providerKey: "openai",
+          providerName: "OpenAI no active models",
+          baseUrl: "https://api.openai.com/v1",
+          name: "Disabled GPT",
+          modelId: "gpt-5.1",
+          capabilities: ["code"],
+          status: "disabled",
+          isDefault: true,
+        },
+        {
+          id: "model-ready",
+          providerProfileId: "provider-ready",
+          providerKey: "anthropic",
+          providerName: "Anthropic ready",
+          baseUrl: "https://api.anthropic.com",
+          name: "Claude ready",
+          modelId: "claude-opus-4.5",
+          capabilities: ["code"],
+          status: "active",
+          isDefault: true,
+        },
+      ],
+      credentials: [
+        {
+          id: "credential-no-models",
+          providerProfileId: "provider-no-models",
+          label: "Configured key",
+          status: "active",
+          secretPreview: "secret-preview",
+        },
+        {
+          id: "credential-ready",
+          providerProfileId: "provider-ready",
+          label: "Ready key",
+          status: "active",
+          secretPreview: "secret-preview",
+        },
+      ],
+    },
+    onCreateRun: async (route) => {
+      createBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-ready-provider",
+            status: "completed",
+            goal: "Summarize Gateway health",
+            source: "copilot",
+            providerProfileId: "provider-ready",
+            modelProfileId: "model-ready",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+
+  await expect(page.getByLabel("Copilot provider")).toHaveValue("provider-ready");
+  await expect(page.getByText("OpenAI no active models")).toHaveCount(0);
+  await page.getByLabel("Copilot prompt").fill("Summarize Gateway health");
+  await page.getByRole("button", { name: "Start" }).click();
+
+  await expect.poll(() => createBody).toMatchObject({
+    providerProfileId: "provider-ready",
+    modelProfileId: "model-ready",
+  });
+});
+
 test("Copilot page links to provider setup when no providers have active credentials", async ({ page }) => {
   await mockCopilotApis(page, {
     providerConfigured: true,

@@ -167,9 +167,15 @@ export default function CopilotPage() {
       getSelectableCopilotProviders({
         providers: modelProviderData?.providers ?? [],
         credentials: modelProviderData?.credentials ?? [],
+        models: modelProviderData?.models ?? [],
         supportedProviderFormats,
       }),
-    [modelProviderData?.credentials, modelProviderData?.providers, supportedProviderFormats]
+    [
+      modelProviderData?.credentials,
+      modelProviderData?.models,
+      modelProviderData?.providers,
+      supportedProviderFormats,
+    ]
   );
   const providerModels = useMemo(
     () =>

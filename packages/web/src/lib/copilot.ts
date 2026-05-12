@@ -135,9 +135,15 @@ export interface CopilotProviderCredentialChoice {
   status: string;
 }
 
+export interface CopilotModelChoice {
+  providerProfileId: string;
+  status: string;
+}
+
 export interface SelectableCopilotProvidersInput<TProvider extends CopilotProviderChoice> {
   providers: TProvider[];
   credentials: CopilotProviderCredentialChoice[];
+  models: CopilotModelChoice[];
   supportedProviderFormats: string[];
 }
 
@@ -252,7 +258,7 @@ export function getSelectableCopilotProviders<TProvider extends CopilotProviderC
   input: SelectableCopilotProvidersInput<TProvider>
 ): TProvider[] {
   return input.providers.filter((provider) =>
-    isSelectableCopilotProvider(provider, input.supportedProviderFormats, input.credentials)
+    isSelectableCopilotProvider(provider, input.supportedProviderFormats, input.credentials, input.models)
   );
 }
 
@@ -285,12 +291,14 @@ export function getCopilotLaunchPromptKey(intent: string | null | undefined): Tr
 function isSelectableCopilotProvider(
   provider: CopilotProviderChoice,
   supportedProviderFormats: string[],
-  credentials: CopilotProviderCredentialChoice[]
+  credentials: CopilotProviderCredentialChoice[],
+  models: CopilotModelChoice[]
 ): boolean {
   return (
     provider.status === "active" &&
     supportedProviderFormats.includes(provider.apiFormat) &&
-    hasCopilotProviderCredential(provider, credentials)
+    hasCopilotProviderCredential(provider, credentials) &&
+    hasSelectableCopilotModel(provider, models)
   );
 }
 
@@ -302,6 +310,10 @@ function hasCopilotProviderCredential(
   return credentials.some(
     (credential) => credential.providerProfileId === provider.id && credential.status === "active"
   );
+}
+
+function hasSelectableCopilotModel(provider: CopilotProviderChoice, models: CopilotModelChoice[]): boolean {
+  return models.some((model) => model.providerProfileId === provider.id && model.status === "active");
 }
 
 function summarizeMemoryWrite(payload: Record<string, unknown>): CopilotPendingActionSummary {

@@ -227,7 +227,7 @@ describe("copilot display helpers", () => {
     ).toBeNull();
   });
 
-  it("keeps Copilot provider choices credential-ready", () => {
+  it("keeps Copilot provider choices credential-ready with active models", () => {
     const providers = [
       {
         id: "provider-without-key",
@@ -248,6 +248,12 @@ describe("copilot display helpers", () => {
         authType: "none",
       },
       {
+        id: "provider-without-active-model",
+        status: "active",
+        apiFormat: "openai",
+        authType: "api_key",
+      },
+      {
         id: "disabled-provider",
         status: "disabled",
         apiFormat: "openai",
@@ -261,6 +267,14 @@ describe("copilot display helpers", () => {
         credentials: [
           { providerProfileId: "provider-without-key", status: "disabled" },
           { providerProfileId: "provider-with-key", status: "active" },
+          { providerProfileId: "provider-without-active-model", status: "active" },
+        ],
+        models: [
+          { providerProfileId: "provider-without-key", status: "active" },
+          { providerProfileId: "provider-with-key", status: "active" },
+          { providerProfileId: "local-provider", status: "active" },
+          { providerProfileId: "provider-without-active-model", status: "disabled" },
+          { providerProfileId: "disabled-provider", status: "active" },
         ],
         supportedProviderFormats: ["openai", "openai-compatible", "anthropic"],
       }).map((provider) => provider.id)
