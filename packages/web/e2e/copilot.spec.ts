@@ -369,6 +369,48 @@ test("Copilot page skips providers without active credentials", async ({ page })
   });
 });
 
+test("Copilot page links to provider setup when no providers have active credentials", async ({ page }) => {
+  await mockCopilotApis(page, {
+    providerConfigured: true,
+    runs: [],
+    modelProviders: {
+      providers: [
+        {
+          id: "provider-missing-key",
+          providerKey: "openai",
+          name: "OpenAI missing key",
+          baseUrl: "https://api.openai.com/v1",
+          authType: "api_key",
+          apiFormat: "openai",
+          supportedAdapters: ["opencode"],
+          status: "active",
+        },
+      ],
+      models: [
+        {
+          id: "model-missing-key",
+          providerProfileId: "provider-missing-key",
+          providerKey: "openai",
+          providerName: "OpenAI missing key",
+          baseUrl: "https://api.openai.com/v1",
+          name: "GPT without key",
+          modelId: "gpt-5.1",
+          capabilities: ["code"],
+          status: "active",
+          isDefault: true,
+        },
+      ],
+      credentials: [],
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByLabel("Copilot prompt").fill("Summarize Gateway health");
+
+  await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
+  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
+});
+
 test("Copilot page starts runs with launch context from the URL", async ({ page }) => {
   let createBody: Record<string, unknown> | undefined;
   await mockCopilotApis(page, {

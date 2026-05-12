@@ -158,7 +158,6 @@ export default function CopilotPage() {
   const promptReady = prompt.trim().length > 0;
   const providerSetupError = isProviderSetupError(errorCode);
   const providerConfigured = capabilityData?.providerConfigured !== false;
-  const providerSetupRequired = !providerConfigured || providerSetupError;
   const supportedProviderFormats = useMemo(
     () => capabilityData?.supportedProviderFormats ?? ["openai", "openai-compatible", "anthropic"],
     [capabilityData]
@@ -179,6 +178,11 @@ export default function CopilotPage() {
       ),
     [modelProviderData?.models, selectedProviderId]
   );
+  const providerSelectionUnavailable =
+    !modelProvidersLoading &&
+    !modelProvidersLoadFailed &&
+    (copilotProviders.length === 0 || (copilotProviders.length > 0 && providerModels.length === 0));
+  const providerSetupRequired = !providerConfigured || providerSetupError || providerSelectionUnavailable;
 
   useEffect(() => {
     setSelectedProviderId((current) =>
