@@ -2,6 +2,7 @@ import { CopilotRepository, type CopilotRun, type CopilotRunEvent } from "../../
 import { ProjectRepository } from "../../db/repositories/project-repository.js";
 import { SessionRepository } from "../../db/repositories/session-repository.js";
 import type { Database } from "../../db/types.js";
+import type { CommandRunner } from "../../lib/dependency-check.js";
 import { AnthropicMessagesClient } from "./anthropic-messages-client.js";
 import { runCopilotActiveRecall } from "./active-recall.js";
 import type { CopilotModelClient, CopilotModelEvent, CopilotModelRequest, CopilotServiceError } from "./types.js";
@@ -16,6 +17,7 @@ import {
   createCopilotToolRegistry,
   executeCopilotTool,
   toModelToolDefinitions,
+  type CopilotToolContext,
   type CopilotToolRegistry
 } from "./tool-registry.js";
 
@@ -26,6 +28,7 @@ export interface CopilotOrchestratorOptions {
   modelRequestTimeoutMs?: number;
   runControls?: CopilotRunControlRegistry;
   onRunStarted?: (run: CopilotRun) => void;
+  adapterCommandRunner?: CommandRunner;
 }
 
 export interface RunCopilotTextInput {
@@ -158,12 +161,14 @@ export class CopilotOrchestrator {
   ): Promise<RunCopilotTextResult> {
     const cancelledBeforeTool = this.cancelledResultIfNeeded(repo, run, events, runSignal);
     if (cancelledBeforeTool) return cancelledBeforeTool;
-    const result = await executeCopilotTool(this.toolRegistry, toolCall.name, toolCall.input, {
+    const context: CopilotToolContext = {
       db: this.options.db,
       userId: run.userId,
       masterKey: this.options.masterKey,
       runId: run.id
-    });
+    };
+    if (this.options.adapterCommandRunner) context.adapterCommandRunner = this.options.adapterCommandRunner;
+    const result = await executeCopilotTool(this.toolRegistry, toolCall.name, toolCall.input, context);
     const cancelledAfterTool = this.cancelledResultIfNeeded(repo, run, events, runSignal);
     if (cancelledAfterTool) return cancelledAfterTool;
     if (!result.ok) return this.failWithRunEvent(repo, run, result.error, events, 400);

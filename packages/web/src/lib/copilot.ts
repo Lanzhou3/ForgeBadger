@@ -37,6 +37,7 @@ const pendingActionLabels: Record<string, string> = {
   "openforge.propose_memory_write": "Memory write",
   "openforge.propose_session_create": "Session create",
   "openforge.propose_diagnostics_export": "Diagnostics export",
+  "openforge.propose_adapter_refresh": "Adapter refresh",
   "openforge.propose_troubleshooting_steps": "Troubleshooting steps",
 };
 
@@ -44,6 +45,7 @@ const pendingActionLabelKeys: Record<string, TranslationKey> = {
   "openforge.propose_memory_write": "copilot.pendingAction.memoryWrite",
   "openforge.propose_session_create": "copilot.pendingAction.sessionCreate",
   "openforge.propose_diagnostics_export": "copilot.pendingAction.diagnosticsExport",
+  "openforge.propose_adapter_refresh": "copilot.pendingAction.adapterRefresh",
   "openforge.propose_troubleshooting_steps": "copilot.pendingAction.troubleshootingSteps",
 };
 
@@ -213,6 +215,11 @@ export function getCopilotPendingActionSummary(
     case "openforge.propose_diagnostics_export":
       return {
         detail: "Diagnostics export",
+        preview: previewText(readString(payload, "reason")),
+      };
+    case "openforge.propose_adapter_refresh":
+      return {
+        detail: "Adapter refresh",
         preview: previewText(readString(payload, "reason")),
       };
     case "openforge.propose_troubleshooting_steps":

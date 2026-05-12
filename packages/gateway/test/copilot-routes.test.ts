@@ -18,6 +18,7 @@ import { SessionRepository } from "../src/db/repositories/session-repository.js"
 import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
 import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
 import { createCopilotRoutes } from "../src/routes/copilot.js";
+import type { CommandRunner } from "../src/lib/dependency-check.js";
 import type { CopilotModelClient, CopilotModelEvent, CopilotModelRequest } from "../src/services/copilot/types.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
@@ -45,6 +46,8 @@ describe("copilot routes", () => {
   let modelEventResponses: Array<CopilotModelEvent[] | Error>;
   let modelResponseWait: Promise<void> | null;
   let modelRequestSignals: Array<AbortSignal | undefined>;
+  let adapterCommands: string[];
+  let adapterCommandRunner: CommandRunner;
   const calls: CopilotModelRequest[] = [];
 
   beforeEach(() => {
@@ -60,6 +63,13 @@ describe("copilot routes", () => {
     modelEvents = [{ type: "assistant_message", text: "Gateway is healthy." }];
     modelEventResponses = [];
     modelResponseWait = null;
+    adapterCommands = [];
+    adapterCommandRunner = async (command) => {
+      adapterCommands.push(command);
+      if (command === "tmux") return { exitCode: 0, stdout: "tmux 3.5", stderr: "" };
+      if (command === "claude") return { exitCode: 0, stdout: "Claude Code 1.0.0", stderr: "" };
+      return { exitCode: 1, stdout: "", stderr: `${command} missing` };
+    };
     app = express();
     app.locals.jwtSecret = secret;
     app.use(express.json());
@@ -72,7 +82,8 @@ describe("copilot routes", () => {
         const response = modelEventResponses.shift();
         if (response instanceof Error) throw response;
         return response ?? modelEvents;
-      })
+      }),
+      adapterCommandRunner
     }));
   });
 
@@ -1133,6 +1144,40 @@ describe("copilot routes", () => {
 
     assert.equal(res.status, 401);
     assert.equal(res.body.code, 1);
+  });
+
+  it("approves adapter-refresh actions by returning fresh adapter discovery", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_adapter_refresh", {
+      reason: "Recheck CLI availability after install."
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const adapters = res.body.data.action.result.adapters as Array<{
+      id: string;
+      available: boolean;
+      launchEnabled: boolean;
+      version?: string;
+    }>;
+    const claude = adapters.find((adapter) => adapter.id === "claude");
+    const opencode = adapters.find((adapter) => adapter.id === "opencode");
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.action.status, "approved");
+    assert.equal(claude?.available, true);
+    assert.equal(claude?.launchEnabled, true);
+    assert.equal(claude?.version, "Claude Code 1.0.0");
+    assert.equal(opencode?.available, false);
+    assert.ok(adapterCommands.includes("tmux"));
+    assert.ok(adapterCommands.includes("claude"));
+    assert.ok(adapterCommands.includes("opencode"));
+    assert.ok(adapterCommands.includes("codex"));
   });
 
   it("approves canonical memory-write actions into redacted durable memory", async () => {

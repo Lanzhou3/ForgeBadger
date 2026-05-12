@@ -7,6 +7,7 @@ import type { CopilotPendingAction, CopilotRun, CopilotRunEvent } from "../db/re
 import { CopilotRepository } from "../db/repositories/copilot-repository.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
 import type { Database } from "../db/types.js";
+import { discoverAdapters } from "../services/adapter-discovery.js";
 import { buildLocalDiagnosticsExport } from "../services/diagnostics.js";
 import { approveCopilotMemoryWrite } from "../services/copilot/memory.js";
 import { CopilotOrchestrator, CopilotRunControlRegistry, type CopilotOrchestratorOptions } from "../services/copilot/orchestrator.js";
@@ -148,7 +149,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     res.json(successEnvelope(run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
   });
 
-  router.post("/runs/:id/pending-actions/:actionId/approve", (req, res) => {
+  router.post("/runs/:id/pending-actions/:actionId/approve", async (req, res) => {
     const repo = repoFor(options.db, req);
     const target = findPendingActionTarget(repo, req.params.id, req.params.actionId);
     if (!target) return res.status(404).json({ code: 1, message: "Pending action not found" });
@@ -161,7 +162,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     }
     const action = target.action;
     if (action.status !== "pending") return res.status(400).json({ code: 1, message: "Pending action is not approvable" });
-    const result = approvePendingAction(action, options, userIdFor(req));
+    const result = await approvePendingAction(action, options, userIdFor(req));
     if (isApprovalError(result)) {
       res.status(400).json({ code: 1, message: result.error.message, details: { code: result.error.code } });
       return;
@@ -548,11 +549,11 @@ function findPendingActionTarget(
   return action?.runId === runId ? { run, action } : undefined;
 }
 
-function approvePendingAction(
+async function approvePendingAction(
   action: CopilotPendingAction,
   options: CopilotRoutesOptions,
   userId: string
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   if (action.type === "openforge.propose_diagnostics_export") {
     return {
       report: buildLocalDiagnosticsExport({
@@ -561,6 +562,11 @@ function approvePendingAction(
         masterKey: options.masterKey,
         appVersion: options.appVersion ?? "0.0.0"
       })
+    };
+  }
+  if (action.type === "openforge.propose_adapter_refresh") {
+    return {
+      adapters: await discoverAdapters(options.adapterCommandRunner)
     };
   }
   if (action.type === "openforge.propose_session_create") {

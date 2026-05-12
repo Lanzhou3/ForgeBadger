@@ -341,6 +341,7 @@ describe("copilot tools", () => {
     const projectDetail = definitions.find((tool) => tool.name === "openforge.get_project_detail");
     const sessionDetail = definitions.find((tool) => tool.name === "openforge.get_session_detail");
     const proposeSessionCreate = definitions.find((tool) => tool.name === "openforge.propose_session_create");
+    const proposeAdapterRefresh = definitions.find((tool) => tool.name === "openforge.propose_adapter_refresh");
     const memorySearch = definitions.find((tool) => tool.name === "openforge.memory_search");
 
     assert.deepEqual(listProjects?.inputSchema, {
@@ -374,6 +375,13 @@ describe("copilot tools", () => {
         name: { type: "string", minLength: 1 }
       },
       required: ["projectId", "aiTool"],
+      additionalProperties: false
+    });
+    assert.deepEqual(proposeAdapterRefresh?.inputSchema, {
+      type: "object",
+      properties: {
+        reason: { type: "string", minLength: 1 }
+      },
       additionalProperties: false
     });
     assert.deepEqual(memorySearch?.inputSchema, {
@@ -501,6 +509,28 @@ describe("copilot tools", () => {
     assert.equal(actions.length, 1);
     assert.equal(actions[0]?.type, "openforge.propose_diagnostics_export");
     assert.deepEqual((result as { ok: true; output: { actionId: string } }).output.actionId, actions[0]?.id);
+  });
+
+  it("creates adapter-refresh proposals as pending actions without refreshing adapters", async () => {
+    const run = new CopilotRepository(db, userId).createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Refresh adapters"
+    });
+
+    const result = await executeCopilotTool(
+      registry,
+      "openforge.propose_adapter_refresh",
+      { reason: "Recheck CLI availability after install." },
+      context(userId, run.id)
+    );
+
+    const actions = new CopilotRepository(db, userId).listPendingActions(run.id);
+    assert.equal(result.ok, true);
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0]?.status, "pending");
+    assert.equal(actions[0]?.type, "openforge.propose_adapter_refresh");
+    assert.deepEqual(actions[0]?.input, { reason: "Recheck CLI availability after install." });
   });
 
   it("searches Copilot memory through bounded tenant-scoped tools", async () => {

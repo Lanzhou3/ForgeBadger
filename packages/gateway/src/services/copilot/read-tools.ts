@@ -29,6 +29,9 @@ const proposeSessionCreateInput = z.object({
 const proposeDiagnosticsExportInput = z.object({
   reason: z.string().min(1).optional()
 }).strict();
+const proposeAdapterRefreshInput = z.object({
+  reason: z.string().min(1).optional()
+}).strict();
 const proposeTroubleshootingStepsInput = z.object({
   summary: z.string().min(1).optional(),
   steps: z.array(z.string().min(1)).min(1).max(10).optional()
@@ -73,6 +76,13 @@ const proposeSessionCreateModelInputSchema = {
   additionalProperties: false
 };
 const proposeDiagnosticsExportModelInputSchema = {
+  type: "object",
+  properties: {
+    reason: { type: "string", minLength: 1 }
+  },
+  additionalProperties: false
+};
+const proposeAdapterRefreshModelInputSchema = {
   type: "object",
   properties: {
     reason: { type: "string", minLength: 1 }
@@ -228,6 +238,16 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       modelInputSchema: proposeDiagnosticsExportModelInputSchema,
       execute: async (input, context) =>
         createPendingProposal(context, "openforge.propose_diagnostics_export", input)
+    },
+    {
+      name: "openforge.propose_adapter_refresh",
+      description: "Prepare a local AI CLI adapter discovery refresh for user approval.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeAdapterRefreshInput,
+      modelInputSchema: proposeAdapterRefreshModelInputSchema,
+      execute: async (input, context) =>
+        createPendingProposal(context, "openforge.propose_adapter_refresh", input)
     },
     {
       name: "openforge.propose_troubleshooting_steps",

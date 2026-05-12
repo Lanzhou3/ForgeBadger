@@ -86,6 +86,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/copilot", createCopilotRoutes({
     db: deps.db,
     masterKey: deps.masterKey,
-    appVersion: deps.appVersion
+    appVersion: deps.appVersion,
+    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
   }));
 }

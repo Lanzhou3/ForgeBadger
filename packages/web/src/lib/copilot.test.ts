@@ -48,12 +48,14 @@ describe("copilot display helpers", () => {
   it("falls back to readable labels for unknown pending action types", () => {
     expect(getCopilotPendingActionLabel("openforge.propose_setting_update")).toBe("Openforge propose setting update");
     expect(getCopilotPendingActionLabel("openforge.propose_memory_write")).toBe("Memory write");
+    expect(getCopilotPendingActionLabel("openforge.propose_adapter_refresh")).toBe("Adapter refresh");
     expect(getCopilotPendingActionLabel("custom.pending_action")).toBe("Custom pending action");
   });
 
   it("maps known pending action types to localized label keys", () => {
     expect(getCopilotPendingActionLabelKey("openforge.propose_memory_write")).toBe("copilot.pendingAction.memoryWrite");
     expect(getCopilotPendingActionLabelKey("openforge.propose_diagnostics_export")).toBe("copilot.pendingAction.diagnosticsExport");
+    expect(getCopilotPendingActionLabelKey("openforge.propose_adapter_refresh")).toBe("copilot.pendingAction.adapterRefresh");
     expect(getCopilotPendingActionLabelKey("custom.pending_action")).toBeNull();
   });
 
@@ -105,6 +107,15 @@ describe("copilot display helpers", () => {
     ).toEqual({
       detail: "Diagnostics export",
       preview: "Collect final release gate evidence.",
+    });
+    expect(
+      getCopilotPendingActionSummary({
+        type: "openforge.propose_adapter_refresh",
+        input: { reason: "Recheck CLI availability after installing Codex." },
+      })
+    ).toEqual({
+      detail: "Adapter refresh",
+      preview: "Recheck CLI availability after installing Codex.",
     });
   });
 

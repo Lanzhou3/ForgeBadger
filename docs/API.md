@@ -208,24 +208,27 @@ Prepare tools create pending actions and do not directly mutate runtime state:
 
 - `openforge.propose_session_create`
 - `openforge.propose_diagnostics_export`
+- `openforge.propose_adapter_refresh`
 - `openforge.propose_troubleshooting_steps`
 - `openforge.propose_memory_write`
 
 Approval uses the canonical stored pending-action payload. The client cannot
 replace the action payload at approval time. Diagnostics approval returns a
 redacted diagnostics payload; session-create approval returns a draft only and
-does not start a CLI session in this release. Approve and reject routes only
-operate on actions whose stored status is still `pending`; already approved or
-rejected actions are not rewritten. Session-create drafts must target a project
-visible to the current user and one of the supported terminal
-adapters: `claude`, `opencode`, or `codex`; approval revalidates the canonical
-stored draft so stale or invalid drafts stay pending instead of returning an
-actionable session draft. Troubleshooting-step approval also revalidates its
-stored bounded payload. Unknown stored pending-action types are rejected instead
-of being treated as generic troubleshooting output. Memory-write approval creates
-a tenant-scoped durable memory entry from the stored redacted payload. Approve
-and reject decisions also write tenant-scoped audit rows with redacted action
-input and bounded result summaries.
+does not start a CLI session in this release. Adapter-refresh approval reruns
+local adapter discovery and returns fresh availability/launch-readiness
+metadata without starting CLI sessions or changing project/session state.
+Approve and reject routes only operate on actions whose stored status is still
+`pending`; already approved or rejected actions are not rewritten.
+Session-create drafts must target a project visible to the current user and one
+of the supported terminal adapters: `claude`, `opencode`, or `codex`; approval
+revalidates the canonical stored draft so stale or invalid drafts stay pending
+instead of returning an actionable session draft. Troubleshooting-step approval
+also revalidates its stored bounded payload. Unknown stored pending-action types
+are rejected instead of being treated as generic troubleshooting output.
+Memory-write approval creates a tenant-scoped durable memory entry from the
+stored redacted payload. Approve and reject decisions also write tenant-scoped
+audit rows with redacted action input and bounded result summaries.
 
 Copilot memory is explicit product state. Durable memory entries and working
 notes are scoped by `user_id`; project-scoped entries are additionally filtered
