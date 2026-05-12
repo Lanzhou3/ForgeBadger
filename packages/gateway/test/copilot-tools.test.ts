@@ -337,6 +337,11 @@ describe("copilot tools", () => {
   });
 
   it("creates session-create proposals as pending actions without creating sessions", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
     const run = new CopilotRepository(db, userId).createRun({
       status: "running",
       source: "copilot",
@@ -346,7 +351,7 @@ describe("copilot tools", () => {
     const result = await executeCopilotTool(
       registry,
       "openforge.propose_session_create",
-      { projectId: "project-1", aiTool: "claude", name: "Draft session" },
+      { projectId: project.id, aiTool: "claude", name: "Draft session" },
       context(userId, run.id)
     );
 
@@ -355,6 +360,31 @@ describe("copilot tools", () => {
     assert.equal(actions.length, 1);
     assert.equal(actions[0]?.status, "pending");
     assert.equal(actions[0]?.type, "openforge.propose_session_create");
+    assert.equal(new SessionRepository(db, userId).list().length, 0);
+  });
+
+  it("rejects session-create proposals for projects outside the current tenant", async () => {
+    const foreignProject = new ProjectRepository(db, otherUserId).create({
+      name: "Foreign",
+      path: "/tmp/foreign",
+      aiTool: "codex"
+    });
+    const run = new CopilotRepository(db, userId).createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Prepare session"
+    });
+
+    const result = await executeCopilotTool(
+      registry,
+      "openforge.propose_session_create",
+      { projectId: foreignProject.id, aiTool: "claude", name: "Invalid draft" },
+      context(userId, run.id)
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "copilot_tool_validation_failed");
+    assert.equal(new CopilotRepository(db, userId).listPendingActions(run.id).length, 0);
     assert.equal(new SessionRepository(db, userId).list().length, 0);
   });
 

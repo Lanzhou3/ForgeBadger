@@ -8,7 +8,7 @@ import { discoverAdapters } from "../adapter-discovery.js";
 import { getDashboardSummary } from "../dashboard-summary.js";
 import { buildLocalDiagnosticsExport } from "../diagnostics.js";
 import { createCopilotMemoryTools } from "./memory.js";
-import type { CopilotToolContext, CopilotToolDefinition } from "./tool-registry.js";
+import { CopilotToolValidationError, type CopilotToolContext, type CopilotToolDefinition } from "./tool-registry.js";
 import { redactCopilotPayload } from "./redaction.js";
 
 const emptyInput = z.object({}).strict();
@@ -216,7 +216,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       inputSchema: proposeSessionCreateInput,
       modelInputSchema: proposeSessionCreateModelInputSchema,
       execute: async (input, context) =>
-        createPendingProposal(context, "openforge.propose_session_create", input)
+        createSessionCreateProposal(input, context)
     },
     {
       name: "openforge.propose_diagnostics_export",
@@ -335,6 +335,18 @@ function createPendingProposal(
     status: action.status,
     summary: "Pending user approval"
   };
+}
+
+function createSessionCreateProposal(
+  input: unknown,
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId">
+) {
+  const parsed = proposeSessionCreateInput.parse(input);
+  const project = new ProjectRepository(context.db, context.userId).getById(parsed.projectId);
+  if (!project) {
+    throw new CopilotToolValidationError("Copilot session draft project is not available");
+  }
+  return createPendingProposal(context, "openforge.propose_session_create", parsed);
 }
 
 function safeActionInput(input: unknown): Record<string, unknown> {

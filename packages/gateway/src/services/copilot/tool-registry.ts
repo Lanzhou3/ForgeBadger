@@ -36,6 +36,15 @@ export type ExecuteCopilotToolResult =
 
 const MAX_COPILOT_TOOL_OUTPUT_BYTES = 64 * 1024;
 
+export class CopilotToolValidationError extends Error {
+  readonly code = "copilot_tool_validation_failed";
+
+  constructor(message = "Copilot tool input is invalid") {
+    super(message);
+    this.name = "CopilotToolValidationError";
+  }
+}
+
 export function createCopilotToolRegistry(
   tools: CopilotToolDefinition[]
 ): CopilotToolRegistry {
@@ -57,7 +66,15 @@ export async function executeCopilotTool(
   if (!tool) return fail("copilot_tool_not_allowed", "Copilot tool is not allowed");
   const parsed = tool.inputSchema.safeParse(input);
   if (!parsed.success) return fail("copilot_tool_validation_failed", "Copilot tool input is invalid");
-  const output = await tool.execute(parsed.data, context);
+  let output: unknown;
+  try {
+    output = await tool.execute(parsed.data, context);
+  } catch (error) {
+    if (error instanceof CopilotToolValidationError) {
+      return fail(error.code, error.message);
+    }
+    throw error;
+  }
   const redactedOutput = redactCopilotPayload(output);
   if (isBlockedToolOutput(redactedOutput)) {
     return fail("copilot_redaction_blocked_output", "Copilot tool output was blocked by safety policy");
