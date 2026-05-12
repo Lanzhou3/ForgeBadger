@@ -36,6 +36,7 @@ docs/reports/*
 !docs/reports/platform-ai-copilot-product-audit-2026-05-13.md
 !docs/README.zh-CN.md
 !docs/README.zh-TW.md
+!docs/API.md
 !docs/DEVELOPMENT-PLAN.md
 !docs/MVP-10-TASKS.md
 !docs/SMOKE-TEST.md
