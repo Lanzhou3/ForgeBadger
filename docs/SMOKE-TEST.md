@@ -130,7 +130,25 @@ permission prompt event.
 - Start or reconnect a session and confirm the snapshot list changes after
   Gateway records session state.
 
-## 9. Pass Criteria
+## 9. Copilot
+
+- Configure a disposable OpenAI or Anthropic provider profile with an active
+  test credential.
+- Open `/copilot` from the sidebar.
+- Ask Copilot to diagnose project or session launch readiness.
+- Confirm the answer cites safe OpenForge state such as adapter discovery,
+  dashboard health, recent activity, project detail, session detail, or
+  diagnostics summary.
+- If Copilot proposes an action, confirm it appears as a pending action before
+  approval and that approve/reject updates the run without duplicate
+  submission.
+- If Copilot proposes a memory write, approve or reject it and confirm the
+  prompt, stored memory text, and visible details do not expose pasted secrets.
+- Confirm the page does not expose terminal input, raw shell execution,
+  filesystem write controls, automatic tmux input, or Codex app-server `/turn`
+  input.
+
+## 10. Pass Criteria
 
 Pass only when:
 
@@ -140,16 +158,20 @@ Pass only when:
 - Terminal attach, refresh reconnect, stop, restart, and delete behavior match
   the UI state.
 - Permission notification smoke produces both notification and activity rows.
+- Copilot can answer with safe platform state when a disposable provider is
+  configured, or any skipped Copilot step records the provider/environment
+  reason.
 - Any skipped step has a concrete environment reason.
 
-## 10. Automation Boundary
+## 11. Automation Boundary
 
 Automated CI can cover workspace tests, builds, npm package smoke, Provider
-regression, and the mocked Codex Background Tasks Web smoke. It cannot replace
-these manual checks:
+regression, mocked Copilot page behavior, and the mocked Codex Background Tasks
+Web smoke. It cannot replace these manual checks:
 
 - real browser terminal attach, input/output, resize, refresh, and reconnect;
 - real Claude Code permission prompt behavior;
+- live Copilot prompt behavior against a disposable provider credential;
 - physical Windows native versus WSL behavior;
 - local operator review that diagnostics and logs do not contain secrets.
 
