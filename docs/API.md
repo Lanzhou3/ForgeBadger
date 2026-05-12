@@ -164,7 +164,9 @@ pending actions, and aborts the in-process model request when the run is still
 active in the current Gateway process. Late model responses are ignored after a
 run has been cancelled. Model requests are timeout bounded; timeout failures
 return `504` with `details.code = "copilot_model_request_timeout"` and record a
-redacted `run_failed` event.
+redacted `run_failed` event. The Web console's Copilot run creation request
+uses a 65 second client timeout so the Gateway's 60 second model timeout remains
+the user-visible failure boundary.
 `GET /runs?limit=N` returns the requested bounded recent history and also
 includes any live `queued`, `running`, or `waiting_for_approval` run found in
 the same 200-run recovery window used by run creation. This keeps stale live

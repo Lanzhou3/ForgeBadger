@@ -326,6 +326,14 @@ describe("api client", () => {
     });
   });
 
+  it("lets Copilot run creation outlive the Gateway model timeout", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+
+    await createCopilotRun({ prompt: "Summarize Gateway health" });
+
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 65_000);
+  });
+
   it("creates Gate A sessions with the current login token", async () => {
     vi.stubGlobal("window", {});
     vi.stubGlobal("localStorage", {

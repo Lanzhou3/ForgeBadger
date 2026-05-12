@@ -884,6 +884,11 @@ interface ApiEnvelope<T> {
 }
 
 const DEFAULT_API_TIMEOUT_MS = 30_000;
+const COPILOT_RUN_API_TIMEOUT_MS = 65_000;
+
+interface ApiRequestOptions extends RequestInit {
+  timeoutMs?: number;
+}
 
 export const gatewayBaseUrl = getGatewayBaseUrl();
 
@@ -903,7 +908,7 @@ export function apiUrl(path: string): string {
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-export async function fetchJson<T = unknown>(path: string, options: RequestInit = {}) {
+export async function fetchJson<T = unknown>(path: string, options: ApiRequestOptions = {}) {
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
   const res = await fetch(apiUrl(path), request).finally(cleanup);
@@ -920,7 +925,7 @@ export async function fetchJson<T = unknown>(path: string, options: RequestInit 
   return envelope.data as T;
 }
 
-export async function fetchEnvelope<T = unknown>(path: string, options: RequestInit = {}) {
+export async function fetchEnvelope<T = unknown>(path: string, options: ApiRequestOptions = {}) {
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
   const res = await fetch(apiUrl(path), request).finally(cleanup);
@@ -937,22 +942,23 @@ export async function fetchEnvelope<T = unknown>(path: string, options: RequestI
   return envelope;
 }
 
-function buildApiRequest(options: RequestInit, token: string | null): {
+function buildApiRequest(options: ApiRequestOptions, token: string | null): {
   request: RequestInit;
   cleanup: () => void;
 } {
-  const controller = options.signal ? undefined : new AbortController();
+  const { timeoutMs = DEFAULT_API_TIMEOUT_MS, ...requestOptions } = options;
+  const controller = requestOptions.signal ? undefined : new AbortController();
   const timeout = controller
-    ? setTimeout(() => controller.abort(), DEFAULT_API_TIMEOUT_MS)
+    ? setTimeout(() => controller.abort(), timeoutMs)
     : undefined;
   return {
     request: {
-      ...options,
-      signal: options.signal ?? controller?.signal,
+      ...requestOptions,
+      signal: requestOptions.signal ?? controller?.signal,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...options.headers,
+        ...requestOptions.headers,
       },
     },
     cleanup: () => {
@@ -1347,6 +1353,7 @@ export async function createCopilotRun(
   return fetchJson("/api/v1/copilot/runs", {
     method: "POST",
     body: JSON.stringify(input),
+    timeoutMs: COPILOT_RUN_API_TIMEOUT_MS,
   }) as Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }>;
 }
 
