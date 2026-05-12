@@ -100,6 +100,17 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.providerConfigured, true);
   });
 
+  it("reports Copilot provider readiness when a later compatible provider has credentials", async () => {
+    createOpenAiProvider(userId, { isDefault: true, withCredential: false });
+    createOpenAiProvider(userId, { providerKey: "anthropic", isDefault: false, withCredential: true });
+
+    const res = await makeRequest(app, "GET", "/api/v1/copilot/capabilities", undefined, authHeaders());
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.providerConfigured, true);
+  });
+
   it("rejects unauthenticated run creation", async () => {
     const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", { prompt: "Status?" });
 
@@ -1043,26 +1054,32 @@ describe("copilot routes", () => {
     assert.equal(new CopilotMemoryRepository(db, userId).listEntries({}).length, 0);
   });
 
-  function createOpenAiProvider(ownerId = userId): void {
+  function createOpenAiProvider(
+    ownerId = userId,
+    options: { isDefault?: boolean; providerKey?: "openai" | "anthropic"; withCredential?: boolean } = {}
+  ): void {
+    const providerKey = options.providerKey ?? "openai";
     const repo = new ModelProviderRepository(db, ownerId, masterKey);
     const provider = repo.createProviderProfile({
-      providerKey: "openai",
-      name: "OpenAI",
-      baseUrl: "https://api.openai.com/v1",
+      providerKey,
+      name: providerKey === "anthropic" ? "Anthropic" : "OpenAI",
+      baseUrl: providerKey === "anthropic" ? "https://api.anthropic.com" : "https://api.openai.com/v1",
       authType: "api_key",
-      apiFormat: "openai",
-      supportedAdapters: ["opencode"]
+      apiFormat: providerKey,
+      supportedAdapters: providerKey === "anthropic" ? ["claude"] : ["opencode"]
     });
     repo.createModelProfile({
       providerProfileId: provider.id,
-      name: "GPT",
-      modelId: "gpt-5.1",
-      isDefault: true
+      name: providerKey === "anthropic" ? "Claude" : "GPT",
+      modelId: providerKey === "anthropic" ? "claude-sonnet-4-5" : "gpt-5.1",
+      isDefault: options.isDefault ?? true
     });
-    repo.createCredential({
-      providerProfileId: provider.id,
-      plaintextSecret: "sk-openai"
-    });
+    if (options.withCredential !== false) {
+      repo.createCredential({
+        providerProfileId: provider.id,
+        plaintextSecret: providerKey === "anthropic" ? "sk-ant" : "sk-openai"
+      });
+    }
   }
 
   function authHeaders(): Record<string, string> {

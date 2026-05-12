@@ -111,6 +111,24 @@ describe("copilot model client", () => {
     assert.equal(result.error.code, "copilot_provider_not_configured");
   });
 
+  it("skips uncredentialed default providers when another compatible provider is ready", () => {
+    createProvider("openai", "openai", { isDefault: true, withCredential: false });
+    const ready = createProvider("anthropic", "anthropic", { isDefault: false });
+
+    const result = selectCopilotProvider({
+      db,
+      userId,
+      masterKey
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.selection.provider.id, ready.providerId);
+    assert.equal(result.selection.model.id, ready.modelId);
+    assert.equal(result.selection.clientKind, "anthropic-messages");
+    assert.equal(result.selection.apiKey, "sk-ant");
+  });
+
   it("does not use Codex subscription identity for Copilot credentials", () => {
     const setup = createProvider("openai", "openai", { withCredential: false });
 
@@ -451,7 +469,7 @@ describe("copilot model client", () => {
   function createProvider(
     providerKey: string,
     apiFormat: Extract<ProviderApiFormat, "openai" | "openai-compatible" | "anthropic">,
-    options: { withCredential?: boolean } = {}
+    options: { isDefault?: boolean; withCredential?: boolean } = {}
   ) {
     const repo = new ModelProviderRepository(db, userId, masterKey);
     const provider = repo.createProviderProfile({
@@ -466,7 +484,7 @@ describe("copilot model client", () => {
       providerProfileId: provider.id,
       name: "Default",
       modelId: apiFormat === "anthropic" ? "claude-sonnet-4-5" : "gpt-5.1",
-      isDefault: true
+      isDefault: options.isDefault ?? true
     });
     if (options.withCredential !== false) {
       repo.createCredential({

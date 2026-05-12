@@ -28,6 +28,9 @@ export type SelectCopilotProviderResult =
 
 export function selectCopilotProvider(input: SelectCopilotProviderInput): SelectCopilotProviderResult {
   const repo = new ModelProviderRepository(input.db, input.userId, input.masterKey);
+  if (!input.providerProfileId && !input.modelProfileId && !input.credentialId) {
+    return selectDefaultReadyProvider(repo, input.allowOpenAiCompatible === true);
+  }
   const selected = selectProviderAndModel(repo, input);
   if (!selected.ok) return selected;
   const clientKind = clientKindFor(selected.provider, input.allowOpenAiCompatible === true);
@@ -90,6 +93,31 @@ function selectDefaultCompatibleModel(repo: ModelProviderRepository): ProviderAn
     if (provider && model.status === "active" && isCopilotProviderFormat(provider.apiFormat)) {
       return { ok: true, provider, model };
     }
+  }
+  return notConfigured("No compatible Copilot provider is configured");
+}
+
+function selectDefaultReadyProvider(
+  repo: ModelProviderRepository,
+  allowOpenAiCompatible: boolean
+): SelectCopilotProviderResult {
+  for (const model of repo.listModelProfiles()) {
+    const provider = repo.getProviderProfile(model.providerProfileId);
+    if (!provider || model.status !== "active" || !isCopilotProviderFormat(provider.apiFormat)) continue;
+    const clientKind = clientKindFor(provider, allowOpenAiCompatible);
+    if (!clientKind.ok) return clientKind;
+    const credential = selectCredential(repo, provider, undefined);
+    if (!credential.ok) continue;
+    return {
+      ok: true,
+      selection: {
+        provider,
+        model,
+        format: provider.apiFormat as CopilotProviderFormat,
+        clientKind: clientKind.kind,
+        apiKey: credential.apiKey
+      }
+    };
   }
   return notConfigured("No compatible Copilot provider is configured");
 }
