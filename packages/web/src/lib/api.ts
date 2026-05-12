@@ -256,6 +256,15 @@ export interface LocalDiagnosticsExport {
     command: string;
     runtimeModes: string[];
   }>;
+  copilot: {
+    capabilities: {
+      enabled: boolean;
+      toolExecutionEnabled: boolean;
+      approvalRequiredForWrites: boolean;
+      memoryEnabled: boolean;
+      memoryWritesRequireApproval: boolean;
+    };
+  };
   environment: Record<string, unknown>;
 }
 

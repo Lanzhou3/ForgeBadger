@@ -230,6 +230,15 @@ describe("api client", () => {
         counts: { projects: 1 },
         dashboardHealth: {},
         adapters: [{ id: "claude", command: "claude", runtimeModes: ["terminal"] }],
+        copilot: {
+          capabilities: {
+            enabled: true,
+            toolExecutionEnabled: true,
+            approvalRequiredForWrites: true,
+            memoryEnabled: true,
+            memoryWritesRequireApproval: true,
+          },
+        },
         environment: { OPENFORGE_PORT: "48731" },
       },
     })));
@@ -241,6 +250,7 @@ describe("api client", () => {
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(result.report.app.name).toBe("OpenForge");
+    expect(result.report.copilot.capabilities.memoryWritesRequireApproval).toBe(true);
     expect(result.report.environment.OPENFORGE_PORT).toBe("48731");
   });
 
