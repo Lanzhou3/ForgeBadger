@@ -67,9 +67,9 @@ function selectExplicitModel(
   input: SelectCopilotProviderInput
 ): ProviderAndModelResult {
   const model = repo.getModelProfile(input.modelProfileId as string);
-  if (!model) return notConfigured("Copilot model profile is not configured");
+  if (!model || model.status !== "active") return notConfigured("Copilot model profile is not configured");
   const provider = repo.getProviderProfile(model.providerProfileId);
-  if (!provider) return notConfigured("Copilot provider profile is not configured");
+  if (!provider || provider.status !== "active") return notConfigured("Copilot provider profile is not configured");
   if (input.providerProfileId && provider.id !== input.providerProfileId) {
     return unsupported("Selected model does not belong to the selected provider");
   }
@@ -81,7 +81,7 @@ function selectFirstProviderModel(
   providerProfileId: string
 ): ProviderAndModelResult {
   const provider = repo.getProviderProfile(providerProfileId);
-  if (!provider) return notConfigured("Copilot provider profile is not configured");
+  if (!provider || provider.status !== "active") return notConfigured("Copilot provider profile is not configured");
   const model = repo.listModelProfiles(provider.id).find((item) => item.status === "active");
   if (!model) return notConfigured("Copilot model profile is not configured");
   return { ok: true, provider, model };
@@ -90,7 +90,12 @@ function selectFirstProviderModel(
 function selectDefaultCompatibleModel(repo: ModelProviderRepository): ProviderAndModelResult {
   for (const model of repo.listModelProfiles()) {
     const provider = repo.getProviderProfile(model.providerProfileId);
-    if (provider && model.status === "active" && isCopilotProviderFormat(provider.apiFormat)) {
+    if (
+      provider &&
+      provider.status === "active" &&
+      model.status === "active" &&
+      isCopilotProviderFormat(provider.apiFormat)
+    ) {
       return { ok: true, provider, model };
     }
   }
@@ -103,7 +108,14 @@ function selectDefaultReadyProvider(
 ): SelectCopilotProviderResult {
   for (const model of repo.listModelProfiles()) {
     const provider = repo.getProviderProfile(model.providerProfileId);
-    if (!provider || model.status !== "active" || !isCopilotProviderFormat(provider.apiFormat)) continue;
+    if (
+      !provider ||
+      provider.status !== "active" ||
+      model.status !== "active" ||
+      !isCopilotProviderFormat(provider.apiFormat)
+    ) {
+      continue;
+    }
     const clientKind = clientKindFor(provider, allowOpenAiCompatible);
     if (!clientKind.ok) return clientKind;
     const credential = selectCredential(repo, provider, undefined);

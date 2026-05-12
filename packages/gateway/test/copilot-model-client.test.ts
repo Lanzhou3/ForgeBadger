@@ -129,6 +129,39 @@ describe("copilot model client", () => {
     assert.equal(result.selection.apiKey, "sk-ant");
   });
 
+  it("skips disabled default providers when another compatible provider is ready", () => {
+    const disabled = createProvider("openai", "openai", { isDefault: true });
+    disableProvider(disabled.providerId);
+    const ready = createProvider("anthropic", "anthropic", { isDefault: false });
+
+    const result = selectCopilotProvider({
+      db,
+      userId,
+      masterKey
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.selection.provider.id, ready.providerId);
+    assert.equal(result.selection.model.id, ready.modelId);
+  });
+
+  it("rejects explicitly selected disabled providers", () => {
+    const setup = createProvider("openai", "openai");
+    disableProvider(setup.providerId);
+
+    const result = selectCopilotProvider({
+      db,
+      userId,
+      masterKey,
+      providerProfileId: setup.providerId,
+      modelProfileId: setup.modelId
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "copilot_provider_not_configured");
+  });
+
   it("does not use Codex subscription identity for Copilot credentials", () => {
     const setup = createProvider("openai", "openai", { withCredential: false });
 
@@ -493,6 +526,14 @@ describe("copilot model client", () => {
       });
     }
     return { providerId: provider.id, modelId: model.id };
+  }
+
+  function disableProvider(providerId: string): void {
+    db.prepare(`
+      UPDATE model_provider_profiles
+      SET status = 'disabled'
+      WHERE id = ? AND user_id = ?
+    `).run(providerId, userId);
   }
 });
 

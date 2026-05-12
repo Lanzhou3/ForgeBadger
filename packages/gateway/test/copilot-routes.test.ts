@@ -111,6 +111,17 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.providerConfigured, true);
   });
 
+  it("does not report Copilot provider readiness for disabled providers", async () => {
+    const providerId = createOpenAiProvider();
+    disableProvider(providerId);
+
+    const res = await makeRequest(app, "GET", "/api/v1/copilot/capabilities", undefined, authHeaders());
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.providerConfigured, false);
+  });
+
   it("rejects unauthenticated run creation", async () => {
     const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", { prompt: "Status?" });
 
@@ -1074,7 +1085,7 @@ describe("copilot routes", () => {
   function createOpenAiProvider(
     ownerId = userId,
     options: { isDefault?: boolean; providerKey?: "openai" | "anthropic"; withCredential?: boolean } = {}
-  ): void {
+  ): string {
     const providerKey = options.providerKey ?? "openai";
     const repo = new ModelProviderRepository(db, ownerId, masterKey);
     const provider = repo.createProviderProfile({
@@ -1097,6 +1108,15 @@ describe("copilot routes", () => {
         plaintextSecret: providerKey === "anthropic" ? "sk-ant" : "sk-openai"
       });
     }
+    return provider.id;
+  }
+
+  function disableProvider(providerId: string): void {
+    db.prepare(`
+      UPDATE model_provider_profiles
+      SET status = 'disabled'
+      WHERE id = ? AND user_id = ?
+    `).run(providerId, userId);
   }
 
   function authHeaders(): Record<string, string> {
