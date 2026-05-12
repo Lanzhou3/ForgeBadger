@@ -71,7 +71,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     const parseResult = listRunsSchema.safeParse(req.query);
     if (!parseResult.success) return sendInvalid(res, "Invalid copilot run query");
     const repo = repoFor(options.db, req);
-    res.json({ code: 0, data: { runs: repo.listRuns(parseResult.data.limit) }, message: "" });
+    res.json({ code: 0, data: { runs: listRunsWithLiveRecovery(repo, parseResult.data.limit) }, message: "" });
   });
 
   router.post("/runs", async (req, res) => {
@@ -218,6 +218,16 @@ function repoFor(db: Database, req: unknown): CopilotRepository {
 
 function userIdFor(req: unknown): string {
   return (req as AuthenticatedRequest).userId;
+}
+
+function listRunsWithLiveRecovery(repo: CopilotRepository, limit: number | undefined): CopilotRun[] {
+  const historyLimit = limit ?? 50;
+  const recentRuns = repo.listRuns(historyLimit);
+  const seenIds = new Set(recentRuns.map((run) => run.id));
+  const recoveredLiveRuns = repo
+    .listRuns(200)
+    .filter((run) => isLiveRunStatus(run.status) && !seenIds.has(run.id));
+  return [...recentRuns, ...recoveredLiveRuns];
 }
 
 function successEnvelope(

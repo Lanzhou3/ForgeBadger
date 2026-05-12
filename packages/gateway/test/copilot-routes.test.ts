@@ -356,6 +356,30 @@ describe("copilot routes", () => {
     assert.doesNotMatch(sessionInput, /Foreign secret session|foreign-session-secret-path|foreign-attach-secret|foreign-of-secret/);
   });
 
+  it("includes older live runs when listing bounded Copilot history", async () => {
+    const repo = new CopilotRepository(db, userId);
+    const liveRun = repo.createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Older running run"
+    });
+    for (let index = 0; index < 25; index += 1) {
+      repo.createRun({
+        status: "completed",
+        source: "copilot",
+        goal: `Completed run ${index}`
+      });
+    }
+
+    const res = await makeRequest(app, "GET", "/api/v1/copilot/runs?limit=20", undefined, authHeaders());
+
+    const runs = res.body.data.runs as Array<{ id: string; status: string; goal: string }>;
+    assert.equal(res.status, 200);
+    assert.equal(runs.filter((run) => run.status === "completed").length, 20);
+    assert.ok(runs.some((run) => run.id === liveRun.id && run.status === "running"));
+    assert.equal(runs.length, 21);
+  });
+
   it("rejects concurrent Copilot runs for the same user while allowing other users", async () => {
     createOpenAiProvider();
     createOpenAiProvider(otherUserId);

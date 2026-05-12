@@ -165,6 +165,11 @@ active in the current Gateway process. Late model responses are ignored after a
 run has been cancelled. Model requests are timeout bounded; timeout failures
 return `504` with `details.code = "copilot_model_request_timeout"` and record a
 redacted `run_failed` event.
+`GET /runs?limit=N` returns the requested bounded recent history and also
+includes any live `queued`, `running`, or `waiting_for_approval` run found in
+the same 200-run recovery window used by run creation. This keeps stale live
+runs visible and cancellable in the Web console even when they are older than
+the normal history page size.
 
 Read tools are allowlisted and validated server-side. Current read tools are:
 
