@@ -6,6 +6,7 @@ import { ProjectRepository, type Project } from "../../db/repositories/project-r
 import { SessionRepository, type Session } from "../../db/repositories/session-repository.js";
 import { discoverAdapters } from "../adapter-discovery.js";
 import { getDashboardSummary } from "../dashboard-summary.js";
+import { buildLocalDiagnosticsExport } from "../diagnostics.js";
 import { createCopilotMemoryTools } from "./memory.js";
 import type { CopilotToolContext, CopilotToolDefinition } from "./tool-registry.js";
 import { redactCopilotPayload } from "./redaction.js";
@@ -13,6 +14,12 @@ import { redactCopilotPayload } from "./redaction.js";
 const emptyInput = z.object({}).strict();
 const limitInput = z.object({
   limit: z.number().int().min(1).max(50).optional()
+}).strict();
+const projectDetailInput = z.object({
+  projectId: z.string().min(1)
+}).strict();
+const sessionDetailInput = z.object({
+  sessionId: z.string().min(1)
 }).strict();
 const proposeSessionCreateInput = z.object({
   projectId: z.string().min(1),
@@ -37,6 +44,22 @@ const limitModelInputSchema = {
   properties: {
     limit: { type: "integer", minimum: 1, maximum: 50 }
   },
+  additionalProperties: false
+};
+const projectDetailModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 }
+  },
+  required: ["projectId"],
+  additionalProperties: false
+};
+const sessionDetailModelInputSchema = {
+  type: "object",
+  properties: {
+    sessionId: { type: "string", minLength: 1 }
+  },
+  required: ["sessionId"],
   additionalProperties: false
 };
 const proposeSessionCreateModelInputSchema = {
@@ -96,6 +119,19 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       })
     },
     {
+      name: "openforge.get_project_detail",
+      description: "Read one OpenForge project visible to the current user.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: projectDetailInput,
+      modelInputSchema: projectDetailModelInputSchema,
+      execute: async (input, context) => {
+        const { projectId } = projectDetailInput.parse(input);
+        const project = new ProjectRepository(context.db, context.userId).getById(projectId);
+        return { project: project ? toProjectDetail(project) : null };
+      }
+    },
+    {
       name: "openforge.list_sessions",
       description: "List OpenForge sessions visible to the current user.",
       risk: "read",
@@ -108,6 +144,19 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
           .slice(0, readLimit(input))
           .map(toSessionSummary)
       })
+    },
+    {
+      name: "openforge.get_session_detail",
+      description: "Read one OpenForge session visible to the current user.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: sessionDetailInput,
+      modelInputSchema: sessionDetailModelInputSchema,
+      execute: async (input, context) => {
+        const { sessionId } = sessionDetailInput.parse(input);
+        const session = new SessionRepository(context.db, context.userId).getById(sessionId);
+        return { session: session ? toSessionDetail(session) : null };
+      }
     },
     {
       name: "openforge.get_adapter_discovery",
@@ -132,6 +181,32 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
           .list({ limit: readLimit(input) })
           .map(toActivitySummary)
       })
+    },
+    {
+      name: "openforge.get_diagnostics_summary",
+      description: "Read a bounded local diagnostics summary without exporting full diagnostics.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: emptyInput,
+      modelInputSchema: emptyModelInputSchema,
+      execute: async (_input, context) => {
+        const diagnostics = buildLocalDiagnosticsExport({
+          db: context.db,
+          userId: context.userId,
+          masterKey: context.masterKey,
+          appVersion: "0.0.0"
+        });
+        return {
+          diagnostics: {
+            generatedAt: diagnostics.generatedAt,
+            runtime: diagnostics.runtime,
+            counts: diagnostics.counts,
+            dashboardHealth: diagnostics.dashboardHealth,
+            adapters: diagnostics.adapters,
+            copilot: diagnostics.copilot
+          }
+        };
+      }
     },
     {
       name: "openforge.propose_session_create",
@@ -184,6 +259,17 @@ function toProjectSummary(project: Project) {
   };
 }
 
+function toProjectDetail(project: Project) {
+  return {
+    ...toProjectSummary(project),
+    description: project.description,
+    techStack: project.techStack,
+    templateId: project.templateId,
+    createdAt: project.createdAt.toISOString(),
+    updatedAt: project.updatedAt.toISOString()
+  };
+}
+
 function toSessionSummary(session: Session) {
   return {
     id: session.id,
@@ -193,6 +279,19 @@ function toSessionSummary(session: Session) {
     status: session.status,
     credentialMode: session.credentialMode,
     tmuxSession: session.tmuxSession
+  };
+}
+
+function toSessionDetail(session: Session) {
+  return {
+    ...toSessionSummary(session),
+    modelId: session.modelId,
+    agentId: session.agentId,
+    workingDir: session.workingDir,
+    lastActive: session.lastActive?.toISOString() ?? null,
+    errorMessage: session.errorMessage,
+    createdAt: session.createdAt.toISOString(),
+    updatedAt: session.updatedAt.toISOString()
   };
 }
 

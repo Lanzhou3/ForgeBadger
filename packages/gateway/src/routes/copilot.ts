@@ -76,7 +76,11 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     if (existingActiveRun) return sendRunAlreadyActive(res, existingActiveRun);
     activeRunUsers.add(userId);
     try {
-      const result = await new CopilotOrchestrator({ ...options, runControls }).runText({
+      const result = await new CopilotOrchestrator({
+        ...options,
+        runControls,
+        onRunStarted: (run) => recordCopilotRunAudit(options.db, userId, req.ip, "copilot.run.start", run)
+      }).runText({
         userId,
         prompt: parseResult.data.prompt,
         source: parseResult.data.source,
@@ -84,11 +88,19 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         ...(parseResult.data.modelProfileId ? { modelProfileId: parseResult.data.modelProfileId } : {}),
         ...(parseResult.data.sourceRefId ? { sourceRefId: parseResult.data.sourceRefId } : {})
       });
+      const pendingActions = repo.listPendingActions(result.run.id);
+      recordCopilotEventAudits(options.db, userId, req.ip, result.run, result.events, pendingActions);
       if (!result.ok) {
+        if (result.run.status === "failed") {
+          recordCopilotRunAudit(options.db, userId, req.ip, "copilot.run.fail", result.run);
+        }
         res.status(result.status).json(errorEnvelope(result.error.message, result.error.code, result.run, result.events));
         return;
       }
-      res.status(201).json(successEnvelope(result.run, result.events, repo.listPendingActions(result.run.id)));
+      if (result.run.status === "completed") {
+        recordCopilotRunAudit(options.db, userId, req.ip, "copilot.run.complete", result.run);
+      }
+      res.status(201).json(successEnvelope(result.run, result.events, pendingActions));
     } catch {
       res.status(500).json({ code: 1, message: "Failed to create copilot run" });
     } finally {
@@ -114,8 +126,14 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         details: { code: "copilot_run_not_cancellable", status: current.status }
       });
     }
-    rejectPendingActions(repo, current.id);
+    const rejectedPendingActions = rejectPendingActions(repo, current.id);
     const run = repo.updateRun(current.id, { status: "cancelled", completedAt: Date.now() }) ?? current;
+    for (const action of rejectedPendingActions) {
+      recordPendingActionAudit(options.db, userIdFor(req), req.ip, action, "rejected", { reason: "run_cancelled" });
+    }
+    recordCopilotRunAudit(options.db, userIdFor(req), req.ip, "copilot.run.cancel", run, {
+      rejectedPendingActionCount: rejectedPendingActions.length
+    });
     runControls.cancel(current.id);
     res.json(successEnvelope(run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
   });
@@ -147,6 +165,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     recordPendingActionAudit(options.db, userIdFor(req), req.ip, action, "approved", result);
     recordPendingActionDecision(repo, action, "approved");
     const run = completeRunIfNoPendingActions(repo, target.run);
+    if (run.status === "completed") recordCopilotRunAudit(options.db, userIdFor(req), req.ip, "copilot.run.complete", run);
     res.json(pendingActionEnvelope(updated as CopilotPendingAction, run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
   });
 
@@ -169,6 +188,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     recordPendingActionAudit(options.db, userIdFor(req), req.ip, target.action, "rejected", result);
     recordPendingActionDecision(repo, target.action, "rejected");
     const run = completeRunIfNoPendingActions(repo, target.run);
+    if (run.status === "completed") recordCopilotRunAudit(options.db, userIdFor(req), req.ip, "copilot.run.complete", run);
     res.json(pendingActionEnvelope(updated as CopilotPendingAction, run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
   });
 
@@ -246,15 +266,18 @@ function sendRunAlreadyActive(
   });
 }
 
-function rejectPendingActions(repo: CopilotRepository, runId: string): void {
+function rejectPendingActions(repo: CopilotRepository, runId: string): CopilotPendingAction[] {
+  const rejected: CopilotPendingAction[] = [];
   for (const action of repo.listPendingActions(runId)) {
     if (action.status === "pending") {
       repo.updatePendingAction(action.id, {
         status: "rejected",
         result: { reason: "run_cancelled" }
       });
+      rejected.push(action);
     }
   }
+  return rejected;
 }
 
 function recordPendingActionDecision(
@@ -270,6 +293,172 @@ function recordPendingActionDecision(
       actionType: action.type,
       status: decision
     }
+  });
+}
+
+function recordCopilotEventAudits(
+  db: Database,
+  userId: string,
+  ipAddress: string | undefined,
+  run: CopilotRun,
+  events: CopilotRunEvent[],
+  pendingActions: CopilotPendingAction[]
+): void {
+  let pendingTool: { id?: string; name?: string } | null = null;
+  for (const event of events) {
+    if (event.type === "tool_call_requested") {
+      recordCopilotToolRequestAudit(db, userId, ipAddress, run, event);
+      pendingTool = readToolAuditRef(event);
+      continue;
+    }
+    if (event.type === "tool_result") {
+      recordCopilotToolResultAudit(db, userId, ipAddress, run, event, pendingTool);
+      pendingTool = null;
+      continue;
+    }
+    if (event.type === "run_failed" && pendingTool) {
+      recordCopilotToolFailureAudit(db, userId, ipAddress, run, event, pendingTool);
+      pendingTool = null;
+    }
+  }
+  for (const action of pendingActions) {
+    recordPendingActionCreateAudit(db, userId, ipAddress, action);
+  }
+}
+
+function readToolAuditRef(event: CopilotRunEvent): { id?: string; name?: string } {
+  const ref: { id?: string; name?: string } = {};
+  if (typeof event.payload.id === "string") ref.id = event.payload.id;
+  if (typeof event.payload.name === "string") ref.name = event.payload.name;
+  else if (event.message) ref.name = event.message;
+  return ref;
+}
+
+function recordCopilotToolRequestAudit(
+  db: Database,
+  userId: string,
+  ipAddress: string | undefined,
+  run: CopilotRun,
+  event: CopilotRunEvent
+): void {
+  const payload = event.payload;
+  new AuditLogRepository(db, userId).create({
+    action: "copilot.tool.request",
+    resourceType: "copilot_run",
+    resourceId: run.id,
+    details: {
+      runId: run.id,
+      eventId: event.id,
+      sequence: event.sequence,
+      toolCallId: redactCopilotPayload(typeof payload.id === "string" ? payload.id : undefined),
+      toolName: redactCopilotPayload(typeof payload.name === "string" ? payload.name : event.message),
+      input: redactCopilotPayload(payload.input)
+    },
+    ipAddress
+  });
+}
+
+function recordCopilotToolResultAudit(
+  db: Database,
+  userId: string,
+  ipAddress: string | undefined,
+  run: CopilotRun,
+  event: CopilotRunEvent,
+  pendingTool: { id?: string; name?: string } | null
+): void {
+  const payload = event.payload;
+  new AuditLogRepository(db, userId).create({
+    action: "copilot.tool.result",
+    resourceType: "copilot_run",
+    resourceId: run.id,
+    details: {
+      runId: run.id,
+      eventId: event.id,
+      sequence: event.sequence,
+      toolCallId: redactCopilotPayload(typeof payload.toolCallId === "string" ? payload.toolCallId : pendingTool?.id),
+      toolName: redactCopilotPayload(event.message ?? pendingTool?.name),
+      output: redactCopilotPayload(payload.output)
+    },
+    ipAddress
+  });
+}
+
+function recordCopilotToolFailureAudit(
+  db: Database,
+  userId: string,
+  ipAddress: string | undefined,
+  run: CopilotRun,
+  event: CopilotRunEvent,
+  pendingTool: { id?: string; name?: string }
+): void {
+  const payload = event.payload;
+  new AuditLogRepository(db, userId).create({
+    action: "copilot.tool.fail",
+    resourceType: "copilot_run",
+    resourceId: run.id,
+    details: {
+      runId: run.id,
+      eventId: event.id,
+      sequence: event.sequence,
+      toolCallId: redactCopilotPayload(pendingTool.id),
+      toolName: redactCopilotPayload(pendingTool.name),
+      errorCode: typeof payload.code === "string" ? payload.code : undefined,
+      errorMessage: redactCopilotPayload(
+        typeof payload.message === "string" ? payload.message : event.message
+      )
+    },
+    ipAddress
+  });
+}
+
+function recordPendingActionCreateAudit(
+  db: Database,
+  userId: string,
+  ipAddress: string | undefined,
+  action: CopilotPendingAction
+): void {
+  new AuditLogRepository(db, userId).create({
+    action: "copilot.pending_action.create",
+    resourceType: "copilot_run",
+    resourceId: action.runId,
+    details: {
+      runId: action.runId,
+      actionId: action.id,
+      actionType: redactCopilotPayload(action.type),
+      status: action.status,
+      input: redactCopilotPayload(action.input)
+    },
+    ipAddress
+  });
+}
+
+function recordCopilotRunAudit(
+  db: Database,
+  userId: string,
+  ipAddress: string | undefined,
+  auditAction: "copilot.run.start" | "copilot.run.complete" | "copilot.run.fail" | "copilot.run.cancel",
+  run: CopilotRun,
+  extraDetails: Record<string, unknown> = {}
+): void {
+  new AuditLogRepository(db, userId).create({
+    action: auditAction,
+    resourceType: "copilot_run",
+    resourceId: run.id,
+    details: {
+      runId: run.id,
+      status: run.status,
+      source: run.source,
+      ...(run.sourceRefId ? { sourceRefId: redactCopilotPayload(run.sourceRefId) } : {}),
+      ...(run.providerProfileId ? { providerProfileId: run.providerProfileId } : {}),
+      ...(run.modelProfileId ? { modelProfileId: run.modelProfileId } : {}),
+      stepCount: run.stepCount,
+      ...(run.errorCode ? { errorCode: run.errorCode } : {}),
+      ...(run.errorMessage ? { errorMessage: redactCopilotPayload(run.errorMessage) } : {}),
+      createdAt: run.createdAt,
+      completedAt: run.completedAt,
+      ...extraDetails
+    },
+    ipAddress
   });
 }
 

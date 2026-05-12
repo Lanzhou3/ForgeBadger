@@ -23,6 +23,7 @@ export interface CopilotOrchestratorOptions {
   modelClientFactory?: (selection: CopilotProviderSelection) => CopilotModelClient;
   modelRequestTimeoutMs?: number;
   runControls?: CopilotRunControlRegistry;
+  onRunStarted?: (run: CopilotRun) => void;
 }
 
 export interface RunCopilotTextInput {
@@ -58,6 +59,7 @@ export class CopilotOrchestrator {
     let run = repo.createRun(toCreateRunInput({ ...input, prompt: redactedPrompt }));
     const control = this.runControls.start(run.id);
     try {
+      this.options.onRunStarted?.(run);
       const selectionInput = {
         db: this.options.db,
         userId: input.userId,

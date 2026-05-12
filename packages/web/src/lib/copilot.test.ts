@@ -7,6 +7,7 @@ import {
   getCopilotPendingActionLabel,
   getCopilotPendingActionLabelKey,
   getCopilotPendingActionSummary,
+  getCopilotErrorMessageKey,
   getCopilotStartBlocker,
   findLiveCopilotRun,
   findCurrentLiveCopilotRun,
@@ -41,7 +42,7 @@ describe("copilot display helpers", () => {
   });
 
   it("falls back to readable labels for unknown pending action types", () => {
-    expect(getCopilotPendingActionLabel("openforge.propose_setting_update")).toBe("Setting update");
+    expect(getCopilotPendingActionLabel("openforge.propose_setting_update")).toBe("Openforge propose setting update");
     expect(getCopilotPendingActionLabel("openforge.propose_memory_write")).toBe("Memory write");
     expect(getCopilotPendingActionLabel("custom.pending_action")).toBe("Custom pending action");
   });
@@ -50,6 +51,16 @@ describe("copilot display helpers", () => {
     expect(getCopilotPendingActionLabelKey("openforge.propose_memory_write")).toBe("copilot.pendingAction.memoryWrite");
     expect(getCopilotPendingActionLabelKey("openforge.propose_diagnostics_export")).toBe("copilot.pendingAction.diagnosticsExport");
     expect(getCopilotPendingActionLabelKey("custom.pending_action")).toBeNull();
+  });
+
+  it("maps known Copilot error codes to localized message keys", () => {
+    expect(getCopilotErrorMessageKey("copilot_provider_not_configured")).toBe("copilot.error.providerNotConfigured");
+    expect(getCopilotErrorMessageKey("copilot_provider_unsupported")).toBe("copilot.error.providerUnsupported");
+    expect(getCopilotErrorMessageKey("copilot_model_request_failed")).toBe("copilot.error.modelRequestFailed");
+    expect(getCopilotErrorMessageKey("copilot_model_request_timeout")).toBe("copilot.error.modelRequestTimeout");
+    expect(getCopilotErrorMessageKey("copilot_redaction_blocked_output")).toBe("copilot.error.redactionBlockedOutput");
+    expect(getCopilotErrorMessageKey("copilot_run_already_active")).toBe("copilot.error.runAlreadyActive");
+    expect(getCopilotErrorMessageKey("unknown_error")).toBeNull();
   });
 
   it("summarizes memory write pending actions without requiring raw JSON", () => {

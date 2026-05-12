@@ -84,6 +84,9 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.providerConfigured, false);
     assert.equal(res.body.data.approvalRequiredForWrites, true);
     assert.ok(res.body.data.readTools.includes("openforge.get_dashboard_summary"));
+    assert.ok(res.body.data.readTools.includes("openforge.get_project_detail"));
+    assert.ok(res.body.data.readTools.includes("openforge.get_session_detail"));
+    assert.ok(res.body.data.readTools.includes("openforge.get_diagnostics_summary"));
     assert.equal(res.body.data.readTools.includes("openforge.propose_session_create"), false);
   });
 
@@ -137,6 +140,52 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.events[0].type, "assistant_message");
     assert.equal(res.body.data.events[0].message, "Gateway is healthy.");
     assert.equal(calls[0]?.input, "Summarize Gateway health");
+  });
+
+  it("writes audit logs for Copilot run start and completion", async () => {
+    createOpenAiProvider();
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Summarize Gateway health with token=secret-value",
+      source: "dashboard",
+      sourceRefId: "dashboard-root"
+    }, authHeaders());
+
+    const runId = res.body.data.run.id as string;
+    const auditLogs = new AuditLogRepository(db, userId).list({
+      resourceType: "copilot_run",
+      resourceId: runId,
+      limit: 10
+    });
+    const actions = auditLogs.map((log) => log.action).sort();
+    const startDetails = JSON.parse(
+      auditLogs.find((log) => log.action === "copilot.run.start")?.details ?? "{}"
+    ) as {
+      runId?: string;
+      source?: string;
+      sourceRefId?: string;
+      status?: string;
+      stepCount?: number;
+      completedAt?: number | null;
+    };
+    const completionDetails = JSON.parse(
+      auditLogs.find((log) => log.action === "copilot.run.complete")?.details ?? "{}"
+    ) as { runId?: string; status?: string; stepCount?: number; providerProfileId?: string; modelProfileId?: string };
+
+    assert.equal(res.status, 201);
+    assert.deepEqual(actions, ["copilot.run.complete", "copilot.run.start"]);
+    assert.equal(startDetails.runId, runId);
+    assert.equal(startDetails.source, "dashboard");
+    assert.equal(startDetails.sourceRefId, "dashboard-root");
+    assert.equal(startDetails.status, "running");
+    assert.equal(startDetails.stepCount, 0);
+    assert.equal(startDetails.completedAt, null);
+    assert.equal(completionDetails.runId, runId);
+    assert.equal(completionDetails.status, "completed");
+    assert.equal(completionDetails.stepCount, 1);
+    assert.equal(typeof completionDetails.providerProfileId, "string");
+    assert.equal(typeof completionDetails.modelProfileId, "string");
+    assert.doesNotMatch(JSON.stringify(auditLogs), /secret-value/);
   });
 
   it("redacts secret-looking prompts before persistence and model requests", async () => {
@@ -321,6 +370,63 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.pendingActions[0].type, "openforge.propose_memory_write");
   });
 
+  it("writes audit logs for Copilot tool requests and pending-action creation", async () => {
+    createOpenAiProvider();
+    modelEvents = [{
+      type: "tool_call_requested",
+      id: "tool-call-1",
+      name: "openforge.propose_troubleshooting_steps",
+      input: {
+        steps: ["Check provider setup"],
+        summary: "token=secret-value"
+      }
+    }];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Prepare troubleshooting steps",
+      source: "copilot"
+    }, authHeaders());
+
+    const runId = res.body.data.run.id as string;
+    const actionId = res.body.data.pendingActions[0].id as string;
+    const auditLogs = new AuditLogRepository(db, userId).list({
+      resourceType: "copilot_run",
+      resourceId: runId,
+      limit: 10
+    });
+    const actions = auditLogs.map((log) => log.action).sort();
+    const toolDetails = JSON.parse(
+      auditLogs.find((log) => log.action === "copilot.tool.request")?.details ?? "{}"
+    ) as { runId?: string; toolName?: string; input?: { summary?: string } };
+    const pendingDetails = JSON.parse(
+      auditLogs.find((log) => log.action === "copilot.pending_action.create")?.details ?? "{}"
+    ) as { runId?: string; actionId?: string; actionType?: string; status?: string; input?: { summary?: string } };
+    const resultDetails = JSON.parse(
+      auditLogs.find((log) => log.action === "copilot.tool.result")?.details ?? "{}"
+    ) as { runId?: string; toolName?: string; output?: { actionId?: string; summary?: string } };
+
+    assert.equal(res.status, 201);
+    assert.deepEqual(actions, [
+      "copilot.pending_action.create",
+      "copilot.run.start",
+      "copilot.tool.request",
+      "copilot.tool.result"
+    ]);
+    assert.equal(toolDetails.runId, runId);
+    assert.equal(toolDetails.toolName, "openforge.propose_troubleshooting_steps");
+    assert.equal(toolDetails.input?.summary, "token=[REDACTED]");
+    assert.equal(pendingDetails.runId, runId);
+    assert.equal(pendingDetails.actionId, actionId);
+    assert.equal(pendingDetails.actionType, "openforge.propose_troubleshooting_steps");
+    assert.equal(pendingDetails.status, "pending");
+    assert.equal(pendingDetails.input?.summary, "token=[REDACTED]");
+    assert.equal(resultDetails.runId, runId);
+    assert.equal(resultDetails.toolName, "openforge.propose_troubleshooting_steps");
+    assert.equal(resultDetails.output?.actionId, actionId);
+    assert.equal(resultDetails.output?.summary, "Pending user approval");
+    assert.doesNotMatch(JSON.stringify(auditLogs), /secret-value/);
+  });
+
   it("generates a final assistant answer after read-only tool results", async () => {
     createOpenAiProvider();
     modelEventResponses = [
@@ -354,6 +460,20 @@ describe("copilot routes", () => {
       res.body.data.events.at(-1)?.message,
       "Dashboard is ready after checking tool results."
     );
+    const toolResultLogs = new AuditLogRepository(db, userId).list({
+      action: "copilot.tool.result",
+      resourceType: "copilot_run",
+      resourceId: res.body.data.run.id
+    });
+    const toolResultDetails = JSON.parse(toolResultLogs[0]?.details ?? "{}") as {
+      toolName?: string;
+      toolCallId?: string;
+      output?: { stats?: { projects?: number } };
+    };
+    assert.equal(toolResultLogs.length, 1);
+    assert.equal(toolResultDetails.toolName, "openforge.get_dashboard_summary");
+    assert.equal(toolResultDetails.toolCallId, "tool-call-1");
+    assert.equal(typeof toolResultDetails.output?.stats?.projects, "number");
   });
 
   it("fails closed when a read tool output exceeds the Copilot safety limit", async () => {
@@ -387,6 +507,20 @@ describe("copilot routes", () => {
       "tool_call_requested",
       "run_failed"
     ]);
+    const toolFailLogs = new AuditLogRepository(db, userId).list({
+      action: "copilot.tool.fail",
+      resourceType: "copilot_run",
+      resourceId: run?.id
+    });
+    const toolFailDetails = JSON.parse(toolFailLogs[0]?.details ?? "{}") as {
+      toolName?: string;
+      toolCallId?: string;
+      errorCode?: string;
+    };
+    assert.equal(toolFailLogs.length, 1);
+    assert.equal(toolFailDetails.toolName, "openforge.get_recent_activity");
+    assert.equal(toolFailDetails.toolCallId, "tool-call-1");
+    assert.equal(toolFailDetails.errorCode, "copilot_redaction_blocked_output");
     assert.equal(calls.length, 1);
   });
 
@@ -408,6 +542,37 @@ describe("copilot routes", () => {
     assert.equal(run?.errorCode, "copilot_model_request_failed");
     assert.equal(new CopilotRepository(db, userId).listEvents(run?.id ?? "").at(-1)?.type, "run_failed");
     assert.doesNotMatch(JSON.stringify(res.body), /secret-value/);
+  });
+
+  it("writes a redacted audit log when a Copilot run fails", async () => {
+    createOpenAiProvider();
+    modelEventResponses = [new Error("network failure token=secret-value")];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Summarize Gateway health",
+      source: "copilot"
+    }, authHeaders());
+
+    const runId = res.body.details.run.id as string;
+    const auditLogs = new AuditLogRepository(db, userId).list({
+      action: "copilot.run.fail",
+      resourceType: "copilot_run",
+      resourceId: runId
+    });
+    const details = JSON.parse(auditLogs[0]?.details ?? "{}") as {
+      runId?: string;
+      status?: string;
+      errorCode?: string;
+      errorMessage?: string;
+    };
+
+    assert.equal(res.status, 502);
+    assert.equal(auditLogs.length, 1);
+    assert.equal(details.runId, runId);
+    assert.equal(details.status, "failed");
+    assert.equal(details.errorCode, "copilot_model_request_failed");
+    assert.equal(details.errorMessage, "Copilot model request failed");
+    assert.doesNotMatch(JSON.stringify(auditLogs), /secret-value/);
   });
 
   it("marks runs failed when the post-tool model answer throws", async () => {
@@ -438,6 +603,11 @@ describe("copilot routes", () => {
       "tool_result",
       "run_failed"
     ]);
+    assert.equal(new AuditLogRepository(db, userId).list({
+      action: "copilot.tool.fail",
+      resourceType: "copilot_run",
+      resourceId: run?.id
+    }).length, 0);
     assert.doesNotMatch(JSON.stringify(res.body), /sk-secret-value/);
   });
 
@@ -483,6 +653,54 @@ describe("copilot routes", () => {
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.run.status, "cancelled");
     assert.equal(action?.status, "rejected");
+  });
+
+  it("writes an audit log when cancelling a Copilot run", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_memory_write", {
+      kind: "decision",
+      scope: "global",
+      text: "Remember token=secret-value."
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/cancel`,
+      undefined,
+      authHeaders()
+    );
+
+    const auditLogs = new AuditLogRepository(db, userId).list({
+      action: "copilot.run.cancel",
+      resourceType: "copilot_run",
+      resourceId: runId
+    });
+    const actionAuditLogs = new AuditLogRepository(db, userId).list({
+      action: "copilot.pending_action.reject",
+      resourceType: "copilot_run",
+      resourceId: runId
+    });
+    const details = JSON.parse(auditLogs[0]?.details ?? "{}") as {
+      runId?: string;
+      status?: string;
+      rejectedPendingActionCount?: number;
+    };
+    const actionDetails = JSON.parse(actionAuditLogs[0]?.details ?? "{}") as {
+      actionId?: string;
+      decision?: string;
+      result?: { reason?: string };
+    };
+
+    assert.equal(res.status, 200);
+    assert.equal(auditLogs.length, 1);
+    assert.equal(actionAuditLogs.length, 1);
+    assert.equal(details.runId, runId);
+    assert.equal(details.status, "cancelled");
+    assert.equal(details.rejectedPendingActionCount, 1);
+    assert.equal(actionDetails.actionId, actionId);
+    assert.equal(actionDetails.decision, "rejected");
+    assert.equal(actionDetails.result?.reason, "run_cancelled");
+    assert.doesNotMatch(JSON.stringify([...auditLogs, ...actionAuditLogs]), /secret-value/);
   });
 
   it("keeps cancelled running runs cancelled when the model request finishes later", async () => {
@@ -675,12 +893,18 @@ describe("copilot routes", () => {
 
     const repo = new CopilotRepository(db, userId);
     const events = repo.listEvents(runId);
+    const auditLogs = new AuditLogRepository(db, userId).list({
+      action: "copilot.run.complete",
+      resourceType: "copilot_run",
+      resourceId: runId
+    });
     assert.equal(res.status, 200);
     assert.equal(res.body.data.run.status, "completed");
     assert.equal(typeof res.body.data.run.completedAt, "number");
     assert.equal(repo.getRun(runId)?.status, "completed");
     assert.equal(events.at(-1)?.type, "pending_action_rejected");
     assert.equal(events.at(-1)?.message, "openforge.propose_troubleshooting_steps");
+    assert.equal(auditLogs.length, 1);
   });
 
   it("requires authenticated route approval so the model cannot self-approve", async () => {
@@ -782,6 +1006,11 @@ describe("copilot routes", () => {
 
     const repo = new CopilotRepository(db, userId);
     const events = repo.listEvents(runId);
+    const auditLogs = new AuditLogRepository(db, userId).list({
+      action: "copilot.run.complete",
+      resourceType: "copilot_run",
+      resourceId: runId
+    });
     assert.equal(res.status, 200);
     assert.equal(res.body.data.action.status, "approved");
     assert.equal(res.body.data.run.status, "completed");
@@ -789,6 +1018,7 @@ describe("copilot routes", () => {
     assert.equal(repo.getRun(runId)?.status, "completed");
     assert.equal(events.at(-1)?.type, "pending_action_approved");
     assert.equal(events.at(-1)?.message, "openforge.propose_diagnostics_export");
+    assert.equal(auditLogs.length, 1);
   });
 
   it("does not approve invalid stored memory-write actions", async () => {

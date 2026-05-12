@@ -32,6 +32,7 @@ import {
   getCopilotLaunchPromptKey,
   getCopilotEventLabel,
   getCopilotEventLabelKey,
+  getCopilotErrorMessageKey,
   getCopilotPendingActionLabel,
   getCopilotPendingActionLabelKey,
   getCopilotPendingActionSummary,
@@ -473,7 +474,7 @@ export default function CopilotPage() {
                 >
                   <CircleAlert className="mt-0.5 size-4 shrink-0" />
                   <span>
-                    {providerSetupError ? t("copilot.providerSetupRequired") : errorMessage}
+                    {formatCopilotErrorMessage(errorMessage, errorCode, t)}
                     {errorCode && (
                       <span className="mt-1 block font-mono text-xs">{errorCode}</span>
                     )}
@@ -881,6 +882,15 @@ function readErrorMessage(error: unknown): string {
 function readGatewayErrorCode(error: unknown): string {
   const code = error instanceof GatewayApiError ? error.details?.code : undefined;
   return typeof code === "string" ? code : "";
+}
+
+function formatCopilotErrorMessage(
+  fallbackMessage: string,
+  code: string,
+  t: (key: TranslationKey) => string
+): string {
+  const messageKey = getCopilotErrorMessageKey(code);
+  return messageKey ? t(messageKey) : fallbackMessage;
 }
 
 function applyErrorState(

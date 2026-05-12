@@ -32,7 +32,6 @@ const eventLabelKeys: Record<string, TranslationKey> = {
 };
 
 const pendingActionLabels: Record<string, string> = {
-  "openforge.propose_setting_update": "Setting update",
   "openforge.propose_memory_write": "Memory write",
   "openforge.propose_session_create": "Session create",
   "openforge.propose_diagnostics_export": "Diagnostics export",
@@ -40,11 +39,19 @@ const pendingActionLabels: Record<string, string> = {
 };
 
 const pendingActionLabelKeys: Record<string, TranslationKey> = {
-  "openforge.propose_setting_update": "copilot.pendingAction.settingUpdate",
   "openforge.propose_memory_write": "copilot.pendingAction.memoryWrite",
   "openforge.propose_session_create": "copilot.pendingAction.sessionCreate",
   "openforge.propose_diagnostics_export": "copilot.pendingAction.diagnosticsExport",
   "openforge.propose_troubleshooting_steps": "copilot.pendingAction.troubleshootingSteps",
+};
+
+const errorMessageKeys: Record<string, TranslationKey> = {
+  copilot_provider_not_configured: "copilot.error.providerNotConfigured",
+  copilot_provider_unsupported: "copilot.error.providerUnsupported",
+  copilot_model_request_failed: "copilot.error.modelRequestFailed",
+  copilot_model_request_timeout: "copilot.error.modelRequestTimeout",
+  copilot_redaction_blocked_output: "copilot.error.redactionBlockedOutput",
+  copilot_run_already_active: "copilot.error.runAlreadyActive",
 };
 
 export interface ResolveCopilotRunSelectionInput {
@@ -147,6 +154,10 @@ export function getCopilotPendingActionLabelKey(type: string): TranslationKey | 
   return pendingActionLabelKeys[type] ?? null;
 }
 
+export function getCopilotErrorMessageKey(code: string | null | undefined): TranslationKey | null {
+  return code ? errorMessageKeys[code] ?? null : null;
+}
+
 export function getCopilotPendingActionSummary(
   action: CopilotPendingActionSummaryInput
 ): CopilotPendingActionSummary | null {
@@ -163,8 +174,6 @@ export function getCopilotPendingActionSummary(
       };
     case "openforge.propose_troubleshooting_steps":
       return summarizeTroubleshootingSteps(payload);
-    case "openforge.propose_setting_update":
-      return summarizeSettingUpdate(payload);
     default:
       return null;
   }
@@ -270,14 +279,6 @@ function summarizeTroubleshootingSteps(payload: Record<string, unknown>): Copilo
   return {
     detail: readString(payload, "summary") ?? "Troubleshooting steps",
     preview: previewText(steps.join(" / ")),
-  };
-}
-
-function summarizeSettingUpdate(payload: Record<string, unknown>): CopilotPendingActionSummary {
-  const target = readString(payload, "key") ?? readString(payload, "path") ?? readString(payload, "setting");
-  return {
-    detail: target ? `Setting update / ${target}` : "Setting update",
-    preview: previewText(readString(payload, "description") ?? readString(payload, "reason")),
   };
 }
 

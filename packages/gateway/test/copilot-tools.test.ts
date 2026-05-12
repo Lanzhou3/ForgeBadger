@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { UserRepository } from "../src/db/repositories/user-repository.js";
+import { ApiKeyRepository } from "../src/db/repositories/api-key-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { ActivityRepository } from "../src/db/repositories/activity-repository.js";
 import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
@@ -77,6 +78,125 @@ describe("copilot tools", () => {
     assert.equal((result.output as { projects: Array<{ id: string }> }).projects[0]?.id, project.id);
   });
 
+  it("gets tenant-scoped project detail", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude",
+      description: "Control plane",
+      techStack: "Next.js, Express"
+    });
+    const foreign = new ProjectRepository(db, otherUserId).create({
+      name: "Foreign",
+      path: "/tmp/foreign",
+      aiTool: "codex"
+    });
+
+    const owned = await executeCopilotTool(
+      registry,
+      "openforge.get_project_detail",
+      { projectId: project.id },
+      context(userId)
+    );
+    const crossTenant = await executeCopilotTool(
+      registry,
+      "openforge.get_project_detail",
+      { projectId: foreign.id },
+      context(userId)
+    );
+
+    assert.equal(owned.ok, true);
+    assert.equal(crossTenant.ok, true);
+    if (!owned.ok || !crossTenant.ok) return;
+    assert.equal((owned.output as { project: { id: string; description: string } }).project.id, project.id);
+    assert.equal((owned.output as { project: { id: string; description: string } }).project.description, "Control plane");
+    assert.equal((crossTenant.output as { project: unknown }).project, null);
+  });
+
+  it("gets tenant-scoped session detail without attach tokens", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const apiKey = new ApiKeyRepository(db, userId, masterKey).create({
+      provider: "anthropic",
+      plaintextKey: "secret-api-key-value"
+    });
+    const session = new SessionRepository(db, userId).create({
+      projectId: project.id,
+      name: "Main session",
+      aiTool: "claude",
+      workingDir: "/tmp/openforge",
+      attachToken: "secret-attach-token",
+      tmuxSession: "of-session",
+      credentialMode: "stored_encrypted_key",
+      apiKeyId: apiKey.id
+    });
+    const foreignProject = new ProjectRepository(db, otherUserId).create({
+      name: "Foreign",
+      path: "/tmp/foreign",
+      aiTool: "codex"
+    });
+    const foreignApiKey = new ApiKeyRepository(db, otherUserId, masterKey).create({
+      provider: "openai",
+      plaintextKey: "foreign-api-key-value"
+    });
+    const foreignSession = new SessionRepository(db, otherUserId).create({
+      projectId: foreignProject.id,
+      name: "Foreign session",
+      aiTool: "codex",
+      workingDir: "/tmp/foreign",
+      attachToken: "foreign-attach-token",
+      apiKeyId: foreignApiKey.id
+    });
+
+    const result = await executeCopilotTool(
+      registry,
+      "openforge.get_session_detail",
+      { sessionId: session.id },
+      context(userId)
+    );
+    const crossTenant = await executeCopilotTool(
+      registry,
+      "openforge.get_session_detail",
+      { sessionId: foreignSession.id },
+      context(userId)
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(crossTenant.ok, true);
+    if (!result.ok || !crossTenant.ok) return;
+    const output = result.output as { session: { id: string; attachToken?: string; apiKeyId?: string; tmuxSession?: string } };
+    assert.equal(output.session.id, session.id);
+    assert.equal(output.session.tmuxSession, "of-session");
+    assert.equal("attachToken" in output.session, false);
+    assert.equal("apiKeyId" in output.session, false);
+    assert.equal((crossTenant.output as { session: unknown }).session, null);
+    assert.doesNotMatch(JSON.stringify(output), new RegExp(`secret-attach-token|${apiKey.id}`));
+  });
+
+  it("gets a bounded diagnostics summary", async () => {
+    new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+
+    const result = await executeCopilotTool(
+      registry,
+      "openforge.get_diagnostics_summary",
+      {},
+      context(userId)
+    );
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const output = result.output as { diagnostics: { counts: { projects: number }; environment?: unknown } };
+    assert.equal(output.diagnostics.counts.projects, 1);
+    assert.equal("environment" in output.diagnostics, false);
+  });
+
   it("redacts tool outputs before returning them", async () => {
     new ActivityRepository(db, userId).create({
       type: "copilot_test",
@@ -144,6 +264,8 @@ describe("copilot tools", () => {
   it("exposes model-facing JSON schemas for tool parameters", () => {
     const definitions = toModelToolDefinitions(registry);
     const listProjects = definitions.find((tool) => tool.name === "openforge.list_projects");
+    const projectDetail = definitions.find((tool) => tool.name === "openforge.get_project_detail");
+    const sessionDetail = definitions.find((tool) => tool.name === "openforge.get_session_detail");
     const memorySearch = definitions.find((tool) => tool.name === "openforge.memory_search");
 
     assert.deepEqual(listProjects?.inputSchema, {
@@ -151,6 +273,22 @@ describe("copilot tools", () => {
       properties: {
         limit: { type: "integer", minimum: 1, maximum: 50 }
       },
+      additionalProperties: false
+    });
+    assert.deepEqual(projectDetail?.inputSchema, {
+      type: "object",
+      properties: {
+        projectId: { type: "string", minLength: 1 }
+      },
+      required: ["projectId"],
+      additionalProperties: false
+    });
+    assert.deepEqual(sessionDetail?.inputSchema, {
+      type: "object",
+      properties: {
+        sessionId: { type: "string", minLength: 1 }
+      },
+      required: ["sessionId"],
       additionalProperties: false
     });
     assert.deepEqual(memorySearch?.inputSchema, {
