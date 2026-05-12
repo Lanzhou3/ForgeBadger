@@ -13,6 +13,7 @@ import { AuditLogRepository } from "../src/db/repositories/audit-log-repository.
 import { ActivityRepository } from "../src/db/repositories/activity-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
+import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
 import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
 import { createCopilotRoutes } from "../src/routes/copilot.js";
@@ -1080,6 +1081,62 @@ describe("copilot routes", () => {
     assert.equal(res.body.details.code, "copilot_memory_write_invalid");
     assert.equal(action?.status, "pending");
     assert.equal(new CopilotMemoryRepository(db, userId).listEntries({}).length, 0);
+  });
+
+  it("does not approve invalid stored session-create actions", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_session_create", {
+      projectId: project.id,
+      aiTool: "shell",
+      name: "Invalid draft"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_session_draft_invalid");
+    assert.equal(action?.status, "pending");
+  });
+
+  it("does not approve session-create actions when the target project is gone", async () => {
+    const projects = new ProjectRepository(db, userId);
+    const project = projects.create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_session_create", {
+      projectId: project.id,
+      aiTool: "claude",
+      name: "Stale draft"
+    });
+    projects.delete(project.id);
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_session_draft_invalid");
+    assert.equal(action?.status, "pending");
   });
 
   function createOpenAiProvider(

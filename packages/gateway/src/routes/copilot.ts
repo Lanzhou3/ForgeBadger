@@ -5,6 +5,7 @@ import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { AuditLogRepository } from "../db/repositories/audit-log-repository.js";
 import type { CopilotPendingAction, CopilotRun, CopilotRunEvent } from "../db/repositories/copilot-repository.js";
 import { CopilotRepository } from "../db/repositories/copilot-repository.js";
+import { ProjectRepository } from "../db/repositories/project-repository.js";
 import type { Database } from "../db/types.js";
 import { buildLocalDiagnosticsExport } from "../services/diagnostics.js";
 import { approveCopilotMemoryWrite } from "../services/copilot/memory.js";
@@ -24,6 +25,11 @@ const createRunSchema = z.object({
 const listRunsSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional()
 });
+const sessionCreateApprovalSchema = z.object({
+  projectId: z.string().min(1),
+  aiTool: z.enum(["claude", "opencode", "codex"]),
+  name: z.string().min(1).optional()
+}).strict();
 
 export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   db: Database;
@@ -537,12 +543,38 @@ function approvePendingAction(
     };
   }
   if (action.type === "openforge.propose_session_create") {
-    return { draft: action.input, executed: false };
+    return approveCopilotSessionCreateDraft(action, options, userId);
   }
   if (action.type === "openforge.propose_memory_write") {
     return approveCopilotMemoryWrite(action, { db: options.db, userId });
   }
   return { steps: action.input, executed: false };
+}
+
+function approveCopilotSessionCreateDraft(
+  action: CopilotPendingAction,
+  options: CopilotRoutesOptions,
+  userId: string
+): Record<string, unknown> {
+  const parsed = sessionCreateApprovalSchema.safeParse(action.input);
+  if (!parsed.success) {
+    return {
+      error: {
+        code: "copilot_session_draft_invalid",
+        message: "Copilot session draft is invalid"
+      }
+    };
+  }
+  const project = new ProjectRepository(options.db, userId).getById(parsed.data.projectId);
+  if (!project) {
+    return {
+      error: {
+        code: "copilot_session_draft_invalid",
+        message: "Copilot session draft project is not available"
+      }
+    };
+  }
+  return { draft: parsed.data, executed: false };
 }
 
 function isApprovalError(result: Record<string, unknown>): result is { error: { code: string; message: string } } {

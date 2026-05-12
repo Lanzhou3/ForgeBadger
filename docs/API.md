@@ -185,10 +185,12 @@ replace the action payload at approval time. Diagnostics approval returns a
 redacted diagnostics payload; session-create approval returns a draft only and
 does not start a CLI session in this release. Session-create drafts must target
 a project visible to the current user and one of the supported terminal
-adapters: `claude`, `opencode`, or `codex`. Memory-write approval creates a
-tenant-scoped durable memory entry from the stored redacted payload. Approve and
-reject decisions also write tenant-scoped audit rows with redacted action input
-and bounded result summaries.
+adapters: `claude`, `opencode`, or `codex`; approval revalidates the canonical
+stored draft so stale or invalid drafts stay pending instead of returning an
+actionable session draft. Memory-write approval creates a tenant-scoped durable
+memory entry from the stored redacted payload. Approve and reject decisions also
+write tenant-scoped audit rows with redacted action input and bounded result
+summaries.
 
 Copilot memory is explicit product state. Durable memory entries and working
 notes are scoped by `user_id`; project-scoped entries are additionally filtered
