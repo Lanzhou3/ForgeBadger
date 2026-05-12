@@ -24,7 +24,7 @@ export interface CopilotActiveRecallInput {
 }
 
 export interface CopilotActiveRecallEventInput {
-  type: "memory_recalled";
+  type: "memory_recalled" | "memory_recall_skipped";
   message: string;
   payload: Record<string, unknown>;
 }
@@ -88,12 +88,26 @@ export async function runCopilotActiveRecall(
     };
   } catch {
     recordRecallFailure(circuit, now);
-    return emptyRecall();
+    return skippedRecall("failed");
   }
 }
 
 function emptyRecall(): CopilotActiveRecallResult {
   return { context: null, event: null };
+}
+
+function skippedRecall(reason: string): CopilotActiveRecallResult {
+  return {
+    context: null,
+    event: {
+      type: "memory_recall_skipped",
+      message: "Memory recall skipped",
+      payload: {
+        source: "active_recall",
+        reason
+      }
+    }
+  };
 }
 
 function readRecallItems(output: unknown): MemoryRecallItem[] {

@@ -359,7 +359,7 @@ describe("copilot routes", () => {
     );
   });
 
-  it("continues Copilot page runs without injected memory when active recall fails", async () => {
+  it("records a non-blocking skip event when active recall fails", async () => {
     createOpenAiProvider();
     new CopilotMemoryRepository(db, userId).createEntry({
       kind: "decision",
@@ -378,8 +378,10 @@ describe("copilot routes", () => {
     assert.equal(calls[0]?.input, "How should provider SSOT work for Copilot?");
     assert.deepEqual(
       res.body.data.events.map((event: { type: string }) => event.type),
-      ["assistant_message"]
+      ["memory_recall_skipped", "assistant_message"]
     );
+    assert.equal(res.body.data.events[0].payload.reason, "failed");
+    assert.equal(res.body.data.run.stepCount, 2);
   });
 
   it("keeps approval-required tool runs waiting for approval", async () => {

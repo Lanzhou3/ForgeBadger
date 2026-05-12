@@ -119,6 +119,9 @@ encrypted provider credentials.
 Prompt text is redacted before run persistence, active recall, and provider
 model requests so secret-looking values such as API keys, bearer tokens, and
 OpenForge attach tokens are not stored or sent onward in plaintext.
+If active memory recall fails, Copilot records a non-blocking
+`memory_recall_skipped` timeline event and continues the model request without
+injecting memory context.
 
 `POST /runs` accepts:
 

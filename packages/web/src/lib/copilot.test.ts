@@ -30,12 +30,14 @@ describe("copilot display helpers", () => {
 
   it("falls back to readable labels for unknown event types", () => {
     expect(getCopilotEventLabel("assistant_message")).toBe("Assistant message");
+    expect(getCopilotEventLabel("memory_recall_skipped")).toBe("Memory recall skipped");
     expect(getCopilotEventLabel("openforge.custom_event")).toBe("Openforge custom event");
   });
 
   it("maps known event types to localized label keys", () => {
     expect(getCopilotEventLabelKey("assistant_message")).toBe("copilot.event.assistantMessage");
     expect(getCopilotEventLabelKey("memory_recalled")).toBe("copilot.event.memoryRecalled");
+    expect(getCopilotEventLabelKey("memory_recall_skipped")).toBe("copilot.event.memoryRecallSkipped");
     expect(getCopilotEventLabelKey("tool_call_requested")).toBe("copilot.event.toolRequested");
     expect(getCopilotEventLabelKey("pending_action_approved")).toBe("copilot.event.pendingActionApproved");
     expect(getCopilotEventLabelKey("pending_action_rejected")).toBe("copilot.event.pendingActionRejected");
