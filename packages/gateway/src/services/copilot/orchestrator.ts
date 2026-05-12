@@ -1,4 +1,6 @@
 import { CopilotRepository, type CopilotRun, type CopilotRunEvent } from "../../db/repositories/copilot-repository.js";
+import { ProjectRepository } from "../../db/repositories/project-repository.js";
+import { SessionRepository } from "../../db/repositories/session-repository.js";
 import type { Database } from "../../db/types.js";
 import { AnthropicMessagesClient } from "./anthropic-messages-client.js";
 import { runCopilotActiveRecall } from "./active-recall.js";
@@ -87,6 +89,7 @@ export class CopilotOrchestrator {
       const recallEvent = recall.event ? repo.addEvent(run.id, recall.event) : null;
       const recalledRun = repo.getRun(run.id) ?? run;
       const previousEvents = recallEvent ? [recallEvent] : [];
+      const sourceContext = buildSourceContext(this.options.db, input.userId, input.source, input.sourceRefId);
       const cancelled = this.cancelledResultIfNeeded(repo, recalledRun, previousEvents, control.signal);
       if (cancelled) return cancelled;
       if (recalledRun.stepCount >= recalledRun.maxSteps) {
@@ -104,6 +107,7 @@ export class CopilotOrchestrator {
         selected.selection,
         redactedPrompt,
         recall.context,
+        sourceContext,
         previousEvents,
         control.signal
       );
@@ -118,6 +122,7 @@ export class CopilotOrchestrator {
     selection: CopilotProviderSelection,
     prompt: string,
     recallContext: string | null,
+    sourceContext: string | null,
     previousEvents: CopilotRunEvent[],
     runSignal: AbortSignal
   ): Promise<RunCopilotTextResult> {
@@ -125,7 +130,7 @@ export class CopilotOrchestrator {
       repo,
       run,
       selection,
-      toModelRequest(selection, prompt, this.toolRegistry, recallContext),
+      toModelRequest(selection, prompt, this.toolRegistry, recallContext, sourceContext),
       previousEvents,
       runSignal
     );
@@ -395,8 +400,10 @@ function toModelRequest(
   selection: CopilotProviderSelection,
   prompt: string,
   toolRegistry: CopilotToolRegistry,
-  recallContext: string | null
+  recallContext: string | null,
+  sourceContext: string | null
 ): CopilotModelRequest {
+  const contextBlocks = [sourceContext, recallContext].filter((block): block is string => Boolean(block));
   return {
     model: selection.model.modelId,
     instructions: [
@@ -404,10 +411,62 @@ function toModelRequest(
       "Answer operational questions about the OpenForge control plane.",
       "Do not request terminal input, shell execution, file writes, or autonomous project changes."
     ].join("\n"),
-    input: recallContext ? [recallContext, "", "User request:", prompt].join("\n") : prompt,
+    input: contextBlocks.length > 0 ? [...contextBlocks, "", "User request:", prompt].join("\n") : prompt,
     tools: toModelToolDefinitions(toolRegistry),
     maxOutputTokens: 1024
   };
+}
+
+function buildSourceContext(
+  db: Database,
+  userId: string,
+  source: RunCopilotTextInput["source"],
+  sourceRefId: string | undefined
+): string | null {
+  if (!sourceRefId) return null;
+  if (source === "project") {
+    const project = new ProjectRepository(db, userId).getById(sourceRefId);
+    if (!project) return unavailableSourceContext("project", sourceRefId);
+    return [
+      "OpenForge source context:",
+      "Type: project",
+      `ID: ${safeContextValue(project.id)}`,
+      `Name: ${safeContextValue(project.name)}`,
+      `Status: ${safeContextValue(project.status)}`,
+      `AI tool: ${safeContextValue(project.aiTool)}`,
+      ...(project.techStack ? [`Tech stack: ${safeContextValue(project.techStack)}`] : []),
+      ...(project.description ? [`Description: ${safeContextValue(project.description)}`] : [])
+    ].join("\n");
+  }
+  if (source === "session") {
+    const session = new SessionRepository(db, userId).getById(sourceRefId);
+    if (!session) return unavailableSourceContext("session", sourceRefId);
+    return [
+      "OpenForge source context:",
+      "Type: session",
+      `ID: ${safeContextValue(session.id)}`,
+      `Name: ${safeContextValue(session.name)}`,
+      `Status: ${safeContextValue(session.status)}`,
+      `AI tool: ${safeContextValue(session.aiTool)}`,
+      `Project ID: ${safeContextValue(session.projectId)}`,
+      ...(session.modelId ? [`Model ID: ${safeContextValue(session.modelId)}`] : [])
+    ].join("\n");
+  }
+  return null;
+}
+
+function unavailableSourceContext(type: "project" | "session", sourceRefId: string): string {
+  return [
+    "OpenForge source context unavailable:",
+    `Type: ${type}`,
+    `ID: ${safeContextValue(sourceRefId)}`,
+    "Reason: not visible to the current user"
+  ].join("\n");
+}
+
+function safeContextValue(value: string): string {
+  const redacted = redactCopilotText(value).replace(/\s+/g, " ").trim();
+  return redacted.length > 200 ? `${redacted.slice(0, 197)}...` : redacted;
 }
 
 function toToolResultModelRequest(

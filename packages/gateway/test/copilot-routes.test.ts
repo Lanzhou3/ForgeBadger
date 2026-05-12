@@ -14,6 +14,7 @@ import { ActivityRepository } from "../src/db/repositories/activity-repository.j
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
+import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
 import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
 import { createCopilotRoutes } from "../src/routes/copilot.js";
@@ -243,6 +244,116 @@ describe("copilot routes", () => {
     assert.doesNotMatch(run?.goal ?? "", /secret-value|attach-secret/);
     assert.doesNotMatch(String(calls[0]?.input ?? ""), /secret-value|attach-secret/);
     assert.match(String(calls[0]?.input ?? ""), /token=\[REDACTED\]/);
+  });
+
+  it("injects bounded project source context into model requests", async () => {
+    createOpenAiProvider();
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge Project",
+      path: "/tmp/openforge-secret-path",
+      description: "Local IDE control plane",
+      techStack: "Next.js, Express",
+      aiTool: "claude"
+    });
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Assess project readiness",
+      source: "project",
+      sourceRefId: project.id
+    }, authHeaders());
+
+    const input = calls[0]?.input ?? "";
+    assert.equal(res.status, 201);
+    assert.match(input, /OpenForge source context/);
+    assert.match(input, /Type: project/);
+    assert.match(input, new RegExp(`ID: ${project.id}`));
+    assert.match(input, /Name: OpenForge Project/);
+    assert.match(input, /Status: active/);
+    assert.match(input, /AI tool: claude/);
+    assert.match(input, /Tech stack: Next\.js, Express/);
+    assert.match(input, /User request:\nAssess project readiness/);
+    assert.doesNotMatch(input, /openforge-secret-path/);
+  });
+
+  it("injects bounded session source context into model requests", async () => {
+    createOpenAiProvider();
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const session = new SessionRepository(db, userId).create({
+      projectId: project.id,
+      name: "Release smoke",
+      aiTool: "codex",
+      workingDir: "/tmp/openforge-secret-working-dir",
+      attachToken: "attach-secret",
+      tmuxSession: "of-secret",
+      credentialMode: "stored_encrypted_key"
+    });
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Assess session readiness",
+      source: "session",
+      sourceRefId: session.id
+    }, authHeaders());
+
+    const input = calls[0]?.input ?? "";
+    assert.equal(res.status, 201);
+    assert.match(input, /OpenForge source context/);
+    assert.match(input, /Type: session/);
+    assert.match(input, new RegExp(`ID: ${session.id}`));
+    assert.match(input, /Name: Release smoke/);
+    assert.match(input, /Status: idle/);
+    assert.match(input, /AI tool: codex/);
+    assert.match(input, new RegExp(`Project ID: ${project.id}`));
+    assert.match(input, /User request:\nAssess session readiness/);
+    assert.doesNotMatch(input, /attach-secret|of-secret|openforge-secret-working-dir/);
+  });
+
+  it("does not leak cross-tenant source context into model requests", async () => {
+    createOpenAiProvider();
+    const foreignProject = new ProjectRepository(db, otherUserId).create({
+      name: "Foreign secret project",
+      path: "/tmp/foreign-secret-path",
+      aiTool: "claude"
+    });
+    const foreignSession = new SessionRepository(db, otherUserId).create({
+      projectId: foreignProject.id,
+      name: "Foreign secret session",
+      aiTool: "codex",
+      workingDir: "/tmp/foreign-session-secret-path",
+      attachToken: "foreign-attach-secret",
+      tmuxSession: "foreign-of-secret"
+    });
+
+    const projectRes = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Assess project readiness",
+      source: "project",
+      sourceRefId: foreignProject.id
+    }, authHeaders());
+    const sessionRes = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Assess session readiness",
+      source: "session",
+      sourceRefId: foreignSession.id
+    }, authHeaders());
+
+    const input = calls[0]?.input ?? "";
+    const sessionInput = calls[1]?.input ?? "";
+    assert.equal(projectRes.status, 201);
+    assert.match(input, /OpenForge source context unavailable/);
+    assert.match(input, /Type: project/);
+    assert.match(input, new RegExp(`ID: ${foreignProject.id}`));
+    assert.match(input, /not visible to the current user/);
+    assert.match(input, /User request:\nAssess project readiness/);
+    assert.doesNotMatch(input, /Foreign secret project|foreign-secret-path/);
+    assert.equal(sessionRes.status, 201);
+    assert.match(sessionInput, /OpenForge source context unavailable/);
+    assert.match(sessionInput, /Type: session/);
+    assert.match(sessionInput, new RegExp(`ID: ${foreignSession.id}`));
+    assert.match(sessionInput, /not visible to the current user/);
+    assert.match(sessionInput, /User request:\nAssess session readiness/);
+    assert.doesNotMatch(sessionInput, /Foreign secret session|foreign-session-secret-path|foreign-attach-secret|foreign-of-secret/);
   });
 
   it("rejects concurrent Copilot runs for the same user while allowing other users", async () => {

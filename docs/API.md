@@ -122,6 +122,15 @@ OpenForge attach tokens are not stored or sent onward in plaintext.
 If active memory recall fails, Copilot records a non-blocking
 `memory_recall_skipped` timeline event and continues the model request without
 injecting memory context.
+For `source: "project"` and `source: "session"` runs, `sourceRefId` is resolved
+through tenant-scoped Gateway repositories and a bounded source context is
+included in the provider model request. Project context includes only summary
+fields such as id, name, status, AI tool, tech stack, and description. Session
+context includes only summary fields such as id, name, status, AI tool, project
+id, and model id. Paths, attach tokens, tmux session names, API key ids, and
+other sensitive runtime fields are not included. Missing or cross-tenant
+references produce a non-leaking "source context unavailable" block rather than
+falling back to another user's data.
 
 `POST /runs` accepts:
 
