@@ -9,6 +9,7 @@ import {
   getCopilotPendingActionSummary,
   getCopilotErrorMessageKey,
   getCopilotStartBlocker,
+  getSelectableCopilotProviders,
   findLiveCopilotRun,
   findCurrentLiveCopilotRun,
   buildCopilotLaunchHref,
@@ -224,6 +225,46 @@ describe("copilot display helpers", () => {
         liveRunStatus: "completed",
       })
     ).toBeNull();
+  });
+
+  it("keeps Copilot provider choices credential-ready", () => {
+    const providers = [
+      {
+        id: "provider-without-key",
+        status: "active",
+        apiFormat: "openai",
+        authType: "api_key",
+      },
+      {
+        id: "provider-with-key",
+        status: "active",
+        apiFormat: "anthropic",
+        authType: "api_key",
+      },
+      {
+        id: "local-provider",
+        status: "active",
+        apiFormat: "openai-compatible",
+        authType: "none",
+      },
+      {
+        id: "disabled-provider",
+        status: "disabled",
+        apiFormat: "openai",
+        authType: "api_key",
+      },
+    ];
+
+    expect(
+      getSelectableCopilotProviders({
+        providers,
+        credentials: [
+          { providerProfileId: "provider-without-key", status: "disabled" },
+          { providerProfileId: "provider-with-key", status: "active" },
+        ],
+        supportedProviderFormats: ["openai", "openai-compatible", "anthropic"],
+      }).map((provider) => provider.id)
+    ).toEqual(["provider-with-key", "local-provider"]);
   });
 
   it("builds Copilot launch hrefs with bounded source context", () => {

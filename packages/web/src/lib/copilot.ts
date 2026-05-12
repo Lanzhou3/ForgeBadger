@@ -123,6 +123,24 @@ export interface CopilotLaunchSearchParams {
   get(name: string): string | null;
 }
 
+export interface CopilotProviderChoice {
+  id: string;
+  status: string;
+  apiFormat: string;
+  authType: string;
+}
+
+export interface CopilotProviderCredentialChoice {
+  providerProfileId: string;
+  status: string;
+}
+
+export interface SelectableCopilotProvidersInput<TProvider extends CopilotProviderChoice> {
+  providers: TProvider[];
+  credentials: CopilotProviderCredentialChoice[];
+  supportedProviderFormats: string[];
+}
+
 const launchSources = new Set<CopilotLaunchSource>(["dashboard", "project", "session", "settings", "copilot"]);
 const launchIntents = new Set<CopilotLaunchIntent>([
   "launch_readiness",
@@ -230,6 +248,14 @@ export function getCopilotStartBlocker(input: CopilotStartBlockerInput): Copilot
   return null;
 }
 
+export function getSelectableCopilotProviders<TProvider extends CopilotProviderChoice>(
+  input: SelectableCopilotProvidersInput<TProvider>
+): TProvider[] {
+  return input.providers.filter((provider) =>
+    isSelectableCopilotProvider(provider, input.supportedProviderFormats, input.credentials)
+  );
+}
+
 export function buildCopilotLaunchHref(input: CopilotLaunchHrefInput): string {
   const params = new URLSearchParams({ source: input.source });
   const sourceRefId = input.sourceRefId?.trim();
@@ -254,6 +280,28 @@ export function resolveCopilotLaunchContext(params: CopilotLaunchSearchParams): 
 export function getCopilotLaunchPromptKey(intent: string | null | undefined): TranslationKey | null {
   const launchIntent = readLaunchIntent(intent);
   return launchIntent ? launchPromptKeys[launchIntent] : null;
+}
+
+function isSelectableCopilotProvider(
+  provider: CopilotProviderChoice,
+  supportedProviderFormats: string[],
+  credentials: CopilotProviderCredentialChoice[]
+): boolean {
+  return (
+    provider.status === "active" &&
+    supportedProviderFormats.includes(provider.apiFormat) &&
+    hasCopilotProviderCredential(provider, credentials)
+  );
+}
+
+function hasCopilotProviderCredential(
+  provider: CopilotProviderChoice,
+  credentials: CopilotProviderCredentialChoice[]
+): boolean {
+  if (provider.authType === "none") return true;
+  return credentials.some(
+    (credential) => credential.providerProfileId === provider.id && credential.status === "active"
+  );
 }
 
 function summarizeMemoryWrite(payload: Record<string, unknown>): CopilotPendingActionSummary {

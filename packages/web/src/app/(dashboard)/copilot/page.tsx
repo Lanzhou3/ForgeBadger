@@ -25,7 +25,6 @@ import {
   type CopilotRun,
   type CopilotRunEvent,
   type ModelProfile,
-  type ProviderProfile,
 } from "@/lib/api";
 import {
   findCurrentLiveCopilotRun,
@@ -36,6 +35,7 @@ import {
   getCopilotPendingActionLabel,
   getCopilotPendingActionLabelKey,
   getCopilotPendingActionSummary,
+  getSelectableCopilotProviders,
   getCopilotStartBlocker,
   getCopilotStatusTone,
   isCopilotRunLive,
@@ -165,10 +165,12 @@ export default function CopilotPage() {
   );
   const copilotProviders = useMemo(
     () =>
-      (modelProviderData?.providers ?? []).filter((provider) =>
-        isSelectableCopilotProvider(provider, supportedProviderFormats)
-      ),
-    [modelProviderData?.providers, supportedProviderFormats]
+      getSelectableCopilotProviders({
+        providers: modelProviderData?.providers ?? [],
+        credentials: modelProviderData?.credentials ?? [],
+        supportedProviderFormats,
+      }),
+    [modelProviderData?.credentials, modelProviderData?.providers, supportedProviderFormats]
   );
   const providerModels = useMemo(
     () =>
@@ -656,10 +658,6 @@ function RunMetadata({
       ))}
     </dl>
   );
-}
-
-function isSelectableCopilotProvider(provider: ProviderProfile, supportedProviderFormats: string[]) {
-  return provider.status === "active" && supportedProviderFormats.includes(provider.apiFormat);
 }
 
 function isSelectableCopilotModel(model: ModelProfile) {

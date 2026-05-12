@@ -223,7 +223,22 @@ test("Copilot page sends the selected provider and model when starting a run", a
           isDefault: true,
         },
       ],
-      credentials: [],
+      credentials: [
+        {
+          id: "credential-openai",
+          providerProfileId: "provider-openai",
+          label: "OpenAI test key",
+          status: "active",
+          secretPreview: "openai-preview",
+        },
+        {
+          id: "credential-anthropic",
+          providerProfileId: "provider-anthropic",
+          label: "Anthropic test key",
+          status: "active",
+          secretPreview: "anthropic-preview",
+        },
+      ],
     },
     onCreateRun: async (route) => {
       createBody = route.request().postDataJSON() as Record<string, unknown>;
@@ -260,6 +275,98 @@ test("Copilot page sends the selected provider and model when starting a run", a
   });
   await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("Anthropic production");
   await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("Claude Opus");
+});
+
+test("Copilot page skips providers without active credentials", async ({ page }) => {
+  let createBody: Record<string, unknown> | undefined;
+  await mockCopilotApis(page, {
+    modelProviders: {
+      providers: [
+        {
+          id: "provider-missing-key",
+          providerKey: "openai",
+          name: "OpenAI missing key",
+          baseUrl: "https://api.openai.com/v1",
+          authType: "api_key",
+          apiFormat: "openai",
+          supportedAdapters: ["opencode"],
+          status: "active",
+        },
+        {
+          id: "provider-ready",
+          providerKey: "anthropic",
+          name: "Anthropic ready",
+          baseUrl: "https://api.anthropic.com",
+          authType: "api_key",
+          apiFormat: "anthropic",
+          supportedAdapters: ["opencode"],
+          status: "active",
+        },
+      ],
+      models: [
+        {
+          id: "model-missing-key",
+          providerProfileId: "provider-missing-key",
+          providerKey: "openai",
+          providerName: "OpenAI missing key",
+          baseUrl: "https://api.openai.com/v1",
+          name: "GPT without key",
+          modelId: "gpt-5.1",
+          capabilities: ["code"],
+          status: "active",
+          isDefault: true,
+        },
+        {
+          id: "model-ready",
+          providerProfileId: "provider-ready",
+          providerKey: "anthropic",
+          providerName: "Anthropic ready",
+          baseUrl: "https://api.anthropic.com",
+          name: "Claude ready",
+          modelId: "claude-opus-4.5",
+          capabilities: ["code"],
+          status: "active",
+          isDefault: true,
+        },
+      ],
+      credentials: [{
+        id: "credential-ready",
+        providerProfileId: "provider-ready",
+        label: "Ready key",
+        status: "active",
+        secretPreview: "secret-preview",
+      }],
+    },
+    onCreateRun: async (route) => {
+      createBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-ready-provider",
+            status: "completed",
+            goal: "Summarize Gateway health",
+            source: "copilot",
+            providerProfileId: "provider-ready",
+            modelProfileId: "model-ready",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+
+  await expect(page.getByLabel("Copilot provider")).toHaveValue("provider-ready");
+  await expect(page.getByText("OpenAI missing key")).toHaveCount(0);
+  await page.getByLabel("Copilot prompt").fill("Summarize Gateway health");
+  await page.getByRole("button", { name: "Start" }).click();
+
+  await expect.poll(() => createBody).toMatchObject({
+    providerProfileId: "provider-ready",
+    modelProfileId: "model-ready",
+  });
 });
 
 test("Copilot page starts runs with launch context from the URL", async ({ page }) => {
@@ -625,7 +732,13 @@ async function mockCopilotApis(
             status: "active",
             isDefault: true,
           }],
-          credentials: [],
+          credentials: [{
+            id: "credential-openai",
+            providerProfileId: "provider-openai",
+            label: "OpenAI test key",
+            status: "active",
+            secretPreview: "openai-preview",
+          }],
         }),
       });
       return;
