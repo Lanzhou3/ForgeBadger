@@ -133,7 +133,7 @@ permission prompt event.
 ## 9. Copilot
 
 - Configure a disposable OpenAI or Anthropic provider profile with an active
-  test credential.
+  model and active test credential.
 - Open `/copilot` from the sidebar.
 - Ask Copilot to diagnose project or session launch readiness.
 - Confirm the answer cites safe OpenForge state such as adapter discovery,
@@ -158,9 +158,9 @@ Pass only when:
 - Terminal attach, refresh reconnect, stop, restart, and delete behavior match
   the UI state.
 - Permission notification smoke produces both notification and activity rows.
-- Copilot can answer with safe platform state when a disposable provider is
-  configured, or any skipped Copilot step records the provider/environment
-  reason.
+- Copilot can answer with safe platform state when a disposable provider,
+  active model, and credential are configured, or any skipped Copilot step
+  records the provider/environment reason.
 - Any skipped step has a concrete environment reason.
 
 ## 11. Automation Boundary

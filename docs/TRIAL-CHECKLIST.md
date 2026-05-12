@@ -72,7 +72,8 @@ write what Claude Code asked, what OpenForge showed, and what happened next
 
 ## Copilot Smoke
 
-- [ ] Configured an OpenAI or Anthropic model provider with a test credential.
+- [ ] Configured an OpenAI or Anthropic model provider with an active model and
+      test credential.
 - [ ] Opened `/copilot` from the sidebar.
 - [ ] Asked Copilot to diagnose session launch readiness.
 - [ ] Verified the response uses platform state such as adapter discovery or recent activity.
