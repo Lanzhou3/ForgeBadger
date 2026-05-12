@@ -15,6 +15,7 @@ import {
   skills,
   templates
 } from "../db/schema.js";
+import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import type { Database } from "../db/types.js";
 import { getDashboardSummary } from "./dashboard-summary.js";
 import { listAdapterDefinitions } from "./adapter-discovery.js";
@@ -46,6 +47,7 @@ export interface LocalDiagnosticsExport {
     command: string;
     runtimeModes: string[];
   }>;
+  modelProviders: ModelProviderDiagnostics;
   copilot: {
     capabilities: {
       enabled: boolean;
@@ -56,6 +58,33 @@ export interface LocalDiagnosticsExport {
     };
   };
   environment: Record<string, unknown>;
+}
+
+export interface ModelProviderDiagnostics {
+  counts: {
+    providers: number;
+    activeProviders: number;
+    models: number;
+    activeModels: number;
+    credentials: number;
+    activeCredentials: number;
+    defaultModels: number;
+  };
+  apiFormats: Record<string, number>;
+  providers: Array<{
+    id: string;
+    name: string;
+    providerKey: string;
+    apiFormat: string;
+    authType: string;
+    status: string;
+    modelCount: number;
+    activeModelCount: number;
+    credentialCount: number;
+    activeCredentialCount: number;
+    hasDefaultModel: boolean;
+    readyForUse: boolean;
+  }>;
 }
 
 const sensitivePattern = /(secret|token|key|password|credential|authorization)/i;
@@ -96,6 +125,7 @@ export function buildLocalDiagnosticsExport(
       command: adapter.command,
       runtimeModes: [...adapter.runtimeModes]
     })),
+    modelProviders: buildModelProviderDiagnostics(input.db, input.userId, input.masterKey),
     copilot: {
       capabilities: {
         enabled: true,
@@ -106,6 +136,57 @@ export function buildLocalDiagnosticsExport(
       }
     },
     environment: redactDiagnosticValue(pickDiagnosticEnv(input.env ?? process.env)) as Record<string, unknown>
+  };
+}
+
+function buildModelProviderDiagnostics(
+  db: Database,
+  userId: string,
+  masterKey: string
+): ModelProviderDiagnostics {
+  const repo = new ModelProviderRepository(db, userId, masterKey);
+  const providers = repo.listProviderProfiles();
+  const models = repo.listModelProfiles();
+  const credentials = repo.listCredentials();
+  const activeModels = models.filter((model) => model.status === "active");
+  const activeCredentials = credentials.filter((credential) => credential.status === "active");
+
+  return {
+    counts: {
+      providers: providers.length,
+      activeProviders: providers.filter((provider) => provider.status === "active").length,
+      models: models.length,
+      activeModels: activeModels.length,
+      credentials: credentials.length,
+      activeCredentials: activeCredentials.length,
+      defaultModels: models.filter((model) => model.isDefault).length
+    },
+    apiFormats: countBy(providers, (provider) => provider.apiFormat),
+    providers: providers
+      .map((provider) => {
+        const providerModels = models.filter((model) => model.providerProfileId === provider.id);
+        const providerCredentials = credentials.filter((credential) => credential.providerProfileId === provider.id);
+        const activeModelCount = providerModels.filter((model) => model.status === "active").length;
+        const activeCredentialCount = providerCredentials.filter((credential) => credential.status === "active").length;
+        const hasDefaultModel = providerModels.some((model) => model.isDefault);
+        return {
+          id: provider.id,
+          name: provider.name,
+          providerKey: provider.providerKey,
+          apiFormat: provider.apiFormat,
+          authType: provider.authType,
+          status: provider.status,
+          modelCount: providerModels.length,
+          activeModelCount,
+          credentialCount: providerCredentials.length,
+          activeCredentialCount,
+          hasDefaultModel,
+          readyForUse: provider.status === "active" &&
+            activeModelCount > 0 &&
+            (provider.authType === "none" || activeCredentialCount > 0)
+        };
+      })
+      .sort((a, b) => Number(b.readyForUse) - Number(a.readyForUse) || a.name.localeCompare(b.name))
   };
 }
 
@@ -145,6 +226,15 @@ function pickDiagnosticEnv(
     OPENFORGE_DB_PATH: env.OPENFORGE_DB_PATH,
     OPENFORGE_TMUX_PREFIX: env.OPENFORGE_TMUX_PREFIX
   };
+}
+
+function countBy<T>(items: T[], keyFor: (item: T) => string): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    const key = keyFor(item);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
 }
 
 function countTable(

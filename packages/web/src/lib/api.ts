@@ -256,6 +256,32 @@ export interface LocalDiagnosticsExport {
     command: string;
     runtimeModes: string[];
   }>;
+  modelProviders: {
+    counts: {
+      providers: number;
+      activeProviders: number;
+      models: number;
+      activeModels: number;
+      credentials: number;
+      activeCredentials: number;
+      defaultModels: number;
+    };
+    apiFormats: Record<string, number>;
+    providers: Array<{
+      id: string;
+      name: string;
+      providerKey: string;
+      apiFormat: string;
+      authType: string;
+      status: string;
+      modelCount: number;
+      activeModelCount: number;
+      credentialCount: number;
+      activeCredentialCount: number;
+      hasDefaultModel: boolean;
+      readyForUse: boolean;
+    }>;
+  };
   copilot: {
     capabilities: {
       enabled: boolean;

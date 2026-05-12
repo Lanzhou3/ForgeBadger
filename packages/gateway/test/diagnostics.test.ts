@@ -9,6 +9,7 @@ import { describe, it } from "node:test";
 import { ApiKeyRepository } from "../src/db/repositories/api-key-repository.js";
 import { AuditLogRepository } from "../src/db/repositories/audit-log-repository.js";
 import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
+import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import {
   buildLocalDiagnosticsExport,
@@ -45,10 +46,48 @@ describe("local diagnostics export", () => {
     const db = createTestDb();
     try {
       const user = new UserRepository(db).create("diagnostics@example.com", "hash");
+      const otherUser = new UserRepository(db).create("other-diagnostics@example.com", "hash");
       new ApiKeyRepository(db, user.id, "a".repeat(64)).create({
         provider: "openai",
         label: "test",
         plaintextKey: "sk-test-secret"
+      });
+      const providers = new ModelProviderRepository(db, user.id, "a".repeat(64));
+      const openAiProvider = providers.createProviderProfile({
+        name: "OpenAI",
+        providerKey: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        authType: "api_key",
+        apiFormat: "openai",
+        supportedAdapters: ["opencode"]
+      });
+      providers.createModelProfile({
+        providerProfileId: openAiProvider.id,
+        name: "GPT",
+        modelId: "gpt-5.1",
+        isDefault: true
+      });
+      providers.createCredential({
+        providerProfileId: openAiProvider.id,
+        label: "Prod key",
+        plaintextSecret: "sk-provider-secret"
+      });
+      const deepSeekProvider = providers.createProviderProfile({
+        name: "DeepSeek",
+        providerKey: "deepseek",
+        baseUrl: "https://api.deepseek.com",
+        authType: "api_key",
+        apiFormat: "openai-compatible",
+        supportedAdapters: ["opencode"]
+      });
+      db.prepare("UPDATE model_provider_profiles SET status = 'disabled' WHERE id = ?").run(deepSeekProvider.id);
+      new ModelProviderRepository(db, otherUser.id, "a".repeat(64)).createProviderProfile({
+        name: "Foreign Provider",
+        providerKey: "anthropic",
+        baseUrl: "https://api.anthropic.com",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"]
       });
       new AuditLogRepository(db, user.id).create({
         action: "diagnostics.test",
@@ -83,11 +122,54 @@ describe("local diagnostics export", () => {
       assert.equal(report.counts.auditLogs, 1);
       assert.equal(report.counts.copilotMemoryEntries, 1);
       assert.equal(report.counts.copilotMemoryNotes, 1);
+      assert.equal(report.modelProviders.counts.providers, 2);
+      assert.equal(report.modelProviders.counts.activeProviders, 1);
+      assert.equal(report.modelProviders.counts.models, 1);
+      assert.equal(report.modelProviders.counts.activeModels, 1);
+      assert.equal(report.modelProviders.counts.credentials, 1);
+      assert.equal(report.modelProviders.counts.activeCredentials, 1);
+      assert.equal(report.modelProviders.counts.defaultModels, 1);
+      assert.deepEqual(report.modelProviders.apiFormats, {
+        openai: 1,
+        "openai-compatible": 1
+      });
+      assert.deepEqual(report.modelProviders.providers, [
+        {
+          id: openAiProvider.id,
+          name: "OpenAI",
+          providerKey: "openai",
+          apiFormat: "openai",
+          authType: "api_key",
+          status: "active",
+          modelCount: 1,
+          activeModelCount: 1,
+          credentialCount: 1,
+          activeCredentialCount: 1,
+          hasDefaultModel: true,
+          readyForUse: true
+        },
+        {
+          id: deepSeekProvider.id,
+          name: "DeepSeek",
+          providerKey: "deepseek",
+          apiFormat: "openai-compatible",
+          authType: "api_key",
+          status: "disabled",
+          modelCount: 0,
+          activeModelCount: 0,
+          credentialCount: 0,
+          activeCredentialCount: 0,
+          hasDefaultModel: false,
+          readyForUse: false
+        }
+      ]);
       assert.equal(report.copilot.capabilities.memoryEnabled, true);
       assert.equal(report.copilot.capabilities.memoryWritesRequireApproval, true);
       assert.equal("OPENFORGE_MASTER_KEY" in report.environment, false);
       assert.equal("OPENAI_API_KEY" in report.environment, false);
       assert.equal(JSON.stringify(report).includes("sk-test-secret"), false);
+      assert.equal(JSON.stringify(report).includes("sk-provider-secret"), false);
+      assert.equal(JSON.stringify(report).includes("Foreign Provider"), false);
       assert.equal(JSON.stringify(report).includes("secret-value"), false);
     } finally {
       db.close();
