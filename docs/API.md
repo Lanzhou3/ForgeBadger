@@ -183,8 +183,10 @@ Prepare tools create pending actions and do not directly mutate runtime state:
 Approval uses the canonical stored pending-action payload. The client cannot
 replace the action payload at approval time. Diagnostics approval returns a
 redacted diagnostics payload; session-create approval returns a draft only and
-does not start a CLI session in this release. Session-create drafts must target
-a project visible to the current user and one of the supported terminal
+does not start a CLI session in this release. Approve and reject routes only
+operate on actions whose stored status is still `pending`; already approved or
+rejected actions are not rewritten. Session-create drafts must target a project
+visible to the current user and one of the supported terminal
 adapters: `claude`, `opencode`, or `codex`; approval revalidates the canonical
 stored draft so stale or invalid drafts stay pending instead of returning an
 actionable session draft. Troubleshooting-step approval also revalidates its

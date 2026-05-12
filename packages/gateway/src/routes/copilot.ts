@@ -190,6 +190,13 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         details: { code: "copilot_run_not_approvable", status: target.run.status }
       });
     }
+    if (target.action.status !== "pending") {
+      return res.status(400).json({
+        code: 1,
+        message: "Pending action is not rejectable",
+        details: { code: "copilot_pending_action_not_pending", status: target.action.status }
+      });
+    }
     const result = { reason: "user_rejected" };
     const updated = repo.updatePendingAction(target.action.id, {
       status: "rejected",

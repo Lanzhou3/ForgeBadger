@@ -881,6 +881,44 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.action.status, "rejected");
   });
 
+  it("does not reject already decided pending actions while a run still waits", async () => {
+    const repo = new CopilotRepository(db, userId);
+    const run = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Approve actions"
+    });
+    const approvedAction = repo.createPendingAction(run.id, {
+      type: "openforge.propose_troubleshooting_steps",
+      input: { steps: ["Already approved"] }
+    });
+    repo.updatePendingAction(approvedAction.id, {
+      status: "approved",
+      result: { steps: ["Already approved"], executed: false },
+      approvedBy: userId,
+      approvedAt: Date.now()
+    });
+    repo.createPendingAction(run.id, {
+      type: "openforge.propose_troubleshooting_steps",
+      input: { steps: ["Still pending"] }
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${run.id}/pending-actions/${approvedAction.id}/reject`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = repo.getPendingAction(approvedAction.id);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "copilot_pending_action_not_pending");
+    assert.equal(action?.status, "approved");
+    assert.equal(repo.getRun(run.id)?.status, "waiting_for_approval");
+  });
+
   it("writes an audit log when rejecting a Copilot pending action", async () => {
     const { runId, actionId } = createPendingAction(userId, "openforge.propose_troubleshooting_steps", {
       steps: ["Check provider setup"],
