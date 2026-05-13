@@ -56,6 +56,7 @@ export interface LocalDiagnosticsExport {
       memoryEnabled: boolean;
       memoryWritesRequireApproval: boolean;
     };
+    providerReadiness: CopilotProviderReadinessDiagnostics;
   };
   environment: Record<string, unknown>;
 }
@@ -87,6 +88,18 @@ export interface ModelProviderDiagnostics {
   }>;
 }
 
+export interface CopilotProviderReadinessDiagnostics {
+  providerConfigured: boolean;
+  supportedProviderFormats: string[];
+  counts: {
+    activeProviders: number;
+    activeModels: number;
+    activeCredentials: number;
+    readyProviders: number;
+  };
+}
+
+const COPILOT_SUPPORTED_PROVIDER_FORMATS = ["openai", "openai-compatible", "anthropic"] as const;
 const sensitivePattern = /(secret|token|key|password|credential|authorization)/i;
 const sensitiveValuePattern = /(sk-[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._-]+)/i;
 
@@ -95,6 +108,7 @@ export function buildLocalDiagnosticsExport(
 ): LocalDiagnosticsExport {
   const now = input.now ?? new Date();
   const summary = getDashboardSummary(input.db, input.userId, input.masterKey);
+  const modelProviderDiagnostics = buildModelProviderDiagnostics(input.db, input.userId, input.masterKey);
   return {
     generatedAt: now.toISOString(),
     app: {
@@ -125,7 +139,7 @@ export function buildLocalDiagnosticsExport(
       command: adapter.command,
       runtimeModes: [...adapter.runtimeModes]
     })),
-    modelProviders: buildModelProviderDiagnostics(input.db, input.userId, input.masterKey),
+    modelProviders: modelProviderDiagnostics,
     copilot: {
       capabilities: {
         enabled: true,
@@ -133,7 +147,8 @@ export function buildLocalDiagnosticsExport(
         approvalRequiredForWrites: true,
         memoryEnabled: true,
         memoryWritesRequireApproval: true
-      }
+      },
+      providerReadiness: buildCopilotProviderReadiness(modelProviderDiagnostics)
     },
     environment: redactDiagnosticValue(pickDiagnosticEnv(input.env ?? process.env)) as Record<string, unknown>
   };
@@ -187,6 +202,24 @@ function buildModelProviderDiagnostics(
         };
       })
       .sort((a, b) => Number(b.readyForUse) - Number(a.readyForUse) || a.name.localeCompare(b.name))
+  };
+}
+
+function buildCopilotProviderReadiness(
+  diagnostics: ModelProviderDiagnostics
+): CopilotProviderReadinessDiagnostics {
+  const supportedFormats = new Set<string>(COPILOT_SUPPORTED_PROVIDER_FORMATS);
+  const providers = diagnostics.providers.filter((provider) => supportedFormats.has(provider.apiFormat));
+  const readyProviders = providers.filter((provider) => provider.readyForUse);
+  return {
+    providerConfigured: readyProviders.length > 0,
+    supportedProviderFormats: [...COPILOT_SUPPORTED_PROVIDER_FORMATS],
+    counts: {
+      activeProviders: providers.filter((provider) => provider.status === "active").length,
+      activeModels: providers.reduce((sum, provider) => sum + provider.activeModelCount, 0),
+      activeCredentials: providers.reduce((sum, provider) => sum + provider.activeCredentialCount, 0),
+      readyProviders: readyProviders.length
+    }
   };
 }
 

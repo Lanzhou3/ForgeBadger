@@ -56,11 +56,11 @@ Codex app-server turn control.
   the first release scope above, not for self-directed coding, shell execution,
   terminal control, or Codex app-server prompt workflows.
 - Phase C first-user hardening remains open in `MEMORY.md`: dependency failure
-  states, CLI availability recovery, diagnostics review, platform-specific
-  remediation, and real user feedback. Provider configuration recovery now has
-  more specific Copilot-page blocker messages and a structured trial-feedback
-  issue form, but still needs first-user confirmation with a disposable
-  provider. Track this as
+  states, CLI availability recovery, platform-specific remediation, and real
+  user feedback. Provider configuration recovery now has more specific
+  Copilot-page blocker messages, Copilot-readable Provider SSOT readiness in
+  diagnostics, and a structured trial-feedback issue form, but still needs
+  first-user confirmation with a disposable provider. Track this as
   [#5](https://github.com/Lanzhou3/OpenForge/issues/5).
 
 ## Acceptance Judgment

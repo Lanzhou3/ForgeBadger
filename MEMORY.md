@@ -82,6 +82,10 @@
   with `OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1`, missing live config is a
   hard failure. The remaining acceptance work is therefore external evidence,
   not another local proxy check.
+- Copilot diagnostics now expose bounded Provider SSOT readiness directly under
+  the diagnostics Copilot section, so read tools and support handoffs can
+  distinguish legacy API key rows from a usable active provider/model/credential
+  configuration without surfacing secrets or foreign-tenant providers.
 
 ## Source Of Truth
 
@@ -117,7 +121,7 @@
    evidence in GitHub issue #4.
 5. Collect first-user Copilot hardening feedback through the trial feedback
    form and issue #5. Focus on dependency failure states, CLI availability
-   recovery, provider configuration recovery, diagnostics review, and
-   platform-specific remediation.
+   recovery, provider configuration recovery, and platform-specific
+   remediation.
 6. Keep SSH/remote execution as a separate architecture item, not part of the
    local Codex app-server prototype.

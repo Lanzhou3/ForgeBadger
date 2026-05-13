@@ -248,6 +248,18 @@ describe("copilot tools", () => {
             hasDefaultModel: boolean;
           }>;
         };
+        copilot: {
+          providerReadiness: {
+            providerConfigured: boolean;
+            supportedProviderFormats: string[];
+            counts: {
+              activeProviders: number;
+              activeModels: number;
+              activeCredentials: number;
+              readyProviders: number;
+            };
+          };
+        };
       };
     };
     const json = JSON.stringify(output);
@@ -267,6 +279,16 @@ describe("copilot tools", () => {
     assert.equal(output.diagnostics.modelProviders.providers[0]?.modelCount, 1);
     assert.equal(output.diagnostics.modelProviders.providers[0]?.activeModelCount, 1);
     assert.equal(output.diagnostics.modelProviders.providers[0]?.hasDefaultModel, true);
+    assert.equal(output.diagnostics.copilot.providerReadiness.providerConfigured, true);
+    assert.deepEqual(output.diagnostics.copilot.providerReadiness.supportedProviderFormats, [
+      "openai",
+      "openai-compatible",
+      "anthropic"
+    ]);
+    assert.equal(output.diagnostics.copilot.providerReadiness.counts.activeProviders, 1);
+    assert.equal(output.diagnostics.copilot.providerReadiness.counts.activeModels, 1);
+    assert.equal(output.diagnostics.copilot.providerReadiness.counts.activeCredentials, 1);
+    assert.equal(output.diagnostics.copilot.providerReadiness.counts.readyProviders, 1);
     assert.equal("environment" in output.diagnostics, false);
     assert.doesNotMatch(json, /sk-provider-secret|secret-header-value|Foreign Provider/);
   });
