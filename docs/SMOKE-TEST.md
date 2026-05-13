@@ -143,6 +143,28 @@ permission prompt event.
   evidence, set `OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1` plus
   `OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER`, `OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL`,
   and a disposable API key. The command must not print the plaintext key.
+  OpenAI example:
+
+  ```bash
+  OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
+  OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER=openai \
+  OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
+  OPENFORGE_COPILOT_PROVIDER_SMOKE_API_KEY=<disposable-openai-key> \
+  pnpm smoke:copilot-provider
+  ```
+
+  Anthropic example:
+
+  ```bash
+  OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
+  OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER=anthropic \
+  OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
+  OPENFORGE_COPILOT_PROVIDER_SMOKE_API_KEY=<disposable-anthropic-key> \
+  pnpm smoke:copilot-provider
+  ```
+
+  Record only the redacted JSON result, provider name, model id, pass/fail
+  status, and any sanitized failure reason.
 - Configure a disposable OpenAI or Anthropic provider profile with an active
   model and active test credential.
 - Open `/copilot` from the sidebar.
