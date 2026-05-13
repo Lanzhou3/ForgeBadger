@@ -1,6 +1,6 @@
 # OpenForge Project Memory
 
-> Updated: 2026-05-10
+> Updated: 2026-05-13
 
 ## Current Stage
 
@@ -65,6 +65,23 @@
   delete flows, and provider credential rotate/delete flows. Current commit
   series: `c83e595 feat: 支持服务商模型同步` followed by the provider
   management closure commit.
+- Platform AI Copilot product-hardening is collected in PR #2
+  `feat: add release gates and platform copilot` on branch
+  `post-beta-release-gates`. The PR is ready for review from the local/CI side:
+  provider-backed Copilot runs, read tools, approval-gated pending actions,
+  provider/model selectors, active memory recall, cancellation/timeout handling,
+  audit logging, provider diagnostics, output redaction, and Web hardening are
+  covered by repository tests, Playwright smoke coverage, package smoke, and CI.
+  The latest local head tracked here is `b2c773f docs: track copilot manual
+  gates`; GitHub Actions for that head passed Workspace Static Checks, Codex
+  Background Task Gates, NPM Package Build/Verify/Smoke, and Environment-Gated
+  Release Notes.
+- Copilot live-provider validation now has an executable harness:
+  `pnpm smoke:copilot-provider`. With no disposable provider credential in the
+  current environment it intentionally reports `missing_provider_credential`;
+  with `OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1`, missing live config is a
+  hard failure. The remaining acceptance work is therefore external evidence,
+  not another local proxy check.
 
 ## Source Of Truth
 
@@ -73,6 +90,10 @@
 - Post-RC sequence: `docs/superpowers/specs/2026-05-06-openforge-post-rc-roadmap-design.md`
 - Codex app-server boundary: `docs/reports/codex-app-server-architecture-2026-05-06.md`
 - Phase B acceptance: `docs/reports/phase-b-codex-app-server-acceptance-2026-05-10.md`
+- Platform AI Copilot product audit:
+  `docs/reports/platform-ai-copilot-product-audit-2026-05-13.md`
+- Trial checklist and feedback routing: `docs/TRIAL-CHECKLIST.md`,
+  `docs/TRIAL-FEEDBACK.md`, `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml`
 - API surface: `docs/API.md`
 
 ## Next Work
@@ -87,11 +108,16 @@
 2. If stopped/error app-server records grow in long-running usage, add an
    explicit TTL or pagination strategy instead of deleting them immediately and
    losing observable process state.
-3. Run a physical Windows/WSL manual smoke when that platform is available; the
+3. Close the Copilot live-provider gate by running `pnpm smoke:copilot-provider`
+   with a disposable provider credential and explicit model id, then record the
+   redacted evidence in GitHub issue #3.
+4. Run a physical Windows/WSL manual smoke when that platform is available; the
    current pass covers CLI mode behavior, CI/release gate automation, checklist
-   fields, and runbook remediation, not a real Windows host.
-4. Start Phase C from beta feedback and first-user hardening: dependency
-   failure states, CLI availability recovery, provider configuration recovery,
-   diagnostics review, and platform-specific remediation.
-5. Keep SSH/remote execution as a separate architecture item, not part of the
+   fields, and runbook remediation, not a real Windows host. Record that
+   evidence in GitHub issue #4.
+5. Collect first-user Copilot hardening feedback through the trial feedback
+   form and issue #5. Focus on dependency failure states, CLI availability
+   recovery, provider configuration recovery, diagnostics review, and
+   platform-specific remediation.
+6. Keep SSH/remote execution as a separate architecture item, not part of the
    local Codex app-server prototype.
