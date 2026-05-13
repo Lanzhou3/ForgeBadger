@@ -72,6 +72,8 @@ write what Claude Code asked, what OpenForge showed, and what happened next
 
 ## Copilot Smoke
 
+- [ ] Maintainer live-provider harness result recorded, if available:
+      `pnpm smoke:copilot-provider`.
 - [ ] Configured an OpenAI or Anthropic model provider with an active model and
       test credential.
 - [ ] If Copilot is blocked, recorded the visible provider readiness reason:

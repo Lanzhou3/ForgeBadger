@@ -71,6 +71,8 @@ project secrets, or the `openforge.token` value.
 
 - Console errors:
 - Network failures:
+- `pnpm smoke:copilot-provider` result: passed / skipped / failed
+- Provider smoke skip or failure reason:
 - Copilot provider with active model configured: yes / no / skipped
 - Copilot prompt used:
 - Copilot read-tool evidence observed:

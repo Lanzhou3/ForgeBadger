@@ -37,6 +37,7 @@ Codex app-server turn control.
 | Diagnostics capability/count metadata | `docs/API.md` documents diagnostics export including Copilot capability and memory counts; commit `a877554` aligned the Web diagnostics export type and API test with the Gateway contract. | Covered |
 | Provider SSOT recovery diagnostics | `docs/API.md` documents Provider SSOT diagnostics without secrets; `packages/gateway/test/diagnostics.test.ts` covers provider/model/credential counts, api format distribution, per-provider readiness, tenant scoping, and absence of plaintext provider secrets. | Covered |
 | Copilot-readable Provider SSOT diagnostics | `openforge.get_diagnostics_summary` now includes the bounded Provider SSOT readiness summary so Copilot can explain provider/model/credential setup from read-tool context; `packages/gateway/test/copilot-tools.test.ts` covers counts, readiness, tenant scoping, and secret/header omission. | Covered |
+| Live provider smoke harness | `pnpm smoke:copilot-provider` runs a skipped-by-default live Copilot provider smoke. With a disposable provider key and explicit model id, it creates an isolated in-memory tenant/provider setup, runs Copilot through the real provider client, and fails if the expected marker is not returned. `scripts/smoke-copilot-provider.test.ts` covers skip/require behavior and secret-free summaries. | Covered as executable gate; live credential run still manual |
 | Product smoke instructions | `docs/TRIAL-CHECKLIST.md` has a Copilot Smoke section; `docs/TRIAL-FEEDBACK.md` captures provider, prompt, read-tool, pending-action, memory, and no-terminal-control evidence. | Covered for trial users |
 | Maintainer smoke instructions | `docs/SMOKE-TEST.md` now includes a maintainer Copilot smoke section and pass criteria. | Covered by this audit slice |
 | Release/PR state | PR #2 (`feat: add release gates and platform copilot`) is open and non-draft. CI state is refreshed after each pushed Copilot-hardening commit and should be treated as the live source for merge readiness rather than static audit text. | Covered as release gate process |
@@ -44,8 +45,9 @@ Codex app-server turn control.
 ## Residual Gaps
 
 - No real provider manual smoke result is recorded in this audit. Automated
-  tests cover provider contracts and Web behavior, but they do not prove a
-  live user prompt against a disposable OpenAI or Anthropic credential.
+  tests and the skipped-by-default `pnpm smoke:copilot-provider` harness cover
+  the execution path and evidence capture shape, but a live run with a
+  disposable OpenAI or Anthropic credential still needs to be recorded.
 - No physical Windows/WSL manual smoke was run in this pass. That remains a
   broader OpenForge platform caveat, especially for terminal-dependent flows.
 - Copilot remains intentionally non-autonomous. It is product-ready only for

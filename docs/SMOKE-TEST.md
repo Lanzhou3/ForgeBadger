@@ -132,6 +132,17 @@ permission prompt event.
 
 ## 9. Copilot
 
+- Maintainers can run the live provider harness before or during manual smoke:
+
+  ```bash
+  pnpm smoke:copilot-provider
+  ```
+
+  Without `OPENFORGE_COPILOT_PROVIDER_SMOKE_API_KEY` or provider-specific
+  disposable credentials, the harness records a skipped result. To require live
+  evidence, set `OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1` plus
+  `OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER`, `OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL`,
+  and a disposable API key. The command must not print the plaintext key.
 - Configure a disposable OpenAI or Anthropic provider profile with an active
   model and active test credential.
 - Open `/copilot` from the sidebar.
