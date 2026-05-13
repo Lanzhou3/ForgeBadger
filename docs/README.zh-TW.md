@@ -29,6 +29,7 @@ Codex app-server 生命週期能力仍屬於實驗功能，並有意隱藏在 We
 - [首次執行檢查表](TRIAL-CHECKLIST.md)
 - [疑難排解](TROUBLESHOOTING.md)
 - [回饋範本](TRIAL-FEEDBACK.md)
+- [GitHub 回饋 Issue 表單](../.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml)
 
 ## 為什麼使用 OpenForge
 
