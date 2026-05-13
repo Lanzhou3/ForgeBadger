@@ -72,10 +72,13 @@
   provider/model selectors, active memory recall, cancellation/timeout handling,
   audit logging, provider diagnostics, output redaction, and Web hardening are
   covered by repository tests, Playwright smoke coverage, package smoke, and CI.
-  The latest local head tracked here is `b2c773f docs: track copilot manual
-  gates`; GitHub Actions for that head passed Workspace Static Checks, Codex
-  Background Task Gates, NPM Package Build/Verify/Smoke, and Environment-Gated
-  Release Notes.
+  The latest Copilot implementation/evidence head tracked here is `e024e7f
+  docs: add copilot live smoke examples`; GitHub Actions for that head passed
+  Workspace Static Checks, Codex Background Task Gates, NPM Package
+  Build/Verify/Smoke, and Environment-Gated Release Notes. Later docs-only
+  progress-source sync commits may sit on top of that evidence head. The PR
+  body now tracks the remaining external gates as #3 live provider smoke, #4
+  physical Windows/WSL smoke, and #5 first-user Copilot hardening feedback.
 - Copilot live-provider validation now has an executable harness:
   `pnpm smoke:copilot-provider`. With no disposable provider credential in the
   current environment it intentionally reports `missing_provider_credential`;
