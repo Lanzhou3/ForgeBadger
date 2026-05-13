@@ -47,9 +47,11 @@ Codex app-server turn control.
 - No real provider manual smoke result is recorded in this audit. Automated
   tests and the skipped-by-default `pnpm smoke:copilot-provider` harness cover
   the execution path and evidence capture shape, but a live run with a
-  disposable OpenAI or Anthropic credential still needs to be recorded.
+  disposable OpenAI or Anthropic credential still needs to be recorded. Track
+  this as [#3](https://github.com/Lanzhou3/OpenForge/issues/3).
 - No physical Windows/WSL manual smoke was run in this pass. That remains a
   broader OpenForge platform caveat, especially for terminal-dependent flows.
+  Track this as [#4](https://github.com/Lanzhou3/OpenForge/issues/4).
 - Copilot remains intentionally non-autonomous. It is product-ready only for
   the first release scope above, not for self-directed coding, shell execution,
   terminal control, or Codex app-server prompt workflows.
@@ -58,7 +60,8 @@ Codex app-server turn control.
   remediation, and real user feedback. Provider configuration recovery now has
   more specific Copilot-page blocker messages and a structured trial-feedback
   issue form, but still needs first-user confirmation with a disposable
-  provider.
+  provider. Track this as
+  [#5](https://github.com/Lanzhou3/OpenForge/issues/5).
 
 ## Acceptance Judgment
 
@@ -66,4 +69,5 @@ The current branch has enough evidence to treat the first Platform AI Copilot
 release contract as implemented and regression-gated. The broader objective
 "make Copilot product-grade" should stay open because product-grade acceptance
 still needs manual provider smoke evidence and first-user hardening feedback,
-not only API contracts, mocked Web E2E, and green CI.
+not only API contracts, mocked Web E2E, and green CI. The remaining external
+manual gates are tracked in issues #3, #4, and #5.
