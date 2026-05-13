@@ -1,7 +1,9 @@
 # OpenForge Trial Feedback Template
 
-Use this template for first-user local trial feedback. Review all attachments
-before sharing.
+Use this template for first-user local trial feedback. Prefer the GitHub issue
+form `OpenForge first-user trial feedback` when filing feedback from the
+repository; use this document as the offline copy/paste template. Review all
+attachments before sharing.
 
 ## Summary
 

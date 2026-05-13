@@ -1,0 +1,161 @@
+name: OpenForge first-user trial feedback
+description: Report a local OpenForge trial result with environment, diagnostics, and Copilot smoke evidence.
+title: "[Trial]: "
+labels:
+  - trial-feedback
+  - product-hardening
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for local first-user trial feedback. Review all attachments before sharing.
+        Do not paste API keys, passwords, JWTs, attach tokens, private keys, unrelated project secrets, or the `openforge.token` value.
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: Trial result
+      options:
+        - pass
+        - pass with caveats
+        - blocked
+    validations:
+      required: true
+
+  - type: dropdown
+    id: startup_path
+    attributes:
+      label: Startup path
+      options:
+        - npm/CLI
+        - source fallback
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include commit/version, OS, shell, browser, Node, tmux, Claude Code, and optional OpenCode/Codex versions.
+      value: |
+        OpenForge version or commit:
+        OS:
+        Shell:
+        Browser:
+        node --version:
+        tmux -V:
+        claude --version:
+        opencode --version, if checked:
+        codex --version, if checked:
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: openforge doctor output
+      description: Paste the redacted `openforge doctor` output. Native Windows users should include the runtime warning.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: startup_health
+    attributes:
+      label: Startup and health checks
+      description: Include the exact startup command, Web URL, Gateway URL, and health check result.
+      value: |
+        Command:
+        Web URL:
+        Gateway URL:
+        Gateway health envelope:
+        /login result:
+    validations:
+      required: true
+
+  - type: textarea
+    id: core_trial
+    attributes:
+      label: Core trial path
+      description: Summarize account, project/config, Claude Code session, browser terminal attach, input/output, resize, reconnect, stop, and restart recovery.
+      value: |
+        Account:
+        Project/config:
+        Claude Code session:
+        Browser terminal attach:
+        Input/output:
+        Resize:
+        Refresh/reconnect:
+        Stop:
+        Gateway/Web restart recovery:
+    validations:
+      required: true
+
+  - type: textarea
+    id: copilot
+    attributes:
+      label: Copilot smoke evidence
+      description: Include live provider harness output if available and the visible provider readiness state.
+      value: |
+        pnpm smoke:copilot-provider result: passed / skipped / failed
+        Provider smoke skip or failure reason:
+        Provider with active model configured: yes / no / skipped
+        Visible provider readiness blocker, if any:
+        Prompt used:
+        Read-tool evidence observed:
+        Pending-action approve/reject result:
+        Memory write proposal tested: yes / no / skipped
+        Confirmed no terminal/shell/Codex turn input in Copilot: yes / no
+    validations:
+      required: true
+
+  - type: textarea
+    id: windows_wsl
+    attributes:
+      label: Windows or WSL evidence
+      description: Native Windows should be recorded as management-UI evidence only; WSL is required for terminal evidence.
+      value: |
+        Native Windows management UI checked: yes / no / not applicable
+        Native Windows doctor warning:
+        WSL distribution/version:
+        WSL terminal trial result:
+    validations:
+      required: false
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics and browser evidence
+      description: Attach redacted diagnostics when possible and include console/network failures.
+      value: |
+        Diagnostics export attached: yes / no
+        Browser console errors:
+        Browser network failures:
+        Screenshots or notes:
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps for each issue
+      description: Write one numbered list per issue. Include expected and actual behavior.
+      value: |
+        1.
+
+        Expected:
+
+        Actual:
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I reviewed this issue and attachments for secrets before submitting.
+          required: true
+        - label: Any API keys, passwords, JWTs, attach tokens, private keys, project secrets, and `openforge.token` values have been removed.
+          required: true

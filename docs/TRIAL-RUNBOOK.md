@@ -4,7 +4,9 @@
 
 This is the single entry point for a local OpenForge first-user trial. It is not
 a public release guide. Use it to start OpenForge, run the core Claude Code
-browser terminal path, collect diagnostics, and submit feedback.
+browser terminal path, collect diagnostics, and submit feedback. Prefer the
+GitHub issue form `OpenForge first-user trial feedback` when filing feedback;
+use `docs/TRIAL-FEEDBACK.md` as the offline copy/paste template.
 
 The primary path is the npm/CLI startup. Source startup is a fallback for local
 debugging and contribution.
