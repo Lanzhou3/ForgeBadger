@@ -65,20 +65,24 @@
   delete flows, and provider credential rotate/delete flows. Current commit
   series: `c83e595 feat: 支持服务商模型同步` followed by the provider
   management closure commit.
-- Platform AI Copilot product-hardening is collected in PR #2
+- Platform AI Copilot product-hardening is collected in
+  [PR #2](https://github.com/Lanzhou3/OpenForge/pull/2)
   `feat: add release gates and platform copilot` on branch
   `post-beta-release-gates`. The PR is ready for review from the local/CI side:
   provider-backed Copilot runs, read tools, approval-gated pending actions,
   provider/model selectors, active memory recall, cancellation/timeout handling,
   audit logging, provider diagnostics, output redaction, and Web hardening are
   covered by repository tests, Playwright smoke coverage, package smoke, and CI.
-  The latest Copilot implementation/evidence head tracked here is `e024e7f
+  The latest Copilot evidence snapshot tracked here is `e024e7f
   docs: add copilot live smoke examples`; GitHub Actions for that head passed
   Workspace Static Checks, Codex Background Task Gates, NPM Package
   Build/Verify/Smoke, and Environment-Gated Release Notes. Later docs-only
   progress-source sync commits may sit on top of that evidence head. The PR
-  body now tracks the remaining external gates as #3 live provider smoke, #4
-  physical Windows/WSL smoke, and #5 first-user Copilot hardening feedback.
+  body now tracks the remaining external gates as
+  [#3](https://github.com/Lanzhou3/OpenForge/issues/3) live provider smoke,
+  [#4](https://github.com/Lanzhou3/OpenForge/issues/4) physical Windows/WSL
+  smoke, and [#5](https://github.com/Lanzhou3/OpenForge/issues/5) first-user
+  Copilot hardening feedback.
 - Copilot live-provider validation now has an executable harness:
   `pnpm smoke:copilot-provider`. With no disposable provider credential in the
   current environment it intentionally reports `missing_provider_credential`;

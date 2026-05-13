@@ -40,7 +40,7 @@ Codex app-server turn control.
 | Live provider smoke harness | `pnpm smoke:copilot-provider` runs a skipped-by-default live Copilot provider smoke. With a disposable provider key and explicit model id, it creates an isolated in-memory tenant/provider setup, runs Copilot through the real provider client, and fails if the expected marker is not returned. `scripts/smoke-copilot-provider.test.ts` covers skip/require behavior and secret-free summaries. | Covered as executable gate; live credential run still manual |
 | Product smoke instructions | `docs/TRIAL-CHECKLIST.md` has a Copilot Smoke section; `docs/TRIAL-FEEDBACK.md` captures provider, prompt, read-tool, pending-action, memory, and no-terminal-control evidence; `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml` exposes the same evidence as a structured GitHub issue form. | Covered for trial users |
 | Maintainer smoke instructions | `docs/SMOKE-TEST.md` now includes a maintainer Copilot smoke section and pass criteria. | Covered by this audit slice |
-| Release/PR state | PR #2 (`feat: add release gates and platform copilot`) is open and non-draft. CI state is refreshed after each pushed Copilot-hardening commit and should be treated as the live source for merge readiness rather than static audit text. | Covered as release gate process |
+| Release/PR state | [PR #2](https://github.com/Lanzhou3/OpenForge/pull/2) (`feat: add release gates and platform copilot`) is open and non-draft. CI state is refreshed after each pushed Copilot-hardening commit and should be treated as the live source for merge readiness rather than static audit text. | Covered as release gate process |
 
 ## Residual Gaps
 
@@ -70,4 +70,7 @@ release contract as implemented and regression-gated. The broader objective
 "make Copilot product-grade" should stay open because product-grade acceptance
 still needs manual provider smoke evidence and first-user hardening feedback,
 not only API contracts, mocked Web E2E, and green CI. The remaining external
-manual gates are tracked in issues #3, #4, and #5.
+manual gates are tracked in issues
+[#3](https://github.com/Lanzhou3/OpenForge/issues/3),
+[#4](https://github.com/Lanzhou3/OpenForge/issues/4), and
+[#5](https://github.com/Lanzhou3/OpenForge/issues/5).
