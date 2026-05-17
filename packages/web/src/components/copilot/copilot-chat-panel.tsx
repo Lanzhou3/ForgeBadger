@@ -180,7 +180,9 @@ export function CopilotChatPanel({
   const visibleMessages = optimisticUserMessage
     ? [...messages.filter((message) => message.id !== optimisticUserMessage.id), optimisticUserMessage]
     : messages;
-  const providerReady = capabilitiesQuery.data?.providerConfigured !== false;
+  const capabilitiesLoadFailed = capabilitiesQuery.isError;
+  const providerReady = capabilitiesQuery.isSuccess && capabilitiesQuery.data.providerConfigured === true;
+  const providerSetupBlocked = capabilitiesQuery.isSuccess && capabilitiesQuery.data.providerConfigured !== true;
 
   const createConversationMutation = useMutation({
     mutationFn: createCopilotConversation,
@@ -509,6 +511,10 @@ export function CopilotChatPanel({
     const text = prompt.trim();
     if (!text) return;
     if (sendMessageMutation.isPending) return;
+    if (capabilitiesLoadFailed) {
+      setLocalError(t("copilot.capabilitiesLoadFailed"));
+      return;
+    }
     if (!providerReady) {
       setLocalError(t("copilot.providerSetupRequired"));
       return;
@@ -643,7 +649,13 @@ export function CopilotChatPanel({
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
           <div className={cn("mx-auto min-h-full", compact ? "max-w-none" : "max-w-4xl")}>
-            {!providerReady && (
+            {capabilitiesLoadFailed && (
+              <div className="mb-4 flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                <p>{t("copilot.capabilitiesLoadFailed")}</p>
+              </div>
+            )}
+            {providerSetupBlocked && (
               <div className="mb-4 flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
                 <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <div>

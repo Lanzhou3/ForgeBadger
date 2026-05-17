@@ -661,18 +661,22 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
       recordPendingActionAudit(options.db, userIdFor(req), req.ip, action, "rejected", { reason: "run_cancelled" });
       recordPendingActionDecision(repo, action, "rejected");
     }
+    const abortSignalDelivered = runControls.cancel(current.id);
     repo.addEvent(run.id, {
       type: "run_cancelled",
       message: "Copilot run cancelled",
-      payload: { rejectedPendingActionCount: rejectedPendingActions.length }
+      payload: {
+        rejectedPendingActionCount: rejectedPendingActions.length,
+        abortSignalDelivered
+      }
     });
     recordCopilotRunAudit(options.db, userIdFor(req), req.ip, "copilot.run.cancel", run, {
-      rejectedPendingActionCount: rejectedPendingActions.length
+      rejectedPendingActionCount: rejectedPendingActions.length,
+      abortSignalDelivered
     }, {
       eventBus: options.eventBus,
       conversationId: repo.findConversationIdByRunId(run.id)
     });
-    runControls.cancel(current.id);
     res.json(successEnvelope(run, repo.listEvents(run.id), repo.listPendingActions(run.id)));
   });
 

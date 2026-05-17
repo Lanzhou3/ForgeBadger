@@ -2307,6 +2307,7 @@ describe("copilot routes", () => {
     assert.equal(events.at(-2)?.payload.status, "rejected");
     assert.equal(events.at(-1)?.type, "run_cancelled");
     assert.equal(events.at(-1)?.payload.rejectedPendingActionCount, 1);
+    assert.equal(events.at(-1)?.payload.abortSignalDelivered, false);
   });
 
   it("writes an audit log when cancelling a Copilot run", async () => {
@@ -2338,6 +2339,7 @@ describe("copilot routes", () => {
       runId?: string;
       status?: string;
       rejectedPendingActionCount?: number;
+      abortSignalDelivered?: boolean;
     };
     const actionDetails = JSON.parse(actionAuditLogs[0]?.details ?? "{}") as {
       actionId?: string;
@@ -2351,6 +2353,7 @@ describe("copilot routes", () => {
     assert.equal(details.runId, runId);
     assert.equal(details.status, "cancelled");
     assert.equal(details.rejectedPendingActionCount, 1);
+    assert.equal(details.abortSignalDelivered, false);
     assert.equal(actionDetails.actionId, actionId);
     assert.equal(actionDetails.decision, "rejected");
     assert.equal(actionDetails.result?.reason, "run_cancelled");

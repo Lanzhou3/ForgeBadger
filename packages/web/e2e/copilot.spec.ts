@@ -24,6 +24,16 @@ test("Copilot chat blocks sending when no provider is configured", async ({ page
   await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
 });
 
+test("Copilot chat blocks sending when capabilities cannot load", async ({ page }) => {
+  await mockCopilotApis(page, { capabilitiesStatus: 500 });
+
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Summarize release state");
+
+  await expect(page.getByText("Failed to load Copilot capabilities").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+});
+
 test("Copilot chat creates a conversation and sends messages", async ({ page }) => {
   let createConversationBody: Record<string, unknown> | undefined;
   let sendBody: Record<string, unknown> | undefined;
@@ -1239,6 +1249,7 @@ async function mockCopilotApis(
   page: Page,
   overrides: {
     providerConfigured?: boolean;
+    capabilitiesStatus?: number;
     initialConversations?: Array<Record<string, unknown>>;
     initialMessages?: Array<Record<string, unknown>>;
     onCreateConversation?: (route: Route) => Promise<void>;
@@ -1273,6 +1284,13 @@ async function mockCopilotApis(
     }
 
     if (url.pathname === "/api/v1/copilot/capabilities") {
+      if (overrides.capabilitiesStatus && overrides.capabilitiesStatus >= 400) {
+        await route.fulfill({
+          status: overrides.capabilitiesStatus,
+          json: { code: 1, message: "Failed to load Copilot capabilities" },
+        });
+        return;
+      }
       await route.fulfill({
         json: envelope({
           supportedProviderFormats: ["openai", "anthropic"],
