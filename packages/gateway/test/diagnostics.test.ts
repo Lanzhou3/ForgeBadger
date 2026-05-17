@@ -175,4 +175,36 @@ describe("local diagnostics export", () => {
       db.close();
     }
   });
+
+  it("includes safe Feishu integration capability state without CLI error details", () => {
+    const db = createTestDb();
+    try {
+      const user = new UserRepository(db).create("diagnostics-feishu@example.com", "hash");
+
+      const report = buildLocalDiagnosticsExport({
+        db,
+        userId: user.id,
+        masterKey: "a".repeat(64),
+        appVersion: "0.0.0-test",
+        now: new Date("2026-05-17T00:00:00.000Z"),
+        feishuStatus: {
+          available: false,
+          authState: "unknown",
+          identityMode: "unknown",
+          enabled: false,
+          error: "command failed with token sk-diagnostics-secret"
+        }
+      });
+
+      assert.deepEqual(report.integrations.feishu, {
+        available: false,
+        authState: "unknown",
+        identityMode: "unknown",
+        enabled: false
+      });
+      assert.equal(JSON.stringify(report).includes("sk-diagnostics-secret"), false);
+    } finally {
+      db.close();
+    }
+  });
 });

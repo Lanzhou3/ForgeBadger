@@ -42,6 +42,7 @@ import {
   listCopilotMemoryNotes,
   getDashboardSummary,
   getDependencies,
+  getFeishuIntegrationStatus,
   getConfigCompliance,
   getGlobalAiConfig,
   getProjectAgentSequence,
@@ -1361,6 +1362,34 @@ describe("api client", () => {
         }),
       })
     );
+  });
+
+  it("loads Feishu integration status through the shared authenticated API client", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({
+      status: {
+        available: true,
+        version: "lark-cli 1.2.3",
+        authState: "authenticated",
+        identityMode: "user",
+        enabled: false,
+      },
+    })));
+
+    const status = await getFeishuIntegrationStatus();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/integrations/feishu/status",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+    expect(status.available).toBe(true);
+    expect(status.authState).toBe("authenticated");
+    expect(status.identityMode).toBe("user");
+    expect(status.enabled).toBe(false);
   });
 
   it("lists sessions with an optional project filter", async () => {

@@ -30,6 +30,7 @@ import {
 import { createCodexSubscriptionRoutes } from "./codex-subscription.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { createCopilotRoutes } from "./copilot.js";
+import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
@@ -78,6 +79,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     }
   }));
   app.use("/api/v1/codex/subscription", createCodexSubscriptionRoutes());
+  app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes());
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
     db: deps.db,
     masterKey: deps.masterKey,

@@ -85,7 +85,7 @@ Docs:
 - Modify: `packages/web/src/lib/api.test.ts`
 - Test: `packages/gateway/test/feishu-integration.test.ts`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Cover:
 
@@ -103,13 +103,13 @@ pnpm --dir packages/gateway test test/feishu-integration.test.ts
 
 Expected: FAIL because service and route do not exist.
 
-- [ ] **Step 2: Implement minimal Feishu CLI service**
+- [x] **Step 2: Implement minimal Feishu CLI service**
 
 Implement fixed executable discovery with a configurable path but no raw command
 input. Use a command runner abstraction for tests. Parse only JSON/NDJSON for
 auth status where supported; otherwise return a redacted unknown status.
 
-- [ ] **Step 3: Add read-only status route**
+- [x] **Step 3: Add read-only status route**
 
 Route:
 
@@ -135,7 +135,7 @@ Response envelope:
 }
 ```
 
-- [ ] **Step 4: Add Web API client tests and client**
+- [x] **Step 4: Add Web API client tests and client**
 
 Add `getFeishuIntegrationStatus()` in `packages/web/src/lib/api.ts`.
 
@@ -147,7 +147,7 @@ pnpm --dir packages/web test src/lib/api.test.ts
 
 Expected: PASS after client implementation.
 
-- [ ] **Step 5: Verify Gateway route**
+- [x] **Step 5: Verify Gateway route**
 
 Run:
 
@@ -158,7 +158,7 @@ pnpm --dir packages/gateway typecheck
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/gateway/src/services/integrations packages/gateway/src/routes/integrations-feishu.ts packages/gateway/src/routes/index.ts packages/gateway/test/feishu-integration.test.ts packages/web/src/lib/api.ts packages/web/src/lib/api.test.ts
@@ -174,7 +174,7 @@ git commit -m "feat: add feishu integration status"
 - Modify: `packages/gateway/src/routes/diagnostics.ts` if diagnostics are centralized there, otherwise the existing diagnostics export service.
 - Test: `packages/web/e2e/settings.spec.ts` if present, otherwise add focused coverage to an existing E2E file.
 
-- [ ] **Step 1: Write failing UI/API copy tests**
+- [x] **Step 1: Write failing UI/API copy tests**
 
 Assert i18n includes Feishu integration labels and status strings in `zh-CN`,
 `zh-TW`, and `en`.
@@ -187,7 +187,7 @@ pnpm --dir packages/web test src/lib/i18n.test.ts
 
 Expected: FAIL until keys are added.
 
-- [ ] **Step 2: Render Settings / Integrations / Feishu card**
+- [x] **Step 2: Render Settings / Integrations / Feishu card**
 
 The card shows:
 
@@ -200,7 +200,7 @@ The card shows:
 
 Do not add Feishu writes or inbound control in this task.
 
-- [ ] **Step 3: Add diagnostics field**
+- [x] **Step 3: Add diagnostics field**
 
 Diagnostics should include safe Feishu capability state only:
 
@@ -213,7 +213,7 @@ Diagnostics should include safe Feishu capability state only:
 Do not include tokens, cookies, full CLI stderr, chat ids, document ids, or user
 mapping details.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -224,7 +224,7 @@ pnpm --dir packages/web typecheck
 
 Run a focused Playwright test if a settings E2E exists or is added.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/web/src/app/\(dashboard\)/settings/page.tsx packages/web/src/lib/i18n.ts packages/web/src/lib/i18n.test.ts docs/API.md

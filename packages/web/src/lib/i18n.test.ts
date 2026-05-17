@@ -10,6 +10,15 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "settings.diagnostics")).toBe("诊断导出");
     expect(getTranslation("zh-TW", "settings.diagnosticsExport")).toContain("診斷 JSON");
     expect(getTranslation("en", "settings.diagnosticsNotice")).toContain("not uploaded automatically");
+    expect(getTranslation("zh-CN", "settings.feishuIntegration")).toBe("飞书集成");
+    expect(getTranslation("zh-TW", "settings.feishuIntegration")).toBe("飛書整合");
+    expect(getTranslation("en", "settings.feishuIntegration")).toBe("Feishu Integration");
+    expect(getTranslation("zh-CN", "settings.feishuPhaseOneNotice")).toContain("远程控制尚未启用");
+    expect(getTranslation("zh-TW", "settings.feishuPhaseOneNotice")).toContain("遠端控制尚未啟用");
+    expect(getTranslation("en", "settings.feishuPhaseOneNotice")).toContain("remote control is not enabled");
+    expect(getTranslation("zh-CN", "settings.feishuAuthAuthenticated")).toBe("已认证");
+    expect(getTranslation("zh-TW", "settings.feishuAuthUnauthenticated")).toBe("未驗證");
+    expect(getTranslation("en", "settings.feishuIdentityBot")).toBe("Bot");
     expect(getTranslation("zh-CN", "projects.configNeedsReviewTitle")).toBe("配置需要处理");
     expect(getTranslation("zh-TW", "projects.configNeedsReviewTitle")).toBe("設定需要處理");
     expect(getTranslation("en", "projects.configNeedsReviewTitle")).toBe("Config needs review");

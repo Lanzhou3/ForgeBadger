@@ -335,6 +335,19 @@ export interface DependencyReport {
   terminalRuntime?: TerminalRuntimeStatus;
 }
 
+export type FeishuAuthState = "authenticated" | "unauthenticated" | "unknown";
+export type FeishuIdentityMode = "user" | "bot" | "unknown";
+
+export interface FeishuIntegrationStatus {
+  available: boolean;
+  version?: string;
+  authState: FeishuAuthState;
+  identityMode: FeishuIdentityMode;
+  enabled: boolean;
+  emergencyDisabled?: boolean;
+  error?: string;
+}
+
 export interface LocalDiagnosticsExport {
   generatedAt: string;
   app: {
@@ -387,6 +400,9 @@ export interface LocalDiagnosticsExport {
       memoryEnabled: boolean;
       memoryWritesRequireApproval: boolean;
     };
+  };
+  integrations?: {
+    feishu?: FeishuIntegrationStatus;
   };
   environment: Record<string, unknown>;
 }
@@ -1183,6 +1199,13 @@ export async function getDependencies(): Promise<DependencyReport> {
   return fetchJson("/api/v1/gate-a/dependencies", {
     cache: "no-store"
   }) as Promise<DependencyReport>;
+}
+
+export async function getFeishuIntegrationStatus(): Promise<FeishuIntegrationStatus> {
+  const data = await fetchJson<{ status: FeishuIntegrationStatus }>("/api/v1/integrations/feishu/status", {
+    cache: "no-store"
+  });
+  return data.status;
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {

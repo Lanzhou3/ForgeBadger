@@ -98,14 +98,44 @@ project config, models, credentials, sessions, Agents, and Skills.
 Diagnostics export is authenticated, tenant scoped, and local-only. It returns a
 redacted report with app version, Node/platform metadata, tenant resource
 counts, dashboard health, adapter definitions/runtime modes, Copilot capability
-metadata, Provider SSOT readiness summaries, Copilot memory entry/note counts, and selected
-OpenForge environment values. It never uploads telemetry and redacts key,
-token, password, credential, authorization, `sk-*`, and `Bearer ...` values.
+metadata, Provider SSOT readiness summaries, Copilot memory entry/note counts,
+safe Feishu integration capability state, and selected OpenForge environment
+values. It never uploads telemetry and redacts key, token, password,
+credential, authorization, `sk-*`, and `Bearer ...` values.
 Provider SSOT diagnostics include only bounded counts and status metadata:
 provider/model/credential totals, active/default counts, api format
 distribution, and per-provider readiness summaries. Plaintext secrets, encrypted
 secrets, credential previews, default headers, and foreign-tenant providers are
 not included.
+
+### Integrations
+
+- `GET /api/v1/integrations/feishu/status`
+
+Feishu integration endpoints are authenticated and Gateway-owned. The first
+slice is read-only diagnostics only: it discovers the local `lark-cli` binary,
+reports version and structured auth status when available, and keeps the
+integration disabled until explicit configuration and approval flows are added.
+It never accepts model-generated command strings, never sends terminal input,
+and does not expose raw CLI stderr.
+
+Successful status response:
+
+```json
+{
+  "code": 0,
+  "data": {
+    "status": {
+      "available": true,
+      "version": "lark-cli 1.2.3",
+      "authState": "authenticated",
+      "identityMode": "user",
+      "enabled": false
+    }
+  },
+  "message": ""
+}
+```
 
 ### Platform AI Copilot
 

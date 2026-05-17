@@ -19,6 +19,7 @@ import { ModelProviderRepository } from "../db/repositories/model-provider-repos
 import type { Database } from "../db/types.js";
 import { getDashboardSummary } from "./dashboard-summary.js";
 import { listAdapterDefinitions } from "./adapter-discovery.js";
+import type { FeishuCliStatus } from "./integrations/feishu-cli.js";
 
 export interface LocalDiagnosticsExportInput {
   db: Database;
@@ -27,6 +28,7 @@ export interface LocalDiagnosticsExportInput {
   appVersion: string;
   now?: Date;
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  feishuStatus?: FeishuCliStatus;
 }
 
 export interface LocalDiagnosticsExport {
@@ -58,7 +60,19 @@ export interface LocalDiagnosticsExport {
     };
     providerReadiness: CopilotProviderReadinessDiagnostics;
   };
+  integrations: {
+    feishu: FeishuIntegrationDiagnostics;
+  };
   environment: Record<string, unknown>;
+}
+
+export interface FeishuIntegrationDiagnostics {
+  available: boolean;
+  version?: string;
+  authState: FeishuCliStatus["authState"];
+  identityMode: FeishuCliStatus["identityMode"];
+  enabled: boolean;
+  emergencyDisabled?: boolean;
 }
 
 export interface ModelProviderDiagnostics {
@@ -150,7 +164,23 @@ export function buildLocalDiagnosticsExport(
       },
       providerReadiness: buildCopilotProviderReadiness(modelProviderDiagnostics)
     },
+    integrations: {
+      feishu: buildFeishuIntegrationDiagnostics(input.feishuStatus)
+    },
     environment: redactDiagnosticValue(pickDiagnosticEnv(input.env ?? process.env)) as Record<string, unknown>
+  };
+}
+
+function buildFeishuIntegrationDiagnostics(
+  status?: FeishuCliStatus
+): FeishuIntegrationDiagnostics {
+  return {
+    available: status?.available ?? false,
+    ...(status?.version ? { version: status.version } : {}),
+    authState: status?.authState ?? "unknown",
+    identityMode: status?.identityMode ?? "unknown",
+    enabled: status?.enabled ?? false,
+    ...(status?.emergencyDisabled !== undefined ? { emergencyDisabled: status.emergencyDisabled } : {})
   };
 }
 
