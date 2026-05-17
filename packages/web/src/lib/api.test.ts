@@ -42,7 +42,11 @@ import {
   listCopilotMemoryNotes,
   getDashboardSummary,
   getDependencies,
+  getFeishuIntegrationConfig,
   getFeishuIntegrationStatus,
+  listFeishuUserMappings,
+  replaceFeishuUserMappings,
+  updateFeishuIntegrationConfig,
   getConfigCompliance,
   getGlobalAiConfig,
   getProjectAgentSequence,
@@ -1390,6 +1394,96 @@ describe("api client", () => {
     expect(status.authState).toBe("authenticated");
     expect(status.identityMode).toBe("user");
     expect(status.enabled).toBe(false);
+  });
+
+  it("loads and updates Feishu integration config through REST", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({
+      config: {
+        enabled: true,
+        emergencyDisabled: false,
+        identityMode: "bot",
+        allowedChatIds: ["chat-1"],
+        commandPrefix: "/of",
+      },
+    })));
+
+    const config = await getFeishuIntegrationConfig();
+    await updateFeishuIntegrationConfig({
+      enabled: true,
+      identityMode: "bot",
+      allowedChatIds: ["chat-1"],
+      commandPrefix: "/of",
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/integrations/feishu/config",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/integrations/feishu/config",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          enabled: true,
+          identityMode: "bot",
+          allowedChatIds: ["chat-1"],
+          commandPrefix: "/of",
+        }),
+      })
+    );
+    expect(config.commandPrefix).toBe("/of");
+    expect(config.allowedChatIds).toEqual(["chat-1"]);
+  });
+
+  it("loads and replaces Feishu user mappings through REST", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({
+      mappings: [
+        {
+          id: "mapping-1",
+          feishuUserId: "ou_1",
+          openforgeUserId: "user-1",
+          displayName: "Owner",
+          createdAt: "2026-05-17T00:00:00.000Z",
+          updatedAt: "2026-05-17T00:00:00.000Z",
+        },
+      ],
+    })));
+
+    const mappings = await listFeishuUserMappings();
+    await replaceFeishuUserMappings([
+      { feishuUserId: "ou_1", openforgeUserId: "user-1", displayName: "Owner" },
+    ]);
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/integrations/feishu/user-mappings",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/integrations/feishu/user-mappings",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          mappings: [
+            { feishuUserId: "ou_1", openforgeUserId: "user-1", displayName: "Owner" },
+          ],
+        }),
+      })
+    );
+    expect(mappings.map((mapping) => mapping.feishuUserId)).toEqual(["ou_1"]);
   });
 
   it("lists sessions with an optional project filter", async () => {

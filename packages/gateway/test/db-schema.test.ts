@@ -55,6 +55,8 @@ describe("db schema", () => {
       "copilot_pending_actions",
       "copilot_run_events",
       "copilot_runs",
+      "integration_feishu_configs",
+      "integration_feishu_user_mappings",
       "model_cost_rates",
       "model_profiles",
       "model_provider_profiles",

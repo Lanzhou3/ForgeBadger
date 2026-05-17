@@ -127,6 +127,13 @@
       "when": 1778889600000,
       "tag": "0018_copilot_conversations",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1778976000000,
+      "tag": "0019_feishu_integration",
+      "breakpoints": true
     }
   ]
 }

@@ -111,13 +111,22 @@ not included.
 ### Integrations
 
 - `GET /api/v1/integrations/feishu/status`
+- `GET /api/v1/integrations/feishu/config`
+- `PATCH /api/v1/integrations/feishu/config`
+- `GET /api/v1/integrations/feishu/user-mappings`
+- `PUT /api/v1/integrations/feishu/user-mappings`
 
-Feishu integration endpoints are authenticated and Gateway-owned. The first
-slice is read-only diagnostics only: it discovers the local `lark-cli` binary,
-reports version and structured auth status when available, and keeps the
-integration disabled until explicit configuration and approval flows are added.
-It never accepts model-generated command strings, never sends terminal input,
-and does not expose raw CLI stderr.
+Feishu integration endpoints are authenticated, tenant scoped, and
+Gateway-owned. Status discovers the local `lark-cli` binary, reports version
+and structured auth status when available, and overlays the tenant's persisted
+enabled/emergency-disabled state. Configuration and user mappings are persisted
+without Feishu tokens, cookies, credentials, raw CLI stderr, or secret-like
+fields.
+
+These endpoints still do not execute Feishu writes, accept model-generated
+command strings, send terminal input, approve actions from Feishu text, or
+start unattended development loops. Later outbound/inbound flows must continue
+through explicit OpenForge approval gates.
 
 Successful status response:
 
@@ -136,6 +145,79 @@ Successful status response:
   "message": ""
 }
 ```
+
+Successful config response:
+
+```json
+{
+  "code": 0,
+  "data": {
+    "config": {
+      "enabled": false,
+      "emergencyDisabled": false,
+      "identityMode": "unknown",
+      "allowedChatIds": [],
+      "commandPrefix": "/openforge"
+    }
+  },
+  "message": ""
+}
+```
+
+`PATCH /config` accepts any subset of:
+
+```json
+{
+  "enabled": true,
+  "emergencyDisabled": false,
+  "identityMode": "bot",
+  "allowedChatIds": ["oc_abc"],
+  "commandPrefix": "/openforge"
+}
+```
+
+`allowedChatIds` is trimmed, deduplicated, limited to 50 entries, and each id is
+limited to 128 characters. Config updates write a tenant-scoped audit log with
+safe metadata only.
+
+Successful user mapping response:
+
+```json
+{
+  "code": 0,
+  "data": {
+    "mappings": [
+      {
+        "id": "mapping-id",
+        "feishuUserId": "ou_abc",
+        "openforgeUserId": "user-id",
+        "displayName": "Alice",
+        "createdAt": "2026-05-17T00:00:00.000Z",
+        "updatedAt": "2026-05-17T00:00:00.000Z"
+      }
+    ]
+  },
+  "message": ""
+}
+```
+
+`PUT /user-mappings` replaces the authenticated tenant's mapping set:
+
+```json
+{
+  "mappings": [
+    {
+      "feishuUserId": "ou_abc",
+      "openforgeUserId": "user-id",
+      "displayName": "Alice"
+    }
+  ]
+}
+```
+
+Mappings are limited to 100 entries and are automatically scoped by
+`user_id`; replacement writes a tenant-scoped audit log with mapping count
+only.
 
 ### Platform AI Copilot
 

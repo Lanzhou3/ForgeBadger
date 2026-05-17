@@ -242,7 +242,7 @@ git commit -m "feat: show feishu integration status"
 - Modify: `packages/web/src/lib/api.ts`
 - Modify: `packages/web/src/lib/api.test.ts`
 
-- [ ] **Step 1: Write failing repository tests**
+- [x] **Step 1: Write failing repository tests**
 
 Cover:
 
@@ -252,7 +252,7 @@ Cover:
 - allowed chat ids are normalized and bounded;
 - no secret fields are persisted.
 
-- [ ] **Step 2: Add migration and schema**
+- [x] **Step 2: Add migration and schema**
 
 Tables:
 
@@ -262,7 +262,7 @@ Tables:
 Every row includes `user_id`; repositories must automatically filter by
 `user_id`.
 
-- [ ] **Step 3: Add settings update endpoints**
+- [x] **Step 3: Add settings update endpoints**
 
 Routes:
 
@@ -275,7 +275,7 @@ PUT /api/v1/integrations/feishu/user-mappings
 
 Use zod validation, bounded arrays, and audit logs for changes.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 

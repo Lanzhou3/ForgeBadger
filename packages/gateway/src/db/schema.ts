@@ -584,6 +584,53 @@ export const userSettings = sqliteTable("user_settings", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 });
 
+export const integrationFeishuConfigs = sqliteTable(
+  "integration_feishu_configs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    emergencyDisabled: integer("emergency_disabled", { mode: "boolean" }).notNull().default(false),
+    identityMode: text("identity_mode").notNull().default("unknown"),
+    allowedChatIds: text("allowed_chat_ids").notNull().default("[]"),
+    commandPrefix: text("command_prefix").notNull().default("/openforge"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_integration_feishu_configs_user: uniqueIndex("idx_integration_feishu_configs_user").on(table.userId)
+  })
+);
+
+export const integrationFeishuUserMappings = sqliteTable(
+  "integration_feishu_user_mappings",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    feishuUserId: text("feishu_user_id").notNull(),
+    openforgeUserId: text("openforge_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    displayName: text("display_name"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_integration_feishu_user_mappings_feishu_user: uniqueIndex("idx_integration_feishu_user_mappings_feishu_user").on(
+      table.userId,
+      table.feishuUserId
+    ),
+    idx_integration_feishu_user_mappings_openforge_user: index("idx_integration_feishu_user_mappings_openforge_user").on(
+      table.userId,
+      table.openforgeUserId
+    )
+  })
+);
+
 export const auditLogs = sqliteTable(
   "audit_logs",
   {

@@ -348,6 +348,37 @@ export interface FeishuIntegrationStatus {
   error?: string;
 }
 
+export interface FeishuIntegrationConfig {
+  enabled: boolean;
+  emergencyDisabled: boolean;
+  identityMode: FeishuIdentityMode;
+  allowedChatIds: string[];
+  commandPrefix: string;
+}
+
+export interface UpdateFeishuIntegrationConfigInput {
+  enabled?: boolean;
+  emergencyDisabled?: boolean;
+  identityMode?: FeishuIdentityMode;
+  allowedChatIds?: string[];
+  commandPrefix?: string;
+}
+
+export interface FeishuUserMapping {
+  id: string;
+  feishuUserId: string;
+  openforgeUserId: string;
+  displayName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReplaceFeishuUserMappingInput {
+  feishuUserId: string;
+  openforgeUserId: string;
+  displayName?: string | null;
+}
+
 export interface LocalDiagnosticsExport {
   generatedAt: string;
   app: {
@@ -1206,6 +1237,40 @@ export async function getFeishuIntegrationStatus(): Promise<FeishuIntegrationSta
     cache: "no-store"
   });
   return data.status;
+}
+
+export async function getFeishuIntegrationConfig(): Promise<FeishuIntegrationConfig> {
+  const data = await fetchJson<{ config: FeishuIntegrationConfig }>("/api/v1/integrations/feishu/config", {
+    cache: "no-store"
+  });
+  return data.config;
+}
+
+export async function updateFeishuIntegrationConfig(
+  input: UpdateFeishuIntegrationConfigInput
+): Promise<FeishuIntegrationConfig> {
+  const data = await fetchJson<{ config: FeishuIntegrationConfig }>("/api/v1/integrations/feishu/config", {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+  return data.config;
+}
+
+export async function listFeishuUserMappings(): Promise<FeishuUserMapping[]> {
+  const data = await fetchJson<{ mappings: FeishuUserMapping[] }>("/api/v1/integrations/feishu/user-mappings", {
+    cache: "no-store"
+  });
+  return data.mappings;
+}
+
+export async function replaceFeishuUserMappings(
+  mappings: ReplaceFeishuUserMappingInput[]
+): Promise<FeishuUserMapping[]> {
+  const data = await fetchJson<{ mappings: FeishuUserMapping[] }>("/api/v1/integrations/feishu/user-mappings", {
+    method: "PUT",
+    body: JSON.stringify({ mappings })
+  });
+  return data.mappings;
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
