@@ -142,4 +142,44 @@ describe("CopilotMemoryRepository", () => {
     assert.equal(searchResult?.id, entry.id);
     assert.doesNotMatch(searchResult?.snippet ?? "", /secret-value/);
   });
+
+  it("deletes durable entries and removes them from search indexing", () => {
+    const entry = repo.createEntry({
+      kind: "decision",
+      scope: "project",
+      projectId,
+      text: "Copilot memory deletion should remove provider catalog notes from FTS."
+    });
+
+    const deleted = repo.deleteEntry(entry.id);
+
+    assert.equal(deleted?.id, entry.id);
+    assert.equal(repo.getEntry(entry.id), undefined);
+    assert.equal(repo.search({ query: "provider catalog", includeNotes: true }).length, 0);
+    assert.equal(otherRepo.deleteEntry(entry.id), undefined);
+  });
+
+  it("deletes working notes without crossing tenants", () => {
+    const otherProjectId = new ProjectRepository(db, otherUserId).create({
+      name: "Other",
+      path: "/tmp/other-openforge",
+      aiTool: "claude"
+    }).id;
+    const note = repo.createNote({
+      projectId,
+      text: "Working note: terminal output showed a stale prompt."
+    });
+    otherRepo.createNote({
+      projectId: otherProjectId,
+      text: "Foreign note should stay isolated."
+    });
+
+    assert.equal(otherRepo.deleteNote(note.id), undefined);
+    const deleted = repo.deleteNote(note.id);
+
+    assert.equal(deleted?.id, note.id);
+    assert.equal(repo.getNote(note.id), undefined);
+    assert.equal(repo.search({ query: "terminal output", includeNotes: true }).length, 0);
+    assert.equal(otherRepo.listNotes({ projectId: otherProjectId }).length, 1);
+  });
 });

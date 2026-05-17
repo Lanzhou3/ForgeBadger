@@ -87,6 +87,8 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     db: deps.db,
     masterKey: deps.masterKey,
     appVersion: deps.appVersion,
+    sessionManager: deps.sessionManager,
+    eventBus: deps.eventBus,
     ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
   }));
 }

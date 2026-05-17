@@ -40,7 +40,13 @@ export function attachNotificationPersistence(options: NotificationPersistenceOp
 }
 
 function isPersistableNotificationEvent(event: OpenForgeEvent): event is PersistableNotificationEvent {
-  return event.type !== "activity_created";
+  return (
+    event.type === "session_created" ||
+    event.type === "session_status_changed" ||
+    event.type === "session_deleted" ||
+    event.type === "claude_notification" ||
+    event.type === "error"
+  );
 }
 
 export function notificationInputFromEvent(event: OpenForgeEvent): CreateNotificationInput | undefined {
@@ -105,6 +111,8 @@ export function notificationInputFromEvent(event: OpenForgeEvent): CreateNotific
       };
     }
     case "activity_created":
+      return undefined;
+    case "copilot_run_updated":
       return undefined;
     case "error":
       return undefined;

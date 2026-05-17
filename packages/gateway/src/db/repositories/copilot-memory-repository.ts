@@ -218,6 +218,26 @@ export class CopilotMemoryRepository {
     return row ? toNote(row) : undefined;
   }
 
+  deleteEntry(id: string): CopilotMemoryEntry | undefined {
+    const entry = this.getEntry(id);
+    if (!entry) return undefined;
+    this.db.prepare(`
+      DELETE FROM copilot_memory_entries WHERE id = ? AND user_id = ?
+    `).run(id, this.userId);
+    this.deleteIndex(id, "entry");
+    return entry;
+  }
+
+  deleteNote(id: string): CopilotMemoryNote | undefined {
+    const note = this.getNote(id);
+    if (!note) return undefined;
+    this.db.prepare(`
+      DELETE FROM copilot_memory_notes WHERE id = ? AND user_id = ?
+    `).run(id, this.userId);
+    this.deleteIndex(id, "note");
+    return note;
+  }
+
   listEntries(input: ListMemoryInput): CopilotMemoryEntry[] {
     const clauses = ["user_id = ?"];
     const params: unknown[] = [this.userId];
@@ -272,6 +292,13 @@ export class CopilotMemoryRepository {
         memory_id, user_id, item_type, scope, project_id, redacted_text
       ) VALUES (?, ?, ?, ?, ?, ?)
     `).run(input.id, this.userId, input.itemType, input.scope, input.projectId, input.redactedText);
+  }
+
+  private deleteIndex(id: string, itemType: CopilotMemoryItemType): void {
+    this.db.prepare(`
+      DELETE FROM copilot_memory_fts
+      WHERE memory_id = ? AND user_id = ? AND item_type = ?
+    `).run(id, this.userId, itemType);
   }
 }
 

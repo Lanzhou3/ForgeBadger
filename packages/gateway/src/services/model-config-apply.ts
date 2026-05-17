@@ -9,8 +9,11 @@ export interface ConfigApplyProvider {
   id: string;
   providerKey: string;
   baseUrl: string | null;
+  anthropicBaseUrl?: string | null;
+  openaiBaseUrl?: string | null;
   authType: string;
   apiFormat: string;
+  opencodeNpm?: string | null;
 }
 
 export interface ConfigApplyModel {
@@ -49,21 +52,47 @@ export interface ModelConfigApplyResult extends ModelConfigApplyPreview {
 }
 
 export async function previewModelProviderConfig(input: ModelConfigApplyInput): Promise<ModelConfigApplyPreview> {
-  if (input.adapter === "codex") {
+  const adapter = input.adapter as string;
+  if (adapter === "codex") {
     throw new Error("Codex provider apply is disabled; Codex uses subscription SDK identity");
   }
+  if (adapter !== "claude" && adapter !== "opencode") throw new Error("Unsupported provider apply adapter");
   const projectRoot = validateProjectRoot(input.projectRoot);
   const safeInput = { ...input, projectRoot };
 
-  const plan = safeInput.adapter === "claude"
-    ? await buildClaudePlan(safeInput)
-    : await buildOpenCodePlan(safeInput);
+  const plan = adapter === "claude" ? await buildClaudePlan(safeInput) : await buildOpenCodePlan(safeInput);
   const changedFiles = await Promise.all(plan.files.map(async (file) => ({
     relativePath: file.relativePath,
     operation: await fileExists(projectRoot, file.relativePath) ? "update" as const : "create" as const
   })));
 
   return { ...plan, changedFiles };
+}
+
+async function buildClaudePlan(input: ModelConfigApplyInput): Promise<Omit<ModelConfigApplyPreview, "changedFiles">> {
+  const settings = await readJsonObject(input.projectRoot, ".claude/settings.local.json");
+  const existingEnv = isRecord(settings.env) ? settings.env : {};
+  const envName = input.credential?.envName ?? "ANTHROPIC_AUTH_TOKEN";
+  const timeoutMs = timeoutForClaudeProvider(input.provider.providerKey);
+  const env = {
+    ...existingEnv,
+    ...(endpointForAdapter(input.provider, "claude") ? { ANTHROPIC_BASE_URL: endpointForAdapter(input.provider, "claude") as string } : {}),
+    ...(input.provider.authType === "none" ? {} : { ANTHROPIC_AUTH_TOKEN: `{env:${envName}}` }),
+    ANTHROPIC_MODEL: input.model.modelId,
+    ANTHROPIC_SMALL_FAST_MODEL: input.model.modelId,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: input.model.modelId,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: input.model.modelId,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: input.model.modelId,
+    ...(timeoutMs ? { API_TIMEOUT_MS: timeoutMs } : {})
+  };
+  const merged = { ...settings, env };
+
+  return {
+    adapter: "claude",
+    env: input.provider.authType === "none" ? {} : { [envName]: "{stored-provider-credential}" },
+    secretEnvNames: input.provider.authType === "none" ? [] : [envName],
+    files: [{ relativePath: ".claude/settings.local.json", content: `${JSON.stringify(merged, null, 2)}\n` }]
+  };
 }
 
 export async function applyModelProviderConfig(input: ModelConfigApplyInput): Promise<ModelConfigApplyResult> {
@@ -94,47 +123,14 @@ export async function applyModelProviderConfig(input: ModelConfigApplyInput): Pr
   return { ...preview, backupPath };
 }
 
-async function buildClaudePlan(input: ModelConfigApplyInput): Promise<Omit<ModelConfigApplyPreview, "changedFiles">> {
-  if (input.provider.apiFormat !== "anthropic") {
-    throw new Error("Claude provider apply only supports Anthropic API format");
-  }
-  const env: Record<string, string> = {
-    ANTHROPIC_MODEL: input.model.modelId
-  };
-  if (input.provider.baseUrl) env.ANTHROPIC_BASE_URL = input.provider.baseUrl;
-  const secretEnvNames: string[] = [];
-  if (input.credential) {
-    const secretName = input.provider.authType === "bearer_token" ? "ANTHROPIC_AUTH_TOKEN" : input.credential.envName;
-    env[secretName] = "{stored-provider-credential}";
-    secretEnvNames.push(secretName);
-  }
-  const settings = await readJsonObject(input.projectRoot, ".claude/settings.local.json");
-  const merged = {
-    ...settings,
-    env: {
-      ...(isRecord(settings.env) ? settings.env : {}),
-      ANTHROPIC_MODEL: input.model.modelId,
-      ...(input.provider.baseUrl ? { ANTHROPIC_BASE_URL: input.provider.baseUrl } : {}),
-      ...(input.credential ? { [secretEnvNames[0] as string]: `{env:${secretEnvNames[0]}}` } : {})
-    }
-  };
-
-  return {
-    adapter: "claude",
-    env,
-    secretEnvNames,
-    files: [{ relativePath: ".claude/settings.local.json", content: `${JSON.stringify(merged, null, 2)}\n` }]
-  };
-}
-
 async function buildOpenCodePlan(input: ModelConfigApplyInput): Promise<Omit<ModelConfigApplyPreview, "changedFiles">> {
   const config = await readJsonObject(input.projectRoot, "opencode.json");
   const providerKey = normalizeKey(input.provider.providerKey);
   const envName = input.credential?.envName ?? defaultProviderEnvName(providerKey);
   const providerConfig = {
-    npm: opencodePackageFor(input.provider.apiFormat),
+    npm: input.provider.opencodeNpm ?? opencodePackageFor(input.provider.apiFormat),
     options: {
-      ...(input.provider.baseUrl ? { baseURL: input.provider.baseUrl } : {}),
+      ...(endpointForAdapter(input.provider, "opencode") ? { baseURL: endpointForAdapter(input.provider, "opencode") as string } : {}),
       ...(input.provider.authType === "none" ? {} : { apiKey: `{env:${envName}}` })
     }
   };
@@ -224,4 +220,17 @@ function opencodePackageFor(apiFormat: string): string {
   if (apiFormat === "google") return "@ai-sdk/google";
   if (apiFormat === "bedrock") return "@ai-sdk/amazon-bedrock";
   return "@ai-sdk/openai-compatible";
+}
+
+function endpointForAdapter(provider: ConfigApplyProvider, adapter: "claude" | "opencode"): string | null {
+  if (adapter === "claude") return provider.anthropicBaseUrl ?? provider.baseUrl;
+  if (provider.apiFormat === "anthropic") return provider.anthropicBaseUrl ?? provider.baseUrl;
+  return provider.openaiBaseUrl ?? provider.baseUrl;
+}
+
+function timeoutForClaudeProvider(providerKey: string): string | undefined {
+  const normalized = normalizeKey(providerKey);
+  if (normalized === "anthropic") return undefined;
+  if (normalized === "zai") return "3000000";
+  return "600000";
 }

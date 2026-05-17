@@ -87,7 +87,7 @@ describe("local diagnostics export", () => {
         baseUrl: "https://api.anthropic.com",
         authType: "api_key",
         apiFormat: "anthropic",
-        supportedAdapters: ["claude"]
+        supportedAdapters: ["opencode"]
       });
       new AuditLogRepository(db, user.id).create({
         action: "diagnostics.test",

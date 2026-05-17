@@ -191,6 +191,14 @@ export class InMemorySessionManager {
     await this.tmux.resizeWindow?.(session.tmuxName, cols, rows);
   }
 
+  async sendInput(id: string, data: string): Promise<void> {
+    const session = this.requireSession(id);
+    if (!this.tmux.sendInput) {
+      throw new Error("tmux input is not supported");
+    }
+    await this.tmux.sendInput(session.tmuxName, data);
+  }
+
   async recoverOpenForgeSessions(input: RecoverSessionsInput): Promise<RecoveryResult> {
     const names = await this.tmux.listSessions();
     const indexed = await this.recoveryStore.listSessions();

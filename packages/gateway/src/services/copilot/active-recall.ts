@@ -1,4 +1,5 @@
 import type { Database } from "../../db/types.js";
+import { SessionRepository } from "../../db/repositories/session-repository.js";
 import { executeCopilotTool, type CopilotToolRegistry } from "./tool-registry.js";
 
 const ACTIVE_RECALL_LIMIT = 4;
@@ -18,6 +19,7 @@ export interface CopilotActiveRecallInput {
   userId: string;
   masterKey: string;
   source: string;
+  sourceRefId?: string;
   prompt: string;
   toolRegistry: CopilotToolRegistry;
   now?: number;
@@ -47,22 +49,35 @@ export async function runCopilotActiveRecall(
 ): Promise<CopilotActiveRecallResult> {
   const now = input.now ?? Date.now();
   const circuit = circuitFor(input.userId);
-  if (input.source !== "copilot" || circuit.disabledUntil > now) return emptyRecall();
+  if (circuit.disabledUntil > now) return emptyRecall();
   try {
+    const searchInputs = buildRecallSearchInputs(input);
     const result = await withTimeout(
-      executeCopilotTool(input.toolRegistry, "openforge.memory_search", {
-        query: input.prompt,
-        includeNotes: true,
-        limit: ACTIVE_RECALL_LIMIT
-      }, {
-        db: input.db,
-        userId: input.userId,
-        masterKey: input.masterKey
-      }),
+      Promise.all(searchInputs.map((searchInput) => executeCopilotTool(
+        input.toolRegistry,
+        "openforge.memory_search",
+        searchInput,
+        {
+          db: input.db,
+          userId: input.userId,
+          masterKey: input.masterKey
+        }
+      ))),
       ACTIVE_RECALL_TIMEOUT_MS
     );
-    if (!result.ok) return emptyRecall();
-    const items = readRecallItems(result.output);
+    const outputs: unknown[] = [];
+    for (const item of result) {
+      if (!item.ok) {
+        recordRecallFailure(circuit, now);
+        return skippedRecall("failed");
+      }
+      outputs.push(item.output);
+    }
+    if (outputs.length === 0) {
+      recordRecallFailure(circuit, now);
+      return skippedRecall("failed");
+    }
+    const items = dedupeRecallItems(outputs.flatMap(readRecallItems));
     if (items.length === 0) {
       recordRecallSuccess(circuit);
       return emptyRecall();
@@ -92,6 +107,30 @@ export async function runCopilotActiveRecall(
   }
 }
 
+function buildRecallSearchInputs(input: CopilotActiveRecallInput): Array<Record<string, unknown>> {
+  const projectId = resolveRecallProjectId(input);
+  const base = {
+    query: input.prompt,
+    includeNotes: true,
+    limit: ACTIVE_RECALL_LIMIT
+  };
+  if (!projectId) {
+    return [{ ...base, projectId: null }];
+  }
+  return [
+    { ...base, projectId },
+    { ...base, projectId: null }
+  ];
+}
+
+function resolveRecallProjectId(input: CopilotActiveRecallInput): string | null {
+  if (input.source === "project" && input.sourceRefId) return input.sourceRefId;
+  if (input.source === "session" && input.sourceRefId) {
+    return new SessionRepository(input.db, input.userId).getById(input.sourceRefId)?.projectId ?? null;
+  }
+  return null;
+}
+
 function emptyRecall(): CopilotActiveRecallResult {
   return { context: null, event: null };
 }
@@ -119,6 +158,19 @@ function readRecallItems(output: unknown): MemoryRecallItem[] {
     .map(readRecallItem)
     .filter((item): item is MemoryRecallItem => Boolean(item))
     .slice(0, ACTIVE_RECALL_LIMIT);
+}
+
+function dedupeRecallItems(items: MemoryRecallItem[]): MemoryRecallItem[] {
+  const seen = new Set<string>();
+  const deduped: MemoryRecallItem[] = [];
+  for (const item of items) {
+    const key = `${item.type}:${item.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+    if (deduped.length >= ACTIVE_RECALL_LIMIT) break;
+  }
+  return deduped;
 }
 
 function readRecallItem(value: unknown): MemoryRecallItem | null {

@@ -1,4 +1,4 @@
-import type { CopilotModelClient, CopilotModelRequest, CopilotModelEvent } from "./types.js";
+import type { CopilotModelClient, CopilotModelRequest, CopilotModelEvent, CopilotModelRequestOptions } from "./types.js";
 
 export type CopilotFetch = typeof fetch;
 
@@ -15,7 +15,7 @@ export abstract class FetchCopilotModelClient implements CopilotModelClient {
     this.fetchImpl = fetchImpl ?? fetch;
   }
 
-  abstract createResponse(request: CopilotModelRequest): Promise<CopilotModelEvent[]>;
+  abstract createResponse(request: CopilotModelRequest, options?: CopilotModelRequestOptions): Promise<CopilotModelEvent[]>;
 
   protected async readJson(response: Response): Promise<unknown> {
     try {
@@ -23,6 +23,56 @@ export abstract class FetchCopilotModelClient implements CopilotModelClient {
     } catch {
       return {};
     }
+  }
+}
+
+export async function readSseJsonObjects(response: Response, onObject?: (object: unknown) => void): Promise<unknown[]> {
+  if (!response.body) return [];
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  const objects: unknown[] = [];
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split(/\r?\n\r?\n/u);
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const parsed = parseSseFrame(frame);
+      if (parsed !== undefined) {
+        objects.push(parsed);
+        onObject?.(parsed);
+      }
+    }
+  }
+
+  buffer += decoder.decode();
+  const parsed = parseSseFrame(buffer);
+  if (parsed !== undefined) {
+    objects.push(parsed);
+    onObject?.(parsed);
+  }
+  return objects;
+}
+
+export function isEventStreamResponse(response: Response): boolean {
+  return response.headers.get("Content-Type")?.toLowerCase().includes("text/event-stream") ?? false;
+}
+
+function parseSseFrame(frame: string): unknown | undefined {
+  const data = frame
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trimStart())
+    .join("\n")
+    .trim();
+  if (!data || data === "[DONE]") return undefined;
+  try {
+    return JSON.parse(data) as unknown;
+  } catch {
+    return undefined;
   }
 }
 

@@ -21,6 +21,7 @@ export interface CopilotModelRequest {
 
 export interface CopilotModelRequestOptions {
   signal?: AbortSignal;
+  onTextDelta?: (delta: string) => void;
 }
 
 export interface CopilotModelClient {

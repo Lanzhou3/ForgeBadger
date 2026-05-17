@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { CommandRunner } from "../../lib/dependency-check.js";
 import type { Database } from "../../db/types.js";
 import type { CopilotServiceError } from "./types.js";
-import { hasBlockedCopilotSensitiveOutput, redactCopilotPayload } from "./redaction.js";
+import { hasBlockedCopilotSensitiveOutput, hasCopilotPrivateKeyMaterial, redactCopilotPayload } from "./redaction.js";
 
 export type CopilotToolRisk = "read" | "prepare" | "write";
 
@@ -13,6 +13,14 @@ export interface CopilotToolContext {
   masterKey: string;
   runId?: string;
   adapterCommandRunner?: CommandRunner;
+  sessionManager?: {
+    captureHistory(sessionId: string): Promise<string>;
+    listSessions?(): Array<{
+      id: string;
+      status: string;
+      tmuxName: string;
+    }>;
+  };
 }
 
 export interface CopilotToolDefinition {
@@ -73,10 +81,11 @@ export async function executeCopilotTool(
     if (error instanceof CopilotToolValidationError) {
       return fail(error.code, error.message);
     }
-    throw error;
+    return fail("copilot_tool_execution_failed", "Copilot tool execution failed");
   }
+  const rawSerializedOutput = serializeToolOutput(output);
   const redactedOutput = redactCopilotPayload(output);
-  if (isBlockedToolOutput(redactedOutput)) {
+  if (hasCopilotPrivateKeyMaterial(rawSerializedOutput) || isBlockedToolOutput(redactedOutput)) {
     return fail("copilot_redaction_blocked_output", "Copilot tool output was blocked by safety policy");
   }
   return {

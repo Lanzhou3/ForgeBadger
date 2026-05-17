@@ -6,6 +6,7 @@ import { decryptSecret, encryptSecret, type EncryptedSecret } from "../../crypto
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
 export type ProviderAdapter = "claude" | "opencode";
+export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
 export interface ProviderProfile {
   id: string;
@@ -13,10 +14,15 @@ export interface ProviderProfile {
   providerKey: string;
   name: string;
   baseUrl: string | null;
+  anthropicBaseUrl: string | null;
+  openaiBaseUrl: string | null;
+  region: string | null;
+  productType: ProviderProductType | null;
   authType: ProviderAuthType;
   apiFormat: ProviderApiFormat;
   supportedAdapters: ProviderAdapter[];
   defaultHeaders: Record<string, string>;
+  opencodeNpm: string | null;
   status: string;
   createdAt: number | null;
   updatedAt: number | null;
@@ -29,6 +35,8 @@ export interface ModelProfile {
   providerKey: string;
   providerName: string;
   baseUrl: string | null;
+  anthropicBaseUrl: string | null;
+  openaiBaseUrl: string | null;
   name: string;
   modelId: string;
   capabilities: string[];
@@ -56,10 +64,15 @@ export interface CreateProviderProfileInput {
   name: string;
   providerKey: string;
   baseUrl?: string | null;
+  anthropicBaseUrl?: string | null;
+  openaiBaseUrl?: string | null;
+  region?: string | null;
+  productType?: ProviderProductType | null;
   authType: ProviderAuthType;
   apiFormat: ProviderApiFormat;
   supportedAdapters: ProviderAdapter[];
   defaultHeaders?: Record<string, string>;
+  opencodeNpm?: string | null;
 }
 
 export interface CreateModelProfileInput {
@@ -92,10 +105,15 @@ interface ProviderProfileRow {
   provider_key: string;
   name: string;
   base_url: string | null;
+  anthropic_base_url: string | null;
+  openai_base_url: string | null;
+  region: string | null;
+  product_type: ProviderProductType | null;
   auth_type: ProviderAuthType;
   api_format: ProviderApiFormat;
   supported_adapters: string;
   default_headers: string;
+  opencode_npm: string | null;
   status: string;
   created_at: number | null;
   updated_at: number | null;
@@ -108,6 +126,8 @@ interface ModelProfileRow {
   provider_key: string;
   provider_name: string;
   base_url: string | null;
+  anthropic_base_url: string | null;
+  openai_base_url: string | null;
   name: string;
   model_id: string;
   capabilities: string;
@@ -143,19 +163,25 @@ export class ModelProviderRepository {
     const now = Date.now();
     this.db.prepare(`
       INSERT INTO model_provider_profiles (
-        id, user_id, provider_key, name, base_url, auth_type, api_format,
-        supported_adapters, default_headers, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        id, user_id, provider_key, name, base_url, anthropic_base_url, openai_base_url,
+        region, product_type, auth_type, api_format, supported_adapters, default_headers,
+        opencode_npm, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
     `).run(
       id,
       this.userId,
       normalizeProviderKey(input.providerKey),
       input.name,
       emptyToNull(input.baseUrl),
+      emptyToNull(input.anthropicBaseUrl),
+      emptyToNull(input.openaiBaseUrl),
+      emptyToNull(input.region),
+      input.productType ?? null,
       input.authType,
       input.apiFormat,
-      JSON.stringify(input.supportedAdapters),
+      JSON.stringify(normalizeSupportedAdapters(input.supportedAdapters)),
       JSON.stringify(input.defaultHeaders ?? {}),
+      emptyToNull(input.opencodeNpm),
       now,
       now
     );
@@ -200,24 +226,35 @@ export class ModelProviderRepository {
       name: input.name ?? existing.name,
       providerKey: input.providerKey ?? existing.providerKey,
       baseUrl: input.baseUrl === undefined ? existing.baseUrl : input.baseUrl,
+      anthropicBaseUrl: input.anthropicBaseUrl === undefined ? existing.anthropicBaseUrl : input.anthropicBaseUrl,
+      openaiBaseUrl: input.openaiBaseUrl === undefined ? existing.openaiBaseUrl : input.openaiBaseUrl,
+      region: input.region === undefined ? existing.region : input.region,
+      productType: input.productType === undefined ? existing.productType : input.productType,
       authType: input.authType ?? existing.authType,
       apiFormat: input.apiFormat ?? existing.apiFormat,
       supportedAdapters: input.supportedAdapters ?? existing.supportedAdapters,
-      defaultHeaders: input.defaultHeaders ?? existing.defaultHeaders
+      defaultHeaders: input.defaultHeaders ?? existing.defaultHeaders,
+      opencodeNpm: input.opencodeNpm === undefined ? existing.opencodeNpm : input.opencodeNpm
     };
     this.db.prepare(`
       UPDATE model_provider_profiles
-      SET provider_key = ?, name = ?, base_url = ?, auth_type = ?, api_format = ?,
-        supported_adapters = ?, default_headers = ?, updated_at = ?
+      SET provider_key = ?, name = ?, base_url = ?, anthropic_base_url = ?, openai_base_url = ?,
+        region = ?, product_type = ?, auth_type = ?, api_format = ?, supported_adapters = ?,
+        default_headers = ?, opencode_npm = ?, updated_at = ?
       WHERE id = ? AND user_id = ?
     `).run(
       normalizeProviderKey(next.providerKey),
       next.name,
       emptyToNull(next.baseUrl),
+      emptyToNull(next.anthropicBaseUrl),
+      emptyToNull(next.openaiBaseUrl),
+      emptyToNull(next.region),
+      next.productType ?? null,
       next.authType,
       next.apiFormat,
-      JSON.stringify(next.supportedAdapters),
+      JSON.stringify(normalizeSupportedAdapters(next.supportedAdapters)),
       JSON.stringify(next.defaultHeaders),
+      emptyToNull(next.opencodeNpm),
       Date.now(),
       id,
       this.userId
@@ -278,7 +315,8 @@ export class ModelProviderRepository {
     const params = providerProfileId ? [this.userId, providerProfileId] : [this.userId];
     const where = providerProfileId ? "mp.user_id = ? AND mp.provider_profile_id = ?" : "mp.user_id = ?";
     const rows = this.db.prepare(`
-      SELECT mp.*, mpp.provider_key, mpp.name AS provider_name, mpp.base_url
+      SELECT mp.*, mpp.provider_key, mpp.name AS provider_name, mpp.base_url,
+        mpp.anthropic_base_url, mpp.openai_base_url
       FROM model_profiles mp
       INNER JOIN model_provider_profiles mpp ON mpp.id = mp.provider_profile_id
       WHERE ${where}
@@ -289,7 +327,8 @@ export class ModelProviderRepository {
 
   getModelProfile(id: string): ModelProfile | undefined {
     const row = this.db.prepare(`
-      SELECT mp.*, mpp.provider_key, mpp.name AS provider_name, mpp.base_url
+      SELECT mp.*, mpp.provider_key, mpp.name AS provider_name, mpp.base_url,
+        mpp.anthropic_base_url, mpp.openai_base_url
       FROM model_profiles mp
       INNER JOIN model_provider_profiles mpp ON mpp.id = mp.provider_profile_id
       WHERE mp.id = ? AND mp.user_id = ?
@@ -500,10 +539,15 @@ function toProviderProfile(row: ProviderProfileRow): ProviderProfile {
     providerKey: row.provider_key,
     name: row.name,
     baseUrl: row.base_url,
+    anthropicBaseUrl: row.anthropic_base_url,
+    openaiBaseUrl: row.openai_base_url,
+    region: row.region,
+    productType: row.product_type,
     authType: row.auth_type,
     apiFormat: row.api_format,
-    supportedAdapters: parseJsonArray(row.supported_adapters).filter(isProviderAdapter),
+    supportedAdapters: normalizeSupportedAdapters(parseJsonArray(row.supported_adapters).filter(isProviderAdapter)),
     defaultHeaders: parseJsonObject(row.default_headers),
+    opencodeNpm: row.opencode_npm,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -518,6 +562,8 @@ function toModelProfile(row: ModelProfileRow): ModelProfile {
     providerKey: row.provider_key,
     providerName: row.provider_name,
     baseUrl: row.base_url,
+    anthropicBaseUrl: row.anthropic_base_url,
+    openaiBaseUrl: row.openai_base_url,
     name: row.name,
     modelId: row.model_id,
     capabilities: parseJsonArray(row.capabilities),
@@ -576,4 +622,9 @@ function parseJsonObject(value: string): Record<string, string> {
 
 function isProviderAdapter(value: string): value is ProviderAdapter {
   return value === "claude" || value === "opencode";
+}
+
+function normalizeSupportedAdapters(adapters: ProviderAdapter[]): ProviderAdapter[] {
+  const normalized = adapters.filter(isProviderAdapter);
+  return normalized.length > 0 ? [...new Set(normalized)].sort() : ["claude"];
 }

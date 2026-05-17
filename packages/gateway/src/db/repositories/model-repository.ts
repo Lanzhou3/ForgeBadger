@@ -39,13 +39,14 @@ export class ModelRepository {
 
   create(input: CreateModelInput): Model {
     const id = randomUUID();
+    const providerKey = input.provider.trim().toLowerCase();
     const provider = this.providerRepo.ensureProviderProfile({
       name: input.provider,
       providerKey: input.provider,
       baseUrl: input.endpoint ?? null,
       authType: "api_key",
-      apiFormat: input.provider.trim().toLowerCase() === "anthropic" ? "anthropic" : "openai-compatible",
-      supportedAdapters: input.provider.trim().toLowerCase() === "anthropic" ? ["claude"] : ["opencode"]
+      apiFormat: providerKey === "anthropic" ? "anthropic" : "openai-compatible",
+      supportedAdapters: providerKey === "anthropic" ? ["claude"] : ["opencode"]
     });
     this.providerRepo.createModelProfile({
       id,
@@ -129,13 +130,14 @@ export class ModelRepository {
 
     const existingProfile = this.providerRepo.getModelProfile(id);
     if (existingProfile) {
+      const providerKey = updated.provider.trim().toLowerCase();
       const provider = this.providerRepo.ensureProviderProfile({
         name: updated.provider,
         providerKey: updated.provider,
         baseUrl: updated.endpoint,
         authType: "api_key",
-        apiFormat: updated.provider.trim().toLowerCase() === "anthropic" ? "anthropic" : "openai-compatible",
-        supportedAdapters: updated.provider.trim().toLowerCase() === "anthropic" ? ["claude"] : ["opencode"]
+        apiFormat: providerKey === "anthropic" ? "anthropic" : "openai-compatible",
+        supportedAdapters: providerKey === "anthropic" ? ["claude"] : ["opencode"]
       });
       this.updateProfileMirror(id, provider.id, updated);
     }

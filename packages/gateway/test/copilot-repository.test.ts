@@ -56,6 +56,86 @@ describe("CopilotRepository", () => {
     assert.equal(listed[0]?.id, run.id);
   });
 
+  it("creates and lists conversations scoped to the current user", () => {
+    const conversation = repo.createConversation({
+      title: "Debug provider setup",
+      source: "models",
+      sourceRefId: "model-tab"
+    });
+    otherRepo.createConversation({
+      title: "Other user conversation",
+      source: "copilot"
+    });
+
+    const listed = repo.listConversations();
+
+    assert.equal(conversation.userId, userId);
+    assert.equal(conversation.title, "Debug provider setup");
+    assert.equal(conversation.source, "models");
+    assert.equal(conversation.sourceRefId, "model-tab");
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]?.id, conversation.id);
+  });
+
+  it("stores conversation messages and links assistant messages to runs", () => {
+    const conversation = repo.createConversation({
+      title: "Terminal help",
+      source: "session",
+      sourceRefId: "session-1"
+    });
+    const run = repo.createRun({
+      status: "completed",
+      source: "session",
+      sourceRefId: "session-1",
+      goal: "Explain terminal output"
+    });
+
+    const userMessage = repo.createConversationMessage(conversation.id, {
+      role: "user",
+      content: "What failed?"
+    });
+    const assistantMessage = repo.createConversationMessage(conversation.id, {
+      role: "assistant",
+      content: "The provider returned 404.",
+      runId: run.id,
+      payload: { status: "completed" }
+    });
+
+    const messages = repo.listConversationMessages(conversation.id);
+
+    assert.deepEqual(messages.map((message) => message.id), [userMessage.id, assistantMessage.id]);
+    assert.equal(messages[1]?.runId, run.id);
+    assert.deepEqual(messages[1]?.payload, { status: "completed" });
+    assert.equal(repo.getConversation(conversation.id)?.lastMessageAt, assistantMessage.createdAt);
+  });
+
+  it("soft deletes conversations and individual messages", () => {
+    const conversation = repo.createConversation({
+      title: "Delete me",
+      source: "copilot"
+    });
+    const first = repo.createConversationMessage(conversation.id, {
+      role: "user",
+      content: "Keep the audit trail"
+    });
+    repo.createConversationMessage(conversation.id, {
+      role: "assistant",
+      content: "Visible until conversation deletion"
+    });
+
+    const deletedMessage = repo.deleteConversationMessage(first.id);
+
+    assert.equal(deletedMessage?.deletedAt !== null, true);
+    assert.deepEqual(repo.listConversationMessages(conversation.id).map((message) => message.role), ["assistant"]);
+
+    const deletedConversation = repo.deleteConversation(conversation.id);
+
+    assert.equal(deletedConversation?.deletedAt !== null, true);
+    assert.equal(repo.getConversation(conversation.id), undefined);
+    assert.deepEqual(repo.listConversations(), []);
+    assert.deepEqual(repo.listConversationMessages(conversation.id), []);
+  });
+
   it("appends run events with increasing sequences", () => {
     const run = repo.createRun({
       status: "running",
@@ -117,6 +197,33 @@ describe("CopilotRepository", () => {
     assert.deepEqual(action.input, { key: "theme", value: "dark" });
   });
 
+  it("updates pending actions only when the current status matches", () => {
+    const run = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Guard action transitions"
+    });
+    const action = repo.createPendingAction(run.id, {
+      type: "openforge.propose_setting_update",
+      input: { key: "theme", value: "dark" }
+    });
+    repo.updatePendingActionIfStatus(action.id, "pending", {
+      status: "approved",
+      result: { ok: true },
+      approvedBy: userId,
+      approvedAt: Date.now()
+    });
+
+    const rejected = repo.updatePendingActionIfStatus(action.id, "pending", {
+      status: "rejected",
+      result: { reason: "run_cancelled" }
+    });
+
+    assert.equal(rejected, undefined);
+    assert.equal(repo.getPendingAction(action.id)?.status, "approved");
+    assert.deepEqual(repo.getPendingAction(action.id)?.result, { ok: true });
+  });
+
   it("updates runs only when the current status matches", () => {
     const run = repo.createRun({
       status: "waiting_for_approval",
@@ -133,6 +240,35 @@ describe("CopilotRepository", () => {
     assert.equal(cancelled?.status, "cancelled");
     assert.equal(result?.status, "cancelled");
     assert.equal(repo.getRun(run.id)?.status, "cancelled");
+  });
+
+  it("does not approve a processing pending action after its run leaves the expected status", () => {
+    const run = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Approve action atomically"
+    });
+    const action = repo.createPendingAction(run.id, {
+      type: "openforge.propose_setting_update",
+      input: { key: "theme", value: "dark" }
+    });
+    repo.updatePendingActionIfStatus(action.id, "pending", { status: "processing" });
+    repo.updateRun(run.id, { status: "cancelled", completedAt: Date.now() });
+
+    const approved = repo.updatePendingActionIfStatusAndRunStatus(
+      action.id,
+      "processing",
+      "waiting_for_approval",
+      {
+        status: "approved",
+        result: { ok: true },
+        approvedBy: userId,
+        approvedAt: Date.now()
+      }
+    );
+
+    assert.equal(approved, undefined);
+    assert.equal(repo.getPendingAction(action.id)?.status, "processing");
   });
 
   it("prevents cross-user reads and writes", () => {

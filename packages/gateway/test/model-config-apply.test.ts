@@ -9,9 +9,17 @@ import {
   previewModelProviderConfig
 } from "../src/services/model-config-apply.js";
 
+type PreviewInput = Parameters<typeof previewModelProviderConfig>[0];
+
 describe("model provider config apply", () => {
-  it("previews Claude env without exposing plaintext credentials", async () => {
+  it("applies Claude Code provider settings with secret placeholders", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-apply-"));
+    await mkdir(path.join(root, ".claude"));
+    await writeFile(path.join(root, ".claude/settings.local.json"), JSON.stringify({
+      permissions: { allow: ["Bash(pnpm test)"] },
+      env: { EXISTING_FLAG: "1" }
+    }, null, 2), "utf8");
+
     const preview = await previewModelProviderConfig({
       projectRoot: root,
       adapter: "claude",
@@ -28,15 +36,24 @@ describe("model provider config apply", () => {
       },
       credential: {
         id: "credential-1",
-        envName: "ANTHROPIC_API_KEY"
+        envName: "ANTHROPIC_AUTH_TOKEN"
       }
     });
+    const settings = JSON.parse(preview.files[0]!.content);
 
     assert.equal(preview.adapter, "claude");
-    assert.equal(preview.env.ANTHROPIC_BASE_URL, "https://api.anthropic.com");
-    assert.equal(preview.env.ANTHROPIC_MODEL, "claude-sonnet-4-5");
-    assert.equal(preview.secretEnvNames.includes("ANTHROPIC_API_KEY"), true);
-    assert.equal(JSON.stringify(preview).includes("secret-value"), false);
+    assert.equal(preview.changedFiles[0]?.relativePath, ".claude/settings.local.json");
+    assert.deepEqual(preview.env, { ANTHROPIC_AUTH_TOKEN: "{stored-provider-credential}" });
+    assert.deepEqual(preview.secretEnvNames, ["ANTHROPIC_AUTH_TOKEN"]);
+    assert.equal(settings.permissions.allow[0], "Bash(pnpm test)");
+    assert.equal(settings.env.EXISTING_FLAG, "1");
+    assert.equal(settings.env.ANTHROPIC_BASE_URL, "https://api.anthropic.com");
+    assert.equal(settings.env.ANTHROPIC_AUTH_TOKEN, "{env:ANTHROPIC_AUTH_TOKEN}");
+    assert.equal(settings.env.ANTHROPIC_MODEL, "claude-sonnet-4-5");
+    assert.equal(settings.env.ANTHROPIC_SMALL_FAST_MODEL, "claude-sonnet-4-5");
+    assert.equal(settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL, "claude-sonnet-4-5");
+    assert.equal(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, "claude-sonnet-4-5");
+    assert.equal(settings.env.ANTHROPIC_DEFAULT_OPUS_MODEL, "claude-sonnet-4-5");
   });
 
   it("applies OpenCode provider fragments additively with backup metadata", async () => {
@@ -109,11 +126,10 @@ describe("model provider config apply", () => {
     assert.equal(plannedConfig.provider["google-gemini"].npm, "@ai-sdk/google");
   });
 
-  it("rejects Claude apply for unsupported provider api formats", async () => {
+  it("applies Claude settings for any provider format selected by a Claude-compatible preset", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-openai-"));
 
-    await assert.rejects(
-      () => previewModelProviderConfig({
+    const preview = await previewModelProviderConfig({
         projectRoot: root,
         adapter: "claude",
         provider: {
@@ -127,9 +143,13 @@ describe("model provider config apply", () => {
           id: "model-openai",
           modelId: "gpt-5.1"
         }
-      }),
-      /Claude provider apply only supports Anthropic/
-    );
+      });
+    const plannedSettings = JSON.parse(preview.files[0]!.content);
+
+    assert.equal(plannedSettings.env.ANTHROPIC_BASE_URL, "https://api.openai.com/v1");
+    assert.equal(plannedSettings.env.ANTHROPIC_MODEL, "gpt-5.1");
+    assert.equal(plannedSettings.env.ANTHROPIC_DEFAULT_SONNET_MODEL, "gpt-5.1");
+    assert.equal(plannedSettings.env.API_TIMEOUT_MS, "600000");
   });
 
   it("rejects Codex provider apply because Codex is subscription-managed", async () => {
@@ -151,7 +171,7 @@ describe("model provider config apply", () => {
           id: "model-1",
           modelId: "gpt-5.1-codex"
         }
-      }),
+      } as unknown as PreviewInput),
       /Codex provider apply is disabled/
     );
   });

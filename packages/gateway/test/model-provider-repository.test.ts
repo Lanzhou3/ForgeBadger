@@ -78,6 +78,7 @@ describe("model provider repository", () => {
     assert.equal(models[0]?.provider, "anthropic");
     assert.equal(providerRepo.listModelProfiles()[0]?.id, legacyModel.id);
     assert.equal(providerRepo.listProviderProfiles()[0]?.providerKey, "anthropic");
+    assert.deepEqual(providerRepo.listProviderProfiles()[0]?.supportedAdapters, ["claude"]);
   });
 
   it("removes legacy model mirrors when a provider profile is deleted", () => {

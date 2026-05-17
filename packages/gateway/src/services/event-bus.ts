@@ -53,6 +53,21 @@ export interface ActivityCreatedEvent {
   createdAt: Date;
 }
 
+export interface CopilotRunUpdatedEvent {
+  type: "copilot_run_updated";
+  userId: string;
+  runId: string;
+  status: string;
+  source: string;
+  sourceRefId?: string | undefined;
+  conversationId?: string | undefined;
+  eventType: "started" | "completed" | "failed" | "cancelled" | "waiting_for_approval" | "event_appended" | "assistant_delta";
+  runEventType?: string | undefined;
+  runEventSequence?: number | undefined;
+  deltaText?: string | undefined;
+  errorCode?: string | undefined;
+}
+
 export interface ErrorEvent {
   type: "error";
   userId: string;
@@ -68,6 +83,7 @@ export type OpenForgeEvent =
   | SessionDeletedEvent
   | ClaudeNotificationEvent
   | ActivityCreatedEvent
+  | CopilotRunUpdatedEvent
   | ErrorEvent;
 
 export class OpenForgeEventBus extends EventEmitter {

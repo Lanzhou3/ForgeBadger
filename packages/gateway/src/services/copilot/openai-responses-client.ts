@@ -1,7 +1,9 @@
 import {
   FetchCopilotModelClient,
   fromProviderToolName,
+  isEventStreamResponse,
   normalizeToolInputSchema,
+  readSseJsonObjects,
   toProviderToolName,
   type CopilotFetch
 } from "./model-client.js";
@@ -32,23 +34,70 @@ export class OpenAiResponsesClient extends FetchCopilotModelClient {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(openAiRequestBody(request)),
+      body: JSON.stringify(openAiRequestBody(request, Boolean(options?.onTextDelta))),
       ...(options?.signal ? { signal: options.signal } : {})
     });
-    const body = await this.readJson(response);
-    if (!response.ok) return httpFailure(response.status, body);
-    return normalizeOpenAiResponse(body);
+    if (!response.ok) return httpFailure(response.status, await this.readJson(response));
+    const onTextDelta = options?.onTextDelta;
+    if (onTextDelta && isEventStreamResponse(response)) {
+      return normalizeOpenAiStream(
+        await readSseJsonObjects(response, (chunk) => emitOpenAiStreamDelta(chunk, onTextDelta)),
+        () => {}
+      );
+    }
+    return normalizeOpenAiResponse(await this.readJson(response));
   }
 }
 
-function openAiRequestBody(request: CopilotModelRequest): Record<string, unknown> {
+function openAiRequestBody(request: CopilotModelRequest, stream = false): Record<string, unknown> {
   return {
     model: request.model,
     instructions: request.instructions,
     input: request.input,
     max_output_tokens: request.maxOutputTokens ?? 1024,
-    ...(request.tools ? { tools: request.tools.map(toOpenAiToolDefinition) } : {})
+    ...(stream ? { stream: true } : {}),
+    ...(request.tools ? {
+      tools: request.tools.map(toOpenAiToolDefinition),
+      parallel_tool_calls: false
+    } : {})
   };
+}
+
+function normalizeOpenAiStream(chunks: unknown[], onTextDelta: (delta: string) => void): CopilotModelEvent[] {
+  let text = "";
+  const toolCalls: CopilotModelEvent[] = [];
+  for (const chunk of chunks) {
+    const type = readString(chunk, "type");
+    if (type === "response.output_text.delta") {
+      const delta = readOptionalString(chunk, "delta") ?? "";
+      if (delta) {
+        text += delta;
+        onTextDelta(delta);
+      }
+      continue;
+    }
+    if (type !== "response.output_item.done") continue;
+    const item = readObject(chunk, "item");
+    if (readString(item, "type") === "function_call") {
+      toolCalls.push({
+        type: "tool_call_requested",
+        id: readString(item, "call_id") ?? readString(item, "id") ?? "tool-call",
+        name: fromProviderToolName(readString(item, "name") ?? "unknown"),
+        input: parseJson(readOptionalString(item, "arguments"))
+      });
+    }
+  }
+  const events: CopilotModelEvent[] = [
+    ...(text.trim() ? [{ type: "assistant_message" as const, text: text.trim() }] : []),
+    ...toolCalls
+  ];
+  return events.length > 0 ? events : [{ type: "run_failed", code: "copilot_empty_response", message: "Empty model response" }];
+}
+
+function emitOpenAiStreamDelta(chunk: unknown, onTextDelta: (delta: string) => void): void {
+  if (readString(chunk, "type") !== "response.output_text.delta") return;
+  const delta = readOptionalString(chunk, "delta") ?? "";
+  if (delta) onTextDelta(delta);
 }
 
 function toOpenAiToolDefinition(tool: CopilotToolDefinition): Record<string, unknown> {
@@ -63,8 +112,17 @@ function toOpenAiToolDefinition(tool: CopilotToolDefinition): Record<string, unk
 
 function normalizeOpenAiResponse(body: unknown): CopilotModelEvent[] {
   const directText = readString(body, "output_text");
-  if (directText) return [{ type: "assistant_message", text: directText }];
-  const events = normalizeOutputItems(readArray(body, "output"));
+  const outputEvents = normalizeOutputItems(readArray(body, "output"));
+  const outputTextEvents = outputEvents.filter(
+    (event): event is Extract<CopilotModelEvent, { type: "assistant_message" }> =>
+      event.type === "assistant_message"
+  );
+  const nonTextEvents = outputEvents.filter((event) => event.type !== "assistant_message");
+  const text = directText ?? outputTextEvents.map((event) => event.text).join("\n").trim();
+  const events = [
+    ...(text ? [{ type: "assistant_message" as const, text }] : []),
+    ...nonTextEvents
+  ];
   return events.length > 0 ? events : [{ type: "run_failed", code: "copilot_empty_response", message: "Empty model response" }];
 }
 
@@ -124,6 +182,11 @@ function readObject(value: unknown, key: string): unknown {
 function readString(value: unknown, key: string): string | undefined {
   const item = readObject(value, key);
   return typeof item === "string" && item.trim() ? item : undefined;
+}
+
+function readOptionalString(value: unknown, key: string): string | undefined {
+  const item = readObject(value, key);
+  return typeof item === "string" ? item : undefined;
 }
 
 function parseJson(value: string | undefined): unknown {

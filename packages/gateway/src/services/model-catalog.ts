@@ -10,7 +10,13 @@ export interface ModelPreset {
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
 export type ProviderSupportedAdapter = "claude" | "opencode";
-export type ProviderModelSource = "static" | "dynamic";
+export type ProviderModelSource = "static" | "dynamic" | "models.dev";
+export type ProviderCatalogSource = "verified" | "models.dev";
+export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
+
+export interface ProviderProtocolEndpoint {
+  baseUrl: string;
+}
 
 export interface ProviderModelPreset {
   id: string;
@@ -25,10 +31,16 @@ export interface ProviderCatalogPreset {
   name: string;
   description: string;
   baseUrl: string;
+  region: string;
+  productType: ProviderProductType;
   authType: ProviderAuthType;
   apiFormat: ProviderApiFormat;
   supportedAdapters: ProviderSupportedAdapter[];
   modelSource: ProviderModelSource;
+  endpoints: {
+    anthropic?: ProviderProtocolEndpoint;
+    openai?: ProviderProtocolEndpoint;
+  };
   modelFetch?: {
     strategy: "openai-compatible";
     modelsUrl?: string;
@@ -36,6 +48,25 @@ export interface ProviderCatalogPreset {
   defaultModels: ProviderModelPreset[];
   env?: Record<string, string>;
   headers?: Record<string, string>;
+  source?: ProviderCatalogSource;
+  claude?: {
+    env: {
+      baseUrl: string;
+      authToken: string;
+      model: string;
+      smallFastModel: string;
+      defaultSonnetModel: string;
+      defaultHaikuModel: string;
+      defaultOpusModel: string;
+      apiTimeoutMs: string;
+    };
+    defaultSmallFastModel?: string;
+  };
+  opencode?: {
+    npm: string;
+    api?: string;
+    env: string[];
+  };
 }
 
 export interface ModelGroup<TModel> {
@@ -44,304 +75,378 @@ export interface ModelGroup<TModel> {
   models: TModel[];
 }
 
-const modelPresets: ModelPreset[] = [
-  {
-    id: "anthropic-sonnet",
-    label: "Claude Sonnet",
-    provider: "anthropic",
-    modelId: "claude-sonnet-4-5",
-    endpoint: "https://api.anthropic.com",
-    tier: "balanced"
-  },
-  {
-    id: "anthropic-opus",
-    label: "Claude Opus",
-    provider: "anthropic",
-    modelId: "claude-opus-4-1",
-    endpoint: "https://api.anthropic.com",
-    tier: "performance"
-  },
-  {
-    id: "openai-gpt-4o",
-    label: "GPT-4o",
-    provider: "openai",
-    modelId: "gpt-4o",
-    endpoint: "https://api.openai.com/v1",
-    tier: "balanced"
-  },
-  {
-    id: "google-gemini-pro",
-    label: "Gemini Pro",
-    provider: "google",
-    modelId: "gemini-pro",
-    endpoint: "https://generativelanguage.googleapis.com",
-    tier: "budget"
-  },
-  {
-    id: "local-openai-compatible",
-    label: "Local OpenAI-Compatible",
-    provider: "local",
-    modelId: "local-model",
-    endpoint: "http://127.0.0.1:11434/v1",
-    tier: "local"
-  }
-];
+export interface ModelsDevModel {
+  id: string;
+  name: string;
+  family?: string;
+  release_date: string;
+  attachment: boolean;
+  reasoning: boolean;
+  temperature: boolean;
+  tool_call: boolean;
+  interleaved?: boolean | { field: "reasoning_content" | "reasoning_details" };
+  status?: string;
+  limit: {
+    context: number;
+    input?: number;
+    output: number;
+  };
+  modalities?: {
+    input: string[];
+    output: string[];
+  };
+  provider?: {
+    npm?: string;
+    api?: string;
+  };
+}
+
+export interface ModelsDevProvider {
+  id: string;
+  name: string;
+  env: string[];
+  api?: string;
+  npm?: string;
+  models: Record<string, ModelsDevModel>;
+}
+
+export type ModelsDevCatalog = Record<string, ModelsDevProvider>;
+
+export interface LoadProviderCatalogOptions {
+  fetchImpl?: typeof fetch;
+  sourceUrl?: string;
+  timeoutMs?: number;
+}
+
+const modelsDevUrl = "https://models.dev/api.json";
+const catalogFetchTimeoutMs = 3_000;
+const catalogCacheTtlMs = 5 * 60 * 1000;
+let providerCatalogCache: { expiresAt: number; providers: ProviderCatalogPreset[] } | undefined;
+let modelsDevFailureCacheUntil = 0;
+
+const claudeEnv = {
+  baseUrl: "ANTHROPIC_BASE_URL",
+  authToken: "ANTHROPIC_AUTH_TOKEN",
+  model: "ANTHROPIC_MODEL",
+  smallFastModel: "ANTHROPIC_SMALL_FAST_MODEL",
+  defaultSonnetModel: "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  defaultHaikuModel: "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  defaultOpusModel: "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  apiTimeoutMs: "API_TIMEOUT_MS"
+};
 
 const providerCatalog: ProviderCatalogPreset[] = [
-  {
-    id: "anthropic",
-    name: "Anthropic",
-    description: "Anthropic Claude API provider.",
-    baseUrl: "https://api.anthropic.com",
-    authType: "api_key",
+  providerProduct({
+    id: "anthropic-api",
+    name: "Anthropic API",
+    description: "Official Anthropic API for Claude models.",
+    region: "global",
+    productType: "payg_api",
     apiFormat: "anthropic",
-    supportedAdapters: ["claude"],
-    modelSource: "static",
+    anthropicBaseUrl: "https://api.anthropic.com",
+    opencodeNpm: "@ai-sdk/anthropic",
+    envName: "ANTHROPIC_API_KEY",
     defaultModels: [
-      { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", modelId: "claude-sonnet-4-5-20250929", capabilities: ["chat", "code"] },
-      { id: "claude-opus-4-5", name: "Claude Opus 4.5", modelId: "claude-opus-4-5-20251101", capabilities: ["chat", "code", "reasoning"] },
-      { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", modelId: "claude-haiku-4-5-20251001", capabilities: ["chat", "code", "fast"] }
-    ]
-  },
-  {
-    id: "openai",
-    name: "OpenAI",
-    description: "OpenAI API provider.",
-    baseUrl: "https://api.openai.com/v1",
-    authType: "api_key",
-    apiFormat: "openai",
-    supportedAdapters: ["opencode"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
-    defaultModels: [
-      { id: "gpt-5-1", name: "GPT-5.1", modelId: "gpt-5.1", capabilities: ["chat", "code", "reasoning"] },
-      { id: "gpt-4o", name: "GPT-4o", modelId: "gpt-4o", capabilities: ["chat", "vision"] }
-    ]
-  },
-  {
-    id: "openai-compatible",
-    name: "OpenAI-Compatible",
-    description: "Custom gateway that exposes an OpenAI-compatible API.",
-    baseUrl: "https://gateway.example.com/v1",
-    authType: "api_key",
+      model("claude-sonnet-4-5", "Claude Sonnet 4.5", ["chat", "code", "reasoning"], 200000),
+      model("claude-haiku-4-5", "Claude Haiku 4.5", ["chat", "code"], 200000)
+    ],
+    smallFastModel: "claude-haiku-4-5"
+  }),
+  providerProduct({
+    id: "deepseek-api",
+    name: "DeepSeek API",
+    description: "DeepSeek API with OpenAI and Anthropic-compatible endpoints.",
+    region: "global",
+    productType: "payg_api",
     apiFormat: "openai-compatible",
-    supportedAdapters: ["opencode"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
+    anthropicBaseUrl: "https://api.deepseek.com/anthropic",
+    openaiBaseUrl: "https://api.deepseek.com",
+    envName: "DEEPSEEK_API_KEY",
     defaultModels: [
-      { id: "custom-chat", name: "Custom Chat", modelId: "custom-chat", capabilities: ["chat"] }
-    ]
-  },
-  {
-    id: "deepseek",
-    name: "DeepSeek",
-    description: "DeepSeek OpenAI-compatible API.",
-    baseUrl: "https://api.deepseek.com",
-    authType: "api_key",
+      model("deepseek-chat", "DeepSeek Chat", ["chat", "code"], 64000),
+      model("deepseek-reasoner", "DeepSeek Reasoner", ["chat", "code", "reasoning"], 64000)
+    ],
+    smallFastModel: "deepseek-chat"
+  }),
+  providerProduct({
+    id: "qwen-payg-cn",
+    name: "Qwen API 中国大陆",
+    description: "Alibaba Cloud Model Studio pay-as-you-go endpoint for mainland China accounts.",
+    region: "cn",
+    productType: "payg_api",
     apiFormat: "openai-compatible",
-    supportedAdapters: ["opencode"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible", modelsUrl: "https://api.deepseek.com/models" },
+    anthropicBaseUrl: "https://dashscope.aliyuncs.com/apps/anthropic",
+    openaiBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    envName: "DASHSCOPE_API_KEY",
     defaultModels: [
-      { id: "deepseek-chat", name: "DeepSeek Chat", modelId: "deepseek-chat", capabilities: ["chat", "code"] },
-      { id: "deepseek-reasoner", name: "DeepSeek Reasoner", modelId: "deepseek-reasoner", capabilities: ["chat", "code", "reasoning"] }
-    ]
-  },
-  {
-    id: "moonshot",
-    name: "Moonshot/Kimi",
-    description: "Moonshot Kimi OpenAI-compatible API.",
-    baseUrl: "https://api.moonshot.cn/v1",
-    authType: "api_key",
+      model("qwen3.5-plus", "Qwen3.5 Plus", ["chat", "code", "reasoning"], 256000),
+      model("qwen3.5-coder", "Qwen3.5 Coder", ["chat", "code"], 256000)
+    ],
+    smallFastModel: "qwen3.5-coder"
+  }),
+  providerProduct({
+    id: "qwen-payg-intl-sg",
+    name: "Qwen API 国际版",
+    description: "Alibaba Cloud Model Studio international endpoint.",
+    region: "intl-sg",
+    productType: "payg_api",
     apiFormat: "openai-compatible",
-    supportedAdapters: ["opencode"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
+    anthropicBaseUrl: "https://dashscope-intl.aliyuncs.com/apps/anthropic",
+    openaiBaseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    envName: "DASHSCOPE_API_KEY",
     defaultModels: [
-      { id: "kimi-k2-6", name: "Kimi K2.6", modelId: "kimi-k2.6", capabilities: ["chat", "code"] }
-    ]
-  },
-  {
-    id: "kimi-for-coding",
-    name: "Kimi For Coding",
-    description: "Kimi coding-plan endpoint for OpenCode via the Anthropic AI SDK provider.",
-    baseUrl: "https://api.kimi.com/coding/v1",
-    authType: "api_key",
-    apiFormat: "anthropic",
-    supportedAdapters: ["opencode"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
-    defaultModels: [
-      { id: "kimi-for-coding", name: "Kimi For Coding", modelId: "kimi-for-coding", capabilities: ["chat", "code"] }
-    ]
-  },
-  {
-    id: "kimi-for-coding-claude",
-    name: "Kimi For Coding (Claude Code)",
-    description: "Kimi coding-plan Anthropic-compatible endpoint for Claude Code config.",
-    baseUrl: "https://api.kimi.com/coding/",
-    authType: "api_key",
-    apiFormat: "anthropic",
-    supportedAdapters: ["claude"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
-    defaultModels: [
-      { id: "kimi-for-coding-claude", name: "Kimi For Coding", modelId: "kimi-for-coding", capabilities: ["chat", "code"] }
-    ]
-  },
-  {
-    id: "dashscope",
-    name: "Bailian/DashScope",
-    description: "Alibaba Cloud Bailian DashScope OpenAI-compatible API.",
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    authType: "api_key",
+      model("qwen3.5-plus", "Qwen3.5 Plus", ["chat", "code", "reasoning"], 256000),
+      model("qwen3.5-coder", "Qwen3.5 Coder", ["chat", "code"], 256000)
+    ],
+    smallFastModel: "qwen3.5-coder"
+  }),
+  providerProduct({
+    id: "qwen-coding-plan-cn",
+    name: "Qwen Coding Plan 中国大陆",
+    description: "Alibaba Cloud Model Studio Coding Plan endpoint for mainland China.",
+    region: "cn",
+    productType: "coding_plan",
     apiFormat: "openai-compatible",
-    supportedAdapters: ["opencode"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
+    anthropicBaseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+    openaiBaseUrl: "https://coding.dashscope.aliyuncs.com/v1",
+    envName: "DASHSCOPE_API_KEY",
     defaultModels: [
-      { id: "qwen3-coder-plus", name: "Qwen3 Coder Plus", modelId: "qwen3-coder-plus", capabilities: ["chat", "code"] },
-      { id: "qwen3-max", name: "Qwen3 Max", modelId: "qwen3-max", capabilities: ["chat", "code", "reasoning"] }
-    ]
-  },
-  {
-    id: "bailian-for-coding",
-    name: "Bailian For Coding",
-    description: "Alibaba Cloud Bailian coding-plan Anthropic-compatible endpoint for Claude Code.",
-    baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
-    authType: "api_key",
-    apiFormat: "anthropic",
-    supportedAdapters: ["claude"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
-    defaultModels: [
-      { id: "bailian-coding-qwen3-coder-plus", name: "Qwen3 Coder Plus", modelId: "qwen3-coder-plus", capabilities: ["chat", "code"] },
-      { id: "bailian-coding-qwen3-max", name: "Qwen3 Max", modelId: "qwen3-max", capabilities: ["chat", "code", "reasoning"] }
-    ]
-  },
-  {
-    id: "zhipu",
-    name: "Zhipu GLM",
-    description: "Zhipu GLM OpenAI-compatible API.",
-    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-    authType: "api_key",
+      model("qwen3.5-coder", "Qwen3.5 Coder", ["chat", "code", "reasoning"], 256000),
+      model("qwen3.5-plus", "Qwen3.5 Plus", ["chat", "code", "reasoning"], 256000)
+    ],
+    smallFastModel: "qwen3.5-coder"
+  }),
+  providerProduct({
+    id: "qwen-coding-plan-intl",
+    name: "Qwen Coding Plan 国际版",
+    description: "Alibaba Cloud Model Studio Coding Plan international endpoint.",
+    region: "intl",
+    productType: "coding_plan",
     apiFormat: "openai-compatible",
-    supportedAdapters: ["opencode"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
+    anthropicBaseUrl: "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+    openaiBaseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1",
+    envName: "DASHSCOPE_API_KEY",
     defaultModels: [
-      { id: "glm-5", name: "GLM-5", modelId: "glm-5", capabilities: ["chat", "code"] }
-    ]
-  },
-  {
-    id: "minimax",
-    name: "MiniMax",
-    description: "MiniMax coding-plan OpenAI-compatible API.",
-    baseUrl: "https://api.minimaxi.com/v1",
-    authType: "api_key",
+      model("qwen3.5-coder", "Qwen3.5 Coder", ["chat", "code", "reasoning"], 256000),
+      model("qwen3.5-plus", "Qwen3.5 Plus", ["chat", "code", "reasoning"], 256000)
+    ],
+    smallFastModel: "qwen3.5-coder"
+  }),
+  providerProduct({
+    id: "qwen-token-plan-cn",
+    name: "Qwen Token Plan 中国大陆",
+    description: "Alibaba Cloud Model Studio Token Plan endpoint for mainland China.",
+    region: "cn",
+    productType: "token_plan",
     apiFormat: "openai-compatible",
-    supportedAdapters: ["opencode"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
+    anthropicBaseUrl: "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic",
+    openaiBaseUrl: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    envName: "DASHSCOPE_API_KEY",
     defaultModels: [
-      { id: "minimax-m2-7", name: "MiniMax M2.7", modelId: "MiniMax-M2.7", capabilities: ["chat", "code"] }
-    ]
-  },
-  {
-    id: "minimax-claude",
-    name: "MiniMax (Claude Code)",
-    description: "MiniMax coding-plan Anthropic-compatible endpoint for Claude Code.",
-    baseUrl: "https://api.minimaxi.com/anthropic",
-    authType: "api_key",
-    apiFormat: "anthropic",
-    supportedAdapters: ["claude"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
-    defaultModels: [
-      { id: "minimax-claude-m2-7", name: "MiniMax M2.7", modelId: "MiniMax-M2.7", capabilities: ["chat", "code"] }
-    ]
-  },
-  {
-    id: "siliconflow",
-    name: "SiliconFlow",
-    description: "SiliconFlow OpenAI-compatible gateway.",
-    baseUrl: "https://api.siliconflow.cn/v1",
-    authType: "api_key",
+      model("qwen3.5-coder", "Qwen3.5 Coder", ["chat", "code", "reasoning"], 256000),
+      model("qwen3.5-plus", "Qwen3.5 Plus", ["chat", "code", "reasoning"], 256000)
+    ],
+    smallFastModel: "qwen3.5-coder"
+  }),
+  providerProduct({
+    id: "kimi-code",
+    name: "Kimi Code",
+    description: "Kimi Code coding subscription endpoint.",
+    region: "global",
+    productType: "coding_plan",
     apiFormat: "openai-compatible",
-    supportedAdapters: ["opencode"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
+    anthropicBaseUrl: "https://api.kimi.com/coding/",
+    openaiBaseUrl: "https://api.kimi.com/coding/v1",
+    envName: "KIMI_API_KEY",
     defaultModels: [
-      { id: "siliconflow-qwen", name: "Qwen Coder", modelId: "Qwen/Qwen2.5-Coder-32B-Instruct", capabilities: ["chat", "code"] }
-    ]
-  },
-  {
-    id: "openrouter",
-    name: "OpenRouter",
-    description: "OpenRouter multi-provider gateway.",
-    baseUrl: "https://openrouter.ai/api/v1",
-    authType: "api_key",
+      model("kimi-k2.5", "Kimi K2.5", ["chat", "code", "reasoning", "vision"], 128000),
+      model("kimi-k2", "Kimi K2", ["chat", "code"], 128000)
+    ],
+    smallFastModel: "kimi-k2"
+  }),
+  providerProduct({
+    id: "minimax-global",
+    name: "MiniMax M2.7 国际版",
+    description: "MiniMax international API endpoint for coding tools.",
+    region: "global",
+    productType: "payg_api",
     apiFormat: "openai-compatible",
-    supportedAdapters: ["opencode"],
-    modelSource: "dynamic",
-    modelFetch: { strategy: "openai-compatible" },
+    anthropicBaseUrl: "https://api.minimax.io/anthropic",
+    openaiBaseUrl: "https://api.minimax.io/v1",
+    envName: "MINIMAX_API_KEY",
     defaultModels: [
-      { id: "openrouter-auto", name: "OpenRouter Auto", modelId: "openrouter/auto", capabilities: ["chat"] }
-    ]
-  },
-  {
-    id: "google-gemini",
-    name: "Google Gemini",
-    description: "Google Gemini API provider.",
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-    authType: "api_key",
-    apiFormat: "google",
-    supportedAdapters: ["opencode"],
-    modelSource: "static",
+      model("MiniMax-M2.7", "MiniMax M2.7", ["chat", "code", "reasoning"], 200000)
+    ],
+    smallFastModel: "MiniMax-M2.7"
+  }),
+  providerProduct({
+    id: "minimax-cn",
+    name: "MiniMax M2.7 中国大陆",
+    description: "MiniMax mainland China API endpoint for coding tools.",
+    region: "cn",
+    productType: "payg_api",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://api.minimaxi.com/anthropic",
+    openaiBaseUrl: "https://api.minimaxi.com/v1",
+    envName: "MINIMAX_API_KEY",
     defaultModels: [
-      { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview", modelId: "gemini-3-flash-preview", capabilities: ["chat", "code"] },
-      { id: "gemini-3-pro-preview", name: "Gemini 3 Pro Preview", modelId: "gemini-3-pro-preview", capabilities: ["chat", "code", "reasoning"] }
-    ]
-  },
-  {
-    id: "aws-bedrock",
-    name: "AWS Bedrock",
-    description: "AWS Bedrock provider profile.",
-    baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
-    authType: "none",
-    apiFormat: "bedrock",
-    supportedAdapters: ["opencode"],
-    modelSource: "static",
+      model("MiniMax-M2.7", "MiniMax M2.7", ["chat", "code", "reasoning"], 200000)
+    ],
+    smallFastModel: "MiniMax-M2.7"
+  }),
+  providerProduct({
+    id: "zai-coding-plan",
+    name: "Z.AI GLM Coding Plan",
+    description: "Z.AI coding plan endpoints for GLM coding models.",
+    region: "global",
+    productType: "coding_plan",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://api.z.ai/api/anthropic",
+    openaiBaseUrl: "https://api.z.ai/api/coding/paas/v4",
+    envName: "ZAI_API_KEY",
     defaultModels: [
-      { id: "bedrock-claude-opus-4-7", name: "Claude Opus 4.7", modelId: "global.anthropic.claude-opus-4-7", capabilities: ["chat", "code", "reasoning"] },
-      { id: "bedrock-claude-sonnet-4-6", name: "Claude Sonnet 4.6", modelId: "global.anthropic.claude-sonnet-4-6", capabilities: ["chat", "code"] }
-    ]
-  },
-  {
-    id: "ollama",
-    name: "Ollama/local",
-    description: "Local OpenAI-compatible Ollama endpoint.",
-    baseUrl: "http://127.0.0.1:11434/v1",
-    authType: "none",
-    apiFormat: "local",
-    supportedAdapters: ["opencode"],
-    modelSource: "static",
-    defaultModels: [
-      { id: "llama-local", name: "Local Llama", modelId: "llama3.1", capabilities: ["chat", "local"] }
-    ]
-  }
+      model("glm-4.7", "GLM-4.7", ["chat", "code", "reasoning"], 128000),
+      model("glm-4.5-air", "GLM-4.5 Air", ["chat", "code"], 128000)
+    ],
+    smallFastModel: "glm-4.5-air"
+  })
 ];
 
 export function getModelPresets(): ModelPreset[] {
-  return modelPresets;
+  return [];
 }
 
 export function getProviderCatalog(): ProviderCatalogPreset[] {
   return providerCatalog;
 }
 
-export function getProviderCatalogPreset(id: string): ProviderCatalogPreset | undefined {
-  return providerCatalog.find((provider) => provider.id === id);
+export async function loadProviderCatalog(options: LoadProviderCatalogOptions = {}): Promise<ProviderCatalogPreset[]> {
+  const now = Date.now();
+  if (!options.fetchImpl && providerCatalogCache && providerCatalogCache.expiresAt > now) {
+    return providerCatalogCache.providers;
+  }
+  const providers = [...providerCatalog, ...await loadModelsDevProviders(options)];
+  if (!options.fetchImpl) {
+    providerCatalogCache = { providers, expiresAt: now + catalogCacheTtlMs };
+  }
+  return providers;
+}
+
+async function loadModelsDevProviders(options: LoadProviderCatalogOptions = {}): Promise<ProviderCatalogPreset[]> {
+  try {
+    return await fetchModelsDevProviderCatalog(options);
+  } catch {
+    return [];
+  }
+}
+
+export function createProviderCatalogFromModelsDev(input: ModelsDevCatalog): ProviderCatalogPreset[] {
+  return Object.entries(input)
+    .map(([id, provider]) => normalizeModelsDevProvider(id, provider))
+    .filter((provider): provider is ProviderCatalogPreset => provider !== undefined)
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function isSafeOpenCodeNpmPackage(packageName: string | undefined): boolean {
+  if (!packageName) return true;
+  const trimmed = packageName.trim();
+  return (
+    trimmed.length > 0 &&
+    trimmed.length <= 214 &&
+    !trimmed.includes("..") &&
+    /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u.test(trimmed)
+  );
+}
+
+export async function fetchModelsDevProviderCatalog(
+  options: LoadProviderCatalogOptions = {}
+): Promise<ProviderCatalogPreset[]> {
+  const now = Date.now();
+  if (!options.fetchImpl && modelsDevFailureCacheUntil > now) {
+    throw new Error("models.dev catalog refresh is temporarily disabled after a recent failure");
+  }
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? catalogFetchTimeoutMs);
+  try {
+    const response = await fetchImpl(options.sourceUrl ?? modelsDevUrl, {
+      method: "GET",
+      headers: { "User-Agent": "OpenForge model catalog" },
+      redirect: "error",
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`models.dev catalog returned HTTP ${response.status}`);
+    const payload = await response.json() as unknown;
+    const providers = createProviderCatalogFromModelsDev(parseModelsDevCatalog(payload));
+    return providers;
+  } catch (error) {
+    if (!options.fetchImpl) modelsDevFailureCacheUntil = now + catalogCacheTtlMs;
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function providerProduct(input: {
+  id: string;
+  name: string;
+  description: string;
+  region: string;
+  productType: ProviderProductType;
+  apiFormat: ProviderApiFormat;
+  anthropicBaseUrl?: string;
+  openaiBaseUrl?: string;
+  opencodeNpm?: string;
+  envName: string;
+  authType?: ProviderAuthType;
+  defaultModels: ProviderModelPreset[];
+  smallFastModel: string;
+}): ProviderCatalogPreset {
+  const authType = input.authType ?? "api_key";
+  const baseUrl = input.anthropicBaseUrl ?? input.openaiBaseUrl ?? "";
+  const endpoints = {
+    ...(input.anthropicBaseUrl ? { anthropic: { baseUrl: input.anthropicBaseUrl } } : {}),
+    ...(input.openaiBaseUrl ? { openai: { baseUrl: input.openaiBaseUrl } } : {})
+  };
+  return {
+    id: input.id,
+    name: input.name,
+    description: input.description,
+    baseUrl,
+    region: input.region,
+    productType: input.productType,
+    authType,
+    apiFormat: input.apiFormat,
+    supportedAdapters: ["claude", "opencode"],
+    modelSource: "static",
+    source: "verified",
+    endpoints,
+    defaultModels: input.defaultModels,
+    env: {
+      [claudeEnv.baseUrl]: "Claude Code API endpoint",
+      ...(authType === "none" ? {} : { [claudeEnv.authToken]: `${input.name} API key` }),
+      [claudeEnv.model]: "Primary Claude Code model",
+      [claudeEnv.smallFastModel]: "Small fast Claude Code model",
+      [claudeEnv.defaultSonnetModel]: "Claude Code default Sonnet model",
+      [claudeEnv.defaultHaikuModel]: "Claude Code default Haiku model",
+      [claudeEnv.defaultOpusModel]: "Claude Code default Opus model",
+      [claudeEnv.apiTimeoutMs]: "Claude Code provider request timeout in milliseconds"
+    },
+    claude: {
+      env: claudeEnv,
+      defaultSmallFastModel: input.smallFastModel
+    },
+    opencode: {
+      npm: input.opencodeNpm ?? opencodePackageFor(input.apiFormat),
+      ...(input.openaiBaseUrl ? { api: input.openaiBaseUrl } : input.anthropicBaseUrl ? { api: input.anthropicBaseUrl } : {}),
+      env: authType === "none" ? [] : [input.envName]
+    }
+  };
+}
+
+function model(id: string, name: string, capabilities: string[], contextWindow: number): ProviderModelPreset {
+  return { id, name, modelId: id, capabilities, contextWindow };
 }
 
 export function groupModelsByProvider<TModel extends { provider: string }>(
@@ -360,4 +465,194 @@ export function groupModelsByProvider<TModel extends { provider: string }>(
       count: groupedModels.length,
       models: groupedModels
     }));
+}
+
+function normalizeModelsDevProvider(id: string, provider: ModelsDevProvider): ProviderCatalogPreset | undefined {
+  const providerId = normalizeProviderId(provider.id || id);
+  const npm = safeOpenCodeNpmPackage(provider.npm) ?? npmFromModels(provider.models) ?? "@ai-sdk/openai-compatible";
+  const apiFormat = apiFormatFor(providerId, npm);
+  const defaultModels = Object.values(provider.models)
+    .filter((model) => model.status !== "deprecated")
+    .map(normalizeModelsDevModel)
+    .sort((left, right) => left.name.localeCompare(right.name));
+  if (defaultModels.length === 0) return undefined;
+
+  const baseUrl = typeof provider.api === "string" && /^https?:\/\//u.test(provider.api) ? provider.api : "";
+  const env = Object.fromEntries(provider.env.map((name) => [name, labelForEnv(name, provider.name)]));
+  const opencode = {
+    npm,
+    ...(provider.api ? { api: provider.api } : {}),
+    env: provider.env
+  };
+  return {
+    id: providerId,
+    name: provider.name,
+    description: `${provider.name} provider from models.dev catalog.`,
+    baseUrl,
+    region: "global",
+    productType: "payg_api",
+    authType: provider.env.length > 0 ? "api_key" : authTypeFor(providerId, apiFormat),
+    apiFormat,
+    supportedAdapters: ["opencode"],
+    modelSource: "models.dev",
+    source: "models.dev",
+    endpoints: {
+      ...(apiFormat === "anthropic" ? { anthropic: { baseUrl } } : {}),
+      ...(apiFormat === "openai" || apiFormat === "openai-compatible" ? { openai: { baseUrl } } : {})
+    },
+    ...(apiFormat === "openai-compatible" || apiFormat === "openai" ? { modelFetch: { strategy: "openai-compatible" as const } } : {}),
+    defaultModels,
+    ...(provider.env.length > 0 ? { env } : {}),
+    opencode
+  };
+}
+
+function normalizeModelsDevModel(model: ModelsDevModel): ProviderModelPreset {
+  return {
+    id: model.id,
+    name: model.name || model.id,
+    modelId: model.provider?.api ?? model.id,
+    capabilities: capabilitiesFor(model),
+    ...(Number.isFinite(model.limit.context) && model.limit.context > 0 ? { contextWindow: model.limit.context } : {})
+  };
+}
+
+function capabilitiesFor(model: ModelsDevModel): string[] {
+  const capabilities = new Set<string>(["chat", "code"]);
+  if (model.reasoning) capabilities.add("reasoning");
+  if (model.tool_call) capabilities.add("toolcall");
+  if (model.attachment) capabilities.add("attachment");
+  for (const input of model.modalities?.input ?? []) {
+    if (input !== "text") capabilities.add(input);
+  }
+  if (model.interleaved) capabilities.add("interleaved");
+  return [...capabilities];
+}
+
+function parseModelsDevCatalog(payload: unknown): ModelsDevCatalog {
+  if (!isRecord(payload)) throw new Error("models.dev catalog payload must be an object");
+  const parsed: ModelsDevCatalog = {};
+  for (const [id, value] of Object.entries(payload)) {
+    const provider = parseModelsDevProvider(id, value);
+    if (provider) parsed[id] = provider;
+  }
+  return parsed;
+}
+
+function parseModelsDevProvider(id: string, value: unknown): ModelsDevProvider | undefined {
+  if (!isRecord(value) || !isRecord(value.models)) return undefined;
+  const name = typeof value.name === "string" ? value.name : id;
+  const env = Array.isArray(value.env) ? value.env.filter((item): item is string => typeof item === "string") : [];
+  const models: Record<string, ModelsDevModel> = {};
+  for (const [modelId, modelValue] of Object.entries(value.models)) {
+    const model = parseModelsDevModel(modelId, modelValue);
+    if (model) models[modelId] = model;
+  }
+  if (Object.keys(models).length === 0) return undefined;
+  return {
+    id: typeof value.id === "string" ? value.id : id,
+    name,
+    env,
+    ...(typeof value.api === "string" ? { api: value.api } : {}),
+    ...(typeof value.npm === "string" ? { npm: value.npm } : {}),
+    models
+  };
+}
+
+function parseModelsDevModel(id: string, value: unknown): ModelsDevModel | undefined {
+  if (!isRecord(value)) return undefined;
+  const name = typeof value.name === "string" ? value.name : id;
+  const limit = isRecord(value.limit) ? value.limit : {};
+  const context = typeof limit.context === "number" ? limit.context : 0;
+  const output = typeof limit.output === "number" ? limit.output : 0;
+  const modalities = parseModalities(value.modalities);
+  const provider = parseModelProvider(value.provider);
+  const interleaved = parseInterleaved(value.interleaved);
+  return {
+    id: typeof value.id === "string" ? value.id : id,
+    name,
+    release_date: typeof value.release_date === "string" ? value.release_date : "",
+    attachment: value.attachment === true,
+    reasoning: value.reasoning === true,
+    temperature: value.temperature === true,
+    tool_call: value.tool_call !== false,
+    ...(interleaved !== undefined ? { interleaved } : {}),
+    ...(typeof value.status === "string" ? { status: value.status } : {}),
+    limit: {
+      context,
+      ...(typeof limit.input === "number" ? { input: limit.input } : {}),
+      output
+    },
+    ...(modalities ? { modalities } : {}),
+    ...(provider ? { provider } : {})
+  };
+}
+
+function parseInterleaved(value: unknown): ModelsDevModel["interleaved"] | undefined {
+  if (value === true) return true;
+  if (!isRecord(value)) return undefined;
+  return value.field === "reasoning_content" || value.field === "reasoning_details"
+    ? { field: value.field }
+    : undefined;
+}
+
+function parseModalities(value: unknown): ModelsDevModel["modalities"] | undefined {
+  if (!isRecord(value)) return undefined;
+  const input = Array.isArray(value.input) ? value.input.filter((item): item is string => typeof item === "string") : [];
+  const output = Array.isArray(value.output) ? value.output.filter((item): item is string => typeof item === "string") : [];
+  return { input, output };
+}
+
+function parseModelProvider(value: unknown): ModelsDevModel["provider"] | undefined {
+  if (!isRecord(value)) return undefined;
+  const result: { npm?: string; api?: string } = {};
+  if (typeof value.npm === "string") result.npm = value.npm;
+  if (typeof value.api === "string") result.api = value.api;
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function npmFromModels(models: Record<string, ModelsDevModel>): string | undefined {
+  return Object.values(models)
+    .map((model) => safeOpenCodeNpmPackage(model.provider?.npm))
+    .find((npm): npm is string => typeof npm === "string");
+}
+
+function safeOpenCodeNpmPackage(packageName: string | undefined): string | undefined {
+  if (!isSafeOpenCodeNpmPackage(packageName)) return undefined;
+  return packageName?.trim();
+}
+
+function apiFormatFor(providerId: string, npm: string): ProviderApiFormat {
+  if (providerId.includes("bedrock") || npm.includes("amazon-bedrock")) return "bedrock";
+  if (npm.includes("anthropic")) return "anthropic";
+  if (npm.includes("openai-compatible") || npm.includes("openrouter")) return "openai-compatible";
+  if (npm.includes("openai")) return "openai";
+  if (npm.includes("google")) return "google";
+  return "openai-compatible";
+}
+
+function authTypeFor(providerId: string, apiFormat: ProviderApiFormat): ProviderAuthType {
+  if (apiFormat === "bedrock" || providerId.includes("vertex")) return "none";
+  return "api_key";
+}
+
+function opencodePackageFor(apiFormat: ProviderApiFormat): string {
+  if (apiFormat === "openai") return "@ai-sdk/openai";
+  if (apiFormat === "anthropic") return "@ai-sdk/anthropic";
+  if (apiFormat === "google") return "@ai-sdk/google";
+  if (apiFormat === "bedrock") return "@ai-sdk/amazon-bedrock";
+  return "@ai-sdk/openai-compatible";
+}
+
+function normalizeProviderId(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "provider";
+}
+
+function labelForEnv(envName: string, providerName: string): string {
+  if (envName.endsWith("_API_KEY")) return `${providerName} API key`;
+  return `${providerName} ${envName}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

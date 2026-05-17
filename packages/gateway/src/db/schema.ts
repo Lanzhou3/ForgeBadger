@@ -51,10 +51,15 @@ export const modelProviderProfiles = sqliteTable("model_provider_profiles", {
   providerKey: text("provider_key").notNull(),
   name: text("name").notNull(),
   baseUrl: text("base_url"),
+  anthropicBaseUrl: text("anthropic_base_url"),
+  openaiBaseUrl: text("openai_base_url"),
+  region: text("region"),
+  productType: text("product_type"),
   authType: text("auth_type").notNull().default("api_key"),
   apiFormat: text("api_format").notNull().default("openai-compatible"),
   supportedAdapters: text("supported_adapters").notNull().default("[]"),
   defaultHeaders: text("default_headers").notNull().default("{}"),
+  opencodeNpm: text("opencode_npm"),
   status: text("status").notNull().default("active"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
@@ -145,6 +150,49 @@ export const copilotRunEvents = sqliteTable(
   },
   (table) => ({
     idx_copilot_run_events_run_sequence: uniqueIndex("idx_copilot_run_events_run_sequence").on(table.runId, table.sequence)
+  })
+);
+
+export const copilotConversations = sqliteTable(
+  "copilot_conversations",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    source: text("source").notNull(),
+    sourceRefId: text("source_ref_id"),
+    status: text("status").notNull().default("active"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+    lastMessageAt: integer("last_message_at", { mode: "timestamp" }),
+    deletedAt: integer("deleted_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idx_copilot_conversations_user_updated: index("idx_copilot_conversations_user_updated").on(table.userId, table.updatedAt)
+  })
+);
+
+export const copilotMessages = sqliteTable(
+  "copilot_messages",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => copilotConversations.id, { onDelete: "cascade" }),
+    runId: text("run_id").references(() => copilotRuns.id, { onDelete: "set null" }),
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    payloadJson: text("payload_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    deletedAt: integer("deleted_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idx_copilot_messages_conversation_created: index("idx_copilot_messages_conversation_created").on(table.conversationId, table.createdAt)
   })
 );
 

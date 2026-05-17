@@ -25,6 +25,11 @@ const proposeMemoryWriteInput = z.object({
   projectId: z.string().min(1).nullable().optional(),
   metadata: z.record(z.unknown()).optional()
 }).strict();
+const proposeMemoryDeleteInput = z.object({
+  id: z.string().min(1),
+  type: z.enum(["entry", "note"]).default("entry"),
+  reason: z.string().trim().min(1).max(1024).optional()
+}).strict();
 const memorySearchModelInputSchema = {
   type: "object",
   properties: {
@@ -58,6 +63,16 @@ const proposeMemoryWriteModelInputSchema = {
   required: ["kind", "scope", "text"],
   additionalProperties: false
 };
+const proposeMemoryDeleteModelInputSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", minLength: 1 },
+    type: { type: "string", enum: ["entry", "note"] },
+    reason: { type: "string", minLength: 1, maxLength: 1024 }
+  },
+  required: ["id"],
+  additionalProperties: false
+};
 
 export function createCopilotMemoryTools(): CopilotToolDefinition[] {
   return [
@@ -87,6 +102,15 @@ export function createCopilotMemoryTools(): CopilotToolDefinition[] {
       inputSchema: proposeMemoryWriteInput,
       modelInputSchema: proposeMemoryWriteModelInputSchema,
       execute: async (input, context) => proposeMemoryWrite(input, context)
+    },
+    {
+      name: "openforge.propose_memory_delete",
+      description: "Prepare deleting a Copilot memory entry or working note for explicit user approval.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeMemoryDeleteInput,
+      modelInputSchema: proposeMemoryDeleteModelInputSchema,
+      execute: async (input, context) => proposeMemoryDelete(input, context)
     }
   ];
 }
@@ -114,6 +138,42 @@ export function approveCopilotMemoryWrite(
     metadata: safeMetadata(parsed.data.metadata)
   });
   return { executed: true, entry };
+}
+
+export function approveCopilotMemoryDelete(
+  action: CopilotPendingAction,
+  context: Pick<CopilotToolContext, "db" | "userId">
+) {
+  const parsed = proposeMemoryDeleteInput.safeParse(action.input);
+  if (!parsed.success) {
+    return {
+      executed: false,
+      error: {
+        code: "copilot_memory_delete_invalid",
+        message: "Stored memory delete action is invalid"
+      }
+    };
+  }
+  const repo = new CopilotMemoryRepository(context.db, context.userId);
+  const item = parsed.data.type === "note" ? repo.deleteNote(parsed.data.id) : repo.deleteEntry(parsed.data.id);
+  if (!item) {
+    return {
+      executed: false,
+      error: {
+        code: "copilot_memory_delete_not_found",
+        message: "Copilot memory item was not found"
+      }
+    };
+  }
+  return {
+    executed: true,
+    deleted: {
+      id: item.id,
+      type: parsed.data.type,
+      scope: "scope" in item ? item.scope : "note",
+      projectId: item.projectId
+    }
+  };
 }
 
 async function searchMemory(input: unknown, context: CopilotToolContext) {
@@ -149,6 +209,25 @@ async function proposeMemoryWrite(input: unknown, context: CopilotToolContext) {
   const pending = new CopilotRepository(context.db, context.userId).createPendingAction(context.runId, {
     type: "openforge.propose_memory_write",
     input: redactedInput
+  });
+  return {
+    actionId: pending.id,
+    type: pending.type,
+    status: pending.status,
+    summary: "Pending user approval"
+  };
+}
+
+async function proposeMemoryDelete(input: unknown, context: CopilotToolContext) {
+  const parsed = proposeMemoryDeleteInput.parse(input);
+  if (!context.runId) throw new Error("Copilot run is required for pending actions");
+  const pending = new CopilotRepository(context.db, context.userId).createPendingAction(context.runId, {
+    type: "openforge.propose_memory_delete",
+    input: {
+      id: parsed.id,
+      type: parsed.type,
+      ...(parsed.reason ? { reason: redactCopilotText(parsed.reason) } : {})
+    }
   });
   return {
     actionId: pending.id,

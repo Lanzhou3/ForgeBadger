@@ -7,23 +7,22 @@ import {
   type ModelProfile,
   type CreateProviderProfileInput,
   type CreateModelProfileInput,
-  type ProviderAdapter,
   type ProviderApiFormat,
   type ProviderAuthType,
+  type ProviderProductType,
   type ProviderProfile,
   type UpdateModelProfileInput
 } from "../db/repositories/model-provider-repository.js";
 import type { Database } from "../db/types.js";
 import {
-  getProviderCatalog,
-  getProviderCatalogPreset,
+  isSafeOpenCodeNpmPackage,
+  loadProviderCatalog as loadProviderCatalogFromSource,
   type ProviderCatalogPreset
 } from "../services/model-catalog.js";
 import { checkModelEndpoint } from "../services/model-endpoint-health.js";
 import {
   applyModelProviderConfig,
-  previewModelProviderConfig,
-  type ModelConfigApplyAdapter
+  previewModelProviderConfig
 } from "../services/model-config-apply.js";
 import {
   fetchProviderModels as fetchProviderModelsFromEndpoint,
@@ -31,15 +30,21 @@ import {
   type FetchProviderModelsInput
 } from "../services/provider-model-fetch.js";
 
-const adapterSchema = z.enum(["claude", "opencode", "codex"]);
+const adapterSchema = z.enum(["claude", "opencode", "openforge-copilot", "codex"]);
+const providerAdapterSchema = z.enum(["claude", "opencode"]);
+const productTypeSchema = z.enum(["payg_api", "coding_plan", "token_plan", "subscription", "local"]);
 const createProviderSchema = z.object({
   catalogId: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   providerKey: z.string().min(1).optional(),
   baseUrl: z.string().optional(),
+  anthropicBaseUrl: z.string().optional(),
+  openaiBaseUrl: z.string().optional(),
+  region: z.string().optional(),
+  productType: productTypeSchema.optional(),
   authType: z.enum(["api_key", "bearer_token", "oauth", "none"]).optional(),
   apiFormat: z.enum(["anthropic", "openai", "openai-compatible", "google", "bedrock", "local"]).optional(),
-  supportedAdapters: z.array(z.enum(["claude", "opencode"])).optional()
+  supportedAdapters: z.array(providerAdapterSchema).optional()
 });
 const updateProviderSchema = createProviderSchema.omit({ catalogId: true }).partial();
 const createModelProfileSchema = z.object({
@@ -57,7 +62,10 @@ const createCredentialSchema = z.object({
 const rotateCredentialSchema = createCredentialSchema;
 const applySchema = z.object({
   adapter: adapterSchema,
-  projectRoot: z.string().min(1),
+  projectRoot: z.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().min(1).optional()
+  ),
   modelProfileId: z.string().min(1).optional(),
   credentialId: z.string().min(1).optional()
 });
@@ -71,15 +79,18 @@ const syncModelsSchema = z.object({
 
 export interface ModelProviderRouteOptions {
   fetchProviderModels?: (input: FetchProviderModelsInput) => Promise<FetchedProviderModel[]>;
+  loadProviderCatalog?: () => Promise<ProviderCatalogPreset[]>;
 }
 
 export function createModelProviderRoutes(db: Database, masterKey: string, options: ModelProviderRouteOptions = {}): Router {
   const router = Router();
   const fetchProviderModels = options.fetchProviderModels ?? fetchProviderModelsFromEndpoint;
+  const loadProviderCatalog = options.loadProviderCatalog ?? loadProviderCatalogFromSource;
   router.use(authenticate);
 
-  router.get("/catalog", (_req, res) => {
-    res.json({ code: 0, data: { providers: getProviderCatalog() }, message: "" });
+  router.get("/catalog", async (_req, res) => {
+    const providers = await loadProviderCatalog();
+    res.json({ code: 0, data: { providers }, message: "" });
   });
 
   router.get("/", (req, res) => {
@@ -95,7 +106,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     });
   });
 
-  router.post("/", (req, res) => {
+  router.post("/", async (req, res) => {
     const parseResult = createProviderSchema.safeParse(req.body ?? {});
     if (!parseResult.success) {
       res.status(400).json({ code: 1, message: "Invalid provider payload" });
@@ -103,7 +114,8 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     }
     const repo = repoFor(db, masterKey, req);
     try {
-      const result = createProvider(repo, parseResult.data);
+      const catalog = await loadProviderCatalog();
+      const result = createProvider(repo, parseResult.data, catalog);
       res.status(201).json({ code: 0, data: result, message: "" });
     } catch (error) {
       res.status(400).json({
@@ -123,6 +135,10 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     if (parseResult.data.name !== undefined) updateInput.name = parseResult.data.name;
     if (parseResult.data.providerKey !== undefined) updateInput.providerKey = parseResult.data.providerKey;
     if (parseResult.data.baseUrl !== undefined) updateInput.baseUrl = parseResult.data.baseUrl;
+    if (parseResult.data.anthropicBaseUrl !== undefined) updateInput.anthropicBaseUrl = parseResult.data.anthropicBaseUrl;
+    if (parseResult.data.openaiBaseUrl !== undefined) updateInput.openaiBaseUrl = parseResult.data.openaiBaseUrl;
+    if (parseResult.data.region !== undefined) updateInput.region = parseResult.data.region;
+    if (parseResult.data.productType !== undefined) updateInput.productType = parseResult.data.productType;
     if (parseResult.data.authType !== undefined) updateInput.authType = parseResult.data.authType;
     if (parseResult.data.apiFormat !== undefined) updateInput.apiFormat = parseResult.data.apiFormat;
     if (parseResult.data.supportedAdapters !== undefined) updateInput.supportedAdapters = parseResult.data.supportedAdapters;
@@ -179,10 +195,15 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     }
     const repo = repoFor(db, masterKey, req);
     const provider = repo.getProviderProfile(req.params.id);
-    if (!provider?.baseUrl) {
-      res.status(provider ? 400 : 404).json({
+    if (!provider) {
+      res.status(404).json({ code: 1, message: "Provider not found" });
+      return;
+    }
+    const modelFetchBaseUrl = provider.openaiBaseUrl ?? provider.baseUrl;
+    if (!modelFetchBaseUrl) {
+      res.status(400).json({
         code: 1,
-        message: provider ? "Provider base URL is required" : "Provider not found"
+        message: "Provider base URL is required"
       });
       return;
     }
@@ -198,10 +219,11 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     }
 
     try {
+      const catalogPreset = (await loadProviderCatalog()).find((preset) => preset.id === provider.providerKey);
       const fetchedModels = await fetchProviderModels({
-        baseUrl: provider.baseUrl,
+        baseUrl: modelFetchBaseUrl,
         apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
-        modelsUrl: getProviderCatalogPreset(provider.providerKey)?.modelFetch?.modelsUrl,
+        modelsUrl: catalogPreset?.modelFetch?.modelsUrl,
         ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
       });
       const created = syncFetchedModels(repo, provider, fetchedModels);
@@ -379,11 +401,18 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
   return router;
 }
 
-function createProvider(repo: ModelProviderRepository, input: z.infer<typeof createProviderSchema>) {
-  const preset = input.catalogId ? getProviderCatalogPreset(input.catalogId) : undefined;
+function createProvider(
+  repo: ModelProviderRepository,
+  input: z.infer<typeof createProviderSchema>,
+  catalog: ProviderCatalogPreset[]
+) {
+  const preset = input.catalogId ? catalog.find((provider) => provider.id === input.catalogId) : undefined;
+  if (input.catalogId && !preset) {
+    throw new Error("Catalog provider not found");
+  }
   const provider = preset ? createFromPreset(repo, preset) : createCustom(repo, input);
-  const models = preset?.modelSource === "static"
-    ? preset.defaultModels.map((model, index) => repo.createModelProfile({
+  const models = preset
+    ? seedModelsForPreset(preset).map((model, index) => repo.createModelProfile({
       providerProfileId: provider.id,
       name: model.name,
       modelId: model.modelId,
@@ -395,16 +424,58 @@ function createProvider(repo: ModelProviderRepository, input: z.infer<typeof cre
   return { provider, models };
 }
 
+function seedModelsForPreset(preset: ProviderCatalogPreset) {
+  if (preset.modelSource === "models.dev") {
+    return preset.defaultModels.slice(0, 1);
+  }
+  if (preset.modelSource === "static") {
+    return preset.defaultModels;
+  }
+  return [];
+}
+
 function createFromPreset(repo: ModelProviderRepository, preset: ProviderCatalogPreset): ProviderProfile {
+  assertSafeDefaultHeaders(preset.headers);
+  if (preset.supportedAdapters.includes("opencode")) {
+    assertSafeOpenCodeNpm(preset.opencode?.npm);
+  }
   return repo.createProviderProfile({
     name: preset.name,
     providerKey: preset.id,
     baseUrl: preset.baseUrl,
+    region: preset.region ?? "global",
+    productType: (preset.productType ?? "payg_api") as ProviderProductType,
     authType: preset.authType as ProviderAuthType,
     apiFormat: preset.apiFormat as ProviderApiFormat,
-    supportedAdapters: preset.supportedAdapters as ProviderAdapter[],
-    ...(preset.headers ? { defaultHeaders: preset.headers } : {})
+    supportedAdapters: preset.supportedAdapters,
+    ...(preset.endpoints?.anthropic?.baseUrl ? { anthropicBaseUrl: preset.endpoints.anthropic.baseUrl } : {}),
+    ...(preset.endpoints?.openai?.baseUrl ? { openaiBaseUrl: preset.endpoints.openai.baseUrl } : {}),
+    ...(preset.headers ? { defaultHeaders: preset.headers } : {}),
+    ...(preset.opencode?.npm ? { opencodeNpm: preset.opencode.npm } : {})
   });
+}
+
+function assertSafeDefaultHeaders(headers: Record<string, string> | undefined): void {
+  if (!headers) return;
+  for (const [name, value] of Object.entries(headers)) {
+    if (isSensitiveHeaderName(name) || isSensitiveHeaderValue(value)) {
+      throw new Error("Catalog provider default headers must not contain credentials");
+    }
+  }
+}
+
+function isSensitiveHeaderName(name: string): boolean {
+  return /(^|[-_])(authorization|api[-_]?key|token|secret|credential|password|key)([-_]|$)/iu.test(name);
+}
+
+function isSensitiveHeaderValue(value: string): boolean {
+  return /(bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]+)/iu.test(value);
+}
+
+function assertSafeOpenCodeNpm(packageName: string | undefined): void {
+  if (!isSafeOpenCodeNpmPackage(packageName)) {
+    throw new Error("Catalog provider OpenCode npm package is invalid");
+  }
 }
 
 function createCustom(repo: ModelProviderRepository, input: z.infer<typeof createProviderSchema>): ProviderProfile {
@@ -415,9 +486,13 @@ function createCustom(repo: ModelProviderRepository, input: z.infer<typeof creat
     name: input.name,
     providerKey: input.providerKey,
     ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
+    ...(input.anthropicBaseUrl ? { anthropicBaseUrl: input.anthropicBaseUrl } : {}),
+    ...(input.openaiBaseUrl ? { openaiBaseUrl: input.openaiBaseUrl } : {}),
+    ...(input.region ? { region: input.region } : {}),
+    ...(input.productType ? { productType: input.productType } : {}),
     authType: input.authType,
     apiFormat: input.apiFormat,
-    supportedAdapters: input.supportedAdapters ?? ["opencode"]
+    supportedAdapters: input.supportedAdapters ?? ["claude"]
   });
 }
 
@@ -444,8 +519,26 @@ async function handleApplyRequest(input: {
     input.res.status(404).json({ code: 1, message: "Provider not found" });
     return;
   }
-  if (!provider.supportedAdapters.includes(parseResult.data.adapter as ProviderAdapter)) {
+  if (parseResult.data.adapter === "codex") {
+    input.res.status(400).json({ code: 1, message: "Codex provider apply is disabled; Codex uses subscription SDK identity" });
+    return;
+  }
+  if (parseResult.data.adapter === "openforge-copilot") {
+    await handleCopilotApplyRequest({
+      repo,
+      provider,
+      modelProfileId: parseResult.data.modelProfileId,
+      res: input.res,
+      shouldApply: input.shouldApply
+    });
+    return;
+  }
+  if (!provider.supportedAdapters.includes(parseResult.data.adapter)) {
     input.res.status(400).json({ code: 1, message: "Provider does not support the selected adapter" });
+    return;
+  }
+  if (!parseResult.data.projectRoot) {
+    input.res.status(400).json({ code: 1, message: "Project path is required for Claude Code and OpenCode apply" });
     return;
   }
   const model = selectModel(repo, provider, parseResult.data.modelProfileId);
@@ -464,17 +557,20 @@ async function handleApplyRequest(input: {
     return;
   }
   const payload = {
-    projectRoot: parseResult.data.projectRoot,
-    adapter: parseResult.data.adapter as ModelConfigApplyAdapter,
+    projectRoot: parseResult.data.projectRoot ?? "",
+    adapter: parseResult.data.adapter,
     provider: {
       id: provider.id,
       providerKey: provider.providerKey,
       baseUrl: provider.baseUrl,
+      anthropicBaseUrl: provider.anthropicBaseUrl,
+      openaiBaseUrl: provider.openaiBaseUrl,
       authType: provider.authType,
-      apiFormat: provider.apiFormat
+      apiFormat: provider.apiFormat,
+      opencodeNpm: provider.opencodeNpm
     },
     model: { id: model.id, modelId: model.modelId },
-    ...(credential ? { credential: { id: credential.id, envName: envNameFor(provider.providerKey) } } : {})
+    ...(credential ? { credential: { id: credential.id, envName: envNameFor(provider.providerKey, parseResult.data.adapter) } } : {})
   };
   try {
     const result = input.shouldApply
@@ -487,6 +583,49 @@ async function handleApplyRequest(input: {
       message: error instanceof Error ? error.message : "Failed to apply provider config"
     });
   }
+}
+
+async function handleCopilotApplyRequest(input: {
+  repo: ModelProviderRepository;
+  provider: ProviderProfile;
+  modelProfileId: string | undefined;
+  res: Response;
+  shouldApply: boolean;
+}): Promise<void> {
+  if (!isCopilotCompatibleProvider(input.provider)) {
+    input.res.status(400).json({ code: 1, message: "Provider does not support OpenForge Copilot" });
+    return;
+  }
+  const model = selectModel(input.repo, input.provider, input.modelProfileId);
+  if (!model) {
+    input.res.status(input.modelProfileId ? 400 : 404).json({
+      code: 1,
+      message: input.modelProfileId
+        ? "Model does not belong to the selected provider"
+        : "Provider model not found"
+    });
+    return;
+  }
+  const appliedModel = input.shouldApply ? input.repo.setDefaultModel(model.id) ?? model : model;
+  const result = {
+    adapter: "openforge-copilot",
+    env: {},
+    secretEnvNames: [],
+    files: [],
+    changedFiles: [],
+    internalDefault: {
+      scope: "user",
+      providerProfileId: input.provider.id,
+      modelProfileId: appliedModel.id,
+      providerName: input.provider.name,
+      modelName: appliedModel.name
+    }
+  };
+  input.res.json({ code: 0, data: input.shouldApply ? { result } : { preview: result }, message: "" });
+}
+
+function isCopilotCompatibleProvider(provider: ProviderProfile): boolean {
+  return provider.apiFormat === "anthropic" || provider.apiFormat === "openai" || provider.apiFormat === "openai-compatible";
 }
 
 
@@ -538,7 +677,8 @@ function repoFor(db: Database, masterKey: string, req: unknown): ModelProviderRe
   return new ModelProviderRepository(db, userId, masterKey);
 }
 
-function envNameFor(providerKey: string): string {
+function envNameFor(providerKey: string, adapter: string): string {
+  if (adapter === "claude") return "ANTHROPIC_AUTH_TOKEN";
   const normalized = providerKey.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
   if (normalized === "ANTHROPIC") return "ANTHROPIC_API_KEY";
   if (normalized === "OPENAI") return "OPENAI_API_KEY";

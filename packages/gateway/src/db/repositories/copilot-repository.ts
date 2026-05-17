@@ -55,6 +55,31 @@ export interface CopilotPendingAction {
   updatedAt: number | null;
 }
 
+export interface CopilotConversation {
+  id: string;
+  userId: string;
+  title: string;
+  source: string;
+  sourceRefId: string | null;
+  status: string;
+  createdAt: number | null;
+  updatedAt: number | null;
+  lastMessageAt: number | null;
+  deletedAt: number | null;
+}
+
+export interface CopilotMessage {
+  id: string;
+  userId: string;
+  conversationId: string;
+  runId: string | null;
+  role: "user" | "assistant" | "system" | string;
+  content: string;
+  payload: Record<string, unknown>;
+  createdAt: number | null;
+  deletedAt: number | null;
+}
+
 export interface CreateCopilotRunInput {
   status?: CopilotRunStatus | string;
   providerProfileId?: string | null;
@@ -91,6 +116,23 @@ export interface UpdatePendingActionInput {
   result?: Record<string, unknown> | null;
   approvedBy?: string | null;
   approvedAt?: number | null;
+}
+
+export interface CreateCopilotConversationInput {
+  title: string;
+  source: string;
+  sourceRefId?: string | null;
+}
+
+export interface UpdateCopilotConversationInput {
+  title?: string;
+}
+
+export interface CreateCopilotMessageInput {
+  role: "user" | "assistant" | "system" | string;
+  content: string;
+  runId?: string | null;
+  payload?: Record<string, unknown>;
 }
 
 interface CopilotRunRow {
@@ -138,8 +180,169 @@ interface CopilotPendingActionRow {
   updated_at: number | null;
 }
 
+interface CopilotConversationRow {
+  id: string;
+  user_id: string;
+  title: string;
+  source: string;
+  source_ref_id: string | null;
+  status: string;
+  created_at: number | null;
+  updated_at: number | null;
+  last_message_at: number | null;
+  deleted_at: number | null;
+}
+
+interface CopilotMessageRow {
+  id: string;
+  user_id: string;
+  conversation_id: string;
+  run_id: string | null;
+  role: string;
+  content: string;
+  payload_json: string;
+  created_at: number | null;
+  deleted_at: number | null;
+}
+
 export class CopilotRepository {
   constructor(private readonly db: Database, private readonly userId: string) {}
+
+  createConversation(input: CreateCopilotConversationInput): CopilotConversation {
+    const id = randomUUID();
+    const now = Date.now();
+    this.db.prepare(`
+      INSERT INTO copilot_conversations (
+        id, user_id, title, source, source_ref_id, status, created_at, updated_at, last_message_at
+      ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
+    `).run(
+      id,
+      this.userId,
+      input.title.trim(),
+      input.source,
+      input.sourceRefId ?? null,
+      now,
+      now,
+      now
+    );
+    return this.getConversation(id) as CopilotConversation;
+  }
+
+  listConversations(limit = 50): CopilotConversation[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM copilot_conversations
+      WHERE user_id = ? AND deleted_at IS NULL
+      ORDER BY coalesce(last_message_at, updated_at, created_at) DESC
+      LIMIT ?
+    `).all(this.userId, clampLimit(limit)) as CopilotConversationRow[];
+    return rows.map(toConversation);
+  }
+
+  getConversation(id: string): CopilotConversation | undefined {
+    const row = this.db.prepare(`
+      SELECT * FROM copilot_conversations
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).get(id, this.userId) as CopilotConversationRow | undefined;
+    return row ? toConversation(row) : undefined;
+  }
+
+  updateConversation(id: string, input: UpdateCopilotConversationInput): CopilotConversation | undefined {
+    const existing = this.getConversation(id);
+    if (!existing) return undefined;
+    this.db.prepare(`
+      UPDATE copilot_conversations
+      SET title = ?, updated_at = ?
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).run(
+      input.title?.trim() || existing.title,
+      Date.now(),
+      id,
+      this.userId
+    );
+    return this.getConversation(id);
+  }
+
+  deleteConversation(id: string): CopilotConversation | undefined {
+    const existing = this.getConversation(id);
+    if (!existing) return undefined;
+    const now = Date.now();
+    this.db.prepare(`
+      UPDATE copilot_conversations
+      SET deleted_at = ?, updated_at = ?, status = 'deleted'
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).run(now, now, id, this.userId);
+    this.db.prepare(`
+      UPDATE copilot_messages
+      SET deleted_at = ?
+      WHERE conversation_id = ? AND user_id = ? AND deleted_at IS NULL
+    `).run(now, id, this.userId);
+    return { ...existing, status: "deleted", updatedAt: now, deletedAt: now };
+  }
+
+  createConversationMessage(conversationId: string, input: CreateCopilotMessageInput): CopilotMessage {
+    if (!this.getConversation(conversationId)) throw new Error("Copilot conversation not found");
+    const id = randomUUID();
+    const now = Date.now();
+    this.db.prepare(`
+      INSERT INTO copilot_messages (
+        id, user_id, conversation_id, run_id, role, content, payload_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      this.userId,
+      conversationId,
+      input.runId ?? null,
+      input.role,
+      input.content,
+      JSON.stringify(input.payload ?? {}),
+      now
+    );
+    this.db.prepare(`
+      UPDATE copilot_conversations
+      SET last_message_at = ?, updated_at = ?
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).run(now, now, conversationId, this.userId);
+    return this.getConversationMessage(id) as CopilotMessage;
+  }
+
+  listConversationMessages(conversationId: string): CopilotMessage[] {
+    if (!this.getConversation(conversationId)) return [];
+    const rows = this.db.prepare(`
+      SELECT * FROM copilot_messages
+      WHERE conversation_id = ? AND user_id = ? AND deleted_at IS NULL
+      ORDER BY created_at ASC
+    `).all(conversationId, this.userId) as CopilotMessageRow[];
+    return rows.map(toMessage);
+  }
+
+  findConversationIdByRunId(runId: string): string | undefined {
+    const row = this.db.prepare(`
+      SELECT cm.conversation_id
+      FROM copilot_messages cm
+      INNER JOIN copilot_conversations cc
+        ON cc.id = cm.conversation_id
+        AND cc.user_id = cm.user_id
+        AND cc.deleted_at IS NULL
+      WHERE cm.run_id = ?
+        AND cm.user_id = ?
+        AND cm.deleted_at IS NULL
+      ORDER BY cm.created_at DESC
+      LIMIT 1
+    `).get(runId, this.userId) as { conversation_id: string } | undefined;
+    return row?.conversation_id;
+  }
+
+  deleteConversationMessage(id: string): CopilotMessage | undefined {
+    const existing = this.getConversationMessage(id);
+    if (!existing || existing.deletedAt !== null) return undefined;
+    const now = Date.now();
+    this.db.prepare(`
+      UPDATE copilot_messages
+      SET deleted_at = ?
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `).run(now, id, this.userId);
+    return { ...existing, deletedAt: now };
+  }
 
   createRun(input: CreateCopilotRunInput): CopilotRun {
     const id = randomUUID();
@@ -329,6 +532,64 @@ export class CopilotRepository {
     return this.getPendingAction(actionId);
   }
 
+  updatePendingActionIfStatus(
+    actionId: string,
+    expectedStatus: string,
+    input: UpdatePendingActionInput
+  ): CopilotPendingAction | undefined {
+    const existing = this.getPendingAction(actionId);
+    if (!existing) return undefined;
+    const result = this.db.prepare(`
+      UPDATE copilot_pending_actions
+      SET status = ?, result_json = ?, approved_by = ?, approved_at = ?, updated_at = ?
+      WHERE id = ? AND user_id = ? AND status = ?
+    `).run(
+      input.status ?? existing.status,
+      stringifyNullable(input.result === undefined ? existing.result : input.result),
+      input.approvedBy === undefined ? existing.approvedBy : input.approvedBy,
+      input.approvedAt === undefined ? existing.approvedAt : input.approvedAt,
+      Date.now(),
+      actionId,
+      this.userId,
+      expectedStatus
+    );
+    if (result.changes !== 1) return undefined;
+    return this.getPendingAction(actionId);
+  }
+
+  updatePendingActionIfStatusAndRunStatus(
+    actionId: string,
+    expectedStatus: string,
+    expectedRunStatus: string,
+    input: UpdatePendingActionInput
+  ): CopilotPendingAction | undefined {
+    const existing = this.getPendingAction(actionId);
+    if (!existing) return undefined;
+    const result = this.db.prepare(`
+      UPDATE copilot_pending_actions
+      SET status = ?, result_json = ?, approved_by = ?, approved_at = ?, updated_at = ?
+      WHERE id = ? AND user_id = ? AND status = ?
+        AND EXISTS (
+          SELECT 1 FROM copilot_runs
+          WHERE copilot_runs.id = copilot_pending_actions.run_id
+            AND copilot_runs.user_id = copilot_pending_actions.user_id
+            AND copilot_runs.status = ?
+        )
+    `).run(
+      input.status ?? existing.status,
+      stringifyNullable(input.result === undefined ? existing.result : input.result),
+      input.approvedBy === undefined ? existing.approvedBy : input.approvedBy,
+      input.approvedAt === undefined ? existing.approvedAt : input.approvedAt,
+      Date.now(),
+      actionId,
+      this.userId,
+      expectedStatus,
+      expectedRunStatus
+    );
+    if (result.changes !== 1) return undefined;
+    return this.getPendingAction(actionId);
+  }
+
   private nextSequence(runId: string): number {
     const row = this.db.prepare(`
       SELECT max(sequence) AS sequence
@@ -343,6 +604,14 @@ export class CopilotRepository {
       SELECT * FROM copilot_run_events WHERE id = ? AND user_id = ?
     `).get(id, this.userId) as CopilotRunEventRow | undefined;
     return row ? toEvent(row) : undefined;
+  }
+
+  private getConversationMessage(id: string): CopilotMessage | undefined {
+    const row = this.db.prepare(`
+      SELECT * FROM copilot_messages
+      WHERE id = ? AND user_id = ?
+    `).get(id, this.userId) as CopilotMessageRow | undefined;
+    return row ? toMessage(row) : undefined;
   }
 
 }
@@ -406,6 +675,35 @@ function toPendingAction(row: CopilotPendingActionRow): CopilotPendingAction {
     approvedAt: row.approved_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+function toConversation(row: CopilotConversationRow): CopilotConversation {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    title: row.title,
+    source: row.source,
+    sourceRefId: row.source_ref_id,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastMessageAt: row.last_message_at,
+    deletedAt: row.deleted_at
+  };
+}
+
+function toMessage(row: CopilotMessageRow): CopilotMessage {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    conversationId: row.conversation_id,
+    runId: row.run_id,
+    role: row.role,
+    content: row.content,
+    payload: parseRecord(row.payload_json),
+    createdAt: row.created_at,
+    deletedAt: row.deleted_at
   };
 }
 

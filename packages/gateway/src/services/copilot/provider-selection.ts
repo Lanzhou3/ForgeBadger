@@ -2,7 +2,7 @@ import { ModelProviderRepository, type ModelProfile, type ProviderProfile } from
 import type { Database } from "../../db/types.js";
 import type { CopilotProviderFormat, CopilotServiceError } from "./types.js";
 
-export type CopilotClientKind = "openai-responses" | "anthropic-messages";
+export type CopilotClientKind = "openai-responses" | "openai-chat-completions" | "anthropic-messages";
 
 export interface CopilotProviderSelection {
   provider: ProviderProfile;
@@ -142,7 +142,7 @@ function clientKindFor(provider: ProviderProfile, allowOpenAiCompatible: boolean
   if (provider.apiFormat === "openai") return { ok: true, kind: "openai-responses" };
   if (provider.apiFormat === "anthropic") return { ok: true, kind: "anthropic-messages" };
   if (provider.apiFormat === "openai-compatible" && allowOpenAiCompatible) {
-    return { ok: true, kind: "openai-responses" };
+    return { ok: true, kind: "openai-chat-completions" };
   }
   return unsupported("Provider format is not supported for Copilot");
 }
@@ -163,7 +163,11 @@ function selectCredential(
   if (!credential || credential.providerProfileId !== provider.id) {
     return notConfigured("Copilot provider credential is not configured");
   }
-  return { ok: true, apiKey: repo.decryptCredential(credential.id) };
+  try {
+    return { ok: true, apiKey: repo.decryptCredential(credential.id) };
+  } catch {
+    return notConfigured("Copilot provider credential is not readable");
+  }
 }
 
 function isCopilotProviderFormat(value: string): value is CopilotProviderFormat {
