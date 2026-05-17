@@ -21,12 +21,25 @@ export function isSidebarToggleShortcut(event: KeyLikeEvent): boolean {
   return hasPrimaryModifier(event) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "b";
 }
 
+export function isCopilotShortcut(event: KeyLikeEvent): boolean {
+  return hasPrimaryModifier(event) && !event.altKey && Boolean(event.shiftKey) && event.key.toLowerCase() === "k";
+}
+
 function hasPrimaryModifier(event: KeyLikeEvent): boolean {
   return Boolean(event.ctrlKey || event.metaKey);
 }
 
 export function shouldHandleGlobalShortcut(context: GlobalShortcutContext): boolean {
   if (context.isTerminalRoute || context.targetClosestXterm || context.targetIsContentEditable) {
+    return false;
+  }
+
+  const tagName = context.targetTagName?.toLowerCase();
+  return tagName !== "input" && tagName !== "textarea" && tagName !== "select";
+}
+
+export function shouldHandleCopilotShortcut(context: GlobalShortcutContext): boolean {
+  if (context.targetClosestXterm || context.targetIsContentEditable) {
     return false;
   }
 

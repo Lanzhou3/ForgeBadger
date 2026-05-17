@@ -9,6 +9,8 @@ import {
   approveCopilotPendingAction,
   cancelCopilotRun,
   createProjectWithConfig,
+  createCopilotConversation,
+  createCopilotConversationMessage,
   createCopilotRun,
   createTemplateFromProject,
   createSkill,
@@ -16,6 +18,9 @@ import {
   createTemplate,
   createSession,
   deleteProviderCredential,
+  deleteCopilotConversation,
+  deleteCopilotMemoryItem,
+  deleteCopilotMessage,
   deleteModelProvider,
   deleteProviderModel,
   chooseDefaultRuntimeAdapter,
@@ -29,7 +34,12 @@ import {
   exportDiagnostics,
   exportTemplate,
   getCopilotCapabilities,
+  getCopilotMemoryItem,
   getCopilotRun,
+  listCopilotConversationMessages,
+  listCopilotConversations,
+  listCopilotMemoryEntries,
+  listCopilotMemoryNotes,
   getDashboardSummary,
   getDependencies,
   getConfigCompliance,
@@ -60,6 +70,7 @@ import {
   listSkillSources,
   syncLocalSkills,
   syncProviderModels,
+  searchCopilotMemory,
   rotateProviderCredential,
   setDefaultProviderModel,
   updateProviderModel,
@@ -95,6 +106,7 @@ import {
   togglePlugin,
   updateAgent,
   updateAdminUser,
+  updateCopilotConversation,
   updateProjectAgentSequence,
   updateProjectAiConfigFile,
   updateSkill,
@@ -262,6 +274,17 @@ describe("api client", () => {
     await cancelCopilotRun("run-1");
     await approveCopilotPendingAction("run-1", "action-1");
     await rejectCopilotPendingAction("run-1", "action-1");
+    await listCopilotConversations();
+    await createCopilotConversation({ title: "Terminal help", source: "session", sourceRefId: "session-1" });
+    await updateCopilotConversation("conversation-1", { title: "Updated help" });
+    await listCopilotConversationMessages("conversation-1");
+    await createCopilotConversationMessage("conversation-1", {
+      prompt: "解释这个错误",
+      source: "session",
+      sourceRefId: "session-1",
+    });
+    await deleteCopilotMessage("message-1");
+    await deleteCopilotConversation("conversation-1");
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -300,6 +323,84 @@ describe("api client", () => {
       7,
       "http://127.0.0.1:48731/api/v1/copilot/runs/run-1/pending-actions/action-1/reject",
       expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      8,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      9,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ title: "Terminal help", source: "session", sourceRefId: "session-1" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      10,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ title: "Updated help" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      11,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1/messages",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      12,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ prompt: "解释这个错误", source: "session", sourceRefId: "session-1" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      13,
+      "http://127.0.0.1:48731/api/v1/copilot/messages/message-1",
+      expect.objectContaining({ method: "DELETE" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      14,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("calls Copilot memory management REST helpers", async () => {
+    await listCopilotMemoryEntries({ scope: "project", projectId: "project-1", limit: 20 });
+    await listCopilotMemoryNotes({ projectId: "project-1", sessionId: "session-1", limit: 10 });
+    await searchCopilotMemory({ query: "provider catalog", includeNotes: true, limit: 5 });
+    await getCopilotMemoryItem("entry", "memory-1");
+    await deleteCopilotMemoryItem("note", "memory-2");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/copilot/memory/entries?scope=project&projectId=project-1&limit=20",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/copilot/memory/notes?projectId=project-1&sessionId=session-1&limit=10",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/copilot/memory/search?query=provider+catalog&includeNotes=true&limit=5",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:48731/api/v1/copilot/memory/entry/memory-1",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:48731/api/v1/copilot/memory/note/memory-2",
+      expect.objectContaining({ method: "DELETE" })
     );
   });
 

@@ -44,4 +44,36 @@ describe("eventQueryInvalidations", () => {
       ["activities"],
     ]);
   });
+
+  it("refreshes Copilot conversations and active run views for Copilot run updates", () => {
+    expect(
+      eventQueryInvalidations({
+        type: "copilot_run_updated",
+        payload: {
+          run_id: "run-1",
+          status: "completed",
+          conversation_id: "conversation-1",
+        },
+      })
+    ).toEqual([
+      ["copilot-runs"],
+      ["copilot-conversations"],
+      ["copilot-conversation-messages"],
+    ]);
+  });
+
+  it("does not invalidate query caches for transient Copilot assistant deltas", () => {
+    expect(
+      eventQueryInvalidations({
+        type: "copilot_run_updated",
+        payload: {
+          run_id: "run-1",
+          status: "running",
+          conversation_id: "conversation-1",
+          event_type: "assistant_delta",
+          delta_text: "partial"
+        },
+      })
+    ).toEqual([]);
+  });
 });

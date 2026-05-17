@@ -16,6 +16,11 @@ import { sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import { useLanguage } from "@/hooks/use-language";
 import { buildCopilotLaunchHref } from "@/lib/copilot";
+import {
+  shouldAutoConnectSession,
+  shouldLoadSessionActivities,
+  shouldShowSessionPreparing,
+} from "@/lib/session-connect-state";
 
 export default function TerminalPage() {
   const params = useParams();
@@ -37,6 +42,7 @@ export default function TerminalPage() {
     queryKey: ["session", id],
     queryFn: () => getSession(id),
     enabled: !!id,
+    retry: false,
   });
 
   const connectMutation = useMutation({
@@ -47,10 +53,14 @@ export default function TerminalPage() {
     },
   });
 
+  const session = connectMutation.data?.session ?? sessionData?.session;
+  const attachToken = attachTokenOverride ?? connectMutation.data?.session.attachToken ?? "";
+
   const { data: activityData } = useQuery({
     queryKey: ["activities", { sessionId: id }],
     queryFn: () => listActivities({ sessionId: id, limit: 20 }),
-    enabled: !!id,
+    enabled: shouldLoadSessionActivities({ sessionId: id, hasSession: Boolean(session) }),
+    retry: false,
   });
 
   const stopMutation = useMutation({
@@ -66,14 +76,28 @@ export default function TerminalPage() {
   const connectedSession = connectMutation.data;
 
   useEffect(() => {
-    if (!id || !authToken || attachTokenOverride || isConnecting || connectedSession) {
+    if (
+      !shouldAutoConnectSession({
+        sessionId: id,
+        hasAuthToken: authToken.length > 0,
+        hasAttachTokenOverride: attachTokenOverride !== null,
+        isConnecting,
+        hasConnectedSession: Boolean(connectedSession),
+        hasConnectError: connectMutation.isError,
+      })
+    ) {
       return;
     }
     connectSessionMutation();
-  }, [attachTokenOverride, authToken, connectSessionMutation, connectedSession, id, isConnecting]);
-
-  const session = connectMutation.data?.session ?? sessionData?.session;
-  const attachToken = attachTokenOverride ?? connectMutation.data?.session.attachToken ?? "";
+  }, [
+    attachTokenOverride,
+    authToken,
+    connectMutation.isError,
+    connectSessionMutation,
+    connectedSession,
+    id,
+    isConnecting,
+  ]);
 
   useEffect(() => {
     if (!session) {
@@ -87,18 +111,17 @@ export default function TerminalPage() {
   if (!authToken) missing.push("login token");
   if (!attachToken) missing.push("attach token");
 
-  if (!attachTokenOverride && (connectMutation.isIdle || connectMutation.isPending) && authToken) {
+  if (
+    shouldShowSessionPreparing({
+      hasAuthToken: authToken.length > 0,
+      hasAttachTokenOverride: attachTokenOverride !== null,
+      connectStatus: connectMutation.status,
+      hasConnectError: connectMutation.isError,
+    })
+  ) {
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/sessions">
-              <ArrowLeft className="size-4" />
-              {t("sessions.back")}
-            </Link>
-          </Button>
-          <span className="text-sm font-medium">Session {id}</span>
-        </div>
+        <SessionFallbackHeader sessionId={id} copilotHref={sessionCopilotHref} />
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           {t("sessions.preparing")}
         </div>
@@ -113,15 +136,7 @@ export default function TerminalPage() {
         : `Missing ${missing.join(" and ")}`;
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/sessions">
-              <ArrowLeft className="size-4" />
-              {t("sessions.back")}
-            </Link>
-          </Button>
-          <span className="text-sm font-medium">Session {id}</span>
-        </div>
+        <SessionFallbackHeader sessionId={id} copilotHref={sessionCopilotHref} />
         <div className="flex flex-1 items-center justify-center">
           <div className="max-w-md rounded-lg border border-destructive/50 bg-destructive/10 p-6 text-center">
             <h2 className="text-lg font-semibold text-destructive">
@@ -172,7 +187,11 @@ export default function TerminalPage() {
             </Link>
           </Button>
           <Button asChild variant="ghost" size="sm">
-            <Link href={sessionCopilotHref}>
+            <Link
+              href={sessionCopilotHref}
+              aria-label={t("copilot.askCopilot")}
+              title={t("copilot.askCopilot")}
+            >
               <Sparkles className="size-3 sm:mr-2" />
               <span className="hidden sm:inline">{t("copilot.askCopilot")}</span>
             </Link>
@@ -212,6 +231,40 @@ export default function TerminalPage() {
         </div>
         {!focusMode && <ActivityPanel activities={activityData?.activities ?? []} />}
       </div>
+    </div>
+  );
+}
+
+function SessionFallbackHeader({
+  sessionId,
+  copilotHref,
+}: {
+  sessionId: string;
+  copilotHref: string;
+}) {
+  const { t } = useLanguage();
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/sessions">
+            <ArrowLeft className="size-4" />
+            {t("sessions.back")}
+          </Link>
+        </Button>
+        <span className="truncate text-sm font-medium">Session {sessionId}</span>
+      </div>
+      <Button asChild variant="ghost" size="sm">
+        <Link
+          href={copilotHref}
+          aria-label={t("copilot.askCopilot")}
+          title={t("copilot.askCopilot")}
+        >
+          <Sparkles className="size-3 sm:mr-2" />
+          <span className="hidden sm:inline">{t("copilot.askCopilot")}</span>
+        </Link>
+      </Button>
     </div>
   );
 }

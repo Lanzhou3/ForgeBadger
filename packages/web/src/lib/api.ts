@@ -157,6 +157,7 @@ export interface CopilotCapabilities {
   providerConfigured?: boolean;
   toolExecutionEnabled: boolean;
   readTools?: string[];
+  prepareTools?: string[];
   approvalRequiredForWrites?: boolean;
   pendingActionApprovalEnabled?: boolean;
 }
@@ -203,6 +204,67 @@ export interface CopilotPendingAction {
   updatedAt?: number | null;
 }
 
+export interface CopilotConversation {
+  id: string;
+  title: string;
+  source: string;
+  sourceRefId?: string | null;
+  status: "active" | "deleted" | string;
+  createdAt?: number | null;
+  updatedAt?: number | null;
+  lastMessageAt?: number | null;
+  deletedAt?: number | null;
+}
+
+export interface CopilotMessage {
+  id: string;
+  conversationId: string;
+  runId?: string | null;
+  role: "user" | "assistant" | "system" | string;
+  content: string;
+  payload?: Record<string, unknown>;
+  createdAt?: number | null;
+  deletedAt?: number | null;
+}
+
+export type CopilotMemoryItemType = "entry" | "note";
+export type CopilotMemoryScope = "global" | "project" | "session";
+
+export interface CopilotMemoryEntry {
+  id: string;
+  type?: "entry";
+  userId: string;
+  kind: string;
+  scope: CopilotMemoryScope | string;
+  projectId?: string | null;
+  sourceRunId?: string | null;
+  redactedText: string;
+  metadata?: Record<string, unknown>;
+  createdAt?: number | null;
+  updatedAt?: number | null;
+}
+
+export interface CopilotMemoryNote {
+  id: string;
+  type?: "note";
+  userId: string;
+  projectId?: string | null;
+  sessionId?: string | null;
+  sourceRunId?: string | null;
+  redactedText: string;
+  metadata?: Record<string, unknown>;
+  createdAt?: number | null;
+}
+
+export interface CopilotMemorySearchResult {
+  id: string;
+  type: CopilotMemoryItemType;
+  scope: CopilotMemoryScope | string;
+  projectId?: string | null;
+  snippet: string;
+  rank: number;
+}
+
 export interface CopilotPendingActionDecision {
   action: CopilotPendingAction;
   run?: CopilotRun;
@@ -210,12 +272,47 @@ export interface CopilotPendingActionDecision {
   pendingActions?: CopilotPendingAction[];
 }
 
+export type CopilotSource = "dashboard" | "project" | "session" | "settings" | "copilot" | "models";
+
 export interface CreateCopilotRunInput {
   prompt: string;
   providerProfileId?: string;
   modelProfileId?: string;
-  source?: "dashboard" | "project" | "session" | "settings" | "copilot";
+  source?: CopilotSource;
   sourceRefId?: string;
+  async?: boolean;
+}
+
+export interface CreateCopilotConversationInput {
+  title: string;
+  source?: CopilotSource;
+  sourceRefId?: string;
+}
+
+export interface UpdateCopilotConversationInput {
+  title: string;
+}
+
+export interface CreateCopilotConversationMessageInput extends CreateCopilotRunInput {}
+
+export interface ListCopilotMemoryEntriesInput {
+  scope?: CopilotMemoryScope;
+  projectId?: string;
+  limit?: number;
+}
+
+export interface ListCopilotMemoryNotesInput {
+  projectId?: string;
+  sessionId?: string;
+  limit?: number;
+}
+
+export interface SearchCopilotMemoryInput {
+  query: string;
+  scope?: CopilotMemoryScope;
+  projectId?: string;
+  includeNotes?: boolean;
+  limit?: number;
 }
 
 export interface DependencyStatus {
@@ -474,7 +571,9 @@ export interface ModelGroup {
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderApplyAdapter = "claude" | "opencode" | "codex";
+export type ProviderApplyAdapter = "claude" | "opencode" | "openforge-copilot" | "codex";
+export type ProviderSupportedAdapter = "claude" | "opencode";
+export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
 export interface ProviderCatalogModel {
   id: string;
@@ -489,15 +588,40 @@ export interface ProviderCatalogPreset {
   name: string;
   description: string;
   baseUrl: string;
+  region: string;
+  productType: ProviderProductType;
   authType: ProviderAuthType;
   apiFormat: ProviderApiFormat;
-  supportedAdapters: Array<"claude" | "opencode">;
-  modelSource: "static" | "dynamic";
+  supportedAdapters: ProviderSupportedAdapter[];
+  modelSource: "static" | "dynamic" | "models.dev";
+  endpoints: {
+    anthropic?: { baseUrl: string };
+    openai?: { baseUrl: string };
+  };
   modelFetch?: {
     strategy: "openai-compatible";
     modelsUrl?: string;
   };
   defaultModels: ProviderCatalogModel[];
+  source?: "verified" | "models.dev";
+  claude?: {
+    env: {
+      baseUrl: string;
+      authToken: string;
+      model: string;
+      smallFastModel: string;
+      defaultSonnetModel: string;
+      defaultHaikuModel: string;
+      defaultOpusModel: string;
+      apiTimeoutMs: string;
+    };
+    defaultSmallFastModel?: string;
+  };
+  opencode?: {
+    npm: string;
+    api?: string;
+    env: string[];
+  };
 }
 
 export interface ProviderProfile {
@@ -505,9 +629,14 @@ export interface ProviderProfile {
   providerKey: string;
   name: string;
   baseUrl: string | null;
+  anthropicBaseUrl?: string | null;
+  openaiBaseUrl?: string | null;
+  region?: string | null;
+  productType?: ProviderProductType | null;
   authType: ProviderAuthType;
   apiFormat: ProviderApiFormat;
-  supportedAdapters: Array<"claude" | "opencode">;
+  supportedAdapters: ProviderSupportedAdapter[];
+  opencodeNpm?: string | null;
   status: string;
 }
 
@@ -517,6 +646,8 @@ export interface ModelProfile {
   providerKey: string;
   providerName: string;
   baseUrl: string | null;
+  anthropicBaseUrl?: string | null;
+  openaiBaseUrl?: string | null;
   name: string;
   modelId: string;
   capabilities: string[];
@@ -544,6 +675,14 @@ export interface ProviderApplyPreview {
   secretEnvNames: string[];
   changedFiles: Array<{ relativePath: string; operation: "create" | "update" }>;
   backupPath?: string;
+  files?: Array<{ relativePath: string; content: string }>;
+  internalDefault?: {
+    scope: "user";
+    providerProfileId: string;
+    modelProfileId: string;
+    providerName: string;
+    modelName: string;
+  };
 }
 
 export interface CodexSubscriptionStatus {
@@ -1388,6 +1527,110 @@ export async function listCopilotRuns(limit?: number): Promise<{ runs: CopilotRu
   return fetchJson(`/api/v1/copilot/runs${query}`) as Promise<{ runs: CopilotRun[] }>;
 }
 
+export async function listCopilotMemoryEntries(
+  input: ListCopilotMemoryEntriesInput = {}
+): Promise<{ entries: CopilotMemoryEntry[] }> {
+  const query = buildCopilotMemoryQuery(input);
+  return fetchJson(`/api/v1/copilot/memory/entries${query}`) as Promise<{ entries: CopilotMemoryEntry[] }>;
+}
+
+export async function listCopilotMemoryNotes(
+  input: ListCopilotMemoryNotesInput = {}
+): Promise<{ notes: CopilotMemoryNote[] }> {
+  const query = buildCopilotMemoryQuery(input);
+  return fetchJson(`/api/v1/copilot/memory/notes${query}`) as Promise<{ notes: CopilotMemoryNote[] }>;
+}
+
+export async function searchCopilotMemory(
+  input: SearchCopilotMemoryInput
+): Promise<{ results: CopilotMemorySearchResult[] }> {
+  const query = buildCopilotMemoryQuery(input);
+  return fetchJson(`/api/v1/copilot/memory/search${query}`) as Promise<{ results: CopilotMemorySearchResult[] }>;
+}
+
+export async function getCopilotMemoryItem(
+  type: CopilotMemoryItemType,
+  id: string
+): Promise<{ item: CopilotMemoryEntry | CopilotMemoryNote }> {
+  return fetchJson(`/api/v1/copilot/memory/${type}/${encodeURIComponent(id)}`) as Promise<{
+    item: CopilotMemoryEntry | CopilotMemoryNote;
+  }>;
+}
+
+export async function deleteCopilotMemoryItem(
+  type: CopilotMemoryItemType,
+  id: string
+): Promise<{ item: CopilotMemoryEntry | CopilotMemoryNote }> {
+  return fetchJson(`/api/v1/copilot/memory/${type}/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }) as Promise<{ item: CopilotMemoryEntry | CopilotMemoryNote }>;
+}
+
+export async function listCopilotConversations(limit?: number): Promise<{ conversations: CopilotConversation[] }> {
+  const query = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
+  return fetchJson(`/api/v1/copilot/conversations${query}`) as Promise<{ conversations: CopilotConversation[] }>;
+}
+
+export async function createCopilotConversation(
+  input: CreateCopilotConversationInput
+): Promise<{ conversation: CopilotConversation }> {
+  return fetchJson("/api/v1/copilot/conversations", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ conversation: CopilotConversation }>;
+}
+
+export async function updateCopilotConversation(
+  id: string,
+  input: UpdateCopilotConversationInput
+): Promise<{ conversation: CopilotConversation }> {
+  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  }) as Promise<{ conversation: CopilotConversation }>;
+}
+
+export async function deleteCopilotConversation(id: string): Promise<{ conversation: CopilotConversation }> {
+  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }) as Promise<{ conversation: CopilotConversation }>;
+}
+
+export async function listCopilotConversationMessages(
+  conversationId: string
+): Promise<{ messages: CopilotMessage[] }> {
+  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/messages`) as Promise<{
+    messages: CopilotMessage[];
+  }>;
+}
+
+export async function createCopilotConversationMessage(
+  conversationId: string,
+  input: CreateCopilotConversationMessageInput
+): Promise<{
+  messages: CopilotMessage[];
+  run: CopilotRun;
+  events: CopilotRunEvent[];
+  pendingActions?: CopilotPendingAction[];
+}> {
+  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    timeoutMs: COPILOT_RUN_API_TIMEOUT_MS,
+  }) as Promise<{
+    messages: CopilotMessage[];
+    run: CopilotRun;
+    events: CopilotRunEvent[];
+    pendingActions?: CopilotPendingAction[];
+  }>;
+}
+
+export async function deleteCopilotMessage(id: string): Promise<{ message: CopilotMessage }> {
+  return fetchJson(`/api/v1/copilot/messages/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }) as Promise<{ message: CopilotMessage }>;
+}
+
 export async function getCopilotRun(
   id: string
 ): Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions: CopilotPendingAction[] }> {
@@ -1422,6 +1665,22 @@ export async function rejectCopilotPendingAction(
   return fetchJson(`/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/reject`, {
     method: "POST",
   }) as Promise<CopilotPendingActionDecision>;
+}
+
+function buildCopilotMemoryQuery(
+  input: ListCopilotMemoryEntriesInput | ListCopilotMemoryNotesInput | SearchCopilotMemoryInput
+): string {
+  const searchParams = new URLSearchParams();
+  if ("query" in input) searchParams.set("query", input.query);
+  if ("scope" in input && input.scope) searchParams.set("scope", input.scope);
+  if ("projectId" in input && input.projectId) searchParams.set("projectId", input.projectId);
+  if ("sessionId" in input && input.sessionId) searchParams.set("sessionId", input.sessionId);
+  if ("includeNotes" in input && input.includeNotes !== undefined) {
+    searchParams.set("includeNotes", String(input.includeNotes));
+  }
+  if (input.limit !== undefined) searchParams.set("limit", String(input.limit));
+  const query = searchParams.toString();
+  return query ? `?${query}` : "";
 }
 
 // Agents
@@ -1808,6 +2067,10 @@ export async function createModelProvider(data: {
   name?: string;
   providerKey?: string;
   baseUrl?: string;
+  anthropicBaseUrl?: string;
+  openaiBaseUrl?: string;
+  region?: string;
+  productType?: ProviderProductType;
   authType?: ProviderAuthType;
   apiFormat?: ProviderApiFormat;
   supportedAdapters?: Array<"claude" | "opencode">;
@@ -1896,7 +2159,7 @@ export async function syncProviderModels(
 
 export async function previewProviderApply(
   providerId: string,
-  data: { adapter: ProviderApplyAdapter; projectRoot: string; modelProfileId?: string; credentialId?: string }
+  data: { adapter: ProviderApplyAdapter; projectRoot?: string; modelProfileId?: string; credentialId?: string }
 ): Promise<{ preview: ProviderApplyPreview }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/preview-apply`, {
     method: "POST",
@@ -1906,7 +2169,7 @@ export async function previewProviderApply(
 
 export async function applyProviderConfig(
   providerId: string,
-  data: { adapter: ProviderApplyAdapter; projectRoot: string; modelProfileId?: string; credentialId?: string }
+  data: { adapter: ProviderApplyAdapter; projectRoot?: string; modelProfileId?: string; credentialId?: string }
 ): Promise<{ result: ProviderApplyPreview }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/apply`, {
     method: "POST",

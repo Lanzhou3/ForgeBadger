@@ -13,246 +13,64 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("Copilot page surfaces run-list errors and keeps prompt accessible", async ({ page }) => {
-  let allowRunListSuccess = false;
-  await mockCopilotApis(page, {
-    onRuns: async (route) => {
-      if (!allowRunListSuccess) {
-        await route.fulfill({
-          status: 500,
-          json: { code: 1, message: "run list failed" },
-        });
-        return;
-      }
-      await route.fulfill({ json: envelope({ runs: [] }) });
-    },
-  });
+test("Copilot chat blocks sending when no provider is configured", async ({ page }) => {
+  await mockCopilotApis(page, { providerConfigured: false });
 
   await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Summarize release state");
 
-  await expect(page.getByLabel("Copilot prompt")).toBeVisible();
-  await expect(page.getByRole("alert").filter({ hasText: "Failed to load Copilot runs" })).toBeVisible();
-  await expect(page.getByText("No Copilot runs yet")).toHaveCount(0);
-
-  allowRunListSuccess = true;
-  await page.getByRole("button", { name: "Retry" }).click();
-
-  await expect(page.getByRole("alert").filter({ hasText: "Failed to load Copilot runs" })).toHaveCount(0);
-  await expect(page.getByText("No Copilot runs yet").first()).toBeVisible();
-});
-
-test("Copilot page surfaces selected run detail errors", async ({ page }) => {
-  await mockCopilotApis(page, {
-    onRunDetail: async (route) => {
-      await route.fulfill({
-        status: 500,
-        json: { code: 1, message: "run detail failed" },
-      });
-    },
-  });
-
-  await page.goto("/copilot");
-
-  await expect(page.getByRole("alert").filter({ hasText: "Failed to load Copilot run details" })).toBeVisible();
-  await expect(page.getByText("No timeline events yet.")).toHaveCount(0);
-});
-
-test("Copilot page shows failed run error details without timeline events", async ({ page }) => {
-  const failedRun = {
-    id: "run-1",
-    status: "failed",
-    goal: "Summarize Gateway health",
-    source: "copilot",
-    errorCode: "copilot_model_request_failed",
-    errorMessage: "Copilot model request failed",
-    completedAt: 1778490000000,
-  };
-  await mockCopilotApis(page, {
-    runs: [failedRun],
-    runDetail: {
-      run: failedRun,
-      events: [],
-      pendingActions: [],
-    },
-  });
-
-  await page.goto("/copilot");
-
-  await expect(page.getByRole("alert").filter({ hasText: "Copilot run failed" })).toBeVisible();
-  await expect(page.getByText("copilot_model_request_failed")).toBeVisible();
-  await expect(page.getByText("Copilot model request failed")).toBeVisible();
-});
-
-test("Copilot page shows provider and model metadata for selected runs", async ({ page }) => {
-  const run = {
-    id: "run-1",
-    status: "completed",
-    goal: "Summarize Gateway health",
-    source: "copilot",
-    providerProfileId: "provider-openai",
-    modelProfileId: "model-gpt-5",
-    providerProfileName: "OpenAI production",
-    modelProfileName: "GPT-5 coding",
-    stepCount: 3,
-    maxSteps: 8,
-    completedAt: 1778490000000,
-  };
-  await mockCopilotApis(page, {
-    runs: [run],
-    runDetail: {
-      run,
-      events: [],
-      pendingActions: [],
-    },
-  });
-
-  await page.goto("/copilot");
-
-  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("OpenAI production");
-  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("GPT-5 coding");
-  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("3/8");
-  await expect(page.getByLabel("Copilot run metadata for Summarize Gateway health")).toContainText("OpenAI production");
-  await expect(page.getByLabel("Copilot run metadata for Summarize Gateway health")).toContainText("GPT-5 coding");
-  await expect(page.getByLabel("Copilot run metadata for Summarize Gateway health")).toContainText("3/8");
-});
-
-test("Copilot page disables start when no provider is configured", async ({ page }) => {
-  await mockCopilotApis(page, {
-    providerConfigured: false,
-    runs: [],
-  });
-
-  await page.goto("/copilot");
-  await page.getByLabel("Copilot prompt").fill("Summarize release state");
-
-  await expect(page.getByText("Configure an OpenAI or Anthropic model provider first.").first()).toBeVisible();
+  await expect(page.getByText("Configure a Copilot-compatible model provider first.").first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
-  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
 });
 
-test("Copilot page disables start when model provider selection cannot load", async ({ page }) => {
+test("Copilot chat creates a conversation and sends messages", async ({ page }) => {
+  let createConversationBody: Record<string, unknown> | undefined;
+  let sendBody: Record<string, unknown> | undefined;
   await mockCopilotApis(page, {
-    onModelProviders: async (route) => {
-      await route.fulfill({
-        status: 500,
-        json: { code: 1, message: "model provider list failed" },
-      });
-    },
-    runs: [],
-  });
-
-  await page.goto("/copilot");
-  await page.getByLabel("Copilot prompt").fill("Summarize release state");
-
-  await expect(page.getByRole("alert").filter({ hasText: "Failed to load Copilot model providers" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
-});
-
-test("Copilot page disables start while another run is live", async ({ page }) => {
-  await mockCopilotApis(page, {
-    runs: [{
-      id: "run-1",
-      status: "completed",
-      goal: "Previous completed run",
-      source: "copilot",
-    }, {
-      id: "run-live",
-      status: "running",
-      goal: "Summarize current release state",
-      source: "copilot",
-    }],
-  });
-
-  await page.goto("/copilot");
-  await page.getByLabel("Copilot prompt").fill("Start a second run");
-
-  await expect(page.getByText("A Copilot run is already active.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
-});
-
-test("Copilot page sends the selected provider and model when starting a run", async ({ page }) => {
-  let createBody: Record<string, unknown> | undefined;
-  await mockCopilotApis(page, {
-    modelProviders: {
-      providers: [
-        {
-          id: "provider-openai",
-          providerKey: "openai",
-          name: "OpenAI production",
-          baseUrl: "https://api.openai.com/v1",
-          authType: "api_key",
-          apiFormat: "openai",
-          supportedAdapters: ["opencode"],
-          status: "active",
-        },
-        {
-          id: "provider-anthropic",
-          providerKey: "anthropic",
-          name: "Anthropic production",
-          baseUrl: "https://api.anthropic.com",
-          authType: "api_key",
-          apiFormat: "anthropic",
-          supportedAdapters: ["opencode"],
-          status: "active",
-        },
-      ],
-      models: [
-        {
-          id: "model-gpt-5",
-          providerProfileId: "provider-openai",
-          providerKey: "openai",
-          providerName: "OpenAI production",
-          baseUrl: "https://api.openai.com/v1",
-          name: "GPT-5 coding",
-          modelId: "gpt-5.1",
-          capabilities: ["code"],
-          status: "active",
-          isDefault: true,
-        },
-        {
-          id: "model-claude-opus",
-          providerProfileId: "provider-anthropic",
-          providerKey: "anthropic",
-          providerName: "Anthropic production",
-          baseUrl: "https://api.anthropic.com",
-          name: "Claude Opus",
-          modelId: "claude-opus-4.5",
-          capabilities: ["code"],
-          status: "active",
-          isDefault: true,
-        },
-      ],
-      credentials: [
-        {
-          id: "credential-openai",
-          providerProfileId: "provider-openai",
-          label: "OpenAI test key",
-          status: "active",
-          secretPreview: "openai-preview",
-        },
-        {
-          id: "credential-anthropic",
-          providerProfileId: "provider-anthropic",
-          label: "Anthropic test key",
-          status: "active",
-          secretPreview: "anthropic-preview",
-        },
-      ],
-    },
-    onCreateRun: async (route) => {
-      createBody = route.request().postDataJSON() as Record<string, unknown>;
+    onCreateConversation: async (route) => {
+      createConversationBody = route.request().postDataJSON() as Record<string, unknown>;
       await route.fulfill({
         json: envelope({
+          conversation: {
+            id: "conversation-1",
+            title: "Summarize Gateway health",
+            source: "copilot",
+            status: "active",
+            createdAt: 1778490000000,
+            updatedAt: 1778490000000,
+            lastMessageAt: 1778490000000,
+          },
+        }),
+      });
+    },
+    onSendMessage: async (route) => {
+      sendBody = route.request().postDataJSON() as Record<string, unknown>;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await route.fulfill({
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Summarize Gateway health",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "Gateway is healthy.",
+              createdAt: 1778490000001,
+            },
+          ],
           run: {
-            id: "run-selected-model",
+            id: "run-1",
             status: "completed",
             goal: "Summarize Gateway health",
             source: "copilot",
-            providerProfileId: "provider-anthropic",
-            providerProfileName: "Anthropic production",
-            modelProfileId: "model-claude-opus",
-            modelProfileName: "Claude Opus",
           },
           events: [],
           pendingActions: [],
@@ -262,92 +80,51 @@ test("Copilot page sends the selected provider and model when starting a run", a
   });
 
   await page.goto("/copilot");
-  await page.getByLabel("Copilot provider").selectOption("provider-anthropic");
-  await expect(page.getByLabel("Copilot model")).toHaveValue("model-claude-opus");
-  await page.getByLabel("Copilot prompt").fill("Summarize Gateway health");
-  await page.getByRole("button", { name: "Start" }).click();
+  await page.getByPlaceholder(/Ask Copilot/).fill("Summarize Gateway health");
+  await page.getByRole("button", { name: "Send" }).click();
 
-  await expect.poll(() => createBody).toMatchObject({
+  await expect(page.getByText("Summarize Gateway health").last()).toBeVisible();
+  await expect(page.getByText("Copilot is working...")).toBeVisible();
+  await expect.poll(() => createConversationBody).toMatchObject({
+    title: "Summarize Gateway health",
+    source: "copilot",
+  });
+  await expect.poll(() => sendBody).toMatchObject({
     prompt: "Summarize Gateway health",
     source: "copilot",
-    providerProfileId: "provider-anthropic",
-    modelProfileId: "model-claude-opus",
   });
-  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("Anthropic production");
-  await expect(page.getByLabel("Selected Copilot run metadata")).toContainText("Claude Opus");
+  await expect(page.getByText("Gateway is healthy.")).toBeVisible();
 });
 
-test("Copilot page skips providers without active credentials", async ({ page }) => {
-  let createBody: Record<string, unknown> | undefined;
+test("Copilot chat sends the prompt with Enter", async ({ page }) => {
+  let sendBody: Record<string, unknown> | undefined;
   await mockCopilotApis(page, {
-    modelProviders: {
-      providers: [
-        {
-          id: "provider-missing-key",
-          providerKey: "openai",
-          name: "OpenAI missing key",
-          baseUrl: "https://api.openai.com/v1",
-          authType: "api_key",
-          apiFormat: "openai",
-          supportedAdapters: ["opencode"],
-          status: "active",
-        },
-        {
-          id: "provider-ready",
-          providerKey: "anthropic",
-          name: "Anthropic ready",
-          baseUrl: "https://api.anthropic.com",
-          authType: "api_key",
-          apiFormat: "anthropic",
-          supportedAdapters: ["opencode"],
-          status: "active",
-        },
-      ],
-      models: [
-        {
-          id: "model-missing-key",
-          providerProfileId: "provider-missing-key",
-          providerKey: "openai",
-          providerName: "OpenAI missing key",
-          baseUrl: "https://api.openai.com/v1",
-          name: "GPT without key",
-          modelId: "gpt-5.1",
-          capabilities: ["code"],
-          status: "active",
-          isDefault: true,
-        },
-        {
-          id: "model-ready",
-          providerProfileId: "provider-ready",
-          providerKey: "anthropic",
-          providerName: "Anthropic ready",
-          baseUrl: "https://api.anthropic.com",
-          name: "Claude ready",
-          modelId: "claude-opus-4.5",
-          capabilities: ["code"],
-          status: "active",
-          isDefault: true,
-        },
-      ],
-      credentials: [{
-        id: "credential-ready",
-        providerProfileId: "provider-ready",
-        label: "Ready key",
-        status: "active",
-        secretPreview: "secret-preview",
-      }],
-    },
-    onCreateRun: async (route) => {
-      createBody = route.request().postDataJSON() as Record<string, unknown>;
+    onSendMessage: async (route) => {
+      sendBody = route.request().postDataJSON() as Record<string, unknown>;
       await route.fulfill({
         json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Open the latest session",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "Opening the latest session.",
+              createdAt: 1778490000001,
+            },
+          ],
           run: {
-            id: "run-ready-provider",
+            id: "run-1",
             status: "completed",
-            goal: "Summarize Gateway health",
+            goal: "Open the latest session",
             source: "copilot",
-            providerProfileId: "provider-ready",
-            modelProfileId: "model-ready",
           },
           events: [],
           pendingActions: [],
@@ -357,98 +134,37 @@ test("Copilot page skips providers without active credentials", async ({ page })
   });
 
   await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Open the latest session");
+  await page.keyboard.press("Enter");
 
-  await expect(page.getByLabel("Copilot provider")).toHaveValue("provider-ready");
-  await expect(page.getByText("OpenAI missing key")).toHaveCount(0);
-  await page.getByLabel("Copilot prompt").fill("Summarize Gateway health");
-  await page.getByRole("button", { name: "Start" }).click();
-
-  await expect.poll(() => createBody).toMatchObject({
-    providerProfileId: "provider-ready",
-    modelProfileId: "model-ready",
+  await expect.poll(() => sendBody).toMatchObject({
+    prompt: "Open the latest session",
+    source: "copilot",
   });
+  await expect(page.getByText("Opening the latest session.")).toBeVisible();
 });
 
-test("Copilot page skips providers without active models", async ({ page }) => {
-  let createBody: Record<string, unknown> | undefined;
+test("Copilot chat keeps Shift+Enter as a prompt newline", async ({ page }) => {
+  let sendBody: Record<string, unknown> | undefined;
   await mockCopilotApis(page, {
-    modelProviders: {
-      providers: [
-        {
-          id: "provider-no-models",
-          providerKey: "openai",
-          name: "OpenAI no active models",
-          baseUrl: "https://api.openai.com/v1",
-          authType: "api_key",
-          apiFormat: "openai",
-          supportedAdapters: ["opencode"],
-          status: "active",
-        },
-        {
-          id: "provider-ready",
-          providerKey: "anthropic",
-          name: "Anthropic ready",
-          baseUrl: "https://api.anthropic.com",
-          authType: "api_key",
-          apiFormat: "anthropic",
-          supportedAdapters: ["opencode"],
-          status: "active",
-        },
-      ],
-      models: [
-        {
-          id: "model-disabled",
-          providerProfileId: "provider-no-models",
-          providerKey: "openai",
-          providerName: "OpenAI no active models",
-          baseUrl: "https://api.openai.com/v1",
-          name: "Disabled GPT",
-          modelId: "gpt-5.1",
-          capabilities: ["code"],
-          status: "disabled",
-          isDefault: true,
-        },
-        {
-          id: "model-ready",
-          providerProfileId: "provider-ready",
-          providerKey: "anthropic",
-          providerName: "Anthropic ready",
-          baseUrl: "https://api.anthropic.com",
-          name: "Claude ready",
-          modelId: "claude-opus-4.5",
-          capabilities: ["code"],
-          status: "active",
-          isDefault: true,
-        },
-      ],
-      credentials: [
-        {
-          id: "credential-no-models",
-          providerProfileId: "provider-no-models",
-          label: "Configured key",
-          status: "active",
-          secretPreview: "secret-preview",
-        },
-        {
-          id: "credential-ready",
-          providerProfileId: "provider-ready",
-          label: "Ready key",
-          status: "active",
-          secretPreview: "secret-preview",
-        },
-      ],
-    },
-    onCreateRun: async (route) => {
-      createBody = route.request().postDataJSON() as Record<string, unknown>;
+    onSendMessage: async (route) => {
+      sendBody = route.request().postDataJSON() as Record<string, unknown>;
       await route.fulfill({
         json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Check active sessions\nthen summarize",
+              createdAt: 1778490000000,
+            },
+          ],
           run: {
-            id: "run-ready-provider",
+            id: "run-1",
             status: "completed",
-            goal: "Summarize Gateway health",
+            goal: "Check active sessions",
             source: "copilot",
-            providerProfileId: "provider-ready",
-            modelProfileId: "model-ready",
           },
           events: [],
           pendingActions: [],
@@ -458,431 +174,1091 @@ test("Copilot page skips providers without active models", async ({ page }) => {
   });
 
   await page.goto("/copilot");
+  const prompt = page.getByPlaceholder(/Ask Copilot/);
+  await prompt.fill("Check active sessions");
+  await page.keyboard.down("Shift");
+  await page.keyboard.press("Enter");
+  await page.keyboard.up("Shift");
+  await prompt.pressSequentially("then summarize");
 
-  await expect(page.getByLabel("Copilot provider")).toHaveValue("provider-ready");
-  await expect(page.getByText("OpenAI no active models")).toHaveCount(0);
-  await page.getByLabel("Copilot prompt").fill("Summarize Gateway health");
-  await page.getByRole("button", { name: "Start" }).click();
+  await expect(prompt).toHaveValue("Check active sessions\nthen summarize");
+  expect(sendBody).toBeUndefined();
 
-  await expect.poll(() => createBody).toMatchObject({
-    providerProfileId: "provider-ready",
-    modelProfileId: "model-ready",
+  await page.keyboard.press("Enter");
+  await expect.poll(() => sendBody).toMatchObject({
+    prompt: "Check active sessions\nthen summarize",
+    source: "copilot",
   });
 });
 
-test("Copilot page links to provider setup when no providers have active credentials", async ({ page }) => {
+test("Copilot new conversation button opens a blank draft instead of reselecting history", async ({ page }) => {
   await mockCopilotApis(page, {
-    providerConfigured: true,
-    runs: [],
-    modelProviders: {
-      providers: [
-        {
-          id: "provider-missing-key",
-          providerKey: "openai",
-          name: "OpenAI missing key",
-          baseUrl: "https://api.openai.com/v1",
-          authType: "api_key",
-          apiFormat: "openai",
-          supportedAdapters: ["opencode"],
-          status: "active",
-        },
-      ],
-      models: [
-        {
-          id: "model-missing-key",
-          providerProfileId: "provider-missing-key",
-          providerKey: "openai",
-          providerName: "OpenAI missing key",
-          baseUrl: "https://api.openai.com/v1",
-          name: "GPT without key",
-          modelId: "gpt-5.1",
-          capabilities: ["code"],
-          status: "active",
-          isDefault: true,
-        },
-      ],
-      credentials: [],
+    initialConversations: [{
+      id: "conversation-1",
+      title: "Existing conversation",
+      source: "copilot",
+      status: "active",
+    }],
+    initialMessages: [{
+      id: "message-assistant",
+      conversationId: "conversation-1",
+      role: "assistant",
+      content: "Existing answer",
+    }],
+  });
+
+  await page.goto("/copilot");
+  await expect(page.getByText("Existing answer")).toBeVisible();
+  await page.getByRole("button", { name: "New conversation" }).click();
+
+  await expect(page.getByText("Start with a question")).toBeVisible();
+  await expect(page.getByText("Existing answer")).toHaveCount(0);
+});
+
+test("Copilot deletes a conversation and returns to an empty draft", async ({ page }) => {
+  await mockCopilotApis(page, {
+    initialConversations: [{
+      id: "conversation-1",
+      title: "Conversation to delete",
+      source: "copilot",
+      status: "active",
+    }],
+    initialMessages: [{
+      id: "message-assistant",
+      conversationId: "conversation-1",
+      role: "assistant",
+      content: "Existing answer",
+    }],
+  });
+
+  await page.goto("/copilot");
+  await expect(page.getByText("Existing answer")).toBeVisible();
+
+  await page.getByRole("button", { name: "Delete conversation" }).click();
+
+  await expect(page.getByText("No conversations yet")).toBeVisible();
+  await expect(page.getByText("Start with a question")).toBeVisible();
+  await expect(page.getByText("Existing answer")).toHaveCount(0);
+});
+
+test("Copilot deletes an individual message from the current conversation", async ({ page }) => {
+  await mockCopilotApis(page, {
+    initialConversations: [{
+      id: "conversation-1",
+      title: "Conversation with deletable message",
+      source: "copilot",
+      status: "active",
+    }],
+    initialMessages: [{
+      id: "message-user",
+      conversationId: "conversation-1",
+      role: "user",
+      content: "Remove this message",
+    }, {
+      id: "message-assistant",
+      conversationId: "conversation-1",
+      role: "assistant",
+      content: "This answer should remain visible.",
+    }],
+  });
+
+  await page.goto("/copilot");
+  await expect(page.getByText("Remove this message")).toBeVisible();
+  await expect(page.getByText("This answer should remain visible.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Delete message" }).first().click();
+
+  await expect(page.getByText("Remove this message")).toHaveCount(0);
+  await expect(page.getByText("This answer should remain visible.")).toBeVisible();
+});
+
+test("Copilot renders assistant Markdown as rich chat content", async ({ page }) => {
+  await mockCopilotApis(page, {
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "List projects",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: [
+                "**Current projects**",
+                "",
+                "## Next steps",
+                "1. Open the active session",
+                "2. Capture terminal output",
+                "",
+                "> Use approvals before sending terminal input.",
+                "",
+                "- [x] Project catalog loaded",
+                "- [ ] Session snapshot captured",
+                "",
+                "| Project | Status |",
+                "| --- | --- |",
+                "| aether-glass | active |",
+              ].join("\n"),
+              createdAt: 1778490000001,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "completed",
+            goal: "List projects",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
     },
   });
 
   await page.goto("/copilot");
-  await page.getByLabel("Copilot prompt").fill("Summarize Gateway health");
+  await page.getByPlaceholder(/Ask Copilot/).fill("List projects");
+  await page.getByRole("button", { name: "Send" }).click();
 
-  await expect(page.getByText("A compatible model provider needs an active API key.")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
-  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
+  await expect(page.getByRole("table")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Next steps" })).toBeVisible();
+  await expect(page.getByRole("list").filter({ hasText: "Open the active session" })).toBeVisible();
+  await expect(page.getByText("Use approvals before sending terminal input.")).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "Project catalog loaded" })).toBeChecked();
+  await expect(page.getByRole("cell", { name: "aether-glass" })).toBeVisible();
 });
 
-test("Copilot page explains when compatible providers have no active models", async ({ page }) => {
+test("Copilot renders multiple assistant bubbles from one run", async ({ page }) => {
   await mockCopilotApis(page, {
-    providerConfigured: true,
-    runs: [],
-    modelProviders: {
-      providers: [
-        {
-          id: "provider-no-model",
-          providerKey: "anthropic",
-          name: "Anthropic without model",
-          baseUrl: "https://api.anthropic.com",
-          authType: "api_key",
-          apiFormat: "anthropic",
-          supportedAdapters: ["opencode"],
-          status: "active",
-        },
-      ],
-      models: [
-        {
-          id: "model-disabled",
-          providerProfileId: "provider-no-model",
-          providerKey: "anthropic",
-          providerName: "Anthropic without model",
-          baseUrl: "https://api.anthropic.com",
-          name: "Disabled Claude",
-          modelId: "claude-opus-4.5",
-          capabilities: ["code"],
-          status: "disabled",
-          isDefault: true,
-        },
-      ],
-      credentials: [{
-        id: "credential-ready",
-        providerProfileId: "provider-no-model",
-        label: "Ready key",
-        status: "active",
-        secretPreview: "secret-preview",
-      }],
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Diagnose project state",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant-plan",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "I will inspect the project list first.",
+              createdAt: 1778490000001,
+            },
+            {
+              id: "message-assistant-result",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "No active sessions are currently attached.",
+              createdAt: 1778490000002,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "completed",
+            goal: "Diagnose project state",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
     },
   });
 
   await page.goto("/copilot");
-  await page.getByLabel("Copilot prompt").fill("Summarize Gateway health");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Diagnose project state");
+  await page.getByRole("button", { name: "Send" }).click();
 
-  await expect(page.getByText("A compatible model provider needs an active model.")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
-  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
+  await expect(page.getByText("I will inspect the project list first.")).toBeVisible();
+  await expect(page.getByText("No active sessions are currently attached.")).toBeVisible();
 });
 
-test("Copilot page starts runs with launch context from the URL", async ({ page }) => {
-  let createBody: Record<string, unknown> | undefined;
+test("Copilot renders tool events and pending approvals in the chat flow", async ({ page }) => {
   await mockCopilotApis(page, {
-    onCreateRun: async (route) => {
-      createBody = route.request().postDataJSON() as Record<string, unknown>;
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Create a Claude Code session",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "Checking whether an existing session is available.",
+              createdAt: 1778490000001,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Create a Claude Code session",
+            source: "copilot",
+          },
+          events: [
+            {
+              id: "event-tool-call",
+              runId: "run-1",
+              type: "tool_call_requested",
+              sequence: 1,
+              message: "openforge.propose_session_create",
+            },
+            {
+              id: "event-tool-result",
+              runId: "run-1",
+              type: "tool_result",
+              sequence: 2,
+              message: "openforge.propose_session_create",
+              payload: {
+                output: {
+                  actionId: "action-1",
+                  type: "openforge.propose_session_create",
+                  status: "pending",
+                },
+              },
+            },
+          ],
+          pendingActions: [
+            {
+              id: "action-1",
+              runId: "run-1",
+              type: "openforge.propose_session_create",
+              status: "pending",
+              input: {
+                projectId: "project-1",
+                aiTool: "claude",
+                name: "Claude Code",
+              },
+            },
+          ],
+        }),
+      });
+    },
+    onGetRun: async (route) => {
       await route.fulfill({
         json: envelope({
           run: {
-            id: "run-project-context",
-            status: "completed",
-            goal: "Project readiness",
-            source: "project",
-            sourceRefId: "project-1",
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Create a Claude Code session",
+            source: "copilot",
           },
-          events: [],
-          pendingActions: [],
+          events: [
+            {
+              id: "event-tool-call",
+              runId: "run-1",
+              type: "tool_call_requested",
+              sequence: 1,
+              message: "openforge.propose_session_create",
+            },
+            {
+              id: "event-tool-result",
+              runId: "run-1",
+              type: "tool_result",
+              sequence: 2,
+              message: "openforge.propose_session_create",
+              payload: {
+                output: {
+                  actionId: "action-1",
+                  type: "openforge.propose_session_create",
+                  status: "pending",
+                },
+              },
+            },
+          ],
+          pendingActions: [
+            {
+              id: "action-1",
+              runId: "run-1",
+              type: "openforge.propose_session_create",
+              status: "pending",
+              input: {
+                projectId: "project-1",
+                aiTool: "claude",
+                name: "Claude Code",
+              },
+            },
+          ],
         }),
       });
     },
   });
 
-  await page.goto("/copilot?source=project&sourceRefId=project-1&intent=project_readiness");
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Create a Claude Code session");
+  await page.getByRole("button", { name: "Send" }).click();
 
-  await expect(page.getByLabel("Copilot prompt")).toHaveValue(/project's runtime readiness/i);
-  await page.getByRole("button", { name: "Start" }).click();
-  await expect.poll(() => createBody).toMatchObject({
-    source: "project",
-    sourceRefId: "project-1",
-    providerProfileId: "provider-openai",
-    modelProfileId: "model-gpt-5",
-  });
+  const assistantBubble = page
+    .getByText("Checking whether an existing session is available.")
+    .locator("xpath=ancestor::article");
+  await expect(assistantBubble).toBeVisible();
+  await expect(assistantBubble.getByText("Tool requested")).toBeVisible();
+  await expect(assistantBubble.getByText("openforge.propose_session_create").first()).toBeVisible();
+  await expect(assistantBubble.getByText("Pending actions")).toBeVisible();
+  await expect(assistantBubble.getByText("Session create")).toBeVisible();
+  await expect(assistantBubble.getByText("claude / project-1")).toBeVisible();
+  await expect(assistantBubble.getByRole("button", { name: "Approve" })).toBeVisible();
 });
 
-test("Copilot page shows structured provider setup errors from run creation", async ({ page }) => {
+test("Copilot renders model-provider apply approvals with readable details", async ({ page }) => {
   await mockCopilotApis(page, {
-    onCreateRun: async (route) => {
+    onSendMessage: async (route) => {
       await route.fulfill({
-        status: 400,
-        json: {
-          code: 1,
-          message: "Configure an OpenAI or Anthropic model provider first.",
-          details: { code: "copilot_provider_not_configured" },
-        },
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Apply MiniMax to Claude Code",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "I found the provider and need approval before writing project config.",
+              createdAt: 1778490000001,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Apply MiniMax to Claude Code",
+            source: "copilot",
+          },
+          events: [
+            {
+              id: "event-tool-call",
+              runId: "run-1",
+              type: "tool_call_requested",
+              sequence: 1,
+              message: "openforge.propose_model_provider_apply",
+            },
+          ],
+          pendingActions: [
+            {
+              id: "action-1",
+              runId: "run-1",
+              type: "openforge.propose_model_provider_apply",
+              status: "pending",
+              input: {
+                adapter: "claude",
+                projectId: "project-1",
+                providerProfileId: "provider-minimax-cn",
+                modelProfileId: "model-minimax-m2",
+                credentialId: "credential-mainland",
+                reason: "Use MiniMax China for Claude Code.",
+              },
+            },
+          ],
+        }),
+      });
+    },
+    onGetRun: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Apply MiniMax to Claude Code",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [
+            {
+              id: "action-1",
+              runId: "run-1",
+              type: "openforge.propose_model_provider_apply",
+              status: "pending",
+              input: {
+                adapter: "claude",
+                projectId: "project-1",
+                providerProfileId: "provider-minimax-cn",
+                modelProfileId: "model-minimax-m2",
+                credentialId: "credential-mainland",
+                reason: "Use MiniMax China for Claude Code.",
+              },
+            },
+          ],
+        }),
       });
     },
   });
 
   await page.goto("/copilot");
-  await page.getByLabel("Copilot prompt").fill("Summarize release state");
-  await page.getByRole("button", { name: "Start" }).click();
+  await page.getByPlaceholder(/Ask Copilot/).fill("Apply MiniMax to Claude Code");
+  await page.getByRole("button", { name: "Send" }).click();
 
-  await expect(page.getByRole("alert").filter({ hasText: "copilot_provider_not_configured" })).toBeVisible();
-  await expect(page.getByText("Configure an OpenAI or Anthropic model provider first.").first()).toBeVisible();
-  await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
+  const assistantBubble = page
+    .getByText("I found the provider and need approval before writing project config.")
+    .locator("xpath=ancestor::article");
+  await expect(assistantBubble.getByText("Model provider apply")).toBeVisible();
+  await expect(assistantBubble.getByText("claude / project-1 / provider-minimax-cn / model-minimax-m2")).toBeVisible();
+  await expect(assistantBubble.getByText("credential-mainland / Use MiniMax China for Claude Code.")).toBeVisible();
 });
 
-test("Copilot starter prompts fill the prompt without starting a run", async ({ page }) => {
-  let createRequests = 0;
-  await mockCopilotApis(page, {
-    onCreateRun: async (route) => {
-      createRequests += 1;
-      await route.fulfill({ json: envelope({}) });
+test("Copilot renders approved model-provider apply results in the chat flow", async ({ page }) => {
+  let approved = false;
+  const waitingRunDetail = {
+    run: {
+      id: "run-1",
+      status: "waiting_for_approval",
+      goal: "Apply MiniMax to Claude Code",
+      source: "copilot",
     },
-  });
-
-  await page.goto("/copilot");
-  await page.getByRole("button", { name: "Diagnose launch readiness" }).click();
-
-  await expect(page.getByLabel("Copilot prompt")).toHaveValue(/session launch readiness/i);
-  await expect.poll(() => createRequests).toBe(0);
-});
-
-test("Copilot page shows tool result payload details", async ({ page }) => {
-  await mockCopilotApis(page, {
-    runDetail: {
-      run: {
-        id: "run-1",
-        status: "completed",
-        goal: "Summarize Gateway health",
-        source: "copilot",
-        completedAt: 1778490000000,
-      },
-      events: [{
-        id: "event-tool-result",
+    events: [
+      {
+        id: "event-tool-call",
         runId: "run-1",
-        type: "tool_result",
+        type: "tool_call_requested",
         sequence: 1,
-        message: "openforge.get_dashboard_summary",
-        payload: {
-          output: {
-            status: "ready",
-            projectCount: 2,
+        message: "openforge.propose_model_provider_apply",
+      },
+    ],
+    pendingActions: [
+      {
+        id: "action-1",
+        runId: "run-1",
+        type: "openforge.propose_model_provider_apply",
+        status: "pending",
+        input: {
+          adapter: "claude",
+          projectId: "project-1",
+          providerProfileId: "provider-minimax-cn",
+          modelProfileId: "model-minimax-m2",
+        },
+      },
+    ],
+  };
+  await mockCopilotApis(page, {
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Apply MiniMax to Claude Code",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "I need approval before writing project config.",
+              createdAt: 1778490000001,
+            },
+          ],
+          ...waitingRunDetail,
+        }),
+      });
+    },
+    onGetRun: async (route) => {
+      await route.fulfill({
+        json: envelope(approved
+          ? {
+            run: {
+              id: "run-1",
+              status: "completed",
+              goal: "Apply MiniMax to Claude Code",
+              source: "copilot",
+            },
+            events: [],
+            pendingActions: [],
+          }
+          : waitingRunDetail),
+      });
+    },
+    onDecideAction: async (route) => {
+      approved = true;
+      await route.fulfill({
+        json: envelope({
+          action: {
+            id: "action-1",
+            runId: "run-1",
+            type: "openforge.propose_model_provider_apply",
+            status: "approved",
           },
-        },
-      }],
-      pendingActions: [],
-    },
-  });
-
-  await page.goto("/copilot");
-
-  await expect(page.getByText("Tool result")).toBeVisible();
-  await expect(page.getByText("projectCount")).toBeVisible();
-  await expect(page.getByText("ready")).toBeVisible();
-});
-
-test("Copilot page prevents duplicate pending-action submissions", async ({ page }) => {
-  let approveRequests = 0;
-  const pendingAction = {
-    id: "action-1",
-    runId: "run-approval",
-    type: "openforge.propose_memory_write",
-    status: "pending",
-    input: { kind: "decision", scope: "global", text: "Remember release gates." },
-  };
-  const approvedAction = { ...pendingAction, status: "approved", result: { entry: { id: "memory-entry-1" } } };
-  const completedRunDetail = {
-    run: {
-      id: "run-approval",
-      status: "completed",
-      goal: "Remember release decision",
-      source: "copilot",
-    },
-    events: [{
-      id: "event-approved",
-      runId: "run-approval",
-      type: "pending_action_approved",
-      sequence: 1,
-      message: "openforge.propose_memory_write",
-    }],
-    pendingActions: [approvedAction],
-  };
-  let currentRunDetail = {
-    run: {
-      id: "run-approval",
-      status: "waiting_for_approval",
-      goal: "Remember release decision",
-      source: "copilot",
-    },
-    events: [],
-    pendingActions: [pendingAction],
-  };
-  await mockCopilotApis(page, {
-    runs: [{
-      id: "run-approval",
-      status: "waiting_for_approval",
-      goal: "Remember release decision",
-      source: "copilot",
-    }],
-    onRunDetail: async (route) => {
-      await route.fulfill({ json: envelope(currentRunDetail) });
-    },
-    onApprove: async (route) => {
-      approveRequests += 1;
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      currentRunDetail = completedRunDetail;
-      await route.fulfill({
-        json: envelope({
-          action: approvedAction,
-          ...completedRunDetail,
+          run: {
+            id: "run-1",
+            status: "completed",
+            goal: "Apply MiniMax to Claude Code",
+            source: "copilot",
+          },
+          events: [
+            {
+              id: "event-approved",
+              runId: "run-1",
+              type: "pending_action_approved",
+              sequence: 2,
+              message: "openforge.propose_model_provider_apply",
+              payload: {
+                actionId: "action-1",
+                actionType: "openforge.propose_model_provider_apply",
+                status: "approved",
+                result: {
+                  adapter: "claude",
+                  projectId: "project-1",
+                  changedFiles: [{ relativePath: ".claude/settings.local.json", operation: "create" }],
+                  backupPath: "/tmp/openforge/.openforge/backups/model-provider-apply/2026-05-16",
+                  secretEnvNames: ["ANTHROPIC_AUTH_TOKEN"],
+                  executed: true,
+                },
+              },
+            },
+          ],
+          pendingActions: [],
         }),
       });
     },
   });
 
   await page.goto("/copilot");
-  const approve = page.getByRole("button", { name: "Approve" });
-  await expect(approve).toBeVisible();
-  const actionSummary = page.getByText("decision / global").locator("xpath=..");
-  await expect(actionSummary).toBeVisible();
-  await expect(actionSummary.getByText("Remember release gates.", { exact: true })).toBeVisible();
+  await page.getByPlaceholder(/Ask Copilot/).fill("Apply MiniMax to Claude Code");
+  await page.getByRole("button", { name: "Send" }).click();
+  const assistantBubble = page.getByText("I need approval before writing project config.").locator("xpath=ancestor::article");
+  await assistantBubble.getByRole("button", { name: "Approve" }).click();
 
-  await approve.dblclick();
-
-  await expect.poll(() => approveRequests).toBe(1);
-  await expect(page.getByText("completed").first()).toBeVisible();
   await expect(page.getByText("Action approved")).toBeVisible();
-  await expect(page.getByText("memory-entry-1")).toBeVisible();
+  await expect(page.getByText("claude / project-1 / executed")).toBeVisible();
+  await expect(page.getByText(".claude/settings.local.json create / backup created / secrets: ANTHROPIC_AUTH_TOKEN")).toBeVisible();
 });
 
-test("Copilot page reflects rejected pending actions immediately", async ({ page }) => {
-  const pendingAction = {
-    id: "action-1",
-    runId: "run-approval",
-    type: "openforge.propose_troubleshooting_steps",
-    status: "pending",
-    input: { steps: ["Check provider setup"] },
-  };
-  const rejectedAction = { ...pendingAction, status: "rejected" };
-  const completedRunDetail = {
-    run: {
-      id: "run-approval",
-      status: "completed",
-      goal: "Prepare troubleshooting",
-      source: "copilot",
-    },
-    events: [{
-      id: "event-rejected",
-      runId: "run-approval",
-      type: "pending_action_rejected",
-      sequence: 1,
-      message: "openforge.propose_troubleshooting_steps",
-    }],
-    pendingActions: [rejectedAction],
-  };
-  let currentRunDetail = {
-    run: {
-      id: "run-approval",
-      status: "waiting_for_approval",
-      goal: "Prepare troubleshooting",
-      source: "copilot",
-    },
-    events: [],
-    pendingActions: [pendingAction],
-  };
+test("Copilot renders recalled memory snippets in the assistant activity flow", async ({ page }) => {
   await mockCopilotApis(page, {
-    runs: [{
-      id: "run-approval",
-      status: "waiting_for_approval",
-      goal: "Prepare troubleshooting",
-      source: "copilot",
-    }],
-    onRunDetail: async (route) => {
-      await route.fulfill({ json: envelope(currentRunDetail) });
-    },
-    onReject: async (route) => {
-      currentRunDetail = completedRunDetail;
+    onSendMessage: async (route) => {
       await route.fulfill({
         json: envelope({
-          action: rejectedAction,
-          ...completedRunDetail,
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Use the remembered provider decision",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "I found a relevant provider decision and will use it as context.",
+              createdAt: 1778490000001,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "completed",
+            goal: "Use the remembered provider decision",
+            source: "copilot",
+          },
+          events: [
+            {
+              id: "event-memory-recalled",
+              runId: "run-1",
+              type: "memory_recalled",
+              sequence: 1,
+              message: "1 memory item recalled",
+              payload: {
+                results: [
+                  {
+                    id: "memory-1",
+                    type: "entry",
+                    scope: "global",
+                    projectId: null,
+                    snippet: "Provider configuration should treat provider profiles as the source of truth.",
+                  },
+                ],
+              },
+            },
+          ],
+          pendingActions: [],
         }),
       });
     },
   });
 
   await page.goto("/copilot");
-  await page.getByRole("button", { name: "Reject" }).click();
+  await page.getByPlaceholder(/Ask Copilot/).fill("Use the remembered provider decision");
+  await page.getByRole("button", { name: "Send" }).click();
 
-  await expect(page.getByText("completed").first()).toBeVisible();
-  await expect(page.getByText("Action rejected")).toBeVisible();
+  const assistantBubble = page
+    .getByText("I found a relevant provider decision and will use it as context.")
+    .locator("xpath=ancestor::article");
+  await expect(assistantBubble.getByText("Memory recalled")).toBeVisible();
+  await expect(assistantBubble.getByText("Provider configuration should treat provider profiles as the source of truth.")).toBeVisible();
 });
 
-test("Copilot page can cancel runs waiting for approval", async ({ page }) => {
-  let cancelRequests = 0;
-  const pendingAction = {
-    id: "action-1",
-    runId: "run-approval",
-    type: "openforge.propose_troubleshooting_steps",
-    status: "pending",
-    input: { steps: ["Check provider setup"] },
-  };
-  let currentRunDetail = {
-    run: {
-      id: "run-approval",
-      status: "waiting_for_approval",
-      goal: "Prepare troubleshooting",
-      source: "copilot",
-    },
-    events: [],
-    pendingActions: [pendingAction],
-  };
+test("Copilot renders terminal snapshots from tool results in the assistant activity flow", async ({ page }) => {
   await mockCopilotApis(page, {
-    runs: [{
-      id: "run-approval",
-      status: "waiting_for_approval",
-      goal: "Prepare troubleshooting",
-      source: "copilot",
-    }],
-    onRunDetail: async (route) => {
-      await route.fulfill({ json: envelope(currentRunDetail) });
-    },
-    onCancel: async (route) => {
-      cancelRequests += 1;
-      currentRunDetail = {
-        run: {
-          ...currentRunDetail.run,
-          status: "cancelled",
-          completedAt: 1778490000000,
-        },
-        events: currentRunDetail.events,
-        pendingActions: [{ ...pendingAction, status: "rejected", result: { reason: "run_cancelled" } }],
-      };
-      await route.fulfill({ json: envelope(currentRunDetail) });
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "What is in the terminal?",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "I checked the terminal snapshot.",
+              createdAt: 1778490000001,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "completed",
+            goal: "What is in the terminal?",
+            source: "copilot",
+          },
+          events: [
+            {
+              id: "event-terminal-result",
+              runId: "run-1",
+              type: "tool_result",
+              sequence: 1,
+              message: "openforge.get_session_terminal_snapshot",
+              payload: {
+                output: {
+                  terminal: {
+                    available: true,
+                    text: "pwd\n/data/OpenForge\n",
+                  },
+                },
+              },
+            },
+          ],
+          pendingActions: [],
+        }),
+      });
     },
   });
 
   await page.goto("/copilot");
-  await page.getByRole("button", { name: "Stop" }).click();
+  await page.getByPlaceholder(/Ask Copilot/).fill("What is in the terminal?");
+  await page.getByRole("button", { name: "Send" }).click();
 
-  await expect.poll(() => cancelRequests).toBe(1);
-  await expect(page.getByText("cancelled").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
+  const assistantBubble = page.getByText("I checked the terminal snapshot.").locator("xpath=ancestor::article");
+  await expect(assistantBubble.getByText("Tool result")).toBeVisible();
+  await expect(assistantBubble.getByText("pwd")).toBeVisible();
+  await expect(assistantBubble.getByText("/data/OpenForge")).toBeVisible();
+});
+
+test("Copilot keeps showing progress while an async run has not returned events yet", async ({ page }) => {
+  let sendCompleted = false;
+  await mockCopilotApis(page, {
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        status: 202,
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Check project state",
+              createdAt: 1778490000000,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "running",
+            goal: "Check project state",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+      sendCompleted = true;
+    },
+    onGetRun: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-1",
+            status: "running",
+            goal: "Check project state",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Check project state");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect.poll(() => sendCompleted).toBe(true);
+  await expect(page.getByText("Copilot is working...")).toBeVisible();
+  await expect(page.getByText("Gateway is healthy.")).toHaveCount(0);
+});
+
+test("Copilot renders assistant delta events before the final run response", async ({ page }) => {
+  await mockCopilotApis(page, {
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        status: 202,
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Stream the answer",
+              createdAt: 1778490000000,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "running",
+            goal: "Stream the answer",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+    onGetRun: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-1",
+            status: "running",
+            goal: "Stream the answer",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Stream the answer");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByRole("article").filter({ hasText: "Stream the answer" })).toHaveCount(1);
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("openforge:gateway-event", {
+      detail: {
+        type: "copilot_run_updated",
+        payload: {
+          event_type: "assistant_delta",
+          run_id: "run-1",
+          conversation_id: "conversation-1",
+          delta_text: "Streaming answer chunk.",
+        },
+      },
+    }));
+  });
+
+  await expect(page.getByText("Streaming answer chunk.")).toBeVisible();
+});
+
+test("Copilot shows a failed run reason after approving a pending action", async ({ page }) => {
+  await mockCopilotApis(page, {
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Send pwd to the session",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "I need approval before sending terminal input.",
+              createdAt: 1778490000001,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Send pwd to the session",
+            source: "copilot",
+          },
+          events: [
+            {
+              id: "event-tool-call",
+              runId: "run-1",
+              type: "tool_call_requested",
+              sequence: 1,
+              message: "openforge.propose_session_input",
+            },
+          ],
+          pendingActions: [
+            {
+              id: "action-1",
+              runId: "run-1",
+              type: "openforge.propose_session_input",
+              status: "pending",
+              input: {
+                sessionId: "session-1",
+                input: "pwd",
+                submit: true,
+              },
+            },
+          ],
+        }),
+      });
+    },
+    onGetRun: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Send pwd to the session",
+            source: "copilot",
+          },
+          events: [
+            {
+              id: "event-tool-call",
+              runId: "run-1",
+              type: "tool_call_requested",
+              sequence: 1,
+              message: "openforge.propose_session_input",
+            },
+          ],
+          pendingActions: [
+            {
+              id: "action-1",
+              runId: "run-1",
+              type: "openforge.propose_session_input",
+              status: "pending",
+              input: {
+                sessionId: "session-1",
+                input: "pwd",
+                submit: true,
+              },
+            },
+          ],
+        }),
+      });
+    },
+    onDecideAction: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          action: {
+            id: "action-1",
+            runId: "run-1",
+            type: "openforge.propose_session_input",
+            status: "approved",
+          },
+          run: {
+            id: "run-1",
+            status: "failed",
+            goal: "Send pwd to the session",
+            source: "copilot",
+            errorCode: "copilot_model_request_failed",
+            errorMessage: "Continuation failed after approval",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Send pwd to the session");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Approve" }).click();
+
+  await expect(page.getByText("Copilot could not reach the selected model provider.")).toBeVisible();
+});
+
+test("Copilot memory panel lists, searches, and deletes memory", async ({ page }) => {
+  let deleteMemoryPath = "";
+  await mockCopilotApis(page, {
+    initialMemoryEntries: [{
+      id: "memory-1",
+      type: "entry",
+      userId: "user-e2e",
+      kind: "provider-decision",
+      scope: "global",
+      projectId: null,
+      redactedText: "Provider profiles are the source of truth for model configuration.",
+    }],
+    initialMemoryNotes: [{
+      id: "note-1",
+      type: "note",
+      userId: "user-e2e",
+      projectId: "project-1",
+      sessionId: null,
+      redactedText: "Project aether-glass prefers Claude Code for coding sessions.",
+    }],
+    memorySearchResults: [{
+      id: "memory-1",
+      type: "entry",
+      scope: "global",
+      projectId: null,
+      snippet: "Provider profiles are the source of truth for model configuration.",
+      rank: 1,
+    }],
+    onDeleteMemory: async (route) => {
+      deleteMemoryPath = new URL(route.request().url()).pathname;
+      await route.fulfill({
+        json: envelope({
+          item: {
+            id: "memory-1",
+            type: "entry",
+            userId: "user-e2e",
+            kind: "provider-decision",
+            scope: "global",
+            redactedText: "Provider profiles are the source of truth for model configuration.",
+          },
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByRole("button", { name: "Memory" }).click();
+
+  await expect(page.getByText("Provider profiles are the source of truth for model configuration.")).toBeVisible();
+  await expect(page.getByText("Project aether-glass prefers Claude Code for coding sessions.")).toBeVisible();
+
+  await page.getByPlaceholder("Search Copilot memory").fill("provider");
+  await expect(page.getByText("Provider profiles are the source of truth for model configuration.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Delete memory" }).first().click();
+  await expect.poll(() => deleteMemoryPath).toBe("/api/v1/copilot/memory/entry/memory-1");
+});
+
+test("Copilot drawer opens from the global shell", async ({ page }) => {
+  await mockCopilotApis(page);
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Copilot" }).click();
+
+  await expect(page.getByPlaceholder(/Ask Copilot/).last()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close" })).toHaveCount(1);
+});
+
+test("Copilot drawer opens from the global shortcut", async ({ page }) => {
+  await mockCopilotApis(page);
+
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Open Copilot" })).toBeVisible();
+  await page.keyboard.press("Control+Shift+K");
+
+  await expect(page.getByPlaceholder(/Ask Copilot/).last()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close" })).toHaveCount(1);
+});
+
+test("Copilot drawer sends project route context when opened from a project page", async ({ page }) => {
+  let createConversationBody: Record<string, unknown> | undefined;
+  let sendBody: Record<string, unknown> | undefined;
+  await mockCopilotApis(page, {
+    onCreateConversation: async (route) => {
+      createConversationBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        json: envelope({
+          conversation: {
+            id: "conversation-1",
+            title: "Check project state",
+            source: "project",
+            sourceRefId: "project-123",
+            status: "active",
+          },
+        }),
+      });
+    },
+    onSendMessage: async (route) => {
+      sendBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ json: envelope({ messages: [], run: {}, events: [], pendingActions: [] }) });
+    },
+  });
+
+  await page.goto("/projects/project-123");
+  await page.getByRole("button", { name: "Open Copilot" }).click();
+  await page.getByPlaceholder(/Ask Copilot/).last().fill("Check project state");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect.poll(() => createConversationBody).toMatchObject({
+    source: "project",
+    sourceRefId: "project-123",
+  });
+  await expect.poll(() => sendBody).toMatchObject({
+    prompt: "Check project state",
+    source: "project",
+    sourceRefId: "project-123",
+  });
+});
+
+test("Copilot page does not render the global floating drawer trigger", async ({ page }) => {
+  await mockCopilotApis(page);
+
+  await page.goto("/copilot");
+
+  await expect(page.getByRole("button", { name: "Open Copilot" })).toHaveCount(0);
 });
 
 async function mockCopilotApis(
   page: Page,
   overrides: {
-    onRuns?: (route: Route) => Promise<void>;
-    onRunDetail?: (route: Route) => Promise<void>;
-    onApprove?: (route: Route) => Promise<void>;
-    onReject?: (route: Route) => Promise<void>;
-    onCancel?: (route: Route) => Promise<void>;
-    onCreateRun?: (route: Route) => Promise<void>;
-    onModelProviders?: (route: Route) => Promise<void>;
     providerConfigured?: boolean;
-    runs?: Array<Record<string, unknown>>;
-    modelProviders?: {
-      providers: Array<Record<string, unknown>>;
-      models: Array<Record<string, unknown>>;
-      credentials: Array<Record<string, unknown>>;
-    };
-    runDetail?: {
-      run: Record<string, unknown>;
-      events: Array<Record<string, unknown>>;
-      pendingActions: Array<Record<string, unknown>>;
-    };
+    initialConversations?: Array<Record<string, unknown>>;
+    initialMessages?: Array<Record<string, unknown>>;
+    onCreateConversation?: (route: Route) => Promise<void>;
+    onSendMessage?: (route: Route) => Promise<void>;
+    onGetRun?: (route: Route) => Promise<void>;
+    onDecideAction?: (route: Route) => Promise<void>;
+    initialMemoryEntries?: Array<Record<string, unknown>>;
+    initialMemoryNotes?: Array<Record<string, unknown>>;
+    memorySearchResults?: Array<Record<string, unknown>>;
+    onDeleteMemory?: (route: Route) => Promise<void>;
   } = {}
 ) {
+  let conversations: Array<Record<string, unknown>> = [...(overrides.initialConversations ?? [])];
+  let messages: Array<Record<string, unknown>> = [...(overrides.initialMessages ?? [])];
+  let memoryEntries: Array<Record<string, unknown>> = [...(overrides.initialMemoryEntries ?? [])];
+  let memoryNotes: Array<Record<string, unknown>> = [...(overrides.initialMemoryNotes ?? [])];
+
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
+    const method = route.request().method();
 
     if (url.pathname === "/api/v1/auth/me") {
       await route.fulfill({
@@ -896,47 +1272,6 @@ async function mockCopilotApis(
       return;
     }
 
-    if (url.pathname === "/api/v1/model-providers") {
-      if (overrides.onModelProviders) {
-        await overrides.onModelProviders(route);
-        return;
-      }
-      await route.fulfill({
-        json: envelope(overrides.modelProviders ?? {
-          providers: [{
-            id: "provider-openai",
-            providerKey: "openai",
-            name: "OpenAI production",
-            baseUrl: "https://api.openai.com/v1",
-            authType: "api_key",
-            apiFormat: "openai",
-            supportedAdapters: ["opencode"],
-            status: "active",
-          }],
-          models: [{
-            id: "model-gpt-5",
-            providerProfileId: "provider-openai",
-            providerKey: "openai",
-            providerName: "OpenAI production",
-            baseUrl: "https://api.openai.com/v1",
-            name: "GPT-5 coding",
-            modelId: "gpt-5.1",
-            capabilities: ["code"],
-            status: "active",
-            isDefault: true,
-          }],
-          credentials: [{
-            id: "credential-openai",
-            providerProfileId: "provider-openai",
-            label: "OpenAI test key",
-            status: "active",
-            secretPreview: "openai-preview",
-          }],
-        }),
-      });
-      return;
-    }
-
     if (url.pathname === "/api/v1/copilot/capabilities") {
       await route.fulfill({
         json: envelope({
@@ -944,6 +1279,7 @@ async function mockCopilotApis(
           providerConfigured: overrides.providerConfigured ?? true,
           toolExecutionEnabled: true,
           readTools: ["openforge.get_dashboard_summary"],
+          prepareTools: ["openforge.propose_session_create", "openforge.propose_session_input"],
           approvalRequiredForWrites: true,
           pendingActionApprovalEnabled: true,
         }),
@@ -951,95 +1287,219 @@ async function mockCopilotApis(
       return;
     }
 
-    if (url.pathname === "/api/v1/copilot/runs" && route.request().method() === "POST") {
-      if (overrides.onCreateRun) {
-        await overrides.onCreateRun(route);
-        return;
-      }
-      await route.fulfill({ json: envelope({}) });
+    if (url.pathname === "/api/v1/projects/project-123" && method === "GET") {
+      await route.fulfill({
+        json: envelope({
+          project: {
+            id: "project-123",
+            name: "Project 123",
+            path: "/workspace/project-123",
+            rootPath: "/workspace/project-123",
+            aiTool: "claude",
+            status: "active",
+          },
+        }),
+      });
       return;
     }
 
-    if (url.pathname === "/api/v1/copilot/runs") {
-      if (overrides.onRuns) {
-        await overrides.onRuns(route);
-        return;
-      }
+    if (url.pathname === "/api/v1/projects/project-123/agent-sequence" && method === "GET") {
+      await route.fulfill({ json: envelope({ sequence: [] }) });
+      return;
+    }
+
+    if (
+      (url.pathname === "/api/v1/projects/project-123/ai-config" ||
+        url.pathname === "/api/v1/projects/project-123/ai-config/global") &&
+      method === "GET"
+    ) {
       await route.fulfill({
         json: envelope({
-          runs: overrides.runs ?? [{
-            id: "run-1",
-            status: "completed",
-            goal: "Summarize Gateway health",
-            source: "copilot",
-            completedAt: 1778490000000,
+          adapter: "claude",
+          projectRoot: "/workspace/project-123",
+          files: [],
+          forms: [],
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/projects/project-123/skills" && method === "GET") {
+      await route.fulfill({ json: envelope({ skills: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/sessions" && method === "GET") {
+      await route.fulfill({ json: envelope({ sessions: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/agents" && method === "GET") {
+      await route.fulfill({ json: envelope({ agents: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/skills" && method === "GET") {
+      await route.fulfill({ json: envelope({ skills: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/models" && method === "GET") {
+      await route.fulfill({ json: envelope({ models: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/api-keys" && method === "GET") {
+      await route.fulfill({ json: envelope({ apiKeys: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/templates" && method === "GET") {
+      await route.fulfill({ json: envelope({ templates: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/adapters/discovery" && method === "GET") {
+      await route.fulfill({
+        json: envelope({
+          adapters: [{
+            id: "claude",
+            label: "Claude Code",
+            command: "claude",
+            supportLevel: "supported",
+            launchEnabled: true,
+            configDir: "~/.claude",
+            runtimeModes: ["terminal"],
+            available: true,
+            status: "available",
           }],
         }),
       });
       return;
     }
 
-    if (url.pathname === "/api/v1/copilot/runs/run-approval") {
-      if (overrides.onRunDetail) {
-        await overrides.onRunDetail(route);
+    if (url.pathname === "/api/v1/copilot/memory/entries" && method === "GET") {
+      await route.fulfill({ json: envelope({ entries: memoryEntries }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/memory/notes" && method === "GET") {
+      await route.fulfill({ json: envelope({ notes: memoryNotes }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/memory/search" && method === "GET") {
+      await route.fulfill({ json: envelope({ results: overrides.memorySearchResults ?? [] }) });
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/v1/copilot/memory/") && method === "DELETE") {
+      if (overrides.onDeleteMemory) {
+        await overrides.onDeleteMemory(route);
+      } else {
+        const [, , , , , type, id] = url.pathname.split("/");
+        if (type === "entry") memoryEntries = memoryEntries.filter((entry) => entry.id !== id);
+        if (type === "note") memoryNotes = memoryNotes.filter((note) => note.id !== id);
+        await route.fulfill({ json: envelope({ item: { id, type } }) });
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/conversations" && method === "GET") {
+      await route.fulfill({ json: envelope({ conversations }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/conversations" && method === "POST") {
+      if (overrides.onCreateConversation) {
+        await overrides.onCreateConversation(route);
+      } else {
+        await route.fulfill({
+          json: envelope({
+            conversation: {
+              id: "conversation-1",
+              title: "New conversation",
+              source: "copilot",
+              status: "active",
+            },
+          }),
+        });
+      }
+      conversations = [{
+        id: "conversation-1",
+        title: "Summarize Gateway health",
+        source: "copilot",
+        status: "active",
+      }];
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/conversations/conversation-1/messages" && method === "GET") {
+      await route.fulfill({ json: envelope({ messages }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/conversations/conversation-1/messages" && method === "POST") {
+      if (overrides.onSendMessage) {
+        await overrides.onSendMessage(route);
+        return;
+      } else {
+        await route.fulfill({ json: envelope({ messages: [], run: {}, events: [], pendingActions: [] }) });
+      }
+      messages = [
+        {
+          id: "message-user",
+          conversationId: "conversation-1",
+          role: "user",
+          content: "Summarize Gateway health",
+        },
+        {
+          id: "message-assistant",
+          conversationId: "conversation-1",
+          role: "assistant",
+          content: "Gateway is healthy.",
+        },
+      ];
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/messages/message-user" && method === "DELETE") {
+      messages = messages.filter((message) => message.id !== "message-user");
+      await route.fulfill({ json: envelope({ message: { id: "message-user", deletedAt: Date.now() } }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/conversations/conversation-1" && method === "DELETE") {
+      conversations = [];
+      messages = [];
+      await route.fulfill({ json: envelope({ conversation: { id: "conversation-1", status: "deleted" } }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/runs/run-1" && method === "GET") {
+      if (overrides.onGetRun) {
+        await overrides.onGetRun(route);
+      } else {
+        await route.fulfill({
+          json: envelope({
+            run: { id: "run-1", status: "completed", goal: "Summarize Gateway health", source: "copilot" },
+            events: [],
+            pendingActions: [],
+          }),
+        });
+      }
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/v1/copilot/runs/") && url.pathname.includes("/pending-actions/")) {
+      if (overrides.onDecideAction) {
+        await overrides.onDecideAction(route);
         return;
       }
       await route.fulfill({
-        json: envelope(overrides.runDetail ?? {
-          run: {
-            id: "run-approval",
-            status: "waiting_for_approval",
-            goal: "Remember release decision",
-            source: "copilot",
-          },
-          events: [],
-          pendingActions: [],
-        }),
-      });
-      return;
-    }
-
-    if (url.pathname === "/api/v1/copilot/runs/run-approval/pending-actions/action-1/approve") {
-      if (overrides.onApprove) {
-        await overrides.onApprove(route);
-        return;
-      }
-      await route.fulfill({ json: envelope({}) });
-      return;
-    }
-
-    if (url.pathname === "/api/v1/copilot/runs/run-approval/pending-actions/action-1/reject") {
-      if (overrides.onReject) {
-        await overrides.onReject(route);
-        return;
-      }
-      await route.fulfill({ json: envelope({}) });
-      return;
-    }
-
-    if (url.pathname === "/api/v1/copilot/runs/run-approval/cancel") {
-      if (overrides.onCancel) {
-        await overrides.onCancel(route);
-        return;
-      }
-      await route.fulfill({ json: envelope({}) });
-      return;
-    }
-
-    if (url.pathname === "/api/v1/copilot/runs/run-1") {
-      if (overrides.onRunDetail) {
-        await overrides.onRunDetail(route);
-        return;
-      }
-      await route.fulfill({
-        json: envelope(overrides.runDetail ?? {
-          run: {
-            id: "run-1",
-            status: "completed",
-            goal: "Summarize Gateway health",
-            source: "copilot",
-            completedAt: 1778490000000,
-          },
+        json: envelope({
+          action: { id: "action-1", runId: "run-1", type: "openforge.propose_memory_write", status: "approved" },
+          run: { id: "run-1", status: "completed", goal: "Approve action", source: "copilot" },
           events: [],
           pendingActions: [],
         }),
