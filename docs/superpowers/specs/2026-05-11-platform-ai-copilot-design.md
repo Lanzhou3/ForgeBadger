@@ -4,6 +4,21 @@ Date: 2026-05-11
 Status: Confirmed; implementation plan updated with OpenClaw reference input
 Scope: first platform-side AI Copilot architecture, before implementation
 
+## 2026-05-16 Implementation Update
+
+This document remains the original architecture decision record for the first
+Copilot baseline. The implementation has since expanded the approval-gated tool
+surface: chat-style conversations, a global drawer, explicit tenant-scoped
+memory, project/session/config/Agent/Skill/Template/Plugin/model-provider
+proposal tools, running-session terminal snapshots, user-approved terminal
+input, inline tool activity, and post-approval continuation are now part of the
+current Copilot product direction.
+
+The safety boundary is still strict. The Copilot must not get raw shell or host
+exec, arbitrary filesystem writes outside validated OpenForge workflows,
+unapproved terminal input, Codex app-server `/turn` UI, or an unattended
+autonomous development loop.
+
 ## Roadmap Context
 
 OpenForge is currently a local-first control plane for AI CLI sessions. The
@@ -19,7 +34,8 @@ This design introduces a platform-side AI Copilot. It is separate from:
 
 The first release should make OpenForge easier to operate and debug without
 letting a model directly control terminal input, shell commands, or project
-files.
+files. Later implementation has added user-approved terminal input while keeping
+direct model-controlled input out of scope.
 
 ## Goal
 
@@ -305,9 +321,9 @@ Approval-gated actions:
 
 Excluded tools:
 
-- terminal input;
+- direct or unapproved terminal input;
 - shell command;
-- file write;
+- arbitrary file write outside validated OpenForge workflows;
 - dependency install;
 - git commit/push/merge;
 - Codex app-server `turn/start`.
@@ -483,7 +499,7 @@ Acceptance:
 After the first Copilot release is stable, consider:
 
 - session supervisor lite: terminal snapshot plus suggested input;
-- user-confirmed terminal input;
+- richer user-confirmed terminal supervision;
 - project planning and task decomposition tools;
 - remote execution target awareness after SSH feature work lands;
 - multi-run orchestration with budgets and pause/resume;
@@ -511,5 +527,7 @@ Each of these must have its own security review before implementation.
 ## Decision
 
 Proceed with a first-version AI Copilot that is read-heavy, provider-backed,
-and approval-gated. Do not expose autonomous terminal control, raw shell, direct
-file writes, or Codex app-server prompt/turn input in this phase.
+and approval-gated. The current implementation may expose user-approved terminal
+input and validated OpenForge workflow actions, but must not expose autonomous
+terminal control, raw shell, arbitrary direct file writes, or Codex app-server
+prompt/turn input in this phase.

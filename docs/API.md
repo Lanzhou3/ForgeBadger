@@ -110,20 +110,38 @@ not included.
 ### Platform AI Copilot
 
 - `GET /api/v1/copilot/capabilities`
+- `GET /api/v1/copilot/conversations`
+- `POST /api/v1/copilot/conversations`
+- `PATCH /api/v1/copilot/conversations/:id`
+- `DELETE /api/v1/copilot/conversations/:id`
+- `GET /api/v1/copilot/conversations/:id/messages`
+- `POST /api/v1/copilot/conversations/:id/messages`
+- `DELETE /api/v1/copilot/messages/:id`
 - `GET /api/v1/copilot/runs`
 - `POST /api/v1/copilot/runs`
 - `GET /api/v1/copilot/runs/:id`
 - `POST /api/v1/copilot/runs/:id/cancel`
 - `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/approve`
 - `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/reject`
+- `GET /api/v1/copilot/memory/entries`
+- `GET /api/v1/copilot/memory/notes`
+- `GET /api/v1/copilot/memory/search`
+- `GET /api/v1/copilot/memory/:type/:id`
+- `DELETE /api/v1/copilot/memory/:type/:id`
 
 Copilot endpoints are authenticated, tenant scoped, and provider backed. The
 first release supports OpenAI Responses-style, OpenAI-compatible opt-in, and
 Anthropic Messages-style providers through the existing Provider SSOT and
 encrypted provider credentials.
+Conversation endpoints persist the platform chat history separately from run
+execution records. Sending a conversation message stores the user message,
+creates a Copilot run with the same bounded source context rules, and stores
+assistant response events back into the conversation. Conversation and message
+deletes are soft deletes scoped to the authenticated user.
 Prompt text is redacted before run persistence, active recall, and provider
 model requests so secret-looking values such as API keys, bearer tokens, and
-OpenForge attach tokens are not stored or sent onward in plaintext.
+OpenForge attach tokens, and PEM private-key blocks are not stored or sent
+onward in plaintext.
 If active memory recall fails, Copilot records a non-blocking
 `memory_recall_skipped` timeline event and continues the model request without
 injecting memory context.
@@ -136,6 +154,14 @@ id, and model id. Paths, attach tokens, tmux session names, API key ids, and
 other sensitive runtime fields are not included. Missing or cross-tenant
 references produce a non-leaking "source context unavailable" block rather than
 falling back to another user's data.
+`sourceRefId` is optional, non-empty when provided, and limited to 256
+characters.
+
+`GET /capabilities` returns the provider formats Copilot can use, whether a
+compatible provider is configured, and the current tool surface split into
+`readTools` and `prepareTools`. Read tools execute directly after Gateway-side
+validation. Prepare tools only create pending actions; all mutation or terminal
+input still requires explicit approval through the pending-action routes.
 
 `POST /runs` accepts:
 
@@ -183,9 +209,19 @@ Read tools are allowlisted and validated server-side. Current read tools are:
 - `openforge.get_dashboard_summary`
 - `openforge.list_projects`
 - `openforge.get_project_detail`
+- `openforge.list_agents`
+- `openforge.list_skills`
+- `openforge.get_skill_detail`
+- `openforge.list_templates`
+- `openforge.list_plugins`
+- `openforge.get_notifications_summary`
+- `openforge.get_usage_summary`
 - `openforge.list_sessions`
 - `openforge.get_session_detail`
+- `openforge.get_session_terminal_snapshot`
 - `openforge.get_adapter_discovery`
+- `openforge.get_model_provider_summary`
+- `openforge.get_model_provider_catalog`
 - `openforge.get_recent_activity`
 - `openforge.get_diagnostics_summary`
 - `openforge.memory_search`
@@ -210,28 +246,62 @@ timeline entries.
 Prepare tools create pending actions and do not directly mutate runtime state:
 
 - `openforge.propose_session_create`
+- `openforge.propose_project_create`
+- `openforge.propose_project_import`
+- `openforge.propose_project_delete`
+- `openforge.propose_project_config_sync`
+- `openforge.propose_session_input`
+- `openforge.propose_session_start`
+- `openforge.propose_session_stop`
+- `openforge.propose_session_delete`
+- `openforge.propose_agent_create`
+- `openforge.propose_agent_update`
+- `openforge.propose_agent_delete`
+- `openforge.propose_template_create`
+- `openforge.propose_template_update`
+- `openforge.propose_template_delete`
+- `openforge.propose_skill_toggle`
+- `openforge.propose_plugin_toggle`
+- `openforge.propose_project_skill_toggle`
+- `openforge.propose_copilot_model_selection`
+- `openforge.propose_model_provider_sync`
+- `openforge.propose_model_provider_apply`
 - `openforge.propose_diagnostics_export`
 - `openforge.propose_adapter_refresh`
 - `openforge.propose_troubleshooting_steps`
 - `openforge.propose_memory_write`
+- `openforge.propose_memory_delete`
 
 Approval uses the canonical stored pending-action payload. The client cannot
 replace the action payload at approval time. Diagnostics approval returns a
-redacted diagnostics payload; session-create approval returns a draft only and
-does not start a CLI session in this release. Adapter-refresh approval reruns
-local adapter discovery and returns fresh availability/launch-readiness
+redacted diagnostics payload. Session-create approval creates and starts a
+terminal-backed CLI session for `claude`, `opencode`, or `codex` after
+revalidating the stored draft. Session-input approval sends the stored bounded
+input to the running terminal session, captures a bounded post-action terminal
+snapshot, and continues the Copilot run with that evidence when the run has a
+provider/model selection. If the run belongs to a conversation, the resulting
+assistant message is also stored in that conversation. Adapter-refresh approval
+reruns local adapter discovery and returns fresh availability/launch-readiness
 metadata without starting CLI sessions or changing project/session state.
 Approve and reject routes only operate on actions whose stored status is still
-`pending`; already approved or rejected actions are not rewritten.
+`pending`; already approved, rejected, or in-flight `processing` actions are not
+rewritten. Approval claims the pending action before executing approval side
+effects, so duplicate concurrent approvals return `409` with
+`details.code = "copilot_pending_action_not_pending"` instead of executing the
+same action twice.
 Session-create drafts must target a project visible to the current user and one
 of the supported terminal adapters: `claude`, `opencode`, or `codex`; approval
 revalidates the canonical stored draft so stale or invalid drafts stay pending
-instead of returning an actionable session draft. Troubleshooting-step approval
-also revalidates its stored bounded payload. Unknown stored pending-action types
-are rejected instead of being treated as generic troubleshooting output.
+instead of starting a session. Session-input drafts must target a running
+session visible to the current user; approval revalidates the session state
+before writing to the terminal. Troubleshooting-step approval also revalidates
+its stored bounded payload. Unknown stored pending-action types are rejected
+instead of being treated as generic troubleshooting output.
 Memory-write approval creates a tenant-scoped durable memory entry from the
-stored redacted payload. Approve and reject decisions also write tenant-scoped
-audit rows with redacted action input and bounded result summaries.
+stored redacted payload. Memory-delete approval removes the stored tenant-scoped
+memory entry or working note referenced by the canonical pending action.
+Approve and reject decisions also write tenant-scoped audit rows with redacted
+action input and bounded result summaries.
 
 Copilot memory is explicit product state. Durable memory entries and working
 notes are scoped by `user_id`; project-scoped entries are additionally filtered
@@ -241,10 +311,10 @@ transcripts, and does not create embeddings in this release.
 
 Explicit non-goals for this Copilot release:
 
-- no browser terminal input control;
 - no raw shell or host exec tool;
-- no direct filesystem write tool;
+- no arbitrary filesystem write tool outside validated OpenForge config/project workflows;
 - no Codex app-server prompt or `/turn` UI;
+- no unapproved terminal input;
 - no automatic tmux input or autonomous development loop.
 
 ### Adapter Discovery
@@ -507,14 +577,19 @@ Codex adapter instead of accepting values that would later be ignored.
 - `POST /api/v1/models/:id/check`
 - `POST /api/v1/models/:id/check-endpoint`
 
+`GET /api/v1/models/presets` is kept for compatibility but returns an empty
+list. Built-in model presets are deprecated; new model/provider setup should
+use `/api/v1/model-providers/catalog`, which is now provider-preset driven and
+prioritizes Claude Code-compatible presets inspired by cc-switch.
+
 Create body:
 
 ```json
 {
-  "name": "Claude Sonnet",
-  "provider": "anthropic",
-  "modelId": "claude-sonnet-4-5",
-  "endpoint": "https://api.anthropic.com"
+  "name": "Local Gateway",
+  "provider": "local-gateway",
+  "modelId": "local-model",
+  "endpoint": "https://gateway.example.com/v1"
 }
 ```
 
@@ -529,6 +604,73 @@ result represents console readiness rather than third-party network health.
 `POST /api/v1/models/:id/check-endpoint` performs a timeout-bounded external
 endpoint probe and reports health, latency, HTTP status when available, and the
 timeout used by the check.
+
+### Model Providers
+
+- `GET /api/v1/model-providers/catalog`
+- `GET /api/v1/model-providers`
+- `POST /api/v1/model-providers`
+- `PATCH /api/v1/model-providers/:id`
+- `DELETE /api/v1/model-providers/:id`
+- `GET /api/v1/model-providers/:id/models`
+- `POST /api/v1/model-providers/:id/models`
+- `POST /api/v1/model-providers/:id/models/sync`
+- `POST /api/v1/model-providers/:id/preview-apply`
+- `POST /api/v1/model-providers/:id/apply`
+
+Provider Profiles are the source of truth for model provider configuration,
+encrypted API keys, configured model profiles, and CLI apply plans. Provider
+configuration apply currently supports:
+
+- `claude`: preview/apply writes `.claude/settings.local.json` environment
+  entries such as `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`,
+  `ANTHROPIC_MODEL`, and the cc-switch style
+  `ANTHROPIC_DEFAULT_*_MODEL` / `API_TIMEOUT_MS` defaults.
+- `opencode`: preview/apply writes `opencode.json` provider and model
+  fragments.
+
+Codex remains subscription-managed and must not accept Provider URL/API key
+configuration through these endpoints.
+
+`GET /model-providers/catalog` returns a cc-switch-style Claude Code provider
+preset catalog first, covering Anthropic API, Kimi, DeepSeek, Qwen, z.ai,
+OpenRouter, and Ollama with endpoint, env metadata, and default models already
+filled in. When models.dev is reachable, OpenCode-compatible provider entries
+are appended as secondary catalog entries. Catalog OpenCode npm package names
+are sanitized before exposure and revalidated before provider creation; unsafe
+package names fall back to the OpenCode OpenAI-compatible provider package.
+
+Creating from a catalog entry:
+
+```json
+{
+  "catalogId": "openrouter"
+}
+```
+
+`catalogId` must exist in the currently loaded catalog. Missing catalog entries
+return a validation error. Catalog-created Claude Code providers seed all static
+default models from the preset so users do not have to type model IDs manually.
+Catalog-created models.dev providers still seed only the first advertised model
+to keep large external catalogs manageable; users can use model sync or manual
+model creation to add the full provider model list.
+
+Creating a custom Provider Profile:
+
+```json
+{
+  "name": "Local Gateway",
+  "providerKey": "local-gateway",
+  "baseUrl": "https://gateway.example.com/v1",
+  "authType": "api_key",
+  "apiFormat": "anthropic",
+  "supportedAdapters": ["claude"]
+}
+```
+
+Model sync uses the selected Provider Profile base URL, saved credential, and
+current catalog metadata when available. Plaintext credentials are decrypted
+only inside Gateway memory for the outbound provider request.
 
 ### API Keys And Credential Mode
 

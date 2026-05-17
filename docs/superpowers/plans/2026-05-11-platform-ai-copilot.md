@@ -4,7 +4,7 @@
 
 **Goal:** Build the first Platform AI Copilot release: a provider-backed, read-heavy, approval-gated OpenForge assistant that can answer operational questions and prepare safe actions without autonomous terminal control.
 
-**Architecture:** Gateway owns Copilot model calls, run state, tool validation, audit, and approval handling under `/api/v1/copilot`. Web renders a Copilot page and pending actions. Provider selection reuses the existing Provider SSOT and encrypted credentials; Codex subscription identity, tmux terminal input, Codex app-server `/turn`, raw shell, and file writes remain outside this release.
+**Architecture:** Gateway owns Copilot model calls, run state, tool validation, audit, and approval handling under `/api/v1/copilot`. Web renders a Copilot page and pending actions. Provider selection reuses the existing Provider SSOT and encrypted credentials; Codex subscription identity, unapproved tmux terminal input, Codex app-server `/turn`, raw shell, and arbitrary file writes remain outside this release.
 
 **Tech Stack:** Node.js/Express, TypeScript, SQLite/better-sqlite3, Drizzle migrations, zod, Next.js App Router, React, TanStack Query, Tailwind, lucide-react, node:test, Vitest.
 
@@ -22,6 +22,20 @@
   memory gating, session tool visibility, and exec approval canonical-plan
   handling.
 
+## 2026-05-16 Current Implementation Note
+
+This plan captured the initial Copilot baseline. The current implementation has
+expanded within the same approval-gated safety model: chat-style conversations,
+global drawer access, explicit tenant-scoped memory, project/session/config/
+Agent/Skill/Template/Plugin/model-provider proposal tools, running-session
+terminal snapshots, approval-gated terminal input, inline tool activity, and
+post-approval continuation from the latest terminal output are now in scope.
+
+The remaining hard boundaries are unchanged: no raw shell or host exec tool, no
+arbitrary filesystem write tool outside validated OpenForge workflows, no
+unapproved terminal input, no Codex app-server `/turn` UI, and no unattended
+autonomous development loop.
+
 ## Scope Boundaries
 
 This plan includes:
@@ -35,9 +49,9 @@ This plan includes:
 
 This plan excludes:
 
-- Automatic terminal input.
+- Automatic or unapproved terminal input.
 - Any raw shell tool.
-- Direct filesystem writes.
+- Arbitrary filesystem writes outside validated OpenForge workflows.
 - Dependency install or git operations.
 - Codex app-server prompt or `/turn` UI.
 - SSH/remote execution integration.
@@ -866,7 +880,7 @@ Add a Copilot section to `docs/API.md`:
 - run details;
 - cancel;
 - approve/reject pending actions;
-- explicit non-goals: no terminal input, no shell, no Codex turn.
+- explicit non-goals: no unapproved terminal input, no shell, no Codex turn.
 
 - [ ] **Step 2: Update development plan status**
 
