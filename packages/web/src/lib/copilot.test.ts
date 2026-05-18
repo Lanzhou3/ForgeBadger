@@ -82,6 +82,11 @@ describe("copilot display helpers", () => {
     expect(getCopilotPendingActionLabel("openforge.propose_copilot_model_selection")).toBe("Copilot model selection");
     expect(getCopilotPendingActionLabel("openforge.propose_model_provider_sync")).toBe("Model provider sync");
     expect(getCopilotPendingActionLabel("openforge.propose_model_provider_apply")).toBe("Model provider apply");
+    expect(getCopilotPendingActionLabel("openforge.propose_feishu_message_send")).toBe("Feishu message send");
+    expect(getCopilotPendingActionLabel("openforge.propose_feishu_doc_create")).toBe("Feishu doc create");
+    expect(getCopilotPendingActionLabel("openforge.propose_feishu_doc_update")).toBe("Feishu doc update");
+    expect(getCopilotPendingActionLabel("openforge.propose_feishu_task_create")).toBe("Feishu task create");
+    expect(getCopilotPendingActionLabel("openforge.propose_feishu_task_update")).toBe("Feishu task update");
     expect(getCopilotPendingActionLabel("custom.pending_action")).toBe("Custom pending action");
   });
 
@@ -129,6 +134,21 @@ describe("copilot display helpers", () => {
     );
     expect(getCopilotPendingActionLabelKey("openforge.propose_model_provider_apply")).toBe(
       "copilot.pendingAction.modelProviderApply"
+    );
+    expect(getCopilotPendingActionLabelKey("openforge.propose_feishu_message_send")).toBe(
+      "copilot.pendingAction.feishuMessageSend"
+    );
+    expect(getCopilotPendingActionLabelKey("openforge.propose_feishu_doc_create")).toBe(
+      "copilot.pendingAction.feishuDocCreate"
+    );
+    expect(getCopilotPendingActionLabelKey("openforge.propose_feishu_doc_update")).toBe(
+      "copilot.pendingAction.feishuDocUpdate"
+    );
+    expect(getCopilotPendingActionLabelKey("openforge.propose_feishu_task_create")).toBe(
+      "copilot.pendingAction.feishuTaskCreate"
+    );
+    expect(getCopilotPendingActionLabelKey("openforge.propose_feishu_task_update")).toBe(
+      "copilot.pendingAction.feishuTaskUpdate"
     );
     expect(getCopilotPendingActionLabelKey("custom.pending_action")).toBeNull();
   });
@@ -602,6 +622,51 @@ describe("copilot display helpers", () => {
       detail: "Adapter refresh",
       preview: "Recheck CLI availability after installing Codex.",
     });
+    expect(
+      getCopilotPendingActionSummary({
+        type: "openforge.propose_feishu_message_send",
+        input: { chatId: "oc_openforge", text: "Build is green and ready to review." },
+      })
+    ).toEqual({
+      detail: "chat oc_openforge",
+      preview: "Build is green and ready to review.",
+    });
+    expect(
+      getCopilotPendingActionSummary({
+        type: "openforge.propose_feishu_doc_create",
+        input: { title: "Sprint Plan", content: "# Plan", folderId: "fld_openforge" },
+      })
+    ).toEqual({
+      detail: "Sprint Plan / folder fld_openforge",
+      preview: "# Plan",
+    });
+    expect(
+      getCopilotPendingActionSummary({
+        type: "openforge.propose_feishu_doc_update",
+        input: { documentId: "doc_openforge", content: "# Updated Plan" },
+      })
+    ).toEqual({
+      detail: "document doc_openforge",
+      preview: "# Updated Plan",
+    });
+    expect(
+      getCopilotPendingActionSummary({
+        type: "openforge.propose_feishu_task_create",
+        input: { summary: "Verify Copilot", chatId: "oc_openforge", description: "Run targeted tests." },
+      })
+    ).toEqual({
+      detail: "Verify Copilot / chat oc_openforge",
+      preview: "Run targeted tests.",
+    });
+    expect(
+      getCopilotPendingActionSummary({
+        type: "openforge.propose_feishu_task_update",
+        input: { taskId: "task_openforge", status: "done", summary: "Verify Copilot" },
+      })
+    ).toEqual({
+      detail: "task task_openforge / done",
+      preview: "Verify Copilot",
+    });
   });
 
   it("summarizes troubleshooting steps and ignores unknown pending action payloads", () => {
@@ -655,6 +720,23 @@ describe("copilot display helpers", () => {
     ).toEqual({
       detail: "entry / global / deleted",
       preview: "memory-123",
+    });
+    expect(
+      getCopilotEventResultSummary({
+        type: "pending_action_approved",
+        payload: {
+          actionType: "openforge.propose_feishu_message_send",
+          result: {
+            feishu: {
+              operation: "message_send",
+              result: { id: "message-123" },
+            },
+          },
+        },
+      })
+    ).toEqual({
+      detail: "message_send / completed",
+      preview: "message-123",
     });
     expect(
       getCopilotEventResultSummary({

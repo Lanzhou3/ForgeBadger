@@ -285,7 +285,7 @@ pnpm --dir packages/gateway typecheck
 pnpm --dir packages/web test src/lib/api.test.ts
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/gateway/src/db/schema.ts packages/gateway/src/db/migrations packages/gateway/src/db/repositories/feishu-integration-repository.ts packages/gateway/src/routes/integrations-feishu.ts packages/gateway/test/feishu-integration.test.ts packages/web/src/lib/api.ts packages/web/src/lib/api.test.ts docs/API.md
@@ -304,7 +304,7 @@ git commit -m "feat: persist feishu integration settings"
 - Test: `packages/gateway/test/copilot-tools.test.ts`
 - Test: `packages/gateway/test/copilot-routes.test.ts`
 
-- [ ] **Step 1: Write failing tool tests**
+- [x] **Step 1: Write failing tool tests**
 
 Cover these prepare tools:
 
@@ -317,22 +317,22 @@ Cover these prepare tools:
 Assert they create pending actions only and never execute Feishu CLI during model
 tool execution.
 
-- [ ] **Step 2: Implement Feishu command allowlist**
+- [x] **Step 2: Implement Feishu command allowlist**
 
 Commands define schemas, output parsers, timeouts, and redaction. Reject
 unknown operations and all raw command strings.
 
-- [ ] **Step 3: Implement approval handlers**
+- [x] **Step 3: Implement approval handlers**
 
 Approval handlers execute the allowlisted Feishu command, record audit rows, add
 Copilot timeline events, and return redacted result details.
 
-- [ ] **Step 4: Update Web pending action labels**
+- [x] **Step 4: Update Web pending action labels**
 
 Add clear summaries for message/doc/task actions. Show target channel/document
 ids only if they are safe and bounded.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -342,7 +342,7 @@ pnpm --dir packages/web test src/lib/copilot.test.ts src/lib/i18n.test.ts
 pnpm --dir packages/web exec playwright test e2e/copilot.spec.ts --project=chromium
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/gateway/src/services/integrations packages/gateway/src/services/copilot/read-tools.ts packages/gateway/src/routes/copilot.ts packages/gateway/test/copilot-tools.test.ts packages/gateway/test/copilot-routes.test.ts packages/web/src/lib/copilot.ts packages/web/src/lib/copilot.test.ts packages/web/src/lib/i18n.ts docs/API.md

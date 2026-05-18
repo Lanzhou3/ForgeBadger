@@ -60,6 +60,11 @@ const pendingActionLabels: Record<string, string> = {
   "openforge.propose_diagnostics_export": "Diagnostics export",
   "openforge.propose_adapter_refresh": "Adapter refresh",
   "openforge.propose_troubleshooting_steps": "Troubleshooting steps",
+  "openforge.propose_feishu_message_send": "Feishu message send",
+  "openforge.propose_feishu_doc_create": "Feishu doc create",
+  "openforge.propose_feishu_doc_update": "Feishu doc update",
+  "openforge.propose_feishu_task_create": "Feishu task create",
+  "openforge.propose_feishu_task_update": "Feishu task update",
 };
 
 const pendingActionLabelKeys: Record<string, TranslationKey> = {
@@ -89,6 +94,11 @@ const pendingActionLabelKeys: Record<string, TranslationKey> = {
   "openforge.propose_diagnostics_export": "copilot.pendingAction.diagnosticsExport",
   "openforge.propose_adapter_refresh": "copilot.pendingAction.adapterRefresh",
   "openforge.propose_troubleshooting_steps": "copilot.pendingAction.troubleshootingSteps",
+  "openforge.propose_feishu_message_send": "copilot.pendingAction.feishuMessageSend",
+  "openforge.propose_feishu_doc_create": "copilot.pendingAction.feishuDocCreate",
+  "openforge.propose_feishu_doc_update": "copilot.pendingAction.feishuDocUpdate",
+  "openforge.propose_feishu_task_create": "copilot.pendingAction.feishuTaskCreate",
+  "openforge.propose_feishu_task_update": "copilot.pendingAction.feishuTaskUpdate",
 };
 
 const errorMessageKeys: Record<string, TranslationKey> = {
@@ -484,6 +494,16 @@ export function getCopilotPendingActionSummary(
         detail: "Adapter refresh",
         preview: previewText(readString(payload, "reason")),
       };
+    case "openforge.propose_feishu_message_send":
+      return summarizeFeishuMessageSend(payload);
+    case "openforge.propose_feishu_doc_create":
+      return summarizeFeishuDocCreate(payload);
+    case "openforge.propose_feishu_doc_update":
+      return summarizeFeishuDocUpdate(payload);
+    case "openforge.propose_feishu_task_create":
+      return summarizeFeishuTaskCreate(payload);
+    case "openforge.propose_feishu_task_update":
+      return summarizeFeishuTaskUpdate(payload);
     case "openforge.propose_troubleshooting_steps":
       return summarizeTroubleshootingSteps(payload);
     default:
@@ -550,6 +570,12 @@ export function getCopilotEventResultSummary(
       return summarizeDiagnosticsExportResult(result);
     case "openforge.propose_adapter_refresh":
       return summarizeAdapterRefreshResult(result);
+    case "openforge.propose_feishu_message_send":
+    case "openforge.propose_feishu_doc_create":
+    case "openforge.propose_feishu_doc_update":
+    case "openforge.propose_feishu_task_create":
+    case "openforge.propose_feishu_task_update":
+      return summarizeFeishuActionResult(result);
     case "openforge.propose_troubleshooting_steps":
       return summarizeTroubleshootingStepsResult(result);
     default:
@@ -990,6 +1016,52 @@ function summarizeModelProviderApply(payload: Record<string, unknown>): CopilotP
   };
 }
 
+function summarizeFeishuMessageSend(payload: Record<string, unknown>): CopilotPendingActionSummary {
+  return {
+    detail: `chat ${readString(payload, "chatId") ?? "unknown"}`,
+    preview: previewText(readString(payload, "text")),
+  };
+}
+
+function summarizeFeishuDocCreate(payload: Record<string, unknown>): CopilotPendingActionSummary {
+  const folderId = readString(payload, "folderId");
+  return {
+    detail: joinPresent([
+      readString(payload, "title") ?? "Feishu document",
+      folderId ? `folder ${folderId}` : null,
+    ]),
+    preview: previewText(readString(payload, "content")),
+  };
+}
+
+function summarizeFeishuDocUpdate(payload: Record<string, unknown>): CopilotPendingActionSummary {
+  return {
+    detail: `document ${readString(payload, "documentId") ?? "unknown"}`,
+    preview: previewText(readString(payload, "content")),
+  };
+}
+
+function summarizeFeishuTaskCreate(payload: Record<string, unknown>): CopilotPendingActionSummary {
+  const chatId = readString(payload, "chatId");
+  return {
+    detail: joinPresent([
+      readString(payload, "summary") ?? "Feishu task",
+      chatId ? `chat ${chatId}` : null,
+    ]),
+    preview: previewText(readString(payload, "description") ?? readString(payload, "reason")),
+  };
+}
+
+function summarizeFeishuTaskUpdate(payload: Record<string, unknown>): CopilotPendingActionSummary {
+  return {
+    detail: joinPresent([
+      `task ${readString(payload, "taskId") ?? "unknown"}`,
+      readString(payload, "status"),
+    ]),
+    preview: previewText(readString(payload, "summary") ?? readString(payload, "description") ?? readString(payload, "reason")),
+  };
+}
+
 function summarizeModelProviderApplyResult(payload: Record<string, unknown>): CopilotPendingActionSummary {
   const changedFiles = readChangedFiles(payload);
   const secretEnvNames = readStringArray(payload, "secretEnvNames");
@@ -1216,6 +1288,17 @@ function summarizeAdapterRefreshResult(payload: Record<string, unknown>): Copilo
   return {
     detail: joinPresent(["Adapter refresh", payload.executed === true || Array.isArray(adapters) ? "executed" : null]),
     preview: previewText(preview, 240),
+  };
+}
+
+function summarizeFeishuActionResult(payload: Record<string, unknown>): CopilotPendingActionSummary | null {
+  const feishu = readRecord(payload.feishu);
+  if (!feishu) return null;
+  const result = readRecord(feishu.result);
+  const operation = readString(feishu, "operation") ?? "Feishu action";
+  return {
+    detail: `${operation} / completed`,
+    preview: previewText(readString(result ?? {}, "id") ?? readString(result ?? {}, "url")),
   };
 }
 

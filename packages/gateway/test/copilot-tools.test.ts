@@ -2007,6 +2007,61 @@ describe("copilot tools", () => {
     assert.deepEqual(actions[0]?.input, { reason: "Recheck CLI availability after install." });
   });
 
+  it("creates Feishu collaboration proposals as pending actions without executing Feishu CLI", async () => {
+    const run = new CopilotRepository(db, userId).createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Prepare Feishu collaboration"
+    });
+    const adapterCommands: string[] = [];
+    const toolInputs = [
+      {
+        name: "openforge.propose_feishu_message_send",
+        input: { chatId: "oc_openforge", text: "Build is green.", reason: "Notify the project chat." }
+      },
+      {
+        name: "openforge.propose_feishu_doc_create",
+        input: { title: "Sprint Plan", content: "# Plan\nShip Task 4.", folderId: "fld_openforge" }
+      },
+      {
+        name: "openforge.propose_feishu_doc_update",
+        input: { documentId: "doc_openforge", content: "# Updated Plan" }
+      },
+      {
+        name: "openforge.propose_feishu_task_create",
+        input: {
+          summary: "Verify Copilot",
+          description: "Run route tests",
+          assigneeFeishuUserId: "ou_user",
+          dueDate: "2026-05-20",
+          chatId: "oc_openforge"
+        }
+      },
+      {
+        name: "openforge.propose_feishu_task_update",
+        input: { taskId: "task_openforge", status: "done", summary: "Verify Copilot" }
+      }
+    ];
+
+    const results = [];
+    for (const tool of toolInputs) {
+      results.push(await executeCopilotTool(registry, tool.name, tool.input, {
+        ...context(userId, run.id),
+        adapterCommandRunner: async (command) => {
+          adapterCommands.push(command);
+          return { exitCode: 1, stdout: "", stderr: "unexpected command" };
+        }
+      }));
+    }
+
+    const actions = new CopilotRepository(db, userId).listPendingActions(run.id);
+    assert.deepEqual(results.map((result) => result.ok), [true, true, true, true, true]);
+    assert.deepEqual(actions.map((action) => action.type), toolInputs.map((tool) => tool.name));
+    assert.deepEqual(actions.map((action) => action.status), ["pending", "pending", "pending", "pending", "pending"]);
+    assert.deepEqual(actions.map((action) => action.input), toolInputs.map((tool) => tool.input));
+    assert.deepEqual(adapterCommands, []);
+  });
+
   it("searches Copilot memory through bounded tenant-scoped tools", async () => {
     const memory = new CopilotMemoryRepository(db, userId);
     const entry = memory.createEntry({

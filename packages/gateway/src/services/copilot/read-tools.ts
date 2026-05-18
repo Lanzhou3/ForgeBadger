@@ -189,6 +189,40 @@ const proposeTroubleshootingStepsInput = z.object({
   summary: z.string().min(1).optional(),
   steps: z.array(z.string().min(1)).min(1).max(10).optional()
 }).strict();
+const feishuIdInput = z.string().min(1).max(128);
+const feishuTextInput = z.string().min(1).max(16_000);
+const feishuReasonInput = z.string().min(1).max(1024).optional();
+const proposeFeishuMessageSendInput = z.object({
+  chatId: feishuIdInput,
+  text: feishuTextInput,
+  reason: feishuReasonInput
+}).strict();
+const proposeFeishuDocCreateInput = z.object({
+  title: z.string().min(1).max(256),
+  content: feishuTextInput,
+  folderId: feishuIdInput.optional(),
+  reason: feishuReasonInput
+}).strict();
+const proposeFeishuDocUpdateInput = z.object({
+  documentId: feishuIdInput,
+  content: feishuTextInput,
+  reason: feishuReasonInput
+}).strict();
+const proposeFeishuTaskCreateInput = z.object({
+  summary: z.string().min(1).max(256),
+  description: z.string().max(4_000).optional(),
+  assigneeFeishuUserId: feishuIdInput.optional(),
+  dueDate: z.string().min(1).max(32).optional(),
+  chatId: feishuIdInput.optional(),
+  reason: feishuReasonInput
+}).strict();
+const proposeFeishuTaskUpdateInput = z.object({
+  taskId: feishuIdInput,
+  summary: z.string().min(1).max(256).optional(),
+  description: z.string().max(4_000).optional(),
+  status: z.enum(["todo", "in_progress", "done", "cancelled"]).optional(),
+  reason: feishuReasonInput
+}).strict();
 
 const emptyModelInputSchema = {
   type: "object",
@@ -525,6 +559,62 @@ const proposeTroubleshootingStepsModelInputSchema = {
       maxItems: 10
     }
   },
+  additionalProperties: false
+};
+const proposeFeishuMessageSendModelInputSchema = {
+  type: "object",
+  properties: {
+    chatId: { type: "string", minLength: 1, maxLength: 128 },
+    text: { type: "string", minLength: 1, maxLength: 16_000 },
+    reason: { type: "string", minLength: 1, maxLength: 1024 }
+  },
+  required: ["chatId", "text"],
+  additionalProperties: false
+};
+const proposeFeishuDocCreateModelInputSchema = {
+  type: "object",
+  properties: {
+    title: { type: "string", minLength: 1, maxLength: 256 },
+    content: { type: "string", minLength: 1, maxLength: 16_000 },
+    folderId: { type: "string", minLength: 1, maxLength: 128 },
+    reason: { type: "string", minLength: 1, maxLength: 1024 }
+  },
+  required: ["title", "content"],
+  additionalProperties: false
+};
+const proposeFeishuDocUpdateModelInputSchema = {
+  type: "object",
+  properties: {
+    documentId: { type: "string", minLength: 1, maxLength: 128 },
+    content: { type: "string", minLength: 1, maxLength: 16_000 },
+    reason: { type: "string", minLength: 1, maxLength: 1024 }
+  },
+  required: ["documentId", "content"],
+  additionalProperties: false
+};
+const proposeFeishuTaskCreateModelInputSchema = {
+  type: "object",
+  properties: {
+    summary: { type: "string", minLength: 1, maxLength: 256 },
+    description: { type: "string", maxLength: 4_000 },
+    assigneeFeishuUserId: { type: "string", minLength: 1, maxLength: 128 },
+    dueDate: { type: "string", minLength: 1, maxLength: 32 },
+    chatId: { type: "string", minLength: 1, maxLength: 128 },
+    reason: { type: "string", minLength: 1, maxLength: 1024 }
+  },
+  required: ["summary"],
+  additionalProperties: false
+};
+const proposeFeishuTaskUpdateModelInputSchema = {
+  type: "object",
+  properties: {
+    taskId: { type: "string", minLength: 1, maxLength: 128 },
+    summary: { type: "string", minLength: 1, maxLength: 256 },
+    description: { type: "string", maxLength: 4_000 },
+    status: { type: "string", enum: ["todo", "in_progress", "done", "cancelled"] },
+    reason: { type: "string", minLength: 1, maxLength: 1024 }
+  },
+  required: ["taskId"],
   additionalProperties: false
 };
 
@@ -1009,6 +1099,56 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       modelInputSchema: proposeAdapterRefreshModelInputSchema,
       execute: async (input, context) =>
         createPendingProposal(context, "openforge.propose_adapter_refresh", input)
+    },
+    {
+      name: "openforge.propose_feishu_message_send",
+      description: "Prepare sending a Feishu chat message for user approval. This does not invoke Feishu CLI until approved.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeFeishuMessageSendInput,
+      modelInputSchema: proposeFeishuMessageSendModelInputSchema,
+      execute: async (input, context) =>
+        createFeishuProposal(context, "openforge.propose_feishu_message_send", input, proposeFeishuMessageSendInput)
+    },
+    {
+      name: "openforge.propose_feishu_doc_create",
+      description: "Prepare creating a Feishu document for user approval. This does not invoke Feishu CLI until approved.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeFeishuDocCreateInput,
+      modelInputSchema: proposeFeishuDocCreateModelInputSchema,
+      execute: async (input, context) =>
+        createFeishuProposal(context, "openforge.propose_feishu_doc_create", input, proposeFeishuDocCreateInput)
+    },
+    {
+      name: "openforge.propose_feishu_doc_update",
+      description: "Prepare updating a Feishu document for user approval. This does not invoke Feishu CLI until approved.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeFeishuDocUpdateInput,
+      modelInputSchema: proposeFeishuDocUpdateModelInputSchema,
+      execute: async (input, context) =>
+        createFeishuProposal(context, "openforge.propose_feishu_doc_update", input, proposeFeishuDocUpdateInput)
+    },
+    {
+      name: "openforge.propose_feishu_task_create",
+      description: "Prepare creating a Feishu task for user approval. This does not invoke Feishu CLI until approved.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeFeishuTaskCreateInput,
+      modelInputSchema: proposeFeishuTaskCreateModelInputSchema,
+      execute: async (input, context) =>
+        createFeishuProposal(context, "openforge.propose_feishu_task_create", input, proposeFeishuTaskCreateInput)
+    },
+    {
+      name: "openforge.propose_feishu_task_update",
+      description: "Prepare updating a Feishu task for user approval. This does not invoke Feishu CLI until approved.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeFeishuTaskUpdateInput,
+      modelInputSchema: proposeFeishuTaskUpdateModelInputSchema,
+      execute: async (input, context) =>
+        createFeishuProposal(context, "openforge.propose_feishu_task_update", input, proposeFeishuTaskUpdateInput)
     },
     {
       name: "openforge.propose_troubleshooting_steps",
@@ -1581,6 +1721,15 @@ function createProjectDeleteProposal(
     throw new CopilotToolValidationError("Copilot project delete target is not available");
   }
   return createPendingProposal(context, "openforge.propose_project_delete", parsed);
+}
+
+function createFeishuProposal<T>(
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId">,
+  type: string,
+  input: unknown,
+  schema: z.ZodType<T>
+) {
+  return createPendingProposal(context, type, schema.parse(input));
 }
 
 function createProjectConfigSyncProposal(

@@ -22,6 +22,7 @@ import {
   type CopilotMemoryItemType,
   type CopilotMemoryNote
 } from "../db/repositories/copilot-memory-repository.js";
+import { FeishuIntegrationRepository } from "../db/repositories/feishu-integration-repository.js";
 import { ModelProviderRepository, type ModelProfile, type ProviderProfile } from "../db/repositories/model-provider-repository.js";
 import { ProjectRepository, type Project } from "../db/repositories/project-repository.js";
 import { AgentRepository, type Agent } from "../db/repositories/agent-repository.js";
@@ -42,6 +43,12 @@ import { selectCopilotProvider } from "../services/copilot/provider-selection.js
 import { createCopilotReadTools } from "../services/copilot/read-tools.js";
 import { redactCopilotPayload, redactCopilotText, sanitizeCopilotAssistantText } from "../services/copilot/redaction.js";
 import { applyModelProviderConfig } from "../services/model-config-apply.js";
+import {
+  executeFeishuCommand,
+  type FeishuCommandOperation,
+  type FeishuCommandRequest,
+  type FeishuCommandResult
+} from "../services/integrations/feishu-commands.js";
 import {
   fetchProviderModels as fetchProviderModelsFromEndpoint,
   type FetchedProviderModel,
@@ -273,6 +280,7 @@ export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   eventBus?: OpenForgeEventBus;
   fetchProviderModels?: (input: FetchProviderModelsInput) => Promise<FetchedProviderModel[]>;
   loadProviderCatalog?: () => Promise<ProviderCatalogPreset[]>;
+  executeFeishuCommand?: (request: FeishuCommandRequest) => Promise<FeishuCommandResult>;
 }
 
 type PendingActionApprover = (
@@ -1572,6 +1580,9 @@ async function approvePendingAction(
   if (action.type === "openforge.propose_model_provider_apply") {
     return await approveCopilotModelProviderApply(action, options, userId);
   }
+  if (isFeishuPendingActionType(action.type)) {
+    return await approveCopilotFeishuAction(action, options, userId);
+  }
   if (action.type === "openforge.propose_memory_write") {
     return approveCopilotMemoryWrite(action, { db: options.db, userId });
   }
@@ -1587,6 +1598,75 @@ async function approvePendingAction(
       message: "Copilot pending action type is not supported"
     }
   };
+}
+
+const feishuPendingActionOperations = {
+  "openforge.propose_feishu_message_send": "message_send",
+  "openforge.propose_feishu_doc_create": "doc_create",
+  "openforge.propose_feishu_doc_update": "doc_update",
+  "openforge.propose_feishu_task_create": "task_create",
+  "openforge.propose_feishu_task_update": "task_update"
+} satisfies Record<string, FeishuCommandOperation>;
+
+function isFeishuPendingActionType(type: string): type is keyof typeof feishuPendingActionOperations {
+  return type in feishuPendingActionOperations;
+}
+
+async function approveCopilotFeishuAction(
+  action: CopilotPendingAction,
+  options: CopilotRoutesOptions,
+  userId: string
+): Promise<Record<string, unknown>> {
+  const operation = feishuPendingActionOperations[action.type as keyof typeof feishuPendingActionOperations];
+  if (!new FeishuIntegrationRepository(options.db, userId).canExecuteActions()) {
+    return {
+      error: {
+        code: "feishu_integration_disabled",
+        message: "Feishu integration is disabled"
+      }
+    };
+  }
+
+  const commandResult = await (options.executeFeishuCommand ?? executeFeishuCommand)({
+    operation,
+    input: action.input
+  });
+  if (!commandResult.ok) {
+    return {
+      error: {
+        code: commandResult.error.code,
+        message: commandResult.error.message
+      }
+    };
+  }
+
+  const result = {
+    feishu: {
+      operation,
+      result: redactCopilotPayload(commandResult.output)
+    }
+  };
+  new AuditLogRepository(options.db, userId).create({
+    action: `feishu.${operation}`,
+    resourceType: "feishu_integration",
+    resourceId: operation,
+    details: {
+      actionId: action.id,
+      runId: action.runId,
+      operation,
+      result: result.feishu.result
+    }
+  });
+  new CopilotRepository(options.db, userId).addEvent(action.runId, {
+    type: "feishu_action_executed",
+    message: operation,
+    payload: {
+      actionId: action.id,
+      operation,
+      result: result.feishu.result
+    }
+  });
+  return result;
 }
 
 async function approveCopilotSessionCreateDraft(

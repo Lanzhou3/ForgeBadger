@@ -24,9 +24,15 @@ import { ProjectSkillRepository } from "../src/db/repositories/project-skill-rep
 import { TemplateRepository } from "../src/db/repositories/template-repository.js";
 import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
 import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
+import { FeishuIntegrationRepository } from "../src/db/repositories/feishu-integration-repository.js";
 import { createCopilotRoutes } from "../src/routes/copilot.js";
 import type { CommandRunner } from "../src/lib/dependency-check.js";
 import { OpenForgeEventBus, type OpenForgeEvent } from "../src/services/event-bus.js";
+import {
+  executeFeishuCommand,
+  type FeishuCommandRequest,
+  type FeishuCommandResult
+} from "../src/services/integrations/feishu-commands.js";
 import type {
   CopilotModelClient,
   CopilotModelEvent,
@@ -67,6 +73,7 @@ describe("copilot routes", () => {
   let runtimeSessionSnapshots: Array<{ id: string; status: string; tmuxName: string }> | null;
   let stoppedSessionInputs: Array<{ sessionId: string; tmuxName?: string; userId?: string }>;
   let providerModelFetchInputs: Array<{ baseUrl: string; apiKey?: string; modelsUrl?: string; timeoutMs?: number }>;
+  let feishuCommandRequests: FeishuCommandRequest[];
   let adapterCommandRunner: CommandRunner;
   let emittedEvents: OpenForgeEvent[];
   let eventBus: OpenForgeEventBus;
@@ -93,6 +100,7 @@ describe("copilot routes", () => {
     runtimeSessionSnapshots = null;
     stoppedSessionInputs = [];
     providerModelFetchInputs = [];
+    feishuCommandRequests = [];
     emittedEvents = [];
     eventBus = new OpenForgeEventBus();
     eventBus.on("event", (event) => emittedEvents.push(event));
@@ -200,6 +208,17 @@ describe("copilot routes", () => {
           source: "cc-switch"
         }
       ],
+      executeFeishuCommand: async (request: FeishuCommandRequest): Promise<FeishuCommandResult> => {
+        feishuCommandRequests.push(request);
+        return {
+          operation: request.operation,
+          ok: true,
+          output: {
+            id: "feishu-result-1",
+            stdout: "message sent token=secret-value"
+          }
+        };
+      },
       adapterCommandRunner
     }));
   });
@@ -4508,6 +4527,108 @@ describe("copilot routes", () => {
     assert.equal(res.body.code, 1);
     assert.equal(res.body.details.code, "copilot_project_config_sync_invalid");
     assert.equal(action?.status, "pending");
+  });
+
+  it("executes approved Feishu actions through the allowlisted command handler", async () => {
+    new FeishuIntegrationRepository(db, userId).upsertConfig({ enabled: true });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_feishu_message_send", {
+      chatId: "oc_openforge",
+      text: "Build is green.",
+      reason: "Notify the project chat."
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    const audits = new AuditLogRepository(db, userId).list({ action: "feishu.message_send" });
+    const events = new CopilotRepository(db, userId).listEvents(runId);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(action?.status, "approved");
+    assert.deepEqual(feishuCommandRequests, [{
+      operation: "message_send",
+      input: {
+        chatId: "oc_openforge",
+        text: "Build is green.",
+        reason: "Notify the project chat."
+      }
+    }]);
+    assert.equal(audits.length, 1);
+    assert.equal(audits[0]?.resourceType, "feishu_integration");
+    assert.match(audits[0]?.details ?? "", /message_send/);
+    assert.doesNotMatch(JSON.stringify(action?.result), /secret-value/);
+    assert.ok(events.some((event) => event.type === "pending_action_approved" && event.message === "openforge.propose_feishu_message_send"));
+  });
+
+  it("does not approve Feishu actions while the integration is disabled", async () => {
+    new FeishuIntegrationRepository(db, userId).upsertConfig({ enabled: false });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_feishu_task_create", {
+      summary: "Verify Copilot",
+      description: "Run route tests"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "feishu_integration_disabled");
+    assert.equal(action?.status, "pending");
+    assert.deepEqual(feishuCommandRequests, []);
+  });
+
+  it("runs Feishu commands only through allowlisted operations with bounded redacted output", async () => {
+    const calls: Array<{ command: string; args: string[]; timeoutMs?: number }> = [];
+
+    const result = await executeFeishuCommand(
+      {
+        operation: "task_update",
+        input: {
+          taskId: "task_openforge",
+          status: "done"
+        }
+      } as never,
+      {
+        runner: async (command, args, options) => {
+          calls.push({ command, args, timeoutMs: options?.timeoutMs });
+          return {
+            exitCode: 0,
+            stdout: "{\"id\":\"task_openforge\",\"token\":\"secret-value\"}",
+            stderr: ""
+          };
+        },
+        executable: "lark-cli-test",
+        timeoutMs: 1234
+      }
+    );
+    const unsupported = await executeFeishuCommand(
+      { operation: "raw_shell", input: { command: "lark-cli message send" } } as never,
+      {
+        runner: async () => ({ exitCode: 0, stdout: "unsafe", stderr: "" })
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, [{
+      command: "lark-cli-test",
+      args: ["task", "update", "--task-id", "task_openforge", "--status", "done", "--output", "json"],
+      timeoutMs: 1234
+    }]);
+    assert.doesNotMatch(JSON.stringify(result.output), /secret-value/);
+    assert.equal(unsupported.ok, false);
+    assert.equal(unsupported.error.code, "feishu_command_unsupported");
   });
 
   it("does not approve session-create actions when the target project is gone", async () => {

@@ -100,6 +100,9 @@ describe("i18n", () => {
     expect(getTranslation("en", "copilot.pendingAction.projectConfigSync")).toBe("Project config sync");
     expect(getTranslation("en", "copilot.pendingAction.sessionStop")).toBe("Session stop");
     expect(getTranslation("en", "copilot.pendingAction.copilotModelSelection")).toBe("Copilot model selection");
+    expect(getTranslation("en", "copilot.pendingAction.feishuMessageSend")).toBe("Feishu message send");
+    expect(getTranslation("zh-CN", "copilot.pendingAction.feishuDocCreate")).toBe("创建飞书文档");
+    expect(getTranslation("zh-TW", "copilot.pendingAction.feishuTaskUpdate")).toBe("更新飛書任務");
     expect(getTranslation("zh-CN", "copilot.error.projectCreateFailed")).toContain("项目创建失败");
     expect(getTranslation("zh-CN", "copilot.error.projectConfigSyncConflict")).toContain("文件冲突");
     expect(getTranslation("zh-TW", "copilot.error.projectConfigSyncInvalid")).toContain("同步草稿無效");

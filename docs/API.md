@@ -123,10 +123,10 @@ enabled/emergency-disabled state. Configuration and user mappings are persisted
 without Feishu tokens, cookies, credentials, raw CLI stderr, or secret-like
 fields.
 
-These endpoints still do not execute Feishu writes, accept model-generated
-command strings, send terminal input, approve actions from Feishu text, or
-start unattended development loops. Later outbound/inbound flows must continue
-through explicit OpenForge approval gates.
+These endpoints do not execute Feishu writes, accept model-generated command
+strings, send terminal input, approve actions from Feishu text, or start
+unattended development loops. Outbound Feishu writes are only available through
+Copilot prepare tools plus explicit OpenForge pending-action approval.
 
 Successful status response:
 
@@ -384,6 +384,11 @@ Prepare tools create pending actions and do not directly mutate runtime state:
 - `openforge.propose_diagnostics_export`
 - `openforge.propose_adapter_refresh`
 - `openforge.propose_troubleshooting_steps`
+- `openforge.propose_feishu_message_send`
+- `openforge.propose_feishu_doc_create`
+- `openforge.propose_feishu_doc_update`
+- `openforge.propose_feishu_task_create`
+- `openforge.propose_feishu_task_update`
 - `openforge.propose_memory_write`
 - `openforge.propose_memory_delete`
 
@@ -415,6 +420,12 @@ instead of being treated as generic troubleshooting output.
 Memory-write approval creates a tenant-scoped durable memory entry from the
 stored redacted payload. Memory-delete approval removes the stored tenant-scoped
 memory entry or working note referenced by the canonical pending action.
+Feishu action approval requires the tenant Feishu integration to be enabled and
+not emergency-disabled. Approval executes only the Gateway-owned allowlisted
+operation registry for message send, doc create/update, and task create/update;
+model-generated raw command strings are rejected and never passed to `lark-cli`.
+Feishu command output, stderr, audit details, and Copilot timeline payloads are
+bounded and redacted before persistence.
 Approve and reject decisions also write tenant-scoped audit rows with redacted
 action input and bounded result summaries.
 
