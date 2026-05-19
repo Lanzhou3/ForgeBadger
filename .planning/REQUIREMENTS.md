@@ -8,8 +8,8 @@
 ### Release Evidence
 
 - [x] **REL-01**: Maintainer can run `pnpm smoke:copilot-provider` with a disposable provider credential and record redacted live-provider evidence.
-- [ ] **REL-02**: Maintainer can run and record physical Windows/WSL smoke evidence before removing the platform caveat.
-- [ ] **REL-03**: First-user Copilot feedback is captured through the trial feedback path and triaged into concrete dependency, provider, CLI, or platform hardening tasks.
+- [x] **REL-02**: Maintainer can run and record physical Windows/WSL smoke evidence before removing the platform caveat.
+- [x] **REL-03**: First-user Copilot feedback is captured through the trial feedback path and triaged into concrete dependency, provider, CLI, or platform hardening tasks.
 - [x] **REL-04**: Release documentation reflects the actual merged PR state, CI gates, and remaining external evidence caveats.
 - [ ] **REL-05**: CI either runs the documented `gate-d-smoke` terminal E2E gate or records why that gate remains environment-gated.
 - [ ] **REL-06**: CI or release evidence includes an explicit `RUN_TMUX_TESTS=1 ... tmux.test.ts` command result, not only indirect workspace-test coverage.
@@ -63,8 +63,8 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | REL-01 | Phase 1 | Complete |
-| REL-02 | Phase 1 | Pending |
-| REL-03 | Phase 1 | Pending |
+| REL-02 | Phase 1 | Complete |
+| REL-03 | Phase 1 | Complete |
 | REL-04 | Phase 1 | Complete |
 | REL-05 | Phase 1 | Pending |
 | REL-06 | Phase 1 | Pending |
