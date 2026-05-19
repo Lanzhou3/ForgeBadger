@@ -130,7 +130,7 @@ function parseStructuredOutput(output: string): Record<string, unknown> | undefi
         return parsed as Record<string, unknown>;
       }
     } catch {
-      return undefined;
+      continue;
     }
   }
 

@@ -69,6 +69,24 @@ describe("getFeishuCliStatus", () => {
     });
   });
 
+  it("parses structured auth status after progress lines", async () => {
+    const status = await getFeishuCliStatus({
+      runner: async (_command, args) => {
+        if (args.includes("--version")) {
+          return { exitCode: 0, stdout: "lark-cli 1.2.3\n", stderr: "" };
+        }
+        return {
+          exitCode: 0,
+          stdout: "checking auth\n{\"tokenStatus\":\"valid\",\"identity\":\"bot\"}\n",
+          stderr: ""
+        };
+      }
+    });
+
+    assert.equal(status.authState, "authenticated");
+    assert.equal(status.identityMode, "bot");
+  });
+
   it("fails closed when auth status output is not structured JSON", async () => {
     const status = await getFeishuCliStatus({
       runner: async (_command, args) => {

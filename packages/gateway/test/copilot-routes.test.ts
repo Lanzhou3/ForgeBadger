@@ -1261,7 +1261,7 @@ describe("copilot routes", () => {
     }
   });
 
-  it("allows new Copilot runs while an older run waits for approval", async () => {
+  it("rejects new Copilot runs while an older run waits for approval", async () => {
     const existing = new CopilotRepository(db, userId).createRun({
       status: "waiting_for_approval",
       source: "copilot",
@@ -1274,11 +1274,12 @@ describe("copilot routes", () => {
       source: "copilot"
     }, authHeaders());
 
-    assert.equal(res.status, 201);
-    assert.equal(res.body.code, 0);
-    assert.equal(res.body.data.run.status, "completed");
+    assert.equal(res.status, 409);
+    assert.equal(res.body.details.code, "copilot_run_already_active");
+    assert.equal(res.body.details.runId, existing.id);
+    assert.equal(res.body.details.status, "waiting_for_approval");
     assert.equal(new CopilotRepository(db, userId).getRun(existing.id)?.status, "waiting_for_approval");
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 0);
   });
 
   it("injects bounded active memory recall for Copilot page runs", async () => {
@@ -4531,7 +4532,7 @@ describe("copilot routes", () => {
   });
 
   it("executes approved Feishu actions through the allowlisted command handler", async () => {
-    new FeishuIntegrationRepository(db, userId).upsertConfig({ enabled: true });
+    new FeishuIntegrationRepository(db, userId).upsertConfig({ enabled: true, identityMode: "bot" });
     const { runId, actionId } = createPendingAction(userId, "openforge.propose_feishu_message_send", {
       chatId: "oc_openforge",
       text: "Build is green.",
@@ -4586,6 +4587,83 @@ describe("copilot routes", () => {
     assert.equal(res.status, 400);
     assert.equal(res.body.code, 1);
     assert.equal(res.body.details.code, "feishu_integration_disabled");
+    assert.equal(action?.status, "pending");
+    assert.deepEqual(feishuCommandRequests, []);
+  });
+
+  it("does not approve Feishu actions outside configured outbound targets", async () => {
+    new FeishuIntegrationRepository(db, userId).upsertConfig({
+      enabled: true,
+      identityMode: "bot",
+      allowedChatIds: ["oc_openforge"]
+    });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_feishu_message_send", {
+      chatId: "oc_other",
+      text: "Build is green."
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "feishu_target_not_allowed");
+    assert.equal(action?.status, "pending");
+    assert.deepEqual(feishuCommandRequests, []);
+  });
+
+  it("does not approve Feishu task assignments to unmapped users", async () => {
+    const repo = new FeishuIntegrationRepository(db, userId);
+    repo.upsertConfig({ enabled: true, identityMode: "bot" });
+    repo.replaceUserMappings([
+      { feishuUserId: "ou_openforge", openforgeUserId: userId }
+    ]);
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_feishu_task_create", {
+      summary: "Verify Copilot",
+      assigneeFeishuUserId: "ou_other"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "feishu_user_not_mapped");
+    assert.equal(action?.status, "pending");
+    assert.deepEqual(feishuCommandRequests, []);
+  });
+
+  it("does not approve Feishu actions while identity mode is unknown", async () => {
+    new FeishuIntegrationRepository(db, userId).upsertConfig({ enabled: true });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_feishu_message_send", {
+      chatId: "oc_openforge",
+      text: "Build is green."
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 1);
+    assert.equal(res.body.details.code, "feishu_identity_mode_required");
     assert.equal(action?.status, "pending");
     assert.deepEqual(feishuCommandRequests, []);
   });

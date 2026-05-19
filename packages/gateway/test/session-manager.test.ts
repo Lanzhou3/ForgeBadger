@@ -329,7 +329,7 @@ class MemoryRecoveryStore {
     this.entries.push(entry);
   }
 
-  async removeSession(id: string) {
-    this.entries = this.entries.filter((current) => current.id !== id);
+  async removeSession(id: string, userId: string) {
+    this.entries = this.entries.filter((current) => current.id !== id || current.userId !== userId);
   }
 }

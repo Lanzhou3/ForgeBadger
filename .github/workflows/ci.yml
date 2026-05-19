@@ -29,8 +29,9 @@ jobs:
       NEXT_PUBLIC_GATEWAY_URL: "http://127.0.0.1:48731"
       OPENFORGE_DB_PATH: "/tmp/openforge-ci.db"
       OPENFORGE_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
-      OPENFORGE_JWT_SECRET: "ci-jwt-secret-not-for-production"
+      OPENFORGE_JWT_SECRET: "ci-jwt-secret-not-for-production-32chars"
       NEXT_TELEMETRY_DISABLED: "1"
+      RUN_TMUX_TESTS: "1"
       CI: "true"
 
     steps:
@@ -68,6 +69,28 @@ jobs:
 
       - name: Workspace build
         run: pnpm -r build
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir packages/web exec playwright install --with-deps chromium
+
+      - name: Core Web E2E smoke
+        shell: bash
+        run: |
+          pnpm --dir packages/gateway exec tsx src/index.ts &
+          gateway_pid=$!
+          trap 'kill "$gateway_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..40}; do
+            if curl --fail --silent --show-error "$OPENFORGE_GATEWAY_URL/api/v1/health" >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$gateway_pid" 2>/dev/null; then
+              echo "Gateway exited before health check passed"
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error "$OPENFORGE_GATEWAY_URL/api/v1/health" >/dev/null
+          pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line
 
       - name: Whitespace check
         run: git diff --check

@@ -15,6 +15,7 @@ pnpm install --frozen-lockfile
 node --test scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
 pnpm -r typecheck
 pnpm -r test
+RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
 pnpm --dir packages/gateway test test/model-provider-routes.test.ts test/model-provider-repository.test.ts test/model-config-apply.test.ts test/codex-provider-env.test.ts test/session-adapter-decoupling.test.ts
 git diff --check
 ```
@@ -24,6 +25,7 @@ Acceptance:
 - Script-level smoke harness tests pass.
 - TypeScript emits no type errors.
 - CLI, Gateway `node:test`, and Web Vitest suites pass.
+- Real tmux integration tests pass when tmux is installed.
 - Provider SSOT and Codex subscription-boundary regressions pass.
 - `git diff --check` reports no whitespace errors.
 
@@ -89,6 +91,7 @@ The safe beta surface for Codex app-server is observable control plane only.
 
 ```bash
 pnpm --dir packages/web exec playwright test e2e/codex-app-server.spec.ts --project=chromium --reporter=line
+pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line
 pnpm smoke:codex-app-server
 ```
 
@@ -96,6 +99,9 @@ Acceptance:
 
 - The Playwright smoke proves the Web page renders safe status/activity
   metadata, hides prompt/turn/send controls, and does not request `/turn`.
+- Core `mvp1-smoke` Playwright stays required in CI for the product
+  control-plane happy path. Browser terminal `gate-d-smoke` remains
+  environment-gated until the CI image supplies a real AI CLI.
 - `pnpm smoke:codex-app-server` starts a real Codex app-server process, sends
   only initialize/initialized messages, reports `promptOrTurnSent: false`, and
   uses isolated temporary `HOME` and `CODEX_HOME`.

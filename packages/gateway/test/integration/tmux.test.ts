@@ -113,7 +113,7 @@ class MemoryRecoveryStore implements SessionRecoveryStore {
     this.entries.push(session);
   }
 
-  async removeSession(id: string): Promise<void> {
-    this.entries = this.entries.filter((entry) => entry.id !== id);
+  async removeSession(id: string, userId: string): Promise<void> {
+    this.entries = this.entries.filter((entry) => entry.id !== id || entry.userId !== userId);
   }
 }

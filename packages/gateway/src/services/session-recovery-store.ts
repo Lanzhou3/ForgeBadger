@@ -27,9 +27,9 @@ class JsonSessionRecoveryStore implements SessionRecoveryStore {
     await this.writeIndex(index);
   }
 
-  async removeSession(id: string): Promise<void> {
+  async removeSession(id: string, userId: string): Promise<void> {
     const index = await this.readIndex();
-    index.sessions = index.sessions.filter((session) => session.id !== id);
+    index.sessions = index.sessions.filter((session) => session.id !== id || session.userId !== userId);
     await this.writeIndex(index);
   }
 

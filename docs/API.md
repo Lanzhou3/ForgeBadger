@@ -425,9 +425,14 @@ instead of being treated as generic troubleshooting output.
 Memory-write approval creates a tenant-scoped durable memory entry from the
 stored redacted payload. Memory-delete approval removes the stored tenant-scoped
 memory entry or working note referenced by the canonical pending action.
-Feishu action approval requires the tenant Feishu integration to be enabled and
-not emergency-disabled. Approval executes only the Gateway-owned allowlisted
-operation registry for message send, doc create/update, and task create/update;
+Feishu action approval requires the tenant Feishu integration to be enabled,
+not emergency-disabled, and configured with an explicit `identityMode` of
+`user` or `bot`. When `allowedChatIds` is configured, approval also requires the
+action target (`chatId`, `folderId`, `documentId`, `tasklistId`, or `taskId`) to
+be in that allowlist. When Feishu user mappings are configured, task assignment
+approvals require `assigneeFeishuUserId` to be mapped for the current tenant.
+Approval executes only the Gateway-owned allowlisted operation registry for
+message send, doc create/update, and task create/update;
 model-generated raw command strings are rejected and never passed to `lark-cli`.
 The allowlist maps to the current Feishu CLI command families
 `im +messages-send`, `docs +create`, `docs +update`, `task +create`,

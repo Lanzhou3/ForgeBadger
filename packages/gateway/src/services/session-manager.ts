@@ -46,7 +46,7 @@ export interface StoredSession {
 export interface SessionRecoveryStore {
   listSessions(): Promise<StoredSession[]>;
   upsertSession(session: StoredSession): Promise<void>;
-  removeSession(id: string): Promise<void>;
+  removeSession(id: string, userId: string): Promise<void>;
 }
 
 export interface RecoveryResult {
@@ -65,7 +65,7 @@ class EmptyRecoveryStore implements SessionRecoveryStore {
 
   async upsertSession(): Promise<void> {}
 
-  async removeSession(): Promise<void> {}
+  async removeSession(_id: string, _userId: string): Promise<void> {}
 }
 
 export class InMemorySessionManager {
@@ -170,14 +170,16 @@ export class InMemorySessionManager {
 
     if (session) {
       await this.tmux.killSession(session.tmuxName);
-      await this.recoveryStore.removeSession(id);
+      await this.recoveryStore.removeSession(id, session.userId);
       const stopped = this.updateSession(id, { status: "exited" });
       this.sessions.delete(id);
       return stopped;
     }
 
     await this.tmux.killSession(tmuxName as string);
-    await this.recoveryStore.removeSession(id);
+    if (userId) {
+      await this.recoveryStore.removeSession(id, userId);
+    }
     return fallbackStoppedSession(id, tmuxName as string, userId);
   }
 

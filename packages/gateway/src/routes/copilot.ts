@@ -1126,7 +1126,7 @@ function isLiveRunStatus(status: string): boolean {
 }
 
 function isExecutionRunStatus(status: string): boolean {
-  return status === "queued" || status === "running";
+  return status === "queued" || status === "running" || status === "waiting_for_approval";
 }
 
 function isApprovalRunStatus(status: string): boolean {
@@ -1622,11 +1622,26 @@ async function approveCopilotFeishuAction(
   userId: string
 ): Promise<Record<string, unknown>> {
   const operation = feishuPendingActionOperations[action.type as keyof typeof feishuPendingActionOperations];
-  if (!new FeishuIntegrationRepository(options.db, userId).canExecuteActions()) {
+  const feishuRepo = new FeishuIntegrationRepository(options.db, userId);
+  if (!feishuRepo.canExecuteActions()) {
     return {
       error: {
         code: "feishu_integration_disabled",
         message: "Feishu integration is disabled"
+      }
+    };
+  }
+  const policy = validateFeishuOutboundPolicy(
+    feishuRepo.getConfig(),
+    feishuRepo.listUserMappings(),
+    operation,
+    action.input
+  );
+  if (!policy.ok) {
+    return {
+      error: {
+        code: policy.code,
+        message: policy.message
       }
     };
   }
@@ -3230,4 +3245,64 @@ function isApprovalError(result: Record<string, unknown>): result is { error: { 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(payload: Record<string, unknown>, key: string): string | undefined {
+  const value = payload[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+type FeishuOutboundPolicyResult =
+  | { ok: true }
+  | { ok: false; code: string; message: string };
+
+function validateFeishuOutboundPolicy(
+  config: { identityMode: string; allowedChatIds: string[] },
+  mappings: Array<{ feishuUserId: string }>,
+  operation: FeishuCommandOperation,
+  input: unknown
+): FeishuOutboundPolicyResult {
+  if (config.identityMode === "unknown") {
+    return {
+      ok: false,
+      code: "feishu_identity_mode_required",
+      message: "Feishu integration identity mode must be configured before approval"
+    };
+  }
+
+  const targetId = feishuActionTargetId(operation, input);
+  if (targetId && config.allowedChatIds.length > 0 && !config.allowedChatIds.includes(targetId)) {
+    return {
+      ok: false,
+      code: "feishu_target_not_allowed",
+      message: "Feishu action target is not allowed"
+    };
+  }
+
+  const assigneeFeishuUserId = feishuActionAssigneeId(operation, input);
+  if (assigneeFeishuUserId && mappings.length > 0 && !mappings.some((mapping) => mapping.feishuUserId === assigneeFeishuUserId)) {
+    return {
+      ok: false,
+      code: "feishu_user_not_mapped",
+      message: "Feishu action assignee is not mapped"
+    };
+  }
+
+  return { ok: true };
+}
+
+function feishuActionTargetId(operation: FeishuCommandOperation, input: unknown): string | undefined {
+  const payload = isRecord(input) ? input : {};
+  if (operation === "message_send") return stringField(payload, "chatId");
+  if (operation === "doc_create") return stringField(payload, "folderId");
+  if (operation === "doc_update") return stringField(payload, "documentId");
+  if (operation === "task_create") return stringField(payload, "tasklistId");
+  if (operation === "task_update") return stringField(payload, "taskId");
+  return undefined;
+}
+
+function feishuActionAssigneeId(operation: FeishuCommandOperation, input: unknown): string | undefined {
+  return operation === "task_create" && isRecord(input)
+    ? stringField(input, "assigneeFeishuUserId")
+    : undefined;
 }

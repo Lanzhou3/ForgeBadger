@@ -1607,7 +1607,13 @@ async function mockCopilotApis(
       return;
     }
 
-    await route.fulfill({ json: envelope({}) });
+    await route.fulfill({
+      status: 404,
+      json: {
+        code: 1,
+        message: `Unhandled mocked API route: ${method} ${url.pathname}`,
+      },
+    });
   });
 }
 

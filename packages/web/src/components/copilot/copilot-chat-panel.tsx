@@ -180,6 +180,7 @@ export function CopilotChatPanel({
   const visibleMessages = optimisticUserMessage
     ? [...messages.filter((message) => message.id !== optimisticUserMessage.id), optimisticUserMessage]
     : messages;
+  const messagesLoadFailed = messagesQuery.isError;
   const capabilitiesLoadFailed = capabilitiesQuery.isError;
   const providerReady = capabilitiesQuery.isSuccess && capabilitiesQuery.data.providerConfigured === true;
   const providerSetupBlocked = capabilitiesQuery.isSuccess && capabilitiesQuery.data.providerConfigured !== true;
@@ -224,7 +225,7 @@ export function CopilotChatPanel({
       setOptimisticUserMessage(null);
       setPrompt("");
       setLocalError("");
-      setActiveRun({
+      applyActiveRunState({
         run: response.run,
         events: response.events,
         pendingActions: response.pendingActions,
@@ -274,11 +275,14 @@ export function CopilotChatPanel({
     onSuccess: async (data) => {
       const nextRun =
         data.run ?? ({ id: "", status: "completed", goal: "", source: "copilot" } as CopilotRun);
-      setActiveRun((current) => ({
-        run: data.run ?? current?.run ?? nextRun,
-        events: data.events ?? current?.events ?? [],
-        pendingActions: data.pendingActions ?? [],
-      }));
+      setActiveRun((current) => {
+        const nextState = {
+          run: data.run ?? current?.run ?? nextRun,
+          events: data.events ?? current?.events ?? [],
+          pendingActions: data.pendingActions ?? [],
+        };
+        return shouldKeepCurrentActiveRun(current, nextState) ? current : nextState;
+      });
       if (nextRun.status === "failed") {
         const failure = resolveCopilotRunFailureMessage(nextRun);
         setLocalError(failure?.messageKey ? t(failure.messageKey) : failure?.fallbackMessage ?? "Copilot request failed");
@@ -371,7 +375,7 @@ export function CopilotChatPanel({
       try {
         const data = await getCopilotRun(activeRun.run.id);
         if (stopped) return;
-        setActiveRun({
+        applyActiveRunState({
           run: data.run,
           events: data.events,
           pendingActions: data.pendingActions,
@@ -436,7 +440,7 @@ export function CopilotChatPanel({
           setOptimisticUserMessage((current) =>
             current && eventConversationId ? { ...current, conversationId: eventConversationId } : current
           );
-          setActiveRun({
+          applyActiveRunState({
             run: {
               id: eventRunId,
               status: "running",
@@ -464,7 +468,7 @@ export function CopilotChatPanel({
         if (runId) {
           const data = await getCopilotRun(runId);
           if (stopped) return;
-          setActiveRun({
+          applyActiveRunState({
             run: data.run,
             events: data.events,
             pendingActions: data.pendingActions,
@@ -535,6 +539,7 @@ export function CopilotChatPanel({
   }
 
   function selectConversation(id: string) {
+    if (id === selectedConversationId) return;
     if (assistantStreamTimerRef.current) clearInterval(assistantStreamTimerRef.current);
     assistantStreamTimerRef.current = null;
     setDraftConversationActive(false);
@@ -543,6 +548,10 @@ export function CopilotChatPanel({
     setStreamingAssistantText("");
     setPrompt("");
     setSelectedConversationId(id);
+  }
+
+  function applyActiveRunState(nextState: ActiveRunState) {
+    setActiveRun((current) => shouldKeepCurrentActiveRun(current, nextState) ? current : nextState);
   }
 
   function renderConversationResponse(conversationId: string, responseMessages: CopilotMessage[]) {
@@ -672,12 +681,18 @@ export function CopilotChatPanel({
                 {localError}
               </div>
             )}
+            {messagesLoadFailed && (
+              <div className="mb-4 flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                <p>{resolveChatError(messagesQuery.error, t)}</p>
+              </div>
+            )}
             {messagesQuery.isLoading ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
                 {t("common.loading")}
               </div>
-            ) : !hasVisibleChatActivity ? (
+            ) : messagesLoadFailed ? null : !hasVisibleChatActivity ? (
               <EmptyChat onPrompt={setPrompt} />
             ) : (
               <div className="space-y-5">
@@ -1571,6 +1586,18 @@ function titleFromPrompt(prompt: string): string {
   const normalized = prompt.replace(/\s+/g, " ").trim();
   if (normalized.length <= 42) return normalized || "Copilot";
   return `${normalized.slice(0, 42)}...`;
+}
+
+function shouldKeepCurrentActiveRun(current: ActiveRunState | null, next: ActiveRunState): boolean {
+  if (!current || current.run.id !== next.run.id) return false;
+  const currentUpdatedAt = current.run.updatedAt ?? current.run.createdAt ?? 0;
+  const nextUpdatedAt = next.run.updatedAt ?? next.run.createdAt ?? 0;
+  if (currentUpdatedAt > nextUpdatedAt) return true;
+  return isTerminalCopilotRunStatus(current.run.status) && !isTerminalCopilotRunStatus(next.run.status);
+}
+
+function isTerminalCopilotRunStatus(status: string): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
 }
 
 function resolveChatError(error: unknown, t: (key: TranslationKey) => string): string {
