@@ -16,7 +16,8 @@
     "research_before_questions": false,
     "use_worktrees": false,
     "subagent_timeout": 300000,
-    "inline_plan_threshold": 2
+    "inline_plan_threshold": 2,
+    "_auto_chain_active": false
   },
   "planning": {
     "commit_docs": true,
