@@ -12,7 +12,7 @@ OpenForge has shipped the local-first control plane, guarded Codex Background Ta
 
 ## Phases
 
-- [ ] **Phase 1: Beta Evidence Closure** - close live-provider, physical Windows/WSL, first-user feedback, and stale release-documentation gaps.
+- [x] **Phase 1: Beta Evidence Closure** - close live-provider, physical Windows/WSL, first-user feedback, and stale release-documentation gaps. (completed 2026-05-19)
 - [ ] **Phase 2: Public Feishu Webhook Safety** - design and implement public webhook boundary controls before exposing Feishu ingress beyond guarded test adapters.
 - [ ] **Phase 3: First-User Product Hardening** - turn first-user dependency, provider, CLI, and Copilot usability feedback into scoped fixes.
 - [ ] **Phase 4: Feishu Project Manager Ledger** - add work item and ledger state only after command bridge safety evidence is accepted.
@@ -59,7 +59,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-04: Align CI gates and evidence reports with terminal E2E and explicit tmux requirements.
+- [x] 01-04: Align CI gates and evidence reports with terminal E2E and explicit tmux requirements.
 
 ### Phase 2: Public Feishu Webhook Safety
 
@@ -175,7 +175,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 1. Beta Evidence Closure | Post-Beta Trust Closure | 3/4 | In Progress|  |
+| 1. Beta Evidence Closure | Post-Beta Trust Closure | 4/4 | Complete   | 2026-05-19 |
 | 2. Public Feishu Webhook Safety | Post-Beta Trust Closure | 0/2 | Not started | - |
 | 3. First-User Product Hardening | Post-Beta Trust Closure | 0/4 | Not started | - |
 | 4. Feishu Project Manager Ledger | Collaboration Expansion | 0/2 | Not started | - |
