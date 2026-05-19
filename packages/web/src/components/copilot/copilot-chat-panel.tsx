@@ -1233,7 +1233,10 @@ function MessageBubble({
   const hasActivity = assistant && (runEvents.length > 0 || pendingActions.length > 0);
   if (!content && !hasActivity) return null;
   return (
-    <article className={cn("flex gap-3", assistant ? "justify-start" : "justify-end")}>
+    <article
+      data-testid="copilot-message-bubble"
+      className={cn("flex gap-3", assistant ? "justify-start" : "justify-end")}
+    >
       {assistant && <BubbleAvatar icon={<Bot className="size-4" aria-hidden="true" />} />}
       <div
         className={cn(

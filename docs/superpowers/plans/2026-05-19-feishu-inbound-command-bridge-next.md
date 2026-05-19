@@ -4,6 +4,8 @@
 
 **Goal:** Add the first safe inbound Feishu command bridge so authorized Feishu chats can create Copilot conversations and runs without gaining direct terminal or approval authority.
 
+**Current status:** Completed in `28c9365 fix: harden copilot run gates` on `post-beta-release-gates`. GitHub PR #2 is open against `master`, mergeable, and the remote CI checks for this head SHA are green as of 2026-05-19.
+
 **Product positioning:** OpenForge remains a local-first AI CLI control plane with an approval-gated Copilot. Feishu is only a controlled collaboration channel into Copilot, not the execution authority, not a Feishu bot platform, and not a remote autonomous development entry point.
 
 **Architecture:** Gateway remains the only enforcement point. Feishu inbound messages enter through an explicit authenticated/local-only Gateway route, are normalized into a bounded command object, checked against tenant Feishu config, chat allowlist, user mappings, and rate limits, then routed into Copilot as `source: "feishu"` with all write operations still represented as pending actions. Web only receives the resulting Copilot conversation/run state through existing APIs.
@@ -63,18 +65,18 @@ Out of scope:
 - Modify: `packages/gateway/test/feishu-integration.test.ts`
 - Modify: `packages/gateway/src/routes/integrations-feishu.ts`
 
-- [ ] **Step 1: Write failing tests for guarded, disabled, and emergency-disabled integration**
+- [x] **Step 1: Write failing tests for guarded, disabled, and emergency-disabled integration**
 
 Add tests asserting unauthenticated `POST /api/v1/integrations/feishu/inbound` returns `401`, and authenticated requests return `403` with envelope code `1`, write no Copilot run, and do not leak input text when:
 - config is missing or `enabled: false`;
 - config has `emergencyDisabled: true`.
 
-- [ ] **Step 2: Write failing tests for chat allowlist**
+- [x] **Step 2: Write failing tests for chat allowlist**
 
 Seed config with `enabled: true`, `identityMode: "bot"`, and `allowedChatIds: ["oc_allowed"]`.
 Assert inbound from `oc_denied` returns `403`, creates no Copilot run, and records a redacted `feishu.inbound.reject` audit row.
 
-- [ ] **Step 3: Implement minimal inbound schema and rejection path**
+- [x] **Step 3: Implement minimal inbound schema and rejection path**
 
 Add a strict zod schema:
 
@@ -90,7 +92,7 @@ const inboundFeishuCommandSchema = z.object({
 
 The route must fail closed before touching Copilot when config or chat policy fails.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -108,25 +110,25 @@ Expected: new rejection tests pass.
 - Modify: `packages/gateway/src/db/repositories/copilot-repository.ts` if needed
 - Modify: `packages/web/src/lib/api.ts` if shared Copilot source type is too narrow
 
-- [ ] **Step 1: Write failing test for unmapped Feishu user**
+- [x] **Step 1: Write failing test for unmapped Feishu user**
 
 Seed enabled config and allowed chat. Do not seed `integration_feishu_user_mappings`.
 Assert inbound returns `403`, creates no run, and returns `feishu_user_not_mapped`.
 
-- [ ] **Step 2: Write failing test for mapped user creating a Copilot run**
+- [x] **Step 2: Write failing test for mapped user creating a Copilot run**
 
 Seed mapping `{ feishuUserId: "ou_allowed", openforgeUserId: user.id }`.
 Assert inbound creates or reuses a Copilot conversation, creates a run with `source: "feishu"`, and returns only bounded run/conversation metadata.
 
-- [ ] **Step 3: Write failing tests for project ownership and active-run blocking**
+- [x] **Step 3: Write failing tests for project ownership and active-run blocking**
 
 Assert an inbound `projectId` owned by another tenant is rejected before run creation, and a current `queued`, `running`, or `waiting_for_approval` run blocks a new Feishu inbound run.
 
-- [ ] **Step 4: Add `source: "feishu"` where type paths require it**
+- [x] **Step 4: Add `source: "feishu"` where type paths require it**
 
 Keep source handling additive. Do not loosen source validation to arbitrary strings if a literal union is available.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -144,30 +146,30 @@ Expected: mapped inbound path passes and existing Copilot route behavior remains
 - Modify: `packages/gateway/src/routes/integrations-feishu.ts`
 - Modify: `docs/API.md`
 
-- [ ] **Step 1: Write failing redaction test**
+- [x] **Step 1: Write failing redaction test**
 
 Use inbound text containing API-key-shaped content. Assert persisted Copilot messages, provider prompt context, API response, and audit details do not contain the raw secret.
 
-- [ ] **Step 2: Write failing free-form approval test**
+- [x] **Step 2: Write failing free-form approval test**
 
 Create a waiting Copilot run with a pending action. Send inbound text such as `approve`, `批准`, or `/approve action-id`.
 Assert the pending action remains `pending` and the route returns a bounded rejection instead of approving the action.
 
-- [ ] **Step 3: Write failing replay and rate-limit tests**
+- [x] **Step 3: Write failing replay and rate-limit tests**
 
 Assert a repeated accepted `messageId` does not create a second run, and a per-chat rate limit returns `429` without calling Copilot.
 
-- [ ] **Step 4: Add audit rows**
+- [x] **Step 4: Add audit rows**
 
 Record:
 - `feishu.inbound.accept` with chat id, mapped OpenForge user id, optional project id, and redacted text summary.
 - `feishu.inbound.reject` with reason code and bounded redacted metadata.
 
-- [ ] **Step 5: Document the contract**
+- [x] **Step 5: Document the contract**
 
 Update `docs/API.md` with the route, required guard, policy decisions, redaction, and explicit non-support for Feishu approval text.
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run:
 
@@ -185,7 +187,7 @@ Expected: all tests pass and docs contain the safety boundaries.
 - Modify: `.github/workflows/ci.yml` only if the inbound route adds a new narrow regression suite that is not already covered by `pnpm -r test`.
 - Modify: `docs/CI-CD-PLAN.md` only if CI commands change.
 
-- [ ] **Step 1: Run focused verification**
+- [x] **Step 1: Run focused verification**
 
 Run:
 
@@ -195,7 +197,7 @@ pnpm --dir packages/gateway typecheck
 pnpm --dir packages/web test src/lib/api.test.ts
 ```
 
-- [ ] **Step 2: Run broader release-adjacent verification**
+- [x] **Step 2: Run broader release-adjacent verification**
 
 Run:
 
@@ -205,7 +207,14 @@ pnpm -r build
 git diff --check
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
+
+Actual commit:
+
+```bash
+git commit -m "fix: harden copilot run gates"
+git push origin post-beta-release-gates
+```
 
 ```bash
 git add packages/gateway/src/routes/integrations-feishu.ts packages/gateway/src/routes/copilot.ts packages/gateway/src/db/repositories/copilot-repository.ts packages/gateway/test/feishu-integration.test.ts packages/gateway/test/copilot-routes.test.ts packages/web/src/lib/api.ts packages/web/src/lib/api.test.ts docs/API.md .github/workflows/ci.yml docs/CI-CD-PLAN.md
@@ -213,6 +222,8 @@ git commit -m "feat: route feishu commands to copilot"
 ```
 
 Only include files that actually changed.
+
+The command block above is the original execution template; the actual commit was broader because it also closed Copilot live-run, provider error, frontend polling, CI gate, and Feishu outbound-policy review findings.
 
 ## Acceptance Gates
 
@@ -229,3 +240,10 @@ Only include files that actually changed.
 - Emergency disable stops inbound immediately.
 - The route has a documented JWT guard and remains a test adapter until a separate public webhook signature design lands.
 - Existing Web Copilot and approved outbound Feishu actions keep passing.
+
+## Follow-Up Backlog
+
+- Add a separate public Feishu webhook design with signature verification and replay protection at the webhook boundary.
+- Move inbound per-chat rate limiting to a shared store before multi-instance deployment; the current route-level limiter is sufficient for the local Gateway MVP slice.
+- Keep Feishu approvals out of scope unless a future design adds explicit OpenForge approval tokens and auditable approval semantics.
+- Start project-manager work item and ledger tables only after this bridge has run safely behind the current PR gates.

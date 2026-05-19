@@ -37,6 +37,10 @@ test("Copilot chat blocks sending when capabilities cannot load", async ({ page 
 test("Copilot chat creates a conversation and sends messages", async ({ page }) => {
   let createConversationBody: Record<string, unknown> | undefined;
   let sendBody: Record<string, unknown> | undefined;
+  let releaseSendMessage: (() => void) | undefined;
+  const sendMessageGate = new Promise<void>((resolve) => {
+    releaseSendMessage = resolve;
+  });
   await mockCopilotApis(page, {
     onCreateConversation: async (route) => {
       createConversationBody = route.request().postDataJSON() as Record<string, unknown>;
@@ -56,7 +60,7 @@ test("Copilot chat creates a conversation and sends messages", async ({ page }) 
     },
     onSendMessage: async (route) => {
       sendBody = route.request().postDataJSON() as Record<string, unknown>;
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await sendMessageGate;
       await route.fulfill({
         json: envelope({
           messages: [
@@ -103,6 +107,7 @@ test("Copilot chat creates a conversation and sends messages", async ({ page }) 
     prompt: "Summarize Gateway health",
     source: "copilot",
   });
+  releaseSendMessage?.();
   await expect(page.getByText("Gateway is healthy.")).toBeVisible();
 });
 
@@ -304,7 +309,7 @@ test("Copilot does not duplicate the acknowledged user message while an async ru
   await page.getByPlaceholder(/Ask Copilot/).fill("Check project state");
   await page.getByRole("button", { name: "Send" }).click();
 
-  await expect(page.getByRole("article").filter({ hasText: "Check project state" })).toHaveCount(1);
+  await expect(copilotMessage(page, "Check project state")).toHaveCount(1);
 });
 
 test("Copilot deletes a conversation and returns to an empty draft", async ({ page }) => {
@@ -598,9 +603,7 @@ test("Copilot renders tool events and pending approvals in the chat flow", async
   await page.getByPlaceholder(/Ask Copilot/).fill("Create a Claude Code session");
   await page.getByRole("button", { name: "Send" }).click();
 
-  const assistantBubble = page
-    .getByText("Checking whether an existing session is available.")
-    .locator("xpath=ancestor::article");
+  const assistantBubble = copilotMessage(page, "Checking whether an existing session is available.");
   await expect(assistantBubble).toBeVisible();
   await expect(assistantBubble.getByText("Tool requested")).toBeVisible();
   await expect(assistantBubble.getByText("openforge.propose_session_create").first()).toBeVisible();
@@ -701,9 +704,7 @@ test("Copilot renders model-provider apply approvals with readable details", asy
   await page.getByPlaceholder(/Ask Copilot/).fill("Apply MiniMax to Claude Code");
   await page.getByRole("button", { name: "Send" }).click();
 
-  const assistantBubble = page
-    .getByText("I found the provider and need approval before writing project config.")
-    .locator("xpath=ancestor::article");
+  const assistantBubble = copilotMessage(page, "I found the provider and need approval before writing project config.");
   await expect(assistantBubble.getByText("Model provider apply")).toBeVisible();
   await expect(assistantBubble.getByText("claude / project-1 / provider-minimax-cn / model-minimax-m2")).toBeVisible();
   await expect(assistantBubble.getByText("credential-mainland / Use MiniMax China for Claude Code.")).toBeVisible();
@@ -830,7 +831,7 @@ test("Copilot renders approved model-provider apply results in the chat flow", a
   await page.goto("/copilot");
   await page.getByPlaceholder(/Ask Copilot/).fill("Apply MiniMax to Claude Code");
   await page.getByRole("button", { name: "Send" }).click();
-  const assistantBubble = page.getByText("I need approval before writing project config.").locator("xpath=ancestor::article");
+  const assistantBubble = copilotMessage(page, "I need approval before writing project config.");
   await assistantBubble.getByRole("button", { name: "Approve" }).click();
 
   await expect(page.getByText("Action approved")).toBeVisible();
@@ -896,9 +897,7 @@ test("Copilot renders recalled memory snippets in the assistant activity flow", 
   await page.getByPlaceholder(/Ask Copilot/).fill("Use the remembered provider decision");
   await page.getByRole("button", { name: "Send" }).click();
 
-  const assistantBubble = page
-    .getByText("I found a relevant provider decision and will use it as context.")
-    .locator("xpath=ancestor::article");
+  const assistantBubble = copilotMessage(page, "I found a relevant provider decision and will use it as context.");
   await expect(assistantBubble.getByText("Memory recalled")).toBeVisible();
   await expect(assistantBubble.getByText("Provider configuration should treat provider profiles as the source of truth.")).toBeVisible();
 });
@@ -958,7 +957,7 @@ test("Copilot renders terminal snapshots from tool results in the assistant acti
   await page.getByPlaceholder(/Ask Copilot/).fill("What is in the terminal?");
   await page.getByRole("button", { name: "Send" }).click();
 
-  const assistantBubble = page.getByText("I checked the terminal snapshot.").locator("xpath=ancestor::article");
+  const assistantBubble = copilotMessage(page, "I checked the terminal snapshot.");
   await expect(assistantBubble.getByText("Tool result")).toBeVisible();
   await expect(assistantBubble.getByText("pwd")).toBeVisible();
   await expect(assistantBubble.getByText("/data/OpenForge")).toBeVisible();
@@ -1062,7 +1061,7 @@ test("Copilot renders assistant delta events before the final run response", asy
   await page.goto("/copilot");
   await page.getByPlaceholder(/Ask Copilot/).fill("Stream the answer");
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByRole("article").filter({ hasText: "Stream the answer" })).toHaveCount(1);
+  await expect(copilotMessage(page, "Stream the answer")).toHaveCount(1);
 
   await page.evaluate(() => {
     window.dispatchEvent(new CustomEvent("openforge:gateway-event", {
@@ -1619,4 +1618,8 @@ async function mockCopilotApis(
 
 function envelope(data: unknown) {
   return { code: 0, data, message: "" };
+}
+
+function copilotMessage(page: Page, text: string) {
+  return page.getByTestId("copilot-message-bubble").filter({ hasText: text });
 }
