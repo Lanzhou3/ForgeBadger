@@ -146,6 +146,25 @@ Known skip:
 - Skip E2E only when CI cannot provide loopback listeners, tmux, or Claude Code
   CLI. Record which dependency is missing.
 
+### Phase 1 Terminal Gate Boundary
+
+CI requires `e2e/mvp1-smoke.spec.ts` as the stable control-plane happy path.
+`e2e/gate-d-smoke.spec.ts` remains release/manual evidence unless the host
+supplies Gateway/Web loopback listeners, tmux, and the real CLI prerequisites
+needed for terminal behavior.
+
+Focused tmux evidence is the explicit command:
+
+```bash
+RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
+```
+
+Do not claim `pnpm -r test` alone satisfies REL-06. If `gate-d-smoke` or the
+focused tmux command is skipped, record `Status: Caveat`, skip reason, owner,
+and next action. The default owner is the release maintainer for the target
+host, and the next action is to rerun the skipped command on a host with the
+missing dependency installed.
+
 ## 2. Security Gates
 
 Block a release if any of these are true:
