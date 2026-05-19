@@ -50,7 +50,7 @@ OpenForge has shipped the local-first control plane, guarded Codex Background Ta
 Plans:
 **Wave 1**
 
-- [ ] 01-01: Refresh post-merge release and progress documentation.
+- [x] 01-01: Refresh post-merge release and progress documentation.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -175,7 +175,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 1. Beta Evidence Closure | Post-Beta Trust Closure | 0/4 | Not started | - |
+| 1. Beta Evidence Closure | Post-Beta Trust Closure | 1/4 | In Progress|  |
 | 2. Public Feishu Webhook Safety | Post-Beta Trust Closure | 0/2 | Not started | - |
 | 3. First-User Product Hardening | Post-Beta Trust Closure | 0/4 | Not started | - |
 | 4. Feishu Project Manager Ledger | Collaboration Expansion | 0/2 | Not started | - |
