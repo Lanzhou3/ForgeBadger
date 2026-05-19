@@ -16,10 +16,10 @@
 
 ### Feishu Safety
 
-- [ ] **FSH-01**: Public Feishu webhook ingress has a documented signature-verification and timestamp/replay design before public exposure.
-- [ ] **FSH-02**: Feishu inbound replay protection and per-chat rate limiting are safe for the intended deployment topology.
-- [ ] **FSH-03**: Feishu inbound and outbound paths enforce tenant configuration, chat allowlists, identity mode, and user mappings before Copilot or outbound execution.
-- [ ] **FSH-04**: Feishu free-form text cannot approve pending actions, send terminal input, or bypass OpenForge approval/audit semantics.
+- [x] **FSH-01**: Public Feishu webhook ingress has a documented signature-verification and timestamp/replay design before public exposure.
+- [x] **FSH-02**: Feishu inbound replay protection and per-chat rate limiting are safe for the intended deployment topology.
+- [x] **FSH-03**: Feishu inbound and outbound paths enforce tenant configuration, chat allowlists, identity mode, and user mappings before Copilot or outbound execution.
+- [x] **FSH-04**: Feishu free-form text cannot approve pending actions, send terminal input, or bypass OpenForge approval/audit semantics.
 
 ### First-User Hardening
 
@@ -68,10 +68,10 @@
 | REL-04 | Phase 1 | Complete |
 | REL-05 | Phase 1 | Complete |
 | REL-06 | Phase 1 | Complete |
-| FSH-01 | Phase 2 | Pending |
-| FSH-02 | Phase 2 | Pending |
-| FSH-03 | Phase 2 | Pending |
-| FSH-04 | Phase 2 | Pending |
+| FSH-01 | Phase 2 | Complete |
+| FSH-02 | Phase 2 | Complete |
+| FSH-03 | Phase 2 | Complete |
+| FSH-04 | Phase 2 | Complete |
 | UX-01 | Phase 3 | Pending |
 | UX-02 | Phase 3 | Pending |
 | UX-03 | Phase 3 | Pending |
@@ -94,4 +94,4 @@
 
 ---
 *Requirements defined: 2026-05-19*
-*Last updated: 2026-05-19 after GSD bootstrap from post-beta review*
+*Last updated: 2026-05-20 after Phase 2 public Feishu webhook safety completion*

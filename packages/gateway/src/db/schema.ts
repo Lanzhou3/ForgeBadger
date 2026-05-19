@@ -596,11 +596,17 @@ export const integrationFeishuConfigs = sqliteTable(
     identityMode: text("identity_mode").notNull().default("unknown"),
     allowedChatIds: text("allowed_chat_ids").notNull().default("[]"),
     commandPrefix: text("command_prefix").notNull().default("/openforge"),
+    publicWebhookId: text("public_webhook_id"),
+    publicWebhookEnabled: integer("public_webhook_enabled", { mode: "boolean" }).notNull().default(false),
+    verificationTokenEncrypted: text("verification_token_encrypted"),
+    eventEncryptKeyEncrypted: text("event_encrypt_key_encrypted"),
+    webhookConfiguredAt: integer("webhook_configured_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
     updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
   },
   (table) => ({
-    idx_integration_feishu_configs_user: uniqueIndex("idx_integration_feishu_configs_user").on(table.userId)
+    idx_integration_feishu_configs_user: uniqueIndex("idx_integration_feishu_configs_user").on(table.userId),
+    idx_integration_feishu_configs_public_webhook: uniqueIndex("idx_integration_feishu_configs_public_webhook").on(table.publicWebhookId)
   })
 );
 
@@ -627,6 +633,52 @@ export const integrationFeishuUserMappings = sqliteTable(
     idx_integration_feishu_user_mappings_openforge_user: index("idx_integration_feishu_user_mappings_openforge_user").on(
       table.userId,
       table.openforgeUserId
+    )
+  })
+);
+
+export const integrationFeishuWebhookReplayEntries = sqliteTable(
+  "integration_feishu_webhook_replay_entries",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    publicWebhookId: text("public_webhook_id").notNull(),
+    replayKey: text("replay_key").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date())
+  },
+  (table) => ({
+    idx_integration_feishu_webhook_replay_unique: uniqueIndex("idx_integration_feishu_webhook_replay_unique").on(
+      table.userId,
+      table.publicWebhookId,
+      table.replayKey
+    ),
+    idx_integration_feishu_webhook_replay_expiry: index("idx_integration_feishu_webhook_replay_expiry").on(table.expiresAt)
+  })
+);
+
+export const integrationFeishuWebhookRateWindows = sqliteTable(
+  "integration_feishu_webhook_rate_windows",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    publicWebhookId: text("public_webhook_id").notNull(),
+    scope: text("scope").notNull(),
+    scopeId: text("scope_id").notNull(),
+    windowStartedAt: integer("window_started_at", { mode: "timestamp" }).notNull(),
+    count: integer("count").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_integration_feishu_webhook_rate_unique: uniqueIndex("idx_integration_feishu_webhook_rate_unique").on(
+      table.userId,
+      table.publicWebhookId,
+      table.scope,
+      table.scopeId
     )
   })
 );

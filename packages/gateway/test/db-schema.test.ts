@@ -57,6 +57,8 @@ describe("db schema", () => {
       "copilot_runs",
       "integration_feishu_configs",
       "integration_feishu_user_mappings",
+      "integration_feishu_webhook_rate_windows",
+      "integration_feishu_webhook_replay_entries",
       "model_cost_rates",
       "model_profiles",
       "model_provider_profiles",

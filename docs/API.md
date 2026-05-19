@@ -152,9 +152,12 @@ malformed, stale, far-future, or mismatched requests before event
 normalization and before Copilot execution. URL verification is setup-only:
 `url_verification` returns only `{"challenge":"..."}` and does not create a
 Copilot run, mutate policy, dispatch Feishu commands, or write terminal input.
-Encrypted event payloads are accepted only when the tenant webhook config can
-decrypt the event and validate the configured Feishu verification token;
-otherwise the route fails closed.
+Encrypted event payloads with a top-level `encrypt` field are explicitly
+unsupported in this slice and fail closed with
+`feishu_webhook_encrypted_payload_unsupported`. Tenants that require encrypted
+Feishu app mode must leave public webhook enablement off until decrypt support
+is added and tested. Unencrypted public events still validate the configured
+Feishu verification token after signature and timestamp checks.
 
 Replay protection and public webhook rate limits use dedicated persistent
 repository state, not audit-log search and not in-memory maps. Replay keys
@@ -194,6 +197,24 @@ API-visible metadata must not include raw request bodies, signatures, Feishu
 tokens, event encrypt keys, credentials, raw Feishu message text, `Bearer ...`
 values, or `sk-*` style secrets.
 
+Implemented public webhook response examples:
+
+```json
+{ "challenge": "challenge-value" }
+```
+
+```json
+{ "msg": "ok" }
+```
+
+```json
+{ "msg": "ignored" }
+```
+
+```json
+{ "msg": "feishu_webhook_signature_invalid" }
+```
+
 Public webhook audit rows use bounded metadata only. Accepted rows include the
 public id or integration id, Feishu event id or message id, chat id, mapped
 OpenForge user id, optional project id, run id, conversation id, pending action
@@ -230,7 +251,10 @@ Successful config response:
       "emergencyDisabled": false,
       "identityMode": "unknown",
       "allowedChatIds": [],
-      "commandPrefix": "/openforge"
+      "commandPrefix": "/openforge",
+      "publicWebhookId": null,
+      "publicWebhookEnabled": false,
+      "webhookConfiguredAt": null
     }
   },
   "message": ""

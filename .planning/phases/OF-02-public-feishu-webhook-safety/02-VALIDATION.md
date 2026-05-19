@@ -1,7 +1,7 @@
 ---
 phase: 02
 slug: public-feishu-webhook-safety
-status: draft
+status: complete
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-05-20
@@ -38,13 +38,13 @@ created: 2026-05-20
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 02-01-01 | 01 | 1 | FSH-01 | T-02-01 | Public webhook contract is specified before implementation. | docs | `rg -n "webhook/:publicId|X-Lark-Request-Timestamp|X-Lark-Signature|url_verification|single Gateway" docs/API.md` | yes | pending |
-| 02-01-02 | 01 | 1 | FSH-01, FSH-02, FSH-03, FSH-04 | T-02-02 | Test matrix names all boundary controls and non-goals. | docs | `rg -n "signature|timestamp|replay|rate limit|free-form approval|terminal input" docs/API.md` | yes | pending |
-| 02-02-01 | 02 | 2 | FSH-01 | T-02-03 | Public route rejects unauthentic events and handles challenge without side effects. | integration | `pnpm --dir packages/gateway test test/feishu-integration.test.ts` | yes | pending |
-| 02-02-02 | 02 | 2 | FSH-02 | T-02-04 | Replay/rate-limit state is repository-backed and restart-safe for single Gateway. | integration | `pnpm --dir packages/gateway test test/feishu-integration.test.ts` | yes | pending |
-| 02-02-03 | 02 | 2 | FSH-03, FSH-04 | T-02-05 | Existing fail-closed policy, redaction, audit, and no-approval semantics hold for public webhook events. | integration | `pnpm --dir packages/gateway test test/feishu-integration.test.ts test/copilot-routes.test.ts` | yes | pending |
+| 02-01-01 | 01 | 1 | FSH-01 | T-02-01 | Public webhook contract is specified before implementation. | docs | `rg -n "webhook/:publicId|X-Lark-Request-Timestamp|X-Lark-Signature|url_verification|single Gateway" docs/API.md` | yes | pass |
+| 02-01-02 | 01 | 1 | FSH-01, FSH-02, FSH-03, FSH-04 | T-02-02 | Test matrix names all boundary controls and non-goals. | docs | `rg -n "signature|timestamp|replay|rate limit|free-form approval|terminal input" docs/API.md` | yes | pass |
+| 02-02-01 | 02 | 2 | FSH-01 | T-02-03 | Public route rejects unauthentic events and handles challenge without side effects. | integration | `pnpm --dir packages/gateway test test/feishu-integration.test.ts` | yes | pass |
+| 02-02-02 | 02 | 2 | FSH-02 | T-02-04 | Replay/rate-limit state is repository-backed and restart-safe for single Gateway. | integration | `pnpm --dir packages/gateway test test/feishu-integration.test.ts` | yes | pass |
+| 02-02-03 | 02 | 2 | FSH-03, FSH-04 | T-02-05 | Existing fail-closed policy, redaction, audit, and no-approval semantics hold for public webhook events. | integration | `pnpm --dir packages/gateway test test/feishu-integration.test.ts test/copilot-routes.test.ts` | yes | pass |
 
-*Status: pending until execution.*
+*Status: all automated checks passed on 2026-05-20.*
 
 ---
 
@@ -71,5 +71,9 @@ Existing infrastructure covers all phase requirements.
 - [x] No watch-mode flags.
 - [x] Feedback latency target is under 90 seconds for focused backend tests.
 - [x] `nyquist_compliant: true` set in frontmatter.
+- [x] `pnpm --dir packages/gateway test test/feishu-integration.test.ts test/copilot-routes.test.ts`
+- [x] `pnpm --dir packages/gateway typecheck`
+- [x] `git diff --check`
+- [x] Changed-file secret scan reviewed; matches are documentation placeholders, auth test headers, or redaction test dummy values.
 
 **Approval:** approved 2026-05-20

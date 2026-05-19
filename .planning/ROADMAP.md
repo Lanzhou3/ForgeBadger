@@ -13,7 +13,7 @@ OpenForge has shipped the local-first control plane, guarded Codex Background Ta
 ## Phases
 
 - [x] **Phase 1: Beta Evidence Closure** - close live-provider, physical Windows/WSL, first-user feedback, and stale release-documentation gaps. (completed 2026-05-19)
-- [ ] **Phase 2: Public Feishu Webhook Safety** - design and implement public webhook boundary controls before exposing Feishu ingress beyond guarded test adapters.
+- [x] **Phase 2: Public Feishu Webhook Safety** - design and implement public webhook boundary controls before exposing Feishu ingress beyond guarded test adapters. (completed 2026-05-20)
 - [ ] **Phase 3: First-User Product Hardening** - turn first-user dependency, provider, CLI, and Copilot usability feedback into scoped fixes.
 - [ ] **Phase 4: Feishu Project Manager Ledger** - add work item and ledger state only after command bridge safety evidence is accepted.
 - [ ] **Phase 5: Remote Execution Architecture** - keep SSH/remote execution separate with its own threat model and milestone.
@@ -88,11 +88,11 @@ Plans:
 
 **Wave 1**
 
-- [ ] 02-01: Specify public webhook boundary, signature verification, replay, and rate-limit contract.
+- [x] 02-01: Specify public webhook boundary, signature verification, replay, and rate-limit contract.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-02: Implement and verify the public webhook route behind explicit configuration.
+- [x] 02-02: Implement and verify the public webhook route behind explicit configuration.
 
 ### Phase 3: First-User Product Hardening
 
@@ -181,7 +181,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5.
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 1. Beta Evidence Closure | Post-Beta Trust Closure | 4/4 | Complete   | 2026-05-19 |
-| 2. Public Feishu Webhook Safety | Post-Beta Trust Closure | 0/2 | Not started | - |
+| 2. Public Feishu Webhook Safety | Post-Beta Trust Closure | 2/2 | Complete   | 2026-05-20 |
 | 3. First-User Product Hardening | Post-Beta Trust Closure | 0/4 | Not started | - |
 | 4. Feishu Project Manager Ledger | Collaboration Expansion | 0/2 | Not started | - |
 | 5. Remote Execution Architecture | Collaboration Expansion | 0/1 | Deferred | - |
