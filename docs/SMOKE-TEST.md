@@ -143,13 +143,13 @@ permission prompt event.
   evidence, set `OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1` plus
   `OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER`, `OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL`,
   and a disposable API key. The command must not print the plaintext key.
-  OpenAI example:
+  Set `OPENFORGE_COPILOT_PROVIDER_SMOKE_API_KEY` in your shell or secret
+  manager before running the command. OpenAI example:
 
   ```bash
   OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
   OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER=openai \
   OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
-  OPENFORGE_COPILOT_PROVIDER_SMOKE_API_KEY=<disposable-openai-key> \
   pnpm smoke:copilot-provider
   ```
 
@@ -159,12 +159,13 @@ permission prompt event.
   OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
   OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER=anthropic \
   OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
-  OPENFORGE_COPILOT_PROVIDER_SMOKE_API_KEY=<disposable-anthropic-key> \
   pnpm smoke:copilot-provider
   ```
 
   Record only the redacted JSON result, provider name, model id, pass/fail
   status, and any sanitized failure reason.
+  For Phase 1 evidence reports, use only disposable or rotatable credentials
+  and copy only redacted JSON or public summary fields, never plaintext keys.
 - Configure a disposable OpenAI or Anthropic provider profile with an active
   model and active test credential.
 - Open `/copilot` from the sidebar.
