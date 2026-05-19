@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Cpu, FlaskConical, Globe2, KeyRound, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
+import { Bell, Cpu, Download, FlaskConical, Globe2, KeyRound, MessageSquare, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,8 +23,16 @@ import {
   setBrowserNotificationPreference,
   type BrowserNotificationPermission,
 } from "@/lib/browser-notifications";
-import { discoverAdapters, listAuditLogs, type AdapterDiscovery } from "@/lib/api";
-import type { Language } from "@/lib/i18n";
+import {
+  discoverAdapters,
+  exportDiagnostics,
+  getFeishuIntegrationStatus,
+  listAuditLogs,
+  type AdapterDiscovery,
+  type FeishuIntegrationStatus,
+  type LocalDiagnosticsExport
+} from "@/lib/api";
+import type { Language, TranslationKey } from "@/lib/i18n";
 
 const languageOptions = [
   { code: "zh-CN", label: "简体中文" },
@@ -37,9 +45,18 @@ export default function SettingsPage() {
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(false);
   const [browserNotificationPermission, setBrowserNotificationPermission] =
     useState<BrowserNotificationPermission>("unsupported");
+  const [diagnosticsState, setDiagnosticsState] = useState<"idle" | "exporting" | "success" | "error">("idle");
   const { data: adapterData, isLoading: adaptersLoading } = useQuery({
     queryKey: ["adapter-discovery"],
     queryFn: discoverAdapters,
+  });
+  const {
+    data: feishuStatus,
+    isLoading: feishuStatusLoading,
+    isError: feishuStatusError
+  } = useQuery({
+    queryKey: ["feishu-integration-status"],
+    queryFn: getFeishuIntegrationStatus,
   });
   const { data: auditData, isLoading: auditLoading } = useQuery({
     queryKey: ["audit-logs", "settings"],
@@ -67,6 +84,17 @@ export default function SettingsPage() {
     const allowed = permission === "granted";
     setBrowserNotificationPreference(allowed);
     setBrowserNotificationsEnabled(allowed);
+  }
+
+  async function handleDiagnosticsExport() {
+    setDiagnosticsState("exporting");
+    try {
+      const { report } = await exportDiagnostics();
+      downloadDiagnosticsReport(report);
+      setDiagnosticsState("success");
+    } catch {
+      setDiagnosticsState("error");
+    }
   }
 
   return (
@@ -169,6 +197,31 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
+                <MessageSquare className="size-4 text-muted-foreground" />
+                <CardTitle>{t("settings.feishuIntegration")}</CardTitle>
+              </div>
+              <CardDescription>
+                {t("settings.feishuIntegrationDescription")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {feishuStatusLoading ? (
+                <p className="text-sm text-muted-foreground">
+                  {t("settings.feishuStatusLoading")}
+                </p>
+              ) : feishuStatusError ? (
+                <p className="text-sm text-muted-foreground">
+                  {t("settings.feishuStatusLoadFailed")}
+                </p>
+              ) : feishuStatus ? (
+                <FeishuIntegrationItem status={feishuStatus} />
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
                 <FlaskConical className="size-4 text-muted-foreground" />
                 <CardTitle>{t("settings.experimentalFeatures")}</CardTitle>
               </div>
@@ -223,6 +276,39 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
+                <Download className="size-4 text-muted-foreground" />
+                <CardTitle>{t("settings.diagnostics")}</CardTitle>
+              </div>
+              <CardDescription>
+                {t("settings.diagnosticsDescription")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-start"
+                onClick={handleDiagnosticsExport}
+                disabled={diagnosticsState === "exporting"}
+              >
+                <Download className="mr-2 size-4" />
+                {diagnosticsState === "exporting"
+                  ? t("settings.diagnosticsExporting")
+                  : t("settings.diagnosticsExport")}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                {diagnosticsState === "success"
+                  ? t("settings.diagnosticsExported")
+                  : diagnosticsState === "error"
+                    ? t("settings.diagnosticsExportFailed")
+                    : t("settings.diagnosticsNotice")}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
                 <ScrollText className="size-4 text-muted-foreground" />
                 <CardTitle>{t("settings.auditHistory")}</CardTitle>
               </div>
@@ -256,6 +342,82 @@ export default function SettingsPage() {
   );
 }
 
+function FeishuIntegrationItem({ status }: { status: FeishuIntegrationStatus }) {
+  const { t } = useLanguage();
+  const enabledState = status.emergencyDisabled
+    ? t("settings.feishuEmergencyDisabled")
+    : status.enabled
+      ? t("settings.feishuEnabled")
+      : t("settings.feishuDisabled");
+
+  return (
+    <div className="rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="font-medium">{t("settings.feishuIntegration")}</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {t("settings.feishuPhaseOneNotice")}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={status.available ? "secondary" : "outline"}>
+            {status.available ? t("settings.feishuCliAvailable") : t("settings.feishuCliMissing")}
+          </Badge>
+          <Badge variant={status.enabled ? "secondary" : "outline"}>
+            {enabledState}
+          </Badge>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+        <StatusField label={t("settings.feishuVersion")} value={status.version ?? "-"} />
+        <StatusField label={t("settings.feishuAuthState")} value={formatFeishuAuthState(status.authState, t)} />
+        <StatusField label={t("settings.feishuIdentityMode")} value={formatFeishuIdentityMode(status.identityMode, t)} />
+        <StatusField label={t("settings.feishuEnabledState")} value={enabledState} />
+      </div>
+    </div>
+  );
+}
+
+function StatusField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="truncate text-right font-medium">{value}</span>
+    </div>
+  );
+}
+
+function formatFeishuAuthState(
+  authState: FeishuIntegrationStatus["authState"],
+  t: (key: TranslationKey) => string
+): string {
+  if (authState === "authenticated") return t("settings.feishuAuthAuthenticated");
+  if (authState === "unauthenticated") return t("settings.feishuAuthUnauthenticated");
+  return t("settings.feishuAuthUnknown");
+}
+
+function formatFeishuIdentityMode(
+  identityMode: FeishuIntegrationStatus["identityMode"],
+  t: (key: TranslationKey) => string
+): string {
+  if (identityMode === "user") return t("settings.feishuIdentityUser");
+  if (identityMode === "bot") return t("settings.feishuIdentityBot");
+  return t("settings.feishuIdentityUnknown");
+}
+
+function downloadDiagnosticsReport(report: LocalDiagnosticsExport) {
+  const generatedAt = report.generatedAt.replace(/[:.]/g, "-");
+  const blob = new Blob([`${JSON.stringify(report, null, 2)}\n`], {
+    type: "application/json"
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `openforge-diagnostics-${generatedAt}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 function AdapterItem({ adapter }: { adapter: AdapterDiscovery }) {
   const { t } = useLanguage();
 
@@ -275,7 +437,11 @@ function AdapterItem({ adapter }: { adapter: AdapterDiscovery }) {
           <Badge variant={adapter.supportLevel === "supported" ? "secondary" : "outline"}>
             {adapter.supportLevel === "supported" ? t("settings.supported") : t("settings.prototype")}
           </Badge>
-          {adapter.launchEnabled && <Badge>{t("settings.launchEnabled")}</Badge>}
+          {adapter.launchEnabled ? (
+            <Badge>{t("settings.launchEnabled")}</Badge>
+          ) : (
+            <Badge variant="outline">{t("settings.launchDisabled")}</Badge>
+          )}
         </div>
       </div>
       <div className="mt-2 text-xs text-muted-foreground">

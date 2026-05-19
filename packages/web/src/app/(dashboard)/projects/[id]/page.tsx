@@ -70,6 +70,7 @@ import {
   type AiConfigFormValue,
 } from "@/lib/ai-config-forms";
 import { useLanguage } from "@/hooks/use-language";
+import { buildCopilotLaunchHref } from "@/lib/copilot";
 import { activityFiltersForProject } from "@/lib/snapshot-filters";
 import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highlight";
 import { cn } from "@/lib/utils";
@@ -269,6 +270,11 @@ export default function ProjectDetailPage() {
   });
 
   const project = projectData?.project;
+  const projectCopilotHref = buildCopilotLaunchHref({
+    source: "project",
+    sourceRefId: id,
+    intent: "project_readiness",
+  });
   const projectSessions = useMemo(
     () => sessionsData?.sessions ?? [],
     [sessionsData?.sessions]
@@ -434,6 +440,12 @@ export default function ProjectDetailPage() {
                     >
                       <Plus className="mr-2 size-4" />
                       {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
+                    </Button>
+                    <Button asChild variant="outline" size="sm" className="justify-start">
+                      <Link href={projectCopilotHref}>
+                        <Sparkles className="mr-2 size-4" />
+                        {t("copilot.askCopilot")}
+                      </Link>
                     </Button>
                     <div className="grid grid-cols-2 gap-2">
                       <Button asChild variant="outline" size="sm">

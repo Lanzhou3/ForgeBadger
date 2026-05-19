@@ -35,7 +35,7 @@ is not part of the beta workflow.
 | No host Codex config pollution | Accepted | Host `~/.codex/config.toml` and `~/.codex/auth.json` fingerprints unchanged around real smoke |
 | Provider SSOT does not flow into Codex | Accepted | Provider regression command: 23 tests covering provider routes/apply and Codex launch isolation |
 | Claude/OpenCode provider configuration still works | Accepted | Provider config apply tests and OpenCode provider-backed launch regression |
-| Windows native/tmux guidance | Accepted with platform caveat | CLI tests cover modes; runbook documents WSL/tmux remediation. No physical Windows host smoke was run in this pass |
+| Windows native/tmux guidance | Pending physical Windows/WSL smoke | CLI tests cover modes; runbook documents WSL/tmux remediation. No physical Windows host smoke has closed this caveat yet |
 | Release-sized gates | Accepted | `pnpm -r typecheck`, `pnpm -r test`, `pnpm -r build`, `pnpm build:npm`, `pnpm verify:npm`, `pnpm smoke:npm` |
 
 ## Residual Risks
@@ -43,9 +43,9 @@ is not part of the beta workflow.
 - Stopped/error app-server sessions are retained in the in-memory manager for
   observability. Add TTL or pagination if long-running use shows unbounded
   state growth.
-- A real Windows host or WSL manual smoke was not available in this pass. CLI
-  unit tests and runbook coverage are the current evidence for platform
-  messaging.
+- A real Windows host or WSL manual smoke is still pending. CLI unit tests,
+  adapter discovery gating, and runbook coverage are the current evidence for
+  platform messaging until physical host notes are attached.
 - `/turn` exists as an authenticated, feature-flagged Gateway prototype route.
   It must stay disabled for beta unless a separate retention, quota, and
   user-facing prompt design is accepted.

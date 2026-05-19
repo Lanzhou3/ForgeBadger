@@ -164,6 +164,19 @@ function buildPayload(event: OpenForgeEvent): Record<string, unknown> {
         message: event.message,
         created_at: event.createdAt.toISOString()
       };
+    case "copilot_run_updated":
+      return {
+        run_id: event.runId,
+        status: event.status,
+        source: event.source,
+        ...(event.sourceRefId ? { source_ref_id: event.sourceRefId } : {}),
+        ...(event.conversationId ? { conversation_id: event.conversationId } : {}),
+        event_type: event.eventType,
+        ...(event.runEventType ? { run_event_type: event.runEventType } : {}),
+        ...(typeof event.runEventSequence === "number" ? { run_event_sequence: event.runEventSequence } : {}),
+        ...(event.deltaText ? { delta_text: event.deltaText } : {}),
+        ...(event.errorCode ? { error_code: event.errorCode } : {})
+      };
     case "error":
       return {
         message: event.message,
@@ -175,7 +188,7 @@ function buildPayload(event: OpenForgeEvent): Record<string, unknown> {
 }
 
 function buildNotificationMeta(event: OpenForgeEvent): Record<string, unknown> {
-  if (event.type === "activity_created" || !event.notificationId) {
+  if (event.type === "activity_created" || event.type === "copilot_run_updated" || !event.notificationId) {
     return {};
   }
   return {

@@ -37,7 +37,7 @@ describe("db schema", () => {
   it("creates all expected tables after migration", () => {
     const tables = db
       .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle_%' ORDER BY name"
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle_%' AND name NOT GLOB 'copilot_memory_fts_*' ORDER BY name"
       )
       .all() as Array<{ name: string }>;
     const names = tables.map((t) => t.name);
@@ -47,6 +47,16 @@ describe("db schema", () => {
       "audit_logs",
       "catalog_items",
       "catalog_sources",
+      "copilot_conversations",
+      "copilot_memory_entries",
+      "copilot_memory_fts",
+      "copilot_memory_notes",
+      "copilot_messages",
+      "copilot_pending_actions",
+      "copilot_run_events",
+      "copilot_runs",
+      "integration_feishu_configs",
+      "integration_feishu_user_mappings",
       "model_cost_rates",
       "model_profiles",
       "model_provider_profiles",
@@ -96,6 +106,29 @@ describe("db schema", () => {
       },
       /UNIQUE constraint failed/
     );
+  });
+
+  it("enforces one live Copilot run per user", () => {
+    db.prepare(
+      "INSERT INTO users (id, username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("u1", "alice", "alice@example.com", "hash", "user", "active");
+
+    db.prepare(
+      "INSERT INTO copilot_runs (id, user_id, status, source, goal, step_count, max_steps) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run("run-live-1", "u1", "running", "copilot", "First live run", 0, 8);
+
+    assert.throws(
+      () => {
+        db.prepare(
+          "INSERT INTO copilot_runs (id, user_id, status, source, goal, step_count, max_steps) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ).run("run-live-2", "u1", "queued", "copilot", "Second live run", 0, 8);
+      },
+      /UNIQUE constraint failed/
+    );
+
+    db.prepare(
+      "INSERT INTO copilot_runs (id, user_id, status, source, goal, step_count, max_steps) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run("run-completed", "u1", "completed", "copilot", "Completed run", 0, 8);
   });
 
   it("cascades user deletion to projects", () => {

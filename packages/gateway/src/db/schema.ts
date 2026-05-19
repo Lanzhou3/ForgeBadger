@@ -51,10 +51,15 @@ export const modelProviderProfiles = sqliteTable("model_provider_profiles", {
   providerKey: text("provider_key").notNull(),
   name: text("name").notNull(),
   baseUrl: text("base_url"),
+  anthropicBaseUrl: text("anthropic_base_url"),
+  openaiBaseUrl: text("openai_base_url"),
+  region: text("region"),
+  productType: text("product_type"),
   authType: text("auth_type").notNull().default("api_key"),
   apiFormat: text("api_format").notNull().default("openai-compatible"),
   supportedAdapters: text("supported_adapters").notNull().default("[]"),
   defaultHeaders: text("default_headers").notNull().default("{}"),
+  opencodeNpm: text("opencode_npm"),
   status: text("status").notNull().default("active"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
@@ -100,6 +105,171 @@ export const providerCredentials = sqliteTable("provider_credentials", {
 }, (table) => ({
   idx_provider_credentials_user_provider: index("idx_provider_credentials_user_provider").on(table.userId, table.providerProfileId)
 }));
+
+export const copilotRuns = sqliteTable(
+  "copilot_runs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    providerProfileId: text("provider_profile_id").references(() => modelProviderProfiles.id, { onDelete: "set null" }),
+    modelProfileId: text("model_profile_id").references(() => modelProfiles.id, { onDelete: "set null" }),
+    source: text("source").notNull(),
+    sourceRefId: text("source_ref_id"),
+    goal: text("goal").notNull(),
+    stepCount: integer("step_count").notNull().default(0),
+    maxSteps: integer("max_steps").notNull().default(8),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+    completedAt: integer("completed_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idx_copilot_runs_user_created: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt)
+  })
+);
+
+export const copilotRunEvents = sqliteTable(
+  "copilot_run_events",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: text("run_id")
+      .notNull()
+      .references(() => copilotRuns.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    sequence: integer("sequence").notNull(),
+    message: text("message"),
+    payloadJson: text("payload_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date())
+  },
+  (table) => ({
+    idx_copilot_run_events_run_sequence: uniqueIndex("idx_copilot_run_events_run_sequence").on(table.runId, table.sequence)
+  })
+);
+
+export const copilotConversations = sqliteTable(
+  "copilot_conversations",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    source: text("source").notNull(),
+    sourceRefId: text("source_ref_id"),
+    status: text("status").notNull().default("active"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+    lastMessageAt: integer("last_message_at", { mode: "timestamp" }),
+    deletedAt: integer("deleted_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idx_copilot_conversations_user_updated: index("idx_copilot_conversations_user_updated").on(table.userId, table.updatedAt)
+  })
+);
+
+export const copilotMessages = sqliteTable(
+  "copilot_messages",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => copilotConversations.id, { onDelete: "cascade" }),
+    runId: text("run_id").references(() => copilotRuns.id, { onDelete: "set null" }),
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    payloadJson: text("payload_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    deletedAt: integer("deleted_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idx_copilot_messages_conversation_created: index("idx_copilot_messages_conversation_created").on(table.conversationId, table.createdAt)
+  })
+);
+
+export const copilotPendingActions = sqliteTable(
+  "copilot_pending_actions",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: text("run_id")
+      .notNull()
+      .references(() => copilotRuns.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    status: text("status").notNull(),
+    inputJson: text("input_json").notNull().default("{}"),
+    resultJson: text("result_json"),
+    approvedBy: text("approved_by"),
+    approvedAt: integer("approved_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_copilot_pending_actions_run: index("idx_copilot_pending_actions_run").on(table.runId, table.status)
+  })
+);
+
+export const copilotMemoryEntries = sqliteTable(
+  "copilot_memory_entries",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    scope: text("scope").notNull(),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    sourceRunId: text("source_run_id").references(() => copilotRuns.id, { onDelete: "set null" }),
+    redactedText: text("redacted_text").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_copilot_memory_entries_user_scope: index("idx_copilot_memory_entries_user_scope").on(table.userId, table.scope, table.createdAt),
+    idx_copilot_memory_entries_user_project: index("idx_copilot_memory_entries_user_project").on(table.userId, table.projectId, table.createdAt)
+  })
+);
+
+export const copilotMemoryNotes = sqliteTable(
+  "copilot_memory_notes",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    sessionId: text("session_id").references(() => sessions.id, { onDelete: "set null" }),
+    sourceRunId: text("source_run_id").references(() => copilotRuns.id, { onDelete: "set null" }),
+    redactedText: text("redacted_text").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date())
+  },
+  (table) => ({
+    idx_copilot_memory_notes_user_created: index("idx_copilot_memory_notes_user_created").on(table.userId, table.createdAt),
+    idx_copilot_memory_notes_user_project: index("idx_copilot_memory_notes_user_project").on(table.userId, table.projectId, table.createdAt)
+  })
+);
+
+export const copilotMemoryFts = sqliteTable("copilot_memory_fts", {
+  memoryId: text("memory_id"),
+  userId: text("user_id"),
+  itemType: text("item_type"),
+  scope: text("scope"),
+  projectId: text("project_id"),
+  redactedText: text("redacted_text")
+});
 
 export const templates = sqliteTable("templates", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -413,6 +583,53 @@ export const userSettings = sqliteTable("user_settings", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 });
+
+export const integrationFeishuConfigs = sqliteTable(
+  "integration_feishu_configs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    emergencyDisabled: integer("emergency_disabled", { mode: "boolean" }).notNull().default(false),
+    identityMode: text("identity_mode").notNull().default("unknown"),
+    allowedChatIds: text("allowed_chat_ids").notNull().default("[]"),
+    commandPrefix: text("command_prefix").notNull().default("/openforge"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_integration_feishu_configs_user: uniqueIndex("idx_integration_feishu_configs_user").on(table.userId)
+  })
+);
+
+export const integrationFeishuUserMappings = sqliteTable(
+  "integration_feishu_user_mappings",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    feishuUserId: text("feishu_user_id").notNull(),
+    openforgeUserId: text("openforge_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    displayName: text("display_name"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_integration_feishu_user_mappings_feishu_user: uniqueIndex("idx_integration_feishu_user_mappings_feishu_user").on(
+      table.userId,
+      table.feishuUserId
+    ),
+    idx_integration_feishu_user_mappings_openforge_user: index("idx_integration_feishu_user_mappings_openforge_user").on(
+      table.userId,
+      table.openforgeUserId
+    )
+  })
+);
 
 export const auditLogs = sqliteTable(
   "audit_logs",

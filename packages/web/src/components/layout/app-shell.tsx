@@ -4,24 +4,41 @@ import { useEffect, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 
 import { CommandPalette } from "@/components/command-palette";
+import { CopilotDrawer } from "@/components/copilot/copilot-drawer";
 import {
   globalShortcutContextFromEvent,
   isCommandPaletteShortcut,
+  isCopilotShortcut,
   isSidebarToggleShortcut,
+  shouldHandleCopilotShortcut,
   shouldHandleGlobalShortcut,
 } from "@/lib/keyboard-shortcuts";
 import { appShellContainerClassName, appShellMainClassName } from "@/lib/app-shell-layout";
+import { resolveCopilotRouteContext } from "@/lib/copilot-route-context";
 import { Sidebar } from "./sidebar";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
   const isTerminalRoute = /^\/sessions\/[^/]+/u.test(pathname ?? "");
+  const isCopilotRoute = pathname === "/copilot";
+  const copilotRouteContext = resolveCopilotRouteContext(pathname);
+
+  useEffect(() => {
+    if (isCopilotRoute) setCopilotOpen(false);
+  }, [isCopilotRoute]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (!shouldHandleGlobalShortcut(globalShortcutContextFromEvent(event, { isTerminalRoute }))) {
+      const shortcutContext = globalShortcutContextFromEvent(event, { isTerminalRoute });
+      if (!isCopilotRoute && isCopilotShortcut(event) && shouldHandleCopilotShortcut(shortcutContext)) {
+        event.preventDefault();
+        setCopilotOpen((current) => !current);
+        return;
+      }
+      if (!shouldHandleGlobalShortcut(shortcutContext)) {
         return;
       }
 
@@ -38,7 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isTerminalRoute]);
+  }, [isCopilotRoute, isTerminalRoute]);
 
   return (
     <div className={appShellContainerClassName}>
@@ -62,6 +79,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
       />
+      {!isCopilotRoute && (
+        <CopilotDrawer
+          open={copilotOpen}
+          onOpenChange={setCopilotOpen}
+          context={copilotRouteContext}
+        />
+      )}
     </div>
   );
 }

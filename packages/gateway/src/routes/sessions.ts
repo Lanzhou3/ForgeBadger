@@ -696,7 +696,7 @@ export function normalizeAdapter(value: string): AdapterId | undefined {
   return isAdapterId(value) ? value : undefined;
 }
 
-function validateCodexTerminalCredentialBoundary(input: {
+export function validateCodexTerminalCredentialBoundary(input: {
   adapter: AdapterId;
   credentialMode: CredentialMode;
   apiKeyId?: string | undefined;

@@ -29,6 +29,8 @@ import {
 } from "./codex-app-server.js";
 import { createCodexSubscriptionRoutes } from "./codex-subscription.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
+import { createCopilotRoutes } from "./copilot.js";
+import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
@@ -77,9 +79,23 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     }
   }));
   app.use("/api/v1/codex/subscription", createCodexSubscriptionRoutes());
+  app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
+    db: deps.db,
+    masterKey: deps.masterKey,
+    sessionManager: deps.sessionManager,
+    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
+  }));
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
     db: deps.db,
     masterKey: deps.masterKey,
     appVersion: deps.appVersion
+  }));
+  app.use("/api/v1/copilot", createCopilotRoutes({
+    db: deps.db,
+    masterKey: deps.masterKey,
+    appVersion: deps.appVersion,
+    sessionManager: deps.sessionManager,
+    eventBus: deps.eventBus,
+    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
   }));
 }

@@ -32,6 +32,30 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
     assert.match(output, /openforge-gate-a/);
   });
 
+  it("sends literal input to a real tmux session", async () => {
+    const tmux = createTmuxClient();
+    const sessionName = `of-test-input-${process.pid}`;
+
+    try {
+      await tmux.createSession({
+        name: sessionName,
+        cwd: tmpdir(),
+        command: "bash",
+        args: ["-lc", "read line; printf 'openforge-input:%s' \"$line\"; sleep 2"],
+        env: {}
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await tmux.sendInput?.(sessionName, "pwd\n");
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const output = await tmux.capturePane(sessionName);
+
+      assert.match(output, /openforge-input:pwd/);
+    } finally {
+      await tmux.killSession(sessionName);
+    }
+  });
+
   it("recovers indexed tmux sessions and kills unindexed OpenForge sessions", async () => {
     const tmux = createTmuxClient();
     const store = new MemoryRecoveryStore();
@@ -89,7 +113,7 @@ class MemoryRecoveryStore implements SessionRecoveryStore {
     this.entries.push(session);
   }
 
-  async removeSession(id: string): Promise<void> {
-    this.entries = this.entries.filter((entry) => entry.id !== id);
+  async removeSession(id: string, userId: string): Promise<void> {
+    this.entries = this.entries.filter((entry) => entry.id !== id || entry.userId !== userId);
   }
 }

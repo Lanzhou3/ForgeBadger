@@ -1,10 +1,16 @@
 # OpenForge Release Plan
 
-> Status: MVP-6 release readiness | Date: 2026-05-02
+> Status: local-first beta release readiness | Date: 2026-05-10
 
 This plan covers the current local/self-hosted release shape: one Gateway
 process and one Web console process. It does not cover cloud multi-tenant
 hosting, billing, external worker pools, or hosted plugin marketplaces.
+
+Phase A local-first browser terminal evidence is closed by the 2026-05-07 real
+browser and Claude Code permission prompt reports. Phase B Codex Background
+Tasks are accepted for beta feedback as a guarded observable control plane:
+Web prompt/turn input remains disabled, and `/turn` is still a feature-flagged
+Gateway prototype route.
 
 ## 1. Release Scope
 
@@ -39,7 +45,12 @@ Minimum runtime dependencies:
 - pnpm 9 or newer.
 - tmux 3.2 or newer.
 - Claude Code CLI on `PATH` for Claude sessions.
+- OpenCode and/or Codex CLI on `PATH` only when those adapters are in scope.
 - SQLite-compatible filesystem for `OPENFORGE_DB_PATH`.
+
+Windows native hosts can run management UI workflows, but the built-in browser
+terminal requires WSL because terminal persistence depends on tmux. Run release
+terminal acceptance inside WSL for Windows users.
 
 Required secrets:
 
@@ -105,9 +116,11 @@ pnpm install --frozen-lockfile
 Run release candidate checks:
 
 ```bash
+node --test scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
 pnpm -r typecheck
-pnpm --filter @openforge/gateway build
-pnpm --filter @openforge/web build
+pnpm -r test
+pnpm -r build
+pnpm --dir packages/gateway test test/model-provider-routes.test.ts test/model-provider-repository.test.ts test/model-config-apply.test.ts test/codex-provider-env.test.ts test/session-adapter-decoupling.test.ts
 git diff --check
 ```
 
@@ -141,11 +154,11 @@ Required checks:
 
 ```bash
 pnpm -r typecheck
-pnpm --filter @openforge/gateway test
-pnpm --filter @openforge/web test
+pnpm -r test
+pnpm -r build
 pnpm build:npm
 pnpm pack:npm
-node scripts/verify-npm-package.mjs
+pnpm verify:npm
 pnpm smoke:npm
 ```
 
@@ -158,17 +171,37 @@ development artifacts.
 
 A release candidate is acceptable only when:
 
-- Required checks in `docs/CI-CD-PLAN.md` pass or have recorded environment
+- Required automated checks in `docs/CI-CD-PLAN.md` pass or have recorded
   skip reasons.
 - Manual smoke in `docs/SMOKE-TEST.md` passes for auth, projects, config sync,
   sessions, terminal attach, notifications, Templates, Skills, plugins,
   usage, and snapshots.
+- `pnpm smoke:codex-app-server` passes on a host with Codex CLI, or the release
+  keeps the explicit caveat that real app-server process smoke was not
+  available for that candidate.
+- Windows native/WSL evidence is recorded from a physical Windows host before
+  removing the current platform caveat.
 - Existing projects can still render config previews and apply config sync with
   explicit conflict decisions.
 - Existing stored API keys decrypt with the configured `OPENFORGE_MASTER_KEY`.
 - No hardcoded secrets or plaintext credentials are introduced.
 
-## 8. Rollback
+## 8. Phase C Entry Criteria
+
+Phase C product hardening starts from beta feedback, not from opening new
+runtime scope. The first Phase C backlog should prioritize:
+
+- first-run install and dependency failure states;
+- clearer CLI availability and provider-configuration recovery paths;
+- diagnostics export review and feedback intake;
+- Windows/WSL terminal remediation based on physical host evidence;
+- retained Codex app-server stopped/error record pagination or TTL if real
+  usage shows unbounded growth.
+
+Do not expose Codex app-server prompt/turn input in Web until a separate
+retention, quota, transcript, and user-facing prompt design is accepted.
+
+## 9. Rollback
 
 Rollback sequence:
 

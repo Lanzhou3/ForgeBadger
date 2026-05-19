@@ -6,6 +6,8 @@ import {
   agents,
   apiKeys,
   auditLogs,
+  copilotMemoryEntries,
+  copilotMemoryNotes,
   models,
   notifications,
   projects,
@@ -13,9 +15,11 @@ import {
   skills,
   templates
 } from "../db/schema.js";
+import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import type { Database } from "../db/types.js";
 import { getDashboardSummary } from "./dashboard-summary.js";
 import { listAdapterDefinitions } from "./adapter-discovery.js";
+import type { FeishuCliStatus } from "./integrations/feishu-cli.js";
 
 export interface LocalDiagnosticsExportInput {
   db: Database;
@@ -24,6 +28,7 @@ export interface LocalDiagnosticsExportInput {
   appVersion: string;
   now?: Date;
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  feishuStatus?: FeishuCliStatus;
 }
 
 export interface LocalDiagnosticsExport {
@@ -44,9 +49,71 @@ export interface LocalDiagnosticsExport {
     command: string;
     runtimeModes: string[];
   }>;
+  modelProviders: ModelProviderDiagnostics;
+  copilot: {
+    capabilities: {
+      enabled: boolean;
+      toolExecutionEnabled: boolean;
+      approvalRequiredForWrites: boolean;
+      memoryEnabled: boolean;
+      memoryWritesRequireApproval: boolean;
+    };
+    providerReadiness: CopilotProviderReadinessDiagnostics;
+  };
+  integrations: {
+    feishu: FeishuIntegrationDiagnostics;
+  };
   environment: Record<string, unknown>;
 }
 
+export interface FeishuIntegrationDiagnostics {
+  available: boolean;
+  version?: string;
+  authState: FeishuCliStatus["authState"];
+  identityMode: FeishuCliStatus["identityMode"];
+  enabled: boolean;
+  emergencyDisabled?: boolean;
+}
+
+export interface ModelProviderDiagnostics {
+  counts: {
+    providers: number;
+    activeProviders: number;
+    models: number;
+    activeModels: number;
+    credentials: number;
+    activeCredentials: number;
+    defaultModels: number;
+  };
+  apiFormats: Record<string, number>;
+  providers: Array<{
+    id: string;
+    name: string;
+    providerKey: string;
+    apiFormat: string;
+    authType: string;
+    status: string;
+    modelCount: number;
+    activeModelCount: number;
+    credentialCount: number;
+    activeCredentialCount: number;
+    hasDefaultModel: boolean;
+    readyForUse: boolean;
+  }>;
+}
+
+export interface CopilotProviderReadinessDiagnostics {
+  providerConfigured: boolean;
+  supportedProviderFormats: string[];
+  counts: {
+    activeProviders: number;
+    activeModels: number;
+    activeCredentials: number;
+    readyProviders: number;
+  };
+}
+
+const COPILOT_SUPPORTED_PROVIDER_FORMATS = ["openai", "openai-compatible", "anthropic"] as const;
 const sensitivePattern = /(secret|token|key|password|credential|authorization)/i;
 const sensitiveValuePattern = /(sk-[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._-]+)/i;
 
@@ -55,6 +122,7 @@ export function buildLocalDiagnosticsExport(
 ): LocalDiagnosticsExport {
   const now = input.now ?? new Date();
   const summary = getDashboardSummary(input.db, input.userId, input.masterKey);
+  const modelProviderDiagnostics = buildModelProviderDiagnostics(input.db, input.userId, input.masterKey);
   return {
     generatedAt: now.toISOString(),
     app: {
@@ -75,7 +143,9 @@ export function buildLocalDiagnosticsExport(
       models: countTable(input.db, models, models.userId, input.userId),
       apiKeys: countTable(input.db, apiKeys, apiKeys.userId, input.userId),
       notifications: countTable(input.db, notifications, notifications.userId, input.userId),
-      auditLogs: countTable(input.db, auditLogs, auditLogs.userId, input.userId)
+      auditLogs: countTable(input.db, auditLogs, auditLogs.userId, input.userId),
+      copilotMemoryEntries: countTable(input.db, copilotMemoryEntries, copilotMemoryEntries.userId, input.userId),
+      copilotMemoryNotes: countTable(input.db, copilotMemoryNotes, copilotMemoryNotes.userId, input.userId)
     },
     dashboardHealth: summary.health,
     adapters: listAdapterDefinitions().map((adapter) => ({
@@ -83,7 +153,103 @@ export function buildLocalDiagnosticsExport(
       command: adapter.command,
       runtimeModes: [...adapter.runtimeModes]
     })),
+    modelProviders: modelProviderDiagnostics,
+    copilot: {
+      capabilities: {
+        enabled: true,
+        toolExecutionEnabled: true,
+        approvalRequiredForWrites: true,
+        memoryEnabled: true,
+        memoryWritesRequireApproval: true
+      },
+      providerReadiness: buildCopilotProviderReadiness(modelProviderDiagnostics)
+    },
+    integrations: {
+      feishu: buildFeishuIntegrationDiagnostics(input.feishuStatus)
+    },
     environment: redactDiagnosticValue(pickDiagnosticEnv(input.env ?? process.env)) as Record<string, unknown>
+  };
+}
+
+function buildFeishuIntegrationDiagnostics(
+  status?: FeishuCliStatus
+): FeishuIntegrationDiagnostics {
+  return {
+    available: status?.available ?? false,
+    ...(status?.version ? { version: status.version } : {}),
+    authState: status?.authState ?? "unknown",
+    identityMode: status?.identityMode ?? "unknown",
+    enabled: status?.enabled ?? false,
+    ...(status?.emergencyDisabled !== undefined ? { emergencyDisabled: status.emergencyDisabled } : {})
+  };
+}
+
+function buildModelProviderDiagnostics(
+  db: Database,
+  userId: string,
+  masterKey: string
+): ModelProviderDiagnostics {
+  const repo = new ModelProviderRepository(db, userId, masterKey);
+  const providers = repo.listProviderProfiles();
+  const models = repo.listModelProfiles();
+  const credentials = repo.listCredentials();
+  const activeModels = models.filter((model) => model.status === "active");
+  const activeCredentials = credentials.filter((credential) => credential.status === "active");
+
+  return {
+    counts: {
+      providers: providers.length,
+      activeProviders: providers.filter((provider) => provider.status === "active").length,
+      models: models.length,
+      activeModels: activeModels.length,
+      credentials: credentials.length,
+      activeCredentials: activeCredentials.length,
+      defaultModels: models.filter((model) => model.isDefault).length
+    },
+    apiFormats: countBy(providers, (provider) => provider.apiFormat),
+    providers: providers
+      .map((provider) => {
+        const providerModels = models.filter((model) => model.providerProfileId === provider.id);
+        const providerCredentials = credentials.filter((credential) => credential.providerProfileId === provider.id);
+        const activeModelCount = providerModels.filter((model) => model.status === "active").length;
+        const activeCredentialCount = providerCredentials.filter((credential) => credential.status === "active").length;
+        const hasDefaultModel = providerModels.some((model) => model.isDefault);
+        return {
+          id: provider.id,
+          name: provider.name,
+          providerKey: provider.providerKey,
+          apiFormat: provider.apiFormat,
+          authType: provider.authType,
+          status: provider.status,
+          modelCount: providerModels.length,
+          activeModelCount,
+          credentialCount: providerCredentials.length,
+          activeCredentialCount,
+          hasDefaultModel,
+          readyForUse: provider.status === "active" &&
+            activeModelCount > 0 &&
+            (provider.authType === "none" || activeCredentialCount > 0)
+        };
+      })
+      .sort((a, b) => Number(b.readyForUse) - Number(a.readyForUse) || a.name.localeCompare(b.name))
+  };
+}
+
+function buildCopilotProviderReadiness(
+  diagnostics: ModelProviderDiagnostics
+): CopilotProviderReadinessDiagnostics {
+  const supportedFormats = new Set<string>(COPILOT_SUPPORTED_PROVIDER_FORMATS);
+  const providers = diagnostics.providers.filter((provider) => supportedFormats.has(provider.apiFormat));
+  const readyProviders = providers.filter((provider) => provider.readyForUse);
+  return {
+    providerConfigured: readyProviders.length > 0,
+    supportedProviderFormats: [...COPILOT_SUPPORTED_PROVIDER_FORMATS],
+    counts: {
+      activeProviders: providers.filter((provider) => provider.status === "active").length,
+      activeModels: providers.reduce((sum, provider) => sum + provider.activeModelCount, 0),
+      activeCredentials: providers.reduce((sum, provider) => sum + provider.activeCredentialCount, 0),
+      readyProviders: readyProviders.length
+    }
   };
 }
 
@@ -123,6 +289,15 @@ function pickDiagnosticEnv(
     OPENFORGE_DB_PATH: env.OPENFORGE_DB_PATH,
     OPENFORGE_TMUX_PREFIX: env.OPENFORGE_TMUX_PREFIX
   };
+}
+
+function countBy<T>(items: T[], keyFor: (item: T) => string): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    const key = keyFor(item);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
 }
 
 function countTable(

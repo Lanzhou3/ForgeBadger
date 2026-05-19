@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -26,6 +27,7 @@ type FormData = z.infer<typeof schema>;
 export function RegisterForm() {
   const router = useRouter();
   const { register: registerAuth } = useAuth();
+  const [isHydrated, setIsHydrated] = useState(false);
   const {
     register,
     handleSubmit,
@@ -34,6 +36,10 @@ export function RegisterForm() {
   } = useForm<FormData>({
     resolver: zodResolver(schema),
   });
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const onSubmit = async (data: FormData) => {
     try {
@@ -51,7 +57,7 @@ export function RegisterForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+    <form method="post" onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <Label htmlFor="email">Email</Label>
         <Input
@@ -95,7 +101,7 @@ export function RegisterForm() {
       )}
       <Button
         type="submit"
-        disabled={isSubmitting}
+        disabled={!isHydrated || isSubmitting}
         className="bg-brand text-brand-foreground hover:bg-brand/90"
       >
         {isSubmitting ? "Creating account..." : "Create account"}

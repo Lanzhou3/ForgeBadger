@@ -6,13 +6,21 @@ import {
   checkModelHealth,
   checkModelEndpointHealth,
   cloneTemplate,
+  approveCopilotPendingAction,
+  cancelCopilotRun,
   createProjectWithConfig,
+  createCopilotConversation,
+  createCopilotConversationMessage,
+  createCopilotRun,
   createTemplateFromProject,
   createSkill,
   createModel,
   createTemplate,
   createSession,
   deleteProviderCredential,
+  deleteCopilotConversation,
+  deleteCopilotMemoryItem,
+  deleteCopilotMessage,
   deleteModelProvider,
   deleteProviderModel,
   chooseDefaultRuntimeAdapter,
@@ -23,9 +31,22 @@ import {
   deleteTemplate,
   defaultConfigConflictDecisions,
   discoverAdapters,
+  exportDiagnostics,
   exportTemplate,
+  getCopilotCapabilities,
+  getCopilotMemoryItem,
+  getCopilotRun,
+  listCopilotConversationMessages,
+  listCopilotConversations,
+  listCopilotMemoryEntries,
+  listCopilotMemoryNotes,
   getDashboardSummary,
   getDependencies,
+  getFeishuIntegrationConfig,
+  getFeishuIntegrationStatus,
+  listFeishuUserMappings,
+  replaceFeishuUserMappings,
+  updateFeishuIntegrationConfig,
   getConfigCompliance,
   getGlobalAiConfig,
   getProjectAgentSequence,
@@ -45,6 +66,7 @@ import {
   listAuditLogs,
   listCatalogItems,
   listCatalogSources,
+  listCopilotRuns,
   listNotifications,
   listSessions,
   listSnapshots,
@@ -53,6 +75,7 @@ import {
   listSkillSources,
   syncLocalSkills,
   syncProviderModels,
+  searchCopilotMemory,
   rotateProviderCredential,
   setDefaultProviderModel,
   updateProviderModel,
@@ -72,6 +95,7 @@ import {
   previewSkillSource,
   previewTemplateFromProject,
   rotateApiKey,
+  rejectCopilotPendingAction,
   markAllNotificationsRead,
   markNotificationRead,
   clearServerNotifications,
@@ -87,6 +111,7 @@ import {
   togglePlugin,
   updateAgent,
   updateAdminUser,
+  updateCopilotConversation,
   updateProjectAgentSequence,
   updateProjectAiConfigFile,
   updateSkill,
@@ -211,6 +236,208 @@ describe("api client", () => {
       "http://127.0.0.1:48731/api/v1/adapters/discovery",
       expect.objectContaining({ headers: expect.any(Object) })
     );
+  });
+
+  it("exports local diagnostics through REST", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({
+      report: {
+        generatedAt: "2026-05-11T00:00:00.000Z",
+        app: { name: "OpenForge", version: "0.0.0" },
+        runtime: { node: "v22.0.0", platform: "linux", arch: "x64" },
+        counts: { projects: 1 },
+        dashboardHealth: {},
+        adapters: [{ id: "claude", command: "claude", runtimeModes: ["terminal"] }],
+        copilot: {
+          capabilities: {
+            enabled: true,
+            toolExecutionEnabled: true,
+            approvalRequiredForWrites: true,
+            memoryEnabled: true,
+            memoryWritesRequireApproval: true,
+          },
+        },
+        environment: { OPENFORGE_PORT: "48731" },
+      },
+    })));
+
+    const result = await exportDiagnostics();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/diagnostics/export",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(result.report.app.name).toBe("OpenForge");
+    expect(result.report.copilot.capabilities.memoryWritesRequireApproval).toBe(true);
+    expect(result.report.environment.OPENFORGE_PORT).toBe("48731");
+  });
+
+  it("calls Copilot REST helpers", async () => {
+    await getCopilotCapabilities();
+    await createCopilotRun({ prompt: "Summarize Gateway health" });
+    await listCopilotRuns();
+    await getCopilotRun("run-1");
+    await cancelCopilotRun("run-1");
+    await approveCopilotPendingAction("run-1", "action-1");
+    await rejectCopilotPendingAction("run-1", "action-1");
+    await listCopilotConversations();
+    await createCopilotConversation({ title: "Terminal help", source: "session", sourceRefId: "session-1" });
+    await updateCopilotConversation("conversation-1", { title: "Updated help" });
+    await listCopilotConversationMessages("conversation-1");
+    await createCopilotConversationMessage("conversation-1", {
+      prompt: "解释这个错误",
+      source: "session",
+      sourceRefId: "session-1",
+    });
+    await deleteCopilotMessage("message-1");
+    await deleteCopilotConversation("conversation-1");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/copilot/capabilities",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/copilot/runs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ prompt: "Summarize Gateway health" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/copilot/runs",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1/cancel",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      6,
+      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1/pending-actions/action-1/approve",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      7,
+      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1/pending-actions/action-1/reject",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      8,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      9,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ title: "Terminal help", source: "session", sourceRefId: "session-1" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      10,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ title: "Updated help" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      11,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1/messages",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      12,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ prompt: "解释这个错误", source: "session", sourceRefId: "session-1" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      13,
+      "http://127.0.0.1:48731/api/v1/copilot/messages/message-1",
+      expect.objectContaining({ method: "DELETE" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      14,
+      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("calls Copilot memory management REST helpers", async () => {
+    await listCopilotMemoryEntries({ scope: "project", projectId: "project-1", limit: 20 });
+    await listCopilotMemoryNotes({ projectId: "project-1", sessionId: "session-1", limit: 10 });
+    await searchCopilotMemory({ query: "provider catalog", includeNotes: true, limit: 5 });
+    await getCopilotMemoryItem("entry", "memory-1");
+    await deleteCopilotMemoryItem("note", "memory-2");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/copilot/memory/entries?scope=project&projectId=project-1&limit=20",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/copilot/memory/notes?projectId=project-1&sessionId=session-1&limit=10",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/copilot/memory/search?query=provider+catalog&includeNotes=true&limit=5",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:48731/api/v1/copilot/memory/entry/memory-1",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:48731/api/v1/copilot/memory/note/memory-2",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("preserves Gateway error details for Copilot requests", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 400,
+          json: () => Promise.resolve({
+            code: 1,
+            message: "Configure an OpenAI or Anthropic model provider first.",
+            details: { code: "copilot_provider_not_configured" },
+          }),
+        } as Response)
+      )
+    );
+
+    await expect(createCopilotRun({ prompt: "Summarize Gateway health" })).rejects.toMatchObject({
+      message: "Configure an OpenAI or Anthropic model provider first.",
+      status: 400,
+      details: { code: "copilot_provider_not_configured" },
+    });
+  });
+
+  it("lets Copilot run creation outlive the Gateway model timeout", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+
+    await createCopilotRun({ prompt: "Summarize Gateway health" });
+
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 65_000);
   });
 
   it("creates Gate A sessions with the current login token", async () => {
@@ -1139,6 +1366,124 @@ describe("api client", () => {
         }),
       })
     );
+  });
+
+  it("loads Feishu integration status through the shared authenticated API client", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({
+      status: {
+        available: true,
+        version: "lark-cli 1.2.3",
+        authState: "authenticated",
+        identityMode: "user",
+        enabled: false,
+      },
+    })));
+
+    const status = await getFeishuIntegrationStatus();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/integrations/feishu/status",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+    expect(status.available).toBe(true);
+    expect(status.authState).toBe("authenticated");
+    expect(status.identityMode).toBe("user");
+    expect(status.enabled).toBe(false);
+  });
+
+  it("loads and updates Feishu integration config through REST", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({
+      config: {
+        enabled: true,
+        emergencyDisabled: false,
+        identityMode: "bot",
+        allowedChatIds: ["chat-1"],
+        commandPrefix: "/of",
+      },
+    })));
+
+    const config = await getFeishuIntegrationConfig();
+    await updateFeishuIntegrationConfig({
+      enabled: true,
+      identityMode: "bot",
+      allowedChatIds: ["chat-1"],
+      commandPrefix: "/of",
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/integrations/feishu/config",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/integrations/feishu/config",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          enabled: true,
+          identityMode: "bot",
+          allowedChatIds: ["chat-1"],
+          commandPrefix: "/of",
+        }),
+      })
+    );
+    expect(config.commandPrefix).toBe("/of");
+    expect(config.allowedChatIds).toEqual(["chat-1"]);
+  });
+
+  it("loads and replaces Feishu user mappings through REST", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({
+      mappings: [
+        {
+          id: "mapping-1",
+          feishuUserId: "ou_1",
+          openforgeUserId: "user-1",
+          displayName: "Owner",
+          createdAt: "2026-05-17T00:00:00.000Z",
+          updatedAt: "2026-05-17T00:00:00.000Z",
+        },
+      ],
+    })));
+
+    const mappings = await listFeishuUserMappings();
+    await replaceFeishuUserMappings([
+      { feishuUserId: "ou_1", openforgeUserId: "user-1", displayName: "Owner" },
+    ]);
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/integrations/feishu/user-mappings",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/integrations/feishu/user-mappings",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          mappings: [
+            { feishuUserId: "ou_1", openforgeUserId: "user-1", displayName: "Owner" },
+          ],
+        }),
+      })
+    );
+    expect(mappings.map((mapping) => mapping.feishuUserId)).toEqual(["ou_1"]);
   });
 
   it("lists sessions with an optional project filter", async () => {

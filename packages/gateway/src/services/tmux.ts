@@ -14,6 +14,7 @@ export interface TmuxClient {
   capturePane(name: string): Promise<string>;
   listSessions(): Promise<string[]>;
   resizeWindow?(name: string, cols: number, rows: number): Promise<void>;
+  sendInput?(name: string, data: string): Promise<void>;
 }
 
 export function createTmuxClient(): TmuxClient {
@@ -58,6 +59,19 @@ export function createTmuxClient(): TmuxClient {
       await runTmux(["resize-window", "-t", name, "-x", String(cols), "-y", String(rows)], {
         ignoreFailure: true
       });
+    },
+
+    async sendInput(name, data) {
+      const lines = data.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (line) {
+          await runTmux(["send-keys", "-t", name, "-l", "--", line]);
+        }
+        if (index < lines.length - 1) {
+          await runTmux(["send-keys", "-t", name, "Enter"]);
+        }
+      }
     }
   };
 }

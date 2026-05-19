@@ -27,6 +27,7 @@ import {
   type GatewayEvent,
   type StoredNotification,
 } from "@/lib/notifications";
+import { dispatchGatewayEvent } from "@/lib/gateway-events";
 import { eventsWebSocketProtocols, eventsWebSocketUrl } from "@/lib/ws";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
@@ -108,6 +109,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data) as GatewayEvent;
+        dispatchGatewayEvent(message);
         const notification = createNotificationFromEvent(message);
         if (notification) {
           updateNotifications((current) => mergeNotifications(current, notification));
@@ -205,6 +207,12 @@ export function eventQueryInvalidations(message: GatewayEvent): string[][] {
     codexAppServerActivityTypes.has(getPayloadString(message.payload, "activity_type") ?? "")
   ) {
     return [["codex-app-server-activities"], ["codex-app-servers"]];
+  }
+  if (type === "copilot_run_updated") {
+    if (getPayloadString(message.payload, "event_type") === "assistant_delta") {
+      return [];
+    }
+    return [["copilot-runs"], ["copilot-conversations"], ["copilot-conversation-messages"]];
   }
   return [];
 }

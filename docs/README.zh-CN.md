@@ -29,6 +29,7 @@ Codex app-server 生命周期能力仍属于实验功能，并有意隐藏在 We
 - [首次运行检查表](TRIAL-CHECKLIST.md)
 - [故障排查](TROUBLESHOOTING.md)
 - [反馈模板](TRIAL-FEEDBACK.md)
+- [GitHub 反馈 Issue 表单](../.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml)
 
 ## 为什么使用 OpenForge
 
@@ -150,7 +151,13 @@ git diff --check
 pnpm -r typecheck
 pnpm -r test
 pnpm -r build
+pnpm build:npm
+pnpm verify:npm
+pnpm smoke:npm
 ```
+
+Codex Background Tasks 的发布验收还需要在已安装 Codex CLI 的主机上运行
+`pnpm smoke:codex-app-server`。Beta 阶段 Web 原型会继续隐藏 prompt/turn 输入。
 
 ## 文档
 

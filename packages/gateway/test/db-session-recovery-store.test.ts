@@ -62,7 +62,11 @@ describe("DbSessionRecoveryStore", () => {
     assert.equal(updated?.tmuxSession, "of-user-session-new");
     assert.equal(updated?.status, "running");
 
-    await store.removeSession(session.id);
+    await store.removeSession(session.id, "other-user");
+
+    assert.equal(repo.getById(session.id)?.tmuxSession, "of-user-session-new");
+
+    await store.removeSession(session.id, user.id);
 
     assert.deepEqual(await store.listSessions(), []);
     assert.equal(repo.getById(session.id)?.tmuxSession, null);

@@ -742,7 +742,7 @@ export function createProjectRoutes(
   return router;
 }
 
-async function prepareCreatedProjectRoot(projectRoot: string): Promise<string> {
+export async function prepareCreatedProjectRoot(projectRoot: string): Promise<string> {
   const targetRoot = resolve(projectRoot.trim());
   if (!existsSync(targetRoot)) {
     validateNearestExistingParent(targetRoot);
@@ -758,7 +758,7 @@ function defaultTemplateIdForAiTool(aiTool: string | null | undefined): string {
   return parsed.success ? defaultTemplateIdsByAiTool[parsed.data] : defaultTemplateId;
 }
 
-function resolveProjectTemplateId(
+export function resolveProjectTemplateId(
   db: Database,
   userId: string,
   aiTool: string,
@@ -772,7 +772,7 @@ function resolveProjectTemplateId(
   return resolvedTemplateId;
 }
 
-async function prepareImportedProjectRoot(projectRoot: string): Promise<string> {
+export async function prepareImportedProjectRoot(projectRoot: string): Promise<string> {
   const targetRoot = resolve(projectRoot.trim());
   if (!existsSync(targetRoot)) {
     throw new Error("Imported project directory must already exist");
@@ -805,7 +805,7 @@ async function assertDirectory(pathname: string, message: string): Promise<void>
   }
 }
 
-async function buildProjectConfigRenderPlan(
+export async function buildProjectConfigRenderPlan(
   db: Database,
   userId: string,
   projectId: string,
@@ -884,7 +884,7 @@ function getGatewayUrl(): string {
   );
 }
 
-function buildConfigSyncSummary(
+export function buildConfigSyncSummary(
   plan: ReturnType<typeof createRenderPlan>,
   conflicts: Awaited<ReturnType<typeof detectConfigConflicts>>
 ) {

@@ -62,14 +62,14 @@ class DbSessionRecoveryStore implements SessionRecoveryStore {
       );
   }
 
-  async removeSession(id: string): Promise<void> {
+  async removeSession(id: string, userId: string): Promise<void> {
     this.db
       .prepare(
         `UPDATE sessions
          SET tmux_session = NULL, status = ?, updated_at = ?
-         WHERE id = ?`
+         WHERE id = ? AND user_id = ?`
       )
-      .run("exited", Date.now(), id);
+      .run("exited", Date.now(), id, userId);
   }
 }
 

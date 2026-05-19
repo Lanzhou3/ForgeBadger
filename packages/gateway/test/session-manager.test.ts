@@ -101,6 +101,28 @@ describe("InMemorySessionManager", () => {
     ]);
   });
 
+  it("sends raw input to the backing tmux session for an active session", async () => {
+    const calls: string[] = [];
+    const manager = new InMemorySessionManager({
+      ...fakeTmux(calls),
+      async sendInput(name, data) {
+        calls.push(`send:${name}:${JSON.stringify(data)}`);
+      }
+    });
+    const session = await manager.createSession({
+      userId: "user_123456",
+      sessionId: "session_abcdef",
+      launchPlan: launchPlan()
+    });
+
+    await manager.sendInput(session.id, "pwd\n");
+
+    assert.deepEqual(calls, [
+      "create:of-user_123-session_abcdef",
+      "send:of-user_123-session_abcdef:\"pwd\\n\""
+    ]);
+  });
+
   it("marks launch failures as errors", async () => {
     const manager = new InMemorySessionManager({
       async createSession() {
@@ -307,7 +329,7 @@ class MemoryRecoveryStore {
     this.entries.push(entry);
   }
 
-  async removeSession(id: string) {
-    this.entries = this.entries.filter((current) => current.id !== id);
+  async removeSession(id: string, userId: string) {
+    this.entries = this.entries.filter((current) => current.id !== id || current.userId !== userId);
   }
 }

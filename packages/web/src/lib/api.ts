@@ -152,6 +152,169 @@ export interface CodexAppServerCapabilities {
   transcriptPersistence: "disabled";
 }
 
+export interface CopilotCapabilities {
+  supportedProviderFormats: Array<"openai" | "openai-compatible" | "anthropic" | string>;
+  providerConfigured: boolean;
+  toolExecutionEnabled: boolean;
+  readTools?: string[];
+  prepareTools?: string[];
+  approvalRequiredForWrites?: boolean;
+  pendingActionApprovalEnabled?: boolean;
+}
+
+export interface CopilotRun {
+  id: string;
+  status: "queued" | "running" | "waiting_for_approval" | "completed" | "failed" | "cancelled" | string;
+  goal: string;
+  source: string;
+  sourceRefId?: string | null;
+  providerProfileId?: string | null;
+  providerProfileName?: string | null;
+  modelProfileId?: string | null;
+  modelProfileName?: string | null;
+  stepCount?: number | null;
+  maxSteps?: number | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  createdAt?: number | null;
+  updatedAt?: number | null;
+  completedAt?: number | null;
+}
+
+export interface CopilotRunEvent {
+  id: string;
+  runId: string;
+  type: string;
+  sequence: number;
+  message?: string | null;
+  payload?: Record<string, unknown>;
+  createdAt?: number | null;
+}
+
+export interface CopilotPendingAction {
+  id: string;
+  runId: string;
+  type: string;
+  status: "pending" | "approved" | "rejected" | string;
+  input?: Record<string, unknown>;
+  result?: Record<string, unknown> | null;
+  approvedBy?: string | null;
+  approvedAt?: number | null;
+  createdAt?: number | null;
+  updatedAt?: number | null;
+}
+
+export interface CopilotConversation {
+  id: string;
+  title: string;
+  source: string;
+  sourceRefId?: string | null;
+  status: "active" | "deleted" | string;
+  createdAt?: number | null;
+  updatedAt?: number | null;
+  lastMessageAt?: number | null;
+  deletedAt?: number | null;
+}
+
+export interface CopilotMessage {
+  id: string;
+  conversationId: string;
+  runId?: string | null;
+  role: "user" | "assistant" | "system" | string;
+  content: string;
+  payload?: Record<string, unknown>;
+  createdAt?: number | null;
+  deletedAt?: number | null;
+}
+
+export type CopilotMemoryItemType = "entry" | "note";
+export type CopilotMemoryScope = "global" | "project" | "session";
+
+export interface CopilotMemoryEntry {
+  id: string;
+  type?: "entry";
+  userId: string;
+  kind: string;
+  scope: CopilotMemoryScope | string;
+  projectId?: string | null;
+  sourceRunId?: string | null;
+  redactedText: string;
+  metadata?: Record<string, unknown>;
+  createdAt?: number | null;
+  updatedAt?: number | null;
+}
+
+export interface CopilotMemoryNote {
+  id: string;
+  type?: "note";
+  userId: string;
+  projectId?: string | null;
+  sessionId?: string | null;
+  sourceRunId?: string | null;
+  redactedText: string;
+  metadata?: Record<string, unknown>;
+  createdAt?: number | null;
+}
+
+export interface CopilotMemorySearchResult {
+  id: string;
+  type: CopilotMemoryItemType;
+  scope: CopilotMemoryScope | string;
+  projectId?: string | null;
+  snippet: string;
+  rank: number;
+}
+
+export interface CopilotPendingActionDecision {
+  action: CopilotPendingAction;
+  run?: CopilotRun;
+  events?: CopilotRunEvent[];
+  pendingActions?: CopilotPendingAction[];
+}
+
+export type CopilotSource = "dashboard" | "project" | "session" | "settings" | "copilot" | "models";
+
+export interface CreateCopilotRunInput {
+  prompt: string;
+  providerProfileId?: string;
+  modelProfileId?: string;
+  source?: CopilotSource;
+  sourceRefId?: string;
+  async?: boolean;
+}
+
+export interface CreateCopilotConversationInput {
+  title: string;
+  source?: CopilotSource;
+  sourceRefId?: string;
+}
+
+export interface UpdateCopilotConversationInput {
+  title: string;
+}
+
+export interface CreateCopilotConversationMessageInput extends CreateCopilotRunInput {}
+
+export interface ListCopilotMemoryEntriesInput {
+  scope?: CopilotMemoryScope;
+  projectId?: string;
+  limit?: number;
+}
+
+export interface ListCopilotMemoryNotesInput {
+  projectId?: string;
+  sessionId?: string;
+  limit?: number;
+}
+
+export interface SearchCopilotMemoryInput {
+  query: string;
+  scope?: CopilotMemoryScope;
+  projectId?: string;
+  includeNotes?: boolean;
+  limit?: number;
+}
+
 export interface DependencyStatus {
   name: string;
   available: boolean;
@@ -170,6 +333,109 @@ export interface TerminalRuntimeStatus {
 export interface DependencyReport {
   dependencies: DependencyStatus[];
   terminalRuntime?: TerminalRuntimeStatus;
+}
+
+export type FeishuAuthState = "authenticated" | "unauthenticated" | "unknown";
+export type FeishuIdentityMode = "user" | "bot" | "unknown";
+
+export interface FeishuIntegrationStatus {
+  available: boolean;
+  version?: string;
+  authState: FeishuAuthState;
+  identityMode: FeishuIdentityMode;
+  enabled: boolean;
+  emergencyDisabled?: boolean;
+  error?: string;
+}
+
+export interface FeishuIntegrationConfig {
+  enabled: boolean;
+  emergencyDisabled: boolean;
+  identityMode: FeishuIdentityMode;
+  allowedChatIds: string[];
+  commandPrefix: string;
+}
+
+export interface UpdateFeishuIntegrationConfigInput {
+  enabled?: boolean;
+  emergencyDisabled?: boolean;
+  identityMode?: FeishuIdentityMode;
+  allowedChatIds?: string[];
+  commandPrefix?: string;
+}
+
+export interface FeishuUserMapping {
+  id: string;
+  feishuUserId: string;
+  openforgeUserId: string;
+  displayName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReplaceFeishuUserMappingInput {
+  feishuUserId: string;
+  openforgeUserId: string;
+  displayName?: string | null;
+}
+
+export interface LocalDiagnosticsExport {
+  generatedAt: string;
+  app: {
+    name: "OpenForge";
+    version: string;
+  };
+  runtime: {
+    node: string;
+    platform: string;
+    arch: string;
+  };
+  counts: Record<string, number>;
+  dashboardHealth: unknown;
+  adapters: Array<{
+    id: string;
+    command: string;
+    runtimeModes: string[];
+  }>;
+  modelProviders: {
+    counts: {
+      providers: number;
+      activeProviders: number;
+      models: number;
+      activeModels: number;
+      credentials: number;
+      activeCredentials: number;
+      defaultModels: number;
+    };
+    apiFormats: Record<string, number>;
+    providers: Array<{
+      id: string;
+      name: string;
+      providerKey: string;
+      apiFormat: string;
+      authType: string;
+      status: string;
+      modelCount: number;
+      activeModelCount: number;
+      credentialCount: number;
+      activeCredentialCount: number;
+      hasDefaultModel: boolean;
+      readyForUse: boolean;
+    }>;
+  };
+  copilot: {
+    capabilities: {
+      enabled: boolean;
+      toolExecutionEnabled: boolean;
+      approvalRequiredForWrites: boolean;
+      memoryEnabled: boolean;
+      memoryWritesRequireApproval: boolean;
+    };
+  };
+  integrations?: {
+    feishu?: FeishuIntegrationStatus;
+  };
+  environment: Record<string, unknown>;
 }
 
 export interface Agent {
@@ -352,7 +618,9 @@ export interface ModelGroup {
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderApplyAdapter = "claude" | "opencode" | "codex";
+export type ProviderApplyAdapter = "claude" | "opencode" | "openforge-copilot" | "codex";
+export type ProviderSupportedAdapter = "claude" | "opencode";
+export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
 export interface ProviderCatalogModel {
   id: string;
@@ -367,15 +635,40 @@ export interface ProviderCatalogPreset {
   name: string;
   description: string;
   baseUrl: string;
+  region: string;
+  productType: ProviderProductType;
   authType: ProviderAuthType;
   apiFormat: ProviderApiFormat;
-  supportedAdapters: Array<"claude" | "opencode">;
-  modelSource: "static" | "dynamic";
+  supportedAdapters: ProviderSupportedAdapter[];
+  modelSource: "static" | "dynamic" | "models.dev";
+  endpoints: {
+    anthropic?: { baseUrl: string };
+    openai?: { baseUrl: string };
+  };
   modelFetch?: {
     strategy: "openai-compatible";
     modelsUrl?: string;
   };
   defaultModels: ProviderCatalogModel[];
+  source?: "verified" | "models.dev";
+  claude?: {
+    env: {
+      baseUrl: string;
+      authToken: string;
+      model: string;
+      smallFastModel: string;
+      defaultSonnetModel: string;
+      defaultHaikuModel: string;
+      defaultOpusModel: string;
+      apiTimeoutMs: string;
+    };
+    defaultSmallFastModel?: string;
+  };
+  opencode?: {
+    npm: string;
+    api?: string;
+    env: string[];
+  };
 }
 
 export interface ProviderProfile {
@@ -383,9 +676,14 @@ export interface ProviderProfile {
   providerKey: string;
   name: string;
   baseUrl: string | null;
+  anthropicBaseUrl?: string | null;
+  openaiBaseUrl?: string | null;
+  region?: string | null;
+  productType?: ProviderProductType | null;
   authType: ProviderAuthType;
   apiFormat: ProviderApiFormat;
-  supportedAdapters: Array<"claude" | "opencode">;
+  supportedAdapters: ProviderSupportedAdapter[];
+  opencodeNpm?: string | null;
   status: string;
 }
 
@@ -395,6 +693,8 @@ export interface ModelProfile {
   providerKey: string;
   providerName: string;
   baseUrl: string | null;
+  anthropicBaseUrl?: string | null;
+  openaiBaseUrl?: string | null;
   name: string;
   modelId: string;
   capabilities: string[];
@@ -422,6 +722,14 @@ export interface ProviderApplyPreview {
   secretEnvNames: string[];
   changedFiles: Array<{ relativePath: string; operation: "create" | "update" }>;
   backupPath?: string;
+  files?: Array<{ relativePath: string; content: string }>;
+  internalDefault?: {
+    scope: "user";
+    providerProfileId: string;
+    modelProfileId: string;
+    providerName: string;
+    modelName: string;
+  };
 }
 
 export interface CodexSubscriptionStatus {
@@ -784,61 +1092,85 @@ interface ApiEnvelope<T> {
   code: number;
   data?: T;
   message: string;
+  details?: Record<string, unknown>;
 }
 
 const DEFAULT_API_TIMEOUT_MS = 30_000;
+const COPILOT_RUN_API_TIMEOUT_MS = 65_000;
+
+interface ApiRequestOptions extends RequestInit {
+  timeoutMs?: number;
+}
 
 export const gatewayBaseUrl = getGatewayBaseUrl();
+
+export class GatewayApiError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly details?: Record<string, unknown>
+  ) {
+    super(message);
+    this.name = "GatewayApiError";
+  }
+}
 
 export function apiUrl(path: string): string {
   const baseUrl = getGatewayBaseUrl().replace(/\/+$/, "");
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-export async function fetchJson<T = unknown>(path: string, options: RequestInit = {}) {
+export async function fetchJson<T = unknown>(path: string, options: ApiRequestOptions = {}) {
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
   const res = await fetch(apiUrl(path), request).finally(cleanup);
+  const envelope = await readApiEnvelope<T>(res);
   if (!res.ok) {
-    throw new Error(formatHttpError(res));
+    throw errorFromResponse(res, envelope);
   }
-  const envelope = (await res.json()) as ApiEnvelope<T>;
+  if (!envelope) {
+    throw new GatewayApiError("API request failed", res.status);
+  }
   if (envelope.code !== 0) {
-    throw new Error(envelope.message || "API request failed");
+    throw errorFromEnvelope(envelope, res.status);
   }
   return envelope.data as T;
 }
 
-export async function fetchEnvelope<T = unknown>(path: string, options: RequestInit = {}) {
+export async function fetchEnvelope<T = unknown>(path: string, options: ApiRequestOptions = {}) {
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
   const res = await fetch(apiUrl(path), request).finally(cleanup);
+  const envelope = await readApiEnvelope<T>(res);
   if (!res.ok) {
-    throw new Error(formatHttpError(res));
+    throw errorFromResponse(res, envelope);
   }
-  const envelope = (await res.json()) as ApiEnvelope<T>;
+  if (!envelope) {
+    throw new GatewayApiError("API request failed", res.status);
+  }
   if (envelope.code !== 0) {
-    throw new Error(envelope.message || "API request failed");
+    throw errorFromEnvelope(envelope, res.status);
   }
   return envelope;
 }
 
-function buildApiRequest(options: RequestInit, token: string | null): {
+function buildApiRequest(options: ApiRequestOptions, token: string | null): {
   request: RequestInit;
   cleanup: () => void;
 } {
-  const controller = options.signal ? undefined : new AbortController();
+  const { timeoutMs = DEFAULT_API_TIMEOUT_MS, ...requestOptions } = options;
+  const controller = requestOptions.signal ? undefined : new AbortController();
   const timeout = controller
-    ? setTimeout(() => controller.abort(), DEFAULT_API_TIMEOUT_MS)
+    ? setTimeout(() => controller.abort(), timeoutMs)
     : undefined;
   return {
     request: {
-      ...options,
-      signal: options.signal ?? controller?.signal,
+      ...requestOptions,
+      signal: requestOptions.signal ?? controller?.signal,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...options.headers,
+        ...requestOptions.headers,
       },
     },
     cleanup: () => {
@@ -851,6 +1183,29 @@ function buildApiRequest(options: RequestInit, token: string | null): {
 
 function formatHttpError(res: Response): string {
   return `Gateway request failed with HTTP ${res.status}`;
+}
+
+async function readApiEnvelope<T>(res: Response): Promise<ApiEnvelope<T> | null> {
+  try {
+    return (await res.json()) as ApiEnvelope<T>;
+  } catch {
+    return null;
+  }
+}
+
+function errorFromResponse<T>(res: Response, envelope: ApiEnvelope<T> | null): GatewayApiError {
+  if (envelope && isErrorEnvelope(envelope)) {
+    return errorFromEnvelope(envelope, res.status);
+  }
+  return new GatewayApiError(formatHttpError(res), res.status);
+}
+
+function errorFromEnvelope<T>(envelope: ApiEnvelope<T>, status?: number): GatewayApiError {
+  return new GatewayApiError(envelope.message || "API request failed", status, envelope.details);
+}
+
+function isErrorEnvelope<T>(envelope: ApiEnvelope<T>): boolean {
+  return envelope.code !== 0 || Boolean(envelope.message) || Boolean(envelope.details);
 }
 
 export async function login(email: string, password: string) {
@@ -875,6 +1230,47 @@ export async function getDependencies(): Promise<DependencyReport> {
   return fetchJson("/api/v1/gate-a/dependencies", {
     cache: "no-store"
   }) as Promise<DependencyReport>;
+}
+
+export async function getFeishuIntegrationStatus(): Promise<FeishuIntegrationStatus> {
+  const data = await fetchJson<{ status: FeishuIntegrationStatus }>("/api/v1/integrations/feishu/status", {
+    cache: "no-store"
+  });
+  return data.status;
+}
+
+export async function getFeishuIntegrationConfig(): Promise<FeishuIntegrationConfig> {
+  const data = await fetchJson<{ config: FeishuIntegrationConfig }>("/api/v1/integrations/feishu/config", {
+    cache: "no-store"
+  });
+  return data.config;
+}
+
+export async function updateFeishuIntegrationConfig(
+  input: UpdateFeishuIntegrationConfigInput
+): Promise<FeishuIntegrationConfig> {
+  const data = await fetchJson<{ config: FeishuIntegrationConfig }>("/api/v1/integrations/feishu/config", {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+  return data.config;
+}
+
+export async function listFeishuUserMappings(): Promise<FeishuUserMapping[]> {
+  const data = await fetchJson<{ mappings: FeishuUserMapping[] }>("/api/v1/integrations/feishu/user-mappings", {
+    cache: "no-store"
+  });
+  return data.mappings;
+}
+
+export async function replaceFeishuUserMappings(
+  mappings: ReplaceFeishuUserMappingInput[]
+): Promise<FeishuUserMapping[]> {
+  const data = await fetchJson<{ mappings: FeishuUserMapping[] }>("/api/v1/integrations/feishu/user-mappings", {
+    method: "PUT",
+    body: JSON.stringify({ mappings })
+  });
+  return data.mappings;
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
@@ -909,6 +1305,10 @@ export async function listAuditLogs(
   if (options.action) searchParams.set("action", options.action);
   const query = searchParams.toString();
   return fetchJson(`/api/v1/audit-logs${query ? `?${query}` : ""}`) as Promise<{ auditLogs: AuditLog[] }>;
+}
+
+export async function exportDiagnostics(): Promise<{ report: LocalDiagnosticsExport }> {
+  return fetchJson("/api/v1/diagnostics/export") as Promise<{ report: LocalDiagnosticsExport }>;
 }
 
 export async function listActivities(params: {
@@ -1193,6 +1593,182 @@ export async function stopCodexAppServer(id: string): Promise<{ session: CodexAp
   return fetchJson(`/api/v1/codex/app-server/${id}/stop`, { method: "POST" }) as Promise<{
     session: CodexAppServerSession;
   }>;
+}
+
+// Copilot
+export async function getCopilotCapabilities(): Promise<CopilotCapabilities> {
+  return fetchJson("/api/v1/copilot/capabilities") as Promise<CopilotCapabilities>;
+}
+
+export async function createCopilotRun(
+  input: CreateCopilotRunInput
+): Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }> {
+  return fetchJson("/api/v1/copilot/runs", {
+    method: "POST",
+    body: JSON.stringify(input),
+    timeoutMs: COPILOT_RUN_API_TIMEOUT_MS,
+  }) as Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }>;
+}
+
+export async function listCopilotRuns(limit?: number): Promise<{ runs: CopilotRun[] }> {
+  const query = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
+  return fetchJson(`/api/v1/copilot/runs${query}`) as Promise<{ runs: CopilotRun[] }>;
+}
+
+export async function listCopilotMemoryEntries(
+  input: ListCopilotMemoryEntriesInput = {}
+): Promise<{ entries: CopilotMemoryEntry[] }> {
+  const query = buildCopilotMemoryQuery(input);
+  return fetchJson(`/api/v1/copilot/memory/entries${query}`) as Promise<{ entries: CopilotMemoryEntry[] }>;
+}
+
+export async function listCopilotMemoryNotes(
+  input: ListCopilotMemoryNotesInput = {}
+): Promise<{ notes: CopilotMemoryNote[] }> {
+  const query = buildCopilotMemoryQuery(input);
+  return fetchJson(`/api/v1/copilot/memory/notes${query}`) as Promise<{ notes: CopilotMemoryNote[] }>;
+}
+
+export async function searchCopilotMemory(
+  input: SearchCopilotMemoryInput
+): Promise<{ results: CopilotMemorySearchResult[] }> {
+  const query = buildCopilotMemoryQuery(input);
+  return fetchJson(`/api/v1/copilot/memory/search${query}`) as Promise<{ results: CopilotMemorySearchResult[] }>;
+}
+
+export async function getCopilotMemoryItem(
+  type: CopilotMemoryItemType,
+  id: string
+): Promise<{ item: CopilotMemoryEntry | CopilotMemoryNote }> {
+  return fetchJson(`/api/v1/copilot/memory/${type}/${encodeURIComponent(id)}`) as Promise<{
+    item: CopilotMemoryEntry | CopilotMemoryNote;
+  }>;
+}
+
+export async function deleteCopilotMemoryItem(
+  type: CopilotMemoryItemType,
+  id: string
+): Promise<{ item: CopilotMemoryEntry | CopilotMemoryNote }> {
+  return fetchJson(`/api/v1/copilot/memory/${type}/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }) as Promise<{ item: CopilotMemoryEntry | CopilotMemoryNote }>;
+}
+
+export async function listCopilotConversations(limit?: number): Promise<{ conversations: CopilotConversation[] }> {
+  const query = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
+  return fetchJson(`/api/v1/copilot/conversations${query}`) as Promise<{ conversations: CopilotConversation[] }>;
+}
+
+export async function createCopilotConversation(
+  input: CreateCopilotConversationInput
+): Promise<{ conversation: CopilotConversation }> {
+  return fetchJson("/api/v1/copilot/conversations", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ conversation: CopilotConversation }>;
+}
+
+export async function updateCopilotConversation(
+  id: string,
+  input: UpdateCopilotConversationInput
+): Promise<{ conversation: CopilotConversation }> {
+  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  }) as Promise<{ conversation: CopilotConversation }>;
+}
+
+export async function deleteCopilotConversation(id: string): Promise<{ conversation: CopilotConversation }> {
+  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }) as Promise<{ conversation: CopilotConversation }>;
+}
+
+export async function listCopilotConversationMessages(
+  conversationId: string
+): Promise<{ messages: CopilotMessage[] }> {
+  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/messages`) as Promise<{
+    messages: CopilotMessage[];
+  }>;
+}
+
+export async function createCopilotConversationMessage(
+  conversationId: string,
+  input: CreateCopilotConversationMessageInput
+): Promise<{
+  messages: CopilotMessage[];
+  run: CopilotRun;
+  events: CopilotRunEvent[];
+  pendingActions?: CopilotPendingAction[];
+}> {
+  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    timeoutMs: COPILOT_RUN_API_TIMEOUT_MS,
+  }) as Promise<{
+    messages: CopilotMessage[];
+    run: CopilotRun;
+    events: CopilotRunEvent[];
+    pendingActions?: CopilotPendingAction[];
+  }>;
+}
+
+export async function deleteCopilotMessage(id: string): Promise<{ message: CopilotMessage }> {
+  return fetchJson(`/api/v1/copilot/messages/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }) as Promise<{ message: CopilotMessage }>;
+}
+
+export async function getCopilotRun(
+  id: string
+): Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions: CopilotPendingAction[] }> {
+  return fetchJson(`/api/v1/copilot/runs/${id}`) as Promise<{
+    run: CopilotRun;
+    events: CopilotRunEvent[];
+    pendingActions: CopilotPendingAction[];
+  }>;
+}
+
+export async function cancelCopilotRun(
+  id: string
+): Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }> {
+  return fetchJson(`/api/v1/copilot/runs/${id}/cancel`, {
+    method: "POST",
+  }) as Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }>;
+}
+
+export async function approveCopilotPendingAction(
+  runId: string,
+  actionId: string
+): Promise<CopilotPendingActionDecision> {
+  return fetchJson(`/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`, {
+    method: "POST",
+  }) as Promise<CopilotPendingActionDecision>;
+}
+
+export async function rejectCopilotPendingAction(
+  runId: string,
+  actionId: string
+): Promise<CopilotPendingActionDecision> {
+  return fetchJson(`/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/reject`, {
+    method: "POST",
+  }) as Promise<CopilotPendingActionDecision>;
+}
+
+function buildCopilotMemoryQuery(
+  input: ListCopilotMemoryEntriesInput | ListCopilotMemoryNotesInput | SearchCopilotMemoryInput
+): string {
+  const searchParams = new URLSearchParams();
+  if ("query" in input) searchParams.set("query", input.query);
+  if ("scope" in input && input.scope) searchParams.set("scope", input.scope);
+  if ("projectId" in input && input.projectId) searchParams.set("projectId", input.projectId);
+  if ("sessionId" in input && input.sessionId) searchParams.set("sessionId", input.sessionId);
+  if ("includeNotes" in input && input.includeNotes !== undefined) {
+    searchParams.set("includeNotes", String(input.includeNotes));
+  }
+  if (input.limit !== undefined) searchParams.set("limit", String(input.limit));
+  const query = searchParams.toString();
+  return query ? `?${query}` : "";
 }
 
 // Agents
@@ -1579,6 +2155,10 @@ export async function createModelProvider(data: {
   name?: string;
   providerKey?: string;
   baseUrl?: string;
+  anthropicBaseUrl?: string;
+  openaiBaseUrl?: string;
+  region?: string;
+  productType?: ProviderProductType;
   authType?: ProviderAuthType;
   apiFormat?: ProviderApiFormat;
   supportedAdapters?: Array<"claude" | "opencode">;
@@ -1667,7 +2247,7 @@ export async function syncProviderModels(
 
 export async function previewProviderApply(
   providerId: string,
-  data: { adapter: ProviderApplyAdapter; projectRoot: string; modelProfileId?: string; credentialId?: string }
+  data: { adapter: ProviderApplyAdapter; projectRoot?: string; modelProfileId?: string; credentialId?: string }
 ): Promise<{ preview: ProviderApplyPreview }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/preview-apply`, {
     method: "POST",
@@ -1677,7 +2257,7 @@ export async function previewProviderApply(
 
 export async function applyProviderConfig(
   providerId: string,
-  data: { adapter: ProviderApplyAdapter; projectRoot: string; modelProfileId?: string; credentialId?: string }
+  data: { adapter: ProviderApplyAdapter; projectRoot?: string; modelProfileId?: string; credentialId?: string }
 ): Promise<{ result: ProviderApplyPreview }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/apply`, {
     method: "POST",

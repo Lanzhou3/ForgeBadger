@@ -272,17 +272,7 @@ describe("session adapter decoupling", () => {
     });
     const providerData = await providerRes.json() as ProviderResponseBody;
     assert.equal(providerRes.status, 201);
-    const modelRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerData.data.provider.id}/models`, {
-      method: "POST",
-      headers: jsonAuthHeaders(token),
-      body: JSON.stringify({
-        name: "DeepSeek Chat",
-        modelId: "deepseek-chat",
-        capabilities: ["chat", "code"]
-      })
-    });
-    const modelData = await modelRes.json() as { data: { model: { id: string } } };
-    assert.equal(modelRes.status, 201);
+    assert.equal(providerData.data.models[0].modelId, "deepseek-chat");
 
     const credentialRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerData.data.provider.id}/credentials`, {
       method: "POST",
@@ -310,7 +300,7 @@ describe("session adapter decoupling", () => {
         projectId: projectData.data.project.id,
         credentialMode: "stored_encrypted_key",
         aiTool: "opencode",
-        modelId: modelData.data.model.id
+        modelId: providerData.data.models[0].id
       })
     });
     const sessionData = await sessionRes.json() as { data: { session: { aiTool: string } } };

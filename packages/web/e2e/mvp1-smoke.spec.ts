@@ -23,17 +23,19 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await expect(page).toHaveURL("/");
 
   await page.goto("/models");
+  await page.getByText("Advanced: add a custom provider manually").click();
   await page.locator("#provider-name").fill(`E2E Provider ${suffix}`);
   await page.locator("#provider-key").fill(`e2e-provider-${suffix}`);
   await page.locator("#provider-base-url").fill("https://e2e.example.com/v1");
-  await page.getByRole("button", { name: "Add custom OpenAI-compatible provider" }).click();
+  await page.getByRole("button", { name: "Add custom Claude-compatible provider" }).click();
   await expect(page.getByText(`E2E Provider ${suffix}`).first()).toBeVisible();
 
-  await page.getByPlaceholder("Credential label").fill("Claude E2E Key");
-  await page.getByPlaceholder("API Key").fill("test-api-key-e2e-secret");
+  await page.locator("#credential-label").fill("Claude E2E Key");
+  await page.locator("#credential-secret").fill("test-api-key-e2e-secret");
   await page.getByRole("button", { name: "Save credential" }).click();
   await expect(page.getByRole("cell", { name: "Claude E2E Key" })).toBeVisible();
 
+  await page.getByText("Advanced: edit models manually").click();
   await page.getByPlaceholder("Name").fill("Claude E2E");
   await page.getByPlaceholder("Model ID").fill("claude-sonnet-e2e");
   await page.getByPlaceholder("Capabilities").fill("chat,code");
