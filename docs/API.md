@@ -116,6 +116,7 @@ not included.
 - `GET /api/v1/integrations/feishu/user-mappings`
 - `PUT /api/v1/integrations/feishu/user-mappings`
 - `POST /api/v1/integrations/feishu/inbound`
+- `POST /api/v1/integrations/feishu/webhook/:publicId`
 
 Feishu integration endpoints are authenticated, tenant scoped, and
 Gateway-owned. Status discovers the local `lark-cli` binary, reports version
@@ -129,9 +130,76 @@ strings, send terminal input, approve actions from Feishu text, or start
 unattended development loops. Outbound Feishu writes are only available through
 Copilot prepare tools plus explicit OpenForge pending-action approval.
 The inbound endpoint is an authenticated OpenForge test adapter, not a public
-Feishu webhook. Public webhook signature verification, event listener
-consumption, approval links, direct terminal input, batch authorization, and
-unattended loops are separate non-goals for this slice.
+Feishu webhook. The public callback contract below uses a separate route and
+auth boundary. Event listener consumption, approval links, direct terminal
+input, batch authorization, and unattended loops remain separate non-goals for
+this slice.
+
+`POST /api/v1/integrations/feishu/webhook/:publicId` is the public Feishu
+event callback route. It is separate from the authenticated `/inbound` test
+adapter and does not use the OpenForge REST envelope because Feishu expects
+protocol-compatible webhook responses. The `publicId` resolves the tenant
+integration before verification, but it is not a secret or an auth factor.
+Public webhook handling is disabled by default and remains inert until a tenant
+explicitly enables it and stores the required encrypted verification token and
+encrypted event encrypt key for that integration.
+
+Ordinary public webhook events must include
+`X-Lark-Request-Timestamp`, `X-Lark-Request-Nonce`, and `X-Lark-Signature`.
+Gateway verifies the signature against the raw request body, checks timestamp
+freshness with a narrow five-minute default window, and rejects missing,
+malformed, stale, far-future, or mismatched requests before event
+normalization and before Copilot execution. URL verification is setup-only:
+`url_verification` returns only `{"challenge":"..."}` and does not create a
+Copilot run, mutate policy, dispatch Feishu commands, or write terminal input.
+Encrypted event payloads are accepted only when the tenant webhook config can
+decrypt the event and validate the configured Feishu verification token;
+otherwise the route fails closed.
+
+Replay protection and public webhook rate limits use dedicated persistent
+repository state, not audit-log search and not in-memory maps. Replay keys
+include tenant/integration identity plus Feishu event id or message id; the
+same nonce/signature replay is also rejected within the timestamp window. Rate
+limits apply per tenant/integration, per chat, and, once resolved, per mapped
+OpenForge user. SQLite-backed replay and rate storage are supported only for
+the local single-Gateway deployment. Multi-instance public webhook deployment
+requires a shared replay and shared rate-limit store before webhook enablement;
+without that shared store the public webhook route must fail closed or remain
+disabled for that deployment mode.
+
+After signature, timestamp, replay, and rate checks pass, public events
+normalize into the same bounded inbound command policy used by `/inbound`:
+the integration must be enabled, not emergency-disabled, configured with
+identity mode `user` or `bot`, constrained by explicit `allowedChatIds`, mapped
+to the current tenant through a mapped Feishu user, and, when a `projectId` is
+present, scoped to a project visible to that user. A current
+`queued`, `running`, or `waiting_for_approval` Copilot run blocks a new public
+webhook run. Only the minimum supported Feishu message events for the command
+bridge are actionable; unknown authentic event types are acknowledged without
+side effects.
+
+Public webhook text such as `approve`, `批准`, or `/approve <id>` is not an
+approval channel and must not approve pending actions. Public webhook events
+also cannot send direct terminal input, run shell commands, create unattended
+development loops, or execute model-generated Feishu command strings. Accepted
+events may create a Copilot conversation/run with `source: "feishu"` only after
+all boundary checks pass.
+
+Failure responses are minimal. Signature, timestamp, decrypt, token, disabled
+route, and unknown-tenant failures return non-2xx responses and create no
+Copilot run. Once an authentic tenant event has been resolved, non-actionable
+or policy-rejected events may return a minimal 2xx acknowledgement when retrying
+would amplify load or leak policy state. Logs, audit rows, model context, and
+API-visible metadata must not include raw request bodies, signatures, Feishu
+tokens, event encrypt keys, credentials, raw Feishu message text, `Bearer ...`
+values, or `sk-*` style secrets.
+
+Public webhook audit rows use bounded metadata only. Accepted rows include the
+public id or integration id, Feishu event id or message id, chat id, mapped
+OpenForge user id, optional project id, run id, conversation id, pending action
+count, and redacted text summary. Policy rejection rows include a reason code
+and redacted metadata sufficient for diagnostics without exposing request
+secrets or private message content.
 
 Successful status response:
 
