@@ -7,7 +7,7 @@
 
 ### Release Evidence
 
-- [ ] **REL-01**: Maintainer can run `pnpm smoke:copilot-provider` with a disposable provider credential and record redacted live-provider evidence.
+- [x] **REL-01**: Maintainer can run `pnpm smoke:copilot-provider` with a disposable provider credential and record redacted live-provider evidence.
 - [ ] **REL-02**: Maintainer can run and record physical Windows/WSL smoke evidence before removing the platform caveat.
 - [ ] **REL-03**: First-user Copilot feedback is captured through the trial feedback path and triaged into concrete dependency, provider, CLI, or platform hardening tasks.
 - [x] **REL-04**: Release documentation reflects the actual merged PR state, CI gates, and remaining external evidence caveats.
@@ -62,7 +62,7 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| REL-01 | Phase 1 | Pending |
+| REL-01 | Phase 1 | Complete |
 | REL-02 | Phase 1 | Pending |
 | REL-03 | Phase 1 | Pending |
 | REL-04 | Phase 1 | Complete |

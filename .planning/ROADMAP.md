@@ -54,7 +54,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02: Run and record live Copilot provider smoke evidence.
+- [x] 01-02: Run and record live Copilot provider smoke evidence.
 - [ ] 01-03: Run physical Windows/WSL smoke or record the blocker and keep the caveat.
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -175,7 +175,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 1. Beta Evidence Closure | Post-Beta Trust Closure | 1/4 | In Progress|  |
+| 1. Beta Evidence Closure | Post-Beta Trust Closure | 2/4 | In Progress|  |
 | 2. Public Feishu Webhook Safety | Post-Beta Trust Closure | 0/2 | Not started | - |
 | 3. First-User Product Hardening | Post-Beta Trust Closure | 0/4 | Not started | - |
 | 4. Feishu Project Manager Ledger | Collaboration Expansion | 0/2 | Not started | - |
