@@ -347,20 +347,19 @@ function dedupeExternalProviders(
   externalProviders: ProviderCatalogPreset[],
   verifiedProviders: ProviderCatalogPreset[]
 ): ProviderCatalogPreset[] {
-  const verifiedKeys = new Set(verifiedProviders.flatMap(providerIdentityKeys));
-  return externalProviders.filter((provider) =>
-    providerIdentityKeys(provider).every((key) => !verifiedKeys.has(key))
-  );
+  const verifiedIds = new Set(verifiedProviders.map((provider) => normalizeCatalogIdentity(provider.id)));
+  const verifiedCompounds = new Set(verifiedProviders.map(providerCompoundIdentity));
+  return externalProviders.filter((provider) => {
+    if (verifiedIds.has(normalizeCatalogIdentity(provider.id))) return false;
+    const compound = providerCompoundIdentity(provider);
+    return !compound || !verifiedCompounds.has(compound);
+  });
 }
 
-function providerIdentityKeys(provider: ProviderCatalogPreset): string[] {
-  return [
-    provider.id,
-    provider.name,
-    provider.baseUrl,
-    provider.endpoints.anthropic?.baseUrl,
-    provider.endpoints.openai?.baseUrl
-  ].map(normalizeCatalogIdentity).filter((key) => key.length > 0);
+function providerCompoundIdentity(provider: ProviderCatalogPreset): string {
+  const name = normalizeCatalogIdentity(provider.name);
+  const baseUrl = normalizeCatalogIdentity(provider.baseUrl || provider.endpoints.openai?.baseUrl || provider.endpoints.anthropic?.baseUrl);
+  return name && baseUrl ? `${name}|${baseUrl}` : "";
 }
 
 function normalizeCatalogIdentity(value: string | undefined): string {

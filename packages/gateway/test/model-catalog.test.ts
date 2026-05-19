@@ -97,6 +97,35 @@ describe("model catalog", () => {
     assert.equal(catalog.filter((provider) => provider.name === "Qwen Coding Plan 中国大陆").length, 1);
   });
 
+  it("keeps distinct models.dev providers that share an endpoint with a verified provider", async () => {
+    const catalog = await loadProviderCatalog({
+      fetchImpl: async () => new Response(JSON.stringify({
+        deepseek: {
+          id: "deepseek",
+          name: "DeepSeek",
+          env: ["DEEPSEEK_API_KEY"],
+          npm: "@ai-sdk/openai-compatible",
+          api: "https://api.deepseek.com",
+          models: {
+            "deepseek-chat": {
+              id: "deepseek-chat",
+              name: "DeepSeek Chat",
+              release_date: "2026-01-01",
+              attachment: false,
+              reasoning: false,
+              temperature: true,
+              tool_call: true,
+              limit: { context: 64000, output: 8192 }
+            }
+          }
+        }
+      }), { status: 200 })
+    });
+
+    assert.ok(catalog.some((provider) => provider.id === "deepseek-api" && provider.source === "verified"));
+    assert.ok(catalog.some((provider) => provider.id === "deepseek" && provider.source === "models.dev"));
+  });
+
   it("keeps the verified catalog when models.dev cannot be loaded", async () => {
     const catalog = await loadProviderCatalog({
       fetchImpl: async () => new Response("unavailable", { status: 503 })
