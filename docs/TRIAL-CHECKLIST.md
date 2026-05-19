@@ -2,6 +2,8 @@
 
 Attach a completed copy of this checklist to trial feedback. Use short notes,
 screenshots, and exact reproduction steps for anything that looks wrong.
+Attach the completed `docs/TRIAL-FEEDBACK.md` copy as the triage input for
+requirement mapping and follow-up phase assignment.
 
 ## Environment
 

@@ -52,10 +52,10 @@ curl --noproxy '*' -fsS \
 
 For local trial use, get `<token>` from the logged-in browser session:
    browser developer tools -> Application or Storage -> Local Storage ->
-   `openforge.token`.
+   the OpenForge browser auth token entry.
 
 Do not include plaintext API keys, passwords, tokens, private keys, unrelated
-project secrets, or the `openforge.token` value.
+project secrets, or the browser auth token value.
 
 ## Reproduction Steps
 
@@ -68,6 +68,13 @@ project secrets, or the `openforge.token` value.
 
 ## Actual Behavior
 
+
+## Triage
+
+- Category: dependency / provider / CLI / platform / Copilot / docs / other
+- Severity: blocker / high / medium / low
+- Mapped requirement: REL-* or UX-*
+- Follow-up phase: Phase 1 evidence / Phase 3 hardening / later
 
 ## Browser Evidence
 
