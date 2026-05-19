@@ -1261,6 +1261,48 @@ describe("copilot routes", () => {
     }
   });
 
+  it("recovers a stale async run even when the process guard has not released", async () => {
+    createOpenAiProvider();
+    const release = deferred<void>();
+    modelResponseWait = release.promise;
+    try {
+      const created = await makeRequest(app, "POST", "/api/v1/copilot/conversations", {
+        title: "Stale async run",
+        source: "copilot"
+      }, authHeaders());
+      const conversationId = created.body.data.conversation.id as string;
+
+      const first = await makeRequest(app, "POST", `/api/v1/copilot/conversations/${conversationId}/messages`, {
+        prompt: "Start async run",
+        source: "copilot",
+        async: true
+      }, authHeaders());
+      assert.equal(first.status, 202);
+      const firstRunId = first.body.data.run.id as string;
+
+      const staleUpdatedAt = Date.now() - (16 * 60 * 1000);
+      db.prepare(`
+        UPDATE copilot_runs
+        SET updated_at = ?
+        WHERE id = ? AND user_id = ?
+      `).run(staleUpdatedAt, firstRunId, userId);
+
+      const second = await makeRequest(app, "POST", `/api/v1/copilot/conversations/${conversationId}/messages`, {
+        prompt: "Recover and start replacement",
+        source: "copilot",
+        async: true
+      }, authHeaders());
+
+      assert.equal(second.status, 202);
+      assert.equal(second.body.code, 0);
+      assert.notEqual(second.body.data.run.id, firstRunId);
+      assert.equal(new CopilotRepository(db, userId).getRun(firstRunId)?.status, "failed");
+      assert.equal(new CopilotRepository(db, userId).findActiveRun()?.id, second.body.data.run.id);
+    } finally {
+      release.resolve();
+    }
+  });
+
   it("rejects new Copilot runs while an older run waits for approval", async () => {
     const existing = new CopilotRepository(db, userId).createRun({
       status: "waiting_for_approval",
@@ -1807,6 +1849,23 @@ describe("copilot routes", () => {
     assert.equal(run?.status, "failed");
     assert.equal(run?.errorCode, "copilot_model_request_failed");
     assert.equal(new CopilotRepository(db, userId).listEvents(run?.id ?? "").at(-1)?.type, "run_failed");
+    assert.doesNotMatch(JSON.stringify(res.body), /secret-value/);
+  });
+
+  it("classifies provider network failures separately from generic model failures", async () => {
+    createOpenAiProvider();
+    modelEventResponses = [new TypeError("fetch failed token=secret-value")];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Summarize Gateway health",
+      source: "copilot"
+    }, authHeaders());
+
+    const run = new CopilotRepository(db, userId).listRuns()[0];
+    assert.equal(res.status, 502);
+    assert.equal(res.body.details.code, "copilot_provider_network_failed");
+    assert.equal(run?.status, "failed");
+    assert.equal(run?.errorCode, "copilot_provider_network_failed");
     assert.doesNotMatch(JSON.stringify(res.body), /secret-value/);
   });
 
@@ -4273,10 +4332,10 @@ describe("copilot routes", () => {
     const invalidUpdate = createPendingAction(userId, "openforge.propose_agent_update", {
       agentId: "missing",
       status: "archived"
-    });
+    }, invalidCreate.runId);
     const invalidDelete = createPendingAction(userId, "openforge.propose_agent_delete", {
       reason: "Missing agent id"
-    });
+    }, invalidCreate.runId);
 
     const createRes = await makeRequest(
       app,
@@ -4319,10 +4378,10 @@ describe("copilot routes", () => {
     const invalidUpdate = createPendingAction(userId, "openforge.propose_template_update", {
       templateId: "missing",
       status: "archived"
-    });
+    }, invalidCreate.runId);
     const invalidDelete = createPendingAction(userId, "openforge.propose_template_delete", {
       reason: "Missing template id"
-    });
+    }, invalidCreate.runId);
 
     const createRes = await makeRequest(
       app,
@@ -4879,13 +4938,21 @@ describe("copilot routes", () => {
     };
   }
 
-  function createPendingAction(ownerId: string, type: string, input: Record<string, unknown> = { reason: "test" }) {
+  function createPendingAction(
+    ownerId: string,
+    type: string,
+    input: Record<string, unknown> = { reason: "test" },
+    existingRunId?: string
+  ) {
     const repo = new CopilotRepository(db, ownerId);
-    const run = repo.createRun({
-      status: "waiting_for_approval",
-      source: "copilot",
-      goal: "Approve action"
-    });
+    const run = existingRunId
+      ? repo.getRun(existingRunId)
+      : repo.createRun({
+          status: "waiting_for_approval",
+          source: "copilot",
+          goal: "Approve action"
+        });
+    if (!run) throw new Error("Missing pending-action test run");
     const action = repo.createPendingAction(run.id, {
       type,
       input

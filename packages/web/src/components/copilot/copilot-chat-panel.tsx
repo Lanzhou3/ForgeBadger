@@ -63,11 +63,13 @@ import {
   getCopilotPendingActionLabel,
   getCopilotPendingActionLabelKey,
   getCopilotPendingActionSummary,
+  getCopilotRunPollDelayMs,
   isCopilotRunLive,
   readCopilotTerminalSnapshotText,
   readCopilotMessageRunActivity,
   readCopilotRunErrorDetails,
   resolveCopilotRunFailureMessage,
+  shouldKeepCopilotActiveRunState,
   shouldRefreshCopilotPanelForGatewayEvent,
   stripCopilotThinkingBlocks,
 } from "@/lib/copilot";
@@ -371,7 +373,18 @@ export function CopilotChatPanel({
     if (!activeRun?.run.id || !isCopilotRunLive(activeRun.run.status)) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let pollAttempt = 0;
+    const clearTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    };
+    const schedulePoll = () => {
+      clearTimer();
+      if (stopped || document.visibilityState === "hidden") return;
+      timer = setTimeout(pollRun, getCopilotRunPollDelayMs(pollAttempt));
+    };
     const pollRun = async () => {
+      if (document.visibilityState === "hidden") return;
       try {
         const data = await getCopilotRun(activeRun.run.id);
         if (stopped) return;
@@ -381,7 +394,8 @@ export function CopilotChatPanel({
           pendingActions: data.pendingActions,
         });
         if (isCopilotRunLive(data.run.status)) {
-          timer = setTimeout(pollRun, 700);
+          pollAttempt += 1;
+          schedulePoll();
           return;
         }
         if (data.run.status === "failed") {
@@ -400,13 +414,27 @@ export function CopilotChatPanel({
             : Promise.resolve(),
         ]);
       } catch (error) {
-        if (!stopped) setLocalError(resolveChatError(error, t));
+        if (!stopped) {
+          setLocalError(resolveChatError(error, t));
+          pollAttempt += 1;
+          schedulePoll();
+        }
       }
     };
-    timer = setTimeout(pollRun, 250);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        clearTimer();
+        return;
+      }
+      pollAttempt = 0;
+      schedulePoll();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    schedulePoll();
     return () => {
       stopped = true;
-      if (timer) clearTimeout(timer);
+      clearTimer();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [activeRun?.run.id, activeRun?.run.status, queryClient, selectedConversationId, t]);
 
@@ -1589,15 +1617,7 @@ function titleFromPrompt(prompt: string): string {
 }
 
 function shouldKeepCurrentActiveRun(current: ActiveRunState | null, next: ActiveRunState): boolean {
-  if (!current || current.run.id !== next.run.id) return false;
-  const currentUpdatedAt = current.run.updatedAt ?? current.run.createdAt ?? 0;
-  const nextUpdatedAt = next.run.updatedAt ?? next.run.createdAt ?? 0;
-  if (currentUpdatedAt > nextUpdatedAt) return true;
-  return isTerminalCopilotRunStatus(current.run.status) && !isTerminalCopilotRunStatus(next.run.status);
-}
-
-function isTerminalCopilotRunStatus(status: string): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
+  return shouldKeepCopilotActiveRunState(current, next);
 }
 
 function resolveChatError(error: unknown, t: (key: TranslationKey) => string): string {

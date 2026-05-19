@@ -26,6 +26,8 @@ import {
   isCopilotRunLive,
   isCopilotRunCancelledError,
   readCopilotMessageRunActivity,
+  getCopilotRunPollDelayMs,
+  shouldKeepCopilotActiveRunState,
   shouldRefreshCopilotRuns,
   shouldRefreshCopilotPanelForGatewayEvent,
   stripCopilotThinkingBlocks,
@@ -160,6 +162,8 @@ describe("copilot display helpers", () => {
     expect(getCopilotErrorMessageKey("copilot_provider_rate_limited")).toBe("copilot.error.providerRateLimited");
     expect(getCopilotErrorMessageKey("copilot_provider_unavailable")).toBe("copilot.error.providerUnavailable");
     expect(getCopilotErrorMessageKey("copilot_provider_request_failed")).toBe("copilot.error.providerRequestFailed");
+    expect(getCopilotErrorMessageKey("copilot_provider_network_failed")).toBe("copilot.error.providerNetworkFailed");
+    expect(getCopilotErrorMessageKey("copilot_provider_stream_parse_failed")).toBe("copilot.error.providerStreamParseFailed");
     expect(getCopilotErrorMessageKey("copilot_model_request_failed")).toBe("copilot.error.modelRequestFailed");
     expect(getCopilotErrorMessageKey("copilot_model_request_timeout")).toBe("copilot.error.modelRequestTimeout");
     expect(getCopilotErrorMessageKey("copilot_redaction_blocked_output")).toBe("copilot.error.redactionBlockedOutput");
@@ -1220,6 +1224,48 @@ describe("copilot display helpers", () => {
       ])
     ).toEqual({ id: "run-running", status: "running" });
     expect(findLiveCopilotRun([{ id: "run-completed", status: "completed" }])).toBeNull();
+  });
+
+  it("keeps a newer active run state over stale poll data", () => {
+    expect(
+      shouldKeepCopilotActiveRunState(
+        {
+          run: { id: "run-1", status: "running", updatedAt: 200 },
+          events: [{ sequence: 1 }, { sequence: 2 }],
+          pendingActions: []
+        },
+        {
+          run: { id: "run-1", status: "running", updatedAt: 200 },
+          events: [{ sequence: 1 }],
+          pendingActions: []
+        }
+      )
+    ).toBe(true);
+    expect(
+      shouldKeepCopilotActiveRunState(
+        {
+          run: { id: "run-1", status: "running", updatedAt: 200 },
+          events: [{ sequence: 1 }],
+          pendingActions: []
+        },
+        {
+          run: { id: "run-1", status: "completed", updatedAt: 201 },
+          events: [{ sequence: 1 }, { sequence: 2 }],
+          pendingActions: []
+        }
+      )
+    ).toBe(false);
+  });
+
+  it("backs off Copilot run polling delays", () => {
+    expect([0, 1, 2, 3, 4, 8].map(getCopilotRunPollDelayMs)).toEqual([
+      500,
+      1000,
+      2000,
+      4000,
+      5000,
+      5000
+    ]);
   });
 
   it("prefers live Copilot detail state over stale completed list state", () => {

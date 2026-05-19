@@ -4,6 +4,7 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { AuditLogRepository } from "../db/repositories/audit-log-repository.js";
 import {
+  CopilotLiveRunConflictError,
   CopilotRepository,
   type CopilotConversation,
   type CopilotRun,
@@ -51,6 +52,7 @@ const inboundFeishuCommandSchema = z.object({
 }).strict();
 
 type InboundFeishuCommand = z.infer<typeof inboundFeishuCommandSchema>;
+const defaultStaleCopilotRunTimeoutMs = 15 * 60 * 1000;
 
 export interface FeishuIntegrationRoutesOptions {
   db?: Database;
@@ -62,6 +64,7 @@ export interface FeishuIntegrationRoutesOptions {
   runControls?: CopilotOrchestratorOptions["runControls"];
   sessionManager?: CopilotOrchestratorOptions["sessionManager"];
   adapterCommandRunner?: CopilotOrchestratorOptions["adapterCommandRunner"];
+  staleRunTimeoutMs?: number;
 }
 
 export function createFeishuIntegrationRoutes(
@@ -265,14 +268,17 @@ export function createFeishuIntegrationRoutes(
       });
     }
     const repo = new CopilotRepository(db, userId);
-    const activeRun = repo.listRuns(200).find((run) => isExecutionRunStatus(run.status));
-    if (activeInboundUsers.has(userId) || activeRun) {
+    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs);
+    const activeRun = repo.findActiveRun();
+    if (activeRun) {
       return sendInboundReject(db, userId, req.ip, res, command, {
         status: 409,
         code: "copilot_run_already_active",
         message: "A Copilot run is already active"
       });
     }
+    // The DB live-run constraint is the source of truth; clear stale process locks after recovery.
+    if (activeInboundUsers.has(userId)) activeInboundUsers.delete(userId);
     if (!options.masterKey) {
       res.status(503).json({
         code: 1,
@@ -320,7 +326,14 @@ export function createFeishuIntegrationRoutes(
         message: result.ok ? "" : result.error.message,
         ...(result.ok ? {} : { details: { code: result.error.code, runId: result.run.id } })
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof CopilotLiveRunConflictError) {
+        return sendInboundReject(db, userId, req.ip, res, command, {
+          status: 409,
+          code: "copilot_run_already_active",
+          message: "A Copilot run is already active"
+        });
+      }
       res.status(500).json({
         code: 1,
         message: "Failed to create Feishu inbound Copilot run",
@@ -365,8 +378,9 @@ function findMappedOpenForgeUserId(repo: FeishuIntegrationRepository, feishuUser
     ?.openforgeUserId ?? null;
 }
 
-function isExecutionRunStatus(status: string): boolean {
-  return status === "queued" || status === "running" || status === "waiting_for_approval";
+function recoverStaleCopilotRuns(repo: CopilotRepository, timeoutMs = defaultStaleCopilotRunTimeoutMs): void {
+  const timeout = Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : defaultStaleCopilotRunTimeoutMs;
+  repo.recoverStaleExecutionRuns(Date.now() - timeout);
 }
 
 function isAcceptedInboundMessageReplay(db: Database, userId: string, messageId: string): boolean {

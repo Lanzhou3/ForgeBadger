@@ -334,7 +334,8 @@ pending actions:
 ```
 
 Copilot allows only one executing or approval-waiting run per user while a run
-is `queued`, `running`, or `waiting_for_approval`. A run in
+is `queued`, `running`, or `waiting_for_approval`; the Gateway enforces this
+with a database uniqueness gate in addition to the in-process guard. A run in
 `waiting_for_approval` keeps its pending actions available for approval or
 rejection, and it blocks new runs until those pending actions are approved,
 rejected, or the run is cancelled.
@@ -347,14 +348,17 @@ details include `abortSignalDelivered` so callers can distinguish status
 cancellation from an in-process abort signal being delivered. Model requests are
 timeout bounded; timeout failures return `504` with
 `details.code = "copilot_model_request_timeout"` and record a redacted
-`run_failed` event. The Web console's Copilot run creation request uses a 65
-second client timeout so the Gateway's 60 second model timeout remains the
-user-visible failure boundary.
+`run_failed` event. Stale `queued`/`running` runs left behind by Gateway
+interruption are failed before new run admission after the recovery window, but
+`waiting_for_approval` runs are preserved for explicit user approval/rejection.
+Network failures return `copilot_provider_network_failed`; malformed streaming
+provider responses return `copilot_provider_stream_parse_failed`. The Web
+console's Copilot run creation request uses a 65 second client timeout so the
+Gateway's 60 second model timeout remains the user-visible failure boundary.
 `GET /runs?limit=N` returns the requested bounded recent history and also
 includes any live `queued`, `running`, or `waiting_for_approval` run found in
-the same 200-run recovery window used by run creation. This keeps stale live
-runs visible and cancellable in the Web console even when they are older than
-the normal history page size.
+the 200-run recovery window. This keeps stale live runs visible and cancellable
+in the Web console even when they are older than the normal history page size.
 
 Read tools are allowlisted and validated server-side. Current read tools are:
 

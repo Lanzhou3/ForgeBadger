@@ -134,6 +134,13 @@
       "when": 1778976000000,
       "tag": "0019_feishu_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1779062400000,
+      "tag": "0020_copilot_live_run_constraint",
+      "breakpoints": true
     }
   ]
 }

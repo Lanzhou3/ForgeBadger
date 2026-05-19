@@ -75,7 +75,7 @@ test("Models provider add dialog saves credential, syncs models, and previews Co
   await expect(dialog.getByText("Anthropic: https://provider-01.example.com/anthropic")).toBeVisible();
   await expect(dialog.getByText("OpenAI: https://provider-01.example.com/v1")).toBeVisible();
   await dialog.getByLabel("Credential name").fill("Minimax subscription");
-  await dialog.getByLabel("API key").fill("sk-minimax-test");
+  await dialog.getByLabel("API key").fill("test-minimax-token");
   await dialog.getByRole("button", { name: "Save and sync models" }).click();
 
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -83,7 +83,7 @@ test("Models provider add dialog saves credential, syncs models, and previews Co
   expect(requests.providerCreate).toEqual({ catalogId: "provider-01" });
   expect(requests.credentialCreate).toEqual({
     label: "Minimax subscription",
-    plaintextSecret: "sk-minimax-test",
+    plaintextSecret: "test-minimax-token",
   });
   expect(requests.syncModels).toEqual({ credentialId: "credential-1" });
 

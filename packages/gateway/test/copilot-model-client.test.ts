@@ -319,6 +319,25 @@ describe("copilot model client", () => {
     if (failure) throw failure;
   });
 
+  it("rejects malformed OpenAI Responses SSE frames", async () => {
+    const client = new OpenAiResponsesClient({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-openai",
+      fetch: (async () => new Response("data: {not-json}\n\n", {
+        headers: { "Content-Type": "text/event-stream" }
+      })) as typeof fetch
+    });
+
+    await assert.rejects(
+      () => client.createResponse({
+        model: "gpt-5.1",
+        instructions: "Answer as OpenForge Copilot.",
+        input: "Status?"
+      }, { onTextDelta: () => {} }),
+      /Invalid provider SSE frame/
+    );
+  });
+
   it("serializes OpenAI Responses tools as function definitions", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const client = new OpenAiResponsesClient({

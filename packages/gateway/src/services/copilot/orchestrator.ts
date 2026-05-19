@@ -10,6 +10,7 @@ import type { Database } from "../../db/types.js";
 import type { CommandRunner } from "../../lib/dependency-check.js";
 import { AnthropicMessagesClient } from "./anthropic-messages-client.js";
 import { runCopilotActiveRecall } from "./active-recall.js";
+import { CopilotSseParseError } from "./model-client.js";
 import type { CopilotModelClient, CopilotModelEvent, CopilotModelRequest, CopilotServiceError } from "./types.js";
 import { OpenAiChatCompletionsClient } from "./openai-chat-completions-client.js";
 import { OpenAiResponsesClient } from "./openai-responses-client.js";
@@ -421,7 +422,7 @@ export class CopilotOrchestrator {
         };
       }
       return { ok: true, events };
-    } catch {
+    } catch (error) {
       const cancelled = this.cancelledResultIfNeeded(repo, run, previousEvents, runSignal);
       if (cancelled) return { ok: false, result: cancelled };
       if (timedOut) {
@@ -432,7 +433,7 @@ export class CopilotOrchestrator {
       }
       return {
         ok: false,
-        result: this.failWithRunEvent(repo, run, modelRequestError(), previousEvents, 502)
+        result: this.failWithRunEvent(repo, run, modelRequestError(error), previousEvents, 502)
       };
     } finally {
       clearTimeout(timeout);
@@ -937,7 +938,19 @@ function maxStepsError(maxSteps: number): CopilotServiceError {
   };
 }
 
-function modelRequestError(): CopilotServiceError {
+function modelRequestError(error?: unknown): CopilotServiceError {
+  if (error instanceof CopilotSseParseError) {
+    return {
+      code: "copilot_provider_stream_parse_failed",
+      message: "Model provider stream response could not be parsed"
+    };
+  }
+  if (error instanceof TypeError) {
+    return {
+      code: "copilot_provider_network_failed",
+      message: "Model provider network request failed"
+    };
+  }
   return {
     code: "copilot_model_request_failed",
     message: "Copilot model request failed"

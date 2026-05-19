@@ -2,6 +2,13 @@ import type { CopilotModelClient, CopilotModelRequest, CopilotModelEvent, Copilo
 
 export type CopilotFetch = typeof fetch;
 
+export class CopilotSseParseError extends Error {
+  constructor() {
+    super("Invalid provider SSE frame");
+    this.name = "CopilotSseParseError";
+  }
+}
+
 const defaultToolInputSchema = {
   type: "object",
   properties: {},
@@ -72,7 +79,7 @@ function parseSseFrame(frame: string): unknown | undefined {
   try {
     return JSON.parse(data) as unknown;
   } catch {
-    return undefined;
+    throw new CopilotSseParseError();
   }
 }
 

@@ -6,7 +6,10 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
+import {
+  CopilotLiveRunConflictError,
+  CopilotRepository
+} from "../src/db/repositories/copilot-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 
 function createTestDb(): Database.Database {
@@ -54,6 +57,64 @@ describe("CopilotRepository", () => {
     assert.equal(run.goal, "Summarize Gateway health");
     assert.equal(listed.length, 1);
     assert.equal(listed[0]?.id, run.id);
+  });
+
+  it("rejects a second live run for the same user and exposes the active run", () => {
+    const active = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Approve first action"
+    });
+
+    assert.throws(
+      () => {
+        repo.createRun({
+          status: "running",
+          source: "copilot",
+          goal: "Start another run"
+        });
+      },
+      (error) =>
+        error instanceof CopilotLiveRunConflictError &&
+        error.activeRun?.id === active.id &&
+        error.activeRun.status === "waiting_for_approval"
+    );
+
+    repo.updateRun(active.id, { status: "completed", completedAt: Date.now() });
+
+    const next = repo.createRun({
+      status: "queued",
+      source: "copilot",
+      goal: "Start after completion"
+    });
+
+    assert.equal(next.status, "queued");
+  });
+
+  it("recovers stale queued and running runs without closing approval waits", () => {
+    const oldRunning = repo.createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Crashed model request"
+    });
+    repo.updateRun(oldRunning.id, { status: "running" });
+    db.prepare("UPDATE copilot_runs SET updated_at = ? WHERE id = ?").run(1000, oldRunning.id);
+
+    const recovered = repo.recoverStaleExecutionRuns(2000, 5000);
+
+    const waiting = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Needs approval"
+    });
+    db.prepare("UPDATE copilot_runs SET updated_at = ? WHERE id = ?").run(1000, waiting.id);
+    const recoveredAfterWaiting = repo.recoverStaleExecutionRuns(2000, 6000);
+
+    assert.deepEqual(recovered.map((run) => run.id), [oldRunning.id]);
+    assert.deepEqual(recoveredAfterWaiting, []);
+    assert.equal(repo.getRun(oldRunning.id)?.status, "failed");
+    assert.equal(repo.getRun(oldRunning.id)?.errorCode, "copilot_stale_run_recovered");
+    assert.equal(repo.getRun(waiting.id)?.status, "waiting_for_approval");
   });
 
   it("creates and lists conversations scoped to the current user", () => {

@@ -15,7 +15,7 @@ import type {
   CopilotRun,
   CopilotRunEvent
 } from "../db/repositories/copilot-repository.js";
-import { CopilotRepository } from "../db/repositories/copilot-repository.js";
+import { CopilotLiveRunConflictError, CopilotRepository } from "../db/repositories/copilot-repository.js";
 import {
   CopilotMemoryRepository,
   type CopilotMemoryEntry,
@@ -270,6 +270,7 @@ const troubleshootingStepsApprovalSchema = z.object({
   summary: z.string().min(1).optional(),
   steps: z.array(z.string().min(1)).min(1).max(10).optional()
 }).strict();
+const defaultStaleCopilotRunTimeoutMs = 15 * 60 * 1000;
 
 export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   db: Database;
@@ -281,6 +282,7 @@ export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   fetchProviderModels?: (input: FetchProviderModelsInput) => Promise<FetchedProviderModel[]>;
   loadProviderCatalog?: () => Promise<ProviderCatalogPreset[]>;
   executeFeishuCommand?: (request: FeishuCommandRequest) => Promise<FeishuCommandResult>;
+  staleRunTimeoutMs?: number;
 }
 
 type PendingActionApprover = (
@@ -428,11 +430,11 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     if (!repo.getConversation(req.params.id)) {
       return res.status(404).json({ code: 1, message: "Copilot conversation not found" });
     }
-    if (activeRunUsers.has(userId)) {
-      return sendRunAlreadyActive(res);
-    }
-    const existingActiveRun = repo.listRuns(200).find((run) => isExecutionRunStatus(run.status));
+    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs);
+    const existingActiveRun = repo.findActiveRun();
     if (existingActiveRun) return sendRunAlreadyActive(res, existingActiveRun);
+    // The DB live-run constraint is the source of truth; clear stale process locks after recovery.
+    if (activeRunUsers.has(userId)) activeRunUsers.delete(userId);
     activeRunUsers.add(userId);
     const userMessage = repo.createConversationMessage(req.params.id, {
       role: "user",
@@ -567,7 +569,10 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         emitCopilotRunUpdated(options.eventBus, userId, result.run, "waiting_for_approval", req.params.id);
       }
       res.status(201).json(messagesEnvelope([userMessage, ...assistantMessages], result.run, result.events, pendingActions));
-    } catch {
+    } catch (error) {
+      if (error instanceof CopilotLiveRunConflictError) {
+        return sendRunAlreadyActive(res, error.activeRun);
+      }
       res.status(500).json({ code: 1, message: "Failed to create copilot conversation message" });
     } finally {
       if (parseResult.data.async !== true) {
@@ -586,12 +591,12 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     const parseResult = createRunSchema.safeParse(req.body ?? {});
     if (!parseResult.success) return sendInvalid(res, "Invalid copilot run payload");
     const userId = userIdFor(req);
-    if (activeRunUsers.has(userId)) {
-      return sendRunAlreadyActive(res);
-    }
     const repo = new CopilotRepository(options.db, userId);
-    const existingActiveRun = repo.listRuns(200).find((run) => isExecutionRunStatus(run.status));
+    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs);
+    const existingActiveRun = repo.findActiveRun();
     if (existingActiveRun) return sendRunAlreadyActive(res, existingActiveRun);
+    // The DB live-run constraint is the source of truth; clear stale process locks after recovery.
+    if (activeRunUsers.has(userId)) activeRunUsers.delete(userId);
     activeRunUsers.add(userId);
     try {
       const result = await new CopilotOrchestrator({
@@ -627,7 +632,10 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         emitCopilotRunUpdated(options.eventBus, userId, result.run, "waiting_for_approval", undefined);
       }
       res.status(201).json(successEnvelope(result.run, result.events, pendingActions));
-    } catch {
+    } catch (error) {
+      if (error instanceof CopilotLiveRunConflictError) {
+        return sendRunAlreadyActive(res, error.activeRun);
+      }
       res.status(500).json({ code: 1, message: "Failed to create copilot run" });
     } finally {
       activeRunUsers.delete(userId);
@@ -851,6 +859,11 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
 
 function repoFor(db: Database, req: unknown): CopilotRepository {
   return new CopilotRepository(db, userIdFor(req));
+}
+
+function recoverStaleCopilotRuns(repo: CopilotRepository, timeoutMs = defaultStaleCopilotRunTimeoutMs): void {
+  const timeout = Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : defaultStaleCopilotRunTimeoutMs;
+  repo.recoverStaleExecutionRuns(Date.now() - timeout);
 }
 
 function memoryRepoFor(db: Database, req: unknown): CopilotMemoryRepository {
@@ -1122,10 +1135,6 @@ function isCancellableRunStatus(status: string): boolean {
 }
 
 function isLiveRunStatus(status: string): boolean {
-  return status === "queued" || status === "running" || status === "waiting_for_approval";
-}
-
-function isExecutionRunStatus(status: string): boolean {
   return status === "queued" || status === "running" || status === "waiting_for_approval";
 }
 

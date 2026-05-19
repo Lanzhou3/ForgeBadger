@@ -108,6 +108,8 @@ const errorMessageKeys: Record<string, TranslationKey> = {
   copilot_provider_rate_limited: "copilot.error.providerRateLimited",
   copilot_provider_unavailable: "copilot.error.providerUnavailable",
   copilot_provider_request_failed: "copilot.error.providerRequestFailed",
+  copilot_provider_network_failed: "copilot.error.providerNetworkFailed",
+  copilot_provider_stream_parse_failed: "copilot.error.providerStreamParseFailed",
   copilot_model_request_failed: "copilot.error.modelRequestFailed",
   copilot_model_request_timeout: "copilot.error.modelRequestTimeout",
   copilot_redaction_blocked_output: "copilot.error.redactionBlockedOutput",
@@ -594,6 +596,48 @@ export function resolveCopilotRunSelection(input: ResolveCopilotRunSelectionInpu
 
 export function isCopilotRunLive(status: string): boolean {
   return status === "queued" || status === "running" || status === "waiting_for_approval";
+}
+
+export interface CopilotActiveRunSnapshot {
+  run: {
+    id: string;
+    status: string;
+    createdAt?: number | null;
+    updatedAt?: number | null;
+  };
+  events?: Array<{ sequence?: number | null }>;
+  pendingActions?: Array<{ updatedAt?: number | null }>;
+}
+
+export function shouldKeepCopilotActiveRunState(
+  current: CopilotActiveRunSnapshot | null,
+  next: CopilotActiveRunSnapshot
+): boolean {
+  if (!current || current.run.id !== next.run.id) return false;
+  const currentUpdatedAt = current.run.updatedAt ?? current.run.createdAt ?? 0;
+  const nextUpdatedAt = next.run.updatedAt ?? next.run.createdAt ?? 0;
+  if (currentUpdatedAt > nextUpdatedAt) return true;
+  if (currentUpdatedAt < nextUpdatedAt) return false;
+  if (maxSequence(current.events) > maxSequence(next.events)) return true;
+  if (maxUpdatedAt(current.pendingActions) > maxUpdatedAt(next.pendingActions)) return true;
+  return isTerminalCopilotRunStatus(current.run.status) && !isTerminalCopilotRunStatus(next.run.status);
+}
+
+export function getCopilotRunPollDelayMs(attempt: number): number {
+  const normalizedAttempt = Math.max(0, Math.trunc(attempt));
+  return Math.min(500 * (2 ** normalizedAttempt), 5000);
+}
+
+function maxSequence(events: CopilotActiveRunSnapshot["events"]): number {
+  return Math.max(0, ...(events ?? []).map((event) => event.sequence ?? 0));
+}
+
+function maxUpdatedAt(items: CopilotActiveRunSnapshot["pendingActions"]): number {
+  return Math.max(0, ...(items ?? []).map((item) => item.updatedAt ?? 0));
+}
+
+function isTerminalCopilotRunStatus(status: string): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
 }
 
 export function findLiveCopilotRun<T extends { status: string }>(runs: T[]): T | null {

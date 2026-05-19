@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import type { Database } from "../types.js";
 
+const liveRunStatuses = ["queued", "running", "waiting_for_approval"] as const;
+
 export type CopilotRunStatus =
   | "queued"
   | "running"
@@ -28,6 +30,13 @@ export interface CopilotRun {
   createdAt: number | null;
   updatedAt: number | null;
   completedAt: number | null;
+}
+
+export class CopilotLiveRunConflictError extends Error {
+  constructor(readonly activeRun: CopilotRun | undefined) {
+    super("Copilot run already active for this user");
+    this.name = "CopilotLiveRunConflictError";
+  }
 }
 
 export interface CopilotRunEvent {
@@ -347,24 +356,31 @@ export class CopilotRepository {
   createRun(input: CreateCopilotRunInput): CopilotRun {
     const id = randomUUID();
     const now = Date.now();
-    this.db.prepare(`
-      INSERT INTO copilot_runs (
-        id, user_id, status, provider_profile_id, model_profile_id, source,
-        source_ref_id, goal, step_count, max_steps, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-    `).run(
-      id,
-      this.userId,
-      input.status ?? "queued",
-      input.providerProfileId ?? null,
-      input.modelProfileId ?? null,
-      input.source,
-      input.sourceRefId ?? null,
-      input.goal,
-      input.maxSteps ?? 8,
-      now,
-      now
-    );
+    try {
+      this.db.prepare(`
+        INSERT INTO copilot_runs (
+          id, user_id, status, provider_profile_id, model_profile_id, source,
+          source_ref_id, goal, step_count, max_steps, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+      `).run(
+        id,
+        this.userId,
+        input.status ?? "queued",
+        input.providerProfileId ?? null,
+        input.modelProfileId ?? null,
+        input.source,
+        input.sourceRefId ?? null,
+        input.goal,
+        input.maxSteps ?? 8,
+        now,
+        now
+      );
+    } catch (error) {
+      if (isLiveRunConstraintError(error)) {
+        throw new CopilotLiveRunConflictError(this.findActiveRun());
+      }
+      throw error;
+    }
     return this.getRun(id) as CopilotRun;
   }
 
@@ -384,6 +400,43 @@ export class CopilotRepository {
       LIMIT ?
     `).all(this.userId, clampLimit(limit)) as CopilotRunRow[];
     return rows.map(toRun);
+  }
+
+  findActiveRun(): CopilotRun | undefined {
+    const row = this.db.prepare(`
+      ${copilotRunSelectSql()}
+      WHERE cr.user_id = ?
+        AND cr.status IN (${liveRunStatuses.map(() => "?").join(", ")})
+      ORDER BY cr.created_at DESC
+      LIMIT 1
+    `).get(this.userId, ...liveRunStatuses) as CopilotRunRow | undefined;
+    return row ? toRun(row) : undefined;
+  }
+
+  recoverStaleExecutionRuns(staleBeforeMs: number, now = Date.now()): CopilotRun[] {
+    const staleRows = this.db.prepare(`
+      ${copilotRunSelectSql()}
+      WHERE cr.user_id = ?
+        AND cr.status IN ('queued', 'running')
+        AND coalesce(cr.updated_at, cr.created_at, 0) < ?
+      ORDER BY cr.created_at ASC
+    `).all(this.userId, staleBeforeMs) as CopilotRunRow[];
+    const recovered: CopilotRun[] = [];
+    const update = this.db.prepare(`
+      UPDATE copilot_runs
+      SET status = 'failed',
+        error_code = 'copilot_stale_run_recovered',
+        error_message = 'Recovered stale Copilot run after Gateway interruption',
+        completed_at = ?,
+        updated_at = ?
+      WHERE id = ? AND user_id = ? AND status IN ('queued', 'running')
+    `);
+    for (const row of staleRows) {
+      update.run(now, now, row.id, this.userId);
+      const run = this.getRun(row.id);
+      if (run?.status === "failed") recovered.push(run);
+    }
+    return recovered;
   }
 
   updateRun(id: string, input: UpdateCopilotRunInput): CopilotRun | undefined {
@@ -724,4 +777,11 @@ function stringifyNullable(value: Record<string, unknown> | null): string | null
 function clampLimit(limit: number): number {
   if (!Number.isFinite(limit)) return 50;
   return Math.max(1, Math.min(Math.trunc(limit), 200));
+}
+
+function isLiveRunConstraintError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return code === "SQLITE_CONSTRAINT_UNIQUE" &&
+    error.message.includes("copilot_runs.user_id");
 }

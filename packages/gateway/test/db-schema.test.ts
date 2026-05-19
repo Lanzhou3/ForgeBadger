@@ -108,6 +108,29 @@ describe("db schema", () => {
     );
   });
 
+  it("enforces one live Copilot run per user", () => {
+    db.prepare(
+      "INSERT INTO users (id, username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("u1", "alice", "alice@example.com", "hash", "user", "active");
+
+    db.prepare(
+      "INSERT INTO copilot_runs (id, user_id, status, source, goal, step_count, max_steps) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run("run-live-1", "u1", "running", "copilot", "First live run", 0, 8);
+
+    assert.throws(
+      () => {
+        db.prepare(
+          "INSERT INTO copilot_runs (id, user_id, status, source, goal, step_count, max_steps) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ).run("run-live-2", "u1", "queued", "copilot", "Second live run", 0, 8);
+      },
+      /UNIQUE constraint failed/
+    );
+
+    db.prepare(
+      "INSERT INTO copilot_runs (id, user_id, status, source, goal, step_count, max_steps) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run("run-completed", "u1", "completed", "copilot", "Completed run", 0, 8);
+  });
+
   it("cascades user deletion to projects", () => {
     db.prepare(
       "INSERT INTO users (id, username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)"
