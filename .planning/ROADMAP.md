@@ -86,7 +86,12 @@ Plans:
 
 Plans:
 
+**Wave 1**
+
 - [ ] 02-01: Specify public webhook boundary, signature verification, replay, and rate-limit contract.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 02-02: Implement and verify the public webhook route behind explicit configuration.
 
 ### Phase 3: First-User Product Hardening
