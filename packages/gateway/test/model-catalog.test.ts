@@ -68,6 +68,35 @@ describe("model catalog", () => {
     assert.ok(catalog.some((provider) => provider.id === "openrouter" && provider.source === "models.dev"));
   });
 
+  it("does not duplicate verified providers returned again by models.dev", async () => {
+    const catalog = await loadProviderCatalog({
+      fetchImpl: async () => new Response(JSON.stringify({
+        "qwen-coding-plan-cn": {
+          id: "qwen-coding-plan-cn",
+          name: "Qwen Coding Plan 中国大陆",
+          env: ["DASHSCOPE_API_KEY"],
+          npm: "@ai-sdk/openai-compatible",
+          api: "https://coding.dashscope.aliyuncs.com/v1",
+          models: {
+            "qwen3.5-coder": {
+              id: "qwen3.5-coder",
+              name: "Qwen3.5 Coder",
+              release_date: "2026-01-01",
+              attachment: false,
+              reasoning: true,
+              temperature: true,
+              tool_call: true,
+              limit: { context: 256000, output: 8192 }
+            }
+          }
+        }
+      }), { status: 200 })
+    });
+
+    assert.equal(catalog.filter((provider) => provider.id === "qwen-coding-plan-cn").length, 1);
+    assert.equal(catalog.filter((provider) => provider.name === "Qwen Coding Plan 中国大陆").length, 1);
+  });
+
   it("keeps the verified catalog when models.dev cannot be loaded", async () => {
     const catalog = await loadProviderCatalog({
       fetchImpl: async () => new Response("unavailable", { status: 503 })

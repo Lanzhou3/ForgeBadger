@@ -431,7 +431,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     if (activeRunUsers.has(userId)) {
       return sendRunAlreadyActive(res);
     }
-    const existingActiveRun = repo.listRuns(200).find((run) => isLiveRunStatus(run.status));
+    const existingActiveRun = repo.listRuns(200).find((run) => isExecutionRunStatus(run.status));
     if (existingActiveRun) return sendRunAlreadyActive(res, existingActiveRun);
     activeRunUsers.add(userId);
     const userMessage = repo.createConversationMessage(req.params.id, {
@@ -590,7 +590,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
       return sendRunAlreadyActive(res);
     }
     const repo = new CopilotRepository(options.db, userId);
-    const existingActiveRun = repo.listRuns(200).find((run) => isLiveRunStatus(run.status));
+    const existingActiveRun = repo.listRuns(200).find((run) => isExecutionRunStatus(run.status));
     if (existingActiveRun) return sendRunAlreadyActive(res, existingActiveRun);
     activeRunUsers.add(userId);
     try {
@@ -1123,6 +1123,10 @@ function isCancellableRunStatus(status: string): boolean {
 
 function isLiveRunStatus(status: string): boolean {
   return status === "queued" || status === "running" || status === "waiting_for_approval";
+}
+
+function isExecutionRunStatus(status: string): boolean {
+  return status === "queued" || status === "running";
 }
 
 function isApprovalRunStatus(status: string): boolean {

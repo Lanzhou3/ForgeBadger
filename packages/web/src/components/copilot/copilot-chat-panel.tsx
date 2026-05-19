@@ -221,12 +221,7 @@ export function CopilotChatPanel({
     onSuccess: async ({ conversationId, response }) => {
       setSelectedConversationId(conversationId);
       setDraftConversationActive(false);
-      const responseHasAssistant = response.messages.some((message) => message.role === "assistant");
-      if (!isCopilotRunLive(response.run.status) || responseHasAssistant) {
-        setOptimisticUserMessage(null);
-      } else {
-        setOptimisticUserMessage((current) => current ? { ...current, conversationId } : current);
-      }
+      setOptimisticUserMessage(null);
       setPrompt("");
       setLocalError("");
       setActiveRun({
@@ -352,6 +347,10 @@ export function CopilotChatPanel({
     streamingAssistantText,
     visibleMessages
   ]);
+  const hasVisibleChatActivity =
+    visibleMessagesWithActivity.length > 0 ||
+    sendMessageMutation.isPending ||
+    activeRunAwaitingFirstEvent;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
@@ -360,6 +359,7 @@ export function CopilotChatPanel({
     activeRun?.events.length,
     pendingActions.length,
     sendMessageMutation.isPending,
+    activeRunAwaitingFirstEvent,
     streamingAssistantText
   ]);
 
@@ -541,6 +541,7 @@ export function CopilotChatPanel({
     setOptimisticUserMessage(null);
     setActiveRun(null);
     setStreamingAssistantText("");
+    setPrompt("");
     setSelectedConversationId(id);
   }
 
@@ -676,7 +677,7 @@ export function CopilotChatPanel({
                 <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
                 {t("common.loading")}
               </div>
-            ) : visibleMessagesWithActivity.length === 0 ? (
+            ) : !hasVisibleChatActivity ? (
               <EmptyChat onPrompt={setPrompt} />
             ) : (
               <div className="space-y-5">

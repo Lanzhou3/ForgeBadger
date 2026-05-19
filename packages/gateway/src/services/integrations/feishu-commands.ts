@@ -80,14 +80,14 @@ const taskCreateInput = z.object({
   description: z.string().max(4_000).optional(),
   assigneeFeishuUserId: idInput.optional(),
   dueDate: z.string().min(1).max(32).optional(),
-  chatId: idInput.optional(),
+  tasklistId: idInput.optional(),
   reason: z.string().min(1).max(1024).optional()
 }).strict();
 const taskUpdateInput = z.object({
   taskId: idInput,
   summary: z.string().min(1).max(256).optional(),
   description: z.string().max(4_000).optional(),
-  status: z.enum(["todo", "in_progress", "done", "cancelled"]).optional(),
+  status: z.enum(["done"]).optional(),
   reason: z.string().min(1).max(1024).optional()
 }).strict();
 
@@ -99,14 +99,12 @@ const feishuCommandRegistry = {
     buildArgs: (input) => {
       const parsed = messageSendInput.parse(input);
       return [
-        "message",
-        "send",
+        "im",
+        "+messages-send",
         "--chat-id",
         parsed.chatId,
         "--text",
-        parsed.text,
-        "--output",
-        "json"
+        parsed.text
       ];
     }
   },
@@ -117,15 +115,15 @@ const feishuCommandRegistry = {
     buildArgs: (input) => {
       const parsed = docCreateInput.parse(input);
       return [
-        "doc",
-        "create",
+        "docs",
+        "+create",
+        "--api-version",
+        "v2",
         "--title",
         parsed.title,
-        "--content",
+        "--markdown",
         parsed.content,
-        ...(parsed.folderId ? ["--folder-id", parsed.folderId] : []),
-        "--output",
-        "json"
+        ...(parsed.folderId ? ["--folder-token", parsed.folderId] : [])
       ];
     }
   },
@@ -136,14 +134,16 @@ const feishuCommandRegistry = {
     buildArgs: (input) => {
       const parsed = docUpdateInput.parse(input);
       return [
-        "doc",
-        "update",
-        "--document-id",
+        "docs",
+        "+update",
+        "--api-version",
+        "v2",
+        "--doc",
         parsed.documentId,
-        "--content",
+        "--markdown",
         parsed.content,
-        "--output",
-        "json"
+        "--mode",
+        "overwrite"
       ];
     }
   },
@@ -155,14 +155,14 @@ const feishuCommandRegistry = {
       const parsed = taskCreateInput.parse(input);
       return [
         "task",
-        "create",
+        "+create",
         "--summary",
         parsed.summary,
         ...(parsed.description ? ["--description", parsed.description] : []),
-        ...(parsed.assigneeFeishuUserId ? ["--assignee-id", parsed.assigneeFeishuUserId] : []),
-        ...(parsed.dueDate ? ["--due-date", parsed.dueDate] : []),
-        ...(parsed.chatId ? ["--chat-id", parsed.chatId] : []),
-        "--output",
+        ...(parsed.assigneeFeishuUserId ? ["--assignee", parsed.assigneeFeishuUserId] : []),
+        ...(parsed.dueDate ? ["--due", parsed.dueDate] : []),
+        ...(parsed.tasklistId ? ["--tasklist-id", parsed.tasklistId] : []),
+        "--format",
         "json"
       ];
     }
@@ -173,15 +173,24 @@ const feishuCommandRegistry = {
     inputSchema: taskUpdateInput,
     buildArgs: (input) => {
       const parsed = taskUpdateInput.parse(input);
+      if (parsed.status === "done" && !parsed.summary && !parsed.description) {
+        return [
+          "task",
+          "+complete",
+          "--task-id",
+          parsed.taskId,
+          "--format",
+          "json"
+        ];
+      }
       return [
         "task",
-        "update",
+        "+update",
         "--task-id",
         parsed.taskId,
         ...(parsed.summary ? ["--summary", parsed.summary] : []),
         ...(parsed.description ? ["--description", parsed.description] : []),
-        ...(parsed.status ? ["--status", parsed.status] : []),
-        "--output",
+        "--format",
         "json"
       ];
     }

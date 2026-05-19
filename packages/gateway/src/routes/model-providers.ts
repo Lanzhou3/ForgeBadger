@@ -411,17 +411,30 @@ function createProvider(
     throw new Error("Catalog provider not found");
   }
   const provider = preset ? createFromPreset(repo, preset) : createCustom(repo, input);
-  const models = preset
-    ? seedModelsForPreset(preset).map((model, index) => repo.createModelProfile({
+  const models = preset ? seedMissingModelsForPreset(repo, provider, preset) : [];
+  return { provider, models };
+}
+
+function seedMissingModelsForPreset(
+  repo: ModelProviderRepository,
+  provider: ProviderProfile,
+  preset: ProviderCatalogPreset
+): ModelProfile[] {
+  const existingModelIds = new Set(repo.listModelProfiles(provider.id).map((model) => model.modelId));
+  const hasDefault = repo.listModelProfiles().some((model) => model.isDefault);
+  const created: ModelProfile[] = [];
+  for (const model of seedModelsForPreset(preset)) {
+    if (existingModelIds.has(model.modelId)) continue;
+    created.push(repo.createModelProfile({
       providerProfileId: provider.id,
       name: model.name,
       modelId: model.modelId,
       capabilities: model.capabilities,
       contextWindow: model.contextWindow ?? null,
-      isDefault: index === 0
-    }))
-    : [];
-  return { provider, models };
+      isDefault: !hasDefault && created.length === 0
+    }));
+  }
+  return created;
 }
 
 function seedModelsForPreset(preset: ProviderCatalogPreset) {
@@ -439,7 +452,7 @@ function createFromPreset(repo: ModelProviderRepository, preset: ProviderCatalog
   if (preset.supportedAdapters.includes("opencode")) {
     assertSafeOpenCodeNpm(preset.opencode?.npm);
   }
-  return repo.createProviderProfile({
+  return repo.ensureProviderProfile({
     name: preset.name,
     providerKey: preset.id,
     baseUrl: preset.baseUrl,

@@ -2034,7 +2034,7 @@ describe("copilot tools", () => {
           description: "Run route tests",
           assigneeFeishuUserId: "ou_user",
           dueDate: "2026-05-20",
-          chatId: "oc_openforge"
+          tasklistId: "tasklist_openforge"
         }
       },
       {

@@ -225,6 +225,88 @@ test("Copilot new conversation button opens a blank draft instead of reselecting
   await expect(page.getByText("Existing answer")).toHaveCount(0);
 });
 
+test("Copilot clears an unsent draft when selecting another conversation", async ({ page }) => {
+  await mockCopilotApis(page, {
+    initialConversations: [{
+      id: "conversation-1",
+      title: "Existing conversation",
+      source: "copilot",
+      status: "active",
+    }],
+    initialMessages: [{
+      id: "message-assistant",
+      conversationId: "conversation-1",
+      role: "assistant",
+      content: "Existing answer",
+    }],
+  });
+
+  await page.goto("/copilot");
+  const prompt = page.getByPlaceholder(/Ask Copilot/);
+  await page.getByRole("button", { name: "New conversation" }).click();
+  await prompt.fill("This draft belongs to the new conversation");
+  await page.getByRole("button", { name: "Existing conversation" }).click();
+
+  await expect(prompt).toHaveValue("");
+  await expect(page.getByText("Existing answer")).toBeVisible();
+});
+
+test("Copilot does not duplicate the acknowledged user message while an async run is live", async ({ page }) => {
+  await mockCopilotApis(page, {
+    initialConversations: [{
+      id: "conversation-1",
+      title: "Existing conversation",
+      source: "copilot",
+      status: "active",
+    }],
+    initialMessages: [],
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        status: 202,
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Check project state",
+              createdAt: 1778490000000,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "running",
+            goal: "Check project state",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+    onGetRun: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-1",
+            status: "running",
+            goal: "Check project state",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Check project state");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByRole("article").filter({ hasText: "Check project state" })).toHaveCount(1);
+});
+
 test("Copilot deletes a conversation and returns to an empty draft", async ({ page }) => {
   await mockCopilotApis(page, {
     initialConversations: [{

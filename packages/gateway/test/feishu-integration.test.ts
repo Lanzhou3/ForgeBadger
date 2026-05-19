@@ -49,7 +49,7 @@ describe("getFeishuCliStatus", () => {
       }
       return {
         exitCode: 0,
-        stdout: JSON.stringify({ authenticated: true, identityMode: "user" }),
+        stdout: JSON.stringify({ tokenStatus: "valid", identity: "user" }, null, 2),
         stderr: ""
       };
     };
@@ -58,7 +58,7 @@ describe("getFeishuCliStatus", () => {
 
     assert.deepEqual(calls, [
       { command: "lark-cli", args: ["--version"] },
-      { command: "lark-cli", args: ["auth", "status", "--output", "json"] }
+      { command: "lark-cli", args: ["auth", "status"] }
     ]);
     assert.deepEqual(status, {
       available: true,

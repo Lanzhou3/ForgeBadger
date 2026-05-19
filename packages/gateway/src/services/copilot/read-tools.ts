@@ -213,14 +213,14 @@ const proposeFeishuTaskCreateInput = z.object({
   description: z.string().max(4_000).optional(),
   assigneeFeishuUserId: feishuIdInput.optional(),
   dueDate: z.string().min(1).max(32).optional(),
-  chatId: feishuIdInput.optional(),
+  tasklistId: feishuIdInput.optional(),
   reason: feishuReasonInput
 }).strict();
 const proposeFeishuTaskUpdateInput = z.object({
   taskId: feishuIdInput,
   summary: z.string().min(1).max(256).optional(),
   description: z.string().max(4_000).optional(),
-  status: z.enum(["todo", "in_progress", "done", "cancelled"]).optional(),
+  status: z.enum(["done"]).optional(),
   reason: feishuReasonInput
 }).strict();
 
@@ -599,7 +599,7 @@ const proposeFeishuTaskCreateModelInputSchema = {
     description: { type: "string", maxLength: 4_000 },
     assigneeFeishuUserId: { type: "string", minLength: 1, maxLength: 128 },
     dueDate: { type: "string", minLength: 1, maxLength: 32 },
-    chatId: { type: "string", minLength: 1, maxLength: 128 },
+    tasklistId: { type: "string", minLength: 1, maxLength: 128 },
     reason: { type: "string", minLength: 1, maxLength: 1024 }
   },
   required: ["summary"],
@@ -611,7 +611,7 @@ const proposeFeishuTaskUpdateModelInputSchema = {
     taskId: { type: "string", minLength: 1, maxLength: 128 },
     summary: { type: "string", minLength: 1, maxLength: 256 },
     description: { type: "string", maxLength: 4_000 },
-    status: { type: "string", enum: ["todo", "in_progress", "done", "cancelled"] },
+    status: { type: "string", enum: ["done"] },
     reason: { type: "string", minLength: 1, maxLength: 1024 }
   },
   required: ["taskId"],

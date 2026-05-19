@@ -325,7 +325,10 @@ export async function loadProviderCatalog(options: LoadProviderCatalogOptions = 
   if (!options.fetchImpl && providerCatalogCache && providerCatalogCache.expiresAt > now) {
     return providerCatalogCache.providers;
   }
-  const providers = [...providerCatalog, ...await loadModelsDevProviders(options)];
+  const providers = [
+    ...providerCatalog,
+    ...dedupeExternalProviders(await loadModelsDevProviders(options), providerCatalog)
+  ];
   if (!options.fetchImpl) {
     providerCatalogCache = { providers, expiresAt: now + catalogCacheTtlMs };
   }
@@ -338,6 +341,30 @@ async function loadModelsDevProviders(options: LoadProviderCatalogOptions = {}):
   } catch {
     return [];
   }
+}
+
+function dedupeExternalProviders(
+  externalProviders: ProviderCatalogPreset[],
+  verifiedProviders: ProviderCatalogPreset[]
+): ProviderCatalogPreset[] {
+  const verifiedKeys = new Set(verifiedProviders.flatMap(providerIdentityKeys));
+  return externalProviders.filter((provider) =>
+    providerIdentityKeys(provider).every((key) => !verifiedKeys.has(key))
+  );
+}
+
+function providerIdentityKeys(provider: ProviderCatalogPreset): string[] {
+  return [
+    provider.id,
+    provider.name,
+    provider.baseUrl,
+    provider.endpoints.anthropic?.baseUrl,
+    provider.endpoints.openai?.baseUrl
+  ].map(normalizeCatalogIdentity).filter((key) => key.length > 0);
+}
+
+function normalizeCatalogIdentity(value: string | undefined): string {
+  return (value ?? "").trim().replace(/\/+$/u, "").toLowerCase();
 }
 
 export function createProviderCatalogFromModelsDev(input: ModelsDevCatalog): ProviderCatalogPreset[] {

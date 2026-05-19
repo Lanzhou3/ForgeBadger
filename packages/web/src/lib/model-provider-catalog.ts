@@ -31,7 +31,7 @@ export function filterProviderCatalog(
   filters: ProviderCatalogFilters
 ): ProviderCatalogResult[] {
   const query = normalize(filters.query);
-  return catalog
+  return dedupeProviderCatalog(catalog)
     .map((preset): ProviderCatalogResult => ({
       ...preset,
       configuredProvider: configuredProviders.get(normalize(preset.id)) ?? configuredProviders.get(normalize(preset.name)),
@@ -41,6 +41,26 @@ export function filterProviderCatalog(
     .filter((result) => filters.apiFormat === "all" || result.apiFormat === filters.apiFormat)
     .filter((result) => matchesSource(result, filters.source))
     .filter((result) => !query || searchableProviderText(result).includes(query));
+}
+
+function dedupeProviderCatalog(catalog: ProviderCatalogPreset[]): ProviderCatalogPreset[] {
+  const seen = new Set<string>();
+  return catalog.filter((provider) => {
+    const keys = providerIdentityKeys(provider);
+    if (keys.some((key) => seen.has(key))) return false;
+    keys.forEach((key) => seen.add(key));
+    return true;
+  });
+}
+
+function providerIdentityKeys(provider: ProviderCatalogPreset): string[] {
+  return [
+    provider.id,
+    provider.name,
+    provider.baseUrl,
+    provider.endpoints?.anthropic?.baseUrl,
+    provider.endpoints?.openai?.baseUrl,
+  ].map(normalizeIdentity).filter((key) => key.length > 0);
 }
 
 export function sourceLabelForProvider(preset: ProviderCatalogPreset): string {
@@ -94,4 +114,8 @@ function searchableProviderText(preset: ProviderCatalogPreset): string {
 
 function normalize(value: string | undefined): string {
   return (value ?? "").trim().toLowerCase();
+}
+
+function normalizeIdentity(value: string | undefined): string {
+  return normalize(value).replace(/\/+$/u, "");
 }

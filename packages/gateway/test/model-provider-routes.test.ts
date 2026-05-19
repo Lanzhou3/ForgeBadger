@@ -59,6 +59,33 @@ const testProviderCatalog: ProviderCatalogPreset[] = [
     modelFetch: { strategy: "openai-compatible" },
     opencode: { npm: "@ai-sdk/openai", env: ["OPENAI_API_KEY"] },
     defaultModels: []
+  },
+  {
+    id: "qwen-coding-plan-cn",
+    name: "Qwen Coding Plan 中国大陆",
+    description: "Qwen Coding Plan endpoint for mainland China.",
+    baseUrl: "https://coding.dashscope.aliyuncs.com/v1",
+    region: "cn",
+    productType: "coding_plan",
+    authType: "api_key",
+    apiFormat: "openai-compatible",
+    supportedAdapters: ["claude", "opencode"],
+    modelSource: "static",
+    source: "verified",
+    endpoints: {
+      anthropic: { baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic" },
+      openai: { baseUrl: "https://coding.dashscope.aliyuncs.com/v1" }
+    },
+    opencode: { npm: "@ai-sdk/openai-compatible", env: ["DASHSCOPE_API_KEY"] },
+    defaultModels: [
+      {
+        id: "qwen3.5-coder",
+        name: "Qwen3.5 Coder",
+        modelId: "qwen3.5-coder",
+        capabilities: ["chat", "code", "reasoning"],
+        contextWindow: 256000
+      }
+    ]
   }
 ];
 
@@ -122,6 +149,51 @@ describe("model provider routes", () => {
     assert.equal(preview.body.code, 0);
     assert.equal(preview.body.data.preview.adapter, "opencode");
     assert.equal(preview.body.data.preview.changedFiles[0].relativePath, "opencode.json");
+  });
+
+  it("treats adding the same catalog provider as idempotent", async () => {
+    const first = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+    const second = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+    assert.equal(second.body.code, 0);
+    assert.equal(second.body.data.provider.id, first.body.data.provider.id);
+
+    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
+    assert.equal(
+      listed.body.data.providers.filter((provider: { providerKey: string }) => provider.providerKey === "deepseek").length,
+      1
+    );
+  });
+
+  it("treats repeated Qwen Coding Plan setup as idempotent", async () => {
+    const first = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "qwen-coding-plan-cn"
+    }, authHeaders());
+    const second = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "qwen-coding-plan-cn"
+    }, authHeaders());
+
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+    assert.equal(second.body.code, 0);
+    assert.equal(second.body.data.provider.id, first.body.data.provider.id);
+    assert.equal(second.body.data.models.length, 0);
+
+    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
+    assert.equal(
+      listed.body.data.providers.filter((provider: { providerKey: string }) => provider.providerKey === "qwen-coding-plan-cn").length,
+      1
+    );
+    assert.equal(
+      listed.body.data.models.filter((model: { providerProfileId: string }) => model.providerProfileId === first.body.data.provider.id).length,
+      1
+    );
   });
 
   it("uses adapter-specific endpoints for dual protocol provider products", async () => {

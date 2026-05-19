@@ -133,4 +133,53 @@ describe("provider catalog browser", () => {
       }).map((provider) => provider.id)
     ).toEqual(["anthropic"]);
   });
+
+  it("deduplicates the same provider product across verified and models.dev catalog sources", () => {
+    const duplicatedCatalog: ProviderCatalogPreset[] = [
+      {
+        id: "qwen-coding-plan-cn",
+        name: "Qwen Coding Plan 中国大陆",
+        description: "Verified Qwen Coding Plan",
+        baseUrl: "https://coding.dashscope.aliyuncs.com/v1",
+        region: "cn",
+        productType: "coding_plan",
+        authType: "api_key",
+        apiFormat: "openai-compatible",
+        supportedAdapters: ["claude", "opencode"],
+        modelSource: "static",
+        source: "verified",
+        endpoints: {
+          anthropic: { baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic" },
+          openai: { baseUrl: "https://coding.dashscope.aliyuncs.com/v1" },
+        },
+        defaultModels: [],
+      },
+      {
+        id: "qwen-coding-plan-cn",
+        name: "Qwen Coding Plan 中国大陆",
+        description: "models.dev duplicate",
+        baseUrl: "https://coding.dashscope.aliyuncs.com/v1/",
+        region: "cn",
+        productType: "coding_plan",
+        authType: "api_key",
+        apiFormat: "openai-compatible",
+        supportedAdapters: ["opencode"],
+        modelSource: "models.dev",
+        source: "models.dev",
+        endpoints: { openai: { baseUrl: "https://coding.dashscope.aliyuncs.com/v1/" } },
+        defaultModels: [],
+      },
+    ];
+
+    const result = filterProviderCatalog(duplicatedCatalog, new Map(), {
+      query: "qwen coding plan 中国大陆",
+      adapter: "all",
+      apiFormat: "all",
+      source: "all",
+      configured: "all",
+    });
+
+    expect(result.map((provider) => provider.id)).toEqual(["qwen-coding-plan-cn"]);
+    expect(result[0]?.source).toBe("verified");
+  });
 });

@@ -33,7 +33,7 @@ export interface GetFeishuCliStatusOptions {
 const DEFAULT_EXECUTABLE = "lark-cli";
 const DEFAULT_TIMEOUT_MS = 3000;
 const VERSION_ARGS = ["--version"] as const;
-const AUTH_STATUS_ARGS = ["auth", "status", "--output", "json"] as const;
+const AUTH_STATUS_ARGS = ["auth", "status"] as const;
 
 export async function getFeishuCliStatus(
   options: GetFeishuCliStatusOptions = {}
@@ -112,6 +112,15 @@ function parseStructuredOutput(output: string): Record<string, unknown> | undefi
     return undefined;
   }
 
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Some commands include progress lines before JSON; fall through to NDJSON parsing.
+  }
+
   for (const line of trimmed.split(/\r?\n/)) {
     const candidate = line.trim();
     if (!candidate) continue;
@@ -129,12 +138,12 @@ function parseStructuredOutput(output: string): Record<string, unknown> | undefi
 }
 
 function normalizeAuthState(payload: Record<string, unknown>): FeishuAuthState {
-  const explicit = stringValue(payload.authState ?? payload.auth_state ?? payload.status);
+  const explicit = stringValue(payload.authState ?? payload.auth_state ?? payload.status ?? payload.tokenStatus);
   if (explicit) {
-    if (["authenticated", "logged_in", "login", "active", "ok"].includes(explicit)) {
+    if (["authenticated", "logged_in", "login", "active", "ok", "valid"].includes(explicit)) {
       return "authenticated";
     }
-    if (["unauthenticated", "not_authenticated", "logged_out", "logout", "inactive"].includes(explicit)) {
+    if (["unauthenticated", "not_authenticated", "logged_out", "logout", "inactive", "invalid", "expired"].includes(explicit)) {
       return "unauthenticated";
     }
   }
@@ -150,7 +159,7 @@ function normalizeAuthState(payload: Record<string, unknown>): FeishuAuthState {
 }
 
 function normalizeIdentityMode(payload: Record<string, unknown>): FeishuIdentityMode {
-  const value = stringValue(payload.identityMode ?? payload.identity_mode ?? payload.mode ?? payload.type);
+  const value = stringValue(payload.identityMode ?? payload.identity_mode ?? payload.identity ?? payload.mode ?? payload.type);
   if (value === "user" || value === "bot") {
     return value;
   }

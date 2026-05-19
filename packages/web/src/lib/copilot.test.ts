@@ -652,10 +652,10 @@ describe("copilot display helpers", () => {
     expect(
       getCopilotPendingActionSummary({
         type: "openforge.propose_feishu_task_create",
-        input: { summary: "Verify Copilot", chatId: "oc_openforge", description: "Run targeted tests." },
+        input: { summary: "Verify Copilot", tasklistId: "tasklist_openforge", description: "Run targeted tests." },
       })
     ).toEqual({
-      detail: "Verify Copilot / chat oc_openforge",
+      detail: "Verify Copilot / tasklist tasklist_openforge",
       preview: "Run targeted tests.",
     });
     expect(

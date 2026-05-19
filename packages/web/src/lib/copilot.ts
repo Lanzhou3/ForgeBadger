@@ -1042,11 +1042,11 @@ function summarizeFeishuDocUpdate(payload: Record<string, unknown>): CopilotPend
 }
 
 function summarizeFeishuTaskCreate(payload: Record<string, unknown>): CopilotPendingActionSummary {
-  const chatId = readString(payload, "chatId");
+  const tasklistId = readString(payload, "tasklistId");
   return {
     detail: joinPresent([
       readString(payload, "summary") ?? "Feishu task",
-      chatId ? `chat ${chatId}` : null,
+      tasklistId ? `tasklist ${tasklistId}` : null,
     ]),
     preview: previewText(readString(payload, "description") ?? readString(payload, "reason")),
   };

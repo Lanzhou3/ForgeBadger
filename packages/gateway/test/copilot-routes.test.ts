@@ -1261,23 +1261,24 @@ describe("copilot routes", () => {
     }
   });
 
-  it("rejects new Copilot runs while the same user already has a live run", async () => {
+  it("allows new Copilot runs while an older run waits for approval", async () => {
     const existing = new CopilotRepository(db, userId).createRun({
       status: "waiting_for_approval",
       source: "copilot",
       goal: "Existing approval run"
     });
+    createOpenAiProvider();
 
     const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
       prompt: "Start another run",
       source: "copilot"
     }, authHeaders());
 
-    assert.equal(res.status, 409);
-    assert.equal(res.body.code, 1);
-    assert.equal(res.body.details.code, "copilot_run_already_active");
-    assert.equal(res.body.details.runId, existing.id);
-    assert.equal(calls.length, 0);
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.run.status, "completed");
+    assert.equal(new CopilotRepository(db, userId).getRun(existing.id)?.status, "waiting_for_approval");
+    assert.equal(calls.length, 1);
   });
 
   it("injects bounded active memory recall for Copilot page runs", async () => {
@@ -4592,6 +4593,41 @@ describe("copilot routes", () => {
   it("runs Feishu commands only through allowlisted operations with bounded redacted output", async () => {
     const calls: Array<{ command: string; args: string[]; timeoutMs?: number }> = [];
 
+    const messageResult = await executeFeishuCommand(
+      {
+        operation: "message_send",
+        input: {
+          chatId: "oc_openforge",
+          text: "Build is green."
+        }
+      },
+      {
+        runner: async (command, args, options) => {
+          calls.push({ command, args, timeoutMs: options?.timeoutMs });
+          return { exitCode: 0, stdout: "{\"message_id\":\"om_openforge\"}", stderr: "" };
+        },
+        executable: "lark-cli-test",
+        timeoutMs: 1234
+      }
+    );
+    const docResult = await executeFeishuCommand(
+      {
+        operation: "doc_create",
+        input: {
+          title: "Sprint Plan",
+          content: "# Plan",
+          folderId: "fld_openforge"
+        }
+      },
+      {
+        runner: async (command, args, options) => {
+          calls.push({ command, args, timeoutMs: options?.timeoutMs });
+          return { exitCode: 0, stdout: "{\"document_id\":\"doc_openforge\"}", stderr: "" };
+        },
+        executable: "lark-cli-test",
+        timeoutMs: 1234
+      }
+    );
     const result = await executeFeishuCommand(
       {
         operation: "task_update",
@@ -4620,12 +4656,26 @@ describe("copilot routes", () => {
       }
     );
 
+    assert.equal(messageResult.ok, true);
+    assert.equal(docResult.ok, true);
     assert.equal(result.ok, true);
-    assert.deepEqual(calls, [{
-      command: "lark-cli-test",
-      args: ["task", "update", "--task-id", "task_openforge", "--status", "done", "--output", "json"],
-      timeoutMs: 1234
-    }]);
+    assert.deepEqual(calls, [
+      {
+        command: "lark-cli-test",
+        args: ["im", "+messages-send", "--chat-id", "oc_openforge", "--text", "Build is green."],
+        timeoutMs: 1234
+      },
+      {
+        command: "lark-cli-test",
+        args: ["docs", "+create", "--api-version", "v2", "--title", "Sprint Plan", "--markdown", "# Plan", "--folder-token", "fld_openforge"],
+        timeoutMs: 1234
+      },
+      {
+        command: "lark-cli-test",
+        args: ["task", "+complete", "--task-id", "task_openforge", "--format", "json"],
+        timeoutMs: 1234
+      }
+    ]);
     assert.doesNotMatch(JSON.stringify(result.output), /secret-value/);
     assert.equal(unsupported.ok, false);
     assert.equal(unsupported.error.code, "feishu_command_unsupported");

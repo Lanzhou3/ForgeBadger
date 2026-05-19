@@ -302,6 +302,11 @@ pending actions:
 }
 ```
 
+Copilot allows only one executing run per user while a run is `queued` or
+`running`. A run in `waiting_for_approval` keeps its pending actions available
+for approval or rejection, but it does not block the user from asking a new
+Copilot question in another conversation.
+
 `POST /runs/:id/cancel` marks live runs as `cancelled`, rejects outstanding
 pending actions, and aborts the in-process model request when the run is still
 active in the current Gateway process. Late model responses are ignored after a
@@ -424,6 +429,9 @@ Feishu action approval requires the tenant Feishu integration to be enabled and
 not emergency-disabled. Approval executes only the Gateway-owned allowlisted
 operation registry for message send, doc create/update, and task create/update;
 model-generated raw command strings are rejected and never passed to `lark-cli`.
+The allowlist maps to the current Feishu CLI command families
+`im +messages-send`, `docs +create`, `docs +update`, `task +create`,
+`task +update`, and `task +complete`.
 Feishu command output, stderr, audit details, and Copilot timeline payloads are
 bounded and redacted before persistence.
 Approve and reject decisions also write tenant-scoped audit rows with redacted
