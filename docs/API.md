@@ -115,6 +115,7 @@ not included.
 - `PATCH /api/v1/integrations/feishu/config`
 - `GET /api/v1/integrations/feishu/user-mappings`
 - `PUT /api/v1/integrations/feishu/user-mappings`
+- `POST /api/v1/integrations/feishu/inbound`
 
 Feishu integration endpoints are authenticated, tenant scoped, and
 Gateway-owned. Status discovers the local `lark-cli` binary, reports version
@@ -127,6 +128,10 @@ These endpoints do not execute Feishu writes, accept model-generated command
 strings, send terminal input, approve actions from Feishu text, or start
 unattended development loops. Outbound Feishu writes are only available through
 Copilot prepare tools plus explicit OpenForge pending-action approval.
+The inbound endpoint is an authenticated OpenForge test adapter, not a public
+Feishu webhook. Public webhook signature verification, event listener
+consumption, approval links, direct terminal input, batch authorization, and
+unattended loops are separate non-goals for this slice.
 
 Successful status response:
 
@@ -219,6 +224,32 @@ Mappings are limited to 100 entries and are automatically scoped by
 `user_id`; replacement writes a tenant-scoped audit log with mapping count
 only.
 
+`POST /inbound` accepts an OpenForge JWT, then validates a strict inbound
+command payload:
+
+```json
+{
+  "chatId": "oc_abc",
+  "feishuUserId": "ou_abc",
+  "text": "status",
+  "messageId": "om_optional",
+  "projectId": "optional-openforge-project-id"
+}
+```
+
+The route fails closed before Copilot execution when the Feishu integration is
+disabled, emergency-disabled, `identityMode` is still `unknown`, no explicit
+`allowedChatIds` allowlist exists, the chat is outside that allowlist, the
+Feishu user is not mapped to the authenticated OpenForge user, the optional
+`projectId` is not visible to that user, an accepted `messageId` is replayed,
+or the per-chat inbound rate limit is exceeded. Accepted commands create a
+Copilot conversation and run with `source: "feishu"`; optional project context
+is used only after tenant-scoped ownership validation. Inbound text is redacted
+before run persistence, conversation message persistence, provider request
+context, audit details, and API response metadata. Free-form approval text such
+as `approve`, `批准`, or `/approve <id>` never approves pending actions; pending
+actions remain controlled by the OpenForge approval routes.
+
 ### Platform AI Copilot
 
 - `GET /api/v1/copilot/capabilities`
@@ -302,10 +333,11 @@ pending actions:
 }
 ```
 
-Copilot allows only one executing run per user while a run is `queued` or
-`running`. A run in `waiting_for_approval` keeps its pending actions available
-for approval or rejection, but it does not block the user from asking a new
-Copilot question in another conversation.
+Copilot allows only one executing or approval-waiting run per user while a run
+is `queued`, `running`, or `waiting_for_approval`. A run in
+`waiting_for_approval` keeps its pending actions available for approval or
+rejection, and it blocks new runs until those pending actions are approved,
+rejected, or the run is cancelled.
 
 `POST /runs/:id/cancel` marks live runs as `cancelled`, rejects outstanding
 pending actions, and aborts the in-process model request when the run is still

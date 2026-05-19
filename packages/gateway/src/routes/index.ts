@@ -79,7 +79,12 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     }
   }));
   app.use("/api/v1/codex/subscription", createCodexSubscriptionRoutes());
-  app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({ db: deps.db }));
+  app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
+    db: deps.db,
+    masterKey: deps.masterKey,
+    sessionManager: deps.sessionManager,
+    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
+  }));
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
     db: deps.db,
     masterKey: deps.masterKey,

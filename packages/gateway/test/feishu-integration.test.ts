@@ -10,12 +10,16 @@ import { beforeEach, describe, it } from "node:test";
 
 import { signJwt } from "../src/auth/jwt.js";
 import { AuditLogRepository } from "../src/db/repositories/audit-log-repository.js";
+import { CopilotRepository } from "../src/db/repositories/copilot-repository.js";
 import { FeishuIntegrationRepository } from "../src/db/repositories/feishu-integration-repository.js";
+import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
+import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { UserRepository, type User } from "../src/db/repositories/user-repository.js";
 import {
   getFeishuCliStatus,
   type FeishuCliCommandRunner
 } from "../src/services/integrations/feishu-cli.js";
+import type { CopilotModelRequest } from "../src/services/copilot/types.js";
 import { createFeishuIntegrationRoutes } from "../src/routes/integrations-feishu.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
@@ -350,6 +354,369 @@ describe("Feishu integration routes", () => {
     assert.equal(auditLogs.length, 1);
     assert.equal(auditLogs[0].resourceType, "feishu_integration");
   });
+
+  it("rejects unauthenticated inbound commands before policy checks", async () => {
+    const db = createTestDb();
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_allowed",
+      text: "status"
+    });
+
+    assert.equal(res.status, 401);
+    assert.equal(new AuditLogRepository(db, "missing-user").list({ action: "feishu.inbound.reject" }).length, 0);
+  });
+
+  it("rejects inbound commands when the integration is disabled without creating a Copilot run", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inbound-disabled@example.com", "hash");
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_allowed",
+      text: "status api_key=sk-disabled-secret"
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 403);
+    assert.equal(res.body.details.code, "feishu_integration_disabled");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+    assert.equal(JSON.stringify(res.body).includes("sk-disabled-secret"), false);
+  });
+
+  it("rejects inbound commands when emergency disable is enabled", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inbound-emergency@example.com", "hash");
+    new FeishuIntegrationRepository(db, user.id).upsertConfig({
+      enabled: true,
+      emergencyDisabled: true,
+      identityMode: "bot",
+      allowedChatIds: ["oc_allowed"]
+    });
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_allowed",
+      text: "status"
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 403);
+    assert.equal(res.body.details.code, "feishu_integration_emergency_disabled");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+  });
+
+  it("rejects inbound commands until an explicit chat allowlist is configured", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inbound-no-allowlist@example.com", "hash");
+    const repo = new FeishuIntegrationRepository(db, user.id);
+    repo.upsertConfig({
+      enabled: true,
+      identityMode: "bot",
+      allowedChatIds: []
+    });
+    repo.replaceUserMappings([
+      { feishuUserId: "ou_allowed", openforgeUserId: user.id }
+    ]);
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_any",
+      feishuUserId: "ou_allowed",
+      text: "status"
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 403);
+    assert.equal(res.body.details.code, "feishu_chat_allowlist_required");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+  });
+
+  it("rejects inbound commands while Feishu identity mode is unknown", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inbound-unknown-identity@example.com", "hash");
+    const repo = new FeishuIntegrationRepository(db, user.id);
+    repo.upsertConfig({
+      enabled: true,
+      identityMode: "unknown",
+      allowedChatIds: ["oc_allowed"]
+    });
+    repo.replaceUserMappings([
+      { feishuUserId: "ou_allowed", openforgeUserId: user.id }
+    ]);
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_allowed",
+      text: "status"
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 403);
+    assert.equal(res.body.details.code, "feishu_identity_mode_required");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+  });
+
+  it("rejects inbound commands from chats outside the allowlist and records redacted audit", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inbound-chat-denied@example.com", "hash");
+    new FeishuIntegrationRepository(db, user.id).upsertConfig({
+      enabled: true,
+      identityMode: "bot",
+      allowedChatIds: ["oc_allowed"]
+    });
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_denied",
+      feishuUserId: "ou_allowed",
+      text: "status token=sk-chat-denied-secret",
+      messageId: "om_denied"
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 403);
+    assert.equal(res.body.details.code, "feishu_chat_not_allowed");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+    const auditLogs = new AuditLogRepository(db, user.id).list({ action: "feishu.inbound.reject" });
+    assert.equal(auditLogs.length, 1);
+    assert.equal(auditLogs[0].resourceType, "feishu_inbound_command");
+    assert.equal(JSON.stringify(auditLogs).includes("sk-chat-denied-secret"), false);
+  });
+
+  it("rejects inbound commands from unmapped Feishu users", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inbound-unmapped@example.com", "hash");
+    new FeishuIntegrationRepository(db, user.id).upsertConfig({
+      enabled: true,
+      identityMode: "bot",
+      allowedChatIds: ["oc_allowed"]
+    });
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_unmapped",
+      text: "status"
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 403);
+    assert.equal(res.body.details.code, "feishu_user_not_mapped");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+  });
+
+  it("creates a Feishu-sourced Copilot conversation and run for mapped users", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inbound-mapped@example.com", "hash");
+    seedFeishuInboundPolicy(db, user.id);
+    seedCopilotProvider(db, user.id);
+    const modelRequests: CopilotModelRequest[] = [];
+    const app = createTestApp(db, {
+      masterKey: secret,
+      modelClientFactory: () => ({
+        async createResponse(request: CopilotModelRequest) {
+          modelRequests.push(request);
+          return [{ type: "assistant_message", text: "Feishu command queued." }];
+        }
+      })
+    });
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_allowed",
+      text: "status api_key=sk-inbound-secret",
+      messageId: "om_allowed"
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.data.run.source, "feishu");
+    assert.equal(res.body.data.conversation.source, "feishu");
+    assert.equal(res.body.data.pendingActionCount, 0);
+    assert.equal(JSON.stringify(res.body).includes("sk-inbound-secret"), false);
+    const runs = new CopilotRepository(db, user.id).listRuns();
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].source, "feishu");
+    assert.equal(runs[0].goal.includes("sk-inbound-secret"), false);
+    assert.equal(modelRequests.length, 1);
+    assert.equal(modelRequests[0].input.includes("sk-inbound-secret"), false);
+  });
+
+  it("rejects inbound project context that is not visible to the mapped user", async () => {
+    const db = createTestDb();
+    const users = new UserRepository(db);
+    const user = users.create("inbound-project-owner@example.com", "hash");
+    const other = users.create("inbound-project-other@example.com", "hash");
+    seedFeishuInboundPolicy(db, user.id);
+    const foreignProject = new ProjectRepository(db, other.id).create({
+      name: "Foreign",
+      path: "/tmp/openforge-foreign-project",
+      aiTool: "claude"
+    });
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_allowed",
+      text: "status",
+      projectId: foreignProject.id
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 403);
+    assert.equal(res.body.details.code, "feishu_project_not_visible");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+  });
+
+  it("does not create a new inbound run while a user run is waiting for approval", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inbound-active-run@example.com", "hash");
+    seedFeishuInboundPolicy(db, user.id);
+    const repo = new CopilotRepository(db, user.id);
+    repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Approve a pending action"
+    });
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_allowed",
+      text: "status"
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 409);
+    assert.equal(res.body.details.code, "copilot_run_already_active");
+    assert.equal(repo.listRuns().length, 1);
+  });
+
+  it("does not approve pending actions from free-form Feishu approval text", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inbound-freeform-approval@example.com", "hash");
+    seedFeishuInboundPolicy(db, user.id);
+    const repo = new CopilotRepository(db, user.id);
+    const run = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Approve a pending action"
+    });
+    const action = repo.createPendingAction(run.id, {
+      type: "openforge.propose_session_input",
+      input: { sessionId: "session-1", input: "continue" }
+    });
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_allowed",
+      text: `/approve ${action.id}`
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 409);
+    assert.equal(repo.getPendingAction(action.id)?.status, "pending");
+  });
+
+  it("does not create duplicate runs when an accepted Feishu message id is replayed", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inbound-replay@example.com", "hash");
+    seedFeishuInboundPolicy(db, user.id);
+    seedCopilotProvider(db, user.id);
+    const app = createTestApp(db, {
+      masterKey: secret,
+      modelClientFactory: () => ({
+        async createResponse() {
+          return [{ type: "assistant_message", text: "ok" }];
+        }
+      })
+    });
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const body = {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_allowed",
+      text: "status",
+      messageId: "om_replay"
+    };
+
+    const first = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", body, {
+      Authorization: `Bearer ${token}`
+    });
+    const second = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", body, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 409);
+    assert.equal(second.body.details.code, "feishu_message_replayed");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 1);
+  });
+
+  it("rate-limits inbound commands per allowed Feishu chat without calling Copilot", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("inbound-rate-limit@example.com", "hash");
+    seedFeishuInboundPolicy(db, user.id);
+    seedCopilotProvider(db, user.id);
+    let modelCallCount = 0;
+    const app = createTestApp(db, {
+      masterKey: secret,
+      inboundRateLimit: { max: 1, windowMs: 60_000 },
+      modelClientFactory: () => ({
+        async createResponse() {
+          modelCallCount += 1;
+          return [{ type: "assistant_message", text: "ok" }];
+        }
+      })
+    });
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const headers = { Authorization: `Bearer ${token}` };
+
+    const first = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_allowed",
+      text: "first",
+      messageId: "om_rate_1"
+    }, headers);
+    const second = await makeRequest(app, "POST", "/api/v1/integrations/feishu/inbound", {
+      chatId: "oc_allowed",
+      feishuUserId: "ou_allowed",
+      text: "second",
+      messageId: "om_rate_2"
+    }, headers);
+
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 429);
+    assert.equal(second.body.details.code, "feishu_inbound_rate_limited");
+    assert.equal(modelCallCount, 1);
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 1);
+  });
 });
 
 function createTestDb(): Database {
@@ -364,7 +731,9 @@ function createTestDb(): Database {
   return db;
 }
 
-function createTestApp(db: Database): express.Express {
+type TestFeishuRouteOptions = Parameters<typeof createFeishuIntegrationRoutes>[0] & Record<string, unknown>;
+
+function createTestApp(db: Database, routeOptions: TestFeishuRouteOptions = {}): express.Express {
   const app = express();
   app.locals.jwtSecret = secret;
   app.use(express.json());
@@ -376,9 +745,45 @@ function createTestApp(db: Database): express.Express {
       authState: "authenticated",
       identityMode: "user",
       enabled: false
-    })
-  }));
+    }),
+    ...routeOptions
+  } as Parameters<typeof createFeishuIntegrationRoutes>[0]));
   return app;
+}
+
+function seedFeishuInboundPolicy(db: Database, userId: string): void {
+  const repo = new FeishuIntegrationRepository(db, userId);
+  repo.upsertConfig({
+    enabled: true,
+    identityMode: "bot",
+    allowedChatIds: ["oc_allowed"]
+  });
+  repo.replaceUserMappings([
+    { feishuUserId: "ou_allowed", openforgeUserId: userId, displayName: "Allowed User" }
+  ]);
+}
+
+function seedCopilotProvider(db: Database, userId: string): void {
+  const repo = new ModelProviderRepository(db, userId, secret);
+  const provider = repo.createProviderProfile({
+    name: "Local OpenAI-compatible provider",
+    providerKey: "local-openai-compatible",
+    baseUrl: "http://127.0.0.1:1/v1",
+    openaiBaseUrl: "http://127.0.0.1:1/v1",
+    authType: "api_key",
+    apiFormat: "openai-compatible",
+    supportedAdapters: ["claude", "opencode"]
+  });
+  repo.createModelProfile({
+    providerProfileId: provider.id,
+    name: "Local Chat",
+    modelId: "local-chat",
+    isDefault: true
+  });
+  repo.createCredential({
+    providerProfileId: provider.id,
+    plaintextSecret: "sk-local-provider"
+  });
 }
 
 async function makeRequest(

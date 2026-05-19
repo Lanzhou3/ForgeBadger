@@ -1,4 +1,5 @@
 import type { Database } from "../../db/types.js";
+import { ProjectRepository } from "../../db/repositories/project-repository.js";
 import { SessionRepository } from "../../db/repositories/session-repository.js";
 import { executeCopilotTool, type CopilotToolRegistry } from "./tool-registry.js";
 
@@ -125,6 +126,9 @@ function buildRecallSearchInputs(input: CopilotActiveRecallInput): Array<Record<
 
 function resolveRecallProjectId(input: CopilotActiveRecallInput): string | null {
   if (input.source === "project" && input.sourceRefId) return input.sourceRefId;
+  if (input.source === "feishu" && input.sourceRefId) {
+    return new ProjectRepository(input.db, input.userId).getById(input.sourceRefId)?.id ?? null;
+  }
   if (input.source === "session" && input.sourceRefId) {
     return new SessionRepository(input.db, input.userId).getById(input.sourceRefId)?.projectId ?? null;
   }

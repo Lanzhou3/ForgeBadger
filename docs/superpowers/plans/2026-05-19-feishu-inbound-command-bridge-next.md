@@ -4,6 +4,8 @@
 
 **Goal:** Add the first safe inbound Feishu command bridge so authorized Feishu chats can create Copilot conversations and runs without gaining direct terminal or approval authority.
 
+**Product positioning:** OpenForge remains a local-first AI CLI control plane with an approval-gated Copilot. Feishu is only a controlled collaboration channel into Copilot, not the execution authority, not a Feishu bot platform, and not a remote autonomous development entry point.
+
 **Architecture:** Gateway remains the only enforcement point. Feishu inbound messages enter through an explicit authenticated/local-only Gateway route, are normalized into a bounded command object, checked against tenant Feishu config, chat allowlist, user mappings, and rate limits, then routed into Copilot as `source: "feishu"` with all write operations still represented as pending actions. Web only receives the resulting Copilot conversation/run state through existing APIs.
 
 **Tech Stack:** Express, TypeScript, zod, SQLite/better-sqlite3 repositories, existing CopilotRepository and CopilotOrchestrator, node:test, Web API client tests.
@@ -16,9 +18,12 @@ Build Task 5 from `docs/superpowers/plans/2026-05-17-feishu-project-manager-copi
 
 In scope:
 - Explicit `POST /api/v1/integrations/feishu/inbound` test adapter.
-- Chat allowlist enforcement using `allowedChatIds`.
+- Existing OpenForge JWT guard before any inbound payload is trusted; public webhook signature verification stays out of this slice.
+- Explicit identity mode and chat allowlist enforcement using `identityMode` and `allowedChatIds`.
 - Feishu user mapping enforcement using `integration_feishu_user_mappings`.
 - `source: "feishu"` support for Copilot runs/conversations when needed by type paths.
+- Optional inbound `projectId` ownership validation before it is used as Copilot context.
+- `messageId` replay protection and bounded per-chat rate limiting.
 - Redaction of inbound text before persistence and provider request context.
 - Free-form approval text must not approve pending actions.
 - Audit rows for accepted and rejected inbound commands.
@@ -58,9 +63,9 @@ Out of scope:
 - Modify: `packages/gateway/test/feishu-integration.test.ts`
 - Modify: `packages/gateway/src/routes/integrations-feishu.ts`
 
-- [ ] **Step 1: Write failing tests for disabled and emergency-disabled integration**
+- [ ] **Step 1: Write failing tests for guarded, disabled, and emergency-disabled integration**
 
-Add tests asserting `POST /api/v1/integrations/feishu/inbound` returns `403` with envelope code `1`, writes no Copilot run, and does not leak input text when:
+Add tests asserting unauthenticated `POST /api/v1/integrations/feishu/inbound` returns `401`, and authenticated requests return `403` with envelope code `1`, write no Copilot run, and do not leak input text when:
 - config is missing or `enabled: false`;
 - config has `emergencyDisabled: true`.
 
@@ -113,11 +118,15 @@ Assert inbound returns `403`, creates no run, and returns `feishu_user_not_mappe
 Seed mapping `{ feishuUserId: "ou_allowed", openforgeUserId: user.id }`.
 Assert inbound creates or reuses a Copilot conversation, creates a run with `source: "feishu"`, and returns only bounded run/conversation metadata.
 
-- [ ] **Step 3: Add `source: "feishu"` where type paths require it**
+- [ ] **Step 3: Write failing tests for project ownership and active-run blocking**
+
+Assert an inbound `projectId` owned by another tenant is rejected before run creation, and a current `queued`, `running`, or `waiting_for_approval` run blocks a new Feishu inbound run.
+
+- [ ] **Step 4: Add `source: "feishu"` where type paths require it**
 
 Keep source handling additive. Do not loosen source validation to arbitrary strings if a literal union is available.
 
-- [ ] **Step 4: Verify**
+- [ ] **Step 5: Verify**
 
 Run:
 
@@ -142,19 +151,23 @@ Use inbound text containing API-key-shaped content. Assert persisted Copilot mes
 - [ ] **Step 2: Write failing free-form approval test**
 
 Create a waiting Copilot run with a pending action. Send inbound text such as `approve`, `批准`, or `/approve action-id`.
-Assert the pending action remains `pending` and the route either creates a normal Copilot run or returns `feishu_approval_not_supported`.
+Assert the pending action remains `pending` and the route returns a bounded rejection instead of approving the action.
 
-- [ ] **Step 3: Add audit rows**
+- [ ] **Step 3: Write failing replay and rate-limit tests**
+
+Assert a repeated accepted `messageId` does not create a second run, and a per-chat rate limit returns `429` without calling Copilot.
+
+- [ ] **Step 4: Add audit rows**
 
 Record:
 - `feishu.inbound.accept` with chat id, mapped OpenForge user id, optional project id, and redacted text summary.
 - `feishu.inbound.reject` with reason code and bounded redacted metadata.
 
-- [ ] **Step 4: Document the contract**
+- [ ] **Step 5: Document the contract**
 
 Update `docs/API.md` with the route, required guard, policy decisions, redaction, and explicit non-support for Feishu approval text.
 
-- [ ] **Step 5: Verify**
+- [ ] **Step 6: Verify**
 
 Run:
 
@@ -203,11 +216,16 @@ Only include files that actually changed.
 
 ## Acceptance Gates
 
+- Unauthenticated inbound requests are rejected before policy or Copilot execution.
+- Unknown Feishu identity mode and empty inbound chat allowlists fail closed.
 - Unauthorized chat cannot create a Copilot run.
 - Unmapped Feishu user cannot create a Copilot run or approve actions.
 - Mapped Feishu user in an allowed chat can create a Copilot run with `source: "feishu"`.
+- Inbound `projectId` is never trusted without tenant ownership validation.
+- Replaying an accepted `messageId` cannot create duplicate runs.
+- Per-chat inbound rate limits fail closed with `429`.
 - Inbound text is redacted before persistence, provider request context, audit details, and API response.
 - Free-form approval text never approves a pending action.
 - Emergency disable stops inbound immediately.
-- The route has a documented local-only or secret-based guard before any non-local deployment.
+- The route has a documented JWT guard and remains a test adapter until a separate public webhook signature design lands.
 - Existing Web Copilot and approved outbound Feishu actions keep passing.

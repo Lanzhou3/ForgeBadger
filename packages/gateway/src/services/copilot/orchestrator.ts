@@ -52,7 +52,7 @@ export interface RunCopilotTextInput {
   prompt: string;
   providerProfileId?: string;
   modelProfileId?: string;
-  source: "dashboard" | "project" | "session" | "settings" | "copilot" | "models";
+  source: "dashboard" | "project" | "session" | "settings" | "copilot" | "models" | "feishu";
   sourceRefId?: string;
   maxSteps?: number;
 }
@@ -636,6 +636,20 @@ function buildSourceContext(
       `AI tool: ${safeContextValue(session.aiTool)}`,
       `Project ID: ${safeContextValue(session.projectId)}`,
       ...(session.modelId ? [`Model ID: ${safeContextValue(session.modelId)}`] : [])
+    ].join("\n");
+  }
+  if (source === "feishu") {
+    const project = new ProjectRepository(db, userId).getById(sourceRefId);
+    if (!project) return unavailableSourceContext("project", sourceRefId);
+    return [
+      "OpenForge source context:",
+      "Type: feishu",
+      `Project ID: ${safeContextValue(project.id)}`,
+      `Project name: ${safeContextValue(project.name)}`,
+      `Project record status: ${safeContextValue(project.status)}`,
+      `AI tool: ${safeContextValue(project.aiTool)}`,
+      ...(project.techStack ? [`Tech stack: ${safeContextValue(project.techStack)}`] : []),
+      ...(project.description ? [`Description: ${safeContextValue(project.description)}`] : [])
     ].join("\n");
   }
   return null;
