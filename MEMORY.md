@@ -65,14 +65,17 @@
   delete flows, and provider credential rotate/delete flows. Current commit
   series: `c83e595 feat: 支持服务商模型同步` followed by the provider
   management closure commit.
-- Platform AI Copilot product-hardening is collected in
+- Platform AI Copilot product-hardening shipped through
   [PR #2](https://github.com/Lanzhou3/OpenForge/pull/2)
-  `feat: add release gates and platform copilot` on branch
-  `post-beta-release-gates`. The PR is ready for review from the local/CI side:
-  provider-backed Copilot runs, read tools, approval-gated pending actions,
-  provider/model selectors, active memory recall, cancellation/timeout handling,
-  audit logging, provider diagnostics, output redaction, and Web hardening are
-  covered by repository tests, Playwright smoke coverage, package smoke, and CI.
+  `feat: add release gates and platform copilot` from branch
+  `post-beta-release-gates`; PR #2 merged into `master` on 2026-05-19. The
+  branch now carries follow-up GSD planning commits for Phase 1 Beta Evidence
+  Closure after `853969c docs(01): capture phase context` and
+  `4db4dc8 docs(01): create phase plan`. Provider-backed Copilot runs, read
+  tools, approval-gated pending actions, provider/model selectors, active memory
+  recall, cancellation/timeout handling, audit logging, provider diagnostics,
+  output redaction, and Web hardening are covered by repository tests,
+  Playwright smoke coverage, package smoke, and CI.
   The latest Copilot evidence snapshot tracked here is `e024e7f
   docs: add copilot live smoke examples`; GitHub Actions for that head passed
   Workspace Static Checks, Codex Background Task Gates, NPM Package

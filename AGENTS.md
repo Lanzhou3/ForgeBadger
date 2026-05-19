@@ -6,7 +6,7 @@ This file provides repository instructions for AI coding agents working in OpenF
 
 OpenForge is an AI programming IDE control platform. It provides a Web console for managing AI CLI instances such as Claude Code, OpenCode, and Codex, including project scaffolding, configuration injection, session management, terminal access, model management, Agent management, Skill management, and template management.
 
-Current product phase: MVP Phase 0 / early infrastructure. Follow `docs/DEVELOPMENT-PLAN.md` for sequencing and milestones.
+Current product phase: post-beta beta evidence closure / first-user readiness. Follow `docs/DEVELOPMENT-PLAN.md` and `.planning/ROADMAP.md` for sequencing and milestones.
 
 ## Source Of Truth
 
