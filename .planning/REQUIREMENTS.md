@@ -82,9 +82,9 @@
 | PM-01 | Phase 4 | Complete |
 | PM-02 | Phase 4 | Complete |
 | PM-03 | Phase 4 | Complete |
-| REM-01 | Phase 5 | Pending |
-| REM-02 | Phase 5 | Pending |
-| COD-01 | Phase 5 | Pending |
+| REM-01 | Phase 5 | Complete |
+| REM-02 | Phase 5 | Complete |
+| COD-01 | Phase 5 | Complete |
 
 **Coverage:**
 - Current milestone requirements: 20 total
