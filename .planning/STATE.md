@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 4 context gathered - ready to plan
-last_updated: "2026-05-20T15:22:02.024Z"
-last_activity: 2026-05-20 -- Phase 04 planning complete
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-05-20T15:35:04.418Z"
+last_activity: 2026-05-20 -- Plan 04-01 complete; ready for 04-02
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 12
-  completed_plans: 10
-  percent: 60
+  completed_plans: 11
+  percent: 92
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: `.planning/PROJECT.md` (updated 2026-05-19)
 ## Current Position
 
 Phase: 4
-Plan: Not started
+Plan: 04-02
 Status: Ready to execute
-Last activity: 2026-05-20 -- Phase 04 planning complete
+Last activity: 2026-05-20 -- Plan 04-01 complete; ready for 04-02
 
-Progress: [██████████] 100%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [██████████] 100%
 | Phase 03 P02 | 25 min | 4 tasks | 4 files |
 | Phase 03 P04 | 8 min | 4 tasks | 2 files |
 | 03 | 4 | - | - |
+| Phase 04 P01 | 5min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,10 @@ Recent decisions affecting current work:
 - Close external evidence before expanding remote/autonomous features.
 - Keep Codex app-server prompt/turn input disabled by default.
 - Treat Feishu as a controlled Copilot collaboration channel, not execution authority.
+- [Phase 04]: Project-manager ledger state is OpenForge-owned Gateway control-plane state. — Plan 04-01 docs/API.md contract.
+- [Phase 04]: Project-manager routes stay under /api/v1/projects/:projectId/project-manager with user_id and project_id scoping. — Plan 04-01 docs/API.md contract.
+- [Phase 04]: Feishu free-form text cannot approve pending actions, send terminal input, mutate ledger records, or bypass approval. — Plan 04-01 docs/API.md contract.
+- [Phase 04]: Project-manager diagnostics expose counts and safe markers only, never raw ledger/evidence/terminal/secret data. — Plan 04-01 docs/API.md contract.
 
 ### Pending Todos
 
@@ -93,6 +98,6 @@ None in `.planning/todos/` yet. Current backlog is represented by `.planning/ROA
 
 ## Session Continuity
 
-Last session: 2026-05-20T14:33:06.834Z
-Stopped at: Phase 4 context gathered - ready to plan
-Resume file: .planning/phases/OF-04-feishu-project-manager-ledger/04-CONTEXT.md
+Last session: 2026-05-20T15:33:20.685Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None

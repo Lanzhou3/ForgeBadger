@@ -157,7 +157,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 04-01: Specify ledger model, state transitions, and audit semantics.
+- [x] 04-01: Specify ledger model, state transitions, and audit semantics.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -196,5 +196,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5.
 | 1. Beta Evidence Closure | Post-Beta Trust Closure | 4/4 | Complete   | 2026-05-19 |
 | 2. Public Feishu Webhook Safety | Post-Beta Trust Closure | 2/2 | Complete   | 2026-05-20 |
 | 3. First-User Product Hardening | Post-Beta Trust Closure | 4/4 | Complete   | 2026-05-20 |
-| 4. Feishu Project Manager Ledger | Collaboration Expansion | 0/2 | Not started | - |
+| 4. Feishu Project Manager Ledger | Collaboration Expansion | 1/2 | In Progress|  |
 | 5. Remote Execution Architecture | Collaboration Expansion | 0/1 | Deferred | - |
