@@ -29,7 +29,7 @@
 - [x] **UX-04**: Product trial checklist and feedback routing are specific enough that first-user reports are reproducible.
 - [x] **UX-05**: Copilot Web active-run state updates are guarded by monotonic `updatedAt`/event sequence/request order rules.
 - [x] **UX-06**: Settings and Copilot panels show recoverable error states for partial API/query failures.
-- [ ] **UX-07**: Web E2E mocks fail fast for unhandled `/api/v1/*` routes and key assertions use stable selectors where practical.
+- [x] **UX-07**: Web E2E mocks fail fast for unhandled `/api/v1/*` routes and key assertions use stable selectors where practical.
 
 ### Project Manager Expansion
 
@@ -78,7 +78,7 @@
 | UX-04 | Phase 3 | Complete |
 | UX-05 | Phase 3 | Complete |
 | UX-06 | Phase 3 | Complete |
-| UX-07 | Phase 3 | Pending |
+| UX-07 | Phase 3 | Complete |
 | PM-01 | Phase 4 | Pending |
 | PM-02 | Phase 4 | Pending |
 | PM-03 | Phase 4 | Pending |
