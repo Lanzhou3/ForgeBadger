@@ -29,16 +29,16 @@ export type ProjectManagerWorkItemStatus = typeof PROJECT_MANAGER_WORK_ITEM_STAT
 export type ProjectManagerLedgerEventType = typeof PROJECT_MANAGER_LEDGER_EVENT_TYPES[number];
 
 export interface ProjectManagerEvidenceRef {
-  kind?: string;
-  label?: string;
-  status?: string;
-  ref?: string;
-  path?: string;
-  sessionId?: string;
-  copilotRunId?: string;
-  feishuChatId?: string;
-  feishuMessageId?: string;
-  createdAt?: string;
+  kind?: string | undefined;
+  label?: string | undefined;
+  status?: string | undefined;
+  ref?: string | undefined;
+  path?: string | undefined;
+  sessionId?: string | undefined;
+  copilotRunId?: string | undefined;
+  feishuChatId?: string | undefined;
+  feishuMessageId?: string | undefined;
+  createdAt?: string | undefined;
 }
 
 export interface ProjectManagerGoal {
