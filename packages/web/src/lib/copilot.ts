@@ -749,6 +749,15 @@ export function getCopilotProviderReadiness(
   };
 }
 
+export function getCopilotProviderReadinessMessageKey(
+  readiness: CopilotProviderReadiness | null | undefined
+): TranslationKey {
+  if (!readiness || readiness.code === "ready") return "copilot.providerSetupRequired";
+  if (readiness.code === "no_compatible_provider") return "copilot.providerReadiness.noCompatibleProvider";
+  if (readiness.code === "missing_active_credential") return "copilot.providerReadiness.missingActiveCredential";
+  return "copilot.providerReadiness.missingActiveModel";
+}
+
 export function buildCopilotLaunchHref(input: CopilotLaunchHrefInput): string {
   const params = new URLSearchParams({ source: input.source });
   const sourceRefId = input.sourceRefId?.trim();

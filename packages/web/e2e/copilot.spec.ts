@@ -14,13 +14,60 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("Copilot chat blocks sending when no provider is configured", async ({ page }) => {
-  await mockCopilotApis(page, { providerConfigured: false });
+  await mockCopilotApis(page, {
+    providerConfigured: false,
+    modelProviders: {
+      providers: [],
+      models: [],
+      credentials: [],
+    },
+  });
 
   await page.goto("/copilot");
   await page.getByPlaceholder(/Ask Copilot/).fill("Summarize release state");
 
-  await expect(page.getByText("Configure a Copilot-compatible model provider first.").first()).toBeVisible();
+  await expect(
+    page.getByText("Create and enable an OpenAI, OpenAI-compatible, or Anthropic model provider first.").first()
+  ).toBeVisible();
   await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+});
+
+test("Copilot chat explains when a compatible provider lacks credentials", async ({ page }) => {
+  await mockCopilotApis(page, {
+    providerConfigured: false,
+    modelProviders: {
+      providers: [{
+        id: "provider-1",
+        providerKey: "openai",
+        name: "OpenAI",
+        baseUrl: null,
+        authType: "api_key",
+        apiFormat: "openai",
+        supportedAdapters: [],
+        status: "active",
+      }],
+      models: [{
+        id: "model-1",
+        providerProfileId: "provider-1",
+        providerKey: "openai",
+        providerName: "OpenAI",
+        baseUrl: null,
+        name: "GPT",
+        modelId: "gpt-test",
+        capabilities: ["chat"],
+        status: "active",
+        isDefault: true,
+      }],
+      credentials: [],
+    },
+  });
+
+  await page.goto("/copilot");
+
+  await expect(
+    page.getByText("A compatible model provider needs an active API key. Add or enable a test credential first.").first()
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
 });
 
@@ -1341,6 +1388,11 @@ async function mockCopilotApis(
     initialMemoryNotes?: Array<Record<string, unknown>>;
     memorySearchResults?: Array<Record<string, unknown>>;
     onDeleteMemory?: (route: Route) => Promise<void>;
+    modelProviders?: {
+      providers: Array<Record<string, unknown>>;
+      models: Array<Record<string, unknown>>;
+      credentials: Array<Record<string, unknown>>;
+    };
   } = {}
 ) {
   let conversations: Array<Record<string, unknown>> = [...(overrides.initialConversations ?? [])];
@@ -1445,6 +1497,17 @@ async function mockCopilotApis(
 
     if (url.pathname === "/api/v1/models" && method === "GET") {
       await route.fulfill({ json: envelope({ models: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/model-providers" && method === "GET") {
+      await route.fulfill({
+        json: envelope(overrides.modelProviders ?? {
+          providers: [],
+          models: [],
+          credentials: [],
+        }),
+      });
       return;
     }
 

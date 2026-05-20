@@ -38,6 +38,7 @@ import {
   GatewayApiError,
   getCopilotCapabilities,
   getCopilotRun,
+  listModelProviders,
   listCopilotMemoryEntries,
   listCopilotMemoryNotes,
   listCopilotConversationMessages,
@@ -63,6 +64,8 @@ import {
   getCopilotPendingActionLabel,
   getCopilotPendingActionLabelKey,
   getCopilotPendingActionSummary,
+  getCopilotProviderReadiness,
+  getCopilotProviderReadinessMessageKey,
   getCopilotRunPollDelayMs,
   isCopilotRunLive,
   readCopilotTerminalSnapshotText,
@@ -133,6 +136,15 @@ export function CopilotChatPanel({
     queryFn: getCopilotCapabilities,
     retry: false,
   });
+  const capabilitiesLoadFailed = capabilitiesQuery.isError;
+  const providerReady = capabilitiesQuery.isSuccess && capabilitiesQuery.data.providerConfigured === true;
+  const providerSetupBlocked = capabilitiesQuery.isSuccess && capabilitiesQuery.data.providerConfigured !== true;
+  const modelProvidersQuery = useQuery({
+    queryKey: ["model-providers"],
+    queryFn: listModelProviders,
+    enabled: providerSetupBlocked,
+    retry: false,
+  });
   const conversationsQuery = useQuery({
     queryKey: ["copilot-conversations"],
     queryFn: () => listCopilotConversations(40),
@@ -183,9 +195,16 @@ export function CopilotChatPanel({
     ? [...messages.filter((message) => message.id !== optimisticUserMessage.id), optimisticUserMessage]
     : messages;
   const messagesLoadFailed = messagesQuery.isError;
-  const capabilitiesLoadFailed = capabilitiesQuery.isError;
-  const providerReady = capabilitiesQuery.isSuccess && capabilitiesQuery.data.providerConfigured === true;
-  const providerSetupBlocked = capabilitiesQuery.isSuccess && capabilitiesQuery.data.providerConfigured !== true;
+  const providerReadiness = useMemo(() => {
+    if (!providerSetupBlocked || !modelProvidersQuery.data || !capabilitiesQuery.data) return null;
+    return getCopilotProviderReadiness({
+      providers: modelProvidersQuery.data.providers,
+      credentials: modelProvidersQuery.data.credentials,
+      models: modelProvidersQuery.data.models,
+      supportedProviderFormats: capabilitiesQuery.data.supportedProviderFormats,
+    });
+  }, [capabilitiesQuery.data, modelProvidersQuery.data, providerSetupBlocked]);
+  const providerSetupMessage = t(getCopilotProviderReadinessMessageKey(providerReadiness));
 
   const createConversationMutation = useMutation({
     mutationFn: createCopilotConversation,
@@ -548,7 +567,7 @@ export function CopilotChatPanel({
       return;
     }
     if (!providerReady) {
-      setLocalError(t("copilot.providerSetupRequired"));
+      setLocalError(providerSetupMessage);
       return;
     }
     sendMessageMutation.mutate(text);
@@ -697,7 +716,16 @@ export function CopilotChatPanel({
               <div className="mb-4 flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
                 <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <div>
-                  <p>{t("copilot.providerSetupRequired")}</p>
+                  <p>{modelProvidersQuery.isLoading ? t("common.loading") : providerSetupMessage}</p>
+                  {modelProvidersQuery.isError && (
+                    <button
+                      className="mt-1 mr-3 text-xs underline"
+                      type="button"
+                      onClick={() => modelProvidersQuery.refetch()}
+                    >
+                      {t("copilot.retry")}
+                    </button>
+                  )}
                   <Link className="mt-1 inline-block text-xs underline" href="/models">
                     {t("copilot.configureProvider")}
                   </Link>

@@ -12,6 +12,7 @@ import {
   resolveCopilotRunFailureMessage,
   getCopilotStartBlocker,
   getCopilotProviderReadiness,
+  getCopilotProviderReadinessMessageKey,
   readCopilotRunErrorDetails,
   getSelectableCopilotProviders,
   filterCopilotProviderChoices,
@@ -1257,6 +1258,71 @@ describe("copilot display helpers", () => {
     ).toBe(false);
   });
 
+  it("preserves terminal Copilot state over stale live detail", () => {
+    expect(
+      shouldKeepCopilotActiveRunState(
+        {
+          run: { id: "run-1", status: "cancelled", updatedAt: 200 },
+          events: [{ sequence: 3 }],
+          pendingActions: [],
+        },
+        {
+          run: { id: "run-1", status: "running", updatedAt: 200 },
+          events: [{ sequence: 3 }],
+          pendingActions: [],
+        }
+      )
+    ).toBe(true);
+  });
+
+  it("uses pending action freshness when run timestamps are tied", () => {
+    expect(
+      shouldKeepCopilotActiveRunState(
+        {
+          run: { id: "run-1", status: "waiting_for_approval", updatedAt: 200 },
+          events: [],
+          pendingActions: [{ updatedAt: 300 }],
+        },
+        {
+          run: { id: "run-1", status: "waiting_for_approval", updatedAt: 200 },
+          events: [],
+          pendingActions: [{ updatedAt: 250 }],
+        }
+      )
+    ).toBe(true);
+    expect(
+      shouldKeepCopilotActiveRunState(
+        {
+          run: { id: "run-1", status: "waiting_for_approval", updatedAt: 200 },
+          events: [],
+          pendingActions: [{ updatedAt: 250 }],
+        },
+        {
+          run: { id: "run-1", status: "waiting_for_approval", updatedAt: 200 },
+          events: [],
+          pendingActions: [{ updatedAt: 300 }],
+        }
+      )
+    ).toBe(false);
+  });
+
+  it("accepts active run detail for a different run id", () => {
+    expect(
+      shouldKeepCopilotActiveRunState(
+        {
+          run: { id: "run-1", status: "running", updatedAt: 300 },
+          events: [{ sequence: 5 }],
+          pendingActions: [],
+        },
+        {
+          run: { id: "run-2", status: "running", updatedAt: 100 },
+          events: [{ sequence: 1 }],
+          pendingActions: [],
+        }
+      )
+    ).toBe(false);
+  });
+
   it("backs off Copilot run polling delays", () => {
     expect([0, 1, 2, 3, 4, 8].map(getCopilotRunPollDelayMs)).toEqual([
       500,
@@ -1435,6 +1501,42 @@ describe("copilot display helpers", () => {
       code: "ready",
       readyProviderCount: 1,
     });
+  });
+
+  it("maps Copilot provider readiness to setup messages", () => {
+    expect(
+      getCopilotProviderReadinessMessageKey({
+        code: "no_compatible_provider",
+        compatibleProviderCount: 0,
+        credentialReadyProviderCount: 0,
+        readyProviderCount: 0,
+      })
+    ).toBe("copilot.providerReadiness.noCompatibleProvider");
+    expect(
+      getCopilotProviderReadinessMessageKey({
+        code: "missing_active_credential",
+        compatibleProviderCount: 1,
+        credentialReadyProviderCount: 0,
+        readyProviderCount: 0,
+      })
+    ).toBe("copilot.providerReadiness.missingActiveCredential");
+    expect(
+      getCopilotProviderReadinessMessageKey({
+        code: "missing_active_model",
+        compatibleProviderCount: 1,
+        credentialReadyProviderCount: 1,
+        readyProviderCount: 0,
+      })
+    ).toBe("copilot.providerReadiness.missingActiveModel");
+    expect(
+      getCopilotProviderReadinessMessageKey({
+        code: "ready",
+        compatibleProviderCount: 1,
+        credentialReadyProviderCount: 1,
+        readyProviderCount: 1,
+      })
+    ).toBe("copilot.providerSetupRequired");
+    expect(getCopilotProviderReadinessMessageKey(null)).toBe("copilot.providerSetupRequired");
   });
 
   it("builds Copilot launch hrefs with bounded source context", () => {
