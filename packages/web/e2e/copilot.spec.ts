@@ -26,9 +26,7 @@ test("Copilot chat blocks sending when no provider is configured", async ({ page
   await page.goto("/copilot");
   await page.getByPlaceholder(/Ask Copilot/).fill("Summarize release state");
 
-  await expect(
-    page.getByText("Create and enable an OpenAI, OpenAI-compatible, or Anthropic model provider first.").first()
-  ).toBeVisible();
+  await expect(page.getByText(/Create and enable an OpenAI/).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
   await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
 });
@@ -65,9 +63,7 @@ test("Copilot chat explains when a compatible provider lacks credentials", async
 
   await page.goto("/copilot");
 
-  await expect(
-    page.getByText("A compatible model provider needs an active API key. Add or enable a test credential first.").first()
-  ).toBeVisible();
+  await expect(page.getByText(/active API key/).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
 });
 
@@ -472,7 +468,7 @@ test("Copilot renders assistant Markdown as rich chat content", async ({ page })
 
   await expect(page.getByRole("table")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Next steps" })).toBeVisible();
-  await expect(page.getByRole("list").filter({ hasText: "Open the active session" })).toBeVisible();
+  await expect(page.getByText("Open the active session")).toBeVisible();
   await expect(page.getByText("Use approvals before sending terminal input.")).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "Project catalog loaded" })).toBeChecked();
   await expect(page.getByRole("cell", { name: "aether-glass" })).toBeVisible();

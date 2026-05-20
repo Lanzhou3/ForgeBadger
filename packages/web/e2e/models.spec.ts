@@ -223,7 +223,7 @@ async function mockModelsApis(
           providerProfileId: "provider-profile-1",
           label: "Minimax subscription",
           status: "active",
-          secretPreview: "sk-...test",
+          secretPreview: "redacted-test",
         },
       ];
       await route.fulfill({ json: envelope({ credential: configuredCredentials[0] }) });
@@ -281,7 +281,13 @@ async function mockModelsApis(
       return;
     }
 
-    await route.fulfill({ json: envelope({}) });
+    await route.fulfill({
+      status: 404,
+      json: {
+        code: 1,
+        message: `Unhandled mocked API route: ${method} ${url.pathname}`,
+      },
+    });
   });
 
   return requests;
