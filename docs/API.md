@@ -185,6 +185,83 @@ mapping details. Model-origin project-manager write proposals are not part of
 the read-tool surface and must use the existing pending-action approval model
 if a later phase adds them.
 
+Work item status is a bounded product state. Allowed statuses are:
+
+- `todo`
+- `in_progress`
+- `blocked`
+- `ready_for_review`
+- `done`
+- `cancelled`
+
+Allowed Phase 4 transitions are:
+
+| From | To |
+|------|----|
+| `todo` | `in_progress`, `blocked`, `cancelled` |
+| `in_progress` | `blocked`, `ready_for_review`, `done`, `cancelled` |
+| `blocked` | `todo`, `in_progress`, `cancelled` |
+| `ready_for_review` | `in_progress`, `done`, `cancelled` |
+| `done` | terminal |
+| `cancelled` | terminal |
+
+Every state mutation updates the current projection and appends a
+`project_manager_ledger_events` row atomically. The same mutation also writes
+an `audit_logs` row with tenant-scoped, redacted details. Stored event and
+audit details must summarize the mutation and counts only; they must not store
+raw prompts, raw terminal transcripts, raw CLI stderr, provider request
+payloads, or secret-bearing Feishu material.
+
+Ledger event type is also bounded. Allowed event types are:
+
+- `goal_updated`
+- `work_item_created`
+- `work_item_status_changed`
+- `evidence_attached`
+- `blocker_recorded`
+- `blocker_resolved`
+- `copilot_observation_recorded`
+- `feishu_reference_linked`
+- `next_step_proposed`
+- `manual_completion_recorded`
+
+Evidence references are structured references, not raw evidence blobs. A
+reference may include only these fields:
+
+- `kind`
+- `label`
+- `status`
+- `ref`
+- `path`
+- `sessionId`
+- `copilotRunId`
+- `feishuChatId`
+- `feishuMessageId`
+- `createdAt`
+
+Marking a work item `done` requires at least one evidence reference or a
+non-empty manual completion reason. If completion uses the manual reason path,
+the mutation must append a `manual_completion_recorded` ledger event and an
+`audit_logs` row that records the presence of the manual completion reason
+without storing sensitive raw details.
+
+Project-manager diagnostics expose counts and safe latest status markers only
+for Project Manager Ledger state. Diagnostics may include goal, work item,
+ledger event, and status totals, plus the latest safe marker timestamps. They
+must not include raw ledger details, raw evidence details, raw terminal
+transcripts, raw CLI stderr, raw Feishu messages, webhook signatures, event
+encrypt keys, Feishu tokens, provider credentials, API keys, JWTs, attach
+tokens, private keys, or cross-tenant mapping details.
+
+Feishu free-form text is never an approval or execution channel for the Project
+Manager Ledger. Feishu free-form text cannot approve pending actions, cannot
+send terminal input, cannot mutate ledger records directly, and cannot bypass
+the existing pending-action approval routes. Feishu outbound updates remain
+approval gated through the existing Copilot prepare-tool and pending-action
+policy checks, including chat allowlists, identity mode, user mapping, and
+tenant configuration. Ledger events may link a bounded Feishu reference, but
+they do not execute Feishu writes.
+
 ### Integrations
 
 - `GET /api/v1/integrations/feishu/status`
