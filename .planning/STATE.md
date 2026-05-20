@@ -1,11 +1,11 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
-status: milestone_complete
-stopped_at: Milestone complete (Phase 05 was final phase)
-last_updated: 2026-05-20T18:33:11.274Z
-last_activity: 2026-05-20 -- Phase 05 execution started
+milestone_name: Post-Beta Trust Closure
+status: Awaiting next milestone
+stopped_at: Milestone v1.0 archived; next milestone not yet planned
+last_updated: 2026-05-21T03:05:00+08:00
+last_activity: 2026-05-21 -- Milestone v1.0 archived and roadmap collapsed
 progress:
   total_phases: 5
   completed_phases: 5
@@ -18,17 +18,17 @@ progress:
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-19)
+See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability.
-**Current focus:** Milestone complete
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 05
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-05-20
+Phase: Milestone v1.0 complete
+Plan: Next milestone not started
+Status: Awaiting next milestone
+Last activity: 2026-05-21 -- Milestone v1.0 archived and roadmap collapsed
 
 Progress: [##########] 100%
 
@@ -82,16 +82,16 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None in `.planning/todos/` yet. Current backlog is represented by `.planning/ROADMAP.md`.
+None in `.planning/todos/` yet. Candidate next-milestone directions are listed in `.planning/ROADMAP.md`.
 
 ### Blockers/Concerns
 
-- Phase 1 evidence closure is complete with explicit caveats, not false Pass claims.
+- v1.0 milestone audit passed: 23/23 traced requirements, 5/5 phases, no integration blockers.
 - Live Copilot provider evidence remains `Caveat` until a disposable provider credential and explicit model id are available.
 - Physical Windows/WSL evidence remains `Caveat` until a real Windows/WSL host completes the terminal checklist.
-- First-user feedback remains `Caveat` until completed feedback is attached and mapped.
-- Phase 1 security verification is complete with `01-SECURITY.md` verified and no open threats.
-- Phase 2 public Feishu webhook safety is complete: signature verification, replay protection, persistent rate limiting, and fail-closed policy semantics are implemented and tested.
+- Completed first-user feedback remains `Caveat` until attached and mapped.
+- Public Feishu webhook live exposure still needs real developer-console callback verification and shared replay/rate storage before multi-instance deployment.
+- Remote execution remains architecture-only until a separate implementation milestone is planned.
 
 ## Deferred Items
 
@@ -103,6 +103,10 @@ None in `.planning/todos/` yet. Current backlog is represented by `.planning/ROA
 
 ## Session Continuity
 
-Last session: 2026-05-20T17:06:21.808Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/OF-05-remote-execution-architecture/05-CONTEXT.md
+Last session: 2026-05-21T03:05:00+08:00
+Stopped at: Milestone v1.0 archived; ready for next milestone planning
+Resume file: .planning/ROADMAP.md
+
+## Operator Next Steps
+
+- Start the next milestone with `$gsd-new-milestone`.

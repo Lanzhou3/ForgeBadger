@@ -4,7 +4,7 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is beta feedback readiness after the post-beta Copilot/Feishu hardening work merged into `master` on 2026-05-19. The next work should improve release trust and first-user operability before expanding remote/autonomous execution.
+The current product stage is v1.0 Post-Beta Trust Closure, archived on 2026-05-20. The next milestone should remove the remaining real-world beta caveats with live-provider, physical Windows/WSL, and completed first-user feedback evidence before broad runtime expansion.
 
 ## Core Value
 
@@ -20,16 +20,19 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - [x] Codex Background Tasks are accepted only as an observable control-plane prototype; Web prompt/turn input remains disabled by default.
 - [x] Platform AI Copilot first-release contract is provider-backed, read-heavy, approval-gated, tenant-scoped, redacted, and regression-gated.
 - [x] Feishu integration supports safe diagnostics, tenant configuration, user mappings, approval-gated outbound actions, and a guarded inbound command bridge.
+- [x] v1.0 closed stale release/source-of-truth drift and aligned post-beta documentation with the merged PR #2 state.
+- [x] v1.0 recorded live-provider, physical Windows/WSL, and first-user evidence as explicit caveats with owners and rerun paths instead of false pass claims.
+- [x] v1.0 implemented public Feishu webhook boundary controls with raw-body signature verification, replay/rate persistence, fail-closed policy gates, redaction, and audit rows.
+- [x] v1.0 hardened dependency, adapter, provider, Settings, Copilot, and Web E2E failure states for first-user recovery.
+- [x] v1.0 added a tenant-scoped project-manager ledger backend with atomic audit writes, safe diagnostics, and Copilot read tools.
+- [x] v1.0 produced a remote execution architecture, threat model, rollback plan, and verification report while keeping runtime implementation deferred.
 
 ### Active
 
-- [ ] Close external beta evidence gaps: live Copilot provider smoke, physical Windows/WSL smoke, and first-user Copilot hardening feedback.
-- [ ] Keep CI/release gates aligned with the documented release plan and post-beta trust boundary.
-- [ ] Refresh stale handoff documents that still describe MVP Phase 0, blocked trial readiness, or PR #2 as open after the merge.
-- [ ] Design public Feishu webhook ingress with signature verification, replay protection, and shared rate limiting before any public endpoint is enabled.
-- [ ] Improve first-user dependency, CLI availability, provider configuration, and platform-specific remediation states.
-- [ ] Harden Copilot Web state monotonicity, request ordering, partial-error states, and E2E mock strictness.
-- [ ] Defer project-manager work item and ledger tables until the Feishu command bridge has real safety evidence.
+- [ ] Plan v1.1 around the remaining external beta evidence: disposable live Copilot provider smoke, physical Windows/WSL terminal smoke, and completed first-user feedback.
+- [ ] Decide public Feishu live exposure readiness, including real developer-console callback verification, encrypted payload policy, and shared replay/rate storage for multi-instance deployment.
+- [ ] Decide whether the project-manager ledger needs a first-class Web workflow or remains a Copilot/diagnostics support surface.
+- [ ] If remote execution is prioritized, plan implementation from the Phase 5 architecture package with SSH target registry, remote agent protocol, terminal transport, and rollback gates.
 
 ### Out of Scope
 
@@ -38,15 +41,16 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - Codex app-server Web prompt/turn workflow — `/turn` stays default-disabled behind `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1` and is not a user-facing workflow.
 - Provider API-key/model override injection for Codex launch paths — Codex remains subscription/SDK-managed.
 - Feishu free-form approvals, Feishu terminal input, or Feishu as execution authority — Feishu is only a controlled collaboration channel into Copilot.
-- SSH/remote execution — tracked as a separate architecture item, not part of the current beta evidence and Feishu safety roadmap.
+- SSH/remote execution runtime implementation — now architecture-reviewed, but still not part of the local-first beta unless selected as a separate future milestone.
 
 ## Context
 
 - Source of truth docs: `CLAUDE.md`, `MEMORY.md`, `docs/DEVELOPMENT-PLAN.md`, `docs/TECH-ARCHITECTURE.md`, `docs/TEST-PLAN.md`, `docs/CI-CD-PLAN.md`, `docs/API.md`, and the relevant `docs/reports/*.md`.
 - Approved post-RC sequence was A -> B -> C: close local-first RC evidence, guarded Codex app-server prototype, then product experience hardening.
 - PR #2 (`post-beta-release-gates`) merged on 2026-05-19 after Copilot/Feishu release-gate hardening and green remote CI.
-- Remaining acceptance gaps are mostly external evidence and first-user feedback, not broad local implementation gaps.
-- GSD planning is newly bootstrapped in `.planning/` for follow-on phases. Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
+- v1.0 Post-Beta Trust Closure is archived in `.planning/milestones/` with a passed milestone audit and 23/23 traced requirements satisfied.
+- Remaining acceptance gaps are explicit external evidence caveats and later-scope product decisions, not broad local implementation gaps.
+- GSD planning is ready for the next milestone cycle. Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints
 
@@ -67,8 +71,10 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Keep Codex app-server as observable prototype only | Prompt/turn workflows add transcript, retention, and autonomy risks | Good |
 | Treat Copilot as approval-gated assistant, not autonomous agent | Reduces blast radius while still enabling operational help and bounded proposals | Good |
 | Treat Feishu as collaboration ingress, not execution authority | Prevents chat messages from becoming terminal or approval control | Good |
-| Close external evidence before expanding scope | CI-green is not enough for live provider, physical Windows/WSL, or first-user trust | Pending |
-| Track SSH/remote execution separately | Remote execution changes threat model and should not be bundled into local beta hardening | Pending |
+| Close external evidence before expanding scope | CI-green is not enough for live provider, physical Windows/WSL, or first-user trust | Good - caveats preserved and next actions recorded in v1.0 |
+| Track SSH/remote execution separately | Remote execution changes threat model and should not be bundled into local beta hardening | Good - Phase 5 kept it architecture-only |
+| Require public Feishu ingress to fail closed before exposure | Chat input must not become approval, terminal, or cross-tenant authority | Good |
+| Keep project-manager state OpenForge-owned | Ledger events need auditability and tenant scope, not Feishu text authority | Good |
 
 ---
-*Last updated: 2026-05-19 after GSD bootstrap from post-beta review.*
+*Last updated: 2026-05-21 after v1.0 milestone close.*
