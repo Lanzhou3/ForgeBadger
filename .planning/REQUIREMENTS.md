@@ -33,9 +33,9 @@
 
 ### Project Manager Expansion
 
-- [x] **PM-01**: Project-manager work item and ledger tables are introduced only after Feishu bridge safety evidence is accepted.
-- [x] **PM-02**: Project-manager state remains auditable, tenant-scoped, and separate from terminal authority.
-- [x] **PM-03**: Any future Feishu approval semantics require explicit OpenForge approval tokens and audit rows, not natural language approval text.
+- [ ] **PM-01**: Project-manager work item and ledger tables are introduced only after Feishu bridge safety evidence is accepted.
+- [ ] **PM-02**: Project-manager state remains auditable, tenant-scoped, and separate from terminal authority.
+- [ ] **PM-03**: Any future Feishu approval semantics require explicit OpenForge approval tokens and audit rows, not natural language approval text.
 
 ## Deferred Requirements
 
@@ -79,9 +79,9 @@
 | UX-05 | Phase 3 | Complete |
 | UX-06 | Phase 3 | Complete |
 | UX-07 | Phase 3 | Complete |
-| PM-01 | Phase 4 | Complete |
-| PM-02 | Phase 4 | Complete |
-| PM-03 | Phase 4 | Complete |
+| PM-01 | Phase 4 | Pending |
+| PM-02 | Phase 4 | Pending |
+| PM-03 | Phase 4 | Pending |
 | REM-01 | Phase 5 | Pending |
 | REM-02 | Phase 5 | Pending |
 | COD-01 | Phase 5 | Pending |

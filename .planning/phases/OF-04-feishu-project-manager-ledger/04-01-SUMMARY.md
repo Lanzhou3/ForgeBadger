@@ -37,7 +37,8 @@ patterns-established:
   - "Evidence references are structured bounded pointers, not raw evidence blobs."
   - "Every future project-manager mutation must write a ledger event and an audit_logs row atomically."
 
-requirements-completed: [PM-01, PM-02, PM-03]
+requirements-addressed: [PM-01, PM-02, PM-03]
+requirements-completed: []
 
 duration: 5min
 completed: 2026-05-20
@@ -60,6 +61,7 @@ completed: 2026-05-20
 - Added the `Project Manager Ledger` REST contract to `docs/API.md`, including exact table names, migration path, project-scoped route prefix, envelope semantics, zod validation expectations, and Copilot read-tool names.
 - Documented bounded work item statuses, allowed state transitions, event types, evidence reference fields, and the rule that `done` requires evidence or a manual completion reason.
 - Locked audit, diagnostics, Feishu, and terminal boundaries so 04-02 can implement without interpreting authority or redaction semantics.
+- Clarified that PM-01, PM-02, and PM-03 are addressed by the contract but remain open until 04-02 implements and verifies the backend surfaces.
 
 ## Task Commits
 
@@ -91,6 +93,10 @@ completed: 2026-05-20
 ## Deviations from Plan
 
 None - plan executed exactly as written.
+
+## Requirement Closure
+
+PM-01, PM-02, and PM-03 remain pending after 04-01. This plan establishes the implementation contract; 04-02 must introduce the migration-backed tables, repository, routes, Copilot read tools, diagnostics, and regression evidence before those requirements can be marked complete.
 
 ## Auth Gates
 
