@@ -121,9 +121,17 @@ Plans:
 
 Plans:
 
+**Wave 1**
+
 - [ ] 03-01: Harden dependency and runtime failure states.
-- [ ] 03-02: Harden provider/Copilot recovery and state clarity.
 - [ ] 03-03: Refresh trial checklist and feedback routing from observed user reports.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 03-02: Harden provider/Copilot recovery and state clarity.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 03-04: Harden Web E2E mocks, selectors, and Copilot state ordering.
 
 ### Phase 4: Feishu Project Manager Ledger
