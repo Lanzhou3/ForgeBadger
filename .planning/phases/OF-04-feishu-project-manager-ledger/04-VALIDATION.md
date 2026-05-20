@@ -1,9 +1,9 @@
 ---
 phase: 04
 slug: feishu-project-manager-ledger
-status: draft
+status: complete
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-05-20
 ---
 
@@ -38,11 +38,11 @@ created: 2026-05-20
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 04-01-01 | 04-01 | 1 | PM-01, PM-02, PM-03 | T-04-01 / T-04-02 / T-04-03 | Ledger contract names exact tables/statuses/event types and excludes Feishu approval or terminal authority. | docs review | `rg -n "project_manager_goals|project_manager_work_items|project_manager_ledger_events|Feishu" .planning/phases/OF-04-feishu-project-manager-ledger/04-01-PLAN.md` | pending | pending |
-| 04-02-01 | 04-02 | 2 | PM-01 | T-04-01 | Migration and Drizzle schema create tenant-scoped project-manager tables after accepted Feishu bridge safety. | schema | `pnpm --dir packages/gateway test test/db-schema.test.ts test/feishu-integration.test.ts` | existing | pending |
-| 04-02-02 | 04-02 | 2 | PM-02 | T-04-01 / T-04-04 | Repository filters by `user_id` and `project_id`, appends ledger events atomically, writes audit rows, and rejects done status without evidence or manual reason. | repository | `pnpm --dir packages/gateway test test/project-manager-repository.test.ts` | wave 0 | pending |
-| 04-02-03 | 04-02 | 2 | PM-02 | T-04-01 / T-04-03 | REST and Copilot read tools expose only tenant-scoped, redacted, bounded project-manager state. | route/tool | `pnpm --dir packages/gateway test test/copilot-tools.test.ts test/copilot-routes.test.ts` | existing | pending |
-| 04-02-04 | 04-02 | 2 | PM-02, PM-03 | T-04-02 / T-04-03 | Diagnostics expose counts/status markers only and no secret-bearing ledger/audit/Feishu details. | diagnostics | `pnpm --dir packages/gateway test test/diagnostics.test.ts` | existing | pending |
+| 04-01-01 | 04-01 | 1 | PM-01, PM-02, PM-03 | T-04-01 / T-04-02 / T-04-03 | Ledger contract names exact tables/statuses/event types and excludes Feishu approval or terminal authority. | docs review | `rg -n "project_manager_goals|project_manager_work_items|project_manager_ledger_events|Feishu" .planning/phases/OF-04-feishu-project-manager-ledger/04-01-PLAN.md` | existing | green |
+| 04-02-01 | 04-02 | 2 | PM-01 | T-04-01 | Migration and Drizzle schema create tenant-scoped project-manager tables after accepted Feishu bridge safety. | schema | `pnpm --dir packages/gateway test test/db-schema.test.ts test/feishu-integration.test.ts` | existing | green |
+| 04-02-02 | 04-02 | 2 | PM-02 | T-04-01 / T-04-04 | Repository filters by `user_id` and `project_id`, appends ledger events atomically, writes audit rows, and rejects done status without evidence or manual reason. | repository | `pnpm --dir packages/gateway test test/project-manager-repository.test.ts` | existing | green |
+| 04-02-03 | 04-02 | 2 | PM-02 | T-04-01 / T-04-03 | REST and Copilot read tools expose only tenant-scoped, redacted, bounded project-manager state. | route/tool | `pnpm --dir packages/gateway test test/copilot-tools.test.ts test/copilot-routes.test.ts` | existing | green |
+| 04-02-04 | 04-02 | 2 | PM-02, PM-03 | T-04-02 / T-04-03 | Diagnostics expose counts/status markers only and no secret-bearing ledger/audit/Feishu details. | diagnostics | `pnpm --dir packages/gateway test test/diagnostics.test.ts` | existing | green |
 
 *Status values: pending, green, red, flaky.*
 
@@ -50,12 +50,12 @@ created: 2026-05-20
 
 ## Wave 0 Requirements
 
-- [ ] `packages/gateway/test/project-manager-repository.test.ts` - stubs and fixtures for PM-01/PM-02 repository coverage.
-- [ ] `packages/gateway/src/db/repositories/project-manager-repository.ts` - repository under test.
-- [ ] `packages/gateway/src/routes/project-manager.ts` - project-scoped API route if not mounted inside an existing project route.
-- [ ] `packages/gateway/test/db-schema.test.ts` - expected project-manager tables.
-- [ ] `packages/gateway/test/copilot-tools.test.ts` - project-manager read tool coverage.
-- [ ] `packages/gateway/test/diagnostics.test.ts` - diagnostics count/redaction coverage.
+- [x] `packages/gateway/test/project-manager-repository.test.ts` - stubs and fixtures for PM-01/PM-02 repository coverage.
+- [x] `packages/gateway/src/db/repositories/project-manager-repository.ts` - repository under test.
+- [x] `packages/gateway/src/routes/project-manager.ts` - project-scoped API route if not mounted inside an existing project route.
+- [x] `packages/gateway/test/db-schema.test.ts` - expected project-manager tables.
+- [x] `packages/gateway/test/copilot-tools.test.ts` - project-manager read tool coverage.
+- [x] `packages/gateway/test/diagnostics.test.ts` - diagnostics count/redaction coverage.
 
 ---
 
