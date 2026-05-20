@@ -370,27 +370,27 @@ These commands should be used as review gates, with expected matches documented 
 | A3 | Future remote-agent method names in the example are illustrative only. | Code Examples | Future implementation may use different names, but must preserve typed operation allowlist and schema validation. |
 | A4 | Static scope-leak commands require human interpretation of expected matches. | Code Examples, Validation Architecture | A zero-match policy would fail on existing legitimate deferred-scope docs and `/turn` disabled references. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Future SSH transport selection**
+1. **RESOLVED - Future SSH transport selection**
    - What we know: Phase 5 should not install packages, and future implementation must not hand-roll SSH crypto. [CITED: .planning/phases/OF-05-remote-execution-architecture/05-CONTEXT.md]
-   - What's unclear: Whether the runtime phase will call the OpenSSH binary or use a Node SSH library. [ASSUMED]
-   - Recommendation: Defer package choice to the runtime phase and require package legitimacy audit plus security review before install. [ASSUMED]
+   - Resolution: Phase 5 does not choose or install an SSH transport. Runtime implementation must choose OpenSSH binary versus a Node SSH library in a later implementation phase, with package legitimacy audit and security review before any install. [ASSUMED]
+   - Planning impact: Treat SSH transport choice as a deferred runtime-phase decision, not a blocker for the architecture package. [ASSUMED]
 
-2. **Remote agent bootstrap mechanism**
+2. **RESOLVED - Remote agent bootstrap mechanism**
    - What we know: The seed spec lists `openforge doctor --remote` versus manual install as an open question. [CITED: docs/superpowers/specs/2026-05-11-ssh-remote-execution-design.md]
-   - What's unclear: Whether first implementation should install/launch a transient agent over SSH or require manual installation. [ASSUMED]
-   - Recommendation: Phase 5 threat model should document both bootstrap risks and leave the final installer UX to a later runtime plan. [ASSUMED]
+   - Resolution: Phase 5 documents bootstrap risks and required controls only. The final remote-agent bootstrap UX is deferred to the runtime implementation phase. [ASSUMED]
+   - Planning impact: Threat model must cover bootstrap abuse cases, but no installer or bootstrap implementation belongs in Phase 5. [ASSUMED]
 
-3. **Private key import**
+3. **RESOLVED - Private key import**
    - What we know: Phase 5 context defers private key import unless encryption, passphrase, deletion, and security review are included. [CITED: .planning/phases/OF-05-remote-execution-architecture/05-CONTEXT.md]
-   - What's unclear: Whether users will accept `ssh-agent`/key-path-only first release. [ASSUMED]
-   - Recommendation: Keep first remote implementation architecture on `ssh-agent`/key path and record private key import as a later design gate. [ASSUMED]
+   - Resolution: Private key import is explicitly deferred. First implementation architecture should prefer `ssh-agent` or user-selected key path unless a later phase includes encryption-at-rest, passphrase handling, deletion semantics, and security review. [CITED: .planning/phases/OF-05-remote-execution-architecture/05-CONTEXT.md]
+   - Planning impact: The Phase 5 architecture package must record private key import as a later design gate, not as a planned first-release capability. [ASSUMED]
 
-4. **WSL as remote smoke**
+4. **RESOLVED - WSL as remote smoke**
    - What we know: WSL can be an optional explicit SSH smoke host but does not replace physical Windows/WSL local terminal caveat evidence. [CITED: .planning/phases/OF-05-remote-execution-architecture/05-CONTEXT.md]
-   - What's unclear: Which host will be available for manual remote smoke in the later runtime phase. [ASSUMED]
-   - Recommendation: Phase 5 should specify smoke categories, not claim availability. [ASSUMED]
+   - Resolution: Phase 5 specifies smoke categories only. WSL may be used as an optional explicitly configured SSH smoke host in a later runtime phase, but it cannot substitute for physical Windows/WSL local terminal caveat evidence. [CITED: .planning/phases/OF-05-remote-execution-architecture/05-CONTEXT.md]
+   - Planning impact: Verification must not claim remote smoke availability or close local Windows/WSL caveats during this design phase. [ASSUMED]
 
 ## Environment Availability
 
