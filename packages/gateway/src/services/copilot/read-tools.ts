@@ -6,6 +6,15 @@ import { CopilotRepository } from "../../db/repositories/copilot-repository.js";
 import { ModelProviderRepository, type ModelProfile, type ProviderProfile } from "../../db/repositories/model-provider-repository.js";
 import { NotificationRepository, type Notification } from "../../db/repositories/notification-repository.js";
 import { PluginRepository } from "../../db/repositories/plugin-repository.js";
+import {
+  PROJECT_MANAGER_LEDGER_EVENT_TYPES,
+  PROJECT_MANAGER_WORK_ITEM_STATUSES,
+  ProjectManagerRepository,
+  type ProjectManagerEvidenceRef,
+  type ProjectManagerGoal,
+  type ProjectManagerLedgerEvent,
+  type ProjectManagerWorkItem
+} from "../../db/repositories/project-manager-repository.js";
 import { ProjectRepository, type Project } from "../../db/repositories/project-repository.js";
 import { ProjectSkillRepository, type ProjectSkill } from "../../db/repositories/project-skill-repository.js";
 import { SessionRepository, type Session } from "../../db/repositories/session-repository.js";
@@ -32,6 +41,20 @@ const projectScopedLimitInput = z.object({
 }).strict();
 const projectDetailInput = z.object({
   projectId: z.string().min(1)
+}).strict();
+const projectManagerWorkItemsInput = z.object({
+  projectId: z.string().min(1),
+  status: z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES).optional(),
+  limit: z.number().int().min(1).max(50).optional()
+}).strict();
+const projectManagerWorkItemInput = z.object({
+  projectId: z.string().min(1),
+  workItemId: z.string().min(1)
+}).strict();
+const projectManagerLedgerInput = z.object({
+  projectId: z.string().min(1),
+  eventType: z.enum(PROJECT_MANAGER_LEDGER_EVENT_TYPES).optional(),
+  limit: z.number().int().min(1).max(50).optional()
 }).strict();
 const skillDetailInput = z.object({
   skillId: z.string().min(1),
@@ -248,6 +271,35 @@ const projectDetailModelInputSchema = {
   type: "object",
   properties: {
     projectId: { type: "string", minLength: 1 }
+  },
+  required: ["projectId"],
+  additionalProperties: false
+};
+const projectManagerWorkItemsModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    status: { type: "string", enum: [...PROJECT_MANAGER_WORK_ITEM_STATUSES] },
+    limit: { type: "integer", minimum: 1, maximum: 50 }
+  },
+  required: ["projectId"],
+  additionalProperties: false
+};
+const projectManagerWorkItemModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    workItemId: { type: "string", minLength: 1 }
+  },
+  required: ["projectId", "workItemId"],
+  additionalProperties: false
+};
+const projectManagerLedgerModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    eventType: { type: "string", enum: [...PROJECT_MANAGER_LEDGER_EVENT_TYPES] },
+    limit: { type: "integer", minimum: 1, maximum: 50 }
   },
   required: ["projectId"],
   additionalProperties: false
@@ -670,6 +722,42 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       }
     },
     {
+      name: "openforge.get_project_goal",
+      description: "Read the current project-manager goal for one visible OpenForge project.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: projectDetailInput,
+      modelInputSchema: projectDetailModelInputSchema,
+      execute: async (input, context) => getProjectManagerGoal(input, context)
+    },
+    {
+      name: "openforge.list_project_work_items",
+      description: "List project-manager work items for one visible OpenForge project without raw ledger details.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: projectManagerWorkItemsInput,
+      modelInputSchema: projectManagerWorkItemsModelInputSchema,
+      execute: async (input, context) => listProjectManagerWorkItems(input, context)
+    },
+    {
+      name: "openforge.get_project_work_item",
+      description: "Read one project-manager work item for a visible OpenForge project without raw details.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: projectManagerWorkItemInput,
+      modelInputSchema: projectManagerWorkItemModelInputSchema,
+      execute: async (input, context) => getProjectManagerWorkItem(input, context)
+    },
+    {
+      name: "openforge.get_project_development_ledger",
+      description: "Read bounded project-manager ledger event markers for one visible OpenForge project.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: projectManagerLedgerInput,
+      modelInputSchema: projectManagerLedgerModelInputSchema,
+      execute: async (input, context) => getProjectManagerDevelopmentLedger(input, context)
+    },
+    {
       name: "openforge.list_agents",
       description: "List OpenForge agents visible to the current user, optionally scoped to one project.",
       risk: "read",
@@ -847,6 +935,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
             dashboardHealth: diagnostics.dashboardHealth,
             adapters: diagnostics.adapters,
             modelProviders: diagnostics.modelProviders,
+            projectManager: diagnostics.projectManager,
             copilot: diagnostics.copilot
           }
         };
@@ -1170,6 +1259,65 @@ function readLimit(input: unknown): number {
   return typeof value === "number" ? value : 20;
 }
 
+function projectManagerWorkItemOptions(input: unknown) {
+  const data = input as {
+    status?: typeof PROJECT_MANAGER_WORK_ITEM_STATUSES[number] | undefined;
+    limit?: number | undefined;
+  };
+  return {
+    ...(data.status ? { status: data.status } : {}),
+    ...(data.limit !== undefined ? { limit: data.limit } : {})
+  };
+}
+
+function projectManagerLedgerOptions(input: unknown) {
+  const data = input as { limit?: number | undefined };
+  return data.limit !== undefined ? { limit: data.limit } : {};
+}
+
+function getVisibleProject(context: CopilotToolContext, projectId: string): Project | undefined {
+  return new ProjectRepository(context.db, context.userId).getById(projectId);
+}
+
+async function getProjectManagerGoal(input: unknown, context: CopilotToolContext) {
+  const { projectId } = projectDetailInput.parse(input);
+  const project = getVisibleProject(context, projectId);
+  if (!project) return { goal: null };
+  const goal = new ProjectManagerRepository(context.db, context.userId).getGoal(project.id);
+  return { goal: goal ? toProjectManagerGoalSummary(goal) : null };
+}
+
+async function listProjectManagerWorkItems(input: unknown, context: CopilotToolContext) {
+  const { projectId } = projectManagerWorkItemsInput.parse(input);
+  const project = getVisibleProject(context, projectId);
+  if (!project) return { workItems: [] };
+  return {
+    workItems: new ProjectManagerRepository(context.db, context.userId)
+      .listWorkItems(project.id, projectManagerWorkItemOptions(input))
+      .map(toProjectManagerWorkItemSummary)
+  };
+}
+
+async function getProjectManagerWorkItem(input: unknown, context: CopilotToolContext) {
+  const { projectId, workItemId } = projectManagerWorkItemInput.parse(input);
+  const project = getVisibleProject(context, projectId);
+  if (!project) return { workItem: null };
+  const workItem = new ProjectManagerRepository(context.db, context.userId).getWorkItem(project.id, workItemId);
+  return { workItem: workItem ? toProjectManagerWorkItemSummary(workItem) : null };
+}
+
+async function getProjectManagerDevelopmentLedger(input: unknown, context: CopilotToolContext) {
+  const { projectId, eventType } = projectManagerLedgerInput.parse(input);
+  const project = getVisibleProject(context, projectId);
+  if (!project) return { events: [] };
+  return {
+    events: new ProjectManagerRepository(context.db, context.userId)
+      .listLedgerEvents(project.id, projectManagerLedgerOptions(input))
+      .filter((event) => !eventType || event.eventType === eventType)
+      .map(toProjectManagerLedgerEventSummary)
+  };
+}
+
 interface RuntimeSessionSummary {
   id: string;
   status: string;
@@ -1215,6 +1363,62 @@ function toProjectDetail(project: Project, sessions: Session[], runtimeSessions:
     templateId: project.templateId,
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString()
+  };
+}
+
+function toProjectManagerGoalSummary(goal: ProjectManagerGoal) {
+  return {
+    id: goal.id,
+    projectId: goal.projectId,
+    summary: goal.summary,
+    constraints: goal.constraints,
+    acceptanceCriteria: goal.acceptanceCriteria,
+    status: goal.status,
+    updatedAt: goal.updatedAt
+  };
+}
+
+function toProjectManagerWorkItemSummary(workItem: ProjectManagerWorkItem) {
+  return {
+    id: workItem.id,
+    projectId: workItem.projectId,
+    title: workItem.title,
+    description: workItem.description,
+    status: workItem.status,
+    priority: workItem.priority,
+    acceptanceCriteria: workItem.acceptanceCriteria,
+    evidenceRefCount: workItem.evidenceRefs.length,
+    evidenceRefs: workItem.evidenceRefs.map(toProjectManagerEvidenceRefSummary),
+    feishuRefCount: workItem.feishuRefs.length,
+    updatedAt: workItem.updatedAt
+  };
+}
+
+function toProjectManagerLedgerEventSummary(event: ProjectManagerLedgerEvent) {
+  return {
+    id: event.id,
+    projectId: event.projectId,
+    workItemId: event.workItemId,
+    eventType: event.eventType,
+    status: event.status,
+    evidenceRefCount: event.evidenceRefs.length,
+    feishuRefCount: event.feishuRefs.length,
+    createdAt: event.createdAt
+  };
+}
+
+function toProjectManagerEvidenceRefSummary(ref: ProjectManagerEvidenceRef) {
+  return {
+    kind: ref.kind,
+    label: ref.label,
+    status: ref.status,
+    ref: ref.ref,
+    path: ref.path,
+    sessionId: ref.sessionId,
+    copilotRunId: ref.copilotRunId,
+    feishuChatId: ref.feishuChatId,
+    feishuMessageId: ref.feishuMessageId,
+    createdAt: ref.createdAt
   };
 }
 
