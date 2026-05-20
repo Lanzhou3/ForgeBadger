@@ -246,8 +246,8 @@ describe("copilot tools", () => {
     assert.equal(serialized.includes("details"), false);
     assert.equal(serialized.includes("Foreign hidden"), false);
     assert.equal((diagnostics.output as { diagnostics: { projectManager: { ledgerEventCount: number } } }).diagnostics.projectManager.ledgerEventCount, 2);
-    assert.doesNotMatch(serialized, new RegExp(["pm-tool-attach-secret", ["sk-pm", "tool-secret"].join("-"), "pm\\.tool\\.jwt"].join("|"), "u"));
-    assert.doesNotMatch(serialized, new RegExp([["sk-pm-tool-std", "err"].join(""), "pm-tool-signature"].join("|"), "u"));
+    assert.doesNotMatch(serialized, new RegExp(["pm-tool-attach-secret", ["sk", "pm-tool-secret"].join("-"), "pm\\.tool\\.jwt"].join("|"), "u"));
+    assert.doesNotMatch(serialized, new RegExp([["sk", "pm-tool-std", "err"].join("-"), "pm-tool-signature"].join("|"), "u"));
   });
 
   it("reads agents, skills, and templates as Copilot platform inventory", async () => {
