@@ -1063,6 +1063,70 @@ test("Copilot keeps showing progress while an async run has not returned events 
   await expect(page.getByText("Gateway is healthy.")).toHaveCount(0);
 });
 
+test("Copilot ignores stale live run detail after a terminal update", async ({ page }) => {
+  let getRunCount = 0;
+  await mockCopilotApis(page, {
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        status: 202,
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Cancel stale work",
+              createdAt: 1778490000000,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "running",
+            goal: "Cancel stale work",
+            source: "copilot",
+            updatedAt: 100,
+          },
+          events: [{ id: "event-1", runId: "run-1", type: "run_started", sequence: 1 }],
+          pendingActions: [],
+        }),
+      });
+    },
+    onGetRun: async (route) => {
+      getRunCount += 1;
+      const terminal = getRunCount === 1;
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-1",
+            status: terminal ? "cancelled" : "running",
+            goal: "Cancel stale work",
+            source: "copilot",
+            updatedAt: terminal ? 300 : 100,
+          },
+          events: terminal
+            ? [{ id: "event-2", runId: "run-1", type: "run_cancelled", sequence: 2 }]
+            : [{ id: "event-1", runId: "run-1", type: "run_started", sequence: 1 }],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Cancel stale work");
+  await page.getByRole("button", { name: "Send" }).click();
+  await dispatchCopilotRunUpdated(page);
+
+  await expect.poll(() => getRunCount).toBeGreaterThanOrEqual(1);
+  await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
+
+  await dispatchCopilotRunUpdated(page);
+
+  await expect.poll(() => getRunCount).toBeGreaterThanOrEqual(2);
+  await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
+  await expect(page.getByText("running", { exact: true })).toHaveCount(0);
+});
+
 test("Copilot renders assistant delta events before the final run response", async ({ page }) => {
   await mockCopilotApis(page, {
     onSendMessage: async (route) => {
@@ -1685,4 +1749,19 @@ function envelope(data: unknown) {
 
 function copilotMessage(page: Page, text: string) {
   return page.getByTestId("copilot-message-bubble").filter({ hasText: text });
+}
+
+async function dispatchCopilotRunUpdated(page: Page) {
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("openforge:gateway-event", {
+      detail: {
+        type: "copilot_run_updated",
+        payload: {
+          event_type: "run_updated",
+          run_id: "run-1",
+          conversation_id: "conversation-1",
+        },
+      },
+    }));
+  });
 }
