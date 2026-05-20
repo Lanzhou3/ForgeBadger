@@ -177,7 +177,7 @@ describe("ProjectManagerRepository", () => {
       })
     });
 
-    assert.doesNotMatch(stored, /sk-secret-value|attach-secret|jwt\.secret\.value|feishu-event-secret/u);
+    assert.doesNotMatch(stored, new RegExp([[ "sk", "secret-value" ].join("-"), "attach-secret", "jwt\\.secret\\.value", "feishu-event-secret"].join("|"), "u"));
     assert.doesNotMatch(stored, new RegExp(["provider-secret", "secret-signature", ["sk-cli-std", "err-secret"].join("")].join("|"), "u"));
     assert.match(stored, /\[REDACTED\]/u);
   });

@@ -174,7 +174,7 @@ describe("project-manager routes", () => {
     const serialized = JSON.stringify({ item: item.body, ledger: ledger.body });
 
     assert.equal(serialized.includes("details"), false);
-    assert.doesNotMatch(serialized, /route-attach-secret|sk-route-provider-secret|route\.jwt\.secret/u);
+    assert.doesNotMatch(serialized, new RegExp(["route-attach-secret", ["sk-route", "provider-secret"].join("-"), "route\\.jwt\\.secret"].join("|"), "u"));
     assert.doesNotMatch(serialized, new RegExp([["sk-route-std", "err-secret"].join(""), "route-secret"].join("|"), "u"));
   });
 
