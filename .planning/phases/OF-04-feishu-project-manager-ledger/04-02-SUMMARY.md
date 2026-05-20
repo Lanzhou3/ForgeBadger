@@ -94,8 +94,10 @@ Each task was committed atomically:
 8. **Secret-scan cleanup:** `f139fa5` - `test(04-02): reduce project-manager secret scan literals`
 9. **Secret-scan cleanup:** `5c4a872` - `test(04-02): remove remaining project-manager secret literals`
 10. **Secret-scan cleanup:** `fd6164d` - `test(04-02): remove project-manager secret literals`
+11. **Post-review hardening:** `0087411` - `fix(04-02): harden project-manager ledger boundaries`
+12. **Post-review hardening:** `cedad76` - `fix(04-02): redact project-manager evidence refs`
 
-_Note: TDD tasks have explicit RED then GREEN commits. The secret-scan cleanup commits are test-only refinements to keep the plan's secret scan focused on real leaks rather than synthetic fixture strings._
+_Note: TDD tasks have explicit RED then GREEN commits. The secret-scan cleanup commits are test-only refinements to keep the plan's secret scan focused on real leaks rather than synthetic fixture strings. Post-review hardening closed code-review blockers around ledger filtering, public `details` ingress, and raw evidence-reference text._
 
 ## Files Created/Modified
 
@@ -128,9 +130,11 @@ All required plan-level commands passed:
 - `[BLOCKING] pnpm --dir packages/gateway test test/db-schema.test.ts test/project-manager-repository.test.ts`
   - Passed after Task 1 before REST/Copilot/diagnostics work, and passed again at final verification.
 - `pnpm --dir packages/gateway test test/project-manager-routes.test.ts test/copilot-tools.test.ts test/diagnostics.test.ts`
-  - Passed: 60 tests, 3 suites.
+  - Passed after post-review hardening as part of the combined Phase 04 verification.
 - `pnpm --dir packages/gateway test test/feishu-integration.test.ts test/copilot-routes.test.ts`
   - Passed: 166 tests, 4 suites.
+- `pnpm --dir packages/gateway test test/db-schema.test.ts test/project-manager-repository.test.ts test/project-manager-routes.test.ts test/copilot-tools.test.ts test/diagnostics.test.ts test/feishu-integration.test.ts test/copilot-routes.test.ts`
+  - Passed after post-review hardening: 245 tests, 9 suites.
 - `pnpm --dir packages/gateway typecheck`
   - Passed.
 - `git diff --check`
