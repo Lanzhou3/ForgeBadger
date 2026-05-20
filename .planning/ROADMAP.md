@@ -155,7 +155,12 @@ Plans:
 
 Plans:
 
+**Wave 1**
+
 - [ ] 04-01: Specify ledger model, state transitions, and audit semantics.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 04-02: Implement backend and diagnostics surfaces for project-manager state.
 
 ### Phase 5: Remote Execution Architecture
