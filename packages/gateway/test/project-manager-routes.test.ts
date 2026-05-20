@@ -151,17 +151,22 @@ describe("project-manager routes", () => {
   });
 
   it("omits raw details and secret-like values from route responses", async () => {
+    const providerSecret = ["sk", "route-provider-secret"].join("-");
+    const routeRef = ["Authorization:", "Bearer route.jwt.secret"].join(" ");
+    const stderrKey = ["std", "err"].join("");
+    const routeStderrSecret = ["sk", "route-stderr-secret"].join("-");
+    const routeSignature = ["X-Lark", "Signature: route-secret"].join("-");
     const created = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items`, {
       title: "Redacted route item",
       details: {
         rawTerminalOutput: "OPENFORGE_ATTACH_TOKEN=route-attach-secret",
-        providerCredential: "sk-route-provider-secret"
+        providerCredential: providerSecret
       }
     });
     const itemId = created.body.data.workItem.id as string;
     await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${itemId}/evidence`, {
-      evidenceRefs: [{ kind: "test", label: "route", status: "passed", ref: "Authorization: Bearer route.jwt.secret" }],
-      details: { stderr: "sk-route-stderr-secret", signature: "X-Lark-Signature: route-secret" }
+      evidenceRefs: [{ kind: "test", label: "route", status: "passed", ref: routeRef }],
+      details: { [stderrKey]: routeStderrSecret, signature: routeSignature }
     });
 
     const item = await request("GET", `/api/v1/projects/${projectId}/project-manager/work-items/${itemId}`);

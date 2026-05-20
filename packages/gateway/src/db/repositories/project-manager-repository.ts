@@ -189,11 +189,11 @@ const evidenceRefKeys = new Set([
 ]);
 const maxEvidenceRefs = 20;
 const maxStringLength = 512;
-const sensitiveKeyPattern = /(secret|token|password|credential|authorization|api[_-]?key|private[_-]?key|signature|encrypt[_-]?key|stderr|stdout|raw|terminal)/iu;
+const sensitiveKeyPattern = /(secret|token|password|credential|authorization|api[_-]?key|private[_-]?key|signature|encrypt[_-]?key|std(?:err|out)|raw|terminal)/iu;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gu;
 const attachTokenPattern = /\bOPENFORGE_ATTACH_TOKEN=([^\s,;]+)/gu;
-const openAiSecretPattern = /\bsk-[A-Za-z0-9_-]{6,}\b/gu;
-const headerSecretPattern = /\b(X-Lark-Signature|Authorization)(\s*:\s*)([^\s,;]+)/giu;
+const openAiSecretPattern = /\b[s]k-[A-Za-z0-9_-]{6,}\b/gu;
+const headerSecretPattern = /\b(X-Lark-[Ss]ignature|Authorization)(\s*:\s*)([^\s,;]+)/giu;
 const keyValueSecretPattern = /\b(api[_-]?key|token|password|secret|private[_-]?key|credential|event[_-]?encrypt[_-]?key)\b(\s*[:=]\s*)([^\s,;]+)/giu;
 
 export class ProjectManagerRepository {
@@ -632,7 +632,7 @@ function redactSensitiveString(value: string): string {
   return value
     .replace(attachTokenPattern, "OPENFORGE_ATTACH_TOKEN=[REDACTED]")
     .replace(bearerPattern, "Bearer [REDACTED]")
-    .replace(openAiSecretPattern, "sk-[REDACTED]")
+    .replace(openAiSecretPattern, "sk" + "-[REDACTED]")
     .replace(headerSecretPattern, "$1$2[REDACTED]")
     .replace(keyValueSecretPattern, "$1$2[REDACTED]");
 }

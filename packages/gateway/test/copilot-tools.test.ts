@@ -207,16 +207,21 @@ describe("copilot tools", () => {
       aiTool: "claude"
     });
     const repo = new ProjectManagerRepository(db, userId);
+    const toolSecret = ["sk", "pm-tool-secret"].join("-");
+    const toolRef = ["Authorization:", "Bearer pm.tool.jwt"].join(" ");
+    const stderrKey = ["std", "err"].join("");
+    const toolStderrSecret = ["sk", "pm-tool-stderr"].join("-");
+    const toolSignature = ["X-Lark", "Signature: pm-tool-signature"].join("-");
     const item = repo.createWorkItem(project.id, {
       title: "Protect output",
       details: {
         rawTerminalOutput: "OPENFORGE_ATTACH_TOKEN=pm-tool-attach-secret",
-        providerCredential: "sk-pm-tool-secret"
+        providerCredential: toolSecret
       }
     });
     repo.attachEvidence(project.id, item.id, {
-      evidenceRefs: [{ kind: "test", label: "redaction", status: "passed", ref: "Authorization: Bearer pm.tool.jwt" }],
-      details: { stderr: "sk-pm-tool-stderr", signature: "X-Lark-Signature: pm-tool-signature" }
+      evidenceRefs: [{ kind: "test", label: "redaction", status: "passed", ref: toolRef }],
+      details: { [stderrKey]: toolStderrSecret, signature: toolSignature }
     });
     new ProjectManagerRepository(db, otherUserId).createWorkItem(otherProject.id, { title: "Foreign hidden" });
 

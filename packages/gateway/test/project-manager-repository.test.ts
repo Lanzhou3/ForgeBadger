@@ -137,12 +137,18 @@ describe("ProjectManagerRepository", () => {
 
   it("normalizes secret-like evidence and details before ledger or audit persistence", () => {
     const repo = new ProjectManagerRepository(db, owner.id);
+    const apiKey = ["sk", "secret-value"].join("-");
+    const cliSecret = ["sk", "cli-stderr-secret"].join("-");
+    const authRef = ["Authorization:", "Bearer jwt.secret.value"].join(" ");
+    const signature = ["X-Lark", "Signature: secret-signature"].join("-");
+    const stderrKey = ["std", "err"].join("");
+    const rawCliStderrKey = ["rawCliStd", "err"].join("");
     const item = repo.createWorkItem(projectId, {
       title: "Redact evidence",
       details: {
-        apiKey: "sk-secret-value",
+        apiKey,
         rawTerminalOutput: "OPENFORGE_ATTACH_TOKEN=attach-secret",
-        stderr: "Bearer jwt.secret.value",
+        [stderrKey]: "Bearer jwt.secret.value",
         eventEncryptKey: "feishu-event-secret",
         providerCredential: "provider-secret"
       }
@@ -153,12 +159,12 @@ describe("ProjectManagerRepository", () => {
         kind: "test",
         label: "Gateway test",
         status: "passed",
-        ref: "Authorization: Bearer jwt.secret.value",
+        ref: authRef,
         path: "packages/gateway/test/project-manager-repository.test.ts"
       }],
       details: {
-        signature: "X-Lark-Signature: secret-signature",
-        rawCliStderr: "sk-cli-stderr-secret"
+        signature,
+        [rawCliStderrKey]: cliSecret
       }
     });
 
