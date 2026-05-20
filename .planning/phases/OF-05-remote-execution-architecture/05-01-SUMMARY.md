@@ -77,6 +77,8 @@ Each task was committed atomically:
 2. **Task 2: Create local-safe remote execution rollback plan** - `57ede4b` (`docs(05-01): add remote rollback plan`)
 3. **Task 3: Record architecture verification evidence** - `46316e4` (`docs(05-01): record architecture verification`)
 
+Verification gate marker fix: `9f66859` (`docs(05-01): add key link markers`) closed `gsd-sdk query verify.key-links` literal escaped-pattern matching without changing rendered doc semantics.
+
 Plan state start was committed separately in `d8b784c` (`docs(state): start phase 5 execution`).
 
 ## Files Created/Modified
@@ -104,6 +106,7 @@ None - plan executed exactly as written.
 ## Issues Encountered
 
 - `docs/superpowers/*` and `docs/reports/*` are ignored by `.gitignore`; Phase 5 artifacts were intentionally force-added to make the plan deliverables tracked without broadening the phase to `.gitignore` cleanup.
+- `gsd-sdk query verify.key-links` treats escaped plan patterns as literal strings; an HTML comment marker was added to the SSH design addendum so the machine gate passes while the visible Markdown links stay clean.
 - `pnpm --dir packages/gateway test test/codex-app-server-routes.test.ts test/terminal-ws.test.ts` failed under local Node v24.14.1 with native assertion `Assertion failed: (env_->execution_async_id()) == (0)`. The verification report records this as a caveat.
 - Initial Playwright sandbox run failed to start `config.webServer`; the same command passed after approved loopback/server binding.
 
@@ -113,6 +116,8 @@ None - plan executed exactly as written.
 - Task 1 fail-closed artifact/link/threat/failure-code checks - PASS
 - Task 2 fail-closed rollback section/token/failure/non-goal checks - PASS
 - Task 3 report frontmatter/section/command/caveat checks - PASS
+- `gsd-sdk query verify.artifacts .planning/phases/OF-05-remote-execution-architecture/05-01-PLAN.md` - PASS, 4/4 artifacts
+- `gsd-sdk query verify.key-links .planning/phases/OF-05-remote-execution-architecture/05-01-PLAN.md` - PASS, 3/3 links
 - Runtime/package/lockfile status guard - PASS
 - `pnpm --dir packages/gateway test test/diagnostics.test.ts test/safe-resolve.test.ts` - PASS, 2 tests
 - `pnpm --dir packages/gateway test test/codex-app-server-routes.test.ts test/terminal-ws.test.ts` - CAVEAT, Node/runtime assertion
