@@ -110,6 +110,65 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: mapped_requirement
+    attributes:
+      label: Mapped UX requirement
+      description: Choose the closest Phase 3 requirement for the primary issue.
+      options:
+        - UX-01 dependency/runtime guidance
+        - UX-02 provider/model/credential recovery
+        - UX-03 Copilot run and pending-action state coherence
+        - UX-04 reproducible feedback quality
+        - UX-05 active-run monotonic ordering
+        - UX-06 partial API/query failure recovery
+        - UX-07 E2E mock/selector regression signal
+        - REL-* release evidence caveat
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - dependency
+        - provider
+        - CLI
+        - platform
+        - Copilot
+        - docs
+        - E2E
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: severity
+      options:
+        - blocker
+        - high
+        - medium
+        - low
+    validations:
+      required: true
+
+  - type: textarea
+    id: caveat_owner
+    attributes:
+      label: Owner and next action for caveats
+      description: Required for pass with caveats or blocked results.
+      value: |
+        Owner:
+        Next action:
+        Evidence needed to move to pass:
+        Follow-up phase or issue:
+    validations:
+      required: false
+
   - type: textarea
     id: windows_wsl
     attributes:

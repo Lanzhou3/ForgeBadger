@@ -72,6 +72,28 @@ write what Claude Code asked, what OpenForge showed, and what happened next
 - [ ] Added screenshots or written observations.
 - [ ] Added reproduction steps for each issue.
 
+## Phase 3 Hardening Triage
+
+Map every observed issue to at least one Phase 3 requirement before filing
+feedback:
+
+| Requirement | Use When The Report Shows |
+|-------------|---------------------------|
+| UX-01 | Missing tmux, missing Claude/Codex/OpenCode CLI, unsupported native Windows terminal mode, or unclear runtime dependency guidance. |
+| UX-02 | Provider, model, or credential readiness failures that are hard to recover from or risk exposing secrets. |
+| UX-03 | Copilot run, pending-action, cancellation, or waiting-for-approval state is confusing after retry, refresh, or multiple tabs. |
+| UX-04 | Feedback lacks enough environment, command, browser, expected/actual, or reproduction detail to become an engineering task. |
+| UX-05 | Copilot Web active-run state appears to move backward after polling, events, refresh, or out-of-order responses. |
+| UX-06 | Settings, Copilot, or diagnostics panels show empty content instead of a recoverable API/query failure state. |
+| UX-07 | Browser E2E evidence hides an unhandled `/api/v1/*` route, uses brittle selectors, or misses key state-ordering assertions. |
+
+For every `pass with caveats` or `blocked` result, record:
+
+- Owner:
+- Next action:
+- Evidence needed to move from Caveat/Blocked to Pass:
+- Follow-up phase or issue:
+
 ## Copilot Smoke
 
 - [ ] Maintainer live-provider harness result recorded, if available:

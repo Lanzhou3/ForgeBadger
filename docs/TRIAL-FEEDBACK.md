@@ -15,6 +15,15 @@ attachments before sharing.
 - Windows native or WSL, if applicable:
 - Browser and version:
 
+Result rubric:
+
+- pass: required evidence is attached and no blocking first-user issue remains.
+- pass with caveats: implementation worked, but external evidence such as live
+  provider smoke, physical Windows/WSL terminal proof, or real browser terminal
+  evidence is missing. Include owner and next action.
+- blocked: the trial cannot continue. Include the blocking step, owner, and next
+  action.
+
 ## Dependency Versions
 
 ```bash
@@ -71,10 +80,25 @@ project secrets, or the browser auth token value.
 
 ## Triage
 
-- Category: dependency / provider / CLI / platform / Copilot / docs / other
+- Category: dependency / provider / CLI / platform / Copilot / docs / E2E / other
 - Severity: blocker / high / medium / low
-- Mapped requirement: REL-* or UX-*
-- Follow-up phase: Phase 1 evidence / Phase 3 hardening / later
+- Mapped requirement: UX-01 / UX-02 / UX-03 / UX-04 / UX-05 / UX-06 / UX-07 / REL-*
+- Follow-up phase: Phase 3 hardening / Phase 4 / Phase 5 / later
+- Owner:
+- Next action:
+- Caveat status: none / pass with caveats / blocked
+
+Requirement mapping guide:
+
+| Requirement | Use When The Report Shows |
+|-------------|---------------------------|
+| UX-01 | Missing tmux, missing local CLI, unsupported native Windows terminal mode, or unclear dependency/runtime guidance. |
+| UX-02 | Provider/model/credential readiness failures or recovery paths that risk exposing secrets. |
+| UX-03 | Copilot run, pending-action, cancellation, or waiting-for-approval state confusion. |
+| UX-04 | Feedback is not reproducible enough to become an engineering task. |
+| UX-05 | Copilot active-run state regresses after polling, events, refresh, or out-of-order responses. |
+| UX-06 | Settings, Copilot, or diagnostics panel shows an empty state instead of a recoverable API/query failure. |
+| UX-07 | E2E mock, selector, or state-ordering regression signal is weak or hiding API contract drift. |
 
 ## Browser Evidence
 
