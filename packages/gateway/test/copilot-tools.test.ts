@@ -195,6 +195,32 @@ describe("copilot tools", () => {
     assert.deepEqual((ledger.output as { events: unknown[] }).events, []);
   });
 
+  it("filters project-manager ledger tool output by event type before limiting", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "Filtered PM",
+      path: "/tmp/filtered-pm-tools",
+      aiTool: "claude"
+    });
+    const repo = new ProjectManagerRepository(db, userId);
+    const item = repo.createWorkItem(project.id, { title: "Filter ledger" });
+    repo.updateWorkItemStatus(project.id, item.id, { status: "in_progress" });
+    repo.attachEvidence(project.id, item.id, {
+      evidenceRefs: [{ kind: "test", label: "copilot", status: "passed", ref: "test/copilot-tools.test.ts" }]
+    });
+
+    const result = await executeCopilotTool(registry, "openforge.get_project_development_ledger", {
+      projectId: project.id,
+      eventType: "evidence_attached",
+      limit: 1
+    }, context(userId));
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const events = (result.output as { events: Array<{ eventType: string }> }).events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.eventType, "evidence_attached");
+  });
+
   it("redacts project-manager tool output and diagnostics summaries", async () => {
     const project = new ProjectRepository(db, userId).create({
       name: "Redacted PM",

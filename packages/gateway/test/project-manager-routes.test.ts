@@ -110,6 +110,7 @@ describe("project-manager routes", () => {
     const repo = new ProjectManagerRepository(db, owner.id);
     const item = repo.createWorkItem(projectId, { title: "Validate routes" });
     const beforeEvents = repo.listLedgerEvents(projectId, { workItemId: item.id }).length;
+    const beforeProjectEvents = repo.listLedgerEvents(projectId).length;
     const beforeAudit = new AuditLogRepository(db, owner.id).list({
       resourceType: "project_manager_work_item",
       resourceId: item.id
@@ -123,13 +124,20 @@ describe("project-manager routes", () => {
     });
     const overLimit = await request("GET", `/api/v1/projects/${projectId}/project-manager/work-items?limit=101`);
     const invalidEventType = await request("GET", `/api/v1/projects/${projectId}/project-manager/ledger?eventType=raw_terminal_output`);
+    const rawDetails = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items`, {
+      title: "Raw details",
+      details: {
+        note: "$ claude --dangerously-skip-permissions\nstdout: raw terminal transcript\nstderr: raw failure output"
+      }
+    });
 
-    for (const response of [invalidStatus, invalidEvidence, overLimit, invalidEventType]) {
+    for (const response of [invalidStatus, invalidEvidence, overLimit, invalidEventType, rawDetails]) {
       assert.equal(response.status, 400);
       assert.equal(response.body.code, 1);
     }
     assert.equal(repo.getWorkItem(projectId, item.id)?.status, "todo");
     assert.equal(repo.listLedgerEvents(projectId, { workItemId: item.id }).length, beforeEvents);
+    assert.equal(repo.listLedgerEvents(projectId).length, beforeProjectEvents);
     assert.equal(new AuditLogRepository(db, owner.id).list({
       resourceType: "project_manager_work_item",
       resourceId: item.id
@@ -150,26 +158,42 @@ describe("project-manager routes", () => {
     assert.equal(repo.getWorkItem(projectId, item.id)?.status, "in_progress");
   });
 
+  it("filters ledger events by type before applying the response limit", async () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const item = repo.createWorkItem(projectId, { title: "Ledger filter" });
+    repo.updateWorkItemStatus(projectId, item.id, { status: "in_progress" });
+    await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/evidence`, {
+      evidenceRefs: [{ kind: "test", label: "route", status: "passed", ref: "test/project-manager-routes.test.ts" }]
+    });
+
+    const response = await request("GET", `/api/v1/projects/${projectId}/project-manager/ledger?eventType=evidence_attached&limit=1`);
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.code, 0);
+    assert.equal(response.body.data.events.length, 1);
+    assert.equal(response.body.data.events[0].eventType, "evidence_attached");
+  });
+
   it("omits raw details and secret-like values from route responses", async () => {
     const providerSecret = ["sk", "route-provider-secret"].join("-");
     const routeRef = ["Authorization:", "Bearer route.jwt.secret"].join(" ");
     const stdErrKey = ["std", "err"].join("");
     const routeStdErrSecret = ["sk", ["route-std", "err-secret"].join("")].join("-");
     const routeSignature = ["X-Lark", "Signature: route-secret"].join("-");
-    const created = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items`, {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const created = repo.createWorkItem(projectId, {
       title: "Redacted route item",
       details: {
         rawTerminalOutput: "OPENFORGE_ATTACH_TOKEN=route-attach-secret",
         providerCredential: providerSecret
       }
     });
-    const itemId = created.body.data.workItem.id as string;
-    await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${itemId}/evidence`, {
+    repo.attachEvidence(projectId, created.id, {
       evidenceRefs: [{ kind: "test", label: "route", status: "passed", ref: routeRef }],
       details: { [stdErrKey]: routeStdErrSecret, signature: routeSignature }
     });
 
-    const item = await request("GET", `/api/v1/projects/${projectId}/project-manager/work-items/${itemId}`);
+    const item = await request("GET", `/api/v1/projects/${projectId}/project-manager/work-items/${created.id}`);
     const ledger = await request("GET", `/api/v1/projects/${projectId}/project-manager/ledger`);
     const serialized = JSON.stringify({ item: item.body, ledger: ledger.body });
 

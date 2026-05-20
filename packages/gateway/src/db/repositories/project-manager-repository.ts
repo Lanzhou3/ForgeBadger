@@ -189,7 +189,11 @@ const evidenceRefKeys = new Set([
 ]);
 const maxEvidenceRefs = 20;
 const maxStringLength = 512;
+const maxDetailArrayItems = 20;
+const maxDetailKeys = 20;
+const maxDetailDepth = 4;
 const sensitiveKeyPattern = /(secret|token|password|credential|authorization|api[_-]?key|private[_-]?key|signature|encrypt[_-]?key|std(?:err|out)|raw|terminal)/iu;
+const rawDetailTextPattern = /[\r\n\x00-\x08\x0B\x0C\x0E-\x1F]|\b(?:std(?:err|out)|terminal transcript|raw terminal|command output)\b|\$\s+\S+/iu;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gu;
 const attachTokenPattern = /\bOPENFORGE_ATTACH_TOKEN=([^\s,;]+)/gu;
 const openAiSecretPattern = /\b[s]k-[A-Za-z0-9_-]{6,}\b/gu;
@@ -411,9 +415,20 @@ export class ProjectManagerRepository {
 
   listLedgerEvents(
     projectId: string,
-    options: { workItemId?: string; limit?: number } = {}
+    options: { workItemId?: string; eventType?: ProjectManagerLedgerEventType; limit?: number } = {}
   ): ProjectManagerLedgerEvent[] {
     const limit = clampLimit(options.limit);
+    const eventType = options.eventType ? normalizeEventType(options.eventType) : undefined;
+    if (options.workItemId && eventType) {
+      return (this.db.prepare(`
+        SELECT *
+        FROM project_manager_ledger_events
+        WHERE user_id = ? AND project_id = ? AND work_item_id = ? AND event_type = ?
+        ORDER BY created_at ASC, rowid ASC
+        LIMIT ?
+      `).all(this.userId, projectId, options.workItemId, eventType, limit) as LedgerEventRow[]).map(toLedgerEvent);
+    }
+
     if (options.workItemId) {
       return (this.db.prepare(`
         SELECT *
@@ -422,6 +437,16 @@ export class ProjectManagerRepository {
         ORDER BY created_at ASC, rowid ASC
         LIMIT ?
       `).all(this.userId, projectId, options.workItemId, limit) as LedgerEventRow[]).map(toLedgerEvent);
+    }
+
+    if (eventType) {
+      return (this.db.prepare(`
+        SELECT *
+        FROM project_manager_ledger_events
+        WHERE user_id = ? AND project_id = ? AND event_type = ?
+        ORDER BY created_at ASC, rowid ASC
+        LIMIT ?
+      `).all(this.userId, projectId, eventType, limit) as LedgerEventRow[]).map(toLedgerEvent);
     }
 
     return (this.db.prepare(`
@@ -608,24 +633,38 @@ function normalizeEvidenceString(value: string): string {
 }
 
 function normalizeDetails(value: unknown): Record<string, unknown> {
-  const normalized = normalizeDetailValue(value, "");
+  const normalized = normalizeDetailValue(value, "", 0);
   if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return {};
   return normalized as Record<string, unknown>;
 }
 
-function normalizeDetailValue(value: unknown, key: string): unknown {
+function normalizeDetailValue(value: unknown, key: string, depth: number): unknown {
   if (sensitiveKeyPattern.test(key)) return "[REDACTED]";
-  if (typeof value === "string") return redactSensitiveString(value);
-  if (Array.isArray(value)) return value.slice(0, 50).map((item) => normalizeDetailValue(item, key));
+  if (typeof value === "string") return normalizeDetailString(value);
+  if (Array.isArray(value)) {
+    if (value.length > maxDetailArrayItems) throw new Error("Project-manager detail arrays cannot exceed 20 items");
+    return value.map((item) => normalizeDetailValue(item, key, depth + 1));
+  }
   if (value && typeof value === "object") {
+    if (depth >= maxDetailDepth) return "[REDACTED]";
+    const entries = Object.entries(value);
+    if (entries.length > maxDetailKeys) throw new Error("Project-manager details cannot exceed 20 keys");
     return Object.fromEntries(
-      Object.entries(value).map(([entryKey, entryValue]) => [
+      entries.map(([entryKey, entryValue]) => [
         entryKey,
-        normalizeDetailValue(entryValue, entryKey)
+        normalizeDetailValue(entryValue, entryKey, depth + 1)
       ])
     );
   }
   return value;
+}
+
+function normalizeDetailString(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) return "";
+  if (normalized.length > maxStringLength) throw new Error("Project-manager detail values must be 512 characters or fewer");
+  const redacted = redactSensitiveString(normalized);
+  return rawDetailTextPattern.test(redacted) ? "[REDACTED]" : redacted;
 }
 
 function redactSensitiveString(value: string): string {

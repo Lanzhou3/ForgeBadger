@@ -34,7 +34,6 @@ const goalBodySchema = z.object({
   summary: z.string().min(1).max(1_000),
   constraints: z.array(z.string().min(1).max(1_000)).max(50).optional(),
   acceptanceCriteria: z.array(z.string().min(1).max(1_000)).max(50).optional(),
-  details: z.record(z.unknown()).optional(),
   status: z.string().min(1).max(64).optional()
 }).strict();
 
@@ -45,20 +44,17 @@ const workItemCreateSchema = z.object({
   priority: z.number().int().min(0).max(100).optional(),
   acceptanceCriteria: z.array(z.string().min(1).max(1_000)).max(50).optional(),
   evidenceRefs: z.array(evidenceRefSchema).max(20).optional(),
-  feishuRefs: z.array(evidenceRefSchema).max(20).optional(),
-  details: z.record(z.unknown()).optional()
+  feishuRefs: z.array(evidenceRefSchema).max(20).optional()
 }).strict();
 
 const statusBodySchema = z.object({
   status: statusSchema,
   evidenceRefs: z.array(evidenceRefSchema).max(20).optional(),
-  manualCompletionReason: z.string().min(1).max(1_000).optional(),
-  details: z.record(z.unknown()).optional()
+  manualCompletionReason: z.string().min(1).max(1_000).optional()
 }).strict();
 
 const evidenceBodySchema = z.object({
-  evidenceRefs: z.array(evidenceRefSchema).min(1).max(20),
-  details: z.record(z.unknown()).optional()
+  evidenceRefs: z.array(evidenceRefSchema).min(1).max(20)
 }).strict();
 
 const workItemsQuerySchema = z.object({
@@ -174,10 +170,12 @@ export function createProjectManagerRoutes(db: Database): Router {
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const options = parse.data.limit !== undefined ? { limit: parse.data.limit } : {};
+    const options = {
+      ...(parse.data.eventType ? { eventType: parse.data.eventType } : {}),
+      ...(parse.data.limit !== undefined ? { limit: parse.data.limit } : {})
+    };
     const events = new ProjectManagerRepository(db, userId)
       .listLedgerEvents(project.id, options)
-      .filter((event) => !parse.data.eventType || event.eventType === parse.data.eventType)
       .map(toLedgerEventDto);
     res.json({ code: 0, data: { events }, message: "" });
   });

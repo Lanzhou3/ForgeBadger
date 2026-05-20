@@ -95,6 +95,23 @@ describe("ProjectManagerRepository", () => {
     assert.equal(auditLogs.length, 2);
   });
 
+  it("filters ledger events by type before applying the result limit", () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const item = repo.createWorkItem(projectId, { title: "Collect evidence" });
+    repo.updateWorkItemStatus(projectId, item.id, { status: "in_progress" });
+    repo.attachEvidence(projectId, item.id, {
+      evidenceRefs: [{ kind: "test", label: "repository", status: "passed", ref: "test/project-manager-repository.test.ts" }]
+    });
+
+    const events = repo.listLedgerEvents(projectId, {
+      eventType: "evidence_attached",
+      limit: 1
+    });
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.eventType, "evidence_attached");
+  });
+
   it("rejects done without evidence or manual completion reason before writing rows", () => {
     const repo = new ProjectManagerRepository(db, owner.id);
     const item = repo.createWorkItem(projectId, { title: "Close item" });
@@ -179,6 +196,31 @@ describe("ProjectManagerRepository", () => {
 
     assert.doesNotMatch(stored, new RegExp([[ "sk", "secret-value" ].join("-"), "attach-secret", "jwt\\.secret\\.value", "feishu-event-secret"].join("|"), "u"));
     assert.doesNotMatch(stored, new RegExp(["provider-secret", "secret-signature", ["sk", "cli-std", "err-secret"].join("-")].join("|"), "u"));
+    assert.match(stored, /\[REDACTED\]/u);
+  });
+
+  it("does not persist raw multiline detail notes into projection, ledger, or audit rows", () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const rawTranscript = [
+      "$ claude --dangerously-skip-permissions",
+      "stdout: running terminal command",
+      "stderr: raw failure output"
+    ].join("\n");
+
+    const item = repo.createWorkItem(projectId, {
+      title: "Raw detail guard",
+      details: { note: rawTranscript }
+    });
+    const stored = JSON.stringify({
+      item: repo.getWorkItem(projectId, item.id),
+      events: repo.listLedgerEvents(projectId, { workItemId: item.id }),
+      audit: new AuditLogRepository(db, owner.id).list({
+        resourceType: "project_manager_work_item",
+        resourceId: item.id
+      })
+    });
+
+    assert.doesNotMatch(stored, /dangerously-skip-permissions|stdout: running terminal command|stderr: raw failure output/u);
     assert.match(stored, /\[REDACTED\]/u);
   });
 });

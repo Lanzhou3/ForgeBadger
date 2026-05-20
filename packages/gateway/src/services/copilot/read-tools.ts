@@ -13,6 +13,7 @@ import {
   type ProjectManagerEvidenceRef,
   type ProjectManagerGoal,
   type ProjectManagerLedgerEvent,
+  type ProjectManagerLedgerEventType,
   type ProjectManagerWorkItem
 } from "../../db/repositories/project-manager-repository.js";
 import { ProjectRepository, type Project } from "../../db/repositories/project-repository.js";
@@ -1271,8 +1272,14 @@ function projectManagerWorkItemOptions(input: unknown) {
 }
 
 function projectManagerLedgerOptions(input: unknown) {
-  const data = input as { limit?: number | undefined };
-  return data.limit !== undefined ? { limit: data.limit } : {};
+  const data = input as {
+    eventType?: ProjectManagerLedgerEventType | undefined;
+    limit?: number | undefined;
+  };
+  return {
+    ...(data.eventType ? { eventType: data.eventType } : {}),
+    ...(data.limit !== undefined ? { limit: data.limit } : {})
+  };
 }
 
 function getVisibleProject(context: CopilotToolContext, projectId: string): Project | undefined {
@@ -1307,13 +1314,12 @@ async function getProjectManagerWorkItem(input: unknown, context: CopilotToolCon
 }
 
 async function getProjectManagerDevelopmentLedger(input: unknown, context: CopilotToolContext) {
-  const { projectId, eventType } = projectManagerLedgerInput.parse(input);
+  const { projectId } = projectManagerLedgerInput.parse(input);
   const project = getVisibleProject(context, projectId);
   if (!project) return { events: [] };
   return {
     events: new ProjectManagerRepository(context.db, context.userId)
       .listLedgerEvents(project.id, projectManagerLedgerOptions(input))
-      .filter((event) => !eventType || event.eventType === eventType)
       .map(toProjectManagerLedgerEventSummary)
   };
 }
