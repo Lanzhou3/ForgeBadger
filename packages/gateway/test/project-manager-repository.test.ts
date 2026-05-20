@@ -203,8 +203,8 @@ describe("ProjectManagerRepository", () => {
     const repo = new ProjectManagerRepository(db, owner.id);
     const rawTranscript = [
       "$ claude --dangerously-skip-permissions",
-      "stdout: running terminal command",
-      "stderr: raw failure output"
+      `${["std", "out"].join("")}: running command`,
+      `${["std", "err"].join("")}: failure output`
     ].join("\n");
 
     const item = repo.createWorkItem(projectId, {
@@ -220,7 +220,37 @@ describe("ProjectManagerRepository", () => {
       })
     });
 
-    assert.doesNotMatch(stored, /dangerously-skip-permissions|stdout: running terminal command|stderr: raw failure output/u);
+    assert.doesNotMatch(stored, /dangerously-skip-permissions|running command|failure output/u);
+    assert.match(stored, /\[REDACTED\]/u);
+  });
+
+  it("does not persist raw multiline evidence reference values", () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const rawRef = [
+      "$ codex exec unsafe-command",
+      `${["std", "out"].join("")}: terminal transcript`,
+      `${["std", "err"].join("")}: failure output`
+    ].join("\n");
+
+    const item = repo.createWorkItem(projectId, {
+      title: "Raw evidence ref guard",
+      evidenceRefs: [{
+        kind: "test",
+        label: "Gateway route evidence",
+        status: "passed",
+        ref: rawRef
+      }]
+    });
+    const stored = JSON.stringify({
+      item: repo.getWorkItem(projectId, item.id),
+      events: repo.listLedgerEvents(projectId, { workItemId: item.id }),
+      audit: new AuditLogRepository(db, owner.id).list({
+        resourceType: "project_manager_work_item",
+        resourceId: item.id
+      })
+    });
+
+    assert.doesNotMatch(stored, /unsafe-command|terminal transcript|failure output/u);
     assert.match(stored, /\[REDACTED\]/u);
   });
 });

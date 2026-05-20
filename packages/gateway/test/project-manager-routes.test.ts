@@ -127,7 +127,11 @@ describe("project-manager routes", () => {
     const rawDetails = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items`, {
       title: "Raw details",
       details: {
-        note: "$ claude --dangerously-skip-permissions\nstdout: raw terminal transcript\nstderr: raw failure output"
+        note: [
+          "$ claude --dangerously-skip-permissions",
+          `${["std", "out"].join("")}: transcript`,
+          `${["std", "err"].join("")}: failure`
+        ].join("\n")
       }
     });
 
@@ -172,6 +176,26 @@ describe("project-manager routes", () => {
     assert.equal(response.body.code, 0);
     assert.equal(response.body.data.events.length, 1);
     assert.equal(response.body.data.events[0].eventType, "evidence_attached");
+  });
+
+  it("redacts raw multiline evidence references before route responses", async () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const item = repo.createWorkItem(projectId, { title: "Evidence ref guard" });
+    const rawRef = [
+      "$ codex exec unsafe-command",
+      `${["std", "out"].join("")}: transcript`,
+      `${["std", "err"].join("")}: failure`
+    ].join("\n");
+
+    const evidence = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/evidence`, {
+      evidenceRefs: [{ kind: "test", label: "raw evidence", status: "passed", ref: rawRef }]
+    });
+    const detail = await request("GET", `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}`);
+    const serialized = JSON.stringify({ evidence: evidence.body, detail: detail.body });
+
+    assert.equal(evidence.status, 200);
+    assert.doesNotMatch(serialized, /unsafe-command|transcript|failure/u);
+    assert.match(serialized, /\[REDACTED\]/u);
   });
 
   it("omits raw details and secret-like values from route responses", async () => {

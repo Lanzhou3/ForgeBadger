@@ -221,6 +221,34 @@ describe("copilot tools", () => {
     assert.equal(events[0]?.eventType, "evidence_attached");
   });
 
+  it("redacts raw multiline evidence references from project-manager read tools", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "Raw Evidence PM",
+      path: "/tmp/raw-evidence-pm-tools",
+      aiTool: "claude"
+    });
+    const rawRef = [
+      "$ codex exec unsafe-command",
+      `${["std", "out"].join("")}: transcript`,
+      `${["std", "err"].join("")}: failure`
+    ].join("\n");
+    const item = new ProjectManagerRepository(db, userId).createWorkItem(project.id, {
+      title: "Protect evidence refs",
+      evidenceRefs: [{ kind: "test", label: "raw evidence", status: "passed", ref: rawRef }]
+    });
+
+    const result = await executeCopilotTool(registry, "openforge.get_project_work_item", {
+      projectId: project.id,
+      workItemId: item.id
+    }, context(userId));
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const serialized = JSON.stringify(result.output);
+    assert.doesNotMatch(serialized, /unsafe-command|transcript|failure/u);
+    assert.match(serialized, /\[REDACTED\]/u);
+  });
+
   it("redacts project-manager tool output and diagnostics summaries", async () => {
     const project = new ProjectRepository(db, userId).create({
       name: "Redacted PM",

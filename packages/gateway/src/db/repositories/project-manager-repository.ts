@@ -629,7 +629,8 @@ function normalizeEvidenceString(value: string): string {
   const normalized = value.trim();
   if (!normalized) return "";
   if (normalized.length > maxStringLength) throw new Error("Evidence reference values must be 512 characters or fewer");
-  return redactSensitiveString(normalized);
+  const redacted = redactSensitiveString(normalized);
+  return rawDetailTextPattern.test(redacted) ? "[REDACTED]" : redacted;
 }
 
 function normalizeDetails(value: unknown): Record<string, unknown> {
