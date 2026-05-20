@@ -319,6 +319,102 @@ export const projects = sqliteTable("projects", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 }, (table) => ({ idx_projects_user_path: uniqueIndex("idx_projects_user_path").on(table.userId, table.path) }));
 
+export const projectManagerGoals = sqliteTable(
+  "project_manager_goals",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    summary: text("summary").notNull(),
+    constraintsJson: text("constraints_json").notNull().default("[]"),
+    acceptanceCriteriaJson: text("acceptance_criteria_json").notNull().default("[]"),
+    detailsJson: text("details_json").notNull().default("{}"),
+    status: text("status").notNull().default("active"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_project_manager_goals_user_project: uniqueIndex("idx_project_manager_goals_user_project").on(
+      table.userId,
+      table.projectId
+    )
+  })
+);
+
+export const projectManagerWorkItems = sqliteTable(
+  "project_manager_work_items",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: text("status").notNull().default("todo"),
+    priority: integer("priority").notNull().default(0),
+    acceptanceCriteriaJson: text("acceptance_criteria_json").notNull().default("[]"),
+    evidenceRefsJson: text("evidence_refs_json").notNull().default("[]"),
+    feishuRefsJson: text("feishu_refs_json").notNull().default("[]"),
+    detailsJson: text("details_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_project_manager_work_items_user_project: index("idx_project_manager_work_items_user_project").on(
+      table.userId,
+      table.projectId
+    ),
+    idx_project_manager_work_items_status: index("idx_project_manager_work_items_status").on(
+      table.userId,
+      table.projectId,
+      table.status
+    )
+  })
+);
+
+export const projectManagerLedgerEvents = sqliteTable(
+  "project_manager_ledger_events",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    workItemId: text("work_item_id").references(() => projectManagerWorkItems.id, { onDelete: "set null" }),
+    eventType: text("event_type").notNull(),
+    status: text("status"),
+    evidenceRefsJson: text("evidence_refs_json").notNull().default("[]"),
+    feishuRefsJson: text("feishu_refs_json").notNull().default("[]"),
+    detailsJson: text("details_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date())
+  },
+  (table) => ({
+    idx_project_manager_ledger_events_user_project: index("idx_project_manager_ledger_events_user_project").on(
+      table.userId,
+      table.projectId
+    ),
+    idx_project_manager_ledger_events_type: index("idx_project_manager_ledger_events_type").on(
+      table.userId,
+      table.projectId,
+      table.eventType
+    ),
+    idx_project_manager_ledger_events_created: index("idx_project_manager_ledger_events_created").on(
+      table.userId,
+      table.projectId,
+      table.createdAt
+    )
+  })
+);
+
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   userId: text("user_id")
