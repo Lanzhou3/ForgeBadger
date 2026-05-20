@@ -505,22 +505,25 @@ All implementation-shaping claims in this research are sourced from project docs
 |---|-------|---------|---------------|
 | none | No assumed claim recorded. | n/a | n/a |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should Phase 4 include prepare tools for project-manager writes, or only read tools plus REST read APIs?**
    - What we know: Context D-03 says model-origin write proposals must become pending actions, and D-14 explicitly requires read tools. [CITED: `.planning/phases/OF-04-feishu-project-manager-ledger/04-CONTEXT.md`]
    - What's unclear: The success criteria can pass with durable state/read surfaces, but full project-manager write proposals may expand Plan 04-02. [CITED: `.planning/ROADMAP.md`]
    - Recommendation: Plan 04-01 should specify write proposal scope; Plan 04-02 should implement read tools first and include prepare/approval handlers only if necessary to prove mutation/audit semantics. [VERIFIED: `packages/gateway/src/services/copilot/read-tools.ts`, `packages/gateway/src/routes/copilot.ts`]
+   - RESOLVED: Phase 4 implements REST mutations plus Copilot read tools only. Model-origin project-manager write prepare tools and approval handlers are deferred unless a later phase explicitly adds them; any future model-origin writes must use pending actions.
 
 2. **Exact endpoint prefix: `/projects/:projectId/project-manager` or `/projects/:projectId/manager`?**
    - What we know: Context D-11 prefers `/api/v1/projects/:projectId/project-manager/...`; older broad plan used `/manager`. [CITED: `.planning/phases/OF-04-feishu-project-manager-ledger/04-CONTEXT.md`, `docs/superpowers/plans/2026-05-17-feishu-project-manager-copilot.md`]
    - What's unclear: The exact route name is discretionary if explicit project id and tenant filtering are preserved. [CITED: `.planning/phases/OF-04-feishu-project-manager-ledger/04-CONTEXT.md`]
    - Recommendation: Use `/api/v1/projects/:projectId/project-manager` for clarity and to match Phase 4 context. [CITED: `.planning/phases/OF-04-feishu-project-manager-ledger/04-CONTEXT.md`]
+   - RESOLVED: Use `/api/v1/projects/:projectId/project-manager/...` for Phase 4 routes.
 
 3. **Should manual Web editing exist now?**
    - What we know: Phase 4 is backend-first and Web polish is deferred unless minimal client contract is needed. [CITED: `.planning/phases/OF-04-feishu-project-manager-ledger/04-CONTEXT.md`]
    - What's unclear: Manual editing can be useful but expands frontend scope and ownership boundaries. [VERIFIED: `AGENTS.md`]
    - Recommendation: Do not plan manual Web editing in Phase 4; use API/Copilot/diagnostics proof first. [CITED: `.planning/phases/OF-04-feishu-project-manager-ledger/04-CONTEXT.md`]
+   - RESOLVED: Do not implement manual Web editing in Phase 4; prove the backend, Copilot read tools, and diagnostics surfaces first.
 
 ## Environment Availability
 
