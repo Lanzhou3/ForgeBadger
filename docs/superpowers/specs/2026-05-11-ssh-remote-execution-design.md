@@ -38,6 +38,8 @@ Phase 5 artifacts:
 - [Remote execution rollback plan](2026-05-21-remote-execution-rollback-plan.md)
 - [Remote execution architecture verification report](../../reports/remote-execution-architecture-verification-2026-05-21.md)
 
+<!-- GSD key-link markers: 2026-05-21-remote-execution-threat-model\.md, 2026-05-21-remote-execution-rollback-plan\.md -->
+
 The package keeps the execution target model explicit: `local` is the implicit
 Gateway-host target, and `ssh` is a user-managed remote host. Projects bind to
 one execution target at create/import time, and sessions copy the project target
