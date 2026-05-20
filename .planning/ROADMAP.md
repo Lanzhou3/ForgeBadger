@@ -16,7 +16,7 @@ OpenForge has shipped the local-first control plane, guarded Codex Background Ta
 - [x] **Phase 2: Public Feishu Webhook Safety** - design and implement public webhook boundary controls before exposing Feishu ingress beyond guarded test adapters. (completed 2026-05-20)
 - [x] **Phase 3: First-User Product Hardening** - turn first-user dependency, provider, CLI, and Copilot usability feedback into scoped fixes. (completed 2026-05-20)
 - [x] **Phase 4: Feishu Project Manager Ledger** - add work item and ledger state only after command bridge safety evidence is accepted. (completed 2026-05-20)
-- [ ] **Phase 5: Remote Execution Architecture** - keep SSH/remote execution separate with its own threat model and milestone.
+- [x] **Phase 5: Remote Execution Architecture** - keep SSH/remote execution separate with its own threat model and milestone. (completed 2026-05-20)
 
 ## Phase Details
 
@@ -184,7 +184,7 @@ Plans:
 
 Plans:
 
-- [ ] 05-01: Produce remote-execution architecture and threat model before implementation.
+- [x] 05-01: Produce remote-execution architecture and threat model before implementation.
 
 ## Progress
 
@@ -197,4 +197,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5.
 | 2. Public Feishu Webhook Safety | Post-Beta Trust Closure | 2/2 | Complete   | 2026-05-20 |
 | 3. First-User Product Hardening | Post-Beta Trust Closure | 4/4 | Complete   | 2026-05-20 |
 | 4. Feishu Project Manager Ledger | Collaboration Expansion | 2/2 | Complete   | 2026-05-20 |
-| 5. Remote Execution Architecture | Collaboration Expansion | 0/1 | Deferred | - |
+| 5. Remote Execution Architecture | Collaboration Expansion | 1/1 | Complete   | 2026-05-20 |
