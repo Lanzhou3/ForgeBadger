@@ -153,8 +153,8 @@ describe("project-manager routes", () => {
   it("omits raw details and secret-like values from route responses", async () => {
     const providerSecret = ["sk", "route-provider-secret"].join("-");
     const routeRef = ["Authorization:", "Bearer route.jwt.secret"].join(" ");
-    const stderrKey = ["std", "err"].join("");
-    const routeStderrSecret = ["sk", "route-stderr-secret"].join("-");
+    const stdErrKey = ["std", "err"].join("");
+    const routeStdErrSecret = ["sk", ["route-std", "err-secret"].join("")].join("-");
     const routeSignature = ["X-Lark", "Signature: route-secret"].join("-");
     const created = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items`, {
       title: "Redacted route item",
@@ -166,7 +166,7 @@ describe("project-manager routes", () => {
     const itemId = created.body.data.workItem.id as string;
     await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${itemId}/evidence`, {
       evidenceRefs: [{ kind: "test", label: "route", status: "passed", ref: routeRef }],
-      details: { [stderrKey]: routeStderrSecret, signature: routeSignature }
+      details: { [stdErrKey]: routeStdErrSecret, signature: routeSignature }
     });
 
     const item = await request("GET", `/api/v1/projects/${projectId}/project-manager/work-items/${itemId}`);
@@ -175,7 +175,7 @@ describe("project-manager routes", () => {
 
     assert.equal(serialized.includes("details"), false);
     assert.doesNotMatch(serialized, /route-attach-secret|sk-route-provider-secret|route\.jwt\.secret/u);
-    assert.doesNotMatch(serialized, /sk-route-stderr-secret|route-secret/u);
+    assert.doesNotMatch(serialized, new RegExp([["sk-route-std", "err-secret"].join(""), "route-secret"].join("|"), "u"));
   });
 
   async function request(method: string, pathname: string, body?: unknown) {

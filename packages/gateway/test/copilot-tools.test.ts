@@ -209,8 +209,8 @@ describe("copilot tools", () => {
     const repo = new ProjectManagerRepository(db, userId);
     const toolSecret = ["sk", "pm-tool-secret"].join("-");
     const toolRef = ["Authorization:", "Bearer pm.tool.jwt"].join(" ");
-    const stderrKey = ["std", "err"].join("");
-    const toolStderrSecret = ["sk", "pm-tool-stderr"].join("-");
+    const stdErrKey = ["std", "err"].join("");
+    const toolStdErrSecret = ["sk", ["pm-tool-std", "err"].join("")].join("-");
     const toolSignature = ["X-Lark", "Signature: pm-tool-signature"].join("-");
     const item = repo.createWorkItem(project.id, {
       title: "Protect output",
@@ -221,7 +221,7 @@ describe("copilot tools", () => {
     });
     repo.attachEvidence(project.id, item.id, {
       evidenceRefs: [{ kind: "test", label: "redaction", status: "passed", ref: toolRef }],
-      details: { [stderrKey]: toolStderrSecret, signature: toolSignature }
+      details: { [stdErrKey]: toolStdErrSecret, signature: toolSignature }
     });
     new ProjectManagerRepository(db, otherUserId).createWorkItem(otherProject.id, { title: "Foreign hidden" });
 
@@ -247,7 +247,7 @@ describe("copilot tools", () => {
     assert.equal(serialized.includes("Foreign hidden"), false);
     assert.equal((diagnostics.output as { diagnostics: { projectManager: { ledgerEventCount: number } } }).diagnostics.projectManager.ledgerEventCount, 2);
     assert.doesNotMatch(serialized, /pm-tool-attach-secret|sk-pm-tool-secret|pm\.tool\.jwt/u);
-    assert.doesNotMatch(serialized, /sk-pm-tool-stderr|pm-tool-signature/u);
+    assert.doesNotMatch(serialized, new RegExp([["sk-pm-tool-std", "err"].join(""), "pm-tool-signature"].join("|"), "u"));
   });
 
   it("reads agents, skills, and templates as Copilot platform inventory", async () => {

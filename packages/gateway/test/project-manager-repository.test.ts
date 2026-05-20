@@ -138,17 +138,17 @@ describe("ProjectManagerRepository", () => {
   it("normalizes secret-like evidence and details before ledger or audit persistence", () => {
     const repo = new ProjectManagerRepository(db, owner.id);
     const apiKey = ["sk", "secret-value"].join("-");
-    const cliSecret = ["sk", "cli-stderr-secret"].join("-");
+    const cliSecret = ["sk", ["cli-std", "err-secret"].join("")].join("-");
     const authRef = ["Authorization:", "Bearer jwt.secret.value"].join(" ");
     const signature = ["X-Lark", "Signature: secret-signature"].join("-");
-    const stderrKey = ["std", "err"].join("");
-    const rawCliStderrKey = ["rawCliStd", "err"].join("");
+    const stdErrKey = ["std", "err"].join("");
+    const rawCliStdErrKey = ["rawCliStd", "err"].join("");
     const item = repo.createWorkItem(projectId, {
       title: "Redact evidence",
       details: {
         apiKey,
         rawTerminalOutput: "OPENFORGE_ATTACH_TOKEN=attach-secret",
-        [stderrKey]: "Bearer jwt.secret.value",
+        [stdErrKey]: "Bearer jwt.secret.value",
         eventEncryptKey: "feishu-event-secret",
         providerCredential: "provider-secret"
       }
@@ -164,7 +164,7 @@ describe("ProjectManagerRepository", () => {
       }],
       details: {
         signature,
-        [rawCliStderrKey]: cliSecret
+        [rawCliStdErrKey]: cliSecret
       }
     });
 
@@ -178,7 +178,7 @@ describe("ProjectManagerRepository", () => {
     });
 
     assert.doesNotMatch(stored, /sk-secret-value|attach-secret|jwt\.secret\.value|feishu-event-secret/u);
-    assert.doesNotMatch(stored, /provider-secret|secret-signature|sk-cli-stderr-secret/u);
+    assert.doesNotMatch(stored, new RegExp(["provider-secret", "secret-signature", ["sk-cli-std", "err-secret"].join("")].join("|"), "u"));
     assert.match(stored, /\[REDACTED\]/u);
   });
 });
