@@ -108,6 +108,83 @@ distribution, and per-provider readiness summaries. Plaintext secrets, encrypted
 secrets, credential previews, default headers, and foreign-tenant providers are
 not included.
 
+### Project Manager Ledger
+
+The Project Manager Ledger is Gateway-owned OpenForge control-plane state. It
+does not make Feishu or terminal sessions an authority for project-manager
+state; Feishu may be referenced only as bounded collaboration metadata, and
+terminal sessions may be referenced only by safe identifiers or evidence
+references.
+
+Phase 4 introduces migration-backed durable state in
+`packages/gateway/src/db/migrations/0022_project_manager_ledger.sql` with these
+exact tables:
+
+- `project_manager_goals`
+- `project_manager_work_items`
+- `project_manager_ledger_events`
+
+Every project-manager table includes `user_id`. Project-scoped rows also
+include `project_id`; this includes project goals, work items, and ledger
+events. Repository methods must be constructed with the authenticated
+`user_id`, must filter by `user_id` internally, and must include `project_id`
+for project-scoped reads and mutations. Route handlers must also verify that
+`:projectId` is visible to the authenticated user before returning or mutating
+project-manager data.
+
+Authenticated REST endpoints are mounted under the project-scoped prefix
+`/api/v1/projects/:projectId/project-manager`:
+
+- `GET /api/v1/projects/:projectId/project-manager/goal`
+- `PUT /api/v1/projects/:projectId/project-manager/goal`
+- `GET /api/v1/projects/:projectId/project-manager/work-items`
+- `POST /api/v1/projects/:projectId/project-manager/work-items`
+- `GET /api/v1/projects/:projectId/project-manager/work-items/:workItemId`
+- `PATCH /api/v1/projects/:projectId/project-manager/work-items/:workItemId/status`
+- `POST /api/v1/projects/:projectId/project-manager/work-items/:workItemId/evidence`
+- `GET /api/v1/projects/:projectId/project-manager/ledger`
+
+All Project Manager Ledger REST endpoints use the canonical OpenForge response
+envelope. Success responses return:
+
+```json
+{
+  "code": 0,
+  "data": {},
+  "message": ""
+}
+```
+
+Error responses return:
+
+```json
+{
+  "code": 1,
+  "message": "error description",
+  "details": {}
+}
+```
+
+Inputs are zod validated at the Gateway boundary. Invalid `projectId`,
+`workItemId`, pagination, status, evidence, or goal payloads return `400` with
+the error envelope. Missing or cross-tenant projects and work items return
+`404` without leaking whether another tenant owns the resource.
+
+Copilot can explain project-manager state through these read-only tools:
+
+- `openforge.get_project_goal`
+- `openforge.list_project_work_items`
+- `openforge.get_project_work_item`
+- `openforge.get_project_development_ledger`
+
+These tools are tenant-scoped, project-scoped, redacted, and read-only. They
+return concise current state plus bounded evidence references only. They must
+not return raw terminal transcripts, unbounded ledger details, Feishu webhook
+verification material, provider credentials, attach tokens, or cross-tenant
+mapping details. Model-origin project-manager write proposals are not part of
+the read-tool surface and must use the existing pending-action approval model
+if a later phase adds them.
+
 ### Integrations
 
 - `GET /api/v1/integrations/feishu/status`
