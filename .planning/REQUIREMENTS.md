@@ -23,12 +23,12 @@
 
 ### First-User Hardening
 
-- [ ] **UX-01**: Dependency failures such as missing tmux, missing Claude/Codex CLI, or unsupported native Windows terminal mode surface as actionable UI/CLI guidance.
+- [x] **UX-01**: Dependency failures such as missing tmux, missing Claude/Codex CLI, or unsupported native Windows terminal mode surface as actionable UI/CLI guidance.
 - [ ] **UX-02**: Provider/model/credential readiness failures are recoverable from user-facing Copilot and diagnostics states without exposing secrets.
 - [ ] **UX-03**: Copilot run, pending-action, cancellation, and waiting-for-approval states remain monotonic and understandable under retries, refresh, and multiple tabs.
 - [ ] **UX-04**: Product trial checklist and feedback routing are specific enough that first-user reports are reproducible.
 - [ ] **UX-05**: Copilot Web active-run state updates are guarded by monotonic `updatedAt`/event sequence/request order rules.
-- [ ] **UX-06**: Settings and Copilot panels show recoverable error states for partial API/query failures.
+- [x] **UX-06**: Settings and Copilot panels show recoverable error states for partial API/query failures.
 - [ ] **UX-07**: Web E2E mocks fail fast for unhandled `/api/v1/*` routes and key assertions use stable selectors where practical.
 
 ### Project Manager Expansion
@@ -72,12 +72,12 @@
 | FSH-02 | Phase 2 | Complete |
 | FSH-03 | Phase 2 | Complete |
 | FSH-04 | Phase 2 | Complete |
-| UX-01 | Phase 3 | Pending |
+| UX-01 | Phase 3 | Complete |
 | UX-02 | Phase 3 | Pending |
 | UX-03 | Phase 3 | Pending |
 | UX-04 | Phase 3 | Pending |
 | UX-05 | Phase 3 | Pending |
-| UX-06 | Phase 3 | Pending |
+| UX-06 | Phase 3 | Complete |
 | UX-07 | Phase 3 | Pending |
 | PM-01 | Phase 4 | Pending |
 | PM-02 | Phase 4 | Pending |

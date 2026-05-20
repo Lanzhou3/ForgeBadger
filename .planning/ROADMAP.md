@@ -123,7 +123,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 03-01: Harden dependency and runtime failure states.
+- [x] 03-01: Harden dependency and runtime failure states.
 - [ ] 03-03: Refresh trial checklist and feedback routing from observed user reports.
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -190,6 +190,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5.
 |-------|-----------|----------------|--------|-----------|
 | 1. Beta Evidence Closure | Post-Beta Trust Closure | 4/4 | Complete   | 2026-05-19 |
 | 2. Public Feishu Webhook Safety | Post-Beta Trust Closure | 2/2 | Complete   | 2026-05-20 |
-| 3. First-User Product Hardening | Post-Beta Trust Closure | 0/4 | Not started | - |
+| 3. First-User Product Hardening | Post-Beta Trust Closure | 1/4 | In Progress|  |
 | 4. Feishu Project Manager Ledger | Collaboration Expansion | 0/2 | Not started | - |
 | 5. Remote Execution Architecture | Collaboration Expansion | 0/1 | Deferred | - |
