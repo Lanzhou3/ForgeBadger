@@ -26,7 +26,7 @@ gaps: []
 human_verification: []
 notes:
   - "No previous Phase 05 verification artifact existed."
-  - "Prior verification artifacts for phases 01, 03, and 04 were read for calibration; no Phase 02 verification artifact exists in this checkout."
+  - "Prior verification artifacts for phases 01, 02, 03, and 04 are now present; Phase 02 was added after this initial Phase 05 verification and is included in milestone-level audit evidence."
   - "Current environment caveats from the Phase 05 evidence report are recorded as non-blocking: Node v24.14.1 native assertion for Codex route/terminal WS tests, and Playwright sandbox loopback caveat followed by approved rerun PASS."
   - "Phase commit range changed planning/docs/report/spec files only; runtime source, migrations, Gateway routes, Web UI, terminal transports, package manifests, and lockfiles were not changed."
 ---

@@ -29,7 +29,7 @@ human_verification: []
 notes:
   - "No previous Phase 04 verification artifact existed."
   - "Phase 04 gsd artifact/key-link strict-string checks had three false negatives: line-separated status docs, 'Feishu free-form text' wording, and escaped/alternated regex patterns. Manual code verification resolved all three."
-  - "Phase 02 has no 02-VERIFICATION.md artifact in this checkout; PM-01 was verified through roadmap/requirements completion, Phase 02 summaries, migration ordering, and fresh Feishu/Copilot regression evidence."
+  - "Phase 02 now has a dedicated 02-VERIFICATION.md artifact; PM-01 remains verified through that artifact, roadmap/requirements completion, Phase 02 summaries, migration ordering, and fresh Feishu/Copilot regression evidence."
 ---
 
 # Phase 04: Feishu Project Manager Ledger Verification Report
