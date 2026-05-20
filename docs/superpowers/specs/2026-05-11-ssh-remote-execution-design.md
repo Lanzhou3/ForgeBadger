@@ -16,6 +16,43 @@ before that scope can move into implementation. It does not change the current
 `post-beta-release-gates` acceptance criteria, and it should be implemented in
 a separate feature slice after the release-gate PR is stable.
 
+## Phase 5 Architecture Package
+
+Phase 5 is a docs-only architecture and security package. It does not implement
+runtime routes, database migrations, Web UI, terminal transports, Codex
+app-server runtime behavior, package manifests, or dependency lockfiles. The
+package preserves OpenForge's local-first product position: today's Gateway,
+Web console, local SQLite state, and tmux-backed sessions remain the protected
+default path, while remote execution stays an explicit user-owned `ssh`
+execution target extension.
+
+Hosted collaboration, cloud deployment, billing, telemetry, hosted marketplace,
+and cloud workers remain later-milestone scope and must not enter local-first
+runtime paths from this phase. Existing beta caveats for live providers,
+physical Windows/WSL smoke, and first-user feedback also remain separate
+evidence topics.
+
+Phase 5 artifacts:
+
+- [Remote execution threat model](2026-05-21-remote-execution-threat-model.md)
+- [Remote execution rollback plan](2026-05-21-remote-execution-rollback-plan.md)
+- [Remote execution architecture verification report](../../reports/remote-execution-architecture-verification-2026-05-21.md)
+
+The package keeps the execution target model explicit: `local` is the implicit
+Gateway-host target, and `ssh` is a user-managed remote host. Projects bind to
+one execution target at create/import time, and sessions copy the project target
+at launch. Browser traffic still reaches only Gateway HTTP/WebSocket APIs; no
+browser-to-SSH path is introduced. The terminal WebSocket message contract
+remains unchanged behind a target-aware Gateway transport.
+
+Remote execution continues to require an SSH remote agent over stdio. Raw
+`ssh host "tmux ..."` wrappers, direct browser-to-SSH connections, generic
+arbitrary shell APIs, SQLite terminal scrollback storage, and unapproved Codex
+Web prompt/turn enablement remain rejected. The remote agent owns remote path
+validation, dependency discovery, tmux lifecycle, and remote cleanup on the
+remote host. Terminal input authority stays on the authenticated
+WebSocket/session attach-token path.
+
 ## Goal
 
 Add user-managed remote machines as explicit execution targets while preserving
