@@ -553,10 +553,23 @@ export default function ProjectDetailPage() {
                   ))}
                 </select>
                 {launchableRuntimeAdapters.length === 0 && !adapterDiscoveryLoading ? (
-                  <p className="flex items-center gap-1 text-xs text-destructive">
-                    <AlertTriangle className="size-3.5" />
-                    {t("projects.noLaunchableRuntimeCli")}
-                  </p>
+                  <div className="space-y-2">
+                    <p className="flex items-center gap-1 text-xs text-destructive">
+                      <AlertTriangle className="size-3.5" />
+                      {t("projects.noLaunchableRuntimeCli")}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {t("projects.runtimeCliRecoveryDescription")}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button asChild variant="outline" size="sm">
+                        <Link href="/settings">{t("projects.openSettings")}</Link>
+                      </Button>
+                      <Button asChild variant="ghost" size="sm">
+                        <Link href={projectCopilotHref}>{t("projects.askCopilotReadiness")}</Link>
+                      </Button>
+                    </div>
+                  </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     {t("projects.runtimeCliDescription")}

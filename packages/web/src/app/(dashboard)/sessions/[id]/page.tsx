@@ -145,11 +145,23 @@ export default function TerminalPage() {
             <p className="mt-2 text-sm text-muted-foreground">
               {errorMessage}. {t("sessions.returnToList")}
             </p>
-            <Button asChild variant="outline" size="sm" className="mt-4">
-              <Link href="/sessions">
-                {t("sessions.backToSessions")}
-              </Link>
-            </Button>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button asChild variant="outline" size="sm">
+                <Link href="/sessions">
+                  {t("sessions.backToSessions")}
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/settings">
+                  {t("sessions.openSettings")}
+                </Link>
+              </Button>
+              <Button asChild variant="ghost" size="sm">
+                <Link href={sessionCopilotHref}>
+                  {t("sessions.askCopilotRecovery")}
+                </Link>
+              </Button>
+            </div>
           </div>
         </div>
       </div>
