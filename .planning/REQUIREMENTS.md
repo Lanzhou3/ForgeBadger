@@ -16,7 +16,7 @@
 
 ### Feishu Live Exposure Readiness
 
-- [ ] **FEI-01**: Operator can verify a real Feishu developer-console public webhook callback using the existing public route and record URL verification or a precise blocker.
+- [x] **FEI-01**: Operator can verify a real Feishu developer-console public webhook callback using the existing public route and record URL verification or a precise blocker.
 - [ ] **FEI-02**: Public Feishu live exposure has an explicit deployment decision for encrypted payloads, shared replay/rate storage, and single-Gateway versus multi-instance topology.
 - [ ] **FEI-03**: Live Feishu exposure evidence confirms free-form chat text cannot approve pending actions, send terminal input, or bypass tenant/audit policy.
 
@@ -60,7 +60,7 @@
 | BETA-03 | Phase 8 | Not started |
 | BETA-04 | Phase 6 | Complete |
 | BETA-05 | Phase 6 | Complete |
-| FEI-01 | Phase 7 | Not started |
+| FEI-01 | Phase 7 | Complete (Blocked) |
 | FEI-02 | Phase 7 | Not started |
 | FEI-03 | Phase 7 | Not started |
 | READY-01 | Phase 8 | Not started |

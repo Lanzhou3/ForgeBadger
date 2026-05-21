@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Beta Evidence Burn-down
 status: executing
-stopped_at: Phase 7 planned, ready to execute
-last_updated: "2026-05-21T07:30:37.757Z"
-last_activity: 2026-05-21 -- Phase 07 planning complete
+stopped_at: Completed 07-01-PLAN.md; ready for 07-02-PLAN.md
+last_updated: "2026-05-21T07:45:10.465Z"
+last_activity: 2026-05-21 -- Completed 07-01; ready for 07-02
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
   percent: 33
 ---
 
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 ## Current Position
 
-Phase: 07 (feishu-live-callback-readiness) — READY TO EXECUTE
-Plan: 2 plans prepared (`07-01`, `07-02`)
-Status: Ready to execute
-Last activity: 2026-05-21 -- Phase 07 planning complete
+Phase: 07 (Feishu Live Callback Readiness) — EXECUTING
+Plan: 2 of 2
+Status: Executing Phase 07 Plan 2
+Last activity: 2026-05-21 -- Completed 07-01; ready for 07-02
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Last activity: 2026-05-21 -- Phase 07 planning complete
 | 05 | 1 | - | - |
 | Phase 06 P01 | 14 min | 3 tasks | 5 files |
 | Phase 06 P02 | 13 min | 3 tasks | 4 files |
+| Phase 07 P01 | 10min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,8 @@ Recent decisions affecting current work:
 - [Phase 04]: Project-manager diagnostics expose counts and safe markers only, never raw ledger/evidence/terminal/secret data. — Plan 04-01 docs/API.md contract.
 - [Phase 04]: Project-manager state stays Gateway-owned; Feishu free-form text and Copilot model output cannot authoritatively mutate the ledger. — Plan 04-02 implementation and regression tests.
 - [Phase 04]: Project-manager mutations require projection, ledger event, and redacted audit row in one repository transaction. — ProjectManagerRepository contract from 04-02.
+- [Phase 07]: CLI auth, doctor, and long-running Feishu event consumption are preflight only; FEI-01 pass requires real developer-console HTTP callback evidence. — Plan 07-01 evidence report.
+- [Phase 07]: If public HTTPS URL or console callback action is unavailable, record FEI-01 as a precise blocker with owner and rerun path instead of overclaiming pass. — Plan 07-01 evidence report.
 
 ### Pending Todos
 
@@ -90,7 +93,7 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 - Live Copilot provider evidence remains `Caveat` until a disposable provider credential and explicit model id are available.
 - Physical Windows/WSL evidence remains `Caveat` until a real Windows/WSL host completes the terminal checklist.
 - Completed first-user feedback remains `Caveat` until attached and mapped.
-- Phase 7 planning is complete. Public Feishu webhook live exposure still needs real developer-console HTTP callback verification; `lark-cli event consume` is auxiliary preflight only. Current safe topology is single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay/rate storage before enablement.
+- Phase 7 Plan 01 is complete. Public Feishu webhook live exposure still needs real developer-console HTTP callback verification for `Pass`; current evidence records the missing public HTTPS URL and Feishu console URL verification action as a blocker. Current safe topology is single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay/rate storage before enablement.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -104,11 +107,11 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 
 ## Session Continuity
 
-Last session: 2026-05-21T15:19:06+08:00
-Stopped at: Phase 7 planned, ready to execute
+Last session: 2026-05-21T07:45:10.436Z
+Stopped at: Completed 07-01-PLAN.md; ready for 07-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Execute Phase 7 with `$gsd-execute-phase 7`.
+- Continue Phase 7 with `07-02-PLAN.md` using `$gsd-execute-phase 7`.
 - Then verify Phase 7 with `$gsd-verify-work 7`.

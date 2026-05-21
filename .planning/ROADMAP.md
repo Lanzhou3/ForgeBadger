@@ -87,7 +87,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 07-01: Prepare and run Feishu callback verification path, or record the exact live-app blocker.
+- [x] 07-01: Prepare and run Feishu callback verification path, or record the exact live-app blocker.
 
 **Wave 2** *(blocked on Wave 1 callback result)*
 
@@ -135,7 +135,7 @@ Phases execute in numeric order: 6 -> 7 -> 8.
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 6. Live Provider and Platform Smoke Evidence | v1.1 | 2/2 | Complete   | 2026-05-21 |
-| 7. Feishu Live Callback Readiness | v1.1 | 0/2 | Planned | - |
+| 7. Feishu Live Callback Readiness | v1.1 | 1/2 | In Progress | - |
 | 8. First-User Readiness Packet | v1.1 | 0/2 | Not started | - |
 
 ## Backlog
