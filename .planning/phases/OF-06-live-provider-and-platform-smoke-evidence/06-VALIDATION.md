@@ -1,7 +1,7 @@
 ---
 phase: 06
 slug: live-provider-and-platform-smoke-evidence
-status: draft
+status: verified
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-05-21T10:37:00+08:00
@@ -38,12 +38,12 @@ created: 2026-05-21T10:37:00+08:00
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 06-01-01 | 01 | 1 | BETA-01, BETA-04 | T-06-01 | Master matrix exists and live provider evidence omits raw credentials and full payloads | doc/static | `git diff --check && gsd-sdk query init.phase-op 6` | ✅ | ⬜ pending |
-| 06-01-02 | 01 | 1 | BETA-01 | T-06-01 | Live provider smoke records `Pass`, `Caveat`, or `Blocked` without leaking the API key | smoke/script | `pnpm smoke:copilot-provider` or required-live variant when a disposable credential exists | ✅ | ⬜ pending |
-| 06-01-03 | 01 | 1 | BETA-04 | T-06-02 | Smoke/trial docs link to the matrix without becoming a conflicting source of truth | doc/static | `rg -n "v1.1-beta-evidence-burn-down-2026-05-21|Pass|Caveat|Blocked" docs/SMOKE-TEST.md docs/TRIAL-CHECKLIST.md` | ✅ | ⬜ pending |
-| 06-02-01 | 02 | 2 | BETA-02, BETA-05 | T-06-03 | WSL evidence cannot be marked `Pass` without real WSL host output | manual/doc | `git diff --check && gsd-sdk query init.phase-op 6` | ✅ | ⬜ pending |
-| 06-02-02 | 02 | 2 | BETA-05 | T-06-04 | CI, `gate-d`, and focused tmux rows are separate and do not claim `pnpm -r test` is sufficient | e2e/shell/doc | `RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts` when tmux exists | ✅ | ⬜ pending |
-| 06-02-03 | 02 | 2 | BETA-04, BETA-05 | T-06-05 | Evidence docs contain no raw API keys, JWTs, Feishu secrets, full provider payloads, or full model output | static/security | `git diff --check` plus targeted secret scan over modified evidence docs | ✅ | ⬜ pending |
+| 06-01-01 | 01 | 1 | BETA-01, BETA-04 | T-06-01 | Master matrix exists and live provider evidence omits raw credentials and full payloads | doc/static | `git diff --check && gsd-sdk query init.phase-op 6` | ✅ | ✅ green |
+| 06-01-02 | 01 | 1 | BETA-01 | T-06-01 | Live provider smoke records `Pass`, `Caveat`, or `Blocked` without leaking the API key | smoke/script | `pnpm smoke:copilot-provider` or required-live variant when a disposable credential exists | ✅ | ✅ green |
+| 06-01-03 | 01 | 1 | BETA-04 | T-06-02 | Smoke/trial docs link to the matrix without becoming a conflicting source of truth | doc/static | `rg -n "v1.1-beta-evidence-burn-down-2026-05-21|Pass|Caveat|Blocked" docs/SMOKE-TEST.md docs/TRIAL-CHECKLIST.md` | ✅ | ✅ green |
+| 06-02-01 | 02 | 2 | BETA-02, BETA-05 | T-06-03 | WSL evidence cannot be marked `Pass` without real WSL host output | manual/doc | `git diff --check && gsd-sdk query init.phase-op 6` | ✅ | ✅ green |
+| 06-02-02 | 02 | 2 | BETA-05 | T-06-04 | CI, `gate-d`, and focused tmux rows are separate and do not claim `pnpm -r test` is sufficient | e2e/shell/doc | `RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts` when tmux exists | ✅ | ✅ green |
+| 06-02-03 | 02 | 2 | BETA-04, BETA-05 | T-06-05 | Evidence docs contain no raw API keys, JWTs, Feishu secrets, full provider payloads, or full model output | static/security | `git diff --check` plus targeted secret scan over modified evidence docs | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -83,4 +83,4 @@ Existing infrastructure covers all phase requirements:
 - [x] Feedback latency < 60 seconds for automated doc/GSD checks.
 - [x] `nyquist_compliant: true` set in frontmatter.
 
-**Approval:** pending
+**Approval:** verified 2026-05-21T04:46:49Z
