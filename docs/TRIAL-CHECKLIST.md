@@ -5,6 +5,12 @@ screenshots, and exact reproduction steps for anything that looks wrong.
 Attach the completed `docs/TRIAL-FEEDBACK.md` copy as the triage input for
 requirement mapping and follow-up phase assignment.
 
+Phase 6 live provider and platform evidence is tracked in
+`docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`. Record trial
+observations here, then update the matrix as `Pass`, `Caveat`, or `Blocked`.
+Do not remove the live-provider caveat without disposable live provider
+evidence, and do not paste secrets into either file.
+
 ## Environment
 
 - Startup path:
@@ -98,6 +104,9 @@ For every `pass with caveats` or `blocked` result, record:
 
 - [ ] Maintainer live-provider harness result recorded, if available:
       `pnpm smoke:copilot-provider`.
+- [ ] Phase 6 matrix row updated in
+      `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md` as `Pass`,
+      `Caveat`, or `Blocked`.
 - [ ] Configured an OpenAI or Anthropic model provider with an active model and
       test credential.
 - [ ] If Copilot is blocked, recorded the visible provider readiness reason:

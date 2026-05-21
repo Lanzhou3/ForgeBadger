@@ -6,6 +6,11 @@ First-user trial runs should use `docs/TRIAL-CHECKLIST.md` as the execution
 notes and feedback attachment. Keep this smoke test as the broader manual
 acceptance checklist for maintainers.
 
+Phase 6 live provider and platform evidence is tracked in
+`docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`. Use that report as
+the source of truth for `Pass`, `Caveat`, and `Blocked` status; do not remove
+the live-provider caveat without disposable live provider evidence.
+
 Run this checklist before asking a user to try the local console, or when a
 broader maintainer acceptance pass is needed. Use a disposable project
 directory and a disposable SQLite database unless the goal is upgrade
@@ -164,8 +169,11 @@ permission prompt event.
 
   Record only the redacted JSON result, provider name, model id, pass/fail
   status, and any sanitized failure reason.
-  For Phase 1 evidence reports, use only disposable or rotatable credentials
-  and copy only redacted JSON or public summary fields, never plaintext keys.
+  For Phase 6 evidence reports, use only disposable or rotatable credentials
+  and copy only redacted JSON or public summary fields into
+  `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`, never plaintext
+  keys. Keep the live-provider row as `Caveat` or `Blocked` unless a disposable
+  live run succeeds.
 - Configure a disposable OpenAI or Anthropic provider profile with an active
   model and active test credential.
 - Open `/copilot` from the sidebar.
