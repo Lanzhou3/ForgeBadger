@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Beta Evidence Burn-down
-status: milestone_complete
-stopped_at: Milestone complete (Phase 08 was final phase)
-last_updated: 2026-05-21T14:05:05.993Z
-last_activity: 2026-05-21 -- Phase 08 readiness closeout executed
+status: Awaiting next milestone
+stopped_at: Phase 8 complete, v1.1 milestone complete and ready to archive
+last_updated: "2026-05-21T14:09:23.152Z"
+last_activity: 2026-05-21 — Milestone v1.1 completed and archived
 progress:
   total_phases: 3
   completed_phases: 3
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 ## Current Position
 
-Phase: 08
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-05-21 -- Phase 08 UAT passed and milestone completed
+Phase: Milestone v1.1 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-05-21 — Milestone v1.1 completed and archived
 
 ## Performance Metrics
 
@@ -122,4 +122,4 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Complete and archive the v1.1 milestone when ready.
+- Start the next milestone with /gsd-new-milestone

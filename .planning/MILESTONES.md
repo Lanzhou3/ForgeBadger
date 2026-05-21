@@ -1,5 +1,20 @@
 # Milestones
 
+## v1.1 Beta Evidence Burn-down (Shipped: 2026-05-21)
+
+**Phases completed:** 3 phases, 6 plans, 19 tasks
+
+**Key accomplishments:**
+
+- v1.1 evidence matrix with live Copilot provider caveat, redacted smoke result, and smoke/trial doc routing
+- Physical Windows/WSL terminal caveat, current-host smoke evidence, CI gate separation, and redaction gate closure
+- Secret-safe Feishu callback setup and sanitized evidence report that records the real developer-console callback as blocked, not passed
+- Feishu public webhook evidence now distinguishes real console callback blockers from automated route, topology, encrypted-payload, and authority regressions
+- First-user Quick Smoke checklist and redacted support diagnostics packet
+- v1.1 first-user readiness closeout with caveat routing and support entry points
+
+---
+
 ## v1.0 Post-Beta Trust Closure (Shipped: 2026-05-20)
 
 **Delivered:** Audited post-beta trust closure for Copilot, Feishu ingress, first-user recovery, project-manager ledger, and remote-execution architecture boundaries.
