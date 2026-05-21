@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Beta Evidence Burn-down
 status: planning
-last_updated: "2026-05-21T01:11:59.276Z"
-last_activity: 2026-05-21
+last_updated: 2026-05-21T09:15:23+08:00
+last_activity: 2026-05-21 -- Milestone v1.1 roadmap created
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
-  total_plans: 0
+  total_plans: 6
   completed_plans: 0
   percent: 0
 ---
@@ -24,10 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-05-21 — Milestone v1.1 started
+Phase: 06
+Plan: Not started
+Status: Roadmap ready
+Last activity: 2026-05-21 -- Milestone v1.1 roadmap created
 
 ## Performance Metrics
 
@@ -79,7 +79,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None in `.planning/todos/` yet. Candidate next-milestone directions are listed in `.planning/ROADMAP.md`.
+None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.md` and `.planning/REQUIREMENTS.md`.
 
 ### Blockers/Concerns
 
@@ -89,6 +89,7 @@ None in `.planning/todos/` yet. Candidate next-milestone directions are listed i
 - Completed first-user feedback remains `Caveat` until attached and mapped.
 - Public Feishu webhook live exposure still needs real developer-console callback verification and shared replay/rate storage before multi-instance deployment.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
+- v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
 ## Deferred Items
 
@@ -100,10 +101,10 @@ None in `.planning/todos/` yet. Candidate next-milestone directions are listed i
 
 ## Session Continuity
 
-Last session: 2026-05-21T03:05:00+08:00
-Stopped at: Milestone v1.0 archived; ready for next milestone planning
+Last session: 2026-05-21T09:15:23+08:00
+Stopped at: Milestone v1.1 roadmap created; ready for Phase 6 discussion
 Resume file: .planning/ROADMAP.md
 
 ## Operator Next Steps
 
-- Start the next milestone with `$gsd-new-milestone`.
+- Start Phase 6 with `$gsd-discuss-phase 6`.

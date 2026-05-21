@@ -55,23 +55,23 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BETA-01 | TBD | Not started |
-| BETA-02 | TBD | Not started |
-| BETA-03 | TBD | Not started |
-| BETA-04 | TBD | Not started |
-| BETA-05 | TBD | Not started |
-| FEI-01 | TBD | Not started |
-| FEI-02 | TBD | Not started |
-| FEI-03 | TBD | Not started |
-| READY-01 | TBD | Not started |
-| READY-02 | TBD | Not started |
-| READY-03 | TBD | Not started |
+| BETA-01 | Phase 6 | Not started |
+| BETA-02 | Phase 6 | Not started |
+| BETA-03 | Phase 8 | Not started |
+| BETA-04 | Phase 6 | Not started |
+| BETA-05 | Phase 6 | Not started |
+| FEI-01 | Phase 7 | Not started |
+| FEI-02 | Phase 7 | Not started |
+| FEI-03 | Phase 7 | Not started |
+| READY-01 | Phase 8 | Not started |
+| READY-02 | Phase 8 | Not started |
+| READY-03 | Phase 8 | Not started |
 
 **Coverage:**
 - Current milestone requirements: 11 total
-- Mapped to phases: 0
+- Mapped to phases: 11
 - Future requirements: 4 total
-- Unmapped: 11
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-21 for v1.1 Beta Evidence Burn-down*
