@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Beta Evidence Burn-down
-status: ready_to_plan
-stopped_at: Phase 07 complete (2/2) — ready to discuss Phase 8
-last_updated: 2026-05-21T08:03:59.832Z
+status: planning
+stopped_at: Phase 8 context gathered
+last_updated: "2026-05-21T09:35:52.812Z"
 last_activity: 2026-05-21
 progress:
   total_phases: 3
@@ -97,7 +97,7 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 - Live Copilot provider evidence remains `Caveat` until a disposable provider credential and explicit model id are available.
 - Physical Windows/WSL evidence remains `Caveat` until a real Windows/WSL host completes the terminal checklist.
 - Completed first-user feedback remains `Caveat` until attached and mapped.
-- Phase 7 execution is complete and ready for verification. Public Feishu webhook live exposure still needs real developer-console HTTP callback verification for callback `Pass`; current evidence records the missing public HTTPS URL and Feishu console URL verification action as a blocker. Current safe topology is single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay/rate storage before enablement.
+- Phase 7 is complete. Public Feishu webhook live exposure still needs real developer-console HTTP callback verification for callback `Pass`; current evidence records the missing public HTTPS URL and Feishu console URL verification action as a blocker. Current safe topology is single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay/rate storage before enablement.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -111,10 +111,10 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 
 ## Session Continuity
 
-Last session: 2026-05-21T07:59:42.124Z
-Stopped at: Completed Phase 7 execution; ready for $gsd-verify-work 7
-Resume file: None
+Last session: 2026-05-21T09:35:52.794Z
+Stopped at: Phase 8 context gathered
+Resume file: .planning/phases/OF-08-first-user-readiness-packet/08-CONTEXT.md
 
 ## Operator Next Steps
 
-- Verify Phase 7 with `$gsd-verify-work 7`.
+- Plan Phase 8 with `$gsd-plan-phase 8`.
