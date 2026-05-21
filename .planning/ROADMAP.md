@@ -125,7 +125,7 @@ Plans:
 
 **Wave 2** *(blocked on Phase 6 and Phase 7 evidence status)*
 
-- [ ] 08-02: Produce v1.1 readiness closeout report and route remaining risks to backlog.
+- [x] 08-02: Produce v1.1 readiness closeout report and route remaining risks to backlog.
 
 ## Progress
 
@@ -136,7 +136,7 @@ Phases execute in numeric order: 6 -> 7 -> 8.
 |-------|-----------|----------------|--------|-----------|
 | 6. Live Provider and Platform Smoke Evidence | v1.1 | 2/2 | Complete   | 2026-05-21 |
 | 7. Feishu Live Callback Readiness | v1.1 | 2/2 | Complete   | 2026-05-21 |
-| 8. First-User Readiness Packet | v1.1 | 1/2 | In Progress|  |
+| 8. First-User Readiness Packet | v1.1 | 2/2 | Complete   | 2026-05-21 |
 
 ## Backlog
 
