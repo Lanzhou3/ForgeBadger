@@ -9,11 +9,11 @@
 ### Project Manager API Client
 
 - [x] **PMAPI-01**: User-facing Web code can call every existing project-manager Gateway endpoint through typed client functions and DTOs in `packages/web/src/lib/api.ts`.
-- [ ] **PMAPI-02**: User sees clear loading, empty, validation-error, not-found, and mutation-error states for project-manager API calls.
+- [x] **PMAPI-02**: User sees clear loading, empty, validation-error, not-found, and mutation-error states for project-manager API calls.
 
 ### Project Manager Workspace
 
-- [ ] **PMUX-01**: User can open a first-class project-manager surface from a project detail context without leaving the project workflow.
+- [x] **PMUX-01**: User can open a first-class project-manager surface from a project detail context without leaving the project workflow.
 - [ ] **PMUX-02**: User can view and update the project goal summary, constraints, acceptance criteria, and status.
 - [ ] **PMUX-03**: User can list, filter, and inspect project-manager work items with status, priority, acceptance criteria, and reference counts.
 - [ ] **PMUX-04**: User can create a project-manager work item with title, description, priority, acceptance criteria, and optional initial references.
@@ -56,8 +56,8 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | PMAPI-01 | Phase 9 | Complete |
-| PMAPI-02 | Phase 9 | Pending |
-| PMUX-01 | Phase 9 | Pending |
+| PMAPI-02 | Phase 9 | Complete |
+| PMUX-01 | Phase 9 | Complete |
 | PMUX-02 | Phase 10 | Pending |
 | PMUX-03 | Phase 10 | Pending |
 | PMUX-04 | Phase 10 | Pending |
