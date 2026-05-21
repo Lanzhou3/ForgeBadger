@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Beta Evidence Burn-down
-status: executing
-stopped_at: Completed 07-01-PLAN.md; ready for 07-02-PLAN.md
-last_updated: "2026-05-21T07:45:10.465Z"
-last_activity: 2026-05-21 -- Completed 07-01; ready for 07-02
+status: verifying
+stopped_at: Completed Phase 7 execution; ready for $gsd-verify-work 7
+last_updated: "2026-05-21T07:59:42.153Z"
+last_activity: 2026-05-21
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
-  percent: 33
+  completed_plans: 4
+  percent: 67
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 ## Current Position
 
-Phase: 07 (Feishu Live Callback Readiness) — EXECUTING
+Phase: 07 (Feishu Live Callback Readiness) — READY FOR VERIFICATION
 Plan: 2 of 2
-Status: Executing Phase 07 Plan 2
-Last activity: 2026-05-21 -- Completed 07-01; ready for 07-02
+Status: Phase complete — ready for verification
+Last activity: 2026-05-21
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Last activity: 2026-05-21 -- Completed 07-01; ready for 07-02
 | Phase 06 P01 | 14 min | 3 tasks | 5 files |
 | Phase 06 P02 | 13 min | 3 tasks | 4 files |
 | Phase 07 P01 | 10min | 3 tasks | 4 files |
+| Phase 07 P02 | 13min | 4 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,8 @@ Recent decisions affecting current work:
 - [Phase 04]: Project-manager mutations require projection, ledger event, and redacted audit row in one repository transaction. — ProjectManagerRepository contract from 04-02.
 - [Phase 07]: CLI auth, doctor, and long-running Feishu event consumption are preflight only; FEI-01 pass requires real developer-console HTTP callback evidence. — Plan 07-01 evidence report.
 - [Phase 07]: If public HTTPS URL or console callback action is unavailable, record FEI-01 as a precise blocker with owner and rerun path instead of overclaiming pass. — Plan 07-01 evidence report.
+- [Phase 07]: v1.1 public Feishu webhook support is local or single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay and shared rate-limit stores before enablement. — Plan 07-02 evidence report.
+- [Phase 07]: Top-level encrypted Feishu payloads fail closed with feishu_webhook_encrypted_payload_unsupported; decrypt support is deferred to a future security-reviewed phase. — Plan 07-02 evidence report.
 
 ### Pending Todos
 
@@ -93,7 +96,7 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 - Live Copilot provider evidence remains `Caveat` until a disposable provider credential and explicit model id are available.
 - Physical Windows/WSL evidence remains `Caveat` until a real Windows/WSL host completes the terminal checklist.
 - Completed first-user feedback remains `Caveat` until attached and mapped.
-- Phase 7 Plan 01 is complete. Public Feishu webhook live exposure still needs real developer-console HTTP callback verification for `Pass`; current evidence records the missing public HTTPS URL and Feishu console URL verification action as a blocker. Current safe topology is single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay/rate storage before enablement.
+- Phase 7 execution is complete and ready for verification. Public Feishu webhook live exposure still needs real developer-console HTTP callback verification for callback `Pass`; current evidence records the missing public HTTPS URL and Feishu console URL verification action as a blocker. Current safe topology is single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay/rate storage before enablement.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -107,11 +110,10 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 
 ## Session Continuity
 
-Last session: 2026-05-21T07:45:10.436Z
-Stopped at: Completed 07-01-PLAN.md; ready for 07-02-PLAN.md
+Last session: 2026-05-21T07:59:42.124Z
+Stopped at: Completed Phase 7 execution; ready for $gsd-verify-work 7
 Resume file: None
 
 ## Operator Next Steps
 
-- Continue Phase 7 with `07-02-PLAN.md` using `$gsd-execute-phase 7`.
-- Then verify Phase 7 with `$gsd-verify-work 7`.
+- Verify Phase 7 with `$gsd-verify-work 7`.

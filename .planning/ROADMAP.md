@@ -91,7 +91,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 callback result)*
 
-- [ ] 07-02: Finalize Feishu live-exposure decision, encrypted-payload boundary, shared-store caveat, and approval/terminal authority regression evidence.
+- [x] 07-02: Finalize Feishu live-exposure decision, encrypted-payload boundary, shared-store caveat, and approval/terminal authority regression evidence.
 
 ### Phase 8: First-User Readiness Packet
 
@@ -135,7 +135,7 @@ Phases execute in numeric order: 6 -> 7 -> 8.
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 6. Live Provider and Platform Smoke Evidence | v1.1 | 2/2 | Complete   | 2026-05-21 |
-| 7. Feishu Live Callback Readiness | v1.1 | 1/2 | In Progress | - |
+| 7. Feishu Live Callback Readiness | v1.1 | 2/2 | Complete   | 2026-05-21 |
 | 8. First-User Readiness Packet | v1.1 | 0/2 | Not started | - |
 
 ## Backlog
