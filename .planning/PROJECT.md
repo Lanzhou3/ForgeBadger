@@ -6,6 +6,17 @@ OpenForge is a local-first AI programming IDE control platform for developers wh
 
 The current product stage is v1.0 Post-Beta Trust Closure, archived on 2026-05-20. The next milestone should remove the remaining real-world beta caveats with live-provider, physical Windows/WSL, and completed first-user feedback evidence before broad runtime expansion.
 
+## Current Milestone: v1.1 Beta Evidence Burn-down
+
+**Goal:** Convert the remaining v1.0 external evidence caveats into reproducible pass/caveat/blocker records for first-user readiness.
+
+**Target features:**
+- Disposable live Copilot provider smoke with redacted evidence and exact model/provider provenance.
+- Physical Windows/WSL terminal smoke with tmux/session recovery evidence or a precise unresolved blocker.
+- Completed first-user trial feedback packet with reproducible issues, owners, and routed follow-up work.
+- Feishu public webhook live-exposure readiness decision, including real callback verification and multi-instance/encrypted-payload boundaries.
+- Release/trial support packet that lets maintainers reproduce provider, runtime, and Feishu failures without exposing secrets.
+
 ## Core Value
 
 Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability.
@@ -29,10 +40,11 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 
 ### Active
 
-- [ ] Plan v1.1 around the remaining external beta evidence: disposable live Copilot provider smoke, physical Windows/WSL terminal smoke, and completed first-user feedback.
-- [ ] Decide public Feishu live exposure readiness, including real developer-console callback verification, encrypted payload policy, and shared replay/rate storage for multi-instance deployment.
-- [ ] Decide whether the project-manager ledger needs a first-class Web workflow or remains a Copilot/diagnostics support surface.
-- [ ] If remote execution is prioritized, plan implementation from the Phase 5 architecture package with SSH target registry, remote agent protocol, terminal transport, and rollback gates.
+- [ ] v1.1 proves or explicitly preserves the live Copilot provider caveat with disposable credential evidence.
+- [ ] v1.1 proves or explicitly preserves the physical Windows/WSL terminal caveat with real-host evidence.
+- [ ] v1.1 attaches completed first-user feedback and maps it to reproducible follow-up work.
+- [ ] v1.1 makes a Feishu public webhook live-exposure decision with real callback evidence and deployment caveats.
+- [ ] v1.1 updates release, trial, and support docs so first-user readiness is inspectable without secret leakage.
 
 ### Out of Scope
 
@@ -75,6 +87,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Track SSH/remote execution separately | Remote execution changes threat model and should not be bundled into local beta hardening | Good - Phase 5 kept it architecture-only |
 | Require public Feishu ingress to fail closed before exposure | Chat input must not become approval, terminal, or cross-tenant authority | Good |
 | Keep project-manager state OpenForge-owned | Ledger events need auditability and tenant scope, not Feishu text authority | Good |
+| Burn down real-world evidence before runtime expansion | First-user readiness depends on live provider, physical terminal, and actual feedback evidence more than new runtime scope | Pending |
 
 ---
-*Last updated: 2026-05-21 after v1.0 milestone close.*
+*Last updated: 2026-05-21 after v1.1 milestone start.*

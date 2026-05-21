@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: Post-Beta Trust Closure
-status: Awaiting next milestone
-stopped_at: Milestone v1.0 archived; next milestone not yet planned
-last_updated: 2026-05-21T03:05:00+08:00
-last_activity: 2026-05-21 -- Milestone v1.0 archived and roadmap collapsed
+milestone: v1.1
+milestone_name: Beta Evidence Burn-down
+status: planning
+last_updated: "2026-05-21T01:11:59.276Z"
+last_activity: 2026-05-21
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 13
-  completed_plans: 13
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,12 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 ## Current Position
 
-Phase: Milestone v1.0 complete
-Plan: Next milestone not started
-Status: Awaiting next milestone
-Last activity: 2026-05-21 -- Milestone v1.0 archived and roadmap collapsed
-
-Progress: [##########] 100%
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-21 — Milestone v1.1 started
 
 ## Performance Metrics
 
