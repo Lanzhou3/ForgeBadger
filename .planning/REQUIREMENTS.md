@@ -8,7 +8,7 @@
 
 ### Project Manager API Client
 
-- [ ] **PMAPI-01**: User-facing Web code can call every existing project-manager Gateway endpoint through typed client functions and DTOs in `packages/web/src/lib/api.ts`.
+- [x] **PMAPI-01**: User-facing Web code can call every existing project-manager Gateway endpoint through typed client functions and DTOs in `packages/web/src/lib/api.ts`.
 - [ ] **PMAPI-02**: User sees clear loading, empty, validation-error, not-found, and mutation-error states for project-manager API calls.
 
 ### Project Manager Workspace
@@ -55,7 +55,7 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PMAPI-01 | Phase 9 | Pending |
+| PMAPI-01 | Phase 9 | Complete |
 | PMAPI-02 | Phase 9 | Pending |
 | PMUX-01 | Phase 9 | Pending |
 | PMUX-02 | Phase 10 | Pending |
