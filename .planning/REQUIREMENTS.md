@@ -8,11 +8,11 @@
 
 ### Real-World Beta Evidence
 
-- [ ] **BETA-01**: Maintainer can run a disposable live Copilot provider smoke and record provider, model, command, result, redaction, and rerun instructions without leaking credentials.
-- [ ] **BETA-02**: Maintainer can run the physical Windows/WSL terminal smoke on a real host and record pass/caveat/blocker evidence for project launch, tmux persistence, reconnect, and recovery behavior.
+- [x] **BETA-01**: Maintainer can run a disposable live Copilot provider smoke and record provider, model, command, result, redaction, and rerun instructions without leaking credentials.
+- [x] **BETA-02**: Maintainer can run the physical Windows/WSL terminal smoke on a real host and record pass/caveat/blocker evidence for project launch, tmux persistence, reconnect, and recovery behavior.
 - [ ] **BETA-03**: Maintainer can attach completed first-user feedback with reproducible steps, affected surfaces, owner, severity, and mapped follow-up disposition.
-- [ ] **BETA-04**: Release, trial, and handoff docs consistently distinguish `Pass`, `Caveat`, and `Blocked` evidence states and do not remove caveats without real evidence.
-- [ ] **BETA-05**: CI/release gate documentation reconciles automated CI, local browser smoke, tmux integration, and manual real-host gates with exact skip or rerun instructions.
+- [x] **BETA-04**: Release, trial, and handoff docs consistently distinguish `Pass`, `Caveat`, and `Blocked` evidence states and do not remove caveats without real evidence.
+- [x] **BETA-05**: CI/release gate documentation reconciles automated CI, local browser smoke, tmux integration, and manual real-host gates with exact skip or rerun instructions.
 
 ### Feishu Live Exposure Readiness
 
@@ -55,11 +55,11 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BETA-01 | Phase 6 | Not started |
-| BETA-02 | Phase 6 | Not started |
+| BETA-01 | Phase 6 | Complete (Caveat) |
+| BETA-02 | Phase 6 | Complete (Caveat) |
 | BETA-03 | Phase 8 | Not started |
-| BETA-04 | Phase 6 | Not started |
-| BETA-05 | Phase 6 | Not started |
+| BETA-04 | Phase 6 | Complete |
+| BETA-05 | Phase 6 | Complete |
 | FEI-01 | Phase 7 | Not started |
 | FEI-02 | Phase 7 | Not started |
 | FEI-03 | Phase 7 | Not started |

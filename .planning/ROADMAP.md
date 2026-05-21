@@ -57,7 +57,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 evidence format)*
 
-- [ ] 06-02: Run or block physical Windows/WSL terminal smoke and reconcile release-gate docs.
+- [x] 06-02: Run or block physical Windows/WSL terminal smoke and reconcile release-gate docs.
 
 ### Phase 7: Feishu Live Callback Readiness
 
@@ -134,7 +134,7 @@ Phases execute in numeric order: 6 -> 7 -> 8.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 6. Live Provider and Platform Smoke Evidence | v1.1 | 1/2 | In Progress|  |
+| 6. Live Provider and Platform Smoke Evidence | v1.1 | 2/2 | Complete   | 2026-05-21 |
 | 7. Feishu Live Callback Readiness | v1.1 | 0/2 | Not started | - |
 | 8. First-User Readiness Packet | v1.1 | 0/2 | Not started | - |
 
