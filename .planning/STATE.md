@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Beta Evidence Burn-down
-status: ready_to_plan
-stopped_at: Phase 6 verified, ready to discuss Phase 7
-last_updated: "2026-05-21T04:46:49.000Z"
-last_activity: 2026-05-21
+status: executing
+stopped_at: Phase 7 planned, ready to execute
+last_updated: "2026-05-21T07:30:37.757Z"
+last_activity: 2026-05-21 -- Phase 07 planning complete
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 2
+  total_plans: 4
   completed_plans: 2
   percent: 33
 ---
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 ## Current Position
 
-Phase: 07 (feishu-live-callback-readiness) — READY TO DISCUSS
-Plan: Not started
-Status: Ready to discuss and plan
-Last activity: 2026-05-21
+Phase: 07 (feishu-live-callback-readiness) — READY TO EXECUTE
+Plan: 2 plans prepared (`07-01`, `07-02`)
+Status: Ready to execute
+Last activity: 2026-05-21 -- Phase 07 planning complete
 
 ## Performance Metrics
 
@@ -90,7 +90,7 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 - Live Copilot provider evidence remains `Caveat` until a disposable provider credential and explicit model id are available.
 - Physical Windows/WSL evidence remains `Caveat` until a real Windows/WSL host completes the terminal checklist.
 - Completed first-user feedback remains `Caveat` until attached and mapped.
-- Public Feishu webhook live exposure still needs real developer-console callback verification and shared replay/rate storage before multi-instance deployment.
+- Phase 7 planning is complete. Public Feishu webhook live exposure still needs real developer-console HTTP callback verification; `lark-cli event consume` is auxiliary preflight only. Current safe topology is single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay/rate storage before enablement.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -104,11 +104,11 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 
 ## Session Continuity
 
-Last session: 2026-05-21T04:46:49Z
-Stopped at: Phase 6 verified, ready to discuss Phase 7
+Last session: 2026-05-21T15:19:06+08:00
+Stopped at: Phase 7 planned, ready to execute
 Resume file: None
 
 ## Operator Next Steps
 
-- Discuss Phase 7 with `$gsd-discuss-phase 7`.
-- Then plan Phase 7 with `$gsd-plan-phase 7`.
+- Execute Phase 7 with `$gsd-execute-phase 7`.
+- Then verify Phase 7 with `$gsd-verify-work 7`.
