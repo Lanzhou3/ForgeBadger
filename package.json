@@ -11,6 +11,7 @@
     "openforge": "pnpm --filter @openforge/gateway openforge",
     "pack:npm": "pnpm --filter openforge pack --dry-run",
     "smoke:copilot-provider": "pnpm --dir packages/gateway exec tsx ../../scripts/smoke-copilot-provider.ts",
+    "smoke:feishu-public-webhook": "pnpm --dir packages/gateway exec tsx ../../scripts/prepare-feishu-public-webhook.ts",
     "smoke:codex-app-server": "node scripts/smoke-codex-app-server.mjs",
     "smoke:npm": "node scripts/smoke-npm-package.mjs",
     "test": "pnpm -r test",
