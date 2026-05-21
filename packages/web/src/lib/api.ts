@@ -33,6 +33,103 @@ export interface Project {
   status?: string;
 }
 
+export interface ProjectManagerEvidenceRef {
+  kind?: string;
+  label?: string;
+  status?: string;
+  ref?: string;
+  path?: string;
+  sessionId?: string;
+  copilotRunId?: string;
+  feishuChatId?: string;
+  feishuMessageId?: string;
+  createdAt?: string;
+}
+
+export interface ProjectManagerGoal {
+  id: string;
+  projectId: string;
+  summary: string;
+  constraints: string[];
+  acceptanceCriteria: string[];
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProjectManagerGoalInput {
+  summary: string;
+  constraints?: string[];
+  acceptanceCriteria?: string[];
+  status?: string;
+}
+
+export type ProjectManagerWorkItemStatus =
+  | "todo"
+  | "in_progress"
+  | "blocked"
+  | "ready_for_review"
+  | "done"
+  | "cancelled";
+
+export interface ProjectManagerWorkItem {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string | null;
+  status: ProjectManagerWorkItemStatus;
+  priority: number;
+  acceptanceCriteria: string[];
+  evidenceRefCount: number;
+  evidenceRefs: ProjectManagerEvidenceRef[];
+  feishuRefCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProjectManagerWorkItemInput {
+  title: string;
+  description?: string | null;
+  status?: ProjectManagerWorkItemStatus;
+  priority?: number;
+  acceptanceCriteria?: string[];
+  evidenceRefs?: ProjectManagerEvidenceRef[];
+  feishuRefs?: ProjectManagerEvidenceRef[];
+}
+
+export interface ProjectManagerWorkItemStatusInput {
+  status: ProjectManagerWorkItemStatus;
+  evidenceRefs?: ProjectManagerEvidenceRef[];
+  manualCompletionReason?: string;
+}
+
+export interface ProjectManagerEvidenceInput {
+  evidenceRefs: ProjectManagerEvidenceRef[];
+}
+
+export type ProjectManagerLedgerEventType =
+  | "goal_updated"
+  | "work_item_created"
+  | "work_item_status_changed"
+  | "evidence_attached"
+  | "blocker_recorded"
+  | "blocker_resolved"
+  | "copilot_observation_recorded"
+  | "feishu_reference_linked"
+  | "next_step_proposed"
+  | "manual_completion_recorded";
+
+export interface ProjectManagerLedgerEvent {
+  id: string;
+  projectId: string;
+  workItemId: string | null;
+  eventType: ProjectManagerLedgerEventType;
+  status: ProjectManagerWorkItemStatus | null;
+  evidenceRefCount: number;
+  feishuRefCount: number;
+  createdAt: number;
+}
+
 export interface Template {
   id: string;
   userId?: string | null;
@@ -1412,6 +1509,10 @@ export function chooseDefaultRuntimeAdapter(
   return adapters.find(isAdapterLaunchable)?.id;
 }
 
+function projectManagerPath(projectId: string, suffix: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/project-manager${suffix}`;
+}
+
 export async function listProjects(): Promise<{ projects: Project[] }> {
   return fetchJson("/api/v1/projects") as Promise<{ projects: Project[] }>;
 }
@@ -1470,6 +1571,89 @@ export async function createDefaultAgentPack(id: string): Promise<DefaultAgentPa
   return fetchJson(`/api/v1/projects/${id}/agents/default-pack`, {
     method: "POST",
   }) as Promise<DefaultAgentPackResult>;
+}
+
+export async function getProjectManagerGoal(
+  projectId: string
+): Promise<{ goal: ProjectManagerGoal | null }> {
+  return fetchJson(projectManagerPath(projectId, "/goal")) as Promise<{ goal: ProjectManagerGoal | null }>;
+}
+
+export async function updateProjectManagerGoal(
+  projectId: string,
+  input: ProjectManagerGoalInput
+): Promise<{ goal: ProjectManagerGoal }> {
+  return fetchJson(projectManagerPath(projectId, "/goal"), {
+    method: "PUT",
+    body: JSON.stringify(input),
+  }) as Promise<{ goal: ProjectManagerGoal }>;
+}
+
+export async function listProjectManagerWorkItems(
+  projectId: string,
+  params: { status?: ProjectManagerWorkItemStatus; limit?: number } = {}
+): Promise<{ workItems: ProjectManagerWorkItem[] }> {
+  const searchParams = new URLSearchParams();
+  if (params.status) searchParams.set("status", params.status);
+  if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return fetchJson(projectManagerPath(projectId, `/work-items${query ? `?${query}` : ""}`)) as Promise<{
+    workItems: ProjectManagerWorkItem[];
+  }>;
+}
+
+export async function createProjectManagerWorkItem(
+  projectId: string,
+  input: ProjectManagerWorkItemInput
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, "/work-items"), {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItem: ProjectManagerWorkItem }>;
+}
+
+export async function getProjectManagerWorkItem(
+  projectId: string,
+  workItemId: string
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, `/work-items/${encodeURIComponent(workItemId)}`)) as Promise<{
+    workItem: ProjectManagerWorkItem;
+  }>;
+}
+
+export async function updateProjectManagerWorkItemStatus(
+  projectId: string,
+  workItemId: string,
+  input: ProjectManagerWorkItemStatusInput
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, `/work-items/${encodeURIComponent(workItemId)}/status`), {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItem: ProjectManagerWorkItem }>;
+}
+
+export async function attachProjectManagerWorkItemEvidence(
+  projectId: string,
+  workItemId: string,
+  input: ProjectManagerEvidenceInput
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, `/work-items/${encodeURIComponent(workItemId)}/evidence`), {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItem: ProjectManagerWorkItem }>;
+}
+
+export async function listProjectManagerLedger(
+  projectId: string,
+  params: { eventType?: ProjectManagerLedgerEventType; limit?: number } = {}
+): Promise<{ events: ProjectManagerLedgerEvent[] }> {
+  const searchParams = new URLSearchParams();
+  if (params.eventType) searchParams.set("eventType", params.eventType);
+  if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return fetchJson(projectManagerPath(projectId, `/ledger${query ? `?${query}` : ""}`)) as Promise<{
+    events: ProjectManagerLedgerEvent[];
+  }>;
 }
 
 export async function deleteProject(id: string): Promise<unknown> {
