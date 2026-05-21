@@ -73,6 +73,7 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
   const ledgerEvents = ledgerQuery.data?.events ?? [];
 
   const refresh = () => {
+    if (!canLoad) return;
     void goalQuery.refetch();
     void workItemsQuery.refetch();
     void ledgerQuery.refetch();
@@ -85,7 +86,7 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
           <h2 className="text-base font-semibold leading-tight">{t("projects.projectManager")}</h2>
           <p className="text-xs text-muted-foreground">{t("projects.projectManagerDisabledActionHint")}</p>
         </div>
-        <Button size="sm" onClick={refresh} disabled={isRefreshing}>
+        <Button size="sm" onClick={refresh} disabled={isRefreshing || !canLoad}>
           <RefreshCw className={cn("mr-2 size-4", isRefreshing && "animate-spin")} />
           {t("projects.projectManagerRefresh")}
         </Button>
