@@ -2,8 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Beta Evidence Burn-down
-status: planning
-last_updated: 2026-05-21T09:15:23+08:00
+status: Roadmap ready
+stopped_at: Phase 6 context gathered
+last_updated: "2026-05-21T02:03:50.518Z"
 last_activity: 2026-05-21 -- Milestone v1.1 roadmap created
 progress:
   total_phases: 3
@@ -101,9 +102,9 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 
 ## Session Continuity
 
-Last session: 2026-05-21T09:15:23+08:00
-Stopped at: Milestone v1.1 roadmap created; ready for Phase 6 discussion
-Resume file: .planning/ROADMAP.md
+Last session: 2026-05-21T02:03:50.500Z
+Stopped at: Phase 6 context gathered
+Resume file: .planning/phases/OF-06-live-provider-and-platform-smoke-evidence/06-CONTEXT.md
 
 ## Operator Next Steps
 
