@@ -298,6 +298,11 @@ Public webhook handling is disabled by default and remains inert until a tenant
 explicitly enables it and stores the required encrypted verification token and
 encrypted event encrypt key for that integration.
 
+For v1.1 release evidence, Feishu developer-console URL verification is a
+manual/live gate. Local signed-route tests and `lark-cli` event consumers are
+automated or CLI preflight evidence only; they do not replace a real
+developer-console HTTP callback to this route.
+
 Ordinary public webhook events must include
 `X-Lark-Request-Timestamp`, `X-Lark-Request-Nonce`, and `X-Lark-Signature`.
 Gateway verifies the signature against the raw request body, checks timestamp

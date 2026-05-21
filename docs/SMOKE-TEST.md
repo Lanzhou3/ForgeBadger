@@ -214,6 +214,9 @@ Web smoke. It cannot replace these manual checks:
 - real browser terminal attach, input/output, resize, refresh, and reconnect;
 - real Claude Code permission prompt behavior;
 - live Copilot prompt behavior against a disposable provider credential;
+- real Feishu developer-console URL verification against
+  `POST /api/v1/integrations/feishu/webhook/:publicId`; automated signed-route
+  regressions and `lark-cli` long-running event consumers are preflight only;
 - physical Windows native versus WSL behavior;
 - local operator review that diagnostics and logs do not contain secrets.
 

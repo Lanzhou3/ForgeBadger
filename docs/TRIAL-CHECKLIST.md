@@ -10,6 +10,10 @@ Phase 6 live provider and platform evidence is tracked in
 observations here, then update the matrix as `Pass`, `Caveat`, or `Blocked`.
 Do not remove the live-provider caveat without disposable live provider
 evidence, and do not paste secrets into either file.
+Phase 7 Feishu live-exposure evidence is linked from the same matrix and from
+`docs/reports/phase-7-feishu-callback-evidence-2026-05-21.md`. Do not mark the
+real Feishu callback gate `Pass` unless the Feishu developer-console URL
+verification hit the Gateway public webhook route.
 
 ## Environment
 
@@ -118,6 +122,26 @@ For every `pass with caveats` or `blocked` result, record:
 - [ ] Approved or rejected the memory write and confirmed it did not expose pasted secrets.
 - [ ] Verified proposed actions appear as pending actions before approval.
 - [ ] Verified no terminal input control, raw shell control, or Codex `/turn` input appears.
+
+## Feishu Live Callback Readiness
+
+- [ ] If testing live Feishu, prepared the public webhook config with
+      `pnpm smoke:feishu-public-webhook` and recorded only sanitized output.
+- [ ] Configured a public HTTPS URL for
+      `/api/v1/integrations/feishu/webhook/:publicId`.
+- [ ] Ran Feishu developer-console URL verification and updated
+      `docs/reports/phase-7-feishu-callback-evidence-2026-05-21.md` as
+      `Pass`, `Caveat`, or `Blocked`.
+- [ ] If triggering a real `im.message.receive_v1` event, used an allowed chat
+      and mapped Feishu user only.
+- [ ] Verified free-form Feishu text such as `/approve <id>` cannot approve
+      pending actions or send terminal input.
+- [ ] For v1.1, kept public webhook deployment to single Gateway with
+      SQLite-backed replay/rate storage; multi-instance requires shared replay
+      and shared rate-limit stores first.
+- [ ] If the Feishu app uses top-level encrypted payloads, kept public webhook
+      enablement off; v1.1 fails closed with
+      `feishu_webhook_encrypted_payload_unsupported`.
 
 Diagnostics export notes:
 

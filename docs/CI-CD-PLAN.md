@@ -168,8 +168,9 @@ missing dependency installed.
 ### v1.1 Phase 6 Evidence Matrix
 
 The current v1.1 source of truth for live provider, physical Windows/WSL,
-CI core smoke, `gate-d`, focused tmux, release docs consistency, and redaction
-status is `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`.
+CI core smoke, `gate-d`, focused tmux, Feishu live-exposure readiness, release
+docs consistency, and redaction status is
+`docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`.
 
 Treat these as separate gates:
 
@@ -178,11 +179,23 @@ Treat these as separate gates:
 - Focused tmux integration: `RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts`.
 - Physical Windows/WSL terminal smoke: manual real-host checklist, not covered
   by Ubuntu CI or current-host Linux evidence.
+- Feishu automated route and authority regression:
+  `pnpm --dir packages/gateway test test/feishu-integration.test.ts test/copilot-routes.test.ts`.
+- Feishu manual/live developer-console callback: configure the Feishu event
+  subscription URL to
+  `https://<public-host>/api/v1/integrations/feishu/webhook/<publicWebhookId>`
+  and run URL verification in the Feishu developer console. CI cannot replace
+  this gate.
 
 Do not mark the physical Windows/WSL row `Pass` unless the real WSL checklist
 is completed. Do not mark the live provider row `Pass` unless a disposable live
 provider credential and explicit model id produce a successful redacted smoke
-result.
+result. Do not mark the Feishu developer-console callback row `Pass` unless a
+real console callback reached the Gateway public webhook route. Current v1.1
+public webhook support is single Gateway with SQLite replay/rate storage;
+multi-instance public exposure requires shared replay and shared rate-limit
+stores first. Top-level encrypted Feishu payloads must fail closed with
+`feishu_webhook_encrypted_payload_unsupported`.
 
 ## 2. Security Gates
 
