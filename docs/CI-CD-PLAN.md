@@ -165,6 +165,25 @@ and next action. The default owner is the release maintainer for the target
 host, and the next action is to rerun the skipped command on a host with the
 missing dependency installed.
 
+### v1.1 Phase 6 Evidence Matrix
+
+The current v1.1 source of truth for live provider, physical Windows/WSL,
+CI core smoke, `gate-d`, focused tmux, release docs consistency, and redaction
+status is `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`.
+
+Treat these as separate gates:
+
+- CI core smoke: `pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line`.
+- Release/manual browser terminal smoke: `pnpm --dir packages/web exec playwright test e2e/gate-d-smoke.spec.ts --project=chromium --reporter=line`.
+- Focused tmux integration: `RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts`.
+- Physical Windows/WSL terminal smoke: manual real-host checklist, not covered
+  by Ubuntu CI or current-host Linux evidence.
+
+Do not mark the physical Windows/WSL row `Pass` unless the real WSL checklist
+is completed. Do not mark the live provider row `Pass` unless a disposable live
+provider credential and explicit model id produce a successful redacted smoke
+result.
+
 ## 2. Security Gates
 
 Block a release if any of these are true:

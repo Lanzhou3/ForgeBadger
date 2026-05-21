@@ -43,6 +43,25 @@ UI evidence only and is not accepted as browser terminal pass evidence.
 This baseline may support Linux/tmux confidence, but it does not convert the
 physical Windows/WSL terminal gate to `Pass`.
 
+## Current Host Automated Evidence
+
+These rows are current-host evidence for CI/release confidence only. They do
+not remove the physical Windows/WSL caveat.
+
+| Gate | Status | Command | Result | Notes |
+|------|--------|---------|--------|-------|
+| CI core smoke (`mvp1-smoke`) | Pass | `pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line` | `1 passed (19.8s)` | A direct run without Gateway failed at registration; rerun passed after starting a temporary Gateway on `127.0.0.1:48731` with a temporary SQLite DB under `/tmp`. |
+| Release/manual browser terminal smoke (`gate-d-smoke`) | Pass | `pnpm --dir packages/web exec playwright test e2e/gate-d-smoke.spec.ts --project=chromium --reporter=line` | `3 passed (25.4s)` | Ran against the same temporary Gateway/Web setup. |
+| Focused tmux integration | Pass | `RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts` | `3 tests`, `1 suite`, `3 pass`, `0 fail`, duration `1096.496653ms` | First unrestricted run failed after cleaning an unexpected existing `of-*` session; rerun passed after cleanup. |
+
+Cleanup checks:
+
+- `ss -ltnp | rg ':48731|:48732|State'` showed no listener remaining on the
+  smoke ports after the temporary Gateway/Web run.
+- `tmux list-sessions -F '#{session_name}'` showed only non-OpenForge
+  `codex-*` sessions after the focused tmux rerun; no `of-*` smoke session
+  remained.
+
 ## Rerun Checklist
 
 Owner: release maintainer with a physical Windows host and WSL environment.
