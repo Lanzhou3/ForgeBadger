@@ -10,6 +10,7 @@ import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, FileCode2, File
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ProjectManagerPanel } from "@/components/projects/ProjectManagerPanel";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -859,6 +860,7 @@ export default function ProjectDetailPage() {
             <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:thin]">
             <TabsList className="min-w-max">
               <TabsTrigger value="sessions">{t("nav.sessions")}</TabsTrigger>
+              <TabsTrigger value="project-manager">{t("projects.projectManager")}</TabsTrigger>
               <TabsTrigger value="agents">{t("nav.agents")}</TabsTrigger>
               <TabsTrigger value="orchestration">{t("projects.orchestration")}</TabsTrigger>
               <TabsTrigger value="skills">{t("nav.skills")}</TabsTrigger>
@@ -917,6 +919,13 @@ export default function ProjectDetailPage() {
                   </Table>
                 </Card>
               )}
+            </TabsContent>
+
+            <TabsContent value="project-manager" className="mt-4">
+              <ProjectManagerPanel
+                projectId={id}
+                enabled={activeTab === "project-manager"}
+              />
             </TabsContent>
 
             <TabsContent value="agents" className="mt-4">

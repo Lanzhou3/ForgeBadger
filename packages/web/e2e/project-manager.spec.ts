@@ -21,12 +21,13 @@ test("renders populated Project Manager state from exact API routes", async ({ p
   await page.goto(`/projects/${PROJECT_ID}`);
   await page.getByRole("tab", { name: "Project Manager" }).click();
 
-  await expect(page.getByTestId("project-manager-panel")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Project Manager" })).toBeVisible();
-  await expect(page.getByText("Ship v1.2 Project Manager workflow")).toBeVisible();
-  await expect(page.getByText("Expose Project Manager tab")).toBeVisible();
-  await expect(page.getByText("Work item status changed")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Refresh project manager" })).toBeVisible();
+  const panel = page.getByTestId("project-manager-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "Project Manager" })).toBeVisible();
+  await expect(panel.getByText("Ship v1.2 Project Manager workflow")).toBeVisible();
+  await expect(panel.getByText("Expose Project Manager tab")).toBeVisible();
+  await expect(panel.getByText("Work item status changed")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Refresh project manager" }).first()).toBeVisible();
   expect(unhandledApiRoutes).toEqual([]);
 });
 
@@ -36,8 +37,9 @@ test("renders a visible not-found state for missing Project Manager records", as
   await page.goto(`/projects/${PROJECT_ID}`);
   await page.getByRole("tab", { name: "Project Manager" }).click();
 
-  await expect(page.getByText("Project manager state was not found for this project.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Refresh project manager" })).toBeVisible();
+  const panel = page.getByTestId("project-manager-panel");
+  await expect(panel.getByText("Project manager state was not found for this project.")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Refresh project manager" }).first()).toBeVisible();
   expect(unhandledApiRoutes).toEqual([]);
 });
 
@@ -60,6 +62,11 @@ async function mockProjectDetailApis(
           status: "active",
         }),
       });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/notifications" && method === "GET") {
+      await route.fulfill({ json: envelope({ notifications: [] }) });
       return;
     }
 
