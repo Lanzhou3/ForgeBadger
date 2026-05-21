@@ -798,6 +798,75 @@ describe("Feishu integration routes", () => {
     assert.equal(JSON.stringify(stale.body).includes("sk-public-webhook-secret"), false);
   });
 
+  it("rejects encrypted public webhook payloads without creating Copilot runs", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-encrypted@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    const app = createTestApp(db);
+    const encryptedEvent = { encrypt: "ciphertext" };
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      "/api/v1/integrations/feishu/webhook/public-test",
+      encryptedEvent,
+      signedFeishuHeaders(encryptedEvent)
+    );
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.msg, "feishu_webhook_encrypted_payload_unsupported");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+  });
+
+  it("rejects signed public webhook events with invalid tokens without creating Copilot runs", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-token-mismatch@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    const app = createTestApp(db);
+    const event = publicMessageEvent({
+      text: "status api_key=sk-public-webhook-secret",
+      messageId: "om_token_mismatch",
+      eventId: "ev_token_mismatch"
+    });
+    (event.header as Record<string, unknown>).token = "wrong-token";
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", event, {
+      ...signedFeishuHeaders(event)
+    });
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.msg, "feishu_webhook_token_invalid");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+    assert.equal(JSON.stringify(res.body).includes("sk-public-webhook-secret"), false);
+  });
+
+  it("rejects public webhook messages outside the chat allowlist without creating Copilot runs", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-chat-denied@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    const app = createTestApp(db);
+    const event = publicMessageEvent({
+      text: "status api_key=sk-public-webhook-secret",
+      chatId: "oc_denied",
+      messageId: "om_chat_denied",
+      eventId: "ev_chat_denied"
+    });
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", event, {
+      ...signedFeishuHeaders(event)
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.msg, "ignored");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+    assert.equal(JSON.stringify(res.body).includes("sk-public-webhook-secret"), false);
+
+    const reject = new AuditLogRepository(db, user.id).list({ action: "feishu.webhook.reject" })[0];
+    const details = JSON.parse(reject?.details ?? "{}") as Record<string, unknown>;
+    assert.equal(details.reasonCode, "feishu_chat_not_allowed");
+    assert.equal(JSON.stringify(details).includes("sk-public-webhook-secret"), false);
+  });
+
   it("creates one Feishu-sourced Copilot run for a valid signed public webhook message", async () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("public-valid@example.com", "hash");
