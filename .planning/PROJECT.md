@@ -4,20 +4,20 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is v1.1 Beta Evidence Burn-down completion. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope.
+The current product stage is v1.2 Project Manager Web Workflow planning. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope.
 
-## Current Milestone: v1.1 Beta Evidence Burn-down
+## Current Milestone: v1.2 Project Manager Web Workflow
 
-**Goal:** Convert the remaining v1.0 external evidence caveats into reproducible pass/caveat/blocker records for first-user readiness.
+**Goal:** Turn the existing Gateway-owned project-manager ledger into a first-class Web workflow for project goals, work items, evidence references, and ledger review.
 
-**Status:** Complete on 2026-05-21; ready for milestone archival.
+**Status:** Planning started on 2026-05-21.
 
 **Target features:**
-- Disposable live Copilot provider smoke with redacted evidence and exact model/provider provenance.
-- Physical Windows/WSL terminal smoke with tmux/session recovery evidence or a precise unresolved blocker.
-- Completed first-user trial feedback packet with reproducible issues, owners, and routed follow-up work.
-- Feishu public webhook live-exposure readiness decision, including real callback verification and multi-instance/encrypted-payload boundaries.
-- Release/trial support packet that lets maintainers reproduce provider, runtime, and Feishu failures without exposing secrets.
+- Project detail Web surface for project-manager goal, work item, status, evidence, and ledger state.
+- Typed Web API client and UI state handling for the existing `/api/v1/projects/:projectId/project-manager/*` endpoints.
+- Goal editing, work item creation, status transitions, filtering, and completion guardrails.
+- Bounded evidence-reference attachment and ledger review without exposing raw terminal, Feishu, provider, or secret-bearing data.
+- Focused backend/frontend/E2E coverage for the daily project-manager workflow and failure states.
 
 ## Core Value
 
@@ -47,11 +47,11 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 
 ### Active
 
-- [ ] Archive the completed v1.1 milestone and choose the next milestone direction.
-- [ ] Collect real first-user feedback through `docs/TRIAL-FEEDBACK.md` or the `OpenForge first-user trial feedback` issue form.
-- [ ] Rerun live provider smoke with a disposable credential and explicit model id when available.
-- [ ] Rerun physical Windows/WSL terminal smoke on a real WSL host when available.
-- [ ] Run real Feishu developer-console URL verification against a public Gateway route when available.
+- [ ] Web users can view and edit the project-manager goal from the project context.
+- [ ] Web users can create, filter, and inspect project-manager work items without leaving the project page.
+- [ ] Web users can move work items through allowed status transitions, with completion blocked unless evidence or a manual completion reason is present.
+- [ ] Web users can attach bounded evidence references and review the ledger event timeline without raw sensitive details.
+- [ ] The project-manager Web workflow has focused typed client coverage, component coverage, and E2E coverage for core happy/error paths.
 
 ### Out of Scope
 
@@ -69,7 +69,9 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - PR #2 (`post-beta-release-gates`) merged on 2026-05-19 after Copilot/Feishu release-gate hardening and green remote CI.
 - v1.0 Post-Beta Trust Closure is archived in `.planning/milestones/` with a passed milestone audit and 23/23 traced requirements satisfied.
 - Remaining acceptance gaps are explicit external evidence caveats and later-scope product decisions, not broad local implementation gaps.
-- GSD planning is ready for the next milestone cycle. Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
+- v1.2 promotes the already-implemented project-manager ledger backend into a Web workflow before remote runtime expansion, because it converts the control-plane audit model into a daily user surface.
+- External v1.1 caveats remain tracked in the readiness reports and should not be silently reclassified during v1.2.
+- Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints
 
@@ -96,6 +98,24 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Keep project-manager state OpenForge-owned | Ledger events need auditability and tenant scope, not Feishu text authority | Good |
 | Burn down real-world evidence before runtime expansion | First-user readiness depends on live provider, physical terminal, and actual feedback evidence more than new runtime scope | Good - v1.1 converted gaps into pass/caveat/blocker evidence |
 | Package v1.1 as a cautious first-user handoff | Phase 8 readiness packet makes trial/support/closeout inspectable while preserving caveats | Good - v1.1 completed with explicit caveats |
+| Promote project-manager ledger to Web before remote runtime work | The backend ledger is already tenant-scoped and audited, but first users need a visible project workflow before higher-risk remote execution | Pending - v1.2 target |
+
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `$gsd-transition`):
+1. Requirements invalidated? -> Move to Out of Scope with reason
+2. Requirements validated? -> Move to Validated with phase reference
+3. New requirements emerged? -> Add to Active
+4. Decisions to log? -> Add to Key Decisions
+5. "What This Is" still accurate? -> Update if drifted
+
+**After each milestone** (via `$gsd-complete-milestone`):
+1. Full review of all sections
+2. Core Value check - still the right priority?
+3. Audit Out of Scope - reasons still valid?
+4. Update Context with current state
 
 ---
-*Last updated: 2026-05-21 after Phase 8 verification and v1.1 milestone completion.*
+*Last updated: 2026-05-21 after starting v1.2 Project Manager Web Workflow.*

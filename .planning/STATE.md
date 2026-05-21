@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Beta Evidence Burn-down
-status: Awaiting next milestone
-stopped_at: Phase 8 complete, v1.1 milestone complete and ready to archive
-last_updated: "2026-05-21T14:09:23.152Z"
-last_activity: 2026-05-21 — Milestone v1.1 completed and archived
+milestone: v1.2
+milestone_name: Project Manager Web Workflow
+status: planning
+last_updated: "2026-05-21T14:21:16.256Z"
+last_activity: 2026-05-21
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -21,14 +20,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability.
-**Current focus:** Milestone complete — ready to archive v1.1 or start the next milestone
+**Current focus:** v1.2 Project Manager Web Workflow — defining requirements and roadmap
 
 ## Current Position
 
-Phase: Milestone v1.1 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-05-21 — Milestone v1.1 completed and archived
+Status: Defining requirements
+Last activity: 2026-05-21 — Milestone v1.2 started
 
 ## Performance Metrics
 
@@ -90,10 +89,11 @@ Recent decisions affecting current work:
 - [Phase 08]: First-user trial entry point is `docs/TRIAL-CHECKLIST.md`; support triage is `docs/SUPPORT-DIAGNOSTICS.md`. — Plan 08-01 readiness packet.
 - [Phase 08]: Completed first-user feedback remains `Caveat` until a real packet is attached or linked through `docs/TRIAL-FEEDBACK.md` or the `OpenForge first-user trial feedback` issue form. — Plan 08-02 closeout.
 - [Phase 08]: v1.1 closeout keeps live provider and physical Windows/WSL as `Caveat`, Feishu developer-console callback as `Blocked`, and first-user feedback as `Caveat`. — Plan 08-02 closeout.
+- [Milestone v1.2]: Promote the project-manager ledger to a Web workflow before remote runtime implementation so first users can operate goals, work items, evidence references, and ledger state directly from the project context.
 
 ### Pending Todos
 
-None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.md` and `.planning/REQUIREMENTS.md`.
+None in `.planning/todos/` yet. v1.2 work is being defined in `.planning/ROADMAP.md` and `.planning/REQUIREMENTS.md`.
 
 ### Blockers/Concerns
 
@@ -103,6 +103,7 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 - Completed first-user feedback remains `Caveat` until attached and mapped.
 - Phase 7 is complete. Public Feishu webhook live exposure still needs real developer-console HTTP callback verification for callback `Pass`; current evidence records the missing public HTTPS URL and Feishu console URL verification action as a blocker. Current safe topology is single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay/rate storage before enablement.
 - Phase 8 UAT passed with 6/6 checks and 0 issues; security has `threats_open: 0`.
+- v1.2 should not reclassify v1.1 live-provider, physical Windows/WSL, Feishu console-callback, or first-user feedback caveats unless new real evidence is attached.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -116,10 +117,10 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 
 ## Session Continuity
 
-Last session: 2026-05-21T14:03:26Z
-Stopped at: Phase 8 complete, v1.1 milestone complete and ready to archive
+Last session: 2026-05-21T14:21:16Z
+Stopped at: v1.2 milestone planning started
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Define v1.2 requirements and roadmap.
