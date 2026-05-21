@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Beta Evidence Burn-down
-status: verifying
-stopped_at: Completed Phase 7 execution; ready for $gsd-verify-work 7
-last_updated: "2026-05-21T07:59:42.153Z"
+status: ready_to_plan
+stopped_at: Phase 07 complete (2/2) — ready to discuss Phase 8
+last_updated: 2026-05-21T08:03:59.832Z
 last_activity: 2026-05-21
 progress:
   total_phases: 3
@@ -21,20 +21,20 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability.
-**Current focus:** Phase 07 — Feishu Live Callback Readiness
+**Current focus:** Phase 8 — first user readiness packet
 
 ## Current Position
 
-Phase: 07 (Feishu Live Callback Readiness) — READY FOR VERIFICATION
-Plan: 2 of 2
-Status: Phase complete — ready for verification
+Phase: 8
+Plan: Not started
+Status: Ready to plan
 Last activity: 2026-05-21
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 13
+- Total plans completed: 15
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -63,6 +63,7 @@ Last activity: 2026-05-21
 | Phase 06 P02 | 13 min | 3 tasks | 4 files |
 | Phase 07 P01 | 10min | 3 tasks | 4 files |
 | Phase 07 P02 | 13min | 4 tasks | 7 files |
+| 07 | 2 | - | - |
 
 ## Accumulated Context
 
