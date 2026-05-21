@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as apiModule from "./api";
 import {
   createAgent,
   createApiKey,
@@ -121,6 +122,19 @@ import {
   writeConfig,
   type AdapterDiscovery,
 } from "./api";
+
+type ProjectManagerApiClient = {
+  getProjectManagerGoal: (projectId: string) => Promise<unknown>;
+  updateProjectManagerGoal: (projectId: string, input: unknown) => Promise<unknown>;
+  listProjectManagerWorkItems: (projectId: string, params?: unknown) => Promise<unknown>;
+  createProjectManagerWorkItem: (projectId: string, input: unknown) => Promise<unknown>;
+  getProjectManagerWorkItem: (projectId: string, workItemId: string) => Promise<unknown>;
+  updateProjectManagerWorkItemStatus: (projectId: string, workItemId: string, input: unknown) => Promise<unknown>;
+  attachProjectManagerWorkItemEvidence: (projectId: string, workItemId: string, input: unknown) => Promise<unknown>;
+  listProjectManagerLedger: (projectId: string, params?: unknown) => Promise<unknown>;
+};
+
+const projectManagerApi = apiModule as unknown as ProjectManagerApiClient;
 
 function mockEnvelope(data: unknown = {}) {
   return Promise.resolve({
@@ -938,6 +952,137 @@ describe("api client", () => {
       "http://127.0.0.1:48731/api/v1/projects/project-1/agents/default-pack",
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  it("manages project-manager ledger routes through REST", async () => {
+    await projectManagerApi.getProjectManagerGoal("project/1");
+    await projectManagerApi.updateProjectManagerGoal("project/1", {
+      summary: "Ship Project Manager UI",
+      constraints: ["No Gateway changes"],
+      acceptanceCriteria: ["Typed client passes tests"],
+      status: "active",
+    });
+    await projectManagerApi.listProjectManagerWorkItems("project/1", {
+      status: "in_progress",
+      limit: 20,
+    });
+    await projectManagerApi.createProjectManagerWorkItem("project/1", {
+      title: "Expose tab",
+      description: "Add a project detail surface",
+      status: "todo",
+      priority: 10,
+      acceptanceCriteria: ["Tab is visible"],
+      evidenceRefs: [{ kind: "test", ref: "api.test.ts" }],
+      feishuRefs: [{ kind: "message", ref: "om_123" }],
+    });
+    await projectManagerApi.getProjectManagerWorkItem("project/1", "work/item-1");
+    await projectManagerApi.updateProjectManagerWorkItemStatus("project/1", "work/item-1", {
+      status: "ready_for_review",
+      evidenceRefs: [{ kind: "test", ref: "vitest" }],
+      manualCompletionReason: "Reviewed locally",
+    });
+    await projectManagerApi.attachProjectManagerWorkItemEvidence("project/1", "work/item-1", {
+      evidenceRefs: [{ kind: "report", path: "docs/report.md" }],
+    });
+    await projectManagerApi.listProjectManagerLedger("project/1", {
+      eventType: "work_item_status_changed",
+      limit: 10,
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/goal",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/goal",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          summary: "Ship Project Manager UI",
+          constraints: ["No Gateway changes"],
+          acceptanceCriteria: ["Typed client passes tests"],
+          status: "active",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items?status=in_progress&limit=20",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          title: "Expose tab",
+          description: "Add a project detail surface",
+          status: "todo",
+          priority: 10,
+          acceptanceCriteria: ["Tab is visible"],
+          evidenceRefs: [{ kind: "test", ref: "api.test.ts" }],
+          feishuRefs: [{ kind: "message", ref: "om_123" }],
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      6,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/status",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "ready_for_review",
+          evidenceRefs: [{ kind: "test", ref: "vitest" }],
+          manualCompletionReason: "Reviewed locally",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      7,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/evidence",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          evidenceRefs: [{ kind: "report", path: "docs/report.md" }],
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      8,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/ledger?eventType=work_item_status_changed&limit=10",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+  });
+
+  it("preserves Gateway error details for project-manager API calls", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve({
+            code: 1,
+            message: "Project not found",
+            details: { code: "project_not_found" },
+          }),
+        } as Response)
+      )
+    );
+
+    await expect(projectManagerApi.getProjectManagerGoal("missing-project")).rejects.toMatchObject({
+      message: "Project not found",
+      status: 404,
+      details: { code: "project_not_found" },
+    });
   });
 
   it("manages skills and project skill enablement through REST", async () => {
