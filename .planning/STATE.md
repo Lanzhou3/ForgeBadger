@@ -4,8 +4,8 @@ milestone: v1.1
 milestone_name: Beta Evidence Burn-down
 status: executing
 stopped_at: Phase 8 planned (2 plans) — ready to execute
-last_updated: "2026-05-21T12:44:46.637Z"
-last_activity: 2026-05-21 -- Phase 08 planning complete
+last_updated: "2026-05-21T12:56:41.162Z"
+last_activity: 2026-05-21 -- Phase 08 execution started
 progress:
   total_phases: 3
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability.
-**Current focus:** Phase 8 — first user readiness packet
+**Current focus:** Phase 08 — first-user-readiness-packet
 
 ## Current Position
 
-Phase: 8
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-21 -- Phase 08 planning complete
+Phase: 08 (first-user-readiness-packet) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 08
+Last activity: 2026-05-21 -- Phase 08 execution started
 
 ## Performance Metrics
 

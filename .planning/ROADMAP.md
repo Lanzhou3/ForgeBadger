@@ -121,7 +121,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 08-01: Capture first-user feedback packet and support diagnostics reproduction path.
+- [x] 08-01: Capture first-user feedback packet and support diagnostics reproduction path.
 
 **Wave 2** *(blocked on Phase 6 and Phase 7 evidence status)*
 
@@ -136,7 +136,7 @@ Phases execute in numeric order: 6 -> 7 -> 8.
 |-------|-----------|----------------|--------|-----------|
 | 6. Live Provider and Platform Smoke Evidence | v1.1 | 2/2 | Complete   | 2026-05-21 |
 | 7. Feishu Live Callback Readiness | v1.1 | 2/2 | Complete   | 2026-05-21 |
-| 8. First-User Readiness Packet | v1.1 | 0/2 | Not started | - |
+| 8. First-User Readiness Packet | v1.1 | 1/2 | In Progress|  |
 
 ## Backlog
 
