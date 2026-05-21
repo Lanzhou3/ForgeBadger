@@ -10,7 +10,7 @@
 
 - [x] **BETA-01**: Maintainer can run a disposable live Copilot provider smoke and record provider, model, command, result, redaction, and rerun instructions without leaking credentials.
 - [x] **BETA-02**: Maintainer can run the physical Windows/WSL terminal smoke on a real host and record pass/caveat/blocker evidence for project launch, tmux persistence, reconnect, and recovery behavior.
-- [ ] **BETA-03**: Maintainer can attach completed first-user feedback with reproducible steps, affected surfaces, owner, severity, and mapped follow-up disposition.
+- [x] **BETA-03**: Maintainer can attach completed first-user feedback with reproducible steps, affected surfaces, owner, severity, and mapped follow-up disposition. Status: Complete (Caveat) until a real completed first-user packet is attached or linked.
 - [x] **BETA-04**: Release, trial, and handoff docs consistently distinguish `Pass`, `Caveat`, and `Blocked` evidence states and do not remove caveats without real evidence.
 - [x] **BETA-05**: CI/release gate documentation reconciles automated CI, local browser smoke, tmux integration, and manual real-host gates with exact skip or rerun instructions.
 
@@ -22,9 +22,9 @@
 
 ### First-User Readiness Packet
 
-- [ ] **READY-01**: First-user trial checklist gives maintainers a single runnable path for setup, dependency checks, provider readiness, terminal smoke, Copilot smoke, and feedback capture.
-- [ ] **READY-02**: Support diagnostics packet lets maintainers reproduce provider, runtime, and Feishu failures with redacted logs, exact commands, expected artifacts, and escalation boundaries.
-- [ ] **READY-03**: v1.1 closeout report summarizes remaining risks as explicit user-facing caveats or next-milestone backlog items, not ambiguous internal TODOs.
+- [x] **READY-01**: First-user trial checklist gives maintainers a single runnable path for setup, dependency checks, provider readiness, terminal smoke, Copilot smoke, and feedback capture.
+- [x] **READY-02**: Support diagnostics packet lets maintainers reproduce provider, runtime, and Feishu failures with redacted logs, exact commands, expected artifacts, and escalation boundaries.
+- [x] **READY-03**: v1.1 closeout report summarizes remaining risks as explicit user-facing caveats or next-milestone backlog items, not ambiguous internal TODOs.
 
 ## Future Requirements
 
@@ -57,15 +57,15 @@
 |-------------|-------|--------|
 | BETA-01 | Phase 6 | Complete (Caveat) |
 | BETA-02 | Phase 6 | Complete (Caveat) |
-| BETA-03 | Phase 8 | Not started |
+| BETA-03 | Phase 8 | Complete (Caveat) |
 | BETA-04 | Phase 6 | Complete |
 | BETA-05 | Phase 6 | Complete |
 | FEI-01 | Phase 7 | Complete (Blocked) |
 | FEI-02 | Phase 7 | Complete |
 | FEI-03 | Phase 7 | Complete |
-| READY-01 | Phase 8 | Not started |
-| READY-02 | Phase 8 | Not started |
-| READY-03 | Phase 8 | Not started |
+| READY-01 | Phase 8 | Complete |
+| READY-02 | Phase 8 | Complete |
+| READY-03 | Phase 8 | Complete |
 
 **Coverage:**
 - Current milestone requirements: 11 total

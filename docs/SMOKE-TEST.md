@@ -10,6 +10,11 @@ Phase 6 live provider and platform evidence is tracked in
 `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`. Use that report as
 the source of truth for `Pass`, `Caveat`, and `Blocked` status; do not remove
 the live-provider caveat without disposable live provider evidence.
+Phase 8 first-user readiness handoff is
+`docs/reports/v1.1-readiness-closeout-2026-05-21.md`; use it with
+`docs/TRIAL-CHECKLIST.md` and `docs/SUPPORT-DIAGNOSTICS.md` when routing trial
+support. The matrix remains the detailed manual/live gate source for live
+provider, physical Windows/WSL, and Feishu developer-console callback evidence.
 
 Run this checklist before asking a user to try the local console, or when a
 broader maintainer acceptance pass is needed. Use a disposable project

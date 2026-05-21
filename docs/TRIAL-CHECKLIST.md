@@ -10,6 +10,9 @@ The v1.1 evidence matrix remains
 callback evidence remains
 `docs/reports/phase-7-feishu-callback-evidence-2026-05-21.md`. Do not mark a
 `Caveat` or `Blocked` row as `Pass` unless the required real evidence exists.
+The first-user readiness closeout is
+`docs/reports/v1.1-readiness-closeout-2026-05-21.md`, and support triage starts
+from `docs/SUPPORT-DIAGNOSTICS.md`.
 
 Do not paste raw provider keys, Feishu secrets, JWTs, browser auth token values,
 sensitive terminal output, raw provider/callback bodies, private keys, attach

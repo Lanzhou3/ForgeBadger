@@ -172,6 +172,14 @@ CI core smoke, `gate-d`, focused tmux, Feishu live-exposure readiness, release
 docs consistency, and redaction status is
 `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`.
 
+The Phase 8 first-user readiness handoff is
+`docs/reports/v1.1-readiness-closeout-2026-05-21.md`, with
+`docs/TRIAL-CHECKLIST.md` as the runnable trial path and
+`docs/SUPPORT-DIAGNOSTICS.md` as the support triage packet. CI and local
+automation remain evidence inputs; they do not replace manual/live evidence for
+live provider, physical Windows/WSL, or Feishu developer-console callback
+status.
+
 Treat these as separate gates:
 
 - CI core smoke: `pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line`.

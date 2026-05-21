@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Beta Evidence Burn-down
 status: executing
-stopped_at: Phase 8 planned (2 plans) — ready to execute
-last_updated: "2026-05-21T12:56:41.162Z"
-last_activity: 2026-05-21 -- Phase 08 execution started
+stopped_at: Phase 8 executed (2 plans) — ready for verify-work
+last_updated: "2026-05-21T13:04:52Z"
+last_activity: 2026-05-21 -- Phase 08 readiness closeout executed
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 6
-  completed_plans: 4
-  percent: 67
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability.
-**Current focus:** Phase 08 — first-user-readiness-packet
+**Current focus:** Phase 08 — first-user-readiness-packet verification
 
 ## Current Position
 
-Phase: 08 (first-user-readiness-packet) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 08
-Last activity: 2026-05-21 -- Phase 08 execution started
+Phase: 08 (first-user-readiness-packet) — EXECUTED
+Plan: 2 of 2
+Status: Ready for verify-work
+Last activity: 2026-05-21 -- Phase 08 readiness closeout executed
 
 ## Performance Metrics
 
@@ -86,6 +86,9 @@ Recent decisions affecting current work:
 - [Phase 07]: If public HTTPS URL or console callback action is unavailable, record FEI-01 as a precise blocker with owner and rerun path instead of overclaiming pass. — Plan 07-01 evidence report.
 - [Phase 07]: v1.1 public Feishu webhook support is local or single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay and shared rate-limit stores before enablement. — Plan 07-02 evidence report.
 - [Phase 07]: Top-level encrypted Feishu payloads fail closed with feishu_webhook_encrypted_payload_unsupported; decrypt support is deferred to a future security-reviewed phase. — Plan 07-02 evidence report.
+- [Phase 08]: First-user trial entry point is `docs/TRIAL-CHECKLIST.md`; support triage is `docs/SUPPORT-DIAGNOSTICS.md`. — Plan 08-01 readiness packet.
+- [Phase 08]: Completed first-user feedback remains `Caveat` until a real packet is attached or linked through `docs/TRIAL-FEEDBACK.md` or the `OpenForge first-user trial feedback` issue form. — Plan 08-02 closeout.
+- [Phase 08]: v1.1 closeout keeps live provider and physical Windows/WSL as `Caveat`, Feishu developer-console callback as `Blocked`, and first-user feedback as `Caveat`. — Plan 08-02 closeout.
 
 ### Pending Todos
 
@@ -98,6 +101,7 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 - Physical Windows/WSL evidence remains `Caveat` until a real Windows/WSL host completes the terminal checklist.
 - Completed first-user feedback remains `Caveat` until attached and mapped.
 - Phase 7 is complete. Public Feishu webhook live exposure still needs real developer-console HTTP callback verification for callback `Pass`; current evidence records the missing public HTTPS URL and Feishu console URL verification action as a blocker. Current safe topology is single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay/rate storage before enablement.
+- Phase 8 execution is complete. Verification still needs `$gsd-verify-work 8`; until then the phase remains executed but not marked complete.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -111,10 +115,10 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 
 ## Session Continuity
 
-Last session: 2026-05-21T12:44:46.619Z
-Stopped at: Phase 8 planned (2 plans) — ready to execute
-Resume file: .planning/phases/OF-08-first-user-readiness-packet/08-01-PLAN.md
+Last session: 2026-05-21T13:04:52Z
+Stopped at: Phase 8 executed (2 plans) — ready for verify-work
+Resume file: .planning/phases/OF-08-first-user-readiness-packet/08-02-SUMMARY.md
 
 ## Operator Next Steps
 
-- Execute Phase 8 with `$gsd-execute-phase 8`.
+- Verify Phase 8 with `$gsd-verify-work 8`.
