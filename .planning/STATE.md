@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Beta Evidence Burn-down
 status: executing
-stopped_at: Phase 6 planning complete
-last_updated: "2026-05-21T02:14:09.442Z"
-last_activity: 2026-05-21 -- Phase 06 planning complete
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-05-21T02:30:18.110Z"
+last_activity: 2026-05-21
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 2
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability.
-**Current focus:** Execute Phase 6 live-provider and platform smoke evidence.
+**Current focus:** Phase 06 — live-provider-and-platform-smoke-evidence
 
 ## Current Position
 
-Phase: 06
-Plan: Not started
+Phase: 06 (live-provider-and-platform-smoke-evidence) — EXECUTING
+Plan: 2 of 2
 Status: Ready to execute
-Last activity: 2026-05-21 -- Phase 06 planning complete
+Last activity: 2026-05-21
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Last activity: 2026-05-21 -- Phase 06 planning complete
 | Phase 04 P02 | 35min | 4 tasks | 14 files |
 | 04 | 2 | - | - |
 | 05 | 1 | - | - |
+| Phase 06 P01 | 14 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -102,9 +103,9 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 
 ## Session Continuity
 
-Last session: 2026-05-21T02:14:09.442Z
-Stopped at: Phase 6 planning complete
-Resume file: .planning/phases/OF-06-live-provider-and-platform-smoke-evidence/06-01-PLAN.md and 06-02-PLAN.md
+Last session: 2026-05-21T02:30:18.088Z
+Stopped at: Completed 06-01-PLAN.md
+Resume file: .planning/phases/OF-06-live-provider-and-platform-smoke-evidence/06-02-PLAN.md
 
 ## Operator Next Steps
 
