@@ -4,11 +4,13 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is v1.0 Post-Beta Trust Closure, archived on 2026-05-20. The next milestone should remove the remaining real-world beta caveats with live-provider, physical Windows/WSL, and completed first-user feedback evidence before broad runtime expansion.
+The current product stage is v1.1 Beta Evidence Burn-down completion. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope.
 
 ## Current Milestone: v1.1 Beta Evidence Burn-down
 
 **Goal:** Convert the remaining v1.0 external evidence caveats into reproducible pass/caveat/blocker records for first-user readiness.
+
+**Status:** Complete on 2026-05-21; ready for milestone archival.
 
 **Target features:**
 - Disposable live Copilot provider smoke with redacted evidence and exact model/provider provenance.
@@ -37,14 +39,19 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - [x] v1.0 hardened dependency, adapter, provider, Settings, Copilot, and Web E2E failure states for first-user recovery.
 - [x] v1.0 added a tenant-scoped project-manager ledger backend with atomic audit writes, safe diagnostics, and Copilot read tools.
 - [x] v1.0 produced a remote execution architecture, threat model, rollback plan, and verification report while keeping runtime implementation deferred.
+- [x] v1.1 records live Copilot provider evidence as `Complete (Caveat)` with a disposable-credential rerun path.
+- [x] v1.1 records physical Windows/WSL terminal evidence as `Complete (Caveat)` with a real-host rerun path.
+- [x] v1.1 records completed first-user feedback as `Complete (Caveat)` with `docs/TRIAL-FEEDBACK.md` and `OpenForge first-user trial feedback` collection paths.
+- [x] v1.1 records Feishu public webhook live exposure as complete with the real developer-console callback still `Blocked`, plus single-Gateway/shared-store/encrypted-payload boundaries.
+- [x] v1.1 adds a first-user readiness packet: `docs/TRIAL-CHECKLIST.md`, `docs/SUPPORT-DIAGNOSTICS.md`, and `docs/reports/v1.1-readiness-closeout-2026-05-21.md`.
 
 ### Active
 
-- [ ] v1.1 proves or explicitly preserves the live Copilot provider caveat with disposable credential evidence.
-- [ ] v1.1 proves or explicitly preserves the physical Windows/WSL terminal caveat with real-host evidence.
-- [ ] v1.1 attaches completed first-user feedback and maps it to reproducible follow-up work.
-- [ ] v1.1 makes a Feishu public webhook live-exposure decision with real callback evidence and deployment caveats.
-- [ ] v1.1 updates release, trial, and support docs so first-user readiness is inspectable without secret leakage.
+- [ ] Archive the completed v1.1 milestone and choose the next milestone direction.
+- [ ] Collect real first-user feedback through `docs/TRIAL-FEEDBACK.md` or the `OpenForge first-user trial feedback` issue form.
+- [ ] Rerun live provider smoke with a disposable credential and explicit model id when available.
+- [ ] Rerun physical Windows/WSL terminal smoke on a real WSL host when available.
+- [ ] Run real Feishu developer-console URL verification against a public Gateway route when available.
 
 ### Out of Scope
 
@@ -87,7 +94,8 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Track SSH/remote execution separately | Remote execution changes threat model and should not be bundled into local beta hardening | Good - Phase 5 kept it architecture-only |
 | Require public Feishu ingress to fail closed before exposure | Chat input must not become approval, terminal, or cross-tenant authority | Good |
 | Keep project-manager state OpenForge-owned | Ledger events need auditability and tenant scope, not Feishu text authority | Good |
-| Burn down real-world evidence before runtime expansion | First-user readiness depends on live provider, physical terminal, and actual feedback evidence more than new runtime scope | Pending |
+| Burn down real-world evidence before runtime expansion | First-user readiness depends on live provider, physical terminal, and actual feedback evidence more than new runtime scope | Good - v1.1 converted gaps into pass/caveat/blocker evidence |
+| Package v1.1 as a cautious first-user handoff | Phase 8 readiness packet makes trial/support/closeout inspectable while preserving caveats | Good - v1.1 completed with explicit caveats |
 
 ---
-*Last updated: 2026-05-21 after v1.1 milestone start.*
+*Last updated: 2026-05-21 after Phase 8 verification and v1.1 milestone completion.*

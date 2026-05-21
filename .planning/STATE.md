@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Beta Evidence Burn-down
-status: executing
-stopped_at: Phase 8 executed (2 plans) — ready for verify-work
-last_updated: "2026-05-21T13:04:52Z"
+status: milestone_complete
+stopped_at: Milestone complete (Phase 08 was final phase)
+last_updated: 2026-05-21T14:05:05.993Z
 last_activity: 2026-05-21 -- Phase 08 readiness closeout executed
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 6
   completed_plans: 6
   percent: 100
@@ -21,20 +21,20 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability.
-**Current focus:** Phase 08 — first-user-readiness-packet verification
+**Current focus:** Milestone complete — ready to archive v1.1 or start the next milestone
 
 ## Current Position
 
-Phase: 08 (first-user-readiness-packet) — EXECUTED
-Plan: 2 of 2
-Status: Ready for verify-work
-Last activity: 2026-05-21 -- Phase 08 readiness closeout executed
+Phase: 08
+Plan: Not started
+Status: Milestone complete
+Last activity: 2026-05-21 -- Phase 08 UAT passed and milestone completed
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 15
+- Total plans completed: 17
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -64,6 +64,7 @@ Last activity: 2026-05-21 -- Phase 08 readiness closeout executed
 | Phase 07 P01 | 10min | 3 tasks | 4 files |
 | Phase 07 P02 | 13min | 4 tasks | 7 files |
 | 07 | 2 | - | - |
+| 08 | 2 | - | - |
 
 ## Accumulated Context
 
@@ -101,7 +102,7 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 - Physical Windows/WSL evidence remains `Caveat` until a real Windows/WSL host completes the terminal checklist.
 - Completed first-user feedback remains `Caveat` until attached and mapped.
 - Phase 7 is complete. Public Feishu webhook live exposure still needs real developer-console HTTP callback verification for callback `Pass`; current evidence records the missing public HTTPS URL and Feishu console URL verification action as a blocker. Current safe topology is single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay/rate storage before enablement.
-- Phase 8 execution is complete. Verification still needs `$gsd-verify-work 8`; until then the phase remains executed but not marked complete.
+- Phase 8 UAT passed with 6/6 checks and 0 issues; security has `threats_open: 0`.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -115,10 +116,10 @@ None in `.planning/todos/` yet. v1.1 work is represented by `.planning/ROADMAP.m
 
 ## Session Continuity
 
-Last session: 2026-05-21T13:04:52Z
-Stopped at: Phase 8 executed (2 plans) — ready for verify-work
-Resume file: .planning/phases/OF-08-first-user-readiness-packet/08-02-SUMMARY.md
+Last session: 2026-05-21T14:03:26Z
+Stopped at: Phase 8 complete, v1.1 milestone complete and ready to archive
+Resume file: None
 
 ## Operator Next Steps
 
-- Verify Phase 8 with `$gsd-verify-work 8`.
+- Complete and archive the v1.1 milestone when ready.
