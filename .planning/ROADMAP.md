@@ -100,7 +100,7 @@ Full archive:
 | 7. Feishu Live Callback Readiness | v1.1 | 2/2 | Complete | 2026-05-21 |
 | 8. First-User Readiness Packet | v1.1 | 2/2 | Complete | 2026-05-21 |
 | 9. Project Manager Web Foundation | v1.2 | 2/2 | Complete   | 2026-05-21 |
-| 10. Goal And Work Item Operations | v1.2 | 0/? | Planned | — |
+| 10. Goal And Work Item Operations | v1.2 | 1/3 | In Progress|  |
 | 11. Evidence, Ledger, And Acceptance Gates | v1.2 | 0/? | Planned | — |
 
 ## Backlog
