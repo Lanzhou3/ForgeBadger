@@ -61,6 +61,43 @@ test("saves a Project Manager goal update through the exact API route", async ({
   expect(unhandledApiRoutes).toEqual([]);
 });
 
+test("filters, inspects, and creates Project Manager work items", async ({ page }) => {
+  const unhandledApiRoutes = await mockProjectDetailApis(page);
+
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Project Manager" }).click();
+
+  const panel = page.getByTestId("project-manager-panel");
+  await panel.getByLabel("Filter by status").selectOption("blocked");
+  await expect(panel.getByText("Review external evidence")).toBeVisible();
+  await expect(panel.getByText("Expose Project Manager tab")).not.toBeVisible();
+
+  await panel.getByRole("button", { name: "View details" }).click();
+  await expect(page.getByRole("dialog", { name: "Review external evidence" })).toBeVisible();
+  await expect(page.getByText("Confirm beta evidence caveats")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await panel.getByRole("button", { name: "Create work item" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create work item" });
+  await dialog.getByLabel("Title").fill("Confirm trial packet");
+  await dialog.getByLabel("Priority").fill("7");
+  await dialog.getByLabel("Description").fill("Check the first-user packet before milestone close.");
+  await dialog.getByLabel("Status").selectOption("blocked");
+  await dialog.getByLabel("Acceptance criteria").fill("Created item is visible\nReferences stay bounded\n");
+  await dialog.getByLabel("Kind").first().fill("report");
+  await dialog.getByLabel("Label").first().fill("Trial checklist");
+  await dialog.getByLabel("Reference").first().fill("TRIAL-1");
+  await dialog.getByLabel("Path").fill("docs/TRIAL-CHECKLIST.md");
+  await dialog.getByLabel("Kind").nth(1).fill("message");
+  await dialog.getByLabel("Label").nth(1).fill("Feishu approval");
+  await dialog.getByLabel("Reference").nth(1).fill("om_999");
+  await dialog.getByLabel("Feishu message ID").fill("om_msg_999");
+  await dialog.getByRole("button", { name: "Create work item" }).click();
+
+  await expect(panel.getByText("Confirm trial packet")).toBeVisible();
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
 async function mockProjectDetailApis(
   page: Page,
   overrides: { projectManagerStatus?: number } = {}
@@ -76,6 +113,33 @@ async function mockProjectDetailApis(
     createdAt: 1779370000000,
     updatedAt: 1779373600000,
   };
+  let workItems = [{
+    id: "work-item-1",
+    projectId: PROJECT_ID,
+    title: "Expose Project Manager tab",
+    description: null,
+    status: "in_progress",
+    priority: 10,
+    acceptanceCriteria: ["Tab is visible"],
+    evidenceRefCount: 1,
+    evidenceRefs: [{ kind: "test", ref: "project-manager.spec.ts" }],
+    feishuRefCount: 0,
+    createdAt: 1779370000000,
+    updatedAt: 1779373600000,
+  }, {
+    id: "work-item-2",
+    projectId: PROJECT_ID,
+    title: "Review external evidence",
+    description: "Confirm beta evidence caveats",
+    status: "blocked",
+    priority: 5,
+    acceptanceCriteria: ["Caveats remain explicit"],
+    evidenceRefCount: 0,
+    evidenceRefs: [],
+    feishuRefCount: 1,
+    createdAt: 1779370000000,
+    updatedAt: 1779373600000,
+  }];
 
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -225,29 +289,71 @@ async function mockProjectDetailApis(
     }
 
     if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/work-items` && method === "GET") {
-      expect(url.searchParams.get("limit")).toBe("5");
+      expect(url.searchParams.get("limit")).toBe("50");
       if (overrides.projectManagerStatus && overrides.projectManagerStatus >= 400) {
         await fulfillProjectManagerError(route, overrides.projectManagerStatus);
         return;
       }
+      const status = url.searchParams.get("status");
+      const filteredWorkItems = status
+        ? workItems.filter((item) => item.status === status)
+        : workItems;
       await route.fulfill({
-        json: envelope({
-          workItems: [{
-            id: "work-item-1",
-            projectId: PROJECT_ID,
-            title: "Expose Project Manager tab",
-            description: null,
-            status: "in_progress",
-            priority: 10,
-            acceptanceCriteria: ["Tab is visible"],
-            evidenceRefCount: 1,
-            evidenceRefs: [{ kind: "test", ref: "project-manager.spec.ts" }],
-            feishuRefCount: 0,
-            createdAt: 1779370000000,
-            updatedAt: 1779373600000,
-          }],
-        }),
+        json: envelope({ workItems: filteredWorkItems }),
       });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/work-items` && method === "POST") {
+      const body = JSON.parse(route.request().postData() ?? "{}") as {
+        title?: unknown;
+        description?: unknown;
+        priority?: unknown;
+        status?: unknown;
+        acceptanceCriteria?: unknown;
+        evidenceRefs?: unknown;
+        feishuRefs?: unknown;
+      };
+      expect(body).toEqual({
+        title: "Confirm trial packet",
+        description: "Check the first-user packet before milestone close.",
+        priority: 7,
+        status: "blocked",
+        acceptanceCriteria: ["Created item is visible", "References stay bounded"],
+        evidenceRefs: [{
+          kind: "report",
+          label: "Trial checklist",
+          ref: "TRIAL-1",
+          path: "docs/TRIAL-CHECKLIST.md",
+        }],
+        feishuRefs: [{
+          kind: "message",
+          label: "Feishu approval",
+          ref: "om_999",
+          feishuMessageId: "om_msg_999",
+        }],
+      });
+      const createdWorkItem = {
+        id: "work-item-created",
+        projectId: PROJECT_ID,
+        title: body.title as string,
+        description: body.description as string,
+        status: body.status as string,
+        priority: body.priority as number,
+        acceptanceCriteria: body.acceptanceCriteria as string[],
+        evidenceRefCount: 1,
+        evidenceRefs: [{
+          kind: "report",
+          label: "Trial checklist",
+          ref: "TRIAL-1",
+          path: "docs/TRIAL-CHECKLIST.md",
+        }],
+        feishuRefCount: 1,
+        createdAt: 1779377600000,
+        updatedAt: 1779377600000,
+      };
+      workItems = [...workItems, createdWorkItem];
+      await route.fulfill({ json: envelope({ workItem: createdWorkItem }) });
       return;
     }
 

@@ -963,8 +963,8 @@ describe("api client", () => {
       status: "active",
     });
     await projectManagerApi.listProjectManagerWorkItems("project/1", {
-      status: "in_progress",
-      limit: 20,
+      status: "blocked",
+      limit: 50,
     });
     await projectManagerApi.createProjectManagerWorkItem("project/1", {
       title: "Expose tab",
@@ -972,8 +972,8 @@ describe("api client", () => {
       status: "todo",
       priority: 10,
       acceptanceCriteria: ["Tab is visible"],
-      evidenceRefs: [{ kind: "test", ref: "api.test.ts" }],
-      feishuRefs: [{ kind: "message", ref: "om_123" }],
+      evidenceRefs: [{ kind: "test", label: "API test", ref: "api.test.ts", path: "packages/web/src/lib/api.test.ts" }],
+      feishuRefs: [{ kind: "message", label: "Approval", ref: "om_123", feishuMessageId: "om_msg_123" }],
     });
     await projectManagerApi.getProjectManagerWorkItem("project/1", "work/item-1");
     await projectManagerApi.updateProjectManagerWorkItemStatus("project/1", "work/item-1", {
@@ -1009,7 +1009,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items?status=in_progress&limit=20",
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items?status=blocked&limit=50",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
@@ -1023,8 +1023,8 @@ describe("api client", () => {
           status: "todo",
           priority: 10,
           acceptanceCriteria: ["Tab is visible"],
-          evidenceRefs: [{ kind: "test", ref: "api.test.ts" }],
-          feishuRefs: [{ kind: "message", ref: "om_123" }],
+          evidenceRefs: [{ kind: "test", label: "API test", ref: "api.test.ts", path: "packages/web/src/lib/api.test.ts" }],
+          feishuRefs: [{ kind: "message", label: "Approval", ref: "om_123", feishuMessageId: "om_msg_123" }],
         }),
       })
     );
