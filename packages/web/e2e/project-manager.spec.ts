@@ -25,7 +25,7 @@ test("renders populated Project Manager state from exact API routes", async ({ p
   await expect(panel).toBeVisible();
   await expect(panel.getByRole("heading", { name: "Project Manager" })).toBeVisible();
   await expect(panel.getByText("Ship v1.2 Project Manager workflow")).toBeVisible();
-  await expect(panel.getByText("Expose Project Manager tab")).toBeVisible();
+  await expect(panel.getByRole("row", { name: /Expose Project Manager tab/ })).toBeVisible();
   await expect(panel.getByText("Work item status changed")).toBeVisible();
   await expect(panel.getByRole("button", { name: "Refresh project manager" }).first()).toBeVisible();
   expect(unhandledApiRoutes).toEqual([]);
@@ -69,8 +69,8 @@ test("filters, inspects, and creates Project Manager work items", async ({ page 
 
   const panel = page.getByTestId("project-manager-panel");
   await panel.getByLabel("Filter by status").selectOption("blocked");
-  await expect(panel.getByText("Review external evidence")).toBeVisible();
-  await expect(panel.getByText("Expose Project Manager tab")).not.toBeVisible();
+  await expect(panel.getByRole("row", { name: /Review external evidence/ })).toBeVisible();
+  await expect(panel.locator("table tbody tr", { hasText: "Expose Project Manager tab" })).toHaveCount(0);
 
   await panel.getByRole("button", { name: "View details" }).click();
   await expect(page.getByRole("dialog", { name: "Review external evidence" })).toBeVisible();
@@ -174,9 +174,66 @@ test("keeps safe evidence draft values visible after attach failure", async ({ p
   expect(unhandledApiRoutes).toEqual([]);
 });
 
+test("renders ledger timeline filters and loads more events", async ({ page }) => {
+  const ledgerLimits: number[] = [];
+  const unhandledApiRoutes = await mockProjectDetailApis(page, {
+    onLedgerLimit: (limit) => ledgerLimits.push(limit),
+  });
+
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Project Manager" }).click();
+
+  const panel = page.getByTestId("project-manager-panel");
+  const ledger = panel.getByTestId("project-manager-ledger");
+  await expect(ledger.getByRole("button", { name: "All" })).toBeVisible();
+  await expect(ledger.getByRole("button", { name: "Status changes" })).toBeVisible();
+  await expect(ledger.getByRole("button", { name: "Evidence" })).toBeVisible();
+  await expect(ledger.getByRole("button", { name: "Manual completion" })).toBeVisible();
+  await expect(ledger.getByRole("button", { name: "Blockers" })).toBeVisible();
+  await expect(ledger.getByText("Manual completion recorded")).toBeVisible();
+  await expect(ledger.getByText("Completion was recorded without an evidence reference.")).toBeVisible();
+  await expect(ledger.getByText("Blocker recorded")).toBeVisible();
+  await expect(ledger.getByText("Blocker marker only; raw blocker details are not displayed.")).toBeVisible();
+  expect(ledgerLimits).toContain(25);
+
+  await ledger.getByRole("button", { name: "Blockers" }).click();
+  await expect(ledger.getByText("Blocker recorded")).toBeVisible();
+  await expect(ledger.getByText("Manual completion recorded")).not.toBeVisible();
+
+  await ledger.getByRole("button", { name: "Manual completion" }).click();
+  await expect(ledger.getByText("Manual completion recorded")).toBeVisible();
+  await expect(ledger.getByText("Blocker recorded")).not.toBeVisible();
+
+  await ledger.getByRole("button", { name: "All" }).click();
+  await ledger.getByRole("button", { name: "Load more ledger events" }).click();
+  await expect.poll(() => ledgerLimits).toContain(50);
+  await expect(ledger.getByText("Next step proposed")).toBeVisible();
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
+test("keeps goal and work items visible when ledger loading fails", async ({ page }) => {
+  const unhandledApiRoutes = await mockProjectDetailApis(page, { ledgerStatus: 500 });
+
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Project Manager" }).click();
+
+  const panel = page.getByTestId("project-manager-panel");
+  await expect(panel.getByText("Ship v1.2 Project Manager workflow")).toBeVisible();
+  await expect(panel.getByText("Expose Project Manager tab")).toBeVisible();
+  const ledger = panel.getByTestId("project-manager-ledger");
+  await expect(ledger.getByText("Could not load ledger events.")).toBeVisible();
+  await expect(ledger.getByRole("button", { name: "Refresh project manager" })).toBeVisible();
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
 async function mockProjectDetailApis(
   page: Page,
-  overrides: { evidenceAttachStatus?: number; projectManagerStatus?: number } = {}
+  overrides: {
+    evidenceAttachStatus?: number;
+    ledgerStatus?: number;
+    onLedgerLimit?: (limit: number) => void;
+    projectManagerStatus?: number;
+  } = {}
 ) {
   const unhandledApiRoutes: string[] = [];
   let goal = {
@@ -526,7 +583,19 @@ async function mockProjectDetailApis(
     }
 
     if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/ledger` && method === "GET") {
-      expect(url.searchParams.get("limit")).toBe("5");
+      const ledgerLimit = Number(url.searchParams.get("limit"));
+      expect(ledgerLimit).toBeGreaterThanOrEqual(25);
+      overrides.onLedgerLimit?.(ledgerLimit);
+      if (overrides.ledgerStatus && overrides.ledgerStatus >= 400) {
+        await route.fulfill({
+          status: overrides.ledgerStatus,
+          json: {
+            code: 1,
+            message: "Could not load ledger events.",
+          },
+        });
+        return;
+      }
       if (overrides.projectManagerStatus && overrides.projectManagerStatus >= 400) {
         await fulfillProjectManagerError(route, overrides.projectManagerStatus);
         return;
@@ -546,16 +615,7 @@ async function mockProjectDetailApis(
         : [];
       await route.fulfill({
         json: envelope({
-          events: [...evidenceAttachedEvent, {
-            id: "ledger-1",
-            projectId: PROJECT_ID,
-            workItemId: "work-item-1",
-            eventType: "work_item_status_changed",
-            status: "in_progress",
-            evidenceRefCount: 1,
-            feishuRefCount: 0,
-            createdAt: 1779373600000,
-          }],
+          events: projectManagerLedgerEvents(ledgerLimit, evidenceAttachedEvent),
         }),
       });
       return;
@@ -573,6 +633,79 @@ async function mockProjectDetailApis(
   });
 
   return unhandledApiRoutes;
+}
+
+function projectManagerLedgerEvents(limit: number, evidenceAttachedEvent: unknown[]) {
+  const baseEvents = [
+    ...evidenceAttachedEvent,
+    {
+            id: "ledger-1",
+            projectId: PROJECT_ID,
+            workItemId: "work-item-1",
+            eventType: "work_item_status_changed",
+            status: "in_progress",
+            evidenceRefCount: 1,
+            feishuRefCount: 0,
+            createdAt: 1779373600000,
+    },
+    {
+      id: "ledger-3",
+      projectId: PROJECT_ID,
+      workItemId: "work-item-2",
+      eventType: "evidence_attached",
+      status: null,
+      evidenceRefCount: 1,
+      feishuRefCount: 1,
+      createdAt: 1779373700000,
+    },
+    {
+      id: "ledger-4",
+      projectId: PROJECT_ID,
+      workItemId: "work-item-3",
+      eventType: "manual_completion_recorded",
+      status: "done",
+      evidenceRefCount: 0,
+      feishuRefCount: 0,
+      createdAt: 1779373800000,
+    },
+    {
+      id: "ledger-5",
+      projectId: PROJECT_ID,
+      workItemId: "work-item-2",
+      eventType: "blocker_recorded",
+      status: "blocked",
+      evidenceRefCount: 0,
+      feishuRefCount: 1,
+      createdAt: 1779373900000,
+    },
+    {
+      id: "ledger-6",
+      projectId: PROJECT_ID,
+      workItemId: "work-item-2",
+      eventType: "blocker_resolved",
+      status: "in_progress",
+      evidenceRefCount: 1,
+      feishuRefCount: 1,
+      createdAt: 1779374000000,
+    },
+  ];
+  const extendedEvents = limit >= 50
+    ? [
+      ...baseEvents,
+      {
+        id: "ledger-7",
+        projectId: PROJECT_ID,
+        workItemId: "work-item-1",
+        eventType: "next_step_proposed",
+        status: "ready_for_review",
+        evidenceRefCount: 1,
+        feishuRefCount: 0,
+        createdAt: 1779374100000,
+      },
+    ]
+    : baseEvents;
+
+  return extendedEvents;
 }
 
 async function fulfillProjectManagerError(route: Route, status: number) {

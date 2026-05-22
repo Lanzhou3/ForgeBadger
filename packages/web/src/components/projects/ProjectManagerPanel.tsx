@@ -111,6 +111,7 @@ interface EvidenceDraft {
 }
 
 const WORK_ITEM_LIMIT = 50;
+const LEDGER_PAGE_SIZE = 25;
 const WORK_ITEM_STATUSES: ProjectManagerWorkItemStatus[] = [
   "todo",
   "in_progress",
@@ -119,6 +120,23 @@ const WORK_ITEM_STATUSES: ProjectManagerWorkItemStatus[] = [
   "done",
   "cancelled",
 ];
+
+type LedgerFilter = "all" | "status_changes" | "evidence" | "manual_completion" | "blockers";
+
+const LEDGER_FILTER_OPTIONS: Array<{ labelKey: TranslationKey; value: LedgerFilter }> = [
+  { value: "all", labelKey: "projects.projectManagerLedgerFilterAll" },
+  { value: "status_changes", labelKey: "projects.projectManagerLedgerFilterStatusChanges" },
+  { value: "evidence", labelKey: "projects.projectManagerLedgerFilterEvidence" },
+  { value: "manual_completion", labelKey: "projects.projectManagerLedgerFilterManualCompletion" },
+  { value: "blockers", labelKey: "projects.projectManagerLedgerFilterBlockers" },
+];
+
+const LEDGER_FILTER_EVENTS: Record<Exclude<LedgerFilter, "all">, ProjectManagerLedgerEventType[]> = {
+  status_changes: ["work_item_status_changed"],
+  evidence: ["evidence_attached"],
+  manual_completion: ["manual_completion_recorded"],
+  blockers: ["blocker_recorded", "blocker_resolved"],
+};
 
 const PROJECT_MANAGER_STATUS_TRANSITIONS: Record<ProjectManagerWorkItemStatus, ProjectManagerWorkItemStatus[]> = {
   todo: ["in_progress", "blocked", "cancelled"],
@@ -143,6 +161,8 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
   const [createWorkItemError, setCreateWorkItemError] = useState<string | null>(null);
   const [evidenceDraft, setEvidenceDraft] = useState<EvidenceDraft>(() => createEvidenceDraft());
   const [evidenceAttachError, setEvidenceAttachError] = useState<string | null>(null);
+  const [ledgerFilter, setLedgerFilter] = useState<LedgerFilter>("all");
+  const [ledgerLimit, setLedgerLimit] = useState(LEDGER_PAGE_SIZE);
   const [statusMutationError, setStatusMutationError] = useState<string | null>(null);
   const [pendingDoneWorkItemId, setPendingDoneWorkItemId] = useState<string | null>(null);
   const [doneReason, setDoneReason] = useState("");
@@ -166,8 +186,8 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
   });
 
   const ledgerQuery = useQuery({
-    queryKey: ["project-manager", projectId, "ledger", { limit: 5 }],
-    queryFn: () => listProjectManagerLedger(projectId, { limit: 5 }),
+    queryKey: ["project-manager", projectId, "ledger", { limit: ledgerLimit }],
+    queryFn: () => listProjectManagerLedger(projectId, { limit: ledgerLimit }),
     enabled: canLoad,
     retry: false,
   });
@@ -249,12 +269,13 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
     },
   });
 
-  const firstError = goalQuery.error ?? workItemsQuery.error ?? ledgerQuery.error;
+  const firstError = goalQuery.error ?? workItemsQuery.error;
   const isNotFoundError = firstError instanceof GatewayApiError && firstError.status === 404;
-  const isLoading = goalQuery.isLoading || workItemsQuery.isLoading || ledgerQuery.isLoading;
+  const isLoading = goalQuery.isLoading || workItemsQuery.isLoading;
   const isRefreshing = goalQuery.isFetching || workItemsQuery.isFetching || ledgerQuery.isFetching;
   const workItems = workItemsQuery.data?.workItems ?? [];
   const ledgerEvents = ledgerQuery.data?.events ?? [];
+  const filteredLedgerEvents = filterLedgerEvents(ledgerEvents, ledgerFilter);
   const selectedWorkItem = workItems.find((item) => item.id === selectedWorkItemId) ?? null;
   const pendingDoneWorkItem = workItems.find((item) => item.id === pendingDoneWorkItemId) ?? null;
 
@@ -278,6 +299,15 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
     void goalQuery.refetch();
     void workItemsQuery.refetch();
     void ledgerQuery.refetch();
+  };
+
+  const refreshLedger = () => {
+    if (!canLoad) return;
+    void ledgerQuery.refetch();
+  };
+
+  const loadMoreLedger = () => {
+    setLedgerLimit((limit) => limit + LEDGER_PAGE_SIZE);
   };
 
   const startGoalEdit = () => {
@@ -429,7 +459,19 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
             t={t}
             workItems={workItems}
           />
-          <ProjectManagerLedgerCard events={ledgerEvents} t={t} />
+          <ProjectManagerLedgerCard
+            error={ledgerQuery.error}
+            events={filteredLedgerEvents}
+            filter={ledgerFilter}
+            hasLoadedEvents={ledgerEvents.length > 0}
+            isFetching={ledgerQuery.isFetching}
+            onFilterChange={setLedgerFilter}
+            onLoadMore={loadMoreLedger}
+            onRefresh={refreshLedger}
+            refreshing={ledgerQuery.isFetching}
+            t={t}
+            workItems={workItems}
+          />
         </div>
       )}
       <ProjectManagerWorkItemDetailSheet
@@ -1219,64 +1261,148 @@ function DetailField({ children, label }: { children: ReactNode; label: string }
 }
 
 function ProjectManagerLedgerCard({
+  error,
   events,
+  filter,
+  hasLoadedEvents,
+  isFetching,
+  onFilterChange,
+  onLoadMore,
+  onRefresh,
+  refreshing,
   t,
+  workItems,
 }: {
+  error: unknown;
   events: ProjectManagerLedgerEvent[];
+  filter: LedgerFilter;
+  hasLoadedEvents: boolean;
+  isFetching: boolean;
+  onFilterChange: (filter: LedgerFilter) => void;
+  onLoadMore: () => void;
+  onRefresh: () => void;
+  refreshing: boolean;
   t: Translate;
+  workItems: ProjectManagerWorkItem[];
 }) {
   return (
-    <Card className="xl:col-span-2">
-      <CardHeader>
+    <Card className="xl:col-span-2" data-testid="project-manager-ledger">
+      <CardHeader className="space-y-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <History className="size-4" />
           {t("projects.projectManagerLedger")}
         </CardTitle>
+        <div className="flex flex-wrap gap-2">
+          {LEDGER_FILTER_OPTIONS.map((option) => (
+            <Button
+              key={option.value}
+              size="sm"
+              variant={filter === option.value ? "default" : "outline"}
+              onClick={() => onFilterChange(option.value)}
+            >
+              {t(option.labelKey)}
+            </Button>
+          ))}
+        </div>
       </CardHeader>
-      <CardContent>
-        {events.length === 0 ? (
+      <CardContent className="space-y-3">
+        {error ? (
+          <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="flex items-center gap-2 text-sm text-destructive">
+                <AlertTriangle className="size-4" />
+                {t("projects.projectManagerLedgerLoadFailed")}
+              </p>
+              <Button size="sm" variant="outline" onClick={onRefresh} disabled={refreshing}>
+                <RefreshCw className={cn("mr-2 size-4", refreshing && "animate-spin")} />
+                {t("projects.projectManagerRefresh")}
+              </Button>
+            </div>
+          </div>
+        ) : isFetching && !hasLoadedEvents ? (
+          <div className="py-4 text-center text-sm text-muted-foreground">
+            {t("projects.projectManagerLoading")}
+          </div>
+        ) : !hasLoadedEvents ? (
           <EmptyState
             title={t("projects.projectManagerNoLedgerTitle")}
             body={t("projects.projectManagerNoLedgerBody")}
           />
+        ) : events.length === 0 ? (
+          <EmptyState
+            title={t("projects.projectManagerLedgerFilteredEmptyTitle")}
+            body={t("projects.projectManagerLedgerFilteredEmptyBody")}
+          />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("projects.projectManagerEvent")}</TableHead>
-                <TableHead>{t("common.status")}</TableHead>
-                <TableHead>{t("projects.projectManagerEvidenceRefs")}</TableHead>
-                <TableHead>{t("projects.projectManagerFeishuRefs")}</TableHead>
-                <TableHead>{t("projects.projectManagerCreated")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {events.map((event) => (
-                <TableRow key={event.id}>
-                  <TableCell className="whitespace-normal font-medium">
-                    {eventLabel(event.eventType, t)}
-                  </TableCell>
-                  <TableCell>
-                    {event.status ? (
-                      <Badge variant={statusBadgeVariant(event.status)}>
-                        {statusLabel(event.status, t)}
-                      </Badge>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs tabular-nums">{event.evidenceRefCount}</TableCell>
-                  <TableCell className="font-mono text-xs tabular-nums">{event.feishuRefCount}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {formatTimestamp(event.createdAt)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="space-y-3">
+            {events.map((event) => (
+              <ProjectManagerLedgerRow
+                key={event.id}
+                event={event}
+                t={t}
+                workItemTitle={ledgerWorkItemTitle(event, workItems)}
+              />
+            ))}
+          </div>
+        )}
+        {!error && (
+          <div className="flex justify-end">
+            <Button size="sm" variant="outline" onClick={onLoadMore} disabled={isFetching}>
+              {t("projects.projectManagerLoadMoreLedger")}
+            </Button>
+          </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function ProjectManagerLedgerRow({
+  event,
+  t,
+  workItemTitle,
+}: {
+  event: ProjectManagerLedgerEvent;
+  t: Translate;
+  workItemTitle: string;
+}) {
+  const note = ledgerEventNote(event.eventType, t);
+
+  return (
+    <div className="rounded-md border border-border/70 bg-muted/10 px-3 py-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={ledgerEventBadgeVariant(event.eventType)}>
+              {eventLabel(event.eventType, t)}
+            </Badge>
+            {event.status ? (
+              <Badge variant={statusBadgeVariant(event.status)}>
+                {statusLabel(event.status, t)}
+              </Badge>
+            ) : (
+              <span className="text-xs text-muted-foreground">-</span>
+            )}
+          </div>
+          <p className="break-words text-sm font-medium">{workItemTitle}</p>
+          {note && <p className="text-xs leading-5 text-muted-foreground">{note}</p>}
+        </div>
+        <div className="text-xs text-muted-foreground">{formatTimestamp(event.createdAt)}</div>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <LedgerDatum label={t("projects.projectManagerEvidenceRefs")} value={event.evidenceRefCount} />
+        <LedgerDatum label={t("projects.projectManagerFeishuRefs")} value={event.feishuRefCount} />
+      </div>
+    </div>
+  );
+}
+
+function LedgerDatum({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-md border border-border/50 bg-background/40 px-2 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 break-all font-mono text-xs tabular-nums">{value}</div>
+    </div>
   );
 }
 
@@ -1429,6 +1555,32 @@ function validateEvidenceReferenceInput(draft: EvidenceDraft): boolean {
   );
 }
 
+function filterLedgerEvents(events: ProjectManagerLedgerEvent[], filter: LedgerFilter) {
+  if (filter === "all") {
+    return events;
+  }
+  const allowedEvents = LEDGER_FILTER_EVENTS[filter];
+  return events.filter((event) => allowedEvents.includes(event.eventType));
+}
+
+function ledgerWorkItemTitle(event: ProjectManagerLedgerEvent, workItems: ProjectManagerWorkItem[]) {
+  const workItem = workItems.find((item) => item.id === event.workItemId);
+  return workItem?.title ?? event.workItemId ?? "-";
+}
+
+function ledgerEventNote(eventType: ProjectManagerLedgerEventType, t: Translate) {
+  if (eventType === "manual_completion_recorded") {
+    return t("projects.projectManagerLedgerManualCompletionNote");
+  }
+  if (eventType === "blocker_recorded") {
+    return t("projects.projectManagerLedgerBlockerRecordedNote");
+  }
+  if (eventType === "blocker_resolved") {
+    return t("projects.projectManagerLedgerBlockerResolvedNote");
+  }
+  return null;
+}
+
 function formatEvidenceRef(ref: ProjectManagerEvidenceRef) {
   const parts = [ref.kind, ref.label, ref.status, ref.ref, ref.path, ref.sessionId, ref.copilotRunId, ref.feishuMessageId]
     .map((part) => part?.trim())
@@ -1448,6 +1600,13 @@ function statusBadgeVariant(status: ProjectManagerWorkItemStatus | string) {
   if (status === "blocked") return "destructive";
   if (status === "in_progress" || status === "ready_for_review") return "secondary";
   return "outline";
+}
+
+function ledgerEventBadgeVariant(eventType: ProjectManagerLedgerEventType) {
+  if (eventType === "blocker_recorded") return "destructive" as const;
+  if (eventType === "evidence_attached" || eventType === "manual_completion_recorded") return "secondary" as const;
+  if (eventType === "blocker_resolved") return "default" as const;
+  return "outline" as const;
 }
 
 function statusLabel(status: ProjectManagerWorkItemStatus | string, t: Translate) {
