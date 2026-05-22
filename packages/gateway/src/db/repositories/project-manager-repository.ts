@@ -36,6 +36,7 @@ export interface ProjectManagerEvidenceRef {
   path?: string | undefined;
   sessionId?: string | undefined;
   copilotRunId?: string | undefined;
+  pendingActionId?: string | undefined;
   feishuChatId?: string | undefined;
   feishuMessageId?: string | undefined;
   createdAt?: string | undefined;
@@ -183,6 +184,7 @@ const evidenceRefKeys = new Set([
   "path",
   "sessionId",
   "copilotRunId",
+  "pendingActionId",
   "feishuChatId",
   "feishuMessageId",
   "createdAt"
@@ -268,6 +270,11 @@ export class ProjectManagerRepository {
     const now = Date.now();
     const status = normalizeStatus(input.status ?? "todo");
     const item = normalizeWorkItemInput(input);
+    const eventDetails = mergeLedgerDetails({
+      status,
+      evidenceRefCount: item.evidenceRefs.length,
+      acceptanceCriteriaCount: item.acceptanceCriteria.length
+    }, item.details);
 
     const write = this.db.transaction(() => {
       this.db.prepare(`
@@ -291,11 +298,7 @@ export class ProjectManagerRepository {
         now,
         now
       );
-      this.insertLedgerEvent(projectId, id, "work_item_created", status, item.evidenceRefs, item.feishuRefs, {
-        status,
-        evidenceRefCount: item.evidenceRefs.length,
-        acceptanceCriteriaCount: item.acceptanceCriteria.length
-      }, now);
+      this.insertLedgerEvent(projectId, id, "work_item_created", status, item.evidenceRefs, item.feishuRefs, eventDetails, now);
       this.writeAudit("project_manager.work_item.create", "project_manager_work_item", id, {
         projectId,
         status,
@@ -357,6 +360,12 @@ export class ProjectManagerRepository {
     const eventType: ProjectManagerLedgerEventType = nextStatus === "done" && hasManualReason
       ? "manual_completion_recorded"
       : "work_item_status_changed";
+    const eventDetails = mergeLedgerDetails({
+      fromStatus: existing.status,
+      toStatus: nextStatus,
+      evidenceRefCount: evidenceRefs.length,
+      manualCompletionReasonPresent: hasManualReason
+    }, details);
     const now = Date.now();
     const write = this.db.transaction(() => {
       this.db.prepare(`
@@ -364,12 +373,7 @@ export class ProjectManagerRepository {
         SET status = ?, evidence_refs_json = ?, details_json = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(nextStatus, JSON.stringify(evidenceRefs), JSON.stringify(details), now, workItemId, this.userId, projectId);
-      this.insertLedgerEvent(projectId, workItemId, eventType, nextStatus, evidenceRefs, existing.feishuRefs, {
-        fromStatus: existing.status,
-        toStatus: nextStatus,
-        evidenceRefCount: evidenceRefs.length,
-        manualCompletionReasonPresent: hasManualReason
-      }, now);
+      this.insertLedgerEvent(projectId, workItemId, eventType, nextStatus, evidenceRefs, existing.feishuRefs, eventDetails, now);
       this.writeAudit("project_manager.work_item.status_change", "project_manager_work_item", workItemId, {
         projectId,
         fromStatus: existing.status,
@@ -393,6 +397,9 @@ export class ProjectManagerRepository {
       throw new Error("Evidence references are required");
     }
     const details = normalizeDetails(input.details ?? {});
+    const eventDetails = mergeLedgerDetails({
+      evidenceRefCount: nextEvidenceRefs.length
+    }, details);
     const now = Date.now();
 
     const write = this.db.transaction(() => {
@@ -401,9 +408,7 @@ export class ProjectManagerRepository {
         SET evidence_refs_json = ?, details_json = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(JSON.stringify(nextEvidenceRefs), JSON.stringify(details), now, workItemId, this.userId, projectId);
-      this.insertLedgerEvent(projectId, workItemId, "evidence_attached", existing.status, nextEvidenceRefs, existing.feishuRefs, {
-        evidenceRefCount: nextEvidenceRefs.length
-      }, now);
+      this.insertLedgerEvent(projectId, workItemId, "evidence_attached", existing.status, nextEvidenceRefs, existing.feishuRefs, eventDetails, now);
       this.writeAudit("project_manager.work_item.evidence_attach", "project_manager_work_item", workItemId, {
         projectId,
         evidenceRefCount: nextEvidenceRefs.length
@@ -568,6 +573,13 @@ function normalizeWorkItemInput(input: CreateProjectManagerWorkItemInput) {
     feishuRefs: normalizeEvidenceRefs(input.feishuRefs ?? []),
     details: normalizeDetails(input.details ?? {})
   };
+}
+
+function mergeLedgerDetails(
+  base: Record<string, unknown>,
+  details: Record<string, unknown>
+): Record<string, unknown> {
+  return Object.keys(details).length > 0 ? { ...base, ...details } : base;
 }
 
 function normalizeStatus(value: string): ProjectManagerWorkItemStatus {

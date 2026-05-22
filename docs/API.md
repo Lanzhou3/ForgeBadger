@@ -181,9 +181,16 @@ These tools are tenant-scoped, project-scoped, redacted, and read-only. They
 return concise current state plus bounded evidence references only. They must
 not return raw terminal transcripts, unbounded ledger details, Feishu webhook
 verification material, provider credentials, attach tokens, or cross-tenant
-mapping details. Model-origin project-manager write proposals are not part of
-the read-tool surface and must use the existing pending-action approval model
-if a later phase adds them.
+mapping details.
+
+Phase 12 adds Project Manager traceability on top of the local-first AI CLI
+control plane. It does not broaden OpenForge into a generic project-management
+suite. Copilot-origin Project Manager writes are proposals only: each proposal
+must become exactly one pending action, must use the canonical stored
+pending-action payload at approval time, and must execute through the
+Gateway-owned Project Manager repository transaction. The only Project Manager
+write semantics in this contract are `create_work_item`,
+`update_work_item_status`, and `attach_evidence`.
 
 Work item status is a bounded product state. Allowed statuses are:
 
@@ -235,9 +242,33 @@ reference may include only these fields:
 - `path`
 - `sessionId`
 - `copilotRunId`
+- `pendingActionId`
 - `feishuChatId`
 - `feishuMessageId`
 - `createdAt`
+
+Ledger route responses expose safe trace markers through
+`ProjectManagerLedgerTrace`; raw `details` are never included in REST DTOs.
+Trace fields are copied only from this allowlist:
+
+```ts
+interface ProjectManagerLedgerTrace {
+  copilotRunId?: string;
+  pendingActionId?: string;
+  actionType?: string;
+  targetType?: string;
+  targetId?: string;
+  evidenceRefCount?: number;
+  approvalStatus?: string;
+  executionStatus?: string;
+}
+```
+
+The trace contract intentionally excludes raw prompt text, raw terminal output,
+provider payloads, full approval diffs, full execution summaries, tokens, API
+keys, JWTs, private keys, stdout, stderr, and other secret-looking fields. If a
+future implementation needs a new trace field, it must add that field to the
+allowlist and tests before exposing it.
 
 Marking a work item `done` requires at least one evidence reference or a
 non-empty manual completion reason. If completion uses the manual reason path,
@@ -657,6 +688,9 @@ Prepare tools create pending actions and do not directly mutate runtime state:
 - `openforge.propose_project_import`
 - `openforge.propose_project_delete`
 - `openforge.propose_project_config_sync`
+- `openforge.propose_project_manager_create_work_item`
+- `openforge.propose_project_manager_update_work_item_status`
+- `openforge.propose_project_manager_attach_evidence`
 - `openforge.propose_session_input`
 - `openforge.propose_session_start`
 - `openforge.propose_session_stop`
@@ -683,6 +717,12 @@ Prepare tools create pending actions and do not directly mutate runtime state:
 - `openforge.propose_feishu_task_update`
 - `openforge.propose_memory_write`
 - `openforge.propose_memory_delete`
+
+The three Project Manager prepare tools map one-to-one to the Phase 12
+`create_work_item`, `update_work_item_status`, and `attach_evidence` semantics.
+They create pending actions only; they do not mutate Project Manager state until
+the user approves the stored action through the existing approval route. No
+other Project Manager prepare-tool semantics are part of this contract.
 
 Approval uses the canonical stored pending-action payload. The client cannot
 replace the action payload at approval time. Diagnostics approval returns a

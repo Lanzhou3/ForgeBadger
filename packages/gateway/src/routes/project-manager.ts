@@ -25,6 +25,7 @@ const evidenceRefSchema = z.object({
   path: z.string().min(1).max(512).optional(),
   sessionId: z.string().min(1).max(128).optional(),
   copilotRunId: z.string().min(1).max(128).optional(),
+  pendingActionId: z.string().min(1).max(128).optional(),
   feishuChatId: z.string().min(1).max(128).optional(),
   feishuMessageId: z.string().min(1).max(128).optional(),
   createdAt: z.string().min(1).max(64).optional()
@@ -66,6 +67,17 @@ const ledgerQuerySchema = z.object({
   eventType: eventTypeSchema.optional(),
   limit: z.coerce.number().int().min(1).max(100).optional()
 }).strict();
+
+interface ProjectManagerLedgerTrace {
+  copilotRunId?: string;
+  pendingActionId?: string;
+  actionType?: string;
+  targetType?: string;
+  targetId?: string;
+  evidenceRefCount?: number;
+  approvalStatus?: string;
+  executionStatus?: string;
+}
 
 export function createProjectManagerRoutes(db: Database): Router {
   const router = Router({ mergeParams: true });
@@ -223,6 +235,7 @@ function toWorkItemDto(workItem: ProjectManagerWorkItem) {
 }
 
 function toLedgerEventDto(event: ProjectManagerLedgerEvent) {
+  const trace = toLedgerTraceDto(event.details);
   return {
     id: event.id,
     projectId: event.projectId,
@@ -231,6 +244,7 @@ function toLedgerEventDto(event: ProjectManagerLedgerEvent) {
     status: event.status,
     evidenceRefCount: event.evidenceRefs.length,
     feishuRefCount: event.feishuRefs.length,
+    ...(trace ? { trace } : {}),
     createdAt: event.createdAt
   };
 }
@@ -244,10 +258,40 @@ function toEvidenceRefDto(ref: ProjectManagerEvidenceRef) {
     path: ref.path,
     sessionId: ref.sessionId,
     copilotRunId: ref.copilotRunId,
+    pendingActionId: ref.pendingActionId,
     feishuChatId: ref.feishuChatId,
     feishuMessageId: ref.feishuMessageId,
     createdAt: ref.createdAt
   };
+}
+
+function toLedgerTraceDto(details: Record<string, unknown>): ProjectManagerLedgerTrace | undefined {
+  const trace: ProjectManagerLedgerTrace = {};
+  assignTraceString(trace, "copilotRunId", details.copilotRunId);
+  assignTraceString(trace, "pendingActionId", details.pendingActionId);
+  assignTraceString(trace, "actionType", details.actionType);
+  assignTraceString(trace, "targetType", details.targetType);
+  assignTraceString(trace, "targetId", details.targetId);
+  assignTraceCount(trace, details.evidenceRefCount);
+  assignTraceString(trace, "approvalStatus", details.approvalStatus);
+  assignTraceString(trace, "executionStatus", details.executionStatus);
+  return Object.keys(trace).length > 0 ? trace : undefined;
+}
+
+function assignTraceString(
+  trace: ProjectManagerLedgerTrace,
+  key: keyof Omit<ProjectManagerLedgerTrace, "evidenceRefCount">,
+  value: unknown
+): void {
+  if (typeof value !== "string") return;
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 512) return;
+  trace[key] = normalized;
+}
+
+function assignTraceCount(trace: ProjectManagerLedgerTrace, value: unknown): void {
+  if (!Number.isInteger(value) || typeof value !== "number" || value < 0 || value > 20) return;
+  trace.evidenceRefCount = value;
 }
 
 function sendProjectNotFound(res: { status(code: number): { json(body: unknown): void } }): void {
