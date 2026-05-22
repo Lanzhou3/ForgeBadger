@@ -1,5 +1,35 @@
 # Milestones
 
+## v1.2 Project Manager Web Workflow (Shipped: 2026-05-22)
+
+**Phases completed:** 3 phases, 8 plans, 29 tasks
+
+**Key accomplishments:**
+
+- Typed Project Manager Ledger Web client with route, body, query, encoding, and error propagation coverage
+- Project Manager tab, visible API states, localized copy, and strict E2E coverage
+- Inline Project Manager goal editing with array-normalized textareas and strict route-contract coverage
+- Status-filtered Project Manager work items with in-context detail and bounded creation
+- Documented Project Manager status transitions with evidence-free done guard
+- Bounded evidence pointer attachment from Project Manager work item details
+- Safe Project Manager ledger timeline with bounded filters and scoped failure handling
+- Full Project Manager workflow proof plus first-user trial, support, and closeout documentation
+
+**Archived:**
+
+- `.planning/milestones/v1.2-ROADMAP.md`
+- `.planning/milestones/v1.2-REQUIREMENTS.md`
+- `.planning/milestones/v1.2-phases/`
+
+**Known deferred items at close:**
+
+- Live Copilot provider, physical Windows/WSL terminal, Feishu developer-console callback, and completed first-user feedback remain explicit v1.1 caveats.
+- Project-manager global dashboard, kanban board, advanced analytics, remote runtime, encrypted Feishu payload support, and multi-instance shared replay/rate stores remain backlog scope.
+
+**What's next:** Start the next milestone with `$gsd-new-milestone` after choosing the next product wedge from first-user evidence or backlog priorities.
+
+---
+
 ## v1.1 Beta Evidence Burn-down (Shipped: 2026-05-21)
 
 **Phases completed:** 3 phases, 6 plans, 19 tasks

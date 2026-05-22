@@ -4,15 +4,15 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is v1.2 Project Manager Web Workflow planning. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope.
+The current product stage is post-v1.2 milestone selection. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow.
 
-## Current Milestone: v1.2 Project Manager Web Workflow
+## Current Milestone
 
-**Goal:** Turn the existing Gateway-owned project-manager ledger into a first-class Web workflow for project goals, work items, evidence references, and ledger review.
+No active milestone. Next milestone should be selected from the backlog or newly discovered first-user evidence.
 
-**Status:** Planning started on 2026-05-21.
+**Last shipped:** v1.2 Project Manager Web Workflow on 2026-05-22.
 
-**Target features:**
+**Shipped v1.2 features:**
 - Project detail Web surface for project-manager goal, work item, status, evidence, and ledger state.
 - Typed Web API client and UI state handling for the existing `/api/v1/projects/:projectId/project-manager/*` endpoints.
 - Goal editing, work item creation, status transitions, filtering, and completion guardrails.
@@ -44,14 +44,16 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - [x] v1.1 records completed first-user feedback as `Complete (Caveat)` with `docs/TRIAL-FEEDBACK.md` and `OpenForge first-user trial feedback` collection paths.
 - [x] v1.1 records Feishu public webhook live exposure as complete with the real developer-console callback still `Blocked`, plus single-Gateway/shared-store/encrypted-payload boundaries.
 - [x] v1.1 adds a first-user readiness packet: `docs/TRIAL-CHECKLIST.md`, `docs/SUPPORT-DIAGNOSTICS.md`, and `docs/reports/v1.1-readiness-closeout-2026-05-21.md`.
+- [x] v1.2 adds typed Project Manager Web client coverage and a first-class project-context Project Manager tab.
+- [x] v1.2 lets Web users view and edit the project-manager goal from the project context.
+- [x] v1.2 lets Web users create, filter, and inspect project-manager work items without leaving the project page.
+- [x] v1.2 lets Web users move work items through allowed status transitions, with completion blocked unless evidence or a manual completion reason is present.
+- [x] v1.2 lets Web users attach bounded evidence references and review the ledger event timeline without raw sensitive details.
+- [x] v1.2 closes the Project Manager Web workflow with typed client coverage, strict E2E coverage, UAT, security verification, validation coverage, goal verification, and handoff docs.
 
 ### Active
 
-- [ ] Web users can view and edit the project-manager goal from the project context.
-- [ ] Web users can create, filter, and inspect project-manager work items without leaving the project page.
-- [ ] Web users can move work items through allowed status transitions, with completion blocked unless evidence or a manual completion reason is present.
-- [ ] Web users can attach bounded evidence references and review the ledger event timeline without raw sensitive details.
-- [ ] The project-manager Web workflow has focused typed client coverage, component coverage, and E2E coverage for core happy/error paths.
+- [ ] Select the next milestone based on first-user trial evidence or the backlog.
 
 ### Out of Scope
 
@@ -70,6 +72,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - v1.0 Post-Beta Trust Closure is archived in `.planning/milestones/` with a passed milestone audit and 23/23 traced requirements satisfied.
 - Remaining acceptance gaps are explicit external evidence caveats and later-scope product decisions, not broad local implementation gaps.
 - v1.2 promotes the already-implemented project-manager ledger backend into a Web workflow before remote runtime expansion, because it converts the control-plane audit model into a daily user surface.
+- v1.2 shipped the Project Manager Web workflow and archived its roadmap, requirements, phase artifacts, UAT, security, validation, and verification evidence under `.planning/milestones/`.
 - External v1.1 caveats remain tracked in the readiness reports and should not be silently reclassified during v1.2.
 - Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
@@ -98,7 +101,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Keep project-manager state OpenForge-owned | Ledger events need auditability and tenant scope, not Feishu text authority | Good |
 | Burn down real-world evidence before runtime expansion | First-user readiness depends on live provider, physical terminal, and actual feedback evidence more than new runtime scope | Good - v1.1 converted gaps into pass/caveat/blocker evidence |
 | Package v1.1 as a cautious first-user handoff | Phase 8 readiness packet makes trial/support/closeout inspectable while preserving caveats | Good - v1.1 completed with explicit caveats |
-| Promote project-manager ledger to Web before remote runtime work | The backend ledger is already tenant-scoped and audited, but first users need a visible project workflow before higher-risk remote execution | Pending - v1.2 target |
+| Promote project-manager ledger to Web before remote runtime work | The backend ledger is already tenant-scoped and audited, but first users need a visible project workflow before higher-risk remote execution | Good - v1.2 shipped project-context Project Manager UI with evidence, ledger, and handoff gates |
 
 ## Evolution
 
@@ -118,4 +121,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-21 after starting v1.2 Project Manager Web Workflow.*
+*Last updated: 2026-05-22 after completing v1.2 Project Manager Web Workflow.*

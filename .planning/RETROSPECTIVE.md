@@ -93,6 +93,52 @@
 
 ---
 
+## Milestone: v1.2 - Project Manager Web Workflow
+
+**Shipped:** 2026-05-22
+**Phases:** 3 | **Plans:** 8 | **Tasks:** 29
+
+### What Was Built
+
+- Typed Project Manager Web client coverage for route encoding, request bodies, query behavior, and error propagation.
+- A first-class Project Manager tab in the project detail context with visible loading, empty, not-found, validation, and mutation states.
+- Inline project goal editing, status-filtered work item lists, work item creation, detail inspection, and evidence-free done guardrails.
+- Bounded evidence-reference attachment from the work item detail Sheet with local raw/secret-content rejection.
+- Safe ledger timeline with event filters, load more, scoped ledger failure handling, and no raw event details.
+- Full Project Manager workflow E2E proof plus trial checklist, support diagnostics, closeout report, UAT, security, validation, and goal verification artifacts.
+
+### What Worked
+
+- Building the Web workflow on top of the existing Gateway-owned ledger kept authority boundaries intact while making the project-manager state usable.
+- Strict E2E route mocks caught endpoint drift and kept the frontend contract honest.
+- The evidence and ledger threat models were specific enough that security review could verify mitigations directly against code and docs.
+
+### What Was Inefficient
+
+- `11-VALIDATION.md` initially retained pending task rows after implementation passed; final closeout needed a dedicated metadata cleanup.
+- `verify-phase` helpers did not parse these plan frontmatter arrays cleanly, so goal-backward verification required manual synthesis from ROADMAP success criteria and plan must-haves.
+- Playwright validation still requires host-level execution in this environment because sandboxed dev-server port binding fails.
+
+### Patterns Established
+
+- Project Manager evidence stays pointer-only: `kind`, `label`, `ref`, and `path`, with no raw terminal, Feishu, provider, or secret-bearing payloads.
+- Ledger UI rows should show safe markers and counts only; raw reasons and reference lists remain out of the timeline.
+- Milestone Web workflow closeout should include UAT, security, validation, and goal verification before milestone archival.
+
+### Key Lessons
+
+1. If a phase is both user-facing and security-sensitive, plan the E2E happy path, failure-path regressions, docs redaction scan, UAT, security review, and goal verification together.
+2. Keep validation files current as implementation lands; stale `pending` rows undermine otherwise good evidence.
+3. Strict mock fallback for `/api/v1/*` is worth preserving because it catches contract drift early in frontend milestones.
+
+### Cost Observations
+
+- Model mix: not measured for this milestone.
+- Sessions: multiple Codex/GSD sessions with validation and security subagent review.
+- Notable: Archiving was straightforward after UAT/security/verification artifacts existed, but final milestone close still required direct living-doc updates.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -101,6 +147,7 @@
 |-----------|----------|--------|------------|
 | v1.0 | Multiple | 5 | Moved from post-beta review cleanup to auditable GSD milestone closure. |
 | v1.1 | Multiple | 3 | Shifted from implementation hardening to evidence burn-down and first-user readiness packaging. |
+| v1.2 | Multiple | 3 | Promoted the Gateway-owned project-manager ledger into a first-class Web workflow with bounded evidence and ledger review. |
 
 ### Cumulative Quality
 
@@ -108,9 +155,11 @@
 |-----------|-------|----------|-------------------|
 | v1.0 | Gateway and Web focused checks plus milestone audit | Not measured | Feishu webhook safety, PM ledger auditability, remote architecture boundaries |
 | v1.1 | Phase UAT, security verification, evidence matrix checks, focused smoke/regression reports | Not measured | Trial checklist, support diagnostics packet, readiness closeout |
+| v1.2 | Web typecheck, API Vitest, Project Manager Playwright E2E, UAT, security, validation, goal verification | Not measured | Project Manager Web workflow, bounded evidence attach, safe ledger timeline |
 
 ### Top Lessons
 
 1. Do not remove release caveats until the exact real-world evidence exists.
 2. Keep product authority boundaries explicit before adding collaboration or remote-control surfaces.
 3. Archive evidence milestones only after UAT, security, and open-artifact scans agree there is no hidden verification debt.
+4. Keep strict frontend route mocks for control-plane workflows; otherwise UI tests can quietly accept broken Gateway contracts.

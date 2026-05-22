@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Project Manager Web Workflow
-status: verifying
+status: Awaiting next milestone
 stopped_at: Completed Phase 11 execution
-last_updated: "2026-05-22T07:00:05.739Z"
-last_activity: 2026-05-22
+last_updated: "2026-05-22T07:19:18.164Z"
+last_activity: 2026-05-22 — Milestone v1.2 completed and archived
 progress:
   total_phases: 3
   completed_phases: 3
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability.
-**Current focus:** Phase 11 — evidence-ledger-and-acceptance-gates
+**Current focus:** Awaiting next milestone selection.
 
 ## Current Position
 
-Phase: 11 (evidence-ledger-and-acceptance-gates) — COMPLETE
-Plan: 3 of 3
-Status: Phase complete — ready for verification
-Last activity: 2026-05-22
+Phase: Milestone v1.2 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-05-22 — Milestone v1.2 completed and archived
 
 ## Performance Metrics
 
@@ -110,7 +110,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None in `.planning/todos/` yet. v1.2 work is being defined in `.planning/ROADMAP.md` and `.planning/REQUIREMENTS.md`.
+None in `.planning/todos/` yet. v1.2 is archived; next milestone is not yet defined.
 
 ### Blockers/Concerns
 
@@ -120,7 +120,8 @@ None in `.planning/todos/` yet. v1.2 work is being defined in `.planning/ROADMAP
 - Completed first-user feedback remains `Caveat` until attached and mapped.
 - Phase 7 is complete. Public Feishu webhook live exposure still needs real developer-console HTTP callback verification for callback `Pass`; current evidence records the missing public HTTPS URL and Feishu console URL verification action as a blocker. Current safe topology is single Gateway with SQLite replay/rate storage; multi-instance exposure requires shared replay/rate storage before enablement.
 - Phase 8 UAT passed with 6/6 checks and 0 issues; security has `threats_open: 0`.
-- v1.2 should not reclassify v1.1 live-provider, physical Windows/WSL, Feishu console-callback, or first-user feedback caveats unless new real evidence is attached.
+- v1.2 shipped the Project Manager Web Workflow and archived phases 9-11 under `.planning/milestones/v1.2-phases/`.
+- v1.2 did not reclassify v1.1 live-provider, physical Windows/WSL, Feishu console-callback, or first-user feedback caveats because no new real external evidence was attached.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -140,5 +141,4 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Run `$gsd-execute-phase 11` to execute the three Phase 11 plans.
-- After execution, run `$gsd-verify-work 11` and `$gsd-secure-phase 11`.
+- Start the next milestone with /gsd-new-milestone
