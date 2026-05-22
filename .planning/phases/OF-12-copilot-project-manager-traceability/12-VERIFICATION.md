@@ -5,7 +5,7 @@ status: passed
 score: 22/22 must-haves verified
 overrides_applied: 0
 re_verification:
-  previous_status: human_needed
+  previous_status: manual_gate_pending
   previous_score: 22/22 must-haves verified
   human_uat_closed:
     - "Visual polish of PM approval card and PM trace markers"
@@ -144,7 +144,7 @@ human_uat:
 
 No automated blocker gaps were found. All 22 roadmap/plan must-haves are verified against source code, route/repository wiring, data flow, focused unit tests, and focused browser tests.
 
-The previous `human_needed` status is closed by `12-HUMAN-UAT.md`: the single manual-only visual/readability item passed after Playwright screenshot inspection. Overall status is now `passed`.
+The previous manual gate is closed by `12-HUMAN-UAT.md`: the single manual-only visual/readability item passed after Playwright screenshot inspection. Overall status is now `passed`.
 
 ---
 
