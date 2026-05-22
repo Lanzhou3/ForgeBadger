@@ -31,6 +31,47 @@ test("renders populated Project Manager state from exact API routes", async ({ p
   expect(unhandledApiRoutes).toEqual([]);
 });
 
+test("opens Project Manager from deep link and renders Copilot trace markers", async ({ page }) => {
+  const unhandledApiRoutes = await mockProjectDetailApis(page);
+
+  await page.goto(`/projects/${PROJECT_ID}?tab=project-manager&workItemId=work-item-trace`);
+
+  const panel = page.getByTestId("project-manager-panel");
+  await expect(panel).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Project Manager" })).toHaveAttribute("data-state", "active");
+  const sheet = page.getByRole("dialog", { name: "Trace Copilot approval chain" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByText("Done").first()).toBeVisible();
+  await expect(sheet.getByText("Copilot trace")).toBeVisible();
+  await expect(sheet.getByText("Run")).toBeVisible();
+  await expect(sheet.getByText("run-trace-1")).toBeVisible();
+  await expect(sheet.getByText("Action")).toBeVisible();
+  await expect(sheet.getByText("pm-action-1")).toBeVisible();
+  await expect(sheet.getByText("Evidence")).toBeVisible();
+  await expect(sheet.getByText(/test.*Traceability E2E.*verified/)).toBeVisible();
+  await expect(sheet.getByText("Session")).toBeVisible();
+  await expect(sheet.getByText("session-trace-1")).toBeVisible();
+  await expect(sheet.getByText("Ledger")).toBeVisible();
+  await expect(sheet.getByText("copilot_trace_recorded")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  const ledger = panel.getByTestId("project-manager-ledger");
+  await expect(ledger.getByText("Copilot trace")).toBeVisible();
+  await expect(ledger.getByText("Action type")).toBeVisible();
+  await expect(ledger.getByText("update_work_item_status")).toBeVisible();
+  await expect(ledger.getByText("Target")).toBeVisible();
+  await expect(ledger.getByText("work-item-trace")).toBeVisible();
+  await expect(ledger.getByText("Evidence refs")).toBeVisible();
+  await expect(ledger.getByText("Approval")).toBeVisible();
+  await expect(ledger.getByText("approved")).toBeVisible();
+  await expect(ledger.getByText("Execution")).toBeVisible();
+  await expect(ledger.getByText("succeeded")).toBeVisible();
+  await expect(panel.getByText("RAW TERMINAL OUTPUT SHOULD NOT RENDER")).toHaveCount(0);
+  await expect(panel.getByText("RAW PROVIDER PAYLOAD SHOULD NOT RENDER")).toHaveCount(0);
+  await expect(panel.getByText("RAW LEDGER DETAILS SHOULD NOT RENDER")).toHaveCount(0);
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
 test("renders a visible not-found state for missing Project Manager records", async ({ page }) => {
   const unhandledApiRoutes = await mockProjectDetailApis(page, { projectManagerStatus: 404 });
 
@@ -320,6 +361,28 @@ async function mockProjectDetailApis(
     feishuRefCount: 0,
     createdAt: 1779370000000,
     updatedAt: 1779373600000,
+  }, {
+    id: "work-item-trace",
+    projectId: PROJECT_ID,
+    title: "Trace Copilot approval chain",
+    description: "Show the done status with trusted evidence and the ledger marker.",
+    status: "done",
+    priority: 9,
+    acceptanceCriteria: ["Trace markers are visible"],
+    evidenceRefCount: 1,
+    evidenceRefs: [{
+      kind: "test",
+      label: "Traceability E2E",
+      status: "verified",
+      ref: "PW-TRACE-1",
+      sessionId: "session-trace-1",
+      copilotRunId: "run-trace-1",
+      pendingActionId: "pm-action-1",
+      rawTerminal: "RAW TERMINAL OUTPUT SHOULD NOT RENDER",
+    }],
+    feishuRefCount: 0,
+    createdAt: 1779370000000,
+    updatedAt: 1779374200000,
   }];
 
   await page.route("**/api/v1/**", async (route) => {
@@ -673,6 +736,31 @@ async function mockProjectDetailApis(
 function projectManagerLedgerEvents(limit: number, evidenceAttachedEvent: unknown[]) {
   const baseEvents = [
     ...evidenceAttachedEvent,
+    {
+      id: "ledger-trace",
+      projectId: PROJECT_ID,
+      workItemId: "work-item-trace",
+      eventType: "copilot_trace_recorded",
+      status: "done",
+      evidenceRefCount: 1,
+      feishuRefCount: 0,
+      trace: {
+        copilotRunId: "run-trace-1",
+        pendingActionId: "pm-action-1",
+        actionType: "update_work_item_status",
+        targetType: "work_item",
+        targetId: "work-item-trace",
+        evidenceRefCount: 1,
+        approvalStatus: "approved",
+        executionStatus: "succeeded",
+      },
+      details: {
+        rawTerminal: "RAW TERMINAL OUTPUT SHOULD NOT RENDER",
+        providerPayload: "RAW PROVIDER PAYLOAD SHOULD NOT RENDER",
+        rawLedgerDetails: "RAW LEDGER DETAILS SHOULD NOT RENDER",
+      },
+      createdAt: 1779374300000,
+    },
     {
             id: "ledger-1",
             projectId: PROJECT_ID,
