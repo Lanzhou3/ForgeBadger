@@ -1,5 +1,32 @@
 # Milestones
 
+## v1.3 AI-Native Project Execution Traceability (Selected: 2026-05-22)
+
+**Status:** Ready for Phase 12 planning
+
+**Planned phases:** 5 phases
+
+- Phase 12: Copilot Project-Manager Traceability
+- Phase 13: Project Manager Board Workflow
+- Phase 14: Terminal Workspace Context
+- Phase 15: Model Provider Setup And Health
+- Phase 16: Open Source Readiness Packet
+
+**Milestone goal:**
+
+Extend the v1.2 Project Manager workflow into an AI-native execution traceability layer that links Copilot, terminal context, evidence, provider readiness, and open-source trust without changing OpenForge into a generic project-management suite.
+
+**Start readiness:**
+
+- v1.2 is archived.
+- `.planning/REQUIREMENTS.md` defines v1.3 requirements and phase mapping.
+- Before this v1.3 planning update, tracked code was clean; the current tracked changes are the v1.3 planning documents, and unrelated untracked `upload_img/` remains outside milestone scope.
+- v1.1 external caveats remain explicit caveats and are not silently reclassified.
+
+**Next:** Run `$gsd-plan-phase 12`.
+
+---
+
 ## v1.2 Project Manager Web Workflow (Shipped: 2026-05-22)
 
 **Phases completed:** 3 phases, 8 plans, 29 tasks
@@ -26,7 +53,7 @@
 - Live Copilot provider, physical Windows/WSL terminal, Feishu developer-console callback, and completed first-user feedback remain explicit v1.1 caveats.
 - Project-manager global dashboard, kanban board, advanced analytics, remote runtime, encrypted Feishu payload support, and multi-instance shared replay/rate stores remain backlog scope.
 
-**What's next:** Start the next milestone with `$gsd-new-milestone` after choosing the next product wedge from first-user evidence or backlog priorities.
+**What's next:** v1.3 has been selected; continue with `$gsd-plan-phase 12`.
 
 ---
 

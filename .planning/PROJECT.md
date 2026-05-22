@@ -4,13 +4,15 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is post-v1.2 milestone selection. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow.
+The current product stage is v1.3 AI-Native Project Execution Traceability planning. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow. v1.3 extends that workflow into Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness while preserving the local-first control-plane wedge.
 
 ## Current Milestone
 
-No active milestone. Next milestone should be selected from the backlog or newly discovered first-user evidence.
+v1.3 AI-Native Project Execution Traceability is selected and Phase 12 is ready for planning from gathered context.
 
 **Last shipped:** v1.2 Project Manager Web Workflow on 2026-05-22.
+
+**Next milestone goal:** Extend the v1.2 Project Manager workflow into an AI-native execution traceability layer that links Copilot, terminal context, evidence, provider readiness, and open-source trust without changing OpenForge into a generic project-management suite.
 
 **Shipped v1.2 features:**
 - Project detail Web surface for project-manager goal, work item, status, evidence, and ledger state.
@@ -21,7 +23,7 @@ No active milestone. Next milestone should be selected from the backlog or newly
 
 ## Core Value
 
-Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability.
+Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability, and can turn AI-assisted work into traceable project state.
 
 ## Requirements
 
@@ -53,7 +55,12 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 
 ### Active
 
-- [ ] Select the next milestone based on first-user trial evidence or the backlog.
+- [ ] v1.3 keeps OpenForge positioned as a local-first AI CLI control plane with AI-native project execution traceability, not a generic project-management suite.
+- [ ] v1.3 links Copilot runs, pending actions, safe summaries, and evidence references to Project Manager work items through explicit approval gates.
+- [ ] v1.3 adds a board workflow, work item edit/delete, and bounded batch actions without regressing the dense v1.2 table/detail workflow.
+- [ ] v1.3 adds safe project-rooted file context for session/project views and bounded file/session/terminal evidence references.
+- [ ] v1.3 simplifies provider setup and adds more actionable provider/model health checks while preserving Codex subscription boundaries.
+- [ ] v1.3 starts open-source readiness with license, README, CONTRIBUTING, SECURITY, issue templates, and caveat-preserving release docs.
 
 ### Out of Scope
 
@@ -73,7 +80,8 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - Remaining acceptance gaps are explicit external evidence caveats and later-scope product decisions, not broad local implementation gaps.
 - v1.2 promotes the already-implemented project-manager ledger backend into a Web workflow before remote runtime expansion, because it converts the control-plane audit model into a daily user surface.
 - v1.2 shipped the Project Manager Web workflow and archived its roadmap, requirements, phase artifacts, UAT, security, validation, and verification evidence under `.planning/milestones/`.
-- External v1.1 caveats remain tracked in the readiness reports and should not be silently reclassified during v1.2.
+- v1.3 is selected from the PM review audit triage: AI-native project management is now the near-term differentiator, but only as an execution traceability layer on top of the local AI CLI control plane.
+- External v1.1 caveats remain tracked in the readiness reports and should not be silently reclassified during v1.3.
 - Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints
@@ -102,6 +110,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Burn down real-world evidence before runtime expansion | First-user readiness depends on live provider, physical terminal, and actual feedback evidence more than new runtime scope | Good - v1.1 converted gaps into pass/caveat/blocker evidence |
 | Package v1.1 as a cautious first-user handoff | Phase 8 readiness packet makes trial/support/closeout inspectable while preserving caveats | Good - v1.1 completed with explicit caveats |
 | Promote project-manager ledger to Web before remote runtime work | The backend ledger is already tenant-scoped and audited, but first users need a visible project workflow before higher-risk remote execution | Good - v1.2 shipped project-context Project Manager UI with evidence, ledger, and handoff gates |
+| Treat AI-native project management as execution traceability, not generic PM | The product differentiation is linking prompts, approvals, terminal context, evidence, and ledger state to AI CLI work | Selected for v1.3 |
 
 ## Evolution
 
@@ -121,4 +130,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-22 after completing v1.2 Project Manager Web Workflow.*
+*Last updated: 2026-05-22 after selecting v1.3 AI-Native Project Execution Traceability.*

@@ -7,6 +7,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 - OpenForge is a local-first AI CLI control plane, not a hosted autonomous development platform.
 - The strongest product wedge is reliable browser control and recovery of local AI CLI sessions.
 - Copilot, Feishu, and Codex app-server features must strengthen that wedge instead of broadening into unbounded autonomy.
+- AI-native project management is a traceability layer for AI CLI execution, not a generic PM-suite replacement.
 
 ## Locked Decisions
 
@@ -21,6 +22,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | Copilot boundary | Copilot is provider-backed, read-heavy, approval-gated, redacted, and non-autonomous. | `docs/reports/platform-ai-copilot-product-audit-2026-05-13.md`, `docs/API.md` |
 | Feishu boundary | Feishu is a controlled collaboration channel into Copilot, not execution authority or approval authority. | `docs/superpowers/plans/2026-05-19-feishu-inbound-command-bridge-next.md` |
 | Roadmap order | Close beta evidence, then public Feishu webhook safety, then first-user hardening before ledger or remote expansion. | GSD bootstrap review, `docs/superpowers/specs/2026-05-06-openforge-post-rc-roadmap-design.md` |
+| v1.3 direction | Next milestone focuses on AI-native project execution traceability: Copilot proposals, Project Manager board, terminal context, provider health, and open-source trust. | `docs/reports/pm-review-audit-2026-05-22.md`, `.planning/REQUIREMENTS.md` |
 
 ## Deferred Ideas
 
