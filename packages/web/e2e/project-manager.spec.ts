@@ -123,9 +123,60 @@ test("changes work item status and guards evidence-free done", async ({ page }) 
   expect(unhandledApiRoutes).toEqual([]);
 });
 
+test("attaches one bounded evidence reference from work item details", async ({ page }) => {
+  const unhandledApiRoutes = await mockProjectDetailApis(page);
+
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Project Manager" }).click();
+
+  const panel = page.getByTestId("project-manager-panel");
+  await panel.getByLabel("Filter by status").selectOption("blocked");
+  await panel.getByRole("button", { name: "View details" }).click();
+
+  const sheet = page.getByRole("dialog", { name: "Review external evidence" });
+  await expect(sheet).toBeVisible();
+  await sheet.getByLabel("Kind").fill("report");
+  await sheet.getByLabel("Label").fill("Phase 11 evidence");
+  await sheet.getByLabel("Reference").fill("PMEV-01");
+  await sheet.getByLabel("Path").fill("docs/reports/phase-11-evidence.md");
+  await sheet.getByRole("button", { name: "Attach evidence" }).click();
+
+  await expect(sheet.getByText("PMEV-01")).toBeVisible();
+  await expect(sheet.getByText("docs/reports/phase-11-evidence.md")).toBeVisible();
+  await expect(panel.locator("tbody tr", { hasText: "Review external evidence" }).locator("td").nth(3)).toHaveText("1");
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
+test("keeps safe evidence draft values visible after attach failure", async ({ page }) => {
+  const unhandledApiRoutes = await mockProjectDetailApis(page, { evidenceAttachStatus: 500 });
+
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Project Manager" }).click();
+
+  const panel = page.getByTestId("project-manager-panel");
+  await panel.getByLabel("Filter by status").selectOption("blocked");
+  await panel.getByRole("button", { name: "View details" }).click();
+
+  const sheet = page.getByRole("dialog", { name: "Review external evidence" });
+  await expect(sheet).toBeVisible();
+  await sheet.getByLabel("Kind").fill("report");
+  await sheet.getByLabel("Label").fill("Phase 11 evidence");
+  await sheet.getByLabel("Reference").fill("PMEV-01");
+  await sheet.getByLabel("Path").fill("docs/reports/phase-11-evidence.md");
+  await sheet.getByRole("button", { name: "Attach evidence" }).click();
+
+  await expect(sheet.getByText("Could not attach evidence reference.")).toBeVisible();
+  await expect(sheet.getByLabel("Kind")).toHaveValue("report");
+  await expect(sheet.getByLabel("Label")).toHaveValue("Phase 11 evidence");
+  await expect(sheet.getByLabel("Reference")).toHaveValue("PMEV-01");
+  await expect(sheet.getByLabel("Path")).toHaveValue("docs/reports/phase-11-evidence.md");
+  await expect(sheet).toBeVisible();
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
 async function mockProjectDetailApis(
   page: Page,
-  overrides: { projectManagerStatus?: number } = {}
+  overrides: { evidenceAttachStatus?: number; projectManagerStatus?: number } = {}
 ) {
   const unhandledApiRoutes: string[] = [];
   let goal = {
@@ -424,15 +475,78 @@ async function mockProjectDetailApis(
       return;
     }
 
+    const evidenceMatch = url.pathname.match(
+      new RegExp(`^/api/v1/projects/${PROJECT_ID}/project-manager/work-items/([^/]+)/evidence$`)
+    );
+    if (evidenceMatch && method === "POST") {
+      if (overrides.evidenceAttachStatus && overrides.evidenceAttachStatus >= 400) {
+        await route.fulfill({
+          status: overrides.evidenceAttachStatus,
+          json: {
+            code: 1,
+            message: "Could not attach evidence reference.",
+          },
+        });
+        return;
+      }
+      const workItemId = decodeURIComponent(evidenceMatch[1]);
+      const body = JSON.parse(route.request().postData() ?? "{}") as {
+        evidenceRefs?: unknown;
+      };
+      expect(body).toEqual({
+        evidenceRefs: [{
+          kind: "report",
+          label: "Phase 11 evidence",
+          ref: "PMEV-01",
+          path: "docs/reports/phase-11-evidence.md",
+        }],
+      });
+      const updatedWorkItem = workItems.find((item) => item.id === workItemId);
+      expect(updatedWorkItem).toBeTruthy();
+      workItems = workItems.map((item) => item.id === workItemId
+        ? {
+          ...item,
+          evidenceRefCount: item.evidenceRefCount + 1,
+          evidenceRefs: [
+            ...item.evidenceRefs,
+            {
+              kind: "report",
+              label: "Phase 11 evidence",
+              ref: "PMEV-01",
+              path: "docs/reports/phase-11-evidence.md",
+            },
+          ],
+          updatedAt: 1779379000000,
+        }
+        : item);
+      await route.fulfill({
+        json: envelope({ workItem: workItems.find((item) => item.id === workItemId) }),
+      });
+      return;
+    }
+
     if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/ledger` && method === "GET") {
       expect(url.searchParams.get("limit")).toBe("5");
       if (overrides.projectManagerStatus && overrides.projectManagerStatus >= 400) {
         await fulfillProjectManagerError(route, overrides.projectManagerStatus);
         return;
       }
+      const evidenceAttachedEvent = workItems.some((item) =>
+        item.evidenceRefs.some((ref) => ref.ref === "PMEV-01")
+      )
+        ? [{
+          id: "ledger-2",
+          projectId: PROJECT_ID,
+          workItemId: "work-item-2",
+          eventType: "evidence_attached",
+          evidenceRefCount: 1,
+          feishuRefCount: 1,
+          createdAt: 1779379000000,
+        }]
+        : [];
       await route.fulfill({
         json: envelope({
-          events: [{
+          events: [...evidenceAttachedEvent, {
             id: "ledger-1",
             projectId: PROJECT_ID,
             workItemId: "work-item-1",

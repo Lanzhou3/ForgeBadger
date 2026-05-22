@@ -50,6 +50,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useLanguage } from "@/hooks/use-language";
 import {
+  attachProjectManagerWorkItemEvidence,
   GatewayApiError,
   getProjectManagerGoal,
   listProjectManagerLedger,
@@ -102,6 +103,13 @@ interface WorkItemDraft {
   feishuMessageId: string;
 }
 
+interface EvidenceDraft {
+  kind: string;
+  label: string;
+  ref: string;
+  path: string;
+}
+
 const WORK_ITEM_LIMIT = 50;
 const WORK_ITEM_STATUSES: ProjectManagerWorkItemStatus[] = [
   "todo",
@@ -133,6 +141,8 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
   const [isCreateWorkItemOpen, setIsCreateWorkItemOpen] = useState(false);
   const [workItemDraft, setWorkItemDraft] = useState<WorkItemDraft>(() => createWorkItemDraft());
   const [createWorkItemError, setCreateWorkItemError] = useState<string | null>(null);
+  const [evidenceDraft, setEvidenceDraft] = useState<EvidenceDraft>(() => createEvidenceDraft());
+  const [evidenceAttachError, setEvidenceAttachError] = useState<string | null>(null);
   const [statusMutationError, setStatusMutationError] = useState<string | null>(null);
   const [pendingDoneWorkItemId, setPendingDoneWorkItemId] = useState<string | null>(null);
   const [doneReason, setDoneReason] = useState("");
@@ -223,9 +233,21 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
     },
   });
 
-  if (!enabled) {
-    return null;
-  }
+  const evidenceMutation = useMutation({
+    mutationFn: ({ reference, workItemId }: { reference: ProjectManagerEvidenceRef; workItemId: string }) =>
+      attachProjectManagerWorkItemEvidence(projectId, workItemId, { evidenceRefs: [reference] }),
+    onSuccess: async () => {
+      setEvidenceAttachError(null);
+      setEvidenceDraft(createEvidenceDraft());
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+      ]);
+    },
+    onError: (error) => {
+      setEvidenceAttachError(projectManagerMutationMessage(error, t("projects.projectManagerEvidenceAttachError")));
+    },
+  });
 
   const firstError = goalQuery.error ?? workItemsQuery.error ?? ledgerQuery.error;
   const isNotFoundError = firstError instanceof GatewayApiError && firstError.status === 404;
@@ -237,10 +259,19 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
   const pendingDoneWorkItem = workItems.find((item) => item.id === pendingDoneWorkItemId) ?? null;
 
   useEffect(() => {
+    setEvidenceAttachError(null);
+    setEvidenceDraft(createEvidenceDraft());
+  }, [selectedWorkItemId]);
+
+  useEffect(() => {
     if (pendingDoneWorkItemId) {
       doneReasonRef.current?.focus();
     }
   }, [pendingDoneWorkItemId]);
+
+  if (!enabled) {
+    return null;
+  }
 
   const refresh = () => {
     if (!canLoad) return;
@@ -291,6 +322,31 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
 
     setCreateWorkItemError(null);
     createWorkItemMutation.mutate(createWorkItemInput(workItemDraft, title));
+  };
+
+  const attachEvidence = () => {
+    if (!selectedWorkItem) return;
+    if (evidenceDraft.kind.trim().length === 0) {
+      setEvidenceAttachError(t("projects.projectManagerEvidenceKindRequired"));
+      return;
+    }
+    if (evidenceDraft.ref.trim().length === 0 && evidenceDraft.path.trim().length === 0) {
+      setEvidenceAttachError(t("projects.projectManagerEvidenceReferenceRequired"));
+      return;
+    }
+    if (validateEvidenceReferenceInput(evidenceDraft)) {
+      setEvidenceAttachError(t("projects.projectManagerEvidenceUnsafeValue"));
+      return;
+    }
+
+    const reference = createSingleEvidenceReference(evidenceDraft);
+    if (!reference) {
+      setEvidenceAttachError(t("projects.projectManagerEvidenceReferenceRequired"));
+      return;
+    }
+
+    setEvidenceAttachError(null);
+    evidenceMutation.mutate({ workItemId: selectedWorkItem.id, reference });
   };
 
   const requestStatusChange = (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => {
@@ -377,7 +433,12 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
         </div>
       )}
       <ProjectManagerWorkItemDetailSheet
+        evidenceDraft={evidenceDraft}
+        evidenceError={evidenceAttachError}
+        isEvidenceSaving={evidenceMutation.isPending}
         item={selectedWorkItem}
+        onAttachEvidence={attachEvidence}
+        onEvidenceDraftChange={setEvidenceDraft}
         onOpenChange={(open) => {
           if (!open) setSelectedWorkItemId(null);
         }}
@@ -699,14 +760,24 @@ function ProjectManagerWorkItemsCard({
 }
 
 function ProjectManagerWorkItemDetailSheet({
+  evidenceDraft,
+  evidenceError,
+  isEvidenceSaving,
   item,
+  onAttachEvidence,
+  onEvidenceDraftChange,
   onOpenChange,
   onStatusChange,
   open,
   statusMutationPending,
   t,
 }: {
+  evidenceDraft: EvidenceDraft;
+  evidenceError: string | null;
+  isEvidenceSaving: boolean;
   item: ProjectManagerWorkItem | null;
+  onAttachEvidence: () => void;
+  onEvidenceDraftChange: (draft: EvidenceDraft) => void;
   onOpenChange: (open: boolean) => void;
   onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
   open: boolean;
@@ -772,6 +843,64 @@ function ProjectManagerWorkItemDetailSheet({
                 <span className="text-muted-foreground">-</span>
               )}
             </DetailField>
+            <fieldset className="space-y-3 rounded-md border border-border/70 p-3">
+              <legend className="px-1 text-sm font-medium">{t("projects.projectManagerAttachEvidence")}</legend>
+              <p className="text-xs leading-5 text-muted-foreground">
+                {t("projects.projectManagerEvidenceReferenceHint")}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="project-manager-evidence-kind">{t("projects.projectManagerRefKind")}</Label>
+                  <Input
+                    id="project-manager-evidence-kind"
+                    value={evidenceDraft.kind}
+                    aria-invalid={!!evidenceError && evidenceDraft.kind.trim().length === 0}
+                    disabled={isEvidenceSaving}
+                    onChange={(event) => onEvidenceDraftChange({ ...evidenceDraft, kind: event.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="project-manager-evidence-label">{t("projects.projectManagerRefLabel")}</Label>
+                  <Input
+                    id="project-manager-evidence-label"
+                    value={evidenceDraft.label}
+                    disabled={isEvidenceSaving}
+                    onChange={(event) => onEvidenceDraftChange({ ...evidenceDraft, label: event.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="project-manager-evidence-ref">{t("projects.projectManagerRefId")}</Label>
+                  <Input
+                    id="project-manager-evidence-ref"
+                    value={evidenceDraft.ref}
+                    aria-invalid={!!evidenceError && evidenceDraft.ref.trim().length === 0 && evidenceDraft.path.trim().length === 0}
+                    disabled={isEvidenceSaving}
+                    onChange={(event) => onEvidenceDraftChange({ ...evidenceDraft, ref: event.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="project-manager-evidence-path">{t("common.path")}</Label>
+                  <Input
+                    id="project-manager-evidence-path"
+                    value={evidenceDraft.path}
+                    aria-invalid={!!evidenceError && evidenceDraft.ref.trim().length === 0 && evidenceDraft.path.trim().length === 0}
+                    disabled={isEvidenceSaving}
+                    onChange={(event) => onEvidenceDraftChange({ ...evidenceDraft, path: event.target.value })}
+                  />
+                </div>
+              </div>
+              {evidenceError && (
+                <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {evidenceError}
+                </p>
+              )}
+              <div className="flex justify-end">
+                <Button size="sm" onClick={onAttachEvidence} disabled={isEvidenceSaving}>
+                  <Plus className="mr-2 size-4" />
+                  {t("projects.projectManagerAttachEvidence")}
+                </Button>
+              </div>
+            </fieldset>
             <div className="grid gap-2 sm:grid-cols-2">
               <DetailField label={t("projects.projectManagerCreated")}>
                 {formatTimestamp(item.createdAt)}
@@ -1213,6 +1342,15 @@ function createWorkItemDraft(): WorkItemDraft {
   };
 }
 
+function createEvidenceDraft(): EvidenceDraft {
+  return {
+    kind: "",
+    label: "",
+    ref: "",
+    path: "",
+  };
+}
+
 function createWorkItemInput(draft: WorkItemDraft, title: string): ProjectManagerWorkItemInput {
   const priority = Number.parseInt(draft.priority, 10);
   const evidenceRef = createReference({
@@ -1239,6 +1377,24 @@ function createWorkItemInput(draft: WorkItemDraft, title: string): ProjectManage
   };
 }
 
+function createSingleEvidenceReference(draft: EvidenceDraft): ProjectManagerEvidenceRef | undefined {
+  const kind = draft.kind.trim();
+  const label = draft.label.trim();
+  const ref = draft.ref.trim();
+  const path = draft.path.trim();
+
+  if (!kind || (!ref && !path)) {
+    return undefined;
+  }
+
+  return {
+    kind,
+    ...(label ? { label } : {}),
+    ...(ref ? { ref } : {}),
+    ...(path ? { path } : {}),
+  };
+}
+
 function createReference(ref: ProjectManagerEvidenceRef): ProjectManagerEvidenceRef | undefined {
   const trimmed = Object.fromEntries(
     Object.entries(ref)
@@ -1251,6 +1407,26 @@ function createReference(ref: ProjectManagerEvidenceRef): ProjectManagerEvidence
   }
 
   return trimmed;
+}
+
+const UNSAFE_EVIDENCE_REFERENCE_PATTERNS = [
+  /\bsk-[A-Za-z0-9_-]{6,}\b/u,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]+/iu,
+  /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/u,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/iu,
+  /private key/iu,
+  /\bOPENFORGE_ATTACH_TOKEN=/u,
+  /\b(api[_-]?key|token|password|secret|private[_-]?key|credential|event[_-]?encrypt[_-]?key)\b\s*[:=]/iu,
+  /[\r\n\x00-\x08\x0B\x0C\x0E-\x1F]/u,
+  /\b(raw terminal|terminal transcript|stdout|stderr|command output)\b/iu,
+  /^\s*[$>#]\s+\S+/u,
+  /"?(messages|choices|provider|authorization|api_key|request|response)"?\s*:/iu,
+];
+
+function validateEvidenceReferenceInput(draft: EvidenceDraft): boolean {
+  return [draft.ref, draft.path].some((value) =>
+    UNSAFE_EVIDENCE_REFERENCE_PATTERNS.some((pattern) => pattern.test(value))
+  );
 }
 
 function formatEvidenceRef(ref: ProjectManagerEvidenceRef) {

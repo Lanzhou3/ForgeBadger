@@ -982,7 +982,12 @@ describe("api client", () => {
       manualCompletionReason: "Reviewed locally",
     });
     await projectManagerApi.attachProjectManagerWorkItemEvidence("project/1", "work/item-1", {
-      evidenceRefs: [{ kind: "report", path: "docs/report.md" }],
+      evidenceRefs: [{
+        kind: "report",
+        label: "Phase 11 evidence",
+        ref: "PMEV-01",
+        path: "docs/reports/phase-11-evidence.md",
+      }],
     });
     await projectManagerApi.listProjectManagerLedger("project/1", {
       eventType: "work_item_status_changed",
@@ -1051,7 +1056,12 @@ describe("api client", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          evidenceRefs: [{ kind: "report", path: "docs/report.md" }],
+          evidenceRefs: [{
+            kind: "report",
+            label: "Phase 11 evidence",
+            ref: "PMEV-01",
+            path: "docs/reports/phase-11-evidence.md",
+          }],
         }),
       })
     );
