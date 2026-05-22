@@ -112,6 +112,90 @@ describe("ProjectManagerRepository", () => {
     assert.equal(events[0]?.eventType, "evidence_attached");
   });
 
+  it("preserves Copilot pending action evidence refs and safe ledger trace markers", () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const created = repo.createWorkItem(projectId, {
+      title: "Trace Copilot proposal",
+      evidenceRefs: [{
+        kind: "copilot_run",
+        label: "Copilot proposal",
+        status: "accepted",
+        copilotRunId: "run-create-1",
+        pendingActionId: "pa-create-1"
+      }],
+      details: {
+        copilotRunId: "run-create-1",
+        pendingActionId: "pa-create-1",
+        actionType: "create_work_item",
+        targetType: "work_item",
+        targetId: "draft-work-item",
+        evidenceRefCount: 1,
+        approvalStatus: "approved",
+        executionStatus: "succeeded"
+      }
+    });
+
+    const statusChanged = repo.updateWorkItemStatus(projectId, created.id, {
+      status: "in_progress",
+      evidenceRefs: [{
+        kind: "copilot_run",
+        label: "Status proposal",
+        status: "accepted",
+        copilotRunId: "run-status-1",
+        pendingActionId: "pa-status-1"
+      }],
+      details: {
+        copilotRunId: "run-status-1",
+        pendingActionId: "pa-status-1",
+        actionType: "update_work_item_status",
+        targetType: "work_item",
+        targetId: created.id,
+        evidenceRefCount: 2,
+        approvalStatus: "approved",
+        executionStatus: "succeeded"
+      }
+    });
+
+    const attached = repo.attachEvidence(projectId, created.id, {
+      evidenceRefs: [{
+        kind: "copilot_run",
+        label: "Attached proposal evidence",
+        status: "verified",
+        copilotRunId: "run-attach-1",
+        pendingActionId: "pa-attach-1"
+      }],
+      details: {
+        copilotRunId: "run-attach-1",
+        pendingActionId: "pa-attach-1",
+        actionType: "attach_evidence",
+        targetType: "work_item",
+        targetId: created.id,
+        evidenceRefCount: 3,
+        approvalStatus: "approved",
+        executionStatus: "succeeded"
+      }
+    });
+
+    const events = repo.listLedgerEvents(projectId, { workItemId: created.id });
+
+    assert.equal(created.evidenceRefs[0]?.pendingActionId, "pa-create-1");
+    assert.equal(statusChanged.evidenceRefs.at(-1)?.pendingActionId, "pa-status-1");
+    assert.equal(attached.evidenceRefs.at(-1)?.pendingActionId, "pa-attach-1");
+    assert.equal(events[0]?.details.pendingActionId, "pa-create-1");
+    assert.equal(events[1]?.details.pendingActionId, "pa-status-1");
+    assert.equal(events[2]?.details.pendingActionId, "pa-attach-1");
+    assert.deepEqual(events[2]?.details, {
+      copilotRunId: "run-attach-1",
+      pendingActionId: "pa-attach-1",
+      actionType: "attach_evidence",
+      targetType: "work_item",
+      targetId: created.id,
+      evidenceRefCount: 3,
+      approvalStatus: "approved",
+      executionStatus: "succeeded"
+    });
+  });
+
   it("rejects done without evidence or manual completion reason before writing rows", () => {
     const repo = new ProjectManagerRepository(db, owner.id);
     const item = repo.createWorkItem(projectId, { title: "Close item" });
