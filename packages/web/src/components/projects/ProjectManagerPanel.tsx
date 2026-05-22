@@ -60,6 +60,7 @@ import {
   updateProjectManagerWorkItemStatus,
   type ProjectManagerEvidenceRef,
   type ProjectManagerLedgerEvent,
+  type ProjectManagerLedgerTrace,
   type ProjectManagerLedgerEventType,
   type ProjectManagerGoal,
   type ProjectManagerWorkItemInput,
@@ -74,6 +75,7 @@ import { cn } from "@/lib/utils";
 interface ProjectManagerPanelProps {
   projectId: string;
   enabled: boolean;
+  selectedWorkItemId?: string | null;
 }
 
 type Translate = (key: TranslationKey) => string;
@@ -147,7 +149,11 @@ const PROJECT_MANAGER_STATUS_TRANSITIONS: Record<ProjectManagerWorkItemStatus, P
   cancelled: [],
 };
 
-export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelProps) {
+export function ProjectManagerPanel({
+  projectId,
+  enabled,
+  selectedWorkItemId: requestedWorkItemId = null,
+}: ProjectManagerPanelProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const canLoad = enabled && projectId.length > 0;
@@ -168,6 +174,7 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
   const [doneReason, setDoneReason] = useState("");
   const [doneReasonError, setDoneReasonError] = useState<string | null>(null);
   const doneReasonRef = useRef<HTMLTextAreaElement | null>(null);
+  const appliedRequestedWorkItemIdRef = useRef<string | null>(null);
 
   const goalQuery = useQuery({
     queryKey: ["project-manager", projectId, "goal"],
@@ -278,6 +285,18 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
   const filteredLedgerEvents = filterLedgerEvents(ledgerEvents, ledgerFilter);
   const selectedWorkItem = workItems.find((item) => item.id === selectedWorkItemId) ?? null;
   const pendingDoneWorkItem = workItems.find((item) => item.id === pendingDoneWorkItemId) ?? null;
+
+  useEffect(() => {
+    const requested = requestedWorkItemId?.trim() ?? "";
+    if (!requested) {
+      appliedRequestedWorkItemIdRef.current = null;
+      return;
+    }
+    if (appliedRequestedWorkItemIdRef.current === requested) return;
+    if (!workItems.some((item) => item.id === requested)) return;
+    setSelectedWorkItemId(requested);
+    appliedRequestedWorkItemIdRef.current = requested;
+  }, [requestedWorkItemId, workItems]);
 
   useEffect(() => {
     setEvidenceAttachError(null);
@@ -456,6 +475,7 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
             statusError={statusMutationError}
             statusFilter={workItemStatusFilter}
             statusMutationPending={statusMutation.isPending}
+            highlightedWorkItemId={requestedWorkItemId}
             t={t}
             workItems={workItems}
           />
@@ -479,6 +499,7 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
         evidenceError={evidenceAttachError}
         isEvidenceSaving={evidenceMutation.isPending}
         item={selectedWorkItem}
+        ledgerEvents={ledgerEvents}
         onAttachEvidence={attachEvidence}
         onEvidenceDraftChange={setEvidenceDraft}
         onOpenChange={(open) => {
@@ -677,6 +698,7 @@ function ProjectManagerGoalCard({
 }
 
 function ProjectManagerWorkItemsCard({
+  highlightedWorkItemId,
   isFetching,
   onCreate,
   onStatusFilterChange,
@@ -688,6 +710,7 @@ function ProjectManagerWorkItemsCard({
   workItems,
   t,
 }: {
+  highlightedWorkItemId?: string | null;
   isFetching: boolean;
   onCreate: () => void;
   onStatusFilterChange: (status: WorkItemStatusFilter) => void;
@@ -763,7 +786,12 @@ function ProjectManagerWorkItemsCard({
             </TableHeader>
             <TableBody>
               {workItems.map((item) => (
-                <TableRow key={item.id}>
+                <TableRow
+                  key={item.id}
+                  className={cn(
+                    item.id === highlightedWorkItemId && "border-primary/60 bg-primary/5"
+                  )}
+                >
                   <TableCell className="max-w-[240px] whitespace-normal break-words font-medium">
                     {item.title}
                   </TableCell>
@@ -806,6 +834,7 @@ function ProjectManagerWorkItemDetailSheet({
   evidenceError,
   isEvidenceSaving,
   item,
+  ledgerEvents,
   onAttachEvidence,
   onEvidenceDraftChange,
   onOpenChange,
@@ -818,6 +847,7 @@ function ProjectManagerWorkItemDetailSheet({
   evidenceError: string | null;
   isEvidenceSaving: boolean;
   item: ProjectManagerWorkItem | null;
+  ledgerEvents: ProjectManagerLedgerEvent[];
   onAttachEvidence: () => void;
   onEvidenceDraftChange: (draft: EvidenceDraft) => void;
   onOpenChange: (open: boolean) => void;
@@ -826,6 +856,8 @@ function ProjectManagerWorkItemDetailSheet({
   statusMutationPending: boolean;
   t: Translate;
 }) {
+  const traceMarkers = item ? workItemCopilotTraceMarkers(item, ledgerEvents) : [];
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
@@ -885,6 +917,15 @@ function ProjectManagerWorkItemDetailSheet({
                 <span className="text-muted-foreground">-</span>
               )}
             </DetailField>
+            {traceMarkers.length > 0 && (
+              <DetailField label="Copilot trace">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {traceMarkers.map((marker) => (
+                    <LedgerDatum key={`${marker.label}-${marker.value}`} label={marker.label} value={marker.value} />
+                  ))}
+                </div>
+              </DetailField>
+            )}
             <fieldset className="space-y-3 rounded-md border border-border/70 p-3">
               <legend className="px-1 text-sm font-medium">{t("projects.projectManagerAttachEvidence")}</legend>
               <p className="text-xs leading-5 text-muted-foreground">
@@ -1393,6 +1434,23 @@ function ProjectManagerLedgerRow({
         <LedgerDatum label={t("projects.projectManagerEvidenceRefs")} value={event.evidenceRefCount} />
         <LedgerDatum label={t("projects.projectManagerFeishuRefs")} value={event.feishuRefCount} />
       </div>
+      {event.trace && <LedgerTraceGrid trace={event.trace} />}
+    </div>
+  );
+}
+
+function LedgerTraceGrid({ trace }: { trace: ProjectManagerLedgerTrace }) {
+  const markers = ledgerTraceMarkers(trace);
+  if (markers.length === 0) return null;
+
+  return (
+    <div className="mt-3 rounded-md border border-border/70 bg-background/40 p-3">
+      <div className="text-xs font-medium uppercase text-muted-foreground">Copilot trace</div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {markers.map((marker) => (
+          <LedgerDatum key={`${marker.label}-${marker.value}`} label={marker.label} value={marker.value} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -1568,6 +1626,46 @@ function ledgerWorkItemTitle(event: ProjectManagerLedgerEvent, workItems: Projec
   return workItem?.title ?? event.workItemId ?? "-";
 }
 
+interface TraceMarker {
+  label: string;
+  value: string | number;
+}
+
+function workItemCopilotTraceMarkers(
+  item: ProjectManagerWorkItem,
+  ledgerEvents: ProjectManagerLedgerEvent[]
+): TraceMarker[] {
+  const evidenceTrace = item.evidenceRefs.find((ref) =>
+    Boolean(ref.copilotRunId || ref.pendingActionId || ref.sessionId)
+  );
+  const ledgerTraceEvent = ledgerEvents.find((event) => event.workItemId === item.id && event.trace);
+  const trace = ledgerTraceEvent?.trace;
+  const markers: TraceMarker[] = [];
+
+  const runId = evidenceTrace?.copilotRunId ?? trace?.copilotRunId;
+  const actionId = evidenceTrace?.pendingActionId ?? trace?.pendingActionId;
+  if (runId) markers.push({ label: "Run", value: runId });
+  if (actionId) markers.push({ label: "Action", value: actionId });
+  if (evidenceTrace) markers.push({ label: "Evidence", value: formatEvidenceRef(evidenceTrace) });
+  if (evidenceTrace?.sessionId) markers.push({ label: "Session", value: evidenceTrace.sessionId });
+  if (ledgerTraceEvent) markers.push({ label: "Ledger", value: ledgerTraceEvent.eventType });
+
+  return markers;
+}
+
+function ledgerTraceMarkers(trace: ProjectManagerLedgerTrace): TraceMarker[] {
+  const markers: Array<TraceMarker | null> = [
+    trace.copilotRunId ? { label: "Run", value: trace.copilotRunId } : null,
+    trace.pendingActionId ? { label: "Action", value: trace.pendingActionId } : null,
+    trace.actionType ? { label: "Action type", value: trace.actionType } : null,
+    trace.targetId ? { label: "Target", value: trace.targetId } : null,
+    typeof trace.evidenceRefCount === "number" ? { label: "Evidence refs", value: trace.evidenceRefCount } : null,
+    trace.approvalStatus ? { label: "Approval", value: trace.approvalStatus } : null,
+    trace.executionStatus ? { label: "Execution", value: trace.executionStatus } : null,
+  ];
+  return markers.filter((marker): marker is TraceMarker => Boolean(marker));
+}
+
 function ledgerEventNote(eventType: ProjectManagerLedgerEventType, t: Translate) {
   if (eventType === "manual_completion_recorded") {
     return t("projects.projectManagerLedgerManualCompletionNote");
@@ -1582,7 +1680,17 @@ function ledgerEventNote(eventType: ProjectManagerLedgerEventType, t: Translate)
 }
 
 function formatEvidenceRef(ref: ProjectManagerEvidenceRef) {
-  const parts = [ref.kind, ref.label, ref.status, ref.ref, ref.path, ref.sessionId, ref.copilotRunId, ref.feishuMessageId]
+  const parts = [
+    ref.kind,
+    ref.label,
+    ref.status,
+    ref.ref,
+    ref.path,
+    ref.sessionId,
+    ref.copilotRunId,
+    ref.pendingActionId,
+    ref.feishuMessageId,
+  ]
     .map((part) => part?.trim())
     .filter(Boolean);
   return parts.length > 0 ? parts.join(" · ") : "-";

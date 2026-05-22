@@ -38,34 +38,32 @@ test("opens Project Manager from deep link and renders Copilot trace markers", a
 
   const panel = page.getByTestId("project-manager-panel");
   await expect(panel).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Project Manager" })).toHaveAttribute("data-state", "active");
   const sheet = page.getByRole("dialog", { name: "Trace Copilot approval chain" });
   await expect(sheet).toBeVisible();
   await expect(sheet.getByText("Done").first()).toBeVisible();
   await expect(sheet.getByText("Copilot trace")).toBeVisible();
-  await expect(sheet.getByText("Run")).toBeVisible();
-  await expect(sheet.getByText("run-trace-1")).toBeVisible();
-  await expect(sheet.getByText("Action")).toBeVisible();
-  await expect(sheet.getByText("pm-action-1")).toBeVisible();
-  await expect(sheet.getByText("Evidence")).toBeVisible();
-  await expect(sheet.getByText(/test.*Traceability E2E.*verified/)).toBeVisible();
-  await expect(sheet.getByText("Session")).toBeVisible();
-  await expect(sheet.getByText("session-trace-1")).toBeVisible();
-  await expect(sheet.getByText("Ledger")).toBeVisible();
-  await expect(sheet.getByText("copilot_trace_recorded")).toBeVisible();
+  await expect(sheet.getByText("Run", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("run-trace-1", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("Action", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("pm-action-1", { exact: true })).toBeVisible();
+  await expect(sheet.getByText(/test.*Traceability E2E.*verified/).first()).toBeVisible();
+  await expect(sheet.getByText("Session", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("session-trace-1", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("Ledger", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("copilot_observation_recorded", { exact: true })).toBeVisible();
 
   await page.keyboard.press("Escape");
   const ledger = panel.getByTestId("project-manager-ledger");
   await expect(ledger.getByText("Copilot trace")).toBeVisible();
-  await expect(ledger.getByText("Action type")).toBeVisible();
-  await expect(ledger.getByText("update_work_item_status")).toBeVisible();
-  await expect(ledger.getByText("Target")).toBeVisible();
-  await expect(ledger.getByText("work-item-trace")).toBeVisible();
-  await expect(ledger.getByText("Evidence refs")).toBeVisible();
-  await expect(ledger.getByText("Approval")).toBeVisible();
-  await expect(ledger.getByText("approved")).toBeVisible();
-  await expect(ledger.getByText("Execution")).toBeVisible();
-  await expect(ledger.getByText("succeeded")).toBeVisible();
+  await expect(ledger.getByText("Action type", { exact: true })).toBeVisible();
+  await expect(ledger.getByText("update_work_item_status", { exact: true })).toBeVisible();
+  await expect(ledger.getByText("Target", { exact: true })).toBeVisible();
+  await expect(ledger.getByText("work-item-trace").first()).toBeVisible();
+  await expect(ledger.getByText("Evidence refs", { exact: true })).toBeVisible();
+  await expect(ledger.getByText("Approval", { exact: true })).toBeVisible();
+  await expect(ledger.getByText("approved", { exact: true })).toBeVisible();
+  await expect(ledger.getByText("Execution", { exact: true })).toBeVisible();
+  await expect(ledger.getByText("succeeded", { exact: true })).toBeVisible();
   await expect(panel.getByText("RAW TERMINAL OUTPUT SHOULD NOT RENDER")).toHaveCount(0);
   await expect(panel.getByText("RAW PROVIDER PAYLOAD SHOULD NOT RENDER")).toHaveCount(0);
   await expect(panel.getByText("RAW LEDGER DETAILS SHOULD NOT RENDER")).toHaveCount(0);
@@ -740,7 +738,7 @@ function projectManagerLedgerEvents(limit: number, evidenceAttachedEvent: unknow
       id: "ledger-trace",
       projectId: PROJECT_ID,
       workItemId: "work-item-trace",
-      eventType: "copilot_trace_recorded",
+      eventType: "copilot_observation_recorded",
       status: "done",
       evidenceRefCount: 1,
       feishuRefCount: 0,

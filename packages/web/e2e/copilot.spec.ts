@@ -977,9 +977,9 @@ test("Copilot renders Project Manager pending actions as fixed trace cards", asy
   await expect(assistantBubble.getByText("Action: update_work_item_status")).toBeVisible();
   await expect(assistantBubble.getByText("Project: project-123")).toBeVisible();
   await expect(assistantBubble.getByText("Work item: work-item-trace")).toBeVisible();
-  await expect(assistantBubble.getByText("Fields: status")).toBeVisible();
+  await expect(assistantBubble.getByText("Fields: status", { exact: true })).toBeVisible();
   await expect(assistantBubble.getByText("Evidence refs: 0").first()).toBeVisible();
-  await expect(assistantBubble.getByText("Trace")).toBeVisible();
+  await expect(assistantBubble.getByText("Trace", { exact: true })).toBeVisible();
   await expect(assistantBubble.getByText(/Copilot run run-1.*pending action pm-action-1.*target work item work-item-trace/)).toBeVisible();
   await expect(assistantBubble.getByText("Review before approval")).toBeVisible();
   await expect(assistantBubble.getByText("Trusted evidence is required before Copilot can mark this done.")).toBeVisible();
@@ -1153,7 +1153,7 @@ test("Copilot renders Project Manager approval anchors and terminal failures", a
   const failedBubble = copilotMessage(page, "I need approval before attaching evidence.").last();
   await failedBubble.getByRole("button", { name: "Approve" }).click();
 
-  await expect(page.getByText("Project Manager action failed. Create a new proposal before retrying.")).toBeVisible();
+  await expect(failedBubble.getByText("Project Manager action failed. Create a new proposal before retrying.").first()).toBeVisible();
   await expect(failedBubble.getByText("Execution: failed")).toBeVisible();
   await expect(failedBubble.getByRole("button", { name: "Approve" })).toHaveCount(0);
   await expect(failedBubble.getByRole("button", { name: "Reject" })).toHaveCount(0);

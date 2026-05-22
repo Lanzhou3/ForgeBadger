@@ -82,6 +82,18 @@ const builtinTemplateOptions = [
   { id: "builtin-codex", name: "Codex CLI" },
 ];
 
+const PROJECT_DETAIL_TABS = [
+  "sessions",
+  "project-manager",
+  "agents",
+  "orchestration",
+  "skills",
+  "config",
+  "activity",
+] as const;
+
+type ProjectDetailTab = typeof PROJECT_DETAIL_TABS[number];
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -89,7 +101,9 @@ export default function ProjectDetailPage() {
   const queryClient = useQueryClient();
   const { t } = useLanguage();
   const id = params.id as string;
-  const [activeTab, setActiveTab] = useState("sessions");
+  const [activeTab, setActiveTab] = useState<ProjectDetailTab>(() =>
+    readProjectDetailTab(searchParams.get("tab")) ?? "sessions"
+  );
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState("builtin-claude-code");
   const [selectedRuntimeAdapter, setSelectedRuntimeAdapter] = useState<RuntimeAdapterId | "">("");
@@ -327,6 +341,7 @@ export default function ProjectDetailPage() {
     !selectedRuntimeLaunchable ||
     (selectedCredentialNeedsKey && !selectedApiKeyId);
   const configNeedsReview = searchParams.get("configStatus") === "failed";
+  const projectManagerWorkItemId = normalizeSearchParam(searchParams.get("workItemId"));
   const selectedModel = models.find((model) => model.id === selectedModelId);
   const runningSessionCount = projectSessions.filter((session) => session.status === "running").length;
   const enabledSkillCount = enabledSkillIds.size;
@@ -336,6 +351,30 @@ export default function ProjectDetailPage() {
       setSelectedModelId(defaultModel.id);
     }
   }, [defaultModel, selectedModelId]);
+
+  useEffect(() => {
+    const nextTab = readProjectDetailTab(searchParams.get("tab"));
+    if (nextTab && nextTab !== activeTab) {
+      setActiveTab(nextTab);
+    }
+  }, [activeTab, searchParams]);
+
+  const handleTabChange = (value: string) => {
+    const nextTab = readProjectDetailTab(value);
+    if (!nextTab) return;
+    setActiveTab(nextTab);
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    if (nextTab === "project-manager") {
+      nextSearchParams.set("tab", "project-manager");
+    } else {
+      nextSearchParams.delete("tab");
+      nextSearchParams.delete("workItemId");
+    }
+    const query = nextSearchParams.toString();
+    router.replace(query ? `/projects/${encodeURIComponent(id)}?${query}` : `/projects/${encodeURIComponent(id)}`, {
+      scroll: false,
+    });
+  };
 
   useEffect(() => {
     const nextTemplateId = project?.templateId ?? defaultTemplateForAiTool(project?.aiTool);
@@ -856,7 +895,7 @@ export default function ProjectDetailPage() {
             </p>
           )}
 
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <Tabs value={activeTab} onValueChange={handleTabChange}>
             <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:thin]">
             <TabsList className="min-w-max">
               <TabsTrigger value="sessions">{t("nav.sessions")}</TabsTrigger>
@@ -925,6 +964,7 @@ export default function ProjectDetailPage() {
               <ProjectManagerPanel
                 projectId={id}
                 enabled={activeTab === "project-manager"}
+                selectedWorkItemId={projectManagerWorkItemId}
               />
             </TabsContent>
 
@@ -1715,6 +1755,17 @@ function ComplianceMetric({ label, value }: { label: string; value: number }) {
 
 function sameStringArray(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function readProjectDetailTab(value: string | null): ProjectDetailTab | null {
+  const normalized = normalizeSearchParam(value);
+  if (!normalized) return null;
+  return PROJECT_DETAIL_TABS.includes(normalized as ProjectDetailTab) ? normalized as ProjectDetailTab : null;
+}
+
+function normalizeSearchParam(value: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 function formatProjectActivityTime(value: string): string {

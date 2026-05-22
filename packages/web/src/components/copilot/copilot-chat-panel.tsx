@@ -75,6 +75,7 @@ import {
   shouldKeepCopilotActiveRunState,
   shouldRefreshCopilotPanelForGatewayEvent,
   stripCopilotThinkingBlocks,
+  type CopilotPendingActionSummary,
 } from "@/lib/copilot";
 import { OPENFORGE_GATEWAY_EVENT } from "@/lib/gateway-events";
 import type { GatewayEvent } from "@/lib/notifications";
@@ -319,7 +320,20 @@ export function CopilotChatPanel({
           : Promise.resolve(),
       ]);
     },
-    onError: (error) => setLocalError(resolveChatError(error, t)),
+    onError: (error) => {
+      setLocalError(resolveChatError(error, t));
+      const failedAction = readFailedProjectManagerAction(error);
+      if (!failedAction) return;
+      setActiveRun((current) => {
+        if (!current) return current;
+        const pendingActions = current.pendingActions ?? [];
+        const hasAction = pendingActions.some((action) => action.id === failedAction.id);
+        const nextPendingActions = hasAction
+          ? pendingActions.map((action) => action.id === failedAction.id ? failedAction : action)
+          : [...pendingActions, failedAction];
+        return { ...current, pendingActions: nextPendingActions };
+      });
+    },
   });
   const sendDisabled = !providerReady || !prompt.trim() || sendMessageMutation.isPending;
 
@@ -330,7 +344,7 @@ export function CopilotChatPanel({
   }, []);
 
   const pendingActions = useMemo(
-    () => (activeRun?.pendingActions ?? []).filter((action) => action.status === "pending"),
+    () => (activeRun?.pendingActions ?? []).filter(shouldShowAssistantPendingAction),
     [activeRun?.pendingActions]
   );
   const timelineEvents = useMemo(
@@ -764,7 +778,7 @@ export function CopilotChatPanel({
                       runEvents={showRunActivity ? timelineEvents : persistedActivity.events}
                       pendingActions={showRunActivity
                         ? pendingActions
-                        : persistedActivity.pendingActions.filter((action) => action.status === "pending")}
+                        : persistedActivity.pendingActions.filter(shouldShowAssistantPendingAction)}
                       deciding={decidePendingActionMutation.isPending}
                       onDelete={() => deleteMessageMutation.mutate(message.id)}
                       onDecide={(action, decision) => decidePendingActionMutation.mutate({ action, decision })}
@@ -871,12 +885,7 @@ function RunEventRow({ event }: { event: CopilotRunEvent }) {
         <div className="font-medium text-foreground">{label}</div>
         {detail && <div className="mt-0.5 break-words text-xs text-muted-foreground">{detail}</div>}
         {resultSummary && (
-          <div className="mt-2 rounded-md border border-border bg-background/70 p-2 text-xs leading-5">
-            <div className="break-words font-medium text-foreground">{resultSummary.detail}</div>
-            {resultSummary.preview && (
-              <div className="mt-0.5 break-words text-muted-foreground">{resultSummary.preview}</div>
-            )}
-          </div>
+          <CopilotSummaryBlock summary={resultSummary} />
         )}
         {memoryResults.length > 0 && (
           <div className="mt-2 space-y-1 rounded-md border border-border bg-background/70 p-2">
@@ -911,6 +920,8 @@ function PendingActionCard({
   const key = getCopilotPendingActionLabelKey(action.type);
   const label = key ? t(key) : getCopilotPendingActionLabel(action.type);
   const summary = getCopilotPendingActionSummary(action);
+  const approveBlocked = summary?.messageKey === "copilot.error.projectManagerTrustedEvidenceRequired";
+  const canDecide = action.status === "pending";
   return (
     <div className="space-y-3 rounded-md border border-border bg-background/70 p-3">
       <div className="min-w-0">
@@ -918,20 +929,97 @@ function PendingActionCard({
         {summary?.detail && <div className="mt-1 break-words text-xs text-muted-foreground">{summary.detail}</div>}
         {summary?.preview && <div className="mt-1 break-words text-xs text-muted-foreground">{summary.preview}</div>}
       </div>
-      <div className="flex justify-end gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={deciding}
-          onClick={() => onDecide(action, "reject")}
-        >
-          {t("copilot.reject")}
-        </Button>
-        <Button type="button" size="sm" disabled={deciding} onClick={() => onDecide(action, "approve")}>
-          {t("copilot.approve")}
-        </Button>
-      </div>
+      {summary && <CopilotSummaryMarkers summary={summary} />}
+      {canDecide && (
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={deciding}
+            onClick={() => onDecide(action, "reject")}
+          >
+            {t("copilot.reject")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={deciding || approveBlocked}
+            onClick={() => onDecide(action, "approve")}
+          >
+            {t("copilot.approve")}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CopilotSummaryBlock({ summary }: { summary: CopilotPendingActionSummary }) {
+  return (
+    <div className="mt-2 rounded-md border border-border bg-background/70 p-2 text-xs leading-5">
+      <div className="break-words font-medium text-foreground">{summary.detail}</div>
+      {summary.preview && (
+        <div className="mt-0.5 break-words text-muted-foreground">{summary.preview}</div>
+      )}
+      <CopilotSummaryMarkers summary={summary} />
+    </div>
+  );
+}
+
+function CopilotSummaryMarkers({ summary }: { summary: CopilotPendingActionSummary }) {
+  const { t } = useLanguage();
+  const markers = summary.markers ?? [];
+  const traceMarkers = markers.filter((marker) => marker.startsWith("Trace:"));
+  const detailMarkers = markers.filter((marker) => !marker.startsWith("Trace:"));
+
+  if (
+    detailMarkers.length === 0 &&
+    traceMarkers.length === 0 &&
+    !summary.messageKey &&
+    !summary.riskCueKey &&
+    !summary.anchor
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 space-y-2 text-xs leading-5">
+      {detailMarkers.length > 0 && (
+        <div className="space-y-1">
+          {detailMarkers.map((marker) => (
+            <div key={marker} className="break-words text-muted-foreground">{marker}</div>
+          ))}
+        </div>
+      )}
+      {traceMarkers.length > 0 && (
+        <div className="rounded-md border border-border/70 bg-muted/20 px-2 py-2">
+          <div className="font-medium text-foreground">{t("copilot.projectManager.trace")}</div>
+          <div className="mt-1 space-y-1">
+            {traceMarkers.map((marker) => (
+              <div key={marker} className="break-words text-muted-foreground">
+                {marker.replace(/^Trace:\s*/u, "")}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {summary.messageKey && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-2 text-amber-100">
+          {t(summary.messageKey)}
+        </div>
+      )}
+      {summary.riskCueKey && (
+        <div className="rounded-md border border-border/70 bg-muted/20 px-2 py-2">
+          <div className="font-medium text-foreground">{t("copilot.projectManager.reviewBeforeApproval")}</div>
+          <div className="mt-1 break-words text-muted-foreground">{t(summary.riskCueKey)}</div>
+        </div>
+      )}
+      {summary.anchor && (
+        <Link className="inline-flex text-xs font-medium text-primary underline-offset-4 hover:underline" href={summary.anchor.href}>
+          {t(summary.anchor.labelKey)}
+        </Link>
+      )}
     </div>
   );
 }
@@ -1601,6 +1689,53 @@ function readToolName(payload: Record<string, unknown> | undefined): string {
 
 function readTerminalSnapshotText(payload: Record<string, unknown> | undefined): string {
   return readCopilotTerminalSnapshotText(payload).trim();
+}
+
+const PROJECT_MANAGER_PENDING_ACTION_TYPES = new Set([
+  "openforge.propose_project_manager_create_work_item",
+  "openforge.propose_project_manager_update_work_item_status",
+  "openforge.propose_project_manager_attach_evidence",
+]);
+
+function shouldShowAssistantPendingAction(action: CopilotPendingAction): boolean {
+  return action.status === "pending" ||
+    (action.status === "failed" && PROJECT_MANAGER_PENDING_ACTION_TYPES.has(action.type));
+}
+
+function readFailedProjectManagerAction(error: unknown): CopilotPendingAction | null {
+  if (!(error instanceof GatewayApiError)) return null;
+  const action = readRecord(error.details?.action);
+  if (!action) return null;
+  const id = readString(action.id);
+  const runId = readString(action.runId);
+  const type = readString(action.type);
+  const status = readString(action.status);
+  if (!id || !runId || !type || status !== "failed" || !PROJECT_MANAGER_PENDING_ACTION_TYPES.has(type)) return null;
+  return {
+    id,
+    runId,
+    type,
+    status,
+    input: readRecord(action.input) ?? undefined,
+    result: readRecord(action.result),
+    approvedBy: readString(action.approvedBy),
+    approvedAt: readNumber(action.approvedAt),
+    createdAt: readNumber(action.createdAt),
+    updatedAt: readNumber(action.updatedAt),
+  };
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 interface MemoryRecallSummary {
