@@ -64,7 +64,7 @@ completed: 2026-05-22
 1. **Task 1: Add Web E2E coverage for PM traceability surfaces** - `c4f44ce` (test)
 2. **Task 2: Implement PM approval cards, anchors, and PM trace markers** - `a74dc7e` (feat)
 
-**Plan metadata:** pending final docs commit
+**Plan metadata:** final docs committed in `ed7c19a`.
 
 ## Files Created/Modified
 
