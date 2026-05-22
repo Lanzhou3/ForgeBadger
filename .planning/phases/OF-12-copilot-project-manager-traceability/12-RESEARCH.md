@@ -439,22 +439,25 @@ All claims in this research were verified from repository code, planning artifac
 |---|-------|---------|---------------|
 | none | No unverified assumptions were used. | n/a | n/a |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Exact PM pending-action type names**
    - What we know: User locked semantic action types `create_work_item`, `update_work_item_status`, and `attach_evidence`. [VERIFIED: .planning/phases/OF-12-copilot-project-manager-traceability/12-CONTEXT.md]
    - What's unclear: The exact tool names are left to planner discretion. [VERIFIED: .planning/phases/OF-12-copilot-project-manager-traceability/12-CONTEXT.md]
    - Recommendation: Use names consistent with existing prepare tools, for example `openforge.propose_project_manager_create_work_item`, while storing a bounded `actionType` marker equal to the locked semantic type. [VERIFIED: packages/gateway/src/services/copilot/read-tools.ts]
+   - RESOLVED: Phase 12 plans use exactly `openforge.propose_project_manager_create_work_item`, `openforge.propose_project_manager_update_work_item_status`, and `openforge.propose_project_manager_attach_evidence`; stored semantic markers remain `create_work_item`, `update_work_item_status`, and `attach_evidence`. [VERIFIED: .planning/phases/OF-12-copilot-project-manager-traceability/12-02-PLAN.md]
 
 2. **Project Manager anchor URL shape**
    - What we know: Project detail has a `project-manager` tab but `activeTab` is currently local state initialized to `sessions`. [VERIFIED: packages/web/src/app/(dashboard)/projects/[id]/page.tsx]
    - What's unclear: No existing URL contract opens the PM tab or detail sheet directly. [VERIFIED: packages/web/src/app/(dashboard)/projects/[id]/page.tsx]
    - Recommendation: Plan `?tab=project-manager&workItemId=...` or equivalent URL state before E2E coverage for `View in Project Manager`. [VERIFIED: packages/web/e2e/project-manager.spec.ts]
+   - RESOLVED: Phase 12 plans and UI contract use `/projects/:projectId?tab=project-manager&workItemId=:workItemId` as the anchor shape for `View in Project Manager`. [VERIFIED: .planning/phases/OF-12-copilot-project-manager-traceability/12-UI-SPEC.md] [VERIFIED: .planning/phases/OF-12-copilot-project-manager-traceability/12-04-PLAN.md]
 
 3. **Trusted evidence status vocabulary**
    - What we know: Context names `accepted` and `verified` as trusted examples, and current schemas accept arbitrary bounded `status` strings. [VERIFIED: .planning/phases/OF-12-copilot-project-manager-traceability/12-CONTEXT.md] [VERIFIED: packages/gateway/src/routes/project-manager.ts]
    - What's unclear: The repository does not currently enforce an enum for evidence ref status. [VERIFIED: packages/gateway/src/db/repositories/project-manager-repository.ts]
    - Recommendation: Define a local trusted set for Copilot-origin `done` approval and leave existing manual/evidence attach status compatibility unchanged. [VERIFIED: packages/gateway/src/db/repositories/project-manager-repository.ts]
+   - RESOLVED: Phase 12 uses `accepted` and `verified` as the local trusted evidence statuses for Copilot-origin `done` approvals while preserving existing evidence status compatibility elsewhere. [VERIFIED: .planning/phases/OF-12-copilot-project-manager-traceability/12-02-PLAN.md] [VERIFIED: .planning/phases/OF-12-copilot-project-manager-traceability/12-UI-SPEC.md]
 
 ## Environment Availability
 

@@ -24,9 +24,20 @@
 **Plans:** 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 12-01-PLAN.md — Project Manager trace DTOs, pendingActionId evidence refs, safe ledger trace contract, and API docs.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 12-02-PLAN.md — Gateway Copilot PM prepare tools, canonical approval handlers, terminal failed semantics, and trusted-evidence done gate.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 12-03-PLAN.md — Web DTOs, fixed PM Copilot summaries, result summaries, and localized trace copy.
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 12-04-PLAN.md — PM approval cards, View in Project Manager anchor, PM detail/ledger markers, and browser coverage.
 
 **Success criteria:**
