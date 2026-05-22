@@ -1,34 +1,34 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Project Manager Web Workflow
-status: Awaiting next milestone
-stopped_at: Completed Phase 11 execution
-last_updated: "2026-05-22T07:19:18.164Z"
-last_activity: 2026-05-22 — Milestone v1.2 completed and archived
+milestone: v1.3
+milestone_name: AI-Native Project Execution Traceability
+status: Ready for Phase 12 planning
+stopped_at: Phase 12 context gathered
+last_updated: "2026-05-22T09:22:47.327Z"
+last_activity: 2026-05-22 — Milestone v1.3 selected and requirements defined
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
-  percent: 100
+  total_phases: 5
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-21)
+See: `.planning/PROJECT.md` (updated 2026-05-22)
 
-**Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser without losing tenant isolation, credential boundaries, terminal persistence, or auditability.
-**Current focus:** Awaiting next milestone selection.
+**Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while turning AI-assisted work into auditable project state.
+**Current focus:** v1.3 AI-Native Project Execution Traceability, Phase 12 ready for planning from gathered context.
 
 ## Current Position
 
-Phase: Milestone v1.2 complete
+Phase: Milestone v1.3 selected
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-05-22 — Milestone v1.2 completed and archived
+Status: Ready for Phase 12 planning
+Last activity: 2026-05-22 — Milestone v1.3 selected and requirements defined
 
 ## Performance Metrics
 
@@ -107,10 +107,12 @@ Recent decisions affecting current work:
 - [Phase 11]: Ledger load failure is scoped to the ledger card so goal and work item operations remain usable. — Plan 11-02 implementation.
 - [Phase 11]: The v1.2 happy-path E2E keeps strict route mocks and covers goal visibility, work item detail, evidence attach, status movement, and ledger markers in one flow. — Plan 11-03 closeout.
 - [Phase 11]: Project Manager trial/support docs treat evidence as bounded references and explicitly forbid raw terminal, Feishu, provider, token, key, and secret content. — Plan 11-03 closeout.
+- [Milestone v1.3]: AI-native project management is scoped as execution traceability on top of the local AI CLI control plane, not a generic PM suite.
+- [Milestone v1.3]: Copilot, Feishu, and model output may propose Project Manager writes only through explicit pending-action approval; Gateway remains the authority.
 
 ### Pending Todos
 
-None in `.planning/todos/` yet. v1.2 is archived; next milestone is not yet defined.
+None in `.planning/todos/` yet. v1.3 requirements are defined in `.planning/REQUIREMENTS.md`.
 
 ### Blockers/Concerns
 
@@ -122,6 +124,7 @@ None in `.planning/todos/` yet. v1.2 is archived; next milestone is not yet defi
 - Phase 8 UAT passed with 6/6 checks and 0 issues; security has `threats_open: 0`.
 - v1.2 shipped the Project Manager Web Workflow and archived phases 9-11 under `.planning/milestones/v1.2-phases/`.
 - v1.2 did not reclassify v1.1 live-provider, physical Windows/WSL, Feishu console-callback, or first-user feedback caveats because no new real external evidence was attached.
+- v1.3 is ready to begin. Before this v1.3 planning update, tracked code was clean; the current tracked changes are the v1.3 planning documents, and unrelated untracked `upload_img/` remains outside milestone scope.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -135,10 +138,10 @@ None in `.planning/todos/` yet. v1.2 is archived; next milestone is not yet defi
 
 ## Session Continuity
 
-Last session: 2026-05-22T07:00:05.604Z
-Stopped at: Completed Phase 11 execution
-Resume file: None
+Last session: 2026-05-22T09:22:47.305Z
+Stopped at: Phase 12 context gathered
+Resume file: .planning/phases/OF-12-copilot-project-manager-traceability/12-CONTEXT.md
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Run `$gsd-plan-phase 12` for Copilot Project-Manager Traceability.
