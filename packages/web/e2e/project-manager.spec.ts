@@ -43,11 +43,39 @@ test("renders a visible not-found state for missing Project Manager records", as
   expect(unhandledApiRoutes).toEqual([]);
 });
 
+test("saves a Project Manager goal update through the exact API route", async ({ page }) => {
+  const unhandledApiRoutes = await mockProjectDetailApis(page);
+
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Project Manager" }).click();
+
+  const panel = page.getByTestId("project-manager-panel");
+  await panel.getByRole("button", { name: "Edit goal" }).click();
+  await panel.getByLabel("Summary").fill("Ship v1.2 with editable goals");
+  await panel.getByLabel("Constraints").fill("Stay in Project Manager tab\nUse Gateway route\n");
+  await panel.getByLabel("Acceptance criteria").fill("Updated goal is visible\n");
+  await panel.getByLabel("Goal status").fill("active");
+  await panel.getByRole("button", { name: "Save goal" }).click();
+
+  await expect(panel.getByText("Ship v1.2 with editable goals")).toBeVisible();
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
 async function mockProjectDetailApis(
   page: Page,
   overrides: { projectManagerStatus?: number } = {}
 ) {
   const unhandledApiRoutes: string[] = [];
+  let goal = {
+    id: "goal-1",
+    projectId: PROJECT_ID,
+    summary: "Ship v1.2 Project Manager workflow",
+    constraints: ["No Gateway authority changes"],
+    acceptanceCriteria: ["Project Manager tab renders"],
+    status: "active",
+    createdAt: 1779370000000,
+    updatedAt: 1779373600000,
+  };
 
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -168,19 +196,31 @@ async function mockProjectDetailApis(
         return;
       }
       await route.fulfill({
-        json: envelope({
-          goal: {
-            id: "goal-1",
-            projectId: PROJECT_ID,
-            summary: "Ship v1.2 Project Manager workflow",
-            constraints: ["No Gateway authority changes"],
-            acceptanceCriteria: ["Project Manager tab renders"],
-            status: "active",
-            createdAt: 1779370000000,
-            updatedAt: 1779373600000,
-          },
-        }),
+        json: envelope({ goal }),
       });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/goal` && method === "PUT") {
+      const body = JSON.parse(route.request().postData() ?? "{}") as {
+        summary?: unknown;
+        constraints?: unknown;
+        acceptanceCriteria?: unknown;
+        status?: unknown;
+      };
+      expect(typeof body.summary).toBe("string");
+      expect(body.constraints).toEqual(["Stay in Project Manager tab", "Use Gateway route"]);
+      expect(body.acceptanceCriteria).toEqual(["Updated goal is visible"]);
+      expect(body.status).toBe("active");
+      goal = {
+        ...goal,
+        summary: body.summary,
+        constraints: body.constraints,
+        acceptanceCriteria: body.acceptanceCriteria,
+        status: body.status,
+        updatedAt: 1779377200000,
+      } as typeof goal;
+      await route.fulfill({ json: envelope({ goal }) });
       return;
     }
 
