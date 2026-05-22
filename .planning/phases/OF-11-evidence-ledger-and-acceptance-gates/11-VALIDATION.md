@@ -1,10 +1,11 @@
 ---
 phase: 11
 slug: evidence-ledger-and-acceptance-gates
-status: approved
+status: verified
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-05-22
+updated: 2026-05-22T15:15:28+08:00
 ---
 
 # Phase 11 - Validation Strategy
@@ -35,12 +36,12 @@ review, and v1.2 acceptance handoff.
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 11-01-01 | 01 | 1 | PMEV-01 | T-11-01, T-11-02 | Evidence form exposes only bounded fields and blocks obvious unsafe raw/secret values before submit | type/e2e | `pnpm --dir packages/web run typecheck` and Project Manager Playwright evidence test | planned | pending |
-| 11-01-02 | 01 | 1 | PMEV-01, PMQA-01 | T-11-03 | Evidence attach uses exact typed client route and preserves recoverable Sheet state on failure | vitest/e2e | `pnpm --dir packages/web exec vitest run src/lib/api.test.ts` and Project Manager Playwright evidence failure test | yes | pending |
-| 11-02-01 | 02 | 2 | PMEV-02, PMEV-03 | T-11-04, T-11-05 | Ledger timeline renders safe event markers, counts, status, timestamps, and short static explanations only | type/e2e | `pnpm --dir packages/web run typecheck` and Project Manager Playwright ledger test | planned | pending |
-| 11-02-02 | 02 | 2 | PMEV-02, PMQA-01 | T-11-06 | Ledger load failure is scoped to ledger area and strict mock catches endpoint drift | e2e | `pnpm --dir packages/web exec playwright test e2e/project-manager.spec.ts --project=chromium` | yes | pending |
-| 11-03-01 | 03 | 3 | PMQA-01 | T-11-07 | Full v1.2 happy path proves goal/work-item/evidence/status/ledger workflow under strict mocks | e2e | `pnpm --dir packages/web exec playwright test e2e/project-manager.spec.ts --project=chromium` | yes | pending |
-| 11-03-02 | 03 | 3 | PMQA-02 | T-11-08 | Trial/support/closeout docs state forbidden content and acceptable reference examples without secrets | docs/static | `rg -n "Project Manager|forbidden|acceptable evidence|raw terminal|provider payload" docs/TRIAL-CHECKLIST.md docs/SUPPORT-DIAGNOSTICS.md docs/reports/v1.2-project-manager-web-workflow-closeout-2026-05-22.md` | planned | pending |
+| 11-01-01 | 01 | 1 | PMEV-01 | T-11-01, T-11-02 | Evidence form exposes only bounded fields and blocks obvious unsafe raw/secret values before submit | type/e2e | `pnpm --dir packages/web run typecheck` and Project Manager Playwright evidence test | yes | covered |
+| 11-01-02 | 01 | 1 | PMEV-01, PMQA-01 | T-11-03 | Evidence attach uses exact typed client route and preserves recoverable Sheet state on failure | vitest/e2e | `pnpm --dir packages/web exec vitest run src/lib/api.test.ts` and Project Manager Playwright evidence failure test | yes | covered |
+| 11-02-01 | 02 | 2 | PMEV-02, PMEV-03 | T-11-04, T-11-05 | Ledger timeline renders safe event markers, counts, status, timestamps, and short static explanations only | type/e2e | `pnpm --dir packages/web run typecheck` and Project Manager Playwright ledger test | yes | covered |
+| 11-02-02 | 02 | 2 | PMEV-02, PMQA-01 | T-11-06 | Ledger load failure is scoped to ledger area and strict mock catches endpoint drift | e2e | `pnpm --dir packages/web exec playwright test e2e/project-manager.spec.ts --project=chromium` | yes | covered |
+| 11-03-01 | 03 | 3 | PMQA-01 | T-11-07 | Full v1.2 happy path proves goal/work-item/evidence/status/ledger workflow under strict mocks | e2e | `pnpm --dir packages/web exec playwright test e2e/project-manager.spec.ts --project=chromium` | yes | covered |
+| 11-03-02 | 03 | 3 | PMQA-02 | T-11-08 | Trial/support/closeout docs state forbidden content and acceptable reference examples without secrets | docs/static | `rg -n "Project Manager|forbidden|acceptable evidence|raw terminal|provider payload" docs/TRIAL-CHECKLIST.md docs/SUPPORT-DIAGNOSTICS.md docs/reports/v1.2-project-manager-web-workflow-closeout-2026-05-22.md` | yes | covered |
 
 ## Wave 0 Requirements
 
@@ -70,3 +71,20 @@ review is not the only acceptance path.
 
 Approval: approved 2026-05-22
 
+## Validation Audit 2026-05-22
+
+| Metric | Count |
+|--------|-------|
+| Requirements audited | 5 |
+| Per-task checks | 6 |
+| Automated covered | 6 |
+| Manual-only | 0 |
+| Gaps found | 0 |
+
+Commands rerun during phase closure:
+
+- `pnpm --dir packages/web run typecheck` - pass.
+- `pnpm --dir packages/web exec vitest run src/lib/api.test.ts` - pass, 46/46.
+- `pnpm --dir packages/web exec playwright test e2e/project-manager.spec.ts --project=chromium` - pass, 10/10.
+- `gsd-sdk query verify.schema-drift 11` - pass, `drift_detected: false`.
+- `rg -n "Project Manager Workflow|Project Manager Failures|v1.2 Project Manager|forbidden|acceptable evidence" docs/TRIAL-CHECKLIST.md docs/SUPPORT-DIAGNOSTICS.md docs/reports/v1.2-project-manager-web-workflow-closeout-2026-05-22.md` - pass.
