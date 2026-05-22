@@ -1,8 +1,17 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BriefcaseBusiness, ClipboardList, Eye, History, Plus, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRightCircle,
+  BriefcaseBusiness,
+  ClipboardList,
+  Eye,
+  History,
+  Plus,
+  RefreshCw,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +24,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -41,6 +56,7 @@ import {
   listProjectManagerWorkItems,
   createProjectManagerWorkItem,
   updateProjectManagerGoal,
+  updateProjectManagerWorkItemStatus,
   type ProjectManagerEvidenceRef,
   type ProjectManagerLedgerEvent,
   type ProjectManagerLedgerEventType,
@@ -48,6 +64,7 @@ import {
   type ProjectManagerWorkItemInput,
   type ProjectManagerGoalInput,
   type ProjectManagerWorkItem,
+  type ProjectManagerWorkItemStatusInput,
   type ProjectManagerWorkItemStatus,
 } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
@@ -95,6 +112,15 @@ const WORK_ITEM_STATUSES: ProjectManagerWorkItemStatus[] = [
   "cancelled",
 ];
 
+const PROJECT_MANAGER_STATUS_TRANSITIONS: Record<ProjectManagerWorkItemStatus, ProjectManagerWorkItemStatus[]> = {
+  todo: ["in_progress", "blocked", "cancelled"],
+  in_progress: ["blocked", "ready_for_review", "done", "cancelled"],
+  blocked: ["todo", "in_progress", "cancelled"],
+  ready_for_review: ["in_progress", "done", "cancelled"],
+  done: [],
+  cancelled: [],
+};
+
 export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -107,6 +133,11 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
   const [isCreateWorkItemOpen, setIsCreateWorkItemOpen] = useState(false);
   const [workItemDraft, setWorkItemDraft] = useState<WorkItemDraft>(() => createWorkItemDraft());
   const [createWorkItemError, setCreateWorkItemError] = useState<string | null>(null);
+  const [statusMutationError, setStatusMutationError] = useState<string | null>(null);
+  const [pendingDoneWorkItemId, setPendingDoneWorkItemId] = useState<string | null>(null);
+  const [doneReason, setDoneReason] = useState("");
+  const [doneReasonError, setDoneReasonError] = useState<string | null>(null);
+  const doneReasonRef = useRef<HTMLTextAreaElement | null>(null);
 
   const goalQuery = useQuery({
     queryKey: ["project-manager", projectId, "goal"],
@@ -174,6 +205,24 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
     },
   });
 
+  const statusMutation = useMutation({
+    mutationFn: ({ input, workItemId }: { input: ProjectManagerWorkItemStatusInput; workItemId: string }) =>
+      updateProjectManagerWorkItemStatus(projectId, workItemId, input),
+    onSuccess: async () => {
+      setStatusMutationError(null);
+      setPendingDoneWorkItemId(null);
+      setDoneReason("");
+      setDoneReasonError(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+      ]);
+    },
+    onError: (error) => {
+      setStatusMutationError(projectManagerMutationMessage(error, t("projects.projectManagerStatusMutationError")));
+    },
+  });
+
   if (!enabled) {
     return null;
   }
@@ -185,6 +234,13 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
   const workItems = workItemsQuery.data?.workItems ?? [];
   const ledgerEvents = ledgerQuery.data?.events ?? [];
   const selectedWorkItem = workItems.find((item) => item.id === selectedWorkItemId) ?? null;
+  const pendingDoneWorkItem = workItems.find((item) => item.id === pendingDoneWorkItemId) ?? null;
+
+  useEffect(() => {
+    if (pendingDoneWorkItemId) {
+      doneReasonRef.current?.focus();
+    }
+  }, [pendingDoneWorkItemId]);
 
   const refresh = () => {
     if (!canLoad) return;
@@ -237,6 +293,33 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
     createWorkItemMutation.mutate(createWorkItemInput(workItemDraft, title));
   };
 
+  const requestStatusChange = (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => {
+    setStatusMutationError(null);
+    if (nextStatus === "done" && item.evidenceRefCount === 0) {
+      setPendingDoneWorkItemId(item.id);
+      setDoneReason("");
+      setDoneReasonError(null);
+      return;
+    }
+
+    statusMutation.mutate({ workItemId: item.id, input: { status: nextStatus } });
+  };
+
+  const confirmDoneWithReason = () => {
+    if (!pendingDoneWorkItem) return;
+    const manualCompletionReason = doneReason.trim();
+    if (!manualCompletionReason) {
+      setDoneReasonError(t("projects.projectManagerDoneReasonRequired"));
+      return;
+    }
+
+    setDoneReasonError(null);
+    statusMutation.mutate({
+      workItemId: pendingDoneWorkItem.id,
+      input: { status: "done", manualCompletionReason },
+    });
+  };
+
   return (
     <div className="space-y-4" data-testid="project-manager-panel">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -282,8 +365,11 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
             isFetching={workItemsQuery.isFetching}
             onCreate={openCreateWorkItemDialog}
             onStatusFilterChange={setWorkItemStatusFilter}
+            onStatusChange={requestStatusChange}
             onViewDetails={(item) => setSelectedWorkItemId(item.id)}
+            statusError={statusMutationError}
             statusFilter={workItemStatusFilter}
+            statusMutationPending={statusMutation.isPending}
             t={t}
             workItems={workItems}
           />
@@ -295,7 +381,9 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
         onOpenChange={(open) => {
           if (!open) setSelectedWorkItemId(null);
         }}
+        onStatusChange={requestStatusChange}
         open={!!selectedWorkItem}
+        statusMutationPending={statusMutation.isPending}
         t={t}
       />
       <CreateWorkItemDialog
@@ -307,6 +395,24 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
         onSave={saveWorkItem}
         open={isCreateWorkItemOpen}
         t={t}
+      />
+      <DoneReasonDialog
+        error={doneReasonError}
+        isSaving={statusMutation.isPending}
+        onConfirm={confirmDoneWithReason}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDoneWorkItemId(null);
+            setDoneReason("");
+            setDoneReasonError(null);
+          }
+        }}
+        open={!!pendingDoneWorkItem}
+        reason={doneReason}
+        reasonRef={doneReasonRef}
+        setReason={setDoneReason}
+        t={t}
+        workItemTitle={pendingDoneWorkItem?.title ?? ""}
       />
     </div>
   );
@@ -471,16 +577,22 @@ function ProjectManagerWorkItemsCard({
   isFetching,
   onCreate,
   onStatusFilterChange,
+  onStatusChange,
   onViewDetails,
+  statusError,
   statusFilter,
+  statusMutationPending,
   workItems,
   t,
 }: {
   isFetching: boolean;
   onCreate: () => void;
   onStatusFilterChange: (status: WorkItemStatusFilter) => void;
+  onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
   onViewDetails: (item: ProjectManagerWorkItem) => void;
+  statusError: string | null;
   statusFilter: WorkItemStatusFilter;
+  statusMutationPending: boolean;
   workItems: ProjectManagerWorkItem[];
   t: Translate;
 }) {
@@ -519,7 +631,12 @@ function ProjectManagerWorkItemsCard({
           </Button>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        {statusError && (
+          <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {statusError}
+          </p>
+        )}
         {workItems.length === 0 ? (
           <EmptyState
             title={isFilterEmpty
@@ -558,10 +675,18 @@ function ProjectManagerWorkItemsCard({
                     {formatTimestamp(item.updatedAt)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button size="sm" variant="outline" onClick={() => onViewDetails(item)}>
-                      <Eye className="mr-2 size-4" />
-                      {t("projects.projectManagerViewDetails")}
-                    </Button>
+                    <div className="flex flex-col justify-end gap-2 sm:flex-row">
+                      <Button size="sm" variant="outline" onClick={() => onViewDetails(item)}>
+                        <Eye className="mr-2 size-4" />
+                        {t("projects.projectManagerViewDetails")}
+                      </Button>
+                      <ProjectManagerStatusActions
+                        disabled={statusMutationPending}
+                        item={item}
+                        onStatusChange={onStatusChange}
+                        t={t}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -576,12 +701,16 @@ function ProjectManagerWorkItemsCard({
 function ProjectManagerWorkItemDetailSheet({
   item,
   onOpenChange,
+  onStatusChange,
   open,
+  statusMutationPending,
   t,
 }: {
   item: ProjectManagerWorkItem | null;
   onOpenChange: (open: boolean) => void;
+  onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
   open: boolean;
+  statusMutationPending: boolean;
   t: Translate;
 }) {
   return (
@@ -593,11 +722,19 @@ function ProjectManagerWorkItemDetailSheet({
         </SheetHeader>
         {item && (
           <div className="space-y-5 px-4 pb-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={statusBadgeVariant(item.status)}>{statusLabel(item.status, t)}</Badge>
-              <span className="text-xs text-muted-foreground">
-                {t("projects.projectManagerUpdated")}: {formatTimestamp(item.updatedAt)}
-              </span>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={statusBadgeVariant(item.status)}>{statusLabel(item.status, t)}</Badge>
+                <span className="text-xs text-muted-foreground">
+                  {t("projects.projectManagerUpdated")}: {formatTimestamp(item.updatedAt)}
+                </span>
+              </div>
+              <ProjectManagerStatusActions
+                disabled={statusMutationPending}
+                item={item}
+                onStatusChange={onStatusChange}
+                t={t}
+              />
             </div>
             <DetailField label={t("projects.projectManagerWorkItemDescription")}>
               {item.description ? (
@@ -846,6 +983,100 @@ function ReferenceDraftFields({
         </div>
       </div>
     </fieldset>
+  );
+}
+
+function ProjectManagerStatusActions({
+  disabled,
+  item,
+  onStatusChange,
+  t,
+}: {
+  disabled: boolean;
+  item: ProjectManagerWorkItem;
+  onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
+  t: Translate;
+}) {
+  const nextStatuses = PROJECT_MANAGER_STATUS_TRANSITIONS[item.status];
+  if (nextStatuses.length === 0) {
+    return <span className="inline-flex h-9 items-center text-xs text-muted-foreground">-</span>;
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline" disabled={disabled}>
+          <ArrowRightCircle className="mr-2 size-4" />
+          {t("projects.projectManagerChangeStatus")}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {nextStatuses.map((nextStatus) => (
+          <DropdownMenuItem
+            key={nextStatus}
+            onSelect={() => onStatusChange(item, nextStatus)}
+          >
+            {statusLabel(nextStatus, t)}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function DoneReasonDialog({
+  error,
+  isSaving,
+  onConfirm,
+  onOpenChange,
+  open,
+  reason,
+  reasonRef,
+  setReason,
+  t,
+  workItemTitle,
+}: {
+  error: string | null;
+  isSaving: boolean;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  reason: string;
+  reasonRef: RefObject<HTMLTextAreaElement | null>;
+  setReason: (reason: string) => void;
+  t: Translate;
+  workItemTitle: string;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("projects.projectManagerDoneReasonTitle")}</DialogTitle>
+          <DialogDescription>{t("projects.projectManagerDoneReasonBody")}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label htmlFor="project-manager-done-reason">{t("projects.projectManagerDoneReasonLabel")}</Label>
+          <Textarea
+            id="project-manager-done-reason"
+            ref={reasonRef}
+            value={reason}
+            aria-invalid={!!error}
+            disabled={isSaving}
+            onChange={(event) => setReason(event.target.value)}
+          />
+          {workItemTitle && <p className="text-xs text-muted-foreground">{workItemTitle}</p>}
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+            {t("projects.projectManagerCancel")}
+          </Button>
+          <Button onClick={onConfirm} disabled={isSaving}>
+            {t("projects.projectManagerConfirmStatusChange")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
