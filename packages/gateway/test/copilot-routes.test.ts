@@ -16,6 +16,7 @@ import { ActivityRepository } from "../src/db/repositories/activity-repository.j
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
+import { ProjectManagerRepository } from "../src/db/repositories/project-manager-repository.js";
 import { AgentRepository } from "../src/db/repositories/agent-repository.js";
 import { PluginRepository } from "../src/db/repositories/plugin-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
@@ -3386,6 +3387,358 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.action.result.summary.totalFiles > 0, true);
     assert.equal(res.body.data.action.result.result.writtenFiles.length > 0, true);
     assert.equal(existsSync(path.join(projectPath, ".claude", "settings.json")), true);
+  });
+
+  it("approves Project Manager actions from stored payloads with safe trace details", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "PM Approval Project",
+      path: "/tmp/pm-approval-project",
+      aiTool: "claude"
+    });
+    const pm = new ProjectManagerRepository(db, userId);
+    const statusItem = pm.createWorkItem(project.id, {
+      title: "Move to done",
+      status: "in_progress",
+      evidenceRefs: [{ kind: "test", label: "route proof", status: "accepted", ref: "test/copilot-routes.test.ts" }]
+    });
+    const evidenceItem = pm.createWorkItem(project.id, {
+      title: "Attach proof",
+      status: "in_progress"
+    });
+    const createAction = createPendingAction(userId, "openforge.propose_project_manager_create_work_item", {
+      actionType: "create_work_item",
+      projectId: project.id,
+      title: "Stored work item title",
+      description: "Stored bounded description",
+      status: "todo",
+      priority: 5,
+      acceptanceCriteria: ["Stored acceptance criterion"],
+      evidenceRefs: [{ kind: "copilot", label: "safe run summary", status: "verified", ref: "run-summary-1" }],
+      copilotRunId: "stored-run-create"
+    });
+    const statusAction = createPendingAction(userId, "openforge.propose_project_manager_update_work_item_status", {
+      actionType: "update_work_item_status",
+      projectId: project.id,
+      workItemId: statusItem.id,
+      status: "done",
+      copilotRunId: "stored-run-status"
+    }, createAction.runId);
+    const evidenceAction = createPendingAction(userId, "openforge.propose_project_manager_attach_evidence", {
+      actionType: "attach_evidence",
+      projectId: project.id,
+      workItemId: evidenceItem.id,
+      evidenceRef: { kind: "test", label: "attached proof", status: "verified", ref: "test/copilot-routes.test.ts" },
+      copilotRunId: "stored-run-evidence"
+    }, createAction.runId);
+    const browserReplacementPayload = {
+      title: "Browser replacement title",
+      status: "cancelled",
+      rawPrompt: "raw prompt must not be stored",
+      terminalOutput: "terminal transcript must not be stored",
+      providerPayload: "provider payload must not be stored",
+      secret: "sk-route-secret",
+      fullDiff: "diff --git a/file b/file",
+      fullExecutionSummary: "full execution summary must not be stored"
+    };
+
+    const createRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${createAction.runId}/pending-actions/${createAction.actionId}/approve`,
+      browserReplacementPayload,
+      authHeaders()
+    );
+    const statusRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${statusAction.runId}/pending-actions/${statusAction.actionId}/approve`,
+      browserReplacementPayload,
+      authHeaders()
+    );
+    const evidenceRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${evidenceAction.runId}/pending-actions/${evidenceAction.actionId}/approve`,
+      browserReplacementPayload,
+      authHeaders()
+    );
+
+    const repo = new CopilotRepository(db, userId);
+    const createdItem = pm.listWorkItems(project.id).find((item) => item.title === "Stored work item title");
+    const updatedStatusItem = pm.getWorkItem(project.id, statusItem.id);
+    const updatedEvidenceItem = pm.getWorkItem(project.id, evidenceItem.id);
+    const ledgerDetails = pm.listLedgerEvents(project.id, { limit: 20 }).map((event) => event.details);
+    const auditDetails = new AuditLogRepository(db, userId).list({
+      action: "copilot.pending_action.approve",
+      resourceType: "copilot_run",
+      resourceId: createAction.runId,
+      limit: 10
+    }).map((log) => JSON.parse(log.details));
+    const serializedSafePayload = JSON.stringify({
+      createResult: createRes.body.data.action.result,
+      statusResult: statusRes.body.data.action.result,
+      evidenceResult: evidenceRes.body.data.action.result,
+      ledgerDetails,
+      auditDetails
+    });
+
+    assert.equal(createRes.status, 200);
+    assert.equal(statusRes.status, 200);
+    assert.equal(evidenceRes.status, 200);
+    assert.equal(createRes.body.data.action.status, "approved");
+    assert.equal(statusRes.body.data.action.status, "approved");
+    assert.equal(evidenceRes.body.data.action.status, "approved");
+    assert.equal(createdItem?.title, "Stored work item title");
+    assert.equal(updatedStatusItem?.status, "done");
+    assert.equal(updatedEvidenceItem?.evidenceRefs.at(-1)?.pendingActionId, evidenceAction.actionId);
+    assert.equal(updatedEvidenceItem?.evidenceRefs.at(-1)?.copilotRunId, "stored-run-evidence");
+    assert.equal(createRes.body.data.action.result.projectManager.actionType, "create_work_item");
+    assert.equal(createRes.body.data.action.result.projectManager.pendingActionId, createAction.actionId);
+    assert.equal(createRes.body.data.action.result.projectManager.workItemId, createdItem?.id);
+    assert.equal(statusRes.body.data.action.result.projectManager.trustedEvidenceRefCount, 1);
+    assert.equal(evidenceRes.body.data.action.result.projectManager.evidenceRefCount, 1);
+    assert.ok(ledgerDetails.some((details) =>
+      details.pendingActionId === createAction.actionId &&
+      details.actionType === "create_work_item" &&
+      details.approvalStatus === "approved" &&
+      details.executionStatus === "succeeded"
+    ));
+    assert.ok(ledgerDetails.some((details) =>
+      details.pendingActionId === statusAction.actionId &&
+      details.actionType === "update_work_item_status" &&
+      details.targetId === statusItem.id
+    ));
+    assert.ok(ledgerDetails.some((details) =>
+      details.pendingActionId === evidenceAction.actionId &&
+      details.actionType === "attach_evidence" &&
+      details.targetId === evidenceItem.id
+    ));
+    assert.equal(repo.getPendingAction(createAction.actionId)?.input.title, "Stored work item title");
+    assert.doesNotMatch(serializedSafePayload, /Browser replacement title|raw prompt|terminal transcript|provider payload|sk-route-secret|diff --git|full execution summary/u);
+  });
+
+  it("fails invalid or unauthorized Project Manager approvals as terminal failed actions", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "PM Invalid Approval Project",
+      path: "/tmp/pm-invalid-approval-project",
+      aiTool: "claude"
+    });
+    const foreignProject = new ProjectRepository(db, otherUserId).create({
+      name: "Foreign PM Approval Project",
+      path: "/tmp/foreign-pm-approval-project",
+      aiTool: "claude"
+    });
+    const foreignItem = new ProjectManagerRepository(db, otherUserId).createWorkItem(foreignProject.id, {
+      title: "Foreign item"
+    });
+    const invalidCreate = createPendingAction(userId, "openforge.propose_project_manager_create_work_item", {
+      actionType: "create_work_item",
+      projectId: project.id,
+      copilotRunId: "run-invalid"
+    });
+    const foreignCreate = createPendingAction(userId, "openforge.propose_project_manager_create_work_item", {
+      actionType: "create_work_item",
+      projectId: foreignProject.id,
+      title: "Should not cross tenant",
+      copilotRunId: "run-foreign"
+    }, invalidCreate.runId);
+    const foreignWorkItem = createPendingAction(userId, "openforge.propose_project_manager_attach_evidence", {
+      actionType: "attach_evidence",
+      projectId: project.id,
+      workItemId: foreignItem.id,
+      evidenceRef: { kind: "test", label: "foreign", status: "verified", ref: "foreign" },
+      copilotRunId: "run-foreign-item"
+    }, invalidCreate.runId);
+
+    const invalidRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${invalidCreate.runId}/pending-actions/${invalidCreate.actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+    const foreignCreateRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${foreignCreate.runId}/pending-actions/${foreignCreate.actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+    const foreignWorkItemRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${foreignWorkItem.runId}/pending-actions/${foreignWorkItem.actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const repo = new CopilotRepository(db, userId);
+    assert.equal(invalidRes.status, 400);
+    assert.equal(foreignCreateRes.status, 400);
+    assert.equal(foreignWorkItemRes.status, 400);
+    assert.equal(invalidRes.body.details.code, "project_manager_action_invalid");
+    assert.equal(foreignCreateRes.body.details.code, "project_manager_action_not_available");
+    assert.equal(foreignWorkItemRes.body.details.code, "project_manager_action_not_available");
+    for (const actionId of [invalidCreate.actionId, foreignCreate.actionId, foreignWorkItem.actionId]) {
+      const action = repo.getPendingAction(actionId);
+      assert.equal(action?.status, "failed");
+      assert.equal(action?.result?.details && (action.result.details as { code?: string }).code, action?.result?.error && (action.result.error as { code?: string }).code);
+    }
+    assert.equal(new ProjectManagerRepository(db, userId).listWorkItems(project.id).length, 0);
+    assert.equal(new ProjectManagerRepository(db, otherUserId).listWorkItems(foreignProject.id).length, 1);
+  });
+
+  it("keeps duplicate Project Manager approvals single-execution", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_project_manager_create_work_item", {
+      actionType: "create_work_item",
+      projectId: "project-id",
+      title: "Race",
+      copilotRunId: "run-race"
+    });
+    const release = deferred<void>();
+    let approverCalls = 0;
+    const raceApp = express();
+    raceApp.locals.jwtSecret = secret;
+    raceApp.use(express.json());
+    raceApp.use("/api/v1/copilot", createCopilotRoutes({
+      db,
+      masterKey,
+      pendingActionApprover: async () => {
+        approverCalls += 1;
+        await release.promise;
+        return { projectManager: { actionType: "create_work_item" }, executed: true };
+      }
+    }));
+    const server = http.createServer(raceApp);
+    const baseUrl = await listen(server);
+    try {
+      const first = fetch(`${baseUrl}/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`, {
+        method: "POST",
+        headers: authHeaders()
+      });
+      await waitFor(() => approverCalls > 0);
+      const duplicate = fetch(`${baseUrl}/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`, {
+        method: "POST",
+        headers: authHeaders()
+      });
+      release.resolve();
+
+      const responses = await Promise.all([first, duplicate]);
+      const statuses = responses.map((response) => response.status).sort();
+      const bodies = await Promise.all(responses.map((response) => response.json()));
+
+      assert.deepEqual(statuses, [200, 409]);
+      assert.equal(approverCalls, 1);
+      assert.ok(bodies.some((body) => body.details?.code === "copilot_pending_action_not_pending"));
+      assert.equal(new CopilotRepository(db, userId).getPendingAction(actionId)?.status, "approved");
+    } finally {
+      release.resolve();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("marks Project Manager execution errors failed without restoring pending", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "PM Failed Approval Project",
+      path: "/tmp/pm-failed-approval-project",
+      aiTool: "claude"
+    });
+    const item = new ProjectManagerRepository(db, userId).createWorkItem(project.id, {
+      title: "Invalid transition",
+      status: "todo"
+    });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_project_manager_update_work_item_status", {
+      actionType: "update_work_item_status",
+      projectId: project.id,
+      workItemId: item.id,
+      status: "ready_for_review",
+      copilotRunId: "run-failed-transition"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.details.code, "project_manager_action_failed");
+    assert.equal(action?.status, "failed");
+    assert.equal(action?.result?.details && (action.result.details as { code?: string }).code, "project_manager_action_failed");
+    assert.equal(new ProjectManagerRepository(db, userId).getWorkItem(project.id, item.id)?.status, "todo");
+  });
+
+  it("rejects Copilot-origin done without existing accepted or verified evidence", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "PM Trusted Evidence Project",
+      path: "/tmp/pm-trusted-evidence-project",
+      aiTool: "claude"
+    });
+    const item = new ProjectManagerRepository(db, userId).createWorkItem(project.id, {
+      title: "Needs trusted proof",
+      status: "in_progress",
+      evidenceRefs: [{ kind: "test", label: "draft proof", status: "draft", ref: "draft-proof" }]
+    });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_project_manager_update_work_item_status", {
+      actionType: "update_work_item_status",
+      projectId: project.id,
+      workItemId: item.id,
+      status: "done",
+      copilotRunId: "run-untrusted-evidence"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    const latestItem = new ProjectManagerRepository(db, userId).getWorkItem(project.id, item.id);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.details.code, "project_manager_trusted_evidence_required");
+    assert.equal(action?.status, "failed");
+    assert.equal(latestItem?.status, "in_progress");
+    assert.deepEqual(latestItem?.evidenceRefs.map((ref) => ref.status), ["draft"]);
+  });
+
+  it("marks thrown Project Manager approval errors failed instead of pending", async () => {
+    const failureApp = express();
+    failureApp.locals.jwtSecret = secret;
+    failureApp.use(express.json());
+    failureApp.use("/api/v1/copilot", createCopilotRoutes({
+      db,
+      masterKey,
+      pendingActionApprover: async () => {
+        throw new Error("project manager execution crashed");
+      }
+    }));
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_project_manager_attach_evidence", {
+      actionType: "attach_evidence",
+      projectId: "project",
+      workItemId: "item",
+      evidenceRef: { kind: "test", label: "proof", status: "verified", ref: "proof" },
+      copilotRunId: "run-thrown-error"
+    });
+
+    const res = await makeRequest(
+      failureApp,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 500);
+    assert.equal(res.body.details.code, "project_manager_action_failed");
+    assert.equal(action?.status, "failed");
+    assert.equal(action?.result?.details && (action.result.details as { code?: string }).code, "project_manager_action_failed");
   });
 
   it("approves session-input actions by sending input to the running terminal session", async () => {

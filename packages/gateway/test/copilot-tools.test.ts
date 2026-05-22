@@ -249,6 +249,159 @@ describe("copilot tools", () => {
     assert.match(serialized, /\[REDACTED\]/u);
   });
 
+  it("exposes exactly three Project Manager prepare tools", () => {
+    const pmPrepareTools = [...registry.tools.values()]
+      .filter((tool) => tool.name.startsWith("openforge.propose_project_manager_"));
+
+    assert.deepEqual(pmPrepareTools.map((tool) => tool.name), [
+      "openforge.propose_project_manager_create_work_item",
+      "openforge.propose_project_manager_update_work_item_status",
+      "openforge.propose_project_manager_attach_evidence"
+    ]);
+    for (const tool of pmPrepareTools) {
+      assert.equal(tool.risk, "prepare");
+      assert.equal(tool.requiresApproval, true);
+    }
+  });
+
+  it("creates Project Manager proposals as pending actions without mutating PM state", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "PM Proposals",
+      path: "/tmp/pm-proposals",
+      aiTool: "claude"
+    });
+    const pm = new ProjectManagerRepository(db, userId);
+    const workItem = pm.createWorkItem(project.id, {
+      title: "Existing task",
+      status: "in_progress",
+      evidenceRefs: [{ kind: "test", label: "existing", status: "accepted", ref: "test/existing" }]
+    });
+    const run = new CopilotRepository(db, userId).createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Prepare PM writes"
+    });
+
+    const createResult = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_create_work_item",
+      {
+        projectId: project.id,
+        title: "Create through approval",
+        description: "Only a proposal",
+        priority: 7,
+        acceptanceCriteria: ["Approved action creates it"],
+        evidenceRefs: [{ kind: "copilot", label: "safe summary", status: "verified", ref: "run-summary" }]
+      },
+      context(userId, run.id)
+    );
+    const statusResult = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_update_work_item_status",
+      { projectId: project.id, workItemId: workItem.id, status: "done" },
+      context(userId, run.id)
+    );
+    const evidenceResult = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_attach_evidence",
+      {
+        projectId: project.id,
+        workItemId: workItem.id,
+        evidenceRef: { kind: "test", label: "focused route test", status: "verified", ref: "test/copilot-routes.test.ts" }
+      },
+      context(userId, run.id)
+    );
+
+    const actions = new CopilotRepository(db, userId).listPendingActions(run.id);
+    assert.deepEqual([createResult.ok, statusResult.ok, evidenceResult.ok], [true, true, true]);
+    assert.equal(createResult.ok && createResult.requiresApproval, true);
+    assert.equal(statusResult.ok && statusResult.requiresApproval, true);
+    assert.equal(evidenceResult.ok && evidenceResult.requiresApproval, true);
+    assert.deepEqual(actions.map((action) => action.type), [
+      "openforge.propose_project_manager_create_work_item",
+      "openforge.propose_project_manager_update_work_item_status",
+      "openforge.propose_project_manager_attach_evidence"
+    ]);
+    assert.deepEqual(actions.map((action) => action.input.actionType), [
+      "create_work_item",
+      "update_work_item_status",
+      "attach_evidence"
+    ]);
+    assert.equal(actions[0]?.input.projectId, project.id);
+    assert.equal(actions[0]?.input.copilotRunId, run.id);
+    assert.equal(actions[0]?.input.pendingActionId, undefined);
+    assert.equal(actions[1]?.input.workItemId, workItem.id);
+    assert.equal(actions[1]?.input.copilotRunId, run.id);
+    assert.equal(actions[1]?.input.pendingActionId, undefined);
+    assert.equal(actions[2]?.input.workItemId, workItem.id);
+    assert.equal(actions[2]?.input.copilotRunId, run.id);
+    assert.equal(actions[2]?.input.pendingActionId, undefined);
+    assert.equal(pm.listWorkItems(project.id).length, 1);
+    assert.equal(pm.getWorkItem(project.id, workItem.id)?.status, "in_progress");
+    assert.equal(pm.getWorkItem(project.id, workItem.id)?.evidenceRefs.length, 1);
+  });
+
+  it("rejects Project Manager proposals for unavailable projects or work items", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "Visible PM",
+      path: "/tmp/visible-pm",
+      aiTool: "claude"
+    });
+    const foreignProject = new ProjectRepository(db, otherUserId).create({
+      name: "Foreign PM",
+      path: "/tmp/foreign-pm",
+      aiTool: "claude"
+    });
+    const foreignItem = new ProjectManagerRepository(db, otherUserId).createWorkItem(foreignProject.id, {
+      title: "Foreign task"
+    });
+    const run = new CopilotRepository(db, userId).createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Reject invalid PM proposals"
+    });
+
+    const foreignCreate = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_create_work_item",
+      { projectId: foreignProject.id, title: "Should fail" },
+      context(userId, run.id)
+    );
+    const foreignStatus = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_update_work_item_status",
+      { projectId: foreignProject.id, workItemId: foreignItem.id, status: "done" },
+      context(userId, run.id)
+    );
+    const missingItem = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_attach_evidence",
+      {
+        projectId: project.id,
+        workItemId: "missing-item",
+        evidenceRef: { kind: "test", label: "missing", status: "verified", ref: "missing" }
+      },
+      context(userId, run.id)
+    );
+    const modelSuppliedPendingAction = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_update_work_item_status",
+      { projectId: project.id, workItemId: "missing-item", status: "done", pendingActionId: "model-supplied" },
+      context(userId, run.id)
+    );
+
+    assert.deepEqual([
+      foreignCreate.ok,
+      foreignStatus.ok,
+      missingItem.ok,
+      modelSuppliedPendingAction.ok
+    ], [false, false, false, false]);
+    assert.deepEqual(
+      new CopilotRepository(db, userId).listPendingActions(run.id),
+      []
+    );
+  });
+
   it("redacts project-manager tool output and diagnostics summaries", async () => {
     const project = new ProjectRepository(db, userId).create({
       name: "Redacted PM",
