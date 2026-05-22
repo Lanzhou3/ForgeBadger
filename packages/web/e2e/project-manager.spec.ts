@@ -98,6 +98,31 @@ test("filters, inspects, and creates Project Manager work items", async ({ page 
   expect(unhandledApiRoutes).toEqual([]);
 });
 
+test("changes work item status and guards evidence-free done", async ({ page }) => {
+  const unhandledApiRoutes = await mockProjectDetailApis(page);
+
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Project Manager" }).click();
+
+  const panel = page.getByTestId("project-manager-panel");
+  const evidenceRow = panel.getByRole("row", { name: /Expose Project Manager tab/ });
+  await evidenceRow.getByRole("button", { name: "Change status" }).click();
+  await page.getByRole("menuitem", { name: "Ready for review" }).click();
+  await expect(evidenceRow.getByText("Ready for review")).toBeVisible();
+
+  const noEvidenceRow = panel.getByRole("row", { name: /Draft release note/ });
+  await noEvidenceRow.getByRole("button", { name: "Change status" }).click();
+  await page.getByRole("menuitem", { name: "Done" }).click();
+  const doneDialog = page.getByRole("dialog", { name: "Completion reason required" });
+  await expect(doneDialog).toBeVisible();
+  await doneDialog.getByRole("button", { name: "Confirm status change" }).click();
+  await expect(doneDialog.getByText("Enter a manual completion reason.")).toBeVisible();
+  await doneDialog.getByLabel("Manual completion reason").fill("Local checklist item completed without external evidence.");
+  await doneDialog.getByRole("button", { name: "Confirm status change" }).click();
+  await expect(noEvidenceRow.getByText("Done")).toBeVisible();
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
 async function mockProjectDetailApis(
   page: Page,
   overrides: { projectManagerStatus?: number } = {}
@@ -137,6 +162,19 @@ async function mockProjectDetailApis(
     evidenceRefCount: 0,
     evidenceRefs: [],
     feishuRefCount: 1,
+    createdAt: 1779370000000,
+    updatedAt: 1779373600000,
+  }, {
+    id: "work-item-3",
+    projectId: PROJECT_ID,
+    title: "Draft release note",
+    description: "Summarize the local UI workflow",
+    status: "in_progress",
+    priority: 3,
+    acceptanceCriteria: ["Release note is concise"],
+    evidenceRefCount: 0,
+    evidenceRefs: [],
+    feishuRefCount: 0,
     createdAt: 1779370000000,
     updatedAt: 1779373600000,
   }];
@@ -354,6 +392,35 @@ async function mockProjectDetailApis(
       };
       workItems = [...workItems, createdWorkItem];
       await route.fulfill({ json: envelope({ workItem: createdWorkItem }) });
+      return;
+    }
+
+    const statusMatch = url.pathname.match(
+      new RegExp(`^/api/v1/projects/${PROJECT_ID}/project-manager/work-items/([^/]+)/status$`)
+    );
+    if (statusMatch && method === "PATCH") {
+      const workItemId = decodeURIComponent(statusMatch[1]);
+      const body = JSON.parse(route.request().postData() ?? "{}") as {
+        status?: unknown;
+        manualCompletionReason?: unknown;
+      };
+      if (workItemId === "work-item-1") {
+        expect(body).toEqual({ status: "ready_for_review" });
+      }
+      if (workItemId === "work-item-3") {
+        expect(body).toEqual({
+          status: "done",
+          manualCompletionReason: "Local checklist item completed without external evidence.",
+        });
+      }
+      const updatedWorkItem = workItems.find((item) => item.id === workItemId);
+      expect(updatedWorkItem).toBeTruthy();
+      workItems = workItems.map((item) => item.id === workItemId
+        ? { ...item, status: body.status as string, updatedAt: 1779378800000 }
+        : item);
+      await route.fulfill({
+        json: envelope({ workItem: workItems.find((item) => item.id === workItemId) }),
+      });
       return;
     }
 
