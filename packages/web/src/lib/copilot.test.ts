@@ -8,6 +8,7 @@ import {
   getCopilotPendingActionLabelKey,
   getCopilotPendingActionSummary,
   getCopilotEventResultSummary,
+  getCopilotProjectManagerAnchor,
   getCopilotErrorMessageKey,
   resolveCopilotRunFailureMessage,
   getCopilotStartBlocker,
@@ -34,6 +35,7 @@ import {
   stripCopilotThinkingBlocks,
   readCopilotTerminalSnapshotText,
 } from "./copilot";
+import { getTranslation, supportedLanguages, type TranslationKey } from "./i18n";
 
 describe("copilot display helpers", () => {
   it("maps run statuses to stable tones", () => {
@@ -156,6 +158,49 @@ describe("copilot display helpers", () => {
     expect(getCopilotPendingActionLabelKey("custom.pending_action")).toBeNull();
   });
 
+  it("maps Project Manager pending actions to fixed labels and localization keys", () => {
+    expect(getCopilotPendingActionLabel("openforge.propose_project_manager_create_work_item")).toBe("Create work item");
+    expect(getCopilotPendingActionLabel("openforge.propose_project_manager_update_work_item_status")).toBe(
+      "Update work item status"
+    );
+    expect(getCopilotPendingActionLabel("openforge.propose_project_manager_attach_evidence")).toBe("Attach evidence");
+    expect(getCopilotPendingActionLabelKey("openforge.propose_project_manager_create_work_item")).toBe(
+      "copilot.pendingAction.projectManagerCreateWorkItem"
+    );
+    expect(getCopilotPendingActionLabelKey("openforge.propose_project_manager_update_work_item_status")).toBe(
+      "copilot.pendingAction.projectManagerUpdateWorkItemStatus"
+    );
+    expect(getCopilotPendingActionLabelKey("openforge.propose_project_manager_attach_evidence")).toBe(
+      "copilot.pendingAction.projectManagerAttachEvidence"
+    );
+  });
+
+  it("localizes Project Manager approval and trace copy for every supported locale", () => {
+    const keys: TranslationKey[] = [
+      "copilot.pendingAction.projectManagerCreateWorkItem",
+      "copilot.pendingAction.projectManagerUpdateWorkItemStatus",
+      "copilot.pendingAction.projectManagerAttachEvidence",
+      "copilot.projectManager.view",
+      "copilot.projectManager.trace",
+      "copilot.projectManager.reviewBeforeApproval",
+      "copilot.projectManager.noTraceMarkers",
+      "copilot.projectManager.riskGatewayWrite",
+      "copilot.error.projectManagerActionFailed",
+      "copilot.error.projectManagerTrustedEvidenceRequired",
+    ];
+
+    for (const language of supportedLanguages) {
+      for (const key of keys) {
+        expect(getTranslation(language, key)).toBeTruthy();
+        expect(getTranslation(language, key)).not.toBe(key);
+      }
+    }
+    expect(getTranslation("en", "copilot.projectManager.view")).toBe("View in Project Manager");
+    expect(getTranslation("en", "copilot.error.projectManagerTrustedEvidenceRequired")).toBe(
+      "Trusted evidence is required before Copilot can mark this done."
+    );
+  });
+
   it("maps known Copilot error codes to localized message keys", () => {
     expect(getCopilotErrorMessageKey("copilot_provider_not_configured")).toBe("copilot.error.providerNotConfigured");
     expect(getCopilotErrorMessageKey("copilot_provider_unsupported")).toBe("copilot.error.providerUnsupported");
@@ -257,6 +302,10 @@ describe("copilot display helpers", () => {
       "copilot.error.modelProviderApplyFailed"
     );
     expect(getCopilotErrorMessageKey("copilot_troubleshooting_steps_invalid")).toBe("copilot.error.troubleshootingStepsInvalid");
+    expect(getCopilotErrorMessageKey("project_manager_action_failed")).toBe("copilot.error.projectManagerActionFailed");
+    expect(getCopilotErrorMessageKey("project_manager_trusted_evidence_required")).toBe(
+      "copilot.error.projectManagerTrustedEvidenceRequired"
+    );
     expect(getCopilotErrorMessageKey("unknown_error")).toBeNull();
   });
 
@@ -674,6 +723,231 @@ describe("copilot display helpers", () => {
     });
   });
 
+  it("summarizes Project Manager pending actions with fixed safe markers", () => {
+    expect(
+      getCopilotPendingActionSummary({
+        id: "action-create",
+        type: "openforge.propose_project_manager_create_work_item",
+        input: {
+          actionType: "create_work_item",
+          projectId: "project-123",
+          title: "Trace Copilot approval",
+          status: "todo",
+          priority: 25,
+          acceptanceCriteria: ["Approved result links back to PM"],
+          evidenceRefs: [{ kind: "test", label: "Vitest", status: "verified" }],
+          copilotRunId: "run-123",
+        },
+      })
+    ).toEqual({
+      detail: "Create work item / project project-123 / title Trace Copilot approval",
+      preview: "Fields: title, status, priority, acceptance criteria, evidence refs / Evidence refs: 1",
+      markers: [
+        "Action: create_work_item",
+        "Project: project-123",
+        "Fields: title, status, priority, acceptance criteria, evidence refs",
+        "Evidence refs: 1",
+        "Trace: Copilot run run-123 -> pending action action-create -> target project project-123 -> evidence refs 1",
+      ],
+      riskCue: "Approval writes Project Manager state through Gateway.",
+      riskCueKey: "copilot.projectManager.riskGatewayWrite",
+      anchor: {
+        labelKey: "copilot.projectManager.view",
+        href: "/projects/project-123?tab=project-manager",
+        projectId: "project-123",
+      },
+    });
+    expect(
+      getCopilotPendingActionSummary({
+        id: "action-status",
+        type: "openforge.propose_project_manager_update_work_item_status",
+        input: {
+          actionType: "update_work_item_status",
+          projectId: "project-123",
+          workItemId: "work-item-123",
+          status: "done",
+          copilotRunId: "run-123",
+        },
+      })
+    ).toEqual({
+      detail: "Update work item status / work item work-item-123 / status done",
+      preview: "Fields: status / Evidence refs: 0 / Trusted evidence required",
+      markers: [
+        "Action: update_work_item_status",
+        "Project: project-123",
+        "Work item: work-item-123",
+        "Fields: status",
+        "Evidence refs: 0",
+        "Trace: Copilot run run-123 -> pending action action-status -> target work item work-item-123 -> evidence refs 0",
+      ],
+      riskCue: "Approval writes Project Manager state through Gateway.",
+      riskCueKey: "copilot.projectManager.riskGatewayWrite",
+      messageKey: "copilot.error.projectManagerTrustedEvidenceRequired",
+      anchor: {
+        labelKey: "copilot.projectManager.view",
+        href: "/projects/project-123?tab=project-manager&workItemId=work-item-123",
+        projectId: "project-123",
+        workItemId: "work-item-123",
+      },
+    });
+    expect(
+      getCopilotPendingActionSummary({
+        id: "action-evidence",
+        type: "openforge.propose_project_manager_attach_evidence",
+        input: {
+          actionType: "attach_evidence",
+          projectId: "project-123",
+          workItemId: "work-item-123",
+          evidenceRef: {
+            kind: "report",
+            label: "Phase 12 summary",
+            status: "accepted",
+            ref: "PM-TRACE-01",
+            path: "docs/reports/phase-12.md",
+            sessionId: "session-123",
+          },
+          copilotRunId: "run-123",
+        },
+      })
+    ).toEqual({
+      detail: "Attach evidence / work item work-item-123 / report Phase 12 summary",
+      preview: "Fields: evidence ref / Evidence refs: 1",
+      markers: [
+        "Action: attach_evidence",
+        "Project: project-123",
+        "Work item: work-item-123",
+        "Fields: evidence ref",
+        "Evidence refs: 1",
+        "Evidence: report / Phase 12 summary / accepted / PM-TRACE-01 / docs/reports/phase-12.md / session-123",
+        "Trace: Copilot run run-123 -> pending action action-evidence -> target work item work-item-123 -> evidence refs 1",
+      ],
+      riskCue: "Approval writes Project Manager state through Gateway.",
+      riskCueKey: "copilot.projectManager.riskGatewayWrite",
+      anchor: {
+        labelKey: "copilot.projectManager.view",
+        href: "/projects/project-123?tab=project-manager&workItemId=work-item-123",
+        projectId: "project-123",
+        workItemId: "work-item-123",
+      },
+    });
+  });
+
+  it("ignores raw Project Manager payload fields in fixed summaries", () => {
+    const summary = getCopilotPendingActionSummary({
+      id: "action-raw",
+      type: "openforge.propose_project_manager_create_work_item",
+      input: {
+        actionType: "create_work_item",
+        projectId: "project-123",
+        title: "Safe title",
+        copilotRunId: "run-123",
+        prompt: "raw prompt should never render",
+        terminalOutput: "terminal transcript should never render",
+        providerPayload: "provider payload should never render",
+        stdout: "stdout should never render",
+        stderr: "stderr should never render",
+        approvalDiff: "diff should never render",
+        rawSummary: "model prose should never render",
+      },
+    });
+    const serialized = JSON.stringify(summary);
+
+    expect(summary?.detail).toContain("Safe title");
+    expect(serialized).not.toContain("raw prompt should never render");
+    expect(serialized).not.toContain("terminal transcript should never render");
+    expect(serialized).not.toContain("provider payload should never render");
+    expect(serialized).not.toContain("stdout should never render");
+    expect(serialized).not.toContain("stderr should never render");
+    expect(serialized).not.toContain("diff should never render");
+    expect(serialized).not.toContain("model prose should never render");
+  });
+
+  it("builds Project Manager anchors for approved action targets", () => {
+    expect(getCopilotProjectManagerAnchor({ projectId: "project/123" })).toEqual({
+      labelKey: "copilot.projectManager.view",
+      href: "/projects/project%2F123?tab=project-manager",
+      projectId: "project/123",
+    });
+    expect(getCopilotProjectManagerAnchor({ projectId: "project/123", workItemId: "work/item-1" })).toEqual({
+      labelKey: "copilot.projectManager.view",
+      href: "/projects/project%2F123?tab=project-manager&workItemId=work%2Fitem-1",
+      projectId: "project/123",
+      workItemId: "work/item-1",
+    });
+    expect(getCopilotProjectManagerAnchor({ projectId: " " })).toBeNull();
+  });
+
+  it("summarizes terminal Project Manager failures with fixed localized copy support", () => {
+    expect(
+      getCopilotPendingActionSummary({
+        id: "action-failed",
+        type: "openforge.propose_project_manager_update_work_item_status",
+        result: {
+          error: {
+            code: "project_manager_action_failed",
+            message: "raw backend detail should not render",
+          },
+          projectManager: {
+            actionType: "update_work_item_status",
+            copilotRunId: "run-123",
+            pendingActionId: "action-failed",
+            approvalStatus: "failed",
+            executionStatus: "failed",
+          },
+        },
+      })
+    ).toEqual({
+      detail: "Update work item status / failed",
+      preview: "Project Manager action failed. Create a new proposal before retrying.",
+      markers: [
+        "Action: update_work_item_status",
+        "Approval: failed",
+        "Execution: failed",
+        "Trace: Copilot run run-123 -> pending action action-failed -> target Project Manager -> evidence refs 0",
+      ],
+      messageKey: "copilot.error.projectManagerActionFailed",
+    });
+    expect(
+      getCopilotPendingActionSummary({
+        id: "action-missing-evidence",
+        type: "openforge.propose_project_manager_update_work_item_status",
+        result: {
+          error: {
+            code: "project_manager_trusted_evidence_required",
+            message: "Copilot completion requires existing accepted or verified evidence",
+          },
+          projectManager: {
+            actionType: "update_work_item_status",
+            projectId: "project-123",
+            workItemId: "work-item-123",
+            copilotRunId: "run-123",
+            pendingActionId: "action-missing-evidence",
+            approvalStatus: "failed",
+            executionStatus: "failed",
+          },
+        },
+      })
+    ).toEqual({
+      detail: "Update work item status / failed",
+      preview: "Trusted evidence is required before Copilot can mark this done.",
+      markers: [
+        "Action: update_work_item_status",
+        "Project: project-123",
+        "Work item: work-item-123",
+        "Approval: failed",
+        "Execution: failed",
+        "Trace: Copilot run run-123 -> pending action action-missing-evidence -> target work item work-item-123 -> evidence refs 0",
+      ],
+      messageKey: "copilot.error.projectManagerTrustedEvidenceRequired",
+      anchor: {
+        labelKey: "copilot.projectManager.view",
+        href: "/projects/project-123?tab=project-manager&workItemId=work-item-123",
+        projectId: "project-123",
+        workItemId: "work-item-123",
+      },
+    });
+  });
+
   it("summarizes troubleshooting steps and ignores unknown pending action payloads", () => {
     expect(
       getCopilotPendingActionSummary({
@@ -1061,6 +1335,131 @@ describe("copilot display helpers", () => {
     ).toEqual({
       detail: "OpenForge / debugging / disabled",
       preview: "Project skill override updated",
+    });
+    expect(
+      getCopilotEventResultSummary({
+        type: "pending_action_approved",
+        payload: {
+          actionType: "openforge.propose_project_manager_create_work_item",
+          result: {
+            projectManager: {
+              actionType: "create_work_item",
+              projectId: "project-123",
+              workItemId: "work-item-123",
+              targetType: "work_item",
+              targetId: "work-item-123",
+              status: "todo",
+              evidenceRefCount: 1,
+              copilotRunId: "run-123",
+              pendingActionId: "action-create",
+              approvalStatus: "approved",
+              executionStatus: "succeeded",
+              rawSummary: "model prose should never render",
+            },
+            executed: true,
+          },
+        },
+      })
+    ).toEqual({
+      detail: "create_work_item / work item work-item-123 / succeeded",
+      preview: "Status: todo / Evidence refs: 1",
+      markers: [
+        "Action: create_work_item",
+        "Project: project-123",
+        "Work item: work-item-123",
+        "Evidence refs: 1",
+        "Approval: approved",
+        "Execution: succeeded",
+        "Trace: Copilot run run-123 -> pending action action-create -> target work item work-item-123 -> evidence refs 1",
+      ],
+      anchor: {
+        labelKey: "copilot.projectManager.view",
+        href: "/projects/project-123?tab=project-manager&workItemId=work-item-123",
+        projectId: "project-123",
+        workItemId: "work-item-123",
+      },
+    });
+    expect(
+      getCopilotEventResultSummary({
+        type: "pending_action_approved",
+        payload: {
+          actionType: "openforge.propose_project_manager_update_work_item_status",
+          result: {
+            projectManager: {
+              actionType: "update_work_item_status",
+              projectId: "project-123",
+              workItemId: "work-item-123",
+              status: "done",
+              evidenceRefCount: 2,
+              trustedEvidenceRefCount: 1,
+              copilotRunId: "run-123",
+              pendingActionId: "action-status",
+              approvalStatus: "approved",
+              executionStatus: "succeeded",
+            },
+            executed: true,
+          },
+        },
+      })
+    ).toEqual({
+      detail: "update_work_item_status / work item work-item-123 / succeeded",
+      preview: "Status: done / Evidence refs: 2 / Trusted evidence: 1",
+      markers: [
+        "Action: update_work_item_status",
+        "Project: project-123",
+        "Work item: work-item-123",
+        "Evidence refs: 2",
+        "Trusted evidence: 1",
+        "Approval: approved",
+        "Execution: succeeded",
+        "Trace: Copilot run run-123 -> pending action action-status -> target work item work-item-123 -> evidence refs 2",
+      ],
+      anchor: {
+        labelKey: "copilot.projectManager.view",
+        href: "/projects/project-123?tab=project-manager&workItemId=work-item-123",
+        projectId: "project-123",
+        workItemId: "work-item-123",
+      },
+    });
+    expect(
+      getCopilotEventResultSummary({
+        type: "pending_action_approved",
+        payload: {
+          actionType: "openforge.propose_project_manager_attach_evidence",
+          result: {
+            projectManager: {
+              actionType: "attach_evidence",
+              projectId: "project-123",
+              workItemId: "work-item-123",
+              status: "ready_for_review",
+              evidenceRefCount: 1,
+              copilotRunId: "run-123",
+              pendingActionId: "action-evidence",
+              approvalStatus: "approved",
+              executionStatus: "succeeded",
+            },
+            executed: true,
+          },
+        },
+      })
+    ).toEqual({
+      detail: "attach_evidence / work item work-item-123 / succeeded",
+      preview: "Status: ready_for_review / Evidence refs: 1",
+      markers: [
+        "Action: attach_evidence",
+        "Project: project-123",
+        "Work item: work-item-123",
+        "Evidence refs: 1",
+        "Approval: approved",
+        "Execution: succeeded",
+        "Trace: Copilot run run-123 -> pending action action-evidence -> target work item work-item-123 -> evidence refs 1",
+      ],
+      anchor: {
+        labelKey: "copilot.projectManager.view",
+        href: "/projects/project-123?tab=project-manager&workItemId=work-item-123",
+        projectId: "project-123",
+        workItemId: "work-item-123",
+      },
     });
     expect(
       getCopilotEventResultSummary({

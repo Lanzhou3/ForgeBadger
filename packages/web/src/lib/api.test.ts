@@ -120,6 +120,8 @@ import {
   updateTemplateFile,
   updateModel,
   writeConfig,
+  type ProjectManagerEvidenceRef,
+  type ProjectManagerLedgerEvent,
   type AdapterDiscovery,
 } from "./api";
 
@@ -1070,6 +1072,60 @@ describe("api client", () => {
       "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/ledger?eventType=work_item_status_changed&limit=10",
       expect.objectContaining({ headers: expect.any(Object) })
     );
+  });
+
+  it("supports Project Manager Copilot trace DTO fields", () => {
+    const evidenceRef: ProjectManagerEvidenceRef = {
+      kind: "test",
+      label: "Focused Web lib tests",
+      status: "verified",
+      ref: "vitest",
+      sessionId: "session-123",
+      copilotRunId: "run-123",
+      pendingActionId: "action-123",
+    };
+    const ledgerEvent: ProjectManagerLedgerEvent = {
+      id: "ledger-123",
+      projectId: "project-123",
+      workItemId: "work-item-123",
+      eventType: "evidence_attached",
+      status: "ready_for_review",
+      evidenceRefCount: 1,
+      feishuRefCount: 0,
+      trace: {
+        copilotRunId: "run-123",
+        pendingActionId: "action-123",
+        actionType: "attach_evidence",
+        targetType: "work_item",
+        targetId: "work-item-123",
+        evidenceRefCount: 1,
+        approvalStatus: "approved",
+        executionStatus: "succeeded",
+      },
+      createdAt: 1779464282,
+    };
+
+    expect(evidenceRef.pendingActionId).toBe("action-123");
+    expect(ledgerEvent.trace).toEqual({
+      copilotRunId: "run-123",
+      pendingActionId: "action-123",
+      actionType: "attach_evidence",
+      targetType: "work_item",
+      targetId: "work-item-123",
+      evidenceRefCount: 1,
+      approvalStatus: "approved",
+      executionStatus: "succeeded",
+    });
+    expect(Object.keys(ledgerEvent.trace ?? {}).sort()).toEqual([
+      "actionType",
+      "approvalStatus",
+      "copilotRunId",
+      "evidenceRefCount",
+      "executionStatus",
+      "pendingActionId",
+      "targetId",
+      "targetType",
+    ]);
   });
 
   it("preserves Gateway error details for project-manager API calls", async () => {
