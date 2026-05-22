@@ -2087,10 +2087,12 @@ function createProjectManagerUpdateWorkItemStatusProposal(
   context: Pick<CopilotToolContext, "db" | "userId" | "runId">
 ) {
   const parsed = proposeProjectManagerUpdateWorkItemStatusInput.parse(input);
-  requireVisibleProjectManagerWorkItem(context, parsed.projectId, parsed.workItemId);
+  const workItem = requireVisibleProjectManagerWorkItem(context, parsed.projectId, parsed.workItemId);
   return createPendingProposal(context, "openforge.propose_project_manager_update_work_item_status", {
     ...parsed,
     actionType: "update_work_item_status",
+    evidenceRefCount: workItem.evidenceRefs.length,
+    trustedEvidenceRefCount: countTrustedProjectManagerEvidenceRefs(workItem),
     copilotRunId: requireCopilotRunId(context)
   });
 }
@@ -2132,6 +2134,13 @@ function requireVisibleProjectManagerWorkItem(
   const workItem = new ProjectManagerRepository(context.db, context.userId).getWorkItem(project.id, workItemId);
   if (!workItem) throw new CopilotToolValidationError("Copilot Project Manager work item target is not available");
   return workItem;
+}
+
+function countTrustedProjectManagerEvidenceRefs(workItem: ProjectManagerWorkItem): number {
+  return workItem.evidenceRefs.filter((ref) => {
+    const status = ref.status?.trim().toLowerCase();
+    return status === "accepted" || status === "verified";
+  }).length;
 }
 
 function createSessionInputProposal(

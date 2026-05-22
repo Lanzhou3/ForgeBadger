@@ -1553,14 +1553,19 @@ function summarizeProjectManagerUpdateWorkItemStatus(
   const workItemId = readString(payload, "workItemId") ?? "work item";
   const status = readString(payload, "status") ?? "status";
   const evidenceCount = readNumber(payload, "evidenceRefCount");
-  const trustedRequired = status === "done";
+  const trustedEvidenceCount = readOptionalNumber(payload, "trustedEvidenceRefCount");
+  const trustedEvidenceMarker = status === "done" && trustedEvidenceCount !== undefined
+    ? `Trusted evidence: ${trustedEvidenceCount}`
+    : null;
+  const trustedEvidenceMissing = status === "done" &&
+    (trustedEvidenceCount === 0 || (trustedEvidenceCount === undefined && evidenceCount === 0));
   const anchor = getCopilotProjectManagerAnchor({ projectId, workItemId });
   const summary = withProjectManagerApprovalMetadata({
     detail: `Update work item status / work item ${workItemId} / status ${status}`,
     preview: joinPresent([
       "Fields: status",
       `Evidence refs: ${evidenceCount}`,
-      trustedRequired ? "Trusted evidence required" : null,
+      trustedEvidenceMissing ? "Trusted evidence required" : trustedEvidenceMarker,
     ]),
     markers: [
       "Action: update_work_item_status",
@@ -1568,11 +1573,12 @@ function summarizeProjectManagerUpdateWorkItemStatus(
       `Work item: ${workItemId}`,
       "Fields: status",
       `Evidence refs: ${evidenceCount}`,
+      trustedEvidenceMissing ? null : trustedEvidenceMarker,
       projectManagerTraceMarker(action, payload, `work item ${workItemId}`, evidenceCount),
-    ],
+    ].filter((marker): marker is string => Boolean(marker)),
     ...(anchor ? { anchor } : {}),
   });
-  return trustedRequired
+  return trustedEvidenceMissing
     ? { ...summary, messageKey: "copilot.error.projectManagerTrustedEvidenceRequired" }
     : summary;
 }

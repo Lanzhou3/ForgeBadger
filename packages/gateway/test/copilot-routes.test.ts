@@ -3421,6 +3421,8 @@ describe("copilot routes", () => {
       projectId: project.id,
       workItemId: statusItem.id,
       status: "done",
+      evidenceRefCount: 1,
+      trustedEvidenceRefCount: 1,
       copilotRunId: "stored-run-status"
     }, createAction.runId);
     const evidenceAction = createPendingAction(userId, "openforge.propose_project_manager_attach_evidence", {

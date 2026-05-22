@@ -990,6 +990,131 @@ test("Copilot renders Project Manager pending actions as fixed trace cards", asy
   await expect(assistantBubble.getByText("RAW PROVIDER PAYLOAD SHOULD NOT RENDER")).toHaveCount(0);
 });
 
+test("Copilot allows Project Manager done approval when trusted evidence is present", async ({ page }) => {
+  let approved = false;
+  await mockCopilotApis(page, {
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Mark the traceability work done",
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              role: "assistant",
+              content: "I need approval before updating Project Manager state.",
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Mark the traceability work done",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [{
+            id: "pm-action-1",
+            runId: "run-1",
+            type: "openforge.propose_project_manager_update_work_item_status",
+            status: "pending",
+            input: {
+              projectId: "project-123",
+              workItemId: "work-item-trace",
+              status: "done",
+              evidenceRefCount: 2,
+              trustedEvidenceRefCount: 1,
+              copilotRunId: "run-1",
+              pendingActionId: "pm-action-1",
+            },
+          }],
+        }),
+      });
+    },
+    onGetRun: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Mark the traceability work done",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [{
+            id: "pm-action-1",
+            runId: "run-1",
+            type: "openforge.propose_project_manager_update_work_item_status",
+            status: "pending",
+            input: {
+              projectId: "project-123",
+              workItemId: "work-item-trace",
+              status: "done",
+              evidenceRefCount: 2,
+              trustedEvidenceRefCount: 1,
+              copilotRunId: "run-1",
+              pendingActionId: "pm-action-1",
+            },
+          }],
+        }),
+      });
+    },
+    onDecideAction: async (route) => {
+      approved = true;
+      await route.fulfill({
+        json: envelope({
+          action: {
+            id: "pm-action-1",
+            runId: "run-1",
+            type: "openforge.propose_project_manager_update_work_item_status",
+            status: "approved",
+            result: {
+              projectManager: {
+                actionType: "update_work_item_status",
+                projectId: "project-123",
+                workItemId: "work-item-trace",
+                status: "done",
+                evidenceRefCount: 2,
+                trustedEvidenceRefCount: 1,
+                copilotRunId: "run-1",
+                pendingActionId: "pm-action-1",
+                approvalStatus: "approved",
+                executionStatus: "succeeded",
+              },
+              executed: true,
+            },
+          },
+          run: {
+            id: "run-1",
+            status: "completed",
+            goal: "Mark the traceability work done",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Mark the traceability work done");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(copilotMessage(page, "I need approval before updating Project Manager state.")).toBeVisible();
+  const pendingActions = copilotMessage(page, "Pending actions");
+  await expect(pendingActions.getByText("Trusted evidence: 1", { exact: true })).toBeVisible();
+  await expect(pendingActions.getByText("Trusted evidence is required before Copilot can mark this done.")).toHaveCount(0);
+  const approveButton = pendingActions.getByRole("button", { name: "Approve" });
+  await expect(approveButton).toBeEnabled();
+  await approveButton.click();
+  await expect.poll(() => approved).toBe(true);
+});
+
 test("Copilot renders Project Manager approval anchors and terminal failures", async ({ page }) => {
   let decisionMode: "approved" | "failed" = "approved";
   const waitingRunDetail = {

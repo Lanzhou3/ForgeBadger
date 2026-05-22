@@ -43,9 +43,9 @@ test("opens Project Manager from deep link and renders Copilot trace markers", a
   await expect(sheet.getByText("Done").first()).toBeVisible();
   await expect(sheet.getByText("Copilot trace")).toBeVisible();
   await expect(sheet.getByText("Run", { exact: true })).toBeVisible();
-  await expect(sheet.getByText("run-trace-1", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("run-done-1", { exact: true })).toBeVisible();
   await expect(sheet.getByText("Action", { exact: true })).toBeVisible();
-  await expect(sheet.getByText("pm-action-1", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("pm-action-done", { exact: true })).toBeVisible();
   await expect(sheet.getByText(/test.*Traceability E2E.*verified/).first()).toBeVisible();
   await expect(sheet.getByText("Session", { exact: true })).toBeVisible();
   await expect(sheet.getByText("session-trace-1", { exact: true })).toBeVisible();
@@ -54,16 +54,16 @@ test("opens Project Manager from deep link and renders Copilot trace markers", a
 
   await page.keyboard.press("Escape");
   const ledger = panel.getByTestId("project-manager-ledger");
-  await expect(ledger.getByText("Copilot trace")).toBeVisible();
-  await expect(ledger.getByText("Action type", { exact: true })).toBeVisible();
+  await expect(ledger.getByText("Copilot trace").first()).toBeVisible();
+  await expect(ledger.getByText("Action type", { exact: true }).first()).toBeVisible();
   await expect(ledger.getByText("update_work_item_status", { exact: true })).toBeVisible();
-  await expect(ledger.getByText("Target", { exact: true })).toBeVisible();
+  await expect(ledger.getByText("Target", { exact: true }).first()).toBeVisible();
   await expect(ledger.getByText("work-item-trace").first()).toBeVisible();
-  await expect(ledger.getByText("Evidence refs", { exact: true })).toBeVisible();
-  await expect(ledger.getByText("Approval", { exact: true })).toBeVisible();
-  await expect(ledger.getByText("approved", { exact: true })).toBeVisible();
-  await expect(ledger.getByText("Execution", { exact: true })).toBeVisible();
-  await expect(ledger.getByText("succeeded", { exact: true })).toBeVisible();
+  await expect(ledger.getByText("Evidence refs", { exact: true }).first()).toBeVisible();
+  await expect(ledger.getByText("Approval", { exact: true }).first()).toBeVisible();
+  await expect(ledger.getByText("approved", { exact: true }).first()).toBeVisible();
+  await expect(ledger.getByText("Execution", { exact: true }).first()).toBeVisible();
+  await expect(ledger.getByText("succeeded", { exact: true }).first()).toBeVisible();
   await expect(panel.getByText("RAW TERMINAL OUTPUT SHOULD NOT RENDER")).toHaveCount(0);
   await expect(panel.getByText("RAW PROVIDER PAYLOAD SHOULD NOT RENDER")).toHaveCount(0);
   await expect(panel.getByText("RAW LEDGER DETAILS SHOULD NOT RENDER")).toHaveCount(0);
@@ -367,15 +367,24 @@ async function mockProjectDetailApis(
     status: "done",
     priority: 9,
     acceptanceCriteria: ["Trace markers are visible"],
-    evidenceRefCount: 1,
+    evidenceRefCount: 2,
     evidenceRefs: [{
+      kind: "test",
+      label: "Initial trace",
+      status: "draft",
+      ref: "PW-TRACE-OLD",
+      sessionId: "session-old",
+      copilotRunId: "run-old-1",
+      pendingActionId: "pm-action-old",
+      rawTerminal: "RAW TERMINAL OUTPUT SHOULD NOT RENDER",
+    }, {
       kind: "test",
       label: "Traceability E2E",
       status: "verified",
       ref: "PW-TRACE-1",
       sessionId: "session-trace-1",
-      copilotRunId: "run-trace-1",
-      pendingActionId: "pm-action-1",
+      copilotRunId: "run-evidence-1",
+      pendingActionId: "pm-action-evidence",
       rawTerminal: "RAW TERMINAL OUTPUT SHOULD NOT RENDER",
     }],
     feishuRefCount: 0,
@@ -735,20 +744,40 @@ function projectManagerLedgerEvents(limit: number, evidenceAttachedEvent: unknow
   const baseEvents = [
     ...evidenceAttachedEvent,
     {
+      id: "ledger-trace-old",
+      projectId: PROJECT_ID,
+      workItemId: "work-item-trace",
+      eventType: "copilot_observation_recorded",
+      status: "in_progress",
+      evidenceRefCount: 1,
+      feishuRefCount: 0,
+      trace: {
+        copilotRunId: "run-old-1",
+        pendingActionId: "pm-action-old",
+        actionType: "attach_evidence",
+        targetType: "work_item",
+        targetId: "work-item-trace",
+        evidenceRefCount: 1,
+        approvalStatus: "approved",
+        executionStatus: "succeeded",
+      },
+      createdAt: 1779374100000,
+    },
+    {
       id: "ledger-trace",
       projectId: PROJECT_ID,
       workItemId: "work-item-trace",
       eventType: "copilot_observation_recorded",
       status: "done",
-      evidenceRefCount: 1,
+      evidenceRefCount: 2,
       feishuRefCount: 0,
       trace: {
-        copilotRunId: "run-trace-1",
-        pendingActionId: "pm-action-1",
+        copilotRunId: "run-done-1",
+        pendingActionId: "pm-action-done",
         actionType: "update_work_item_status",
         targetType: "work_item",
         targetId: "work-item-trace",
-        evidenceRefCount: 1,
+        evidenceRefCount: 2,
         approvalStatus: "approved",
         executionStatus: "succeeded",
       },

@@ -332,6 +332,8 @@ describe("copilot tools", () => {
     assert.equal(actions[0]?.input.pendingActionId, undefined);
     assert.equal(actions[1]?.input.workItemId, workItem.id);
     assert.equal(actions[1]?.input.copilotRunId, run.id);
+    assert.equal(actions[1]?.input.evidenceRefCount, 1);
+    assert.equal(actions[1]?.input.trustedEvidenceRefCount, 1);
     assert.equal(actions[1]?.input.pendingActionId, undefined);
     assert.equal(actions[2]?.input.workItemId, workItem.id);
     assert.equal(actions[2]?.input.copilotRunId, run.id);

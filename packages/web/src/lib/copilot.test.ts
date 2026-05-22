@@ -830,6 +830,41 @@ describe("copilot display helpers", () => {
         workItemId: "work-item-123",
       },
     });
+    expect(
+      getCopilotPendingActionSummary({
+        id: "action-status-ready",
+        type: "openforge.propose_project_manager_update_work_item_status",
+        input: {
+          actionType: "update_work_item_status",
+          projectId: "project-123",
+          workItemId: "work-item-123",
+          status: "done",
+          evidenceRefCount: 2,
+          trustedEvidenceRefCount: 1,
+          copilotRunId: "run-123",
+        },
+      })
+    ).toEqual({
+      detail: "Update work item status / work item work-item-123 / status done",
+      preview: "Fields: status / Evidence refs: 2 / Trusted evidence: 1",
+      markers: [
+        "Action: update_work_item_status",
+        "Project: project-123",
+        "Work item: work-item-123",
+        "Fields: status",
+        "Evidence refs: 2",
+        "Trusted evidence: 1",
+        "Trace: Copilot run run-123 -> pending action action-status-ready -> target work item work-item-123 -> evidence refs 2",
+      ],
+      riskCue: "Approval writes Project Manager state through Gateway.",
+      riskCueKey: "copilot.projectManager.riskGatewayWrite",
+      anchor: {
+        labelKey: "copilot.projectManager.view",
+        href: "/projects/project-123?tab=project-manager&workItemId=work-item-123",
+        projectId: "project-123",
+        workItemId: "work-item-123",
+      },
+    });
   });
 
   it("ignores raw Project Manager payload fields in fixed summaries", () => {

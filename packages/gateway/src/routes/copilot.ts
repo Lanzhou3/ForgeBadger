@@ -300,6 +300,8 @@ const projectManagerUpdateStatusApprovalSchema = z.object({
   projectId: z.string().min(1),
   workItemId: z.string().min(1),
   status: z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES),
+  evidenceRefCount: z.number().int().min(0).optional(),
+  trustedEvidenceRefCount: z.number().int().min(0).optional(),
   copilotRunId: z.string().min(1)
 }).strict();
 const projectManagerAttachEvidenceApprovalSchema = z.object({

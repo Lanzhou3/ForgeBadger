@@ -918,10 +918,14 @@ function ProjectManagerWorkItemDetailSheet({
               )}
             </DetailField>
             {traceMarkers.length > 0 && (
-              <DetailField label="Copilot trace">
+              <DetailField label={t("projects.projectManagerCopilotTrace")}>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {traceMarkers.map((marker) => (
-                    <LedgerDatum key={`${marker.label}-${marker.value}`} label={marker.label} value={marker.value} />
+                    <LedgerDatum
+                      key={`${marker.labelKey}-${marker.value}`}
+                      label={t(marker.labelKey)}
+                      value={marker.value}
+                    />
                   ))}
                 </div>
               </DetailField>
@@ -1434,21 +1438,27 @@ function ProjectManagerLedgerRow({
         <LedgerDatum label={t("projects.projectManagerEvidenceRefs")} value={event.evidenceRefCount} />
         <LedgerDatum label={t("projects.projectManagerFeishuRefs")} value={event.feishuRefCount} />
       </div>
-      {event.trace && <LedgerTraceGrid trace={event.trace} />}
+      {event.trace && <LedgerTraceGrid trace={event.trace} t={t} />}
     </div>
   );
 }
 
-function LedgerTraceGrid({ trace }: { trace: ProjectManagerLedgerTrace }) {
+function LedgerTraceGrid({ trace, t }: { trace: ProjectManagerLedgerTrace; t: Translate }) {
   const markers = ledgerTraceMarkers(trace);
   if (markers.length === 0) return null;
 
   return (
     <div className="mt-3 rounded-md border border-border/70 bg-background/40 p-3">
-      <div className="text-xs font-medium uppercase text-muted-foreground">Copilot trace</div>
+      <div className="text-xs font-medium uppercase text-muted-foreground">
+        {t("projects.projectManagerCopilotTrace")}
+      </div>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         {markers.map((marker) => (
-          <LedgerDatum key={`${marker.label}-${marker.value}`} label={marker.label} value={marker.value} />
+          <LedgerDatum
+            key={`${marker.labelKey}-${marker.value}`}
+            label={t(marker.labelKey)}
+            value={marker.value}
+          />
         ))}
       </div>
     </div>
@@ -1627,7 +1637,7 @@ function ledgerWorkItemTitle(event: ProjectManagerLedgerEvent, workItems: Projec
 }
 
 interface TraceMarker {
-  label: string;
+  labelKey: TranslationKey;
   value: string | number;
 }
 
@@ -1635,35 +1645,76 @@ function workItemCopilotTraceMarkers(
   item: ProjectManagerWorkItem,
   ledgerEvents: ProjectManagerLedgerEvent[]
 ): TraceMarker[] {
-  const evidenceTrace = item.evidenceRefs.find((ref) =>
-    Boolean(ref.copilotRunId || ref.pendingActionId || ref.sessionId)
-  );
-  const ledgerTraceEvent = ledgerEvents.find((event) => event.workItemId === item.id && event.trace);
+  const trustedEvidenceRefs = item.evidenceRefs.filter(isTrustedEvidenceRef);
+  const evidenceTrace = item.status === "done"
+    ? trustedEvidenceRefs.find(hasEvidenceTrace) ?? trustedEvidenceRefs[0]
+    : item.evidenceRefs.find(hasEvidenceTrace);
+  const ledgerTraceEvent = selectLedgerTraceEvent(item, ledgerEvents);
   const trace = ledgerTraceEvent?.trace;
   const markers: TraceMarker[] = [];
 
-  const runId = evidenceTrace?.copilotRunId ?? trace?.copilotRunId;
-  const actionId = evidenceTrace?.pendingActionId ?? trace?.pendingActionId;
-  if (runId) markers.push({ label: "Run", value: runId });
-  if (actionId) markers.push({ label: "Action", value: actionId });
-  if (evidenceTrace) markers.push({ label: "Evidence", value: formatEvidenceRef(evidenceTrace) });
-  if (evidenceTrace?.sessionId) markers.push({ label: "Session", value: evidenceTrace.sessionId });
-  if (ledgerTraceEvent) markers.push({ label: "Ledger", value: ledgerTraceEvent.eventType });
+  const runId = trace?.copilotRunId ?? evidenceTrace?.copilotRunId;
+  const actionId = trace?.pendingActionId ?? evidenceTrace?.pendingActionId;
+  if (runId) markers.push({ labelKey: "projects.projectManagerTraceRun", value: runId });
+  if (actionId) markers.push({ labelKey: "projects.projectManagerTraceAction", value: actionId });
+  if (evidenceTrace) {
+    markers.push({ labelKey: "projects.projectManagerTraceEvidence", value: formatEvidenceRef(evidenceTrace) });
+  }
+  if (evidenceTrace?.sessionId) {
+    markers.push({ labelKey: "projects.projectManagerTraceSession", value: evidenceTrace.sessionId });
+  }
+  if (ledgerTraceEvent) {
+    markers.push({ labelKey: "projects.projectManagerTraceLedger", value: ledgerTraceEvent.eventType });
+  }
 
   return markers;
 }
 
 function ledgerTraceMarkers(trace: ProjectManagerLedgerTrace): TraceMarker[] {
   const markers: Array<TraceMarker | null> = [
-    trace.copilotRunId ? { label: "Run", value: trace.copilotRunId } : null,
-    trace.pendingActionId ? { label: "Action", value: trace.pendingActionId } : null,
-    trace.actionType ? { label: "Action type", value: trace.actionType } : null,
-    trace.targetId ? { label: "Target", value: trace.targetId } : null,
-    typeof trace.evidenceRefCount === "number" ? { label: "Evidence refs", value: trace.evidenceRefCount } : null,
-    trace.approvalStatus ? { label: "Approval", value: trace.approvalStatus } : null,
-    trace.executionStatus ? { label: "Execution", value: trace.executionStatus } : null,
+    trace.copilotRunId ? { labelKey: "projects.projectManagerTraceRun", value: trace.copilotRunId } : null,
+    trace.pendingActionId ? { labelKey: "projects.projectManagerTraceAction", value: trace.pendingActionId } : null,
+    trace.actionType ? { labelKey: "projects.projectManagerTraceActionType", value: trace.actionType } : null,
+    trace.targetId ? { labelKey: "projects.projectManagerTraceTarget", value: trace.targetId } : null,
+    typeof trace.evidenceRefCount === "number"
+      ? { labelKey: "projects.projectManagerTraceEvidenceRefs", value: trace.evidenceRefCount }
+      : null,
+    trace.approvalStatus ? { labelKey: "projects.projectManagerTraceApproval", value: trace.approvalStatus } : null,
+    trace.executionStatus ? { labelKey: "projects.projectManagerTraceExecution", value: trace.executionStatus } : null,
   ];
   return markers.filter((marker): marker is TraceMarker => Boolean(marker));
+}
+
+function selectLedgerTraceEvent(
+  item: ProjectManagerWorkItem,
+  ledgerEvents: ProjectManagerLedgerEvent[]
+): ProjectManagerLedgerEvent | undefined {
+  const itemTraceEvents = ledgerEvents.filter((event) => event.workItemId === item.id && event.trace);
+  if (item.status === "done") {
+    const doneTraceEvent = latestLedgerEvent(itemTraceEvents.filter((event) =>
+      event.status === "done" &&
+      event.trace?.actionType === "update_work_item_status" &&
+      event.trace.executionStatus === "succeeded"
+    ));
+    if (doneTraceEvent) return doneTraceEvent;
+  }
+  return latestLedgerEvent(itemTraceEvents);
+}
+
+function latestLedgerEvent(events: ProjectManagerLedgerEvent[]): ProjectManagerLedgerEvent | undefined {
+  return events.reduce<ProjectManagerLedgerEvent | undefined>((latest, event) => {
+    if (!latest || event.createdAt > latest.createdAt) return event;
+    return latest;
+  }, undefined);
+}
+
+function isTrustedEvidenceRef(ref: ProjectManagerEvidenceRef): boolean {
+  const status = ref.status?.trim().toLowerCase();
+  return status === "accepted" || status === "verified";
+}
+
+function hasEvidenceTrace(ref: ProjectManagerEvidenceRef): boolean {
+  return Boolean(ref.copilotRunId || ref.pendingActionId || ref.sessionId);
 }
 
 function ledgerEventNote(eventType: ProjectManagerLedgerEventType, t: Translate) {
