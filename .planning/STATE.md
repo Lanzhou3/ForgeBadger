@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Project Manager Web Workflow
 status: executing
-stopped_at: Completed 11-01-PLAN.md
-last_updated: "2026-05-22T06:40:19.878Z"
+stopped_at: Completed 11-02-PLAN.md
+last_updated: "2026-05-22T06:51:55.874Z"
 last_activity: 2026-05-22
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 8
-  completed_plans: 6
+  completed_plans: 7
   percent: 67
 ---
 
@@ -26,7 +26,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-21)
 ## Current Position
 
 Phase: 11 (evidence-ledger-and-acceptance-gates) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-05-22
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-22
 
 **Velocity:**
 
-- Total plans completed: 20
+- Total plans completed: 21
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -72,7 +72,8 @@ Last activity: 2026-05-22
 | Phase 10 P02 | 9min | 4 tasks | 4 files |
 | Phase 10 P03 | 7min | 4 tasks | 3 files |
 | 10 | 3 | - | - |
-| 11 | 1/3 | 12min | 12min |
+| 11 | 2/3 | 22min | 11min |
+| Phase 11 P02 | 10min | 4 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,8 @@ Recent decisions affecting current work:
 - [Milestone v1.2]: Promote the project-manager ledger to a Web workflow before remote runtime implementation so first users can operate goals, work items, evidence references, and ledger state directly from the project context.
 - [Phase 11]: Evidence attachment stays inside the work item detail Sheet; work item table rows do not get direct attach controls. — Plan 11-01 implementation.
 - [Phase 11]: Web submits exactly one structured evidence reference and blocks obvious raw output or secret-like pointer values before calling Gateway. — Plan 11-01 implementation.
+- [Phase 11]: Ledger filters stay local and bounded to existing event types; blocker filtering includes both blocker_recorded and blocker_resolved. — Plan 11-02 implementation.
+- [Phase 11]: Ledger load failure is scoped to the ledger card so goal and work item operations remain usable. — Plan 11-02 implementation.
 
 ### Pending Todos
 
@@ -128,9 +131,9 @@ None in `.planning/todos/` yet. v1.2 work is being defined in `.planning/ROADMAP
 
 ## Session Continuity
 
-Last session: 2026-05-22T06:40:19.838Z
-Stopped at: Completed 11-01-PLAN.md
-Resume file: .planning/phases/OF-11-evidence-ledger-and-acceptance-gates/11-02-PLAN.md
+Last session: 2026-05-22T06:51:55.848Z
+Stopped at: Completed 11-02-PLAN.md
+Resume file: .planning/phases/OF-11-evidence-ledger-and-acceptance-gates/11-03-PLAN.md
 
 ## Operator Next Steps
 

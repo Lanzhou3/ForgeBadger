@@ -22,8 +22,8 @@
 ### Evidence And Ledger Review
 
 - [x] **PMEV-01**: User can attach bounded evidence references to a work item using only the approved reference fields from `docs/API.md`.
-- [ ] **PMEV-02**: User can review a ledger timeline that shows safe event markers, status, evidence counts, Feishu reference counts, and timestamps without raw sensitive details.
-- [ ] **PMEV-03**: User can distinguish manual completion, evidence attachment, blocker, and status-change events from the ledger surface.
+- [x] **PMEV-02**: User can review a ledger timeline that shows safe event markers, status, evidence counts, Feishu reference counts, and timestamps without raw sensitive details.
+- [x] **PMEV-03**: User can distinguish manual completion, evidence attachment, blocker, and status-change events from the ledger surface.
 
 ### Safety, Testing, And Handoff
 
@@ -63,8 +63,8 @@
 | PMUX-04 | Phase 10 | Complete |
 | PMUX-05 | Phase 10 | Complete |
 | PMEV-01 | Phase 11 | Complete |
-| PMEV-02 | Phase 11 | Pending |
-| PMEV-03 | Phase 11 | Pending |
+| PMEV-02 | Phase 11 | Complete |
+| PMEV-03 | Phase 11 | Complete |
 | PMQA-01 | Phase 11 | Complete |
 | PMQA-02 | Phase 11 | Pending |
 
