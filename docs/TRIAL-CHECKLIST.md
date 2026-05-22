@@ -59,6 +59,51 @@ evidence reports.
 - [ ] Apply generated config.
 - [ ] Record any config conflict, skip, or overwrite decision.
 
+### Project Manager Workflow
+
+- [ ] Open the disposable project detail page.
+- [ ] Open the `Project Manager` tab.
+- [ ] Review the current goal summary, constraints, acceptance criteria, and
+      status.
+- [ ] Update goal state only if the trial needs to record a real change.
+- [ ] Create or inspect a work item from the Project Manager work item list.
+- [ ] Open the work item detail panel.
+- [ ] Attach one bounded evidence reference using only `kind`, `label`, `ref`,
+      and `path`.
+- [ ] Verify the evidence reference appears on the work item without pasting
+      raw evidence content.
+- [ ] Move the work item through the allowed status action, or verify the
+      evidence-free `done` guard requires a manual completion reason.
+- [ ] Verify the ledger timeline shows the relevant safe event markers:
+      status change, evidence attached, manual completion, or blocker marker.
+- [ ] Use ledger filters and `Load more ledger events` if the expected marker is
+      not in the first loaded window.
+- [ ] Record failures with a short reproduction path and redacted screenshots or
+      diagnostics.
+
+Acceptable evidence-reference examples:
+
+- `kind=report`, `label=Trial checklist`, `path=docs/TRIAL-CHECKLIST.md`
+- `kind=test`, `label=Project Manager E2E`, `ref=project-manager.spec.ts`
+- `kind=report`, `label=v1.2 closeout`,
+  `path=docs/reports/v1.2-project-manager-web-workflow-closeout-2026-05-22.md`
+- `kind=issue`, `label=Follow-up`, `ref=OF-123`
+- `kind=pr`, `label=Workflow patch`, `ref=PR-42`
+- `kind=smoke`, `label=Typecheck`, `ref=pnpm --dir packages/web run typecheck`
+
+Forbidden Project Manager evidence content:
+
+- raw terminal transcripts;
+- Feishu message bodies;
+- provider payloads;
+- API keys;
+- JWTs;
+- private keys;
+- attach tokens;
+- unrelated project secrets;
+- raw provider or callback bodies;
+- browser auth token values.
+
 ### Claude Code Session And Terminal
 
 - [ ] Create a Claude Code session.

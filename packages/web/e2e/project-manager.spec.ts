@@ -174,6 +174,41 @@ test("keeps safe evidence draft values visible after attach failure", async ({ p
   expect(unhandledApiRoutes).toEqual([]);
 });
 
+test("completes the v1.2 Project Manager workflow under strict route mocks", async ({ page }) => {
+  const unhandledApiRoutes = await mockProjectDetailApis(page);
+
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Project Manager" }).click();
+
+  const panel = page.getByTestId("project-manager-panel");
+  await expect(panel.getByText("Ship v1.2 Project Manager workflow")).toBeVisible();
+  const workItemRow = panel.getByRole("row", { name: /Review external evidence/ });
+  await expect(workItemRow).toBeVisible();
+  await workItemRow.getByRole("button", { name: "View details" }).click();
+
+  const sheet = page.getByRole("dialog", { name: "Review external evidence" });
+  await sheet.getByLabel("Kind").fill("report");
+  await sheet.getByLabel("Label").fill("Phase 11 evidence");
+  await sheet.getByLabel("Reference").fill("PMEV-01");
+  await sheet.getByLabel("Path").fill("docs/reports/phase-11-evidence.md");
+  await sheet.getByRole("button", { name: "Attach evidence" }).click();
+  await expect(sheet.getByText("PMEV-01")).toBeVisible();
+
+  await sheet.getByRole("button", { name: "Change status" }).click();
+  await page.getByRole("menuitem", { name: "In progress" }).click();
+  await expect(sheet.getByText("In progress").first()).toBeVisible();
+  await sheet.getByRole("button", { name: "Change status" }).click();
+  await page.getByRole("menuitem", { name: "Done" }).click();
+  await expect(sheet.getByText("Done").first()).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  const ledger = panel.getByTestId("project-manager-ledger");
+  await expect(ledger.getByText("Evidence attached").first()).toBeVisible();
+  await expect(ledger.getByText("Work item status changed").first()).toBeVisible();
+  await expect(ledger.getByText("Review external evidence").first()).toBeVisible();
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
 test("renders ledger timeline filters and loads more events", async ({ page }) => {
   const ledgerLimits: number[] = [];
   const unhandledApiRoutes = await mockProjectDetailApis(page, {

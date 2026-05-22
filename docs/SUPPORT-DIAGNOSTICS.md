@@ -21,6 +21,70 @@ sensitive terminal output.
   credentials, physical Windows/WSL hosts, public HTTPS routing, or Feishu
   developer-console access.
 
+## Project Manager Failures
+
+Run or request:
+
+```bash
+pnpm --dir packages/web run typecheck
+pnpm --dir packages/web exec vitest run src/lib/api.test.ts
+pnpm --dir packages/web exec playwright test e2e/project-manager.spec.ts --project=chromium
+```
+
+Collect these redacted artifacts:
+
+- project id or disposable project name when non-sensitive;
+- Project Manager tab screenshot showing goal, work item, or ledger state;
+- exact OpenForge request path and status code for failing
+  `/api/v1/projects/:projectId/project-manager/*` calls;
+- work item title or short ID;
+- evidence reference fields only: `kind`, `label`, `ref`, and `path`;
+- ledger event type, work item title or ID, status, evidence count, Feishu
+  reference count, and timestamp;
+- focused test command summary and failure name;
+- owner and next action.
+
+Classify:
+
+- Evidence attachment failure with safe draft values preserved is a recoverable
+  Project Manager mutation issue.
+- Evidence attachment failure that clears the Sheet, drops safe values, or asks
+  for raw content is a product contract failure.
+- Ledger load failure should remain scoped to the ledger area. If it hides goal
+  or work item data, map it to UX-06.
+- Unknown Project Manager API endpoint drift should fail strict E2E mocks rather
+  than returning a generic success response.
+- Evidence-free `done` should require a non-empty manual completion reason.
+
+Escalate when:
+
+- Project Manager data appears across tenants or projects;
+- evidence attachment accepts raw terminal transcripts, Feishu message bodies,
+  provider payloads, API keys, JWTs, private keys, attach tokens, or unrelated
+  project secrets;
+- ledger rows expose raw manual reasons, evidence reference lists, terminal
+  output, Feishu bodies, provider payloads, or secret-bearing details;
+- a status transition bypasses the documented Gateway transition rules;
+- diagnostics expose plaintext credentials or raw project-manager payloads.
+
+Redact:
+
+- raw terminal transcripts;
+- Feishu message bodies;
+- provider payloads;
+- API keys;
+- JWTs;
+- private keys;
+- attach tokens;
+- unrelated project secrets;
+- browser auth token values;
+- raw provider or callback bodies.
+
+Acceptable evidence references are short pointers, not raw evidence. Examples:
+`docs/TRIAL-CHECKLIST.md`, `project-manager.spec.ts`,
+`docs/reports/v1.2-project-manager-web-workflow-closeout-2026-05-22.md`,
+`OF-123`, `PR-42`, or a short test command name.
+
 ## Provider Failures
 
 Run or request:
