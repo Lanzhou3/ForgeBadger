@@ -25,7 +25,7 @@
 - [x] **TRACE-01**: User can link a Copilot run, pending action, or safe run summary to a project-manager work item as a bounded evidence reference.
 - [x] **TRACE-02**: Copilot can propose project-manager work item creation, status updates, and evidence attachments through pending actions, never direct mutation.
 - [x] **TRACE-03**: Ledger events record safe traceability markers for Copilot-proposed changes, including run id, action type, status, and evidence counts without raw prompt, terminal, provider, or secret content.
-- [ ] **TRACE-04**: Web surfaces show how a work item moved from prompt to approval to execution evidence.
+- [x] **TRACE-04**: Web surfaces show how a work item moved from prompt to approval to execution evidence.
 
 ### Project Manager Board Workflow
 
@@ -70,13 +70,13 @@
 
 | Requirement | Target Phase | Status |
 |-------------|--------------|--------|
-| POS-01 | Phase 12 | Planned |
-| POS-02 | Phase 12 | Planned |
-| POS-03 | Phase 12 | Planned |
-| TRACE-01 | Phase 12 | Planned |
-| TRACE-02 | Phase 12 | Planned |
-| TRACE-03 | Phase 12 | Planned |
-| TRACE-04 | Phase 12 | Planned |
+| POS-01 | Phase 12 | Complete |
+| POS-02 | Phase 12 | Complete |
+| POS-03 | Phase 12 | Complete |
+| TRACE-01 | Phase 12 | Complete |
+| TRACE-02 | Phase 12 | Complete |
+| TRACE-03 | Phase 12 | Complete |
+| TRACE-04 | Phase 12 | Complete |
 | BOARD-01 | Phase 13 | Planned |
 | BOARD-02 | Phase 13 | Planned |
 | BOARD-03 | Phase 13 | Planned |
