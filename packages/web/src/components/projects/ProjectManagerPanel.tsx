@@ -1,11 +1,14 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, BriefcaseBusiness, ClipboardList, History, RefreshCw } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -14,14 +17,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { useLanguage } from "@/hooks/use-language";
 import {
   GatewayApiError,
   getProjectManagerGoal,
   listProjectManagerLedger,
   listProjectManagerWorkItems,
+  updateProjectManagerGoal,
   type ProjectManagerLedgerEvent,
   type ProjectManagerLedgerEventType,
+  type ProjectManagerGoal,
+  type ProjectManagerGoalInput,
   type ProjectManagerWorkItem,
   type ProjectManagerWorkItemStatus,
 } from "@/lib/api";
@@ -35,9 +42,20 @@ interface ProjectManagerPanelProps {
 
 type Translate = (key: TranslationKey) => string;
 
+interface GoalDraft {
+  summary: string;
+  constraintsText: string;
+  acceptanceCriteriaText: string;
+  status: string;
+}
+
 export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelProps) {
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
   const canLoad = enabled && projectId.length > 0;
+  const [isGoalEditing, setIsGoalEditing] = useState(false);
+  const [goalDraft, setGoalDraft] = useState<GoalDraft>(() => createGoalDraft(null));
+  const [goalFormError, setGoalFormError] = useState<string | null>(null);
 
   const goalQuery = useQuery({
     queryKey: ["project-manager", projectId, "goal"],
@@ -45,6 +63,8 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
     enabled: canLoad,
     retry: false,
   });
+
+  const goal = goalQuery.data?.goal ?? null;
 
   const workItemsQuery = useQuery({
     queryKey: ["project-manager", projectId, "work-items", { limit: 5 }],
@@ -60,6 +80,33 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
     retry: false,
   });
 
+  useEffect(() => {
+    if (!isGoalEditing) {
+      setGoalDraft(createGoalDraft(goal));
+    }
+  }, [goal, isGoalEditing]);
+
+  const invalidateProjectManagerQueries = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "goal"] }),
+      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+    ]);
+  };
+
+  const goalMutation = useMutation({
+    mutationFn: (input: ProjectManagerGoalInput) => updateProjectManagerGoal(projectId, input),
+    onSuccess: async ({ goal: updatedGoal }) => {
+      setGoalFormError(null);
+      setGoalDraft(createGoalDraft(updatedGoal));
+      setIsGoalEditing(false);
+      await invalidateProjectManagerQueries();
+    },
+    onError: (error) => {
+      setGoalFormError(projectManagerMutationMessage(error, t("projects.projectManagerGoalMutationError")));
+    },
+  });
+
   if (!enabled) {
     return null;
   }
@@ -68,7 +115,6 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
   const isNotFoundError = firstError instanceof GatewayApiError && firstError.status === 404;
   const isLoading = goalQuery.isLoading || workItemsQuery.isLoading || ledgerQuery.isLoading;
   const isRefreshing = goalQuery.isFetching || workItemsQuery.isFetching || ledgerQuery.isFetching;
-  const goal = goalQuery.data?.goal ?? null;
   const workItems = workItemsQuery.data?.workItems ?? [];
   const ledgerEvents = ledgerQuery.data?.events ?? [];
 
@@ -77,6 +123,33 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
     void goalQuery.refetch();
     void workItemsQuery.refetch();
     void ledgerQuery.refetch();
+  };
+
+  const startGoalEdit = () => {
+    setGoalFormError(null);
+    setGoalDraft(createGoalDraft(goal));
+    setIsGoalEditing(true);
+  };
+
+  const cancelGoalEdit = () => {
+    setGoalFormError(null);
+    setGoalDraft(createGoalDraft(goal));
+    setIsGoalEditing(false);
+  };
+
+  const saveGoal = () => {
+    const summary = goalDraft.summary.trim();
+    if (!summary) {
+      setGoalFormError(t("projects.projectManagerGoalSummaryRequired"));
+      return;
+    }
+    setGoalFormError(null);
+    goalMutation.mutate({
+      summary,
+      constraints: parseProjectManagerTextList(goalDraft.constraintsText),
+      acceptanceCriteria: parseProjectManagerTextList(goalDraft.acceptanceCriteriaText),
+      status: goalDraft.status.trim() || "active",
+    });
   };
 
   return (
@@ -108,7 +181,18 @@ export function ProjectManagerPanel({ projectId, enabled }: ProjectManagerPanelP
         </Card>
       ) : (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-          <ProjectManagerGoalCard goal={goal} t={t} />
+          <ProjectManagerGoalCard
+            goal={goal}
+            t={t}
+            draft={goalDraft}
+            error={goalFormError}
+            isEditing={isGoalEditing}
+            isSaving={goalMutation.isPending}
+            onCancel={cancelGoalEdit}
+            onDraftChange={setGoalDraft}
+            onEdit={startGoalEdit}
+            onSave={saveGoal}
+          />
           <ProjectManagerWorkItemsCard workItems={workItems} t={t} />
           <ProjectManagerLedgerCard events={ledgerEvents} t={t} />
         </div>
@@ -147,20 +231,102 @@ function ProjectManagerError({
 function ProjectManagerGoalCard({
   goal,
   t,
+  draft,
+  error,
+  isEditing,
+  isSaving,
+  onCancel,
+  onDraftChange,
+  onEdit,
+  onSave,
 }: {
-  goal: Awaited<ReturnType<typeof getProjectManagerGoal>>["goal"] | null;
+  goal: ProjectManagerGoal | null;
   t: Translate;
+  draft: GoalDraft;
+  error: string | null;
+  isEditing: boolean;
+  isSaving: boolean;
+  onCancel: () => void;
+  onDraftChange: (draft: GoalDraft) => void;
+  onEdit: () => void;
+  onSave: () => void;
 }) {
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <CardTitle className="flex items-center gap-2 text-base">
           <BriefcaseBusiness className="size-4" />
           {t("projects.projectManagerGoal")}
         </CardTitle>
+        {!isEditing && (
+          <Button size="sm" variant="outline" onClick={onEdit}>
+            {t("projects.projectManagerEditGoal")}
+          </Button>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
-        {!goal ? (
+        {isEditing ? (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="project-manager-goal-summary">{t("projects.projectManagerGoalSummary")}</Label>
+              <Input
+                id="project-manager-goal-summary"
+                value={draft.summary}
+                aria-invalid={!!error && draft.summary.trim().length === 0}
+                disabled={isSaving}
+                onChange={(event) => onDraftChange({ ...draft, summary: event.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="project-manager-goal-constraints">
+                {t("projects.projectManagerConstraints")}
+              </Label>
+              <Textarea
+                id="project-manager-goal-constraints"
+                value={draft.constraintsText}
+                disabled={isSaving}
+                placeholder={t("projects.projectManagerTextListHint")}
+                onChange={(event) => onDraftChange({ ...draft, constraintsText: event.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">{t("projects.projectManagerTextListHint")}</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="project-manager-goal-acceptance">
+                {t("projects.projectManagerAcceptanceCriteria")}
+              </Label>
+              <Textarea
+                id="project-manager-goal-acceptance"
+                value={draft.acceptanceCriteriaText}
+                disabled={isSaving}
+                placeholder={t("projects.projectManagerTextListHint")}
+                onChange={(event) => onDraftChange({ ...draft, acceptanceCriteriaText: event.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">{t("projects.projectManagerTextListHint")}</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="project-manager-goal-status">{t("projects.projectManagerGoalStatus")}</Label>
+              <Input
+                id="project-manager-goal-status"
+                value={draft.status}
+                disabled={isSaving}
+                onChange={(event) => onDraftChange({ ...draft, status: event.target.value })}
+              />
+            </div>
+            {error && (
+              <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            )}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="outline" onClick={onCancel} disabled={isSaving}>
+                {t("projects.projectManagerCancel")}
+              </Button>
+              <Button onClick={onSave} disabled={isSaving}>
+                {t("projects.projectManagerSaveGoal")}
+              </Button>
+            </div>
+          </div>
+        ) : !goal ? (
           <EmptyState
             title={t("projects.projectManagerNoGoalTitle")}
             body={t("projects.projectManagerNoGoalBody")}
@@ -326,6 +492,33 @@ function SummaryMetric({ label, value }: { label: string; value: number }) {
       <div className="mt-1 font-mono text-sm tabular-nums">{value}</div>
     </div>
   );
+}
+
+function parseProjectManagerTextList(value: string): string[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function formatProjectManagerTextList(values: string[]): string {
+  return values.join("\n");
+}
+
+function createGoalDraft(goal: ProjectManagerGoal | null): GoalDraft {
+  return {
+    summary: goal?.summary ?? "",
+    constraintsText: formatProjectManagerTextList(goal?.constraints ?? []),
+    acceptanceCriteriaText: formatProjectManagerTextList(goal?.acceptanceCriteria ?? []),
+    status: goal?.status ?? "active",
+  };
+}
+
+function projectManagerMutationMessage(error: unknown, fallback: string) {
+  if (error instanceof GatewayApiError && error.message) {
+    return error.message;
+  }
+  return fallback;
 }
 
 function statusBadgeVariant(status: ProjectManagerWorkItemStatus | string) {
