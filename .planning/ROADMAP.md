@@ -21,6 +21,14 @@
 
 **Requirements:** POS-01, POS-02, POS-03, TRACE-01, TRACE-02, TRACE-03, TRACE-04
 
+**Plans:** 4 plans
+
+Plans:
+- [ ] 12-01-PLAN.md — Project Manager trace DTOs, pendingActionId evidence refs, safe ledger trace contract, and API docs.
+- [ ] 12-02-PLAN.md — Gateway Copilot PM prepare tools, canonical approval handlers, terminal failed semantics, and trusted-evidence done gate.
+- [ ] 12-03-PLAN.md — Web DTOs, fixed PM Copilot summaries, result summaries, and localized trace copy.
+- [ ] 12-04-PLAN.md — PM approval cards, View in Project Manager anchor, PM detail/ledger markers, and browser coverage.
+
 **Success criteria:**
 
 1. Copilot can propose project-manager work item creation, status updates, and evidence attachment through pending actions.
@@ -144,7 +152,7 @@ Full archive:
 | 9. Project Manager Web Foundation | v1.2 | 2/2 | Complete   | 2026-05-21 |
 | 10. Goal And Work Item Operations | v1.2 | 3/3 | Complete   | 2026-05-22 |
 | 11. Evidence, Ledger, And Acceptance Gates | v1.2 | 3/3 | Complete   | 2026-05-22 |
-| 12. Copilot Project-Manager Traceability | v1.3 | 0/0 | Planned | — |
+| 12. Copilot Project-Manager Traceability | v1.3 | 0/4 | Planned | — |
 | 13. Project Manager Board Workflow | v1.3 | 0/0 | Planned | — |
 | 14. Terminal Workspace Context | v1.3 | 0/0 | Planned | — |
 | 15. Model Provider Setup And Health | v1.3 | 0/0 | Planned | — |
