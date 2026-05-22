@@ -17,7 +17,7 @@
 - [x] **PMUX-02**: User can view and update the project goal summary, constraints, acceptance criteria, and status.
 - [x] **PMUX-03**: User can list, filter, and inspect project-manager work items with status, priority, acceptance criteria, and reference counts.
 - [x] **PMUX-04**: User can create a project-manager work item with title, description, priority, acceptance criteria, and optional initial references.
-- [ ] **PMUX-05**: User can move a work item through allowed status transitions and receives a clear blocked state when completion lacks evidence or a manual completion reason.
+- [x] **PMUX-05**: User can move a work item through allowed status transitions and receives a clear blocked state when completion lacks evidence or a manual completion reason.
 
 ### Evidence And Ledger Review
 
@@ -61,7 +61,7 @@
 | PMUX-02 | Phase 10 | Complete |
 | PMUX-03 | Phase 10 | Complete |
 | PMUX-04 | Phase 10 | Complete |
-| PMUX-05 | Phase 10 | Pending |
+| PMUX-05 | Phase 10 | Complete |
 | PMEV-01 | Phase 11 | Pending |
 | PMEV-02 | Phase 11 | Pending |
 | PMEV-03 | Phase 11 | Pending |
