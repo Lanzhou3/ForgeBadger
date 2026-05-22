@@ -15,8 +15,8 @@
 
 - [x] **PMUX-01**: User can open a first-class project-manager surface from a project detail context without leaving the project workflow.
 - [x] **PMUX-02**: User can view and update the project goal summary, constraints, acceptance criteria, and status.
-- [ ] **PMUX-03**: User can list, filter, and inspect project-manager work items with status, priority, acceptance criteria, and reference counts.
-- [ ] **PMUX-04**: User can create a project-manager work item with title, description, priority, acceptance criteria, and optional initial references.
+- [x] **PMUX-03**: User can list, filter, and inspect project-manager work items with status, priority, acceptance criteria, and reference counts.
+- [x] **PMUX-04**: User can create a project-manager work item with title, description, priority, acceptance criteria, and optional initial references.
 - [ ] **PMUX-05**: User can move a work item through allowed status transitions and receives a clear blocked state when completion lacks evidence or a manual completion reason.
 
 ### Evidence And Ledger Review
@@ -59,8 +59,8 @@
 | PMAPI-02 | Phase 9 | Complete |
 | PMUX-01 | Phase 9 | Complete |
 | PMUX-02 | Phase 10 | Complete |
-| PMUX-03 | Phase 10 | Pending |
-| PMUX-04 | Phase 10 | Pending |
+| PMUX-03 | Phase 10 | Complete |
+| PMUX-04 | Phase 10 | Complete |
 | PMUX-05 | Phase 10 | Pending |
 | PMEV-01 | Phase 11 | Pending |
 | PMEV-02 | Phase 11 | Pending |
