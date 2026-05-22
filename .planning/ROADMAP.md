@@ -101,7 +101,7 @@ Full archive:
 | 8. First-User Readiness Packet | v1.1 | 2/2 | Complete | 2026-05-21 |
 | 9. Project Manager Web Foundation | v1.2 | 2/2 | Complete   | 2026-05-21 |
 | 10. Goal And Work Item Operations | v1.2 | 3/3 | Complete   | 2026-05-22 |
-| 11. Evidence, Ledger, And Acceptance Gates | v1.2 | 0/? | Planned | — |
+| 11. Evidence, Ledger, And Acceptance Gates | v1.2 | 0/3 | Ready to execute | — |
 
 ## Backlog
 
