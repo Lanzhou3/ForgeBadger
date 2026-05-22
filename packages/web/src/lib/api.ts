@@ -41,6 +41,7 @@ export interface ProjectManagerEvidenceRef {
   path?: string;
   sessionId?: string;
   copilotRunId?: string;
+  pendingActionId?: string;
   feishuChatId?: string;
   feishuMessageId?: string;
   createdAt?: string;
@@ -119,6 +120,17 @@ export type ProjectManagerLedgerEventType =
   | "next_step_proposed"
   | "manual_completion_recorded";
 
+export interface ProjectManagerLedgerTrace {
+  copilotRunId?: string;
+  pendingActionId?: string;
+  actionType?: "create_work_item" | "update_work_item_status" | "attach_evidence" | string;
+  targetType?: "project" | "work_item" | string;
+  targetId?: string;
+  evidenceRefCount?: number;
+  approvalStatus?: "approved" | "failed" | "rejected" | string;
+  executionStatus?: "succeeded" | "failed" | string;
+}
+
 export interface ProjectManagerLedgerEvent {
   id: string;
   projectId: string;
@@ -127,6 +139,7 @@ export interface ProjectManagerLedgerEvent {
   status: ProjectManagerWorkItemStatus | null;
   evidenceRefCount: number;
   feishuRefCount: number;
+  trace?: ProjectManagerLedgerTrace;
   createdAt: number;
 }
 
