@@ -21,13 +21,13 @@
 
 ### Evidence And Ledger Review
 
-- [ ] **PMEV-01**: User can attach bounded evidence references to a work item using only the approved reference fields from `docs/API.md`.
+- [x] **PMEV-01**: User can attach bounded evidence references to a work item using only the approved reference fields from `docs/API.md`.
 - [ ] **PMEV-02**: User can review a ledger timeline that shows safe event markers, status, evidence counts, Feishu reference counts, and timestamps without raw sensitive details.
 - [ ] **PMEV-03**: User can distinguish manual completion, evidence attachment, blocker, and status-change events from the ledger surface.
 
 ### Safety, Testing, And Handoff
 
-- [ ] **PMQA-01**: Project-manager Web workflow tests cover typed client calls, component states, mutation errors, strict E2E mocks, and at least one end-to-end project goal/work-item/evidence/ledger path.
+- [x] **PMQA-01**: Project-manager Web workflow tests cover typed client calls, component states, mutation errors, strict E2E mocks, and at least one end-to-end project goal/work-item/evidence/ledger path.
 - [ ] **PMQA-02**: Maintainer docs or trial notes describe the v1.2 project-manager workflow, known boundaries, and what evidence should never be pasted into the UI.
 
 ## Future Requirements
@@ -62,10 +62,10 @@
 | PMUX-03 | Phase 10 | Complete |
 | PMUX-04 | Phase 10 | Complete |
 | PMUX-05 | Phase 10 | Complete |
-| PMEV-01 | Phase 11 | Pending |
+| PMEV-01 | Phase 11 | Complete |
 | PMEV-02 | Phase 11 | Pending |
 | PMEV-03 | Phase 11 | Pending |
-| PMQA-01 | Phase 11 | Pending |
+| PMQA-01 | Phase 11 | Complete |
 | PMQA-02 | Phase 11 | Pending |
 
 **Coverage:**
