@@ -28,7 +28,7 @@
 ### Safety, Testing, And Handoff
 
 - [x] **PMQA-01**: Project-manager Web workflow tests cover typed client calls, component states, mutation errors, strict E2E mocks, and at least one end-to-end project goal/work-item/evidence/ledger path.
-- [ ] **PMQA-02**: Maintainer docs or trial notes describe the v1.2 project-manager workflow, known boundaries, and what evidence should never be pasted into the UI.
+- [x] **PMQA-02**: Maintainer docs or trial notes describe the v1.2 project-manager workflow, known boundaries, and what evidence should never be pasted into the UI.
 
 ## Future Requirements
 
@@ -66,7 +66,7 @@
 | PMEV-02 | Phase 11 | Complete |
 | PMEV-03 | Phase 11 | Complete |
 | PMQA-01 | Phase 11 | Complete |
-| PMQA-02 | Phase 11 | Pending |
+| PMQA-02 | Phase 11 | Complete |
 
 **Coverage:**
 - v1.2 requirements: 12 total

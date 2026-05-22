@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Project Manager Web Workflow
-status: executing
-stopped_at: Completed 11-02-PLAN.md
-last_updated: "2026-05-22T06:51:55.874Z"
+status: verifying
+stopped_at: Completed Phase 11 execution
+last_updated: "2026-05-22T07:00:05.739Z"
 last_activity: 2026-05-22
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 8
-  completed_plans: 7
-  percent: 67
+  completed_plans: 8
+  percent: 100
 ---
 
 # Project State
@@ -25,16 +25,16 @@ See: `.planning/PROJECT.md` (updated 2026-05-21)
 
 ## Current Position
 
-Phase: 11 (evidence-ledger-and-acceptance-gates) — EXECUTING
+Phase: 11 (evidence-ledger-and-acceptance-gates) — COMPLETE
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-05-22
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 21
+- Total plans completed: 22
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -72,8 +72,9 @@ Last activity: 2026-05-22
 | Phase 10 P02 | 9min | 4 tasks | 4 files |
 | Phase 10 P03 | 7min | 4 tasks | 3 files |
 | 10 | 3 | - | - |
-| 11 | 2/3 | 22min | 11min |
+| 11 | 3/3 | 30min | 10min |
 | Phase 11 P02 | 10min | 4 tasks | 3 files |
+| Phase 11 P03 | 8min | 4 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -104,6 +105,8 @@ Recent decisions affecting current work:
 - [Phase 11]: Web submits exactly one structured evidence reference and blocks obvious raw output or secret-like pointer values before calling Gateway. — Plan 11-01 implementation.
 - [Phase 11]: Ledger filters stay local and bounded to existing event types; blocker filtering includes both blocker_recorded and blocker_resolved. — Plan 11-02 implementation.
 - [Phase 11]: Ledger load failure is scoped to the ledger card so goal and work item operations remain usable. — Plan 11-02 implementation.
+- [Phase 11]: The v1.2 happy-path E2E keeps strict route mocks and covers goal visibility, work item detail, evidence attach, status movement, and ledger markers in one flow. — Plan 11-03 closeout.
+- [Phase 11]: Project Manager trial/support docs treat evidence as bounded references and explicitly forbid raw terminal, Feishu, provider, token, key, and secret content. — Plan 11-03 closeout.
 
 ### Pending Todos
 
@@ -131,9 +134,9 @@ None in `.planning/todos/` yet. v1.2 work is being defined in `.planning/ROADMAP
 
 ## Session Continuity
 
-Last session: 2026-05-22T06:51:55.848Z
-Stopped at: Completed 11-02-PLAN.md
-Resume file: .planning/phases/OF-11-evidence-ledger-and-acceptance-gates/11-03-PLAN.md
+Last session: 2026-05-22T07:00:05.604Z
+Stopped at: Completed Phase 11 execution
+Resume file: None
 
 ## Operator Next Steps
 
