@@ -26,7 +26,7 @@
 Plans:
 **Wave 1**
 
-- [ ] 12-01-PLAN.md — Project Manager trace DTOs, pendingActionId evidence refs, safe ledger trace contract, and API docs.
+- [x] 12-01-PLAN.md — Project Manager trace DTOs, pendingActionId evidence refs, safe ledger trace contract, and API docs.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -163,7 +163,7 @@ Full archive:
 | 9. Project Manager Web Foundation | v1.2 | 2/2 | Complete   | 2026-05-21 |
 | 10. Goal And Work Item Operations | v1.2 | 3/3 | Complete   | 2026-05-22 |
 | 11. Evidence, Ledger, And Acceptance Gates | v1.2 | 3/3 | Complete   | 2026-05-22 |
-| 12. Copilot Project-Manager Traceability | v1.3 | 0/4 | Planned | — |
+| 12. Copilot Project-Manager Traceability | v1.3 | 1/4 | In Progress | — |
 | 13. Project Manager Board Workflow | v1.3 | 0/0 | Planned | — |
 | 14. Terminal Workspace Context | v1.3 | 0/0 | Planned | — |
 | 15. Model Provider Setup And Health | v1.3 | 0/0 | Planned | — |

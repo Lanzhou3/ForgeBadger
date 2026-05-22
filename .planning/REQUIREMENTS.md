@@ -16,15 +16,15 @@
 
 ### Product Position
 
-- [ ] **POS-01**: OpenForge remains a local-first AI CLI control plane; AI-native project management is a traceability layer on top of local AI CLI execution, not a Jira/Linear replacement.
-- [ ] **POS-02**: Project Manager state remains Gateway-owned, tenant-scoped, audited, and bounded to structured references.
+- [x] **POS-01**: OpenForge remains a local-first AI CLI control plane; AI-native project management is a traceability layer on top of local AI CLI execution, not a Jira/Linear replacement.
+- [x] **POS-02**: Project Manager state remains Gateway-owned, tenant-scoped, audited, and bounded to structured references.
 - [ ] **POS-03**: Copilot, Feishu, and model output may propose project-manager writes only through explicit pending-action approval flows.
 
 ### Copilot And Project Manager Traceability
 
-- [ ] **TRACE-01**: User can link a Copilot run, pending action, or safe run summary to a project-manager work item as a bounded evidence reference.
+- [x] **TRACE-01**: User can link a Copilot run, pending action, or safe run summary to a project-manager work item as a bounded evidence reference.
 - [ ] **TRACE-02**: Copilot can propose project-manager work item creation, status updates, and evidence attachments through pending actions, never direct mutation.
-- [ ] **TRACE-03**: Ledger events record safe traceability markers for Copilot-proposed changes, including run id, action type, status, and evidence counts without raw prompt, terminal, provider, or secret content.
+- [x] **TRACE-03**: Ledger events record safe traceability markers for Copilot-proposed changes, including run id, action type, status, and evidence counts without raw prompt, terminal, provider, or secret content.
 - [ ] **TRACE-04**: Web surfaces show how a work item moved from prompt to approval to execution evidence.
 
 ### Project Manager Board Workflow
