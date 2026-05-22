@@ -25,6 +25,12 @@ import {
 import { FeishuIntegrationRepository } from "../db/repositories/feishu-integration-repository.js";
 import { ModelProviderRepository, type ModelProfile, type ProviderProfile } from "../db/repositories/model-provider-repository.js";
 import { ProjectRepository, type Project } from "../db/repositories/project-repository.js";
+import {
+  PROJECT_MANAGER_WORK_ITEM_STATUSES,
+  ProjectManagerRepository,
+  type ProjectManagerEvidenceRef,
+  type ProjectManagerWorkItem
+} from "../db/repositories/project-manager-repository.js";
 import { AgentRepository, type Agent } from "../db/repositories/agent-repository.js";
 import { PluginRepository } from "../db/repositories/plugin-repository.js";
 import { ProjectSkillRepository } from "../db/repositories/project-skill-repository.js";
@@ -269,6 +275,39 @@ const modelProviderApplyApprovalSchema = z.object({
 const troubleshootingStepsApprovalSchema = z.object({
   summary: z.string().min(1).optional(),
   steps: z.array(z.string().min(1)).min(1).max(10).optional()
+}).strict();
+const projectManagerEvidenceRefApprovalSchema = z.object({
+  kind: z.string().trim().min(1).max(64),
+  label: z.string().trim().min(1).max(256),
+  status: z.string().trim().min(1).max(64),
+  ref: z.string().trim().min(1).max(512).optional(),
+  path: z.string().trim().min(1).max(512).optional(),
+  sessionId: z.string().trim().min(1).max(128).optional()
+}).strict();
+const projectManagerCreateWorkItemApprovalSchema = z.object({
+  actionType: z.literal("create_work_item"),
+  projectId: z.string().min(1),
+  title: z.string().trim().min(1).max(256),
+  description: z.string().trim().min(1).max(4_000).optional(),
+  status: z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES).optional(),
+  priority: z.number().int().min(0).max(100).optional(),
+  acceptanceCriteria: z.array(z.string().trim().min(1).max(1_000)).max(50).optional(),
+  evidenceRefs: z.array(projectManagerEvidenceRefApprovalSchema).max(20).optional(),
+  copilotRunId: z.string().min(1)
+}).strict();
+const projectManagerUpdateStatusApprovalSchema = z.object({
+  actionType: z.literal("update_work_item_status"),
+  projectId: z.string().min(1),
+  workItemId: z.string().min(1),
+  status: z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES),
+  copilotRunId: z.string().min(1)
+}).strict();
+const projectManagerAttachEvidenceApprovalSchema = z.object({
+  actionType: z.literal("attach_evidence"),
+  projectId: z.string().min(1),
+  workItemId: z.string().min(1),
+  evidenceRef: projectManagerEvidenceRefApprovalSchema,
+  copilotRunId: z.string().min(1)
 }).strict();
 const defaultStaleCopilotRunTimeoutMs = 15 * 60 * 1000;
 
@@ -726,6 +765,19 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     } catch {
       const cancelled = rejectClaimIfRunCancelled(repo, target.run.id, claimed.id);
       if (cancelled) return sendRunCancelledDuringApproval(res);
+      if (isProjectManagerPendingActionType(claimed.type)) {
+        const failed = failProjectManagerPendingAction(repo, claimed, {
+          code: "project_manager_action_failed",
+          message: "Project Manager action failed"
+        });
+        completeRunIfNoPendingActions(repo, target.run);
+        res.status(500).json({
+          code: 1,
+          message: "Project Manager action failed",
+          details: { code: "project_manager_action_failed", action: failed }
+        });
+        return;
+      }
       repo.updatePendingActionIfStatus(claimed.id, "processing", {
         status: "pending",
         result: null,
@@ -742,6 +794,12 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     const cancelled = rejectClaimIfRunCancelled(repo, target.run.id, claimed.id);
     if (cancelled) return sendRunCancelledDuringApproval(res);
     if (isApprovalError(result)) {
+      if (isProjectManagerPendingActionType(claimed.type)) {
+        const failed = failProjectManagerPendingAction(repo, claimed, result.error);
+        completeRunIfNoPendingActions(repo, target.run);
+        res.status(400).json({ code: 1, message: result.error.message, details: { code: result.error.code, action: failed } });
+        return;
+      }
       repo.updatePendingActionIfStatus(claimed.id, "processing", {
         status: "pending",
         result: null,
@@ -1206,6 +1264,35 @@ function sendRunCancelledDuringApproval(
   });
 }
 
+function failProjectManagerPendingAction(
+  repo: CopilotRepository,
+  action: CopilotPendingAction,
+  error: { code: string; message: string }
+): CopilotPendingAction {
+  const result = {
+    error,
+    details: { code: error.code },
+    projectManager: omitUndefined({
+      actionType: projectManagerSemanticActionType(action.type),
+      copilotRunId: stringField(action.input, "copilotRunId") ?? action.runId,
+      pendingActionId: action.id,
+      approvalStatus: "failed",
+      executionStatus: "failed"
+    })
+  };
+  return repo.updatePendingActionIfStatus(action.id, "processing", {
+    status: "failed",
+    result
+  }) ?? repo.getPendingAction(action.id) ?? action;
+}
+
+function projectManagerSemanticActionType(type: string): string | undefined {
+  if (type === "openforge.propose_project_manager_create_work_item") return "create_work_item";
+  if (type === "openforge.propose_project_manager_update_work_item_status") return "update_work_item_status";
+  if (type === "openforge.propose_project_manager_attach_evidence") return "attach_evidence";
+  return undefined;
+}
+
 function recordPendingActionDecision(
   repo: CopilotRepository,
   action: CopilotPendingAction,
@@ -1593,6 +1680,9 @@ async function approvePendingAction(
   if (action.type === "openforge.propose_model_provider_apply") {
     return await approveCopilotModelProviderApply(action, options, userId);
   }
+  if (isProjectManagerPendingActionType(action.type)) {
+    return approveCopilotProjectManagerAction(action, options, userId);
+  }
   if (isFeishuPendingActionType(action.type)) {
     return await approveCopilotFeishuAction(action, options, userId);
   }
@@ -1611,6 +1701,250 @@ async function approvePendingAction(
       message: "Copilot pending action type is not supported"
     }
   };
+}
+
+const projectManagerPendingActionTypes = new Set([
+  "openforge.propose_project_manager_create_work_item",
+  "openforge.propose_project_manager_update_work_item_status",
+  "openforge.propose_project_manager_attach_evidence"
+]);
+
+function isProjectManagerPendingActionType(type: string): boolean {
+  return projectManagerPendingActionTypes.has(type);
+}
+
+function approveCopilotProjectManagerAction(
+  action: CopilotPendingAction,
+  options: CopilotRoutesOptions,
+  userId: string
+): Record<string, unknown> {
+  if (action.type === "openforge.propose_project_manager_create_work_item") {
+    return approveProjectManagerCreateWorkItem(action, options, userId);
+  }
+  if (action.type === "openforge.propose_project_manager_update_work_item_status") {
+    return approveProjectManagerUpdateWorkItemStatus(action, options, userId);
+  }
+  return approveProjectManagerAttachEvidence(action, options, userId);
+}
+
+function approveProjectManagerCreateWorkItem(
+  action: CopilotPendingAction,
+  options: CopilotRoutesOptions,
+  userId: string
+): Record<string, unknown> {
+  const parsed = projectManagerCreateWorkItemApprovalSchema.safeParse(action.input);
+  if (!parsed.success) return projectManagerApprovalError("project_manager_action_invalid", "Project Manager action payload is invalid");
+  const project = new ProjectRepository(options.db, userId).getById(parsed.data.projectId);
+  if (!project) return projectManagerApprovalError("project_manager_action_not_available", "Project Manager action target is not available");
+  const repo = new ProjectManagerRepository(options.db, userId);
+  try {
+    const evidenceRefs = stampProjectManagerEvidenceRefs(parsed.data.evidenceRefs ?? [], action, parsed.data.copilotRunId);
+    const item = repo.createWorkItem(project.id, {
+      title: parsed.data.title,
+      description: parsed.data.description,
+      status: parsed.data.status,
+      priority: parsed.data.priority,
+      acceptanceCriteria: parsed.data.acceptanceCriteria,
+      evidenceRefs,
+      details: buildProjectManagerTraceDetails(action, {
+        actionType: "create_work_item",
+        targetType: "work_item",
+        evidenceRefCount: evidenceRefs.length,
+        copilotRunId: parsed.data.copilotRunId
+      })
+    });
+    return projectManagerApprovalResult(action, {
+      actionType: "create_work_item",
+      projectId: project.id,
+      workItemId: item.id,
+      status: item.status,
+      evidenceRefCount: item.evidenceRefs.length,
+      copilotRunId: parsed.data.copilotRunId
+    });
+  } catch {
+    return projectManagerApprovalError("project_manager_action_failed", "Project Manager action failed");
+  }
+}
+
+function approveProjectManagerUpdateWorkItemStatus(
+  action: CopilotPendingAction,
+  options: CopilotRoutesOptions,
+  userId: string
+): Record<string, unknown> {
+  const parsed = projectManagerUpdateStatusApprovalSchema.safeParse(action.input);
+  if (!parsed.success) return projectManagerApprovalError("project_manager_action_invalid", "Project Manager action payload is invalid");
+  const target = getProjectManagerActionTarget(options.db, userId, parsed.data.projectId, parsed.data.workItemId);
+  if (!target.ok) return projectManagerApprovalError(target.code, target.message);
+  const trustedEvidenceRefCount = trustedEvidenceRefs(target.workItem).length;
+  if (parsed.data.status === "done" && trustedEvidenceRefCount === 0) {
+    return projectManagerApprovalError("project_manager_trusted_evidence_required", "Copilot completion requires existing accepted or verified evidence");
+  }
+  try {
+    const item = target.repo.updateWorkItemStatus(target.project.id, target.workItem.id, {
+      status: parsed.data.status,
+      details: buildProjectManagerTraceDetails(action, {
+        actionType: "update_work_item_status",
+        targetType: "work_item",
+        targetId: target.workItem.id,
+        evidenceRefCount: target.workItem.evidenceRefs.length,
+        copilotRunId: parsed.data.copilotRunId
+      })
+    });
+    return projectManagerApprovalResult(action, {
+      actionType: "update_work_item_status",
+      projectId: target.project.id,
+      workItemId: item.id,
+      status: item.status,
+      evidenceRefCount: item.evidenceRefs.length,
+      trustedEvidenceRefCount,
+      copilotRunId: parsed.data.copilotRunId
+    });
+  } catch {
+    return projectManagerApprovalError("project_manager_action_failed", "Project Manager action failed");
+  }
+}
+
+function approveProjectManagerAttachEvidence(
+  action: CopilotPendingAction,
+  options: CopilotRoutesOptions,
+  userId: string
+): Record<string, unknown> {
+  const parsed = projectManagerAttachEvidenceApprovalSchema.safeParse(action.input);
+  if (!parsed.success) return projectManagerApprovalError("project_manager_action_invalid", "Project Manager action payload is invalid");
+  const target = getProjectManagerActionTarget(options.db, userId, parsed.data.projectId, parsed.data.workItemId);
+  if (!target.ok) return projectManagerApprovalError(target.code, target.message);
+  try {
+    const evidenceRef = stampProjectManagerEvidenceRef(parsed.data.evidenceRef, action, parsed.data.copilotRunId);
+    const item = target.repo.attachEvidence(target.project.id, target.workItem.id, {
+      evidenceRefs: [evidenceRef],
+      details: buildProjectManagerTraceDetails(action, {
+        actionType: "attach_evidence",
+        targetType: "work_item",
+        targetId: target.workItem.id,
+        evidenceRefCount: target.workItem.evidenceRefs.length + 1,
+        copilotRunId: parsed.data.copilotRunId
+      })
+    });
+    return projectManagerApprovalResult(action, {
+      actionType: "attach_evidence",
+      projectId: target.project.id,
+      workItemId: item.id,
+      status: item.status,
+      evidenceRefCount: 1,
+      copilotRunId: parsed.data.copilotRunId
+    });
+  } catch {
+    return projectManagerApprovalError("project_manager_action_failed", "Project Manager action failed");
+  }
+}
+
+function getProjectManagerActionTarget(
+  db: Database,
+  userId: string,
+  projectId: string,
+  workItemId: string
+): (
+  { ok: true; project: Project; workItem: ProjectManagerWorkItem; repo: ProjectManagerRepository } |
+  { ok: false; code: string; message: string }
+) {
+  const project = new ProjectRepository(db, userId).getById(projectId);
+  if (!project) return projectManagerTargetError();
+  const repo = new ProjectManagerRepository(db, userId);
+  const workItem = repo.getWorkItem(project.id, workItemId);
+  if (!workItem) return projectManagerTargetError();
+  return { ok: true, project, workItem, repo };
+}
+
+function projectManagerTargetError(): { ok: false; code: string; message: string } {
+  return {
+    ok: false,
+    code: "project_manager_action_not_available",
+    message: "Project Manager action target is not available"
+  };
+}
+
+function stampProjectManagerEvidenceRefs(
+  refs: ProjectManagerEvidenceRef[],
+  action: CopilotPendingAction,
+  copilotRunId: string
+): ProjectManagerEvidenceRef[] {
+  return refs.map((ref) => stampProjectManagerEvidenceRef(ref, action, copilotRunId));
+}
+
+function stampProjectManagerEvidenceRef(
+  ref: ProjectManagerEvidenceRef,
+  action: CopilotPendingAction,
+  copilotRunId: string
+): ProjectManagerEvidenceRef {
+  return {
+    ...ref,
+    copilotRunId,
+    pendingActionId: action.id
+  };
+}
+
+function trustedEvidenceRefs(workItem: ProjectManagerWorkItem): ProjectManagerEvidenceRef[] {
+  return workItem.evidenceRefs.filter((ref) => {
+    const status = ref.status?.trim().toLowerCase();
+    return status === "accepted" || status === "verified";
+  });
+}
+
+function buildProjectManagerTraceDetails(
+  action: CopilotPendingAction,
+  input: {
+    actionType: string;
+    targetType: string;
+    targetId?: string | undefined;
+    evidenceRefCount: number;
+    copilotRunId: string;
+  }
+): Record<string, unknown> {
+  return omitUndefined({
+    copilotRunId: input.copilotRunId,
+    pendingActionId: action.id,
+    actionType: input.actionType,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    evidenceRefCount: input.evidenceRefCount,
+    approvalStatus: "approved",
+    executionStatus: "succeeded"
+  });
+}
+
+function projectManagerApprovalResult(
+  action: CopilotPendingAction,
+  input: {
+    actionType: string;
+    projectId: string;
+    workItemId: string;
+    status: string;
+    evidenceRefCount: number;
+    trustedEvidenceRefCount?: number | undefined;
+    copilotRunId: string;
+  }
+): Record<string, unknown> {
+  return {
+    projectManager: omitUndefined({
+      actionType: input.actionType,
+      projectId: input.projectId,
+      workItemId: input.workItemId,
+      targetType: "work_item",
+      targetId: input.workItemId,
+      status: input.status,
+      evidenceRefCount: input.evidenceRefCount,
+      trustedEvidenceRefCount: input.trustedEvidenceRefCount,
+      copilotRunId: input.copilotRunId,
+      pendingActionId: action.id,
+      approvalStatus: "approved",
+      executionStatus: "succeeded"
+    }),
+    executed: true
+  };
+}
+
+function projectManagerApprovalError(code: string, message: string): Record<string, unknown> {
+  return { error: { code, message } };
 }
 
 const feishuPendingActionOperations = {
@@ -3254,6 +3588,10 @@ function isApprovalError(result: Record<string, unknown>): result is { error: { 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function omitUndefined(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
 }
 
 function stringField(payload: Record<string, unknown>, key: string): string | undefined {

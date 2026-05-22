@@ -57,6 +57,33 @@ const projectManagerLedgerInput = z.object({
   eventType: z.enum(PROJECT_MANAGER_LEDGER_EVENT_TYPES).optional(),
   limit: z.number().int().min(1).max(50).optional()
 }).strict();
+const projectManagerEvidenceRefInput = z.object({
+  kind: z.string().trim().min(1).max(64),
+  label: z.string().trim().min(1).max(256),
+  status: z.string().trim().min(1).max(64),
+  ref: z.string().trim().min(1).max(512).optional(),
+  path: z.string().trim().min(1).max(512).optional(),
+  sessionId: z.string().trim().min(1).max(128).optional()
+}).strict();
+const proposeProjectManagerCreateWorkItemInput = z.object({
+  projectId: z.string().min(1),
+  title: z.string().trim().min(1).max(256),
+  description: z.string().trim().min(1).max(4_000).optional(),
+  status: z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES).optional(),
+  priority: z.number().int().min(0).max(100).optional(),
+  acceptanceCriteria: z.array(z.string().trim().min(1).max(1_000)).max(50).optional(),
+  evidenceRefs: z.array(projectManagerEvidenceRefInput).max(20).optional()
+}).strict();
+const proposeProjectManagerUpdateWorkItemStatusInput = z.object({
+  projectId: z.string().min(1),
+  workItemId: z.string().min(1),
+  status: z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES)
+}).strict();
+const proposeProjectManagerAttachEvidenceInput = z.object({
+  projectId: z.string().min(1),
+  workItemId: z.string().min(1),
+  evidenceRef: projectManagerEvidenceRefInput
+}).strict();
 const skillDetailInput = z.object({
   skillId: z.string().min(1),
   projectId: z.string().min(1).optional()
@@ -303,6 +330,61 @@ const projectManagerLedgerModelInputSchema = {
     limit: { type: "integer", minimum: 1, maximum: 50 }
   },
   required: ["projectId"],
+  additionalProperties: false
+};
+const projectManagerEvidenceRefModelInputSchema = {
+  type: "object",
+  properties: {
+    kind: { type: "string", minLength: 1, maxLength: 64 },
+    label: { type: "string", minLength: 1, maxLength: 256 },
+    status: { type: "string", minLength: 1, maxLength: 64 },
+    ref: { type: "string", minLength: 1, maxLength: 512 },
+    path: { type: "string", minLength: 1, maxLength: 512 },
+    sessionId: { type: "string", minLength: 1, maxLength: 128 }
+  },
+  required: ["kind", "label", "status"],
+  additionalProperties: false
+};
+const proposeProjectManagerCreateWorkItemModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    title: { type: "string", minLength: 1, maxLength: 256 },
+    description: { type: "string", minLength: 1, maxLength: 4_000 },
+    status: { type: "string", enum: [...PROJECT_MANAGER_WORK_ITEM_STATUSES] },
+    priority: { type: "integer", minimum: 0, maximum: 100 },
+    acceptanceCriteria: {
+      type: "array",
+      items: { type: "string", minLength: 1, maxLength: 1_000 },
+      maxItems: 50
+    },
+    evidenceRefs: {
+      type: "array",
+      items: projectManagerEvidenceRefModelInputSchema,
+      maxItems: 20
+    }
+  },
+  required: ["projectId", "title"],
+  additionalProperties: false
+};
+const proposeProjectManagerUpdateWorkItemStatusModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    workItemId: { type: "string", minLength: 1 },
+    status: { type: "string", enum: [...PROJECT_MANAGER_WORK_ITEM_STATUSES] }
+  },
+  required: ["projectId", "workItemId", "status"],
+  additionalProperties: false
+};
+const proposeProjectManagerAttachEvidenceModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    workItemId: { type: "string", minLength: 1 },
+    evidenceRef: projectManagerEvidenceRefModelInputSchema
+  },
+  required: ["projectId", "workItemId", "evidenceRef"],
   additionalProperties: false
 };
 const skillDetailModelInputSchema = {
@@ -995,6 +1077,39 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       modelInputSchema: proposeProjectConfigSyncModelInputSchema,
       execute: async (input, context) =>
         createProjectConfigSyncProposal(input, context)
+    },
+    {
+      name: "openforge.propose_project_manager_create_work_item",
+      description:
+        "Prepare creating one Project Manager work item for user approval. This creates a pending action only and does not mutate Project Manager state.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeProjectManagerCreateWorkItemInput,
+      modelInputSchema: proposeProjectManagerCreateWorkItemModelInputSchema,
+      execute: async (input, context) =>
+        createProjectManagerCreateWorkItemProposal(input, context)
+    },
+    {
+      name: "openforge.propose_project_manager_update_work_item_status",
+      description:
+        "Prepare changing one Project Manager work item status for user approval. Done status requires existing accepted or verified evidence at approval time.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeProjectManagerUpdateWorkItemStatusInput,
+      modelInputSchema: proposeProjectManagerUpdateWorkItemStatusModelInputSchema,
+      execute: async (input, context) =>
+        createProjectManagerUpdateWorkItemStatusProposal(input, context)
+    },
+    {
+      name: "openforge.propose_project_manager_attach_evidence",
+      description:
+        "Prepare attaching one bounded evidence reference to one Project Manager work item for user approval.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeProjectManagerAttachEvidenceInput,
+      modelInputSchema: proposeProjectManagerAttachEvidenceModelInputSchema,
+      execute: async (input, context) =>
+        createProjectManagerAttachEvidenceProposal(input, context)
     },
     {
       name: "openforge.propose_session_input",
@@ -1952,6 +2067,71 @@ function createProjectConfigSyncProposal(
     throw new CopilotToolValidationError("Copilot project config sync target is not available");
   }
   return createPendingProposal(context, "openforge.propose_project_config_sync", parsed);
+}
+
+function createProjectManagerCreateWorkItemProposal(
+  input: unknown,
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId">
+) {
+  const parsed = proposeProjectManagerCreateWorkItemInput.parse(input);
+  requireVisibleProject(context, parsed.projectId, "Copilot Project Manager work item target is not available");
+  return createPendingProposal(context, "openforge.propose_project_manager_create_work_item", {
+    ...parsed,
+    actionType: "create_work_item",
+    copilotRunId: requireCopilotRunId(context)
+  });
+}
+
+function createProjectManagerUpdateWorkItemStatusProposal(
+  input: unknown,
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId">
+) {
+  const parsed = proposeProjectManagerUpdateWorkItemStatusInput.parse(input);
+  requireVisibleProjectManagerWorkItem(context, parsed.projectId, parsed.workItemId);
+  return createPendingProposal(context, "openforge.propose_project_manager_update_work_item_status", {
+    ...parsed,
+    actionType: "update_work_item_status",
+    copilotRunId: requireCopilotRunId(context)
+  });
+}
+
+function createProjectManagerAttachEvidenceProposal(
+  input: unknown,
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId">
+) {
+  const parsed = proposeProjectManagerAttachEvidenceInput.parse(input);
+  requireVisibleProjectManagerWorkItem(context, parsed.projectId, parsed.workItemId);
+  return createPendingProposal(context, "openforge.propose_project_manager_attach_evidence", {
+    ...parsed,
+    actionType: "attach_evidence",
+    copilotRunId: requireCopilotRunId(context)
+  });
+}
+
+function requireCopilotRunId(context: Pick<CopilotToolContext, "runId">): string {
+  if (!context.runId) throw new CopilotToolValidationError("Copilot run is required for pending actions");
+  return context.runId;
+}
+
+function requireVisibleProject(
+  context: Pick<CopilotToolContext, "db" | "userId">,
+  projectId: string,
+  message: string
+): Project {
+  const project = new ProjectRepository(context.db, context.userId).getById(projectId);
+  if (!project) throw new CopilotToolValidationError(message);
+  return project;
+}
+
+function requireVisibleProjectManagerWorkItem(
+  context: Pick<CopilotToolContext, "db" | "userId">,
+  projectId: string,
+  workItemId: string
+): ProjectManagerWorkItem {
+  const project = requireVisibleProject(context, projectId, "Copilot Project Manager work item target is not available");
+  const workItem = new ProjectManagerRepository(context.db, context.userId).getWorkItem(project.id, workItemId);
+  if (!workItem) throw new CopilotToolValidationError("Copilot Project Manager work item target is not available");
+  return workItem;
 }
 
 function createSessionInputProposal(
