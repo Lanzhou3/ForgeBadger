@@ -1,4 +1,5 @@
 import {
+  DEFAULT_COPILOT_MAX_STEPS,
   CopilotRepository,
   type CopilotPendingAction,
   type CopilotRun,
@@ -126,15 +127,6 @@ export class CopilotOrchestrator {
       );
       const cancelled = this.cancelledResultIfNeeded(repo, recalledRun, previousEvents, control.signal);
       if (cancelled) return cancelled;
-      if (recalledRun.stepCount >= recalledRun.maxSteps) {
-        return this.failAfterEvents(
-          repo,
-          recalledRun,
-          maxStepsError(recalledRun.maxSteps),
-          previousEvents,
-          400
-        );
-      }
       return await this.callModel(
         repo,
         recalledRun,
@@ -217,8 +209,6 @@ export class CopilotOrchestrator {
       previousEvents,
       response.events
     );
-    const overflow = previousEvents.length + events.length > run.maxSteps;
-    if (overflow) return this.failAfterEvents(repo, run, maxStepsError(run.maxSteps), previousEvents, 400);
     const forcedSessionEvidence = await this.forceSessionEvidenceIfNeeded(
       repo,
       run,
@@ -274,9 +264,6 @@ export class CopilotOrchestrator {
       });
       this.notifyRunEvent(repo.getRun(run.id) ?? run, toolResult);
       currentEvents = [...currentEvents, toolResult];
-      if (currentEvents.length > run.maxSteps) {
-        return this.failAfterEvents(repo, run, maxStepsError(run.maxSteps), currentEvents, 400);
-      }
       toolResults.push({
         toolCall,
         output: result.output,
@@ -323,9 +310,6 @@ export class CopilotOrchestrator {
       response.events
     );
     const followUp = applyDeterministicSessionStatusAnswerIfNeeded(run.goal, events, safeResponseEvents);
-    if (events.length + followUp.length > run.maxSteps) {
-      return this.failAfterEvents(repo, run, maxStepsError(run.maxSteps), events, 400);
-    }
     const forcedSessionEvidence = await this.forceSessionEvidenceIfNeeded(
       repo,
       run,
@@ -558,7 +542,7 @@ function toCreateRunInput(input: RunCopilotTextInput) {
     source: input.source,
     sourceRefId: input.sourceRefId ?? null,
     goal: input.prompt,
-    maxSteps: input.maxSteps ?? 8
+    maxSteps: input.maxSteps ?? DEFAULT_COPILOT_MAX_STEPS
   };
 }
 
@@ -929,13 +913,6 @@ function redactCopilotServiceError(error: CopilotServiceError): CopilotServiceEr
 
 function normalizeCopilotErrorCode(code: string): string {
   return /^copilot_[a-z0-9_]{1,120}$/u.test(code) ? code : "copilot_model_request_failed";
-}
-
-function maxStepsError(maxSteps: number): CopilotServiceError {
-  return {
-    code: "copilot_max_steps_exceeded",
-    message: `Copilot run exceeded max step count ${maxSteps}`
-  };
 }
 
 function modelRequestError(error?: unknown): CopilotServiceError {

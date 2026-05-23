@@ -120,7 +120,7 @@ export const copilotRuns = sqliteTable(
     sourceRefId: text("source_ref_id"),
     goal: text("goal").notNull(),
     stepCount: integer("step_count").notNull().default(0),
-    maxSteps: integer("max_steps").notNull().default(8),
+    maxSteps: integer("max_steps").notNull().default(32),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),

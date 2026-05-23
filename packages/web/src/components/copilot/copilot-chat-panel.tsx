@@ -21,6 +21,7 @@ import {
   Plus,
   Search,
   Send,
+  Square,
   Trash2,
   User,
 } from "lucide-react";
@@ -30,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   approveCopilotPendingAction,
+  cancelCopilotRun,
   createCopilotConversation,
   createCopilotConversationMessage,
   deleteCopilotMemoryItem,
@@ -67,12 +69,14 @@ import {
   getCopilotProviderReadiness,
   getCopilotProviderReadinessMessageKey,
   getCopilotRunPollDelayMs,
+  resolveCopilotConversationSelection,
   isCopilotRunLive,
   readCopilotTerminalSnapshotText,
   readCopilotMessageRunActivity,
   readCopilotRunErrorDetails,
   resolveCopilotRunFailureMessage,
   shouldKeepCopilotActiveRunState,
+  shouldResetCopilotActiveRunForNewMessage,
   shouldRefreshCopilotPanelForGatewayEvent,
   stripCopilotThinkingBlocks,
   type CopilotPendingActionSummary,
@@ -125,6 +129,7 @@ export function CopilotChatPanel({
   const selectedConversationIdRef = useRef<string | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
   const optimisticUserMessageRef = useRef<CopilotMessage | null>(null);
+  const pendingConversationIdsRef = useRef<Set<string>>(new Set());
 
   selectedConversationIdRef.current = selectedConversationId;
   activeRunIdRef.current = activeRun?.run.id ?? null;
@@ -172,11 +177,18 @@ export function CopilotChatPanel({
   });
 
   useEffect(() => {
-    if (draftConversationActive) return;
-    if (selectedConversationId && conversations.some((conversation) => conversation.id === selectedConversationId)) {
-      return;
+    for (const conversation of conversations) {
+      pendingConversationIdsRef.current.delete(conversation.id);
     }
-    setSelectedConversationId(conversations[0]?.id ?? null);
+    const nextSelectedConversationId = resolveCopilotConversationSelection({
+      selectedConversationId,
+      conversations,
+      draftConversationActive,
+      preservedConversationIds: [...pendingConversationIdsRef.current],
+    });
+    if (nextSelectedConversationId !== selectedConversationId) {
+      setSelectedConversationId(nextSelectedConversationId);
+    }
   }, [conversations, draftConversationActive, selectedConversationId]);
 
   useEffect(() => {
@@ -221,6 +233,7 @@ export function CopilotChatPanel({
           ...(initialSourceRefId ? { sourceRefId: initialSourceRefId } : {}),
         });
         conversation = created.conversation;
+        pendingConversationIdsRef.current.add(conversation.id);
         setSelectedConversationId(conversation.id);
       }
       const response = await createCopilotConversationMessage(conversation.id, {
@@ -233,6 +246,10 @@ export function CopilotChatPanel({
     },
     onMutate: (text) => {
       setStreamingAssistantText("");
+      if (shouldResetCopilotActiveRunForNewMessage(activeRun)) {
+        activeRunIdRef.current = null;
+        setActiveRun(null);
+      }
       setOptimisticUserMessage({
         id: `optimistic-${Date.now()}`,
         conversationId: selectedConversationId ?? "pending",
@@ -335,7 +352,31 @@ export function CopilotChatPanel({
       });
     },
   });
+  const activeRunIsLive = Boolean(activeRun?.run.id && isCopilotRunLive(activeRun.run.status));
+  const cancelRunMutation = useMutation({
+    mutationFn: cancelCopilotRun,
+    onSuccess: async (data) => {
+      setActiveRun({
+        run: data.run,
+        events: data.events,
+        pendingActions: data.pendingActions ?? [],
+      });
+      setStreamingAssistantText("");
+      setOptimisticUserMessage(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["copilot-runs"] }),
+        queryClient.invalidateQueries({ queryKey: ["copilot-conversations"] }),
+        selectedConversationId
+          ? queryClient.invalidateQueries({ queryKey: ["copilot-conversation-messages", selectedConversationId] })
+          : Promise.resolve(),
+      ]);
+    },
+    onError: (error) => {
+      setLocalError(resolveChatError(error, t));
+    },
+  });
   const sendDisabled = !providerReady || !prompt.trim() || sendMessageMutation.isPending;
+  const stopDisabled = !activeRun?.run.id || cancelRunMutation.isPending;
 
   useEffect(() => {
     return () => {
@@ -497,6 +538,7 @@ export function CopilotChatPanel({
       if (eventType === "assistant_delta" && (matchesActiveRun || matchesSelectedConversation || matchesPendingConversation)) {
         const delta = typeof detail?.payload?.delta_text === "string" ? detail.payload.delta_text : "";
         if (matchesPendingConversation && eventConversationId && eventRunId && currentOptimisticMessage) {
+          pendingConversationIdsRef.current.add(eventConversationId);
           setSelectedConversationId(eventConversationId);
           setOptimisticUserMessage((current) =>
             current && eventConversationId ? { ...current, conversationId: eventConversationId } : current
@@ -585,6 +627,11 @@ export function CopilotChatPanel({
       return;
     }
     sendMessageMutation.mutate(text);
+  }
+
+  function stopActiveRun() {
+    if (!activeRun?.run.id || cancelRunMutation.isPending) return;
+    cancelRunMutation.mutate(activeRun.run.id);
   }
 
   function startNewConversation() {
@@ -808,13 +855,25 @@ export function CopilotChatPanel({
                 className="min-h-14 flex-1 resize-none bg-transparent px-2 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground"
                 rows={compact ? 2 : 3}
               />
-              <Button type="submit" size="sm" disabled={sendDisabled}>
-                {sendMessageMutation.isPending ? (
+              <Button
+                type={activeRunIsLive ? "button" : "submit"}
+                size="sm"
+                disabled={activeRunIsLive ? stopDisabled : sendDisabled}
+                onClick={activeRunIsLive ? stopActiveRun : undefined}
+                aria-label={activeRunIsLive ? t("copilot.stop") : t("copilot.send")}
+              >
+                {activeRunIsLive ? (
+                  cancelRunMutation.isPending ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Square className="size-4" aria-hidden="true" />
+                  )
+                ) : sendMessageMutation.isPending ? (
                   <Loader2 className="size-4 animate-spin" aria-hidden="true" />
                 ) : (
                   <Send className="size-4" aria-hidden="true" />
                 )}
-                <span className="sr-only">{t("copilot.send")}</span>
+                <span className="sr-only">{activeRunIsLive ? t("copilot.stop") : t("copilot.send")}</span>
               </Button>
             </div>
           </div>

@@ -312,6 +312,7 @@ const projectManagerAttachEvidenceApprovalSchema = z.object({
   copilotRunId: z.string().min(1)
 }).strict();
 const defaultStaleCopilotRunTimeoutMs = 15 * 60 * 1000;
+const defaultStaleCopilotApprovalTimeoutMs = 24 * 60 * 60 * 1000;
 
 export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   db: Database;
@@ -324,6 +325,7 @@ export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   loadProviderCatalog?: () => Promise<ProviderCatalogPreset[]>;
   executeFeishuCommand?: (request: FeishuCommandRequest) => Promise<FeishuCommandResult>;
   staleRunTimeoutMs?: number;
+  staleApprovalTimeoutMs?: number;
 }
 
 type PendingActionApprover = (
@@ -471,7 +473,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     if (!repo.getConversation(req.params.id)) {
       return res.status(404).json({ code: 1, message: "Copilot conversation not found" });
     }
-    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs);
+    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs, options.staleApprovalTimeoutMs);
     const existingActiveRun = repo.findActiveRun();
     if (existingActiveRun) return sendRunAlreadyActive(res, existingActiveRun);
     // The DB live-run constraint is the source of truth; clear stale process locks after recovery.
@@ -633,7 +635,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     if (!parseResult.success) return sendInvalid(res, "Invalid copilot run payload");
     const userId = userIdFor(req);
     const repo = new CopilotRepository(options.db, userId);
-    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs);
+    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs, options.staleApprovalTimeoutMs);
     const existingActiveRun = repo.findActiveRun();
     if (existingActiveRun) return sendRunAlreadyActive(res, existingActiveRun);
     // The DB live-run constraint is the source of truth; clear stale process locks after recovery.
@@ -921,9 +923,18 @@ function repoFor(db: Database, req: unknown): CopilotRepository {
   return new CopilotRepository(db, userIdFor(req));
 }
 
-function recoverStaleCopilotRuns(repo: CopilotRepository, timeoutMs = defaultStaleCopilotRunTimeoutMs): void {
+function recoverStaleCopilotRuns(
+  repo: CopilotRepository,
+  timeoutMs = defaultStaleCopilotRunTimeoutMs,
+  approvalTimeoutMs = defaultStaleCopilotApprovalTimeoutMs
+): void {
+  const now = Date.now();
   const timeout = Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : defaultStaleCopilotRunTimeoutMs;
-  repo.recoverStaleExecutionRuns(Date.now() - timeout);
+  const approvalTimeout = Number.isFinite(approvalTimeoutMs)
+    ? Math.max(0, approvalTimeoutMs)
+    : defaultStaleCopilotApprovalTimeoutMs;
+  repo.recoverStaleExecutionRuns(now - timeout, now);
+  repo.recoverStaleApprovalRuns(now - approvalTimeout, now);
 }
 
 function memoryRepoFor(db: Database, req: unknown): CopilotMemoryRepository {
@@ -3214,6 +3225,52 @@ async function approveCopilotModelProviderSync(
   try {
     const catalog = await (options.loadProviderCatalog ?? loadProviderCatalogFromSource)();
     const catalogPreset = catalog.find((preset) => preset.id === target.provider.providerKey);
+    if (catalogPreset?.modelSource === "static") {
+      const createdModels = syncModelProviderStaticModels(repo, target.provider, catalogPreset);
+      const models = listModelProviderStaticModels(repo, target.provider, catalogPreset);
+      recordActivity({
+        db: options.db,
+        eventBus: options.eventBus,
+        userId,
+        type: "config_sync",
+        status: "success",
+        message: `Models synced for ${target.provider.name}`,
+        metadata: {
+          source: "copilot",
+          providerProfileId: target.provider.id,
+          fetchedCount: catalogPreset.defaultModels.length,
+          createdCount: createdModels.length
+        }
+      });
+      new AuditLogRepository(options.db, userId).create({
+        action: "model_provider.models_sync",
+        resourceType: "model_provider",
+        resourceId: target.provider.id,
+        details: {
+          source: "copilot",
+          fetchedCount: catalogPreset.defaultModels.length,
+          createdCount: createdModels.length
+        }
+      });
+      return {
+        provider: toModelProviderSyncPayload(target.provider),
+        fetchedCount: catalogPreset.defaultModels.length,
+        createdCount: createdModels.length,
+        models: models.map((model) => ({
+          id: model.id,
+          name: model.name,
+          modelId: model.modelId,
+          isDefault: model.isDefault
+        })),
+        executed: true
+      };
+    }
+    if (target.provider.authType !== "none" && !target.credential) {
+      return modelProviderSyncApprovalError(
+        "copilot_model_provider_sync_unavailable",
+        "Copilot model provider sync provider has no active credential"
+      );
+    }
     const fetchedModels = await (options.fetchProviderModels ?? fetchProviderModelsFromEndpoint)({
       baseUrl: target.modelFetchBaseUrl,
       ...(target.credential ? { apiKey: repo.decryptCredential(target.credential.id) } : {}),
@@ -3294,14 +3351,41 @@ function getModelProviderSyncApprovalTarget(
     };
   }
   const credential = selectProviderApplyCredential(repo, provider.id, input.credentialId);
-  if (provider.authType !== "none" && !credential) {
-    return {
-      ok: false,
-      code: "copilot_model_provider_sync_unavailable",
-      message: "Copilot model provider sync provider has no active credential"
-    };
-  }
   return { ok: true, provider, modelFetchBaseUrl, ...(credential ? { credential } : {}) };
+}
+
+function syncModelProviderStaticModels(
+  repo: ModelProviderRepository,
+  provider: ProviderProfile,
+  preset: ProviderCatalogPreset
+): ModelProfile[] {
+  const existing = new Set(repo.listModelProfiles(provider.id).map((model) => model.modelId));
+  const hasDefault = repo.listModelProfiles().some((model) => model.isDefault);
+  const created: ModelProfile[] = [];
+  for (const model of preset.defaultModels) {
+    if (existing.has(model.modelId)) continue;
+    created.push(repo.createModelProfile({
+      providerProfileId: provider.id,
+      name: model.name,
+      modelId: model.modelId,
+      capabilities: model.capabilities,
+      contextWindow: model.contextWindow ?? null,
+      isDefault: !hasDefault && created.length === 0
+    }));
+    existing.add(model.modelId);
+  }
+  return created;
+}
+
+function listModelProviderStaticModels(
+  repo: ModelProviderRepository,
+  provider: ProviderProfile,
+  preset: ProviderCatalogPreset
+): ModelProfile[] {
+  const modelsById = new Map(repo.listModelProfiles(provider.id).map((model) => [model.modelId, model]));
+  return preset.defaultModels
+    .map((model) => modelsById.get(model.modelId))
+    .filter((model): model is ModelProfile => Boolean(model));
 }
 
 function syncModelProviderFetchedModels(

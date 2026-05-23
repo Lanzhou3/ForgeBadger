@@ -1233,7 +1233,7 @@ export function apiUrl(path: string): string {
 export async function fetchJson<T = unknown>(path: string, options: ApiRequestOptions = {}) {
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
-  const res = await fetch(apiUrl(path), request).finally(cleanup);
+  const res = await fetch(apiUrl(path), request).catch(normalizeFetchError).finally(cleanup);
   const envelope = await readApiEnvelope<T>(res);
   if (!res.ok) {
     throw errorFromResponse(res, envelope);
@@ -1250,7 +1250,7 @@ export async function fetchJson<T = unknown>(path: string, options: ApiRequestOp
 export async function fetchEnvelope<T = unknown>(path: string, options: ApiRequestOptions = {}) {
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
-  const res = await fetch(apiUrl(path), request).finally(cleanup);
+  const res = await fetch(apiUrl(path), request).catch(normalizeFetchError).finally(cleanup);
   const envelope = await readApiEnvelope<T>(res);
   if (!res.ok) {
     throw errorFromResponse(res, envelope);
@@ -1293,6 +1293,13 @@ function buildApiRequest(options: ApiRequestOptions, token: string | null): {
 
 function formatHttpError(res: Response): string {
   return `Gateway request failed with HTTP ${res.status}`;
+}
+
+function normalizeFetchError(error: unknown): never {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    throw new GatewayApiError("Gateway request timed out. Check that the Gateway service is running.");
+  }
+  throw error;
 }
 
 async function readApiEnvelope<T>(res: Response): Promise<ApiEnvelope<T> | null> {

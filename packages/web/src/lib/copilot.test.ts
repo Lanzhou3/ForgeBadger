@@ -25,11 +25,13 @@ import {
   resolveCopilotLaunchContext,
   getCopilotLaunchPromptKey,
   resolveCopilotRunSelection,
+  resolveCopilotConversationSelection,
   isCopilotRunLive,
   isCopilotRunCancelledError,
   readCopilotMessageRunActivity,
   getCopilotRunPollDelayMs,
   shouldKeepCopilotActiveRunState,
+  shouldResetCopilotActiveRunForNewMessage,
   shouldRefreshCopilotRuns,
   shouldRefreshCopilotPanelForGatewayEvent,
   stripCopilotThinkingBlocks,
@@ -1661,6 +1663,29 @@ describe("copilot display helpers", () => {
     expect(findLiveCopilotRun([{ id: "run-completed", status: "completed" }])).toBeNull();
   });
 
+  it("keeps a newly selected Copilot conversation while the conversation list is stale", () => {
+    expect(
+      resolveCopilotConversationSelection({
+        selectedConversationId: "conversation-2",
+        conversations: [{ id: "conversation-1" }],
+        preservedConversationIds: ["conversation-2"],
+      })
+    ).toBe("conversation-2");
+    expect(
+      resolveCopilotConversationSelection({
+        selectedConversationId: "conversation-deleted",
+        conversations: [{ id: "conversation-1" }],
+      })
+    ).toBe("conversation-1");
+    expect(
+      resolveCopilotConversationSelection({
+        selectedConversationId: null,
+        conversations: [{ id: "conversation-1" }],
+        draftConversationActive: true,
+      })
+    ).toBeNull();
+  });
+
   it("keeps a newer active run state over stale poll data", () => {
     expect(
       shouldKeepCopilotActiveRunState(
@@ -1690,6 +1715,14 @@ describe("copilot display helpers", () => {
         }
       )
     ).toBe(false);
+  });
+
+  it("resets terminal Copilot active runs before starting a new chat message", () => {
+    expect(shouldResetCopilotActiveRunForNewMessage({ run: { id: "run-1", status: "completed" } })).toBe(true);
+    expect(shouldResetCopilotActiveRunForNewMessage({ run: { id: "run-1", status: "failed" } })).toBe(true);
+    expect(shouldResetCopilotActiveRunForNewMessage({ run: { id: "run-1", status: "cancelled" } })).toBe(true);
+    expect(shouldResetCopilotActiveRunForNewMessage({ run: { id: "run-1", status: "running" } })).toBe(false);
+    expect(shouldResetCopilotActiveRunForNewMessage(null)).toBe(false);
   });
 
   it("preserves terminal Copilot state over stale live detail", () => {

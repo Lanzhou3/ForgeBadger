@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "../types.js";
 
 const liveRunStatuses = ["queued", "running", "waiting_for_approval"] as const;
+export const DEFAULT_COPILOT_MAX_STEPS = 32;
 
 export type CopilotRunStatus =
   | "queued"
@@ -371,7 +372,7 @@ export class CopilotRepository {
         input.source,
         input.sourceRefId ?? null,
         input.goal,
-        input.maxSteps ?? 8,
+        input.maxSteps ?? DEFAULT_COPILOT_MAX_STEPS,
         now,
         now
       );
@@ -435,6 +436,50 @@ export class CopilotRepository {
       update.run(now, now, row.id, this.userId);
       const run = this.getRun(row.id);
       if (run?.status === "failed") recovered.push(run);
+    }
+    return recovered;
+  }
+
+  recoverStaleApprovalRuns(staleBeforeMs: number, now = Date.now()): CopilotRun[] {
+    const staleRows = this.db.prepare(`
+      ${copilotRunSelectSql()}
+      WHERE cr.user_id = ?
+        AND cr.status = 'waiting_for_approval'
+        AND coalesce(cr.updated_at, cr.created_at, 0) < ?
+      ORDER BY cr.created_at ASC
+    `).all(this.userId, staleBeforeMs) as CopilotRunRow[];
+    const recovered: CopilotRun[] = [];
+    const rejectPendingActions = this.db.prepare(`
+      UPDATE copilot_pending_actions
+      SET status = 'rejected',
+        result_json = ?,
+        updated_at = ?
+      WHERE user_id = ?
+        AND run_id = ?
+        AND status IN ('pending', 'processing')
+    `);
+    const cancelRun = this.db.prepare(`
+      UPDATE copilot_runs
+      SET status = 'cancelled',
+        error_code = 'copilot_stale_approval_recovered',
+        error_message = 'Recovered stale Copilot approval wait after Gateway interruption',
+        completed_at = ?,
+        updated_at = ?
+      WHERE id = ? AND user_id = ? AND status = 'waiting_for_approval'
+    `);
+    const recoverOne = this.db.transaction((row: CopilotRunRow) => {
+      rejectPendingActions.run(
+        JSON.stringify({ reason: "stale_approval_recovered" }),
+        now,
+        this.userId,
+        row.id
+      );
+      const result = cancelRun.run(now, now, row.id, this.userId);
+      return result.changes === 1 ? this.getRun(row.id) : undefined;
+    });
+    for (const row of staleRows) {
+      const run = recoverOne(row);
+      if (run?.status === "cancelled") recovered.push(run);
     }
     return recovered;
   }

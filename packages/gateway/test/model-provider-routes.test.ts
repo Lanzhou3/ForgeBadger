@@ -79,10 +79,17 @@ const testProviderCatalog: ProviderCatalogPreset[] = [
     opencode: { npm: "@ai-sdk/openai-compatible", env: ["DASHSCOPE_API_KEY"] },
     defaultModels: [
       {
-        id: "qwen3.5-coder",
-        name: "Qwen3.5 Coder",
-        modelId: "qwen3.5-coder",
+        id: "qwen3.6-plus",
+        name: "Qwen3.6 Plus",
+        modelId: "qwen3.6-plus",
         capabilities: ["chat", "code", "reasoning"],
+        contextWindow: 256000
+      },
+      {
+        id: "qwen3-coder-plus",
+        name: "Qwen3 Coder Plus",
+        modelId: "qwen3-coder-plus",
+        capabilities: ["chat", "code"],
         contextWindow: 256000
       }
     ]
@@ -192,7 +199,7 @@ describe("model provider routes", () => {
     );
     assert.equal(
       listed.body.data.models.filter((model: { providerProfileId: string }) => model.providerProfileId === first.body.data.provider.id).length,
-      1
+      2
     );
   });
 
@@ -378,6 +385,36 @@ describe("model provider routes", () => {
     assert.deepEqual(
       synced.body.data.models.map((model: { modelId: string }) => model.modelId),
       ["deepseek-v4-flash", "deepseek-v4-pro"]
+    );
+  });
+
+  it("syncs static catalog models without calling a provider model endpoint", async () => {
+    let fetchCalled = false;
+    const syncApp = express();
+    syncApp.locals.jwtSecret = secret;
+    syncApp.use(express.json());
+    syncApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
+      loadProviderCatalog: async () => testProviderCatalog,
+      fetchProviderModels: async () => {
+        fetchCalled = true;
+        throw new Error("static providers must not fetch remote models");
+      },
+    }));
+    const created = await makeRequest(syncApp, "POST", "/api/v1/model-providers", {
+      catalogId: "qwen-coding-plan-cn"
+    }, authHeaders());
+    const providerId = created.body.data.provider.id;
+
+    const synced = await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/models/sync`, {}, authHeaders());
+
+    assert.equal(synced.status, 200);
+    assert.equal(synced.body.code, 0);
+    assert.equal(fetchCalled, false);
+    assert.equal(synced.body.data.fetchedCount, 2);
+    assert.equal(synced.body.data.createdCount, 0);
+    assert.deepEqual(
+      synced.body.data.models.map((model: { modelId: string }) => model.modelId),
+      ["qwen3.6-plus", "qwen3-coder-plus"]
     );
   });
 

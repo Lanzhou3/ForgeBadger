@@ -117,6 +117,29 @@ describe("CopilotRepository", () => {
     assert.equal(repo.getRun(waiting.id)?.status, "waiting_for_approval");
   });
 
+  it("cancels stale approval waits and rejects their pending actions", () => {
+    const run = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Approve adapter refresh"
+    });
+    const action = repo.createPendingAction(run.id, {
+      type: "openforge.propose_adapter_refresh",
+      input: { adapter: "codex" }
+    });
+    db.prepare("UPDATE copilot_runs SET updated_at = ? WHERE id = ?").run(1000, run.id);
+    db.prepare("UPDATE copilot_pending_actions SET updated_at = ? WHERE id = ?").run(1000, action.id);
+
+    const recovered = repo.recoverStaleApprovalRuns(2000, 5000);
+
+    assert.deepEqual(recovered.map((item) => item.id), [run.id]);
+    assert.equal(repo.getRun(run.id)?.status, "cancelled");
+    assert.equal(repo.getRun(run.id)?.errorCode, "copilot_stale_approval_recovered");
+    assert.equal(repo.getPendingAction(action.id)?.status, "rejected");
+    assert.deepEqual(repo.getPendingAction(action.id)?.result, { reason: "stale_approval_recovered" });
+    assert.equal(repo.findActiveRun(), undefined);
+  });
+
   it("creates and lists conversations scoped to the current user", () => {
     const conversation = repo.createConversation({
       title: "Debug provider setup",

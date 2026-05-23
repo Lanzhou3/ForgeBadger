@@ -174,6 +174,14 @@ describe("api client", () => {
     );
   });
 
+  it("reports aborted gateway requests as a clear timeout error", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new DOMException("signal is aborted without reason", "AbortError"))));
+
+    await expect(apiModule.login("user@example.com", "password")).rejects.toMatchObject({
+      message: "Gateway request timed out. Check that the Gateway service is running."
+    });
+  });
+
   it("deletes model provider profiles through REST", async () => {
     await deleteModelProvider("provider-1");
 

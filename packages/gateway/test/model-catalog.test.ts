@@ -35,6 +35,21 @@ describe("model catalog", () => {
     assert.equal(kimiCode.endpoints.openai?.baseUrl, "https://api.kimi.com/coding/v1");
     assert.equal(qwenCodingCn.region, "cn");
     assert.equal(qwenCodingCn.productType, "coding_plan");
+    assert.deepEqual(
+      qwenCodingCn.defaultModels.map((model) => model.modelId),
+      [
+        "qwen3.6-plus",
+        "qwen3-coder-plus",
+        "qwen3-coder-next",
+        "qwen3.5-plus",
+        "qwen3-max-2026-01-23",
+        "kimi-k2.5",
+        "glm-5",
+        "MiniMax-M2.5",
+        "glm-4.7"
+      ]
+    );
+    assert.equal(qwenCodingCn.claude?.defaultSmallFastModel, "qwen3-coder-plus");
     assert.equal(minimaxGlobal.endpoints.anthropic?.baseUrl, "https://api.minimax.io/anthropic");
     assert.equal(minimaxGlobal.endpoints.openai?.baseUrl, "https://api.minimax.io/v1");
   });

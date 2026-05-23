@@ -213,13 +213,26 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       res.status(400).json({ code: 1, message: "Credential does not belong to the selected provider" });
       return;
     }
-    if (provider.authType !== "none" && !credential) {
-      res.status(400).json({ code: 1, message: "Provider credential is required to sync models" });
-      return;
-    }
 
     try {
       const catalogPreset = (await loadProviderCatalog()).find((preset) => preset.id === provider.providerKey);
+      if (catalogPreset?.modelSource === "static") {
+        const created = seedMissingModelsForPreset(repo, provider, catalogPreset);
+        res.json({
+          code: 0,
+          data: {
+            fetchedCount: catalogPreset.defaultModels.length,
+            createdCount: created.length,
+            models: listPresetModels(repo, provider, catalogPreset)
+          },
+          message: ""
+        });
+        return;
+      }
+      if (provider.authType !== "none" && !credential) {
+        res.status(400).json({ code: 1, message: "Provider credential is required to sync models" });
+        return;
+      }
       const fetchedModels = await fetchProviderModels({
         baseUrl: modelFetchBaseUrl,
         apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
@@ -683,6 +696,17 @@ function syncFetchedModels(
     created.push(model);
   }
   return created;
+}
+
+function listPresetModels(
+  repo: ModelProviderRepository,
+  provider: ProviderProfile,
+  preset: ProviderCatalogPreset
+): ModelProfile[] {
+  const modelsById = new Map(repo.listModelProfiles(provider.id).map((model) => [model.modelId, model]));
+  return preset.defaultModels
+    .map((model) => modelsById.get(model.modelId))
+    .filter((model): model is ModelProfile => Boolean(model));
 }
 
 function repoFor(db: Database, masterKey: string, req: unknown): ModelProviderRepository {

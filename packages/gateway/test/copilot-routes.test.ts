@@ -1325,6 +1325,44 @@ describe("copilot routes", () => {
     assert.equal(calls.length, 0);
   });
 
+  it("recovers a stale approval wait before creating a new Copilot run", async () => {
+    const repo = new CopilotRepository(db, userId);
+    const existing = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Stale approval run"
+    });
+    const action = repo.createPendingAction(existing.id, {
+      type: "openforge.propose_adapter_refresh",
+      input: { adapter: "codex" }
+    });
+    const staleUpdatedAt = Date.now() - (25 * 60 * 60 * 1000);
+    db.prepare("UPDATE copilot_runs SET updated_at = ? WHERE id = ? AND user_id = ?").run(
+      staleUpdatedAt,
+      existing.id,
+      userId
+    );
+    db.prepare("UPDATE copilot_pending_actions SET updated_at = ? WHERE id = ? AND user_id = ?").run(
+      staleUpdatedAt,
+      action.id,
+      userId
+    );
+    createOpenAiProvider();
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Start after stale approval",
+      source: "copilot"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.notEqual(res.body.data.run.id, existing.id);
+    assert.equal(repo.getRun(existing.id)?.status, "cancelled");
+    assert.equal(repo.getRun(existing.id)?.errorCode, "copilot_stale_approval_recovered");
+    assert.equal(repo.getPendingAction(action.id)?.status, "rejected");
+    assert.deepEqual(repo.getPendingAction(action.id)?.result, { reason: "stale_approval_recovered" });
+  });
+
   it("injects bounded active memory recall for Copilot page runs", async () => {
     createOpenAiProvider();
     new CopilotMemoryRepository(db, userId).createEntry({
@@ -1752,6 +1790,34 @@ describe("copilot routes", () => {
     assert.equal(toolResultDetails.toolName, "openforge.get_dashboard_summary");
     assert.equal(toolResultDetails.toolCallId, "tool-call-1");
     assert.equal(typeof toolResultDetails.output?.stats?.projects, "number");
+  });
+
+  it("does not stop long read-tool runs at a fixed event budget", async () => {
+    createOpenAiProvider();
+    modelEventResponses = [
+      Array.from({ length: 20 }, (_, index) => ({
+        type: "tool_call_requested" as const,
+        id: `tool-call-${index + 1}`,
+        name: "openforge.get_dashboard_summary",
+        input: {}
+      })),
+      [{ type: "assistant_message", text: "Finished after checking the requested context." }]
+    ];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Summarize session state, recent activity, and adapter availability",
+      source: "dashboard"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.run.status, "completed");
+    assert.equal(res.body.data.run.stepCount, 41);
+    assert.equal(
+      res.body.data.events.filter((event: { type: string }) => event.type === "tool_result").length,
+      20
+    );
+    assert.equal(res.body.data.events.at(-1)?.message, "Finished after checking the requested context.");
   });
 
   it("fails closed when a read tool output exceeds the Copilot safety limit", async () => {

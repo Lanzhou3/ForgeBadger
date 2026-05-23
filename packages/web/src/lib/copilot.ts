@@ -649,6 +649,24 @@ export function resolveCopilotRunSelection(input: ResolveCopilotRunSelectionInpu
   return input.runs[0]?.id ?? null;
 }
 
+export function resolveCopilotConversationSelection(input: {
+  selectedConversationId: string | null;
+  conversations: Array<{ id: string }>;
+  draftConversationActive?: boolean;
+  preservedConversationIds?: string[];
+}): string | null {
+  if (input.draftConversationActive) return input.selectedConversationId;
+  const conversationIds = new Set(input.conversations.map((conversation) => conversation.id));
+  if (input.selectedConversationId && conversationIds.has(input.selectedConversationId)) {
+    return input.selectedConversationId;
+  }
+  const preservedConversationIds = new Set(input.preservedConversationIds ?? []);
+  if (input.selectedConversationId && preservedConversationIds.has(input.selectedConversationId)) {
+    return input.selectedConversationId;
+  }
+  return input.conversations[0]?.id ?? null;
+}
+
 export function isCopilotRunLive(status: string): boolean {
   return status === "queued" || status === "running" || status === "waiting_for_approval";
 }
@@ -676,6 +694,11 @@ export function shouldKeepCopilotActiveRunState(
   if (maxSequence(current.events) > maxSequence(next.events)) return true;
   if (maxUpdatedAt(current.pendingActions) > maxUpdatedAt(next.pendingActions)) return true;
   return isTerminalCopilotRunStatus(current.run.status) && !isTerminalCopilotRunStatus(next.run.status);
+}
+
+export function shouldResetCopilotActiveRunForNewMessage(current: CopilotActiveRunSnapshot | null): boolean {
+  if (!current) return false;
+  return isTerminalCopilotRunStatus(current.run.status);
 }
 
 export function getCopilotRunPollDelayMs(attempt: number): number {

@@ -55,6 +55,7 @@ const inboundFeishuCommandSchema = z.object({
 
 type InboundFeishuCommand = z.infer<typeof inboundFeishuCommandSchema>;
 const defaultStaleCopilotRunTimeoutMs = 15 * 60 * 1000;
+const defaultStaleCopilotApprovalTimeoutMs = 24 * 60 * 60 * 1000;
 const publicWebhookTimestampWindowMs = 5 * 60 * 1000;
 const publicWebhookReplayTtlMs = 5 * 60 * 1000;
 
@@ -70,6 +71,7 @@ export interface FeishuIntegrationRoutesOptions {
   sessionManager?: CopilotOrchestratorOptions["sessionManager"];
   adapterCommandRunner?: CopilotOrchestratorOptions["adapterCommandRunner"];
   staleRunTimeoutMs?: number;
+  staleApprovalTimeoutMs?: number;
 }
 
 export function createFeishuIntegrationRoutes(
@@ -218,7 +220,7 @@ export function createFeishuIntegrationRoutes(
     }
 
     const repo = new CopilotRepository(db, config.userId);
-    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs);
+    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs, options.staleApprovalTimeoutMs);
     if (repo.findActiveRun()) {
       return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "copilot_run_already_active");
     }
@@ -466,7 +468,7 @@ export function createFeishuIntegrationRoutes(
       });
     }
     const repo = new CopilotRepository(db, userId);
-    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs);
+    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs, options.staleApprovalTimeoutMs);
     const activeRun = repo.findActiveRun();
     if (activeRun) {
       return sendInboundReject(db, userId, req.ip, res, command, {
@@ -772,9 +774,18 @@ function findMappedOpenForgeUserId(repo: FeishuIntegrationRepository, feishuUser
     ?.openforgeUserId ?? null;
 }
 
-function recoverStaleCopilotRuns(repo: CopilotRepository, timeoutMs = defaultStaleCopilotRunTimeoutMs): void {
+function recoverStaleCopilotRuns(
+  repo: CopilotRepository,
+  timeoutMs = defaultStaleCopilotRunTimeoutMs,
+  approvalTimeoutMs = defaultStaleCopilotApprovalTimeoutMs
+): void {
+  const now = Date.now();
   const timeout = Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : defaultStaleCopilotRunTimeoutMs;
-  repo.recoverStaleExecutionRuns(Date.now() - timeout);
+  const approvalTimeout = Number.isFinite(approvalTimeoutMs)
+    ? Math.max(0, approvalTimeoutMs)
+    : defaultStaleCopilotApprovalTimeoutMs;
+  repo.recoverStaleExecutionRuns(now - timeout, now);
+  repo.recoverStaleApprovalRuns(now - approvalTimeout, now);
 }
 
 function isAcceptedInboundMessageReplay(db: Database, userId: string, messageId: string): boolean {
