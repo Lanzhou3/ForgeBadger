@@ -8,7 +8,7 @@ The current product stage is v1.4 External Evidence Closure planning. v1.0 Post-
 
 ## Current Milestone
 
-v1.4 External Evidence Closure is selected and Phase 17 External Evidence Registry is ready for execution from gathered context.
+v1.4 External Evidence Closure is selected. Phase 17 External Evidence Registry is complete, Phase 18 Live Provider Evidence Rerun is complete as `Caveat`, and Phase 19 Feishu Public Callback Evidence is next.
 
 **Last shipped:** v1.3 AI-Native Project Execution Traceability on 2026-05-29.
 
@@ -68,8 +68,8 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 
 ### Active
 
-- [ ] v1.4 creates a canonical external evidence gate registry before any preserved caveat can be cleared.
-- [ ] v1.4 records live provider evidence with disposable credential/model metadata or a precise blocker.
+- [x] v1.4 creates a canonical external evidence gate registry before any preserved caveat can be cleared.
+- [x] v1.4 records live provider evidence with disposable credential/model metadata or a precise blocker.
 - [ ] v1.4 records Feishu developer-console callback evidence with public HTTPS routing or a precise blocker.
 - [ ] v1.4 records physical Windows/WSL terminal evidence from a real host or a precise blocker.
 - [ ] v1.4 maps completed first-user feedback into severity, owner, disposition, and follow-up routing, or keeps the missing packet as a caveat.
@@ -96,6 +96,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - v1.3 was selected from the PM review audit triage: AI-native project management is now the near-term differentiator, but only as an execution traceability layer on top of the local AI CLI control plane.
 - v1.3 shipped and is archived under `.planning/milestones/v1.3-*`.
 - External v1.1 caveats remain tracked in the readiness reports and should not be silently reclassified during v1.4.
+- Phase 18 reran `pnpm smoke:copilot-provider`; no disposable provider credential was available, so `LIVE-PROVIDER` remains `Caveat` with `missing_provider_credential`.
 - Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints

@@ -27,9 +27,9 @@
 
 ### Live Provider Evidence
 
-- [ ] **PROV-01**: A disposable live provider smoke run can be recorded with explicit provider, model id, command, bounded result, and redacted artifact path.
-- [ ] **PROV-02**: Provider evidence distinguishes credential failure, unsupported model, endpoint/network failure, timeout, provider outage, and product-contract failure.
-- [ ] **PROV-03**: Codex subscription-managed launch paths remain isolated from provider API-key/model override evidence.
+- [x] **PROV-01**: A disposable live provider smoke run can be recorded with explicit provider, model id, command, bounded result, and redacted artifact path.
+- [x] **PROV-02**: Provider evidence distinguishes credential failure, unsupported model, endpoint/network failure, timeout, provider outage, and product-contract failure.
+- [x] **PROV-03**: Codex subscription-managed launch paths remain isolated from provider API-key/model override evidence.
 
 ### Feishu Callback Evidence
 
@@ -69,9 +69,9 @@
 | EVID-01 | Phase 17 | Complete |
 | EVID-02 | Phase 17 | Complete |
 | EVID-03 | Phase 17 | Complete |
-| PROV-01 | Phase 18 | Planned |
-| PROV-02 | Phase 18 | Planned |
-| PROV-03 | Phase 18 | Planned |
+| PROV-01 | Phase 18 | Complete (Caveat) |
+| PROV-02 | Phase 18 | Complete (Caveat) |
+| PROV-03 | Phase 18 | Complete |
 | FEI-LIVE-01 | Phase 19 | Planned |
 | FEI-LIVE-02 | Phase 19 | Planned |
 | FEI-LIVE-03 | Phase 19 | Planned |

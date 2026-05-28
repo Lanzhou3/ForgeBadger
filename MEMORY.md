@@ -12,7 +12,9 @@
   convert the remaining live-provider, physical Windows/WSL, Feishu
   developer-console callback, and first-user feedback caveats into a canonical
   evidence gate registry plus real redacted artifacts or precise blockers.
-  Phase 17 starts with `.planning/phases/OF-17-external-evidence-registry/17-01-PLAN.md`.
+  Phase 17 created the registry; Phase 18 reran `pnpm smoke:copilot-provider`
+  and recorded `LIVE-PROVIDER` as `Caveat` with
+  `missing_provider_credential`.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -121,21 +123,22 @@
 
 ## Next Work
 
-1. Execute Phase 17 and create the canonical external evidence gate registry
-   before clearing any preserved caveat.
-2. Keep Codex app-server turn input disabled unless the Gateway is explicitly
+1. Plan Phase 19 Feishu public callback evidence, but keep the callback gate
+   `Blocked` until public HTTPS Gateway routing and Feishu developer-console
+   URL verification are available.
+2. Rerun the `LIVE-PROVIDER` gate only after a disposable provider credential
+   and explicit model id are available; Phase 18 currently records
+   `missing_provider_credential`.
+3. Keep Codex app-server turn input disabled unless the Gateway is explicitly
    started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Treat `/turn` as a
    default-403 feature-flag prototype API, not a Web-exposed user workflow.
    Gateway does not persist prompt/response transcript content; add
    user-facing retention controls before exposing real turn input in Web. Do not
    add provider API-key or model override application to this Codex app-server
    path.
-3. If stopped/error app-server records grow in long-running usage, add an
+4. If stopped/error app-server records grow in long-running usage, add an
    explicit TTL or pagination strategy instead of deleting them immediately and
    losing observable process state.
-4. Close the Copilot live-provider gate by running `pnpm smoke:copilot-provider`
-   with a disposable provider credential and explicit model id, then record the
-   redacted evidence in GitHub issue #3.
 5. Run a physical Windows/WSL manual smoke when that platform is available; the
    current pass covers CLI mode behavior, CI/release gate automation, checklist
    fields, and runbook remediation, not a real Windows host. Record that

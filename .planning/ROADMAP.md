@@ -41,7 +41,11 @@ Plans:
 
 **Requirements:** PROV-01, PROV-02, PROV-03
 
-**Plans:** TBD after Phase 17.
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 18-01-PLAN.md — Live provider smoke rerun, redacted caveat evidence, and Codex boundary closeout.
 
 **Success criteria:**
 
@@ -166,7 +170,7 @@ Full archive:
 | 15. Model Provider Setup And Health | v1.3 | 3/3 | Complete | 2026-05-29 |
 | 16. Open Source Readiness Packet | v1.3 | 1/1 | Complete | 2026-05-29 |
 | 17. External Evidence Registry | v1.4 | 1/1 | Complete | 2026-05-29 |
-| 18. Live Provider Evidence Rerun | v1.4 | TBD | Planned | - |
+| 18. Live Provider Evidence Rerun | v1.4 | 1/1 | Complete (Caveat) | 2026-05-29 |
 | 19. Feishu Public Callback Evidence | v1.4 | TBD | Planned | - |
 | 20. Platform And First-User Acceptance Closure | v1.4 | TBD | Planned | - |
 

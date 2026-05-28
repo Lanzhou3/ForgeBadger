@@ -25,6 +25,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | Roadmap order | Close beta evidence, then public Feishu webhook safety, then first-user hardening before ledger or remote expansion. | GSD bootstrap review, `docs/superpowers/specs/2026-05-06-openforge-post-rc-roadmap-design.md` |
 | v1.3 direction | Next milestone focuses on AI-native project execution traceability: Copilot proposals, Project Manager board, terminal context, provider health, and open-source trust. | `docs/reports/pm-review-audit-2026-05-22.md`, `.planning/REQUIREMENTS.md` |
 | v1.4 direction | External release caveats require a canonical evidence registry and real redacted artifacts before any `Pass` reclassification. | `docs/OPEN-SOURCE-READINESS.md`, `.planning/REQUIREMENTS.md` |
+| v1.4 live provider gate | `LIVE-PROVIDER` remains `Caveat` after Phase 18 because the smoke rerun returned `missing_provider_credential`; no live `Pass` can be claimed without a disposable credential and explicit model id. | `docs/reports/phase-18-live-provider-evidence-rerun-2026-05-29.md` |
 
 ## Deferred Ideas
 
