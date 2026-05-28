@@ -4,15 +4,15 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is v1.3 AI-Native Project Execution Traceability planning. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow. v1.3 extends that workflow into Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness while preserving the local-first control-plane wedge.
+The current product stage is v1.4 External Evidence Closure planning. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness. v1.4 now focuses on converting the remaining live-provider, physical Windows/WSL, Feishu developer-console callback, and first-user feedback caveats into truthful evidence-gate decisions.
 
 ## Current Milestone
 
-v1.3 AI-Native Project Execution Traceability is selected and Phase 12 is ready for planning from gathered context.
+v1.4 External Evidence Closure is selected and Phase 17 External Evidence Registry is ready for execution from gathered context.
 
-**Last shipped:** v1.2 Project Manager Web Workflow on 2026-05-22.
+**Last shipped:** v1.3 AI-Native Project Execution Traceability on 2026-05-29.
 
-**Next milestone goal:** Extend the v1.2 Project Manager workflow into an AI-native execution traceability layer that links Copilot, terminal context, evidence, provider readiness, and open-source trust without changing OpenForge into a generic project-management suite.
+**Next milestone goal:** Convert preserved external caveats into a canonical evidence gate system with runnable collection paths, redacted artifacts, and `Pass`/`Caveat`/`Blocked` closeout decisions.
 
 **Shipped v1.2 features:**
 - Project detail Web surface for project-manager goal, work item, status, evidence, and ledger state.
@@ -20,6 +20,13 @@ v1.3 AI-Native Project Execution Traceability is selected and Phase 12 is ready 
 - Goal editing, work item creation, status transitions, filtering, and completion guardrails.
 - Bounded evidence-reference attachment and ledger review without exposing raw terminal, Feishu, provider, or secret-bearing data.
 - Focused backend/frontend/E2E coverage for the daily project-manager workflow and failure states.
+
+**Shipped v1.3 features:**
+- Copilot can propose Project Manager changes through pending-action approval while Gateway remains authoritative.
+- Project Manager has board workflow, edit/delete, and bounded batch status operations.
+- Project/session views expose safe workspace context and bounded file/session/terminal evidence references.
+- Provider setup exposes structured readiness checks and clearer provider/model/credential recovery paths.
+- Open-source readiness packet adds MIT rationale, contribution/security entry points, safe issue routing, and caveat-preserving closeout.
 
 ## Core Value
 
@@ -52,15 +59,21 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - [x] v1.2 lets Web users move work items through allowed status transitions, with completion blocked unless evidence or a manual completion reason is present.
 - [x] v1.2 lets Web users attach bounded evidence references and review the ledger event timeline without raw sensitive details.
 - [x] v1.2 closes the Project Manager Web workflow with typed client coverage, strict E2E coverage, UAT, security verification, validation coverage, goal verification, and handoff docs.
+- [x] v1.3 keeps AI-native project management scoped to execution traceability, not a generic PM suite.
+- [x] v1.3 links Copilot runs, pending actions, summaries, and evidence references to Project Manager state through explicit approval gates.
+- [x] v1.3 adds a board workflow, work item edit/delete, and bounded batch actions without regressing dense table/detail workflow.
+- [x] v1.3 adds safe project-rooted workspace context and bounded file/session/terminal evidence references.
+- [x] v1.3 simplifies provider setup and adds actionable provider/model health checks while preserving Codex subscription boundaries.
+- [x] v1.3 adds open-source readiness docs, root contribution/security entry points, issue templates, and caveat-preserving closeout.
 
 ### Active
 
-- [ ] v1.3 keeps OpenForge positioned as a local-first AI CLI control plane with AI-native project execution traceability, not a generic project-management suite.
-- [ ] v1.3 links Copilot runs, pending actions, safe summaries, and evidence references to Project Manager work items through explicit approval gates.
-- [ ] v1.3 adds a board workflow, work item edit/delete, and bounded batch actions without regressing the dense v1.2 table/detail workflow.
-- [ ] v1.3 adds safe project-rooted file context for session/project views and bounded file/session/terminal evidence references.
-- [ ] v1.3 simplifies provider setup and adds more actionable provider/model health checks while preserving Codex subscription boundaries.
-- [ ] v1.3 starts open-source readiness with license, README, CONTRIBUTING, SECURITY, issue templates, and caveat-preserving release docs.
+- [ ] v1.4 creates a canonical external evidence gate registry before any preserved caveat can be cleared.
+- [ ] v1.4 records live provider evidence with disposable credential/model metadata or a precise blocker.
+- [ ] v1.4 records Feishu developer-console callback evidence with public HTTPS routing or a precise blocker.
+- [ ] v1.4 records physical Windows/WSL terminal evidence from a real host or a precise blocker.
+- [ ] v1.4 maps completed first-user feedback into severity, owner, disposition, and follow-up routing, or keeps the missing packet as a caveat.
+- [ ] v1.4 publishes a release closeout matrix that keeps any remaining external gaps visible.
 
 ### Out of Scope
 
@@ -80,8 +93,9 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - Remaining acceptance gaps are explicit external evidence caveats and later-scope product decisions, not broad local implementation gaps.
 - v1.2 promotes the already-implemented project-manager ledger backend into a Web workflow before remote runtime expansion, because it converts the control-plane audit model into a daily user surface.
 - v1.2 shipped the Project Manager Web workflow and archived its roadmap, requirements, phase artifacts, UAT, security, validation, and verification evidence under `.planning/milestones/`.
-- v1.3 is selected from the PM review audit triage: AI-native project management is now the near-term differentiator, but only as an execution traceability layer on top of the local AI CLI control plane.
-- External v1.1 caveats remain tracked in the readiness reports and should not be silently reclassified during v1.3.
+- v1.3 was selected from the PM review audit triage: AI-native project management is now the near-term differentiator, but only as an execution traceability layer on top of the local AI CLI control plane.
+- v1.3 shipped and is archived under `.planning/milestones/v1.3-*`.
+- External v1.1 caveats remain tracked in the readiness reports and should not be silently reclassified during v1.4.
 - Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints
@@ -111,6 +125,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Package v1.1 as a cautious first-user handoff | Phase 8 readiness packet makes trial/support/closeout inspectable while preserving caveats | Good - v1.1 completed with explicit caveats |
 | Promote project-manager ledger to Web before remote runtime work | The backend ledger is already tenant-scoped and audited, but first users need a visible project workflow before higher-risk remote execution | Good - v1.2 shipped project-context Project Manager UI with evidence, ledger, and handoff gates |
 | Treat AI-native project management as execution traceability, not generic PM | The product differentiation is linking prompts, approvals, terminal context, evidence, and ledger state to AI CLI work | Selected for v1.3 |
+| Close external evidence before expanding scope | Open-source readiness exposes the repository, but live provider, Windows/WSL, Feishu callback, and first-user feedback still need real artifacts | Selected for v1.4 |
 
 ## Evolution
 
@@ -130,4 +145,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-22 after selecting v1.3 AI-Native Project Execution Traceability.*
+*Last updated: 2026-05-29 after selecting v1.4 External Evidence Closure.*

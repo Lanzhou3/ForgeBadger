@@ -5,128 +5,78 @@
 - ✅ **v1.0 Post-Beta Trust Closure** — Phases 1-5, shipped 2026-05-20.
 - ✅ **v1.1 Beta Evidence Burn-down** — Phases 6-8, shipped 2026-05-21.
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
-- 🟡 **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, planning started 2026-05-22.
+- ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
+- 🟡 **v1.4 External Evidence Closure** — Phases 17-20, planning started 2026-05-29.
 
-## Current Milestone: v1.3 AI-Native Project Execution Traceability
+## Current Milestone: v1.4 External Evidence Closure
 
-**Goal:** Extend the v1.2 Project Manager workflow into an AI-native execution traceability layer that links Copilot, terminal context, evidence, provider readiness, and open-source trust without changing OpenForge into a generic project-management suite.
+**Goal:** Convert remaining external release caveats into a truthful evidence gate system with runnable collection paths, redacted artifacts, and closeout decisions.
 
-**Scope rule:** v1.3 strengthens the local-first AI CLI control plane. Copilot and Feishu may propose project-manager writes only through explicit pending-action approval; Gateway remains the project-manager authority.
+**Scope rule:** v1.4 strengthens release trust for the local-first AI CLI control plane. It does not add hosted collaboration, cloud workers, autonomous remote execution, Feishu execution authority, or Codex Web prompt/turn product workflow.
 
-**Start readiness:** Ready to begin. v1.2 is archived and requirements are defined in `.planning/REQUIREMENTS.md`. Before this v1.3 planning update, tracked code was clean; the current tracked changes are the v1.3 planning documents, and unrelated untracked `upload_img/` remains outside milestone scope.
+**Start readiness:** Ready to begin. v1.3 is archived and the preserved caveats are explicit in `docs/OPEN-SOURCE-READINESS.md`, `docs/reports/v1.1-readiness-closeout-2026-05-21.md`, and `.planning/STATE.md`.
 
-### Phase 12: Copilot Project-Manager Traceability
+### Phase 17: External Evidence Registry
 
-**Goal:** Link Copilot runs, approvals, and safe summaries to project-manager work items and ledger events without granting direct mutation authority.
+**Goal:** Create one canonical gate registry and release evidence matrix before any gate can be cleared.
 
-**Requirements:** POS-01, POS-02, POS-03, TRACE-01, TRACE-02, TRACE-03, TRACE-04
-
-**Plans:** 4 plans
-
-Plans:
-**Wave 1**
-
-- [x] 12-01-PLAN.md — Project Manager trace DTOs, pendingActionId evidence refs, safe ledger trace contract, and API docs.
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 12-02-PLAN.md — Gateway Copilot PM prepare tools, canonical approval handlers, terminal failed semantics, and trusted-evidence done gate.
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 12-03-PLAN.md — Web DTOs, fixed PM Copilot summaries, result summaries, and localized trace copy.
-
-**Wave 4** *(blocked on Wave 3 completion)*
-
-- [x] 12-04-PLAN.md — PM approval cards, View in Project Manager anchor, PM detail/ledger markers, and browser coverage.
-
-**Success criteria:**
-
-1. Copilot can propose project-manager work item creation, status updates, and evidence attachment through pending actions.
-2. Approved proposals mutate project-manager state through existing Gateway routes/repositories with tenant scoping and audit rows.
-3. Work item detail and ledger surfaces show safe Copilot traceability markers.
-4. Raw prompts, terminal output, provider payloads, and secrets are not stored as evidence blobs.
-
-### Phase 13: Project Manager Board Workflow
-
-**Goal:** Add a visual board workflow while preserving the existing dense table/detail project-manager flow.
-
-**Requirements:** BOARD-01, BOARD-02, BOARD-03, BOARD-04
-
-**Plans:** 3 plans
-
-Plans:
-
-- [x] 13-01-PLAN.md — Backend edit/delete/batch status contract, ledger/audit events, Web API helpers.
-- [x] 13-02-PLAN.md — Board view, edit/delete dialogs, and batch status controls in the Web Project Manager surface.
-- [x] 13-03-PLAN.md — Browser coverage, docs closeout, and dense table/detail regression verification.
-
-**Success criteria:**
-
-1. Work items are visible in bounded status columns.
-2. Status movement follows Gateway transition rules and evidence-free completion guardrails.
-3. Edit, delete, and bounded batch actions produce ledger/audit evidence and visible errors.
-4. Existing table/detail interactions and v1.2 E2E coverage do not regress.
-
-### Phase 14: Terminal Workspace Context
-
-**Goal:** Make terminal sessions more project-aware by adding safe file context and bounded evidence references.
-
-**Requirements:** CTX-01, CTX-02, CTX-03, CTX-04
-
-**Plans:** 3 plans
-
-Plans:
-
-- [x] 14-01-PLAN.md — Gateway safe workspace tree/file read contract and API docs.
-- [x] 14-02-PLAN.md — Web project/session workspace sidecar using the safe Gateway contract.
-- [x] 14-03-PLAN.md — Project Manager file path, terminal snapshot marker, and session id evidence refs.
-
-**Success criteria:**
-
-1. Project/session views expose a safe project-rooted file tree sidecar.
-2. File reads reject traversal, symlink escape, and sensitive system paths.
-3. Users can attach file path, terminal snapshot marker, and session id references to work items.
-4. Terminal scrollback remains tmux-owned and is not stored in SQLite.
-
-### Phase 15: Model Provider Setup And Health
-
-**Goal:** Simplify provider setup and make model readiness checks actionable.
-
-**Requirements:** MODEL-01, MODEL-02, MODEL-03, MODEL-04
-
-**Plans:** 3 plans
-
-Plans:
-
-- [x] 15-01-PLAN.md — Gateway model-provider readiness contract, remote model-list health, and Codex isolation.
-- [x] 15-02-PLAN.md — Web provider health panel, guided setup checklist, and Codex identity messaging.
-- [x] 15-03-PLAN.md — Browser coverage, docs closeout, and Phase 15 requirement verification.
-
-**Success criteria:**
-
-1. Provider setup explains provider, credential, and model profile relationships in one guided flow.
-2. Health checks can validate credential/model readiness with safe lightweight provider calls where supported.
-3. Error states distinguish invalid credentials, endpoint/network failure, unsupported model, timeout, and provider outage.
-4. Codex subscription-managed paths remain isolated from provider key/model injection.
-
-### Phase 16: Open Source Readiness Packet
-
-**Goal:** Prepare the repository for trust-building open-source use while preserving beta caveats and local-first boundaries.
-
-**Requirements:** OSS-01, OSS-02, OSS-03
+**Requirements:** EVPOS-01, EVPOS-02, EVPOS-03, EVID-01, EVID-02, EVID-03
 
 **Plans:** 1 plan
 
 Plans:
 
-- [x] 16-01-PLAN.md — Open-source readiness packet, safe feedback routing, and caveat-preserving closeout.
+- [ ] 17-01-PLAN.md — External evidence gate registry, doc links, and Phase 17 verification.
 
 **Success criteria:**
 
-1. License selection and rationale are documented.
-2. README, CONTRIBUTING, SECURITY, and issue templates describe local-first scope, prerequisites, support boundaries, and safe feedback handling.
-3. Release/readiness docs keep live-provider, Windows/WSL, Feishu callback, and first-user feedback caveats visible with rerun paths.
+1. A canonical registry lists every external gate, current state, owner, clearing condition, artifact shape, redaction rules, and target report/issue route.
+2. Trial, support, open-source, and closeout docs link to that registry instead of duplicating stale caveat wording.
+3. Closeout wording says mocked tests and template existence do not clear external gates.
+4. No evidence guidance asks users to paste secrets, raw provider payloads, Feishu bodies, or raw terminal transcripts.
+
+### Phase 18: Live Provider Evidence Rerun
+
+**Goal:** Run or precisely block live provider evidence using a disposable credential and explicit model id.
+
+**Requirements:** PROV-01, PROV-02, PROV-03
+
+**Plans:** TBD after Phase 17.
+
+**Success criteria:**
+
+1. `pnpm smoke:copilot-provider` has a redacted evidence artifact with provider, model id, command, result, and timestamp, or a precise blocker.
+2. Failure evidence distinguishes credential/model/network/timeout/outage/product-contract classes.
+3. Codex subscription-managed paths remain excluded from provider key/model override evidence.
+
+### Phase 19: Feishu Public Callback Evidence
+
+**Goal:** Record a real Feishu developer-console callback attempt against public HTTPS Gateway routing.
+
+**Requirements:** FEI-LIVE-01, FEI-LIVE-02, FEI-LIVE-03
+
+**Plans:** TBD after Phase 17.
+
+**Success criteria:**
+
+1. Feishu console URL verification is recorded as `Pass`, `Caveat`, or `Blocked` with environment and rerun steps.
+2. Evidence covers signature/raw-body handling, replay/rate policy, tenant allowlist checks, and redaction boundaries.
+3. Feishu free-form text still cannot approve pending actions, send terminal input, or mutate Project Manager state.
+
+### Phase 20: Platform And First-User Acceptance Closure
+
+**Goal:** Close or truthfully preserve physical Windows/WSL and first-user feedback gates, then publish a v1.4 closeout matrix.
+
+**Requirements:** UXE-01, UXE-02, UXE-03, REL-01, REL-02
+
+**Plans:** TBD after Phase 17.
+
+**Success criteria:**
+
+1. Physical Windows/WSL evidence records real WSL dependency, terminal, reconnect, Gateway restart, and cleanup behavior, or a precise blocker.
+2. At least one completed first-user feedback packet is triaged into severity, owner, disposition, affected surface, and follow-up route, or the missing packet remains a caveat.
+3. v1.4 closeout lists every gate as `Pass`, `Caveat`, or `Blocked` with artifact links or precise blockers.
+4. Public docs continue to preserve any remaining caveats with rerun paths.
 
 ## Archived Milestones
 
@@ -178,6 +128,23 @@ Full archive:
 
 </details>
 
+<details>
+<summary>✅ v1.3 AI-Native Project Execution Traceability (Phases 12-16) — SHIPPED 2026-05-29</summary>
+
+- [x] Phase 12: Copilot Project-Manager Traceability — 4/4 plans completed 2026-05-22.
+- [x] Phase 13: Project Manager Board Workflow — 3/3 plans completed 2026-05-29.
+- [x] Phase 14: Terminal Workspace Context — 3/3 plans completed 2026-05-29.
+- [x] Phase 15: Model Provider Setup And Health — 3/3 plans completed 2026-05-29.
+- [x] Phase 16: Open Source Readiness Packet — 1/1 plan completed 2026-05-29.
+
+Full archive:
+
+- `.planning/milestones/v1.3-ROADMAP.md`
+- `.planning/milestones/v1.3-REQUIREMENTS.md`
+- `.planning/milestones/v1.3-phases/`
+
+</details>
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -190,18 +157,22 @@ Full archive:
 | 6. Live Provider and Platform Smoke Evidence | v1.1 | 2/2 | Complete | 2026-05-21 |
 | 7. Feishu Live Callback Readiness | v1.1 | 2/2 | Complete | 2026-05-21 |
 | 8. First-User Readiness Packet | v1.1 | 2/2 | Complete | 2026-05-21 |
-| 9. Project Manager Web Foundation | v1.2 | 2/2 | Complete   | 2026-05-21 |
-| 10. Goal And Work Item Operations | v1.2 | 3/3 | Complete   | 2026-05-22 |
-| 11. Evidence, Ledger, And Acceptance Gates | v1.2 | 3/3 | Complete   | 2026-05-22 |
-| 12. Copilot Project-Manager Traceability | v1.3 | 4/4 | Complete    | 2026-05-22 |
+| 9. Project Manager Web Foundation | v1.2 | 2/2 | Complete | 2026-05-21 |
+| 10. Goal And Work Item Operations | v1.2 | 3/3 | Complete | 2026-05-22 |
+| 11. Evidence, Ledger, And Acceptance Gates | v1.2 | 3/3 | Complete | 2026-05-22 |
+| 12. Copilot Project-Manager Traceability | v1.3 | 4/4 | Complete | 2026-05-22 |
 | 13. Project Manager Board Workflow | v1.3 | 3/3 | Complete | 2026-05-29 |
 | 14. Terminal Workspace Context | v1.3 | 3/3 | Complete | 2026-05-29 |
 | 15. Model Provider Setup And Health | v1.3 | 3/3 | Complete | 2026-05-29 |
 | 16. Open Source Readiness Packet | v1.3 | 1/1 | Complete | 2026-05-29 |
+| 17. External Evidence Registry | v1.4 | 0/1 | Planned | - |
+| 18. Live Provider Evidence Rerun | v1.4 | TBD | Planned | - |
+| 19. Feishu Public Callback Evidence | v1.4 | TBD | Planned | - |
+| 20. Platform And First-User Acceptance Closure | v1.4 | TBD | Planned | - |
 
 ## Backlog
 
-Deferred outside v1.3 unless reprioritized:
+Deferred outside v1.4 unless reprioritized:
 
 - Project-manager global dashboard and advanced analytics.
 - SSH/remote execution runtime implementation from the Phase 5 architecture package.

@@ -1,102 +1,90 @@
-# Requirements: OpenForge v1.3 AI-Native Project Execution Traceability
+# Requirements: OpenForge v1.4 External Evidence Closure
 
-**Defined:** 2026-05-22
-**Core Value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while turning AI-assisted work into auditable project state.
-**Milestone Goal:** Extend the v1.2 Project Manager workflow into an AI-native execution traceability layer that links Copilot, terminal context, evidence, provider readiness, and open-source trust without changing OpenForge into a generic project-management suite.
+**Defined:** 2026-05-29
+**Core Value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
+**Milestone Goal:** Convert the remaining live-provider, physical Windows/WSL, Feishu developer-console callback, and first-user feedback caveats into an explicit evidence gate system with runnable collection paths and truthful closeout decisions.
 
 ## Readiness Assessment
 
-- v1.2 Project Manager Web Workflow is complete and archived.
-- `.planning/STATE.md` had no active milestone before this definition.
-- Before this v1.3 planning update, tracked code was clean; the current tracked changes are the v1.3 planning documents, and unrelated untracked `upload_img/` remains outside milestone scope.
-- v1.1 external caveats remain explicit caveats and are not silently reclassified by this milestone.
-- This milestone has started. Phase 12 context is gathered in `.planning/phases/OF-12-copilot-project-manager-traceability/12-CONTEXT.md`; the next step is `$gsd-plan-phase 12`.
+- v1.3 AI-Native Project Execution Traceability is complete and archived under `.planning/milestones/v1.3-*`.
+- OpenForge is now suitable for cautious open-source inspection and local-first trial, but release claims remain bounded by external evidence caveats.
+- The next product risk is not another broad feature surface; it is proving real-world provider, platform, Feishu, and first-user behavior without exposing secrets or raw transcripts.
+- `upload_img/` remains unrelated untracked local data and is outside milestone scope.
 
-## v1.3 Requirements
+## v1.4 Requirements
 
 ### Product Position
 
-- [x] **POS-01**: OpenForge remains a local-first AI CLI control plane; AI-native project management is a traceability layer on top of local AI CLI execution, not a Jira/Linear replacement.
-- [x] **POS-02**: Project Manager state remains Gateway-owned, tenant-scoped, audited, and bounded to structured references.
-- [x] **POS-03**: Copilot, Feishu, and model output may propose project-manager writes only through explicit pending-action approval flows.
+- [ ] **EVPOS-01**: OpenForge remains a local-first AI CLI control plane; v1.4 does not add hosted collaboration, cloud workers, autonomous remote execution, or Feishu execution authority.
+- [ ] **EVPOS-02**: Release/readiness claims are sourced from bounded evidence artifacts, not from the existence of checklists, templates, or mocked tests alone.
+- [ ] **EVPOS-03**: Evidence collection defaults to redacted metadata, bounded status fields, commands, timestamps, environment summaries, and artifact links; raw provider payloads, Feishu bodies, terminal transcripts, tokens, and secrets remain excluded.
 
-### Copilot And Project Manager Traceability
+### Evidence Registry
 
-- [x] **TRACE-01**: User can link a Copilot run, pending action, or safe run summary to a project-manager work item as a bounded evidence reference.
-- [x] **TRACE-02**: Copilot can propose project-manager work item creation, status updates, and evidence attachments through pending actions, never direct mutation.
-- [x] **TRACE-03**: Ledger events record safe traceability markers for Copilot-proposed changes, including run id, action type, status, and evidence counts without raw prompt, terminal, provider, or secret content.
-- [x] **TRACE-04**: Web surfaces show how a work item moved from prompt to approval to execution evidence.
+- [ ] **EVID-01**: A canonical external evidence gate registry lists live provider, physical Windows/WSL terminal, Feishu developer-console callback, and completed first-user feedback gates.
+- [ ] **EVID-02**: Every gate records current state, owner, clearing condition, rerun command or runbook, allowed artifact shape, redaction rules, and target report or issue destination.
+- [ ] **EVID-03**: Milestone and phase closeouts must reference the registry and may only move a gate to `Pass` when the required artifact exists.
 
-### Project Manager Board Workflow
+### Live Provider Evidence
 
-- [x] **BOARD-01**: User can manage work items in a Kanban-style board grouped by bounded status.
-- [x] **BOARD-02**: User can edit and delete work items with Gateway validation, tenant scoping, ledger events, and clear destructive-action confirmation.
-- [x] **BOARD-03**: User can perform bounded batch actions on selected work items without bypassing status-transition rules.
-- [x] **BOARD-04**: The existing table/detail workflow remains usable for dense review and does not regress.
+- [ ] **PROV-01**: A disposable live provider smoke run can be recorded with explicit provider, model id, command, bounded result, and redacted artifact path.
+- [ ] **PROV-02**: Provider evidence distinguishes credential failure, unsupported model, endpoint/network failure, timeout, provider outage, and product-contract failure.
+- [ ] **PROV-03**: Codex subscription-managed launch paths remain isolated from provider API-key/model override evidence.
 
-### Terminal Workspace Context
+### Feishu Callback Evidence
 
-- [x] **CTX-01**: Session and project views expose a safe file tree sidecar rooted at the project path.
-- [x] **CTX-02**: File tree reads use existing safe path resolution rules and reject traversal, symlink escape, and sensitive system paths.
-- [x] **CTX-03**: User can attach file path, terminal snapshot marker, or session id as bounded evidence references to a work item.
-- [x] **CTX-04**: Terminal, file context, and project-manager evidence remain references only; raw terminal scrollback is not stored in SQLite.
+- [ ] **FEI-LIVE-01**: A real Feishu developer-console URL verification attempt can be recorded against a public HTTPS Gateway webhook URL.
+- [ ] **FEI-LIVE-02**: Feishu callback evidence confirms raw-body signature verification, replay/rate policy, tenant allowlist checks, and redaction boundaries.
+- [ ] **FEI-LIVE-03**: Feishu free-form text remains unable to approve pending actions, send terminal input, or directly mutate Project Manager state.
 
-### Model Provider Setup And Health
+### Platform And First-User Evidence
 
-- [x] **MODEL-01**: User gets a guided provider setup path that reduces provider profile, credential, and model profile confusion.
-- [x] **MODEL-02**: Provider/model health can verify credential and selected model readiness with a safe lightweight provider call where supported, not only endpoint `HEAD`.
-- [x] **MODEL-03**: Provider errors distinguish invalid credential, endpoint/network failure, unsupported model, timeout, and provider outage with actionable remediation.
-- [x] **MODEL-04**: Codex subscription-managed launch paths remain isolated from provider API-key/model override injection.
+- [ ] **UXE-01**: A physical Windows/WSL evidence packet can record dependency checks, WSL terminal launch, browser terminal attach/input/resize, reconnect, Gateway restart recovery, and cleanup.
+- [ ] **UXE-02**: First-user feedback packets map findings to severity, owner, disposition, affected surface, environment, and follow-up backlog item or explicit no-action rationale.
+- [ ] **UXE-03**: Support and trial docs route users to evidence gates without asking them to paste secrets, raw terminal content, or private project data.
 
-### Open Source Readiness
+### Release Closeout
 
-- [x] **OSS-01**: Repository declares an open-source license and records the license rationale.
-- [x] **OSS-02**: README, CONTRIBUTING, SECURITY, and issue templates explain local-first scope, prerequisites, support boundaries, and safe feedback handling.
-- [x] **OSS-03**: Release/readiness docs avoid overclaiming external caveats and keep live-provider, Windows/WSL, Feishu callback, and first-user feedback rerun paths visible.
+- [ ] **REL-01**: v1.4 closeout produces a `Pass`/`Caveat`/`Blocked` matrix for every external evidence gate with artifact links or precise blockers.
+- [ ] **REL-02**: Public/open-source docs continue to avoid overclaiming and surface any remaining caveats with rerun paths.
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Generic project-management suite | v1.3 is about AI execution traceability inside OpenForge, not replacing Jira, Linear, or ClickUp. |
-| Hosted collaboration, cloud deployment, billing, hosted marketplace, or telemetry | Requires separate architecture, security, and product review. |
-| Autonomous remote execution or unattended coding loop | Would change authority boundaries and threat model. |
-| Feishu free-form approval or terminal input | Feishu remains a collaboration ingress only. |
-| Raw evidence blob storage | Evidence remains bounded references; raw transcripts, Feishu content, provider payloads, and secrets stay excluded. |
-| Codex Web `/turn` product workflow | `/turn` remains default-disabled prototype scope until a separate transcript/security design exists. |
-| Clearing v1.1 external caveats | Caveats require real external evidence, not milestone reclassification. |
+| New runtime capability | v1.4 is evidence closure and release trust work. |
+| Hosted collaboration, cloud deployment, billing, marketplace, telemetry | Requires separate architecture and security review. |
+| Autonomous remote execution or unattended coding loops | Changes authority boundaries and threat model. |
+| Feishu free-form approvals or terminal input | Feishu remains controlled collaboration ingress only. |
+| Raw evidence blob storage | Evidence remains bounded references and redacted artifacts. |
+| Clearing external caveats without artifacts | v1.4 exists specifically to prevent false pass claims. |
 
 ## Traceability
 
 | Requirement | Target Phase | Status |
 |-------------|--------------|--------|
-| POS-01 | Phase 12 | Complete |
-| POS-02 | Phase 12 | Complete |
-| POS-03 | Phase 12 | Complete |
-| TRACE-01 | Phase 12 | Complete |
-| TRACE-02 | Phase 12 | Complete |
-| TRACE-03 | Phase 12 | Complete |
-| TRACE-04 | Phase 12 | Complete |
-| BOARD-01 | Phase 13 | Complete |
-| BOARD-02 | Phase 13 | Complete |
-| BOARD-03 | Phase 13 | Complete |
-| BOARD-04 | Phase 13 | Complete |
-| CTX-01 | Phase 14 | Complete |
-| CTX-02 | Phase 14 | Complete |
-| CTX-03 | Phase 14 | Complete |
-| CTX-04 | Phase 14 | Complete |
-| MODEL-01 | Phase 15 | Complete |
-| MODEL-02 | Phase 15 | Complete |
-| MODEL-03 | Phase 15 | Complete |
-| MODEL-04 | Phase 15 | Complete |
-| OSS-01 | Phase 16 | Complete |
-| OSS-02 | Phase 16 | Complete |
-| OSS-03 | Phase 16 | Complete |
+| EVPOS-01 | Phase 17 | Planned |
+| EVPOS-02 | Phase 17 | Planned |
+| EVPOS-03 | Phase 17 | Planned |
+| EVID-01 | Phase 17 | Planned |
+| EVID-02 | Phase 17 | Planned |
+| EVID-03 | Phase 17 | Planned |
+| PROV-01 | Phase 18 | Planned |
+| PROV-02 | Phase 18 | Planned |
+| PROV-03 | Phase 18 | Planned |
+| FEI-LIVE-01 | Phase 19 | Planned |
+| FEI-LIVE-02 | Phase 19 | Planned |
+| FEI-LIVE-03 | Phase 19 | Planned |
+| UXE-01 | Phase 20 | Planned |
+| UXE-02 | Phase 20 | Planned |
+| UXE-03 | Phase 20 | Planned |
+| REL-01 | Phase 20 | Planned |
+| REL-02 | Phase 20 | Planned |
 
 **Coverage:**
-- v1.3 requirements: 22 total
-- Mapped to phases: 22
+- v1.4 requirements: 17 total
+- Mapped to phases: 17
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-05-22 after PM review audit triage.*
+*Requirements defined: 2026-05-29 after v1.3 completion and open-source readiness closeout.*

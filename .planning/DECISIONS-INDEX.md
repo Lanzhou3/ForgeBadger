@@ -8,6 +8,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 - The strongest product wedge is reliable browser control and recovery of local AI CLI sessions.
 - Copilot, Feishu, and Codex app-server features must strengthen that wedge instead of broadening into unbounded autonomy.
 - AI-native project management is a traceability layer for AI CLI execution, not a generic PM-suite replacement.
+- v1.4 focuses on external evidence closure before any new runtime expansion.
 
 ## Locked Decisions
 
@@ -23,6 +24,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | Feishu boundary | Feishu is a controlled collaboration channel into Copilot, not execution authority or approval authority. | `docs/superpowers/plans/2026-05-19-feishu-inbound-command-bridge-next.md` |
 | Roadmap order | Close beta evidence, then public Feishu webhook safety, then first-user hardening before ledger or remote expansion. | GSD bootstrap review, `docs/superpowers/specs/2026-05-06-openforge-post-rc-roadmap-design.md` |
 | v1.3 direction | Next milestone focuses on AI-native project execution traceability: Copilot proposals, Project Manager board, terminal context, provider health, and open-source trust. | `docs/reports/pm-review-audit-2026-05-22.md`, `.planning/REQUIREMENTS.md` |
+| v1.4 direction | External release caveats require a canonical evidence registry and real redacted artifacts before any `Pass` reclassification. | `docs/OPEN-SOURCE-READINESS.md`, `.planning/REQUIREMENTS.md` |
 
 ## Deferred Ideas
 
