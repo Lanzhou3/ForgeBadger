@@ -352,6 +352,27 @@
   mocked script harness coverage, expected live rejection of the tracker issue,
   docs references, and unchanged external gate states.
 
+### External Gate Issue Audit Rerun Guard
+
+- [x] **GATEISSUE-01**: The external evidence gate registry must name
+  `pnpm trial:feedback-issue-audit` in the `FIRST-USER-FEEDBACK` rerun path
+  alongside the Markdown packet audit.
+- [x] **GATEISSUE-02**: The external evidence gate validator must fail if the
+  issue audit command is removed from the `FIRST-USER-FEEDBACK` rerun path.
+- [x] **GATEISSUE-03**: The guard must keep `FIRST-USER-FEEDBACK` as `Caveat`
+  until a completed, redacted, reviewed first-user artifact exists.
+
+### Phase 33 Planning Closure
+
+- [x] **PLAN-33-01**: Phase 33 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-33-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the external gate issue-audit rerun guard
+  while keeping real first-user packet collection pending.
+- [x] **PLAN-33-03**: Phase 33 verification proves red/green gate-validator
+  coverage, aggregate readiness validation, docs references, and unchanged
+  external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -459,11 +480,17 @@
 | PLAN-32-01 | Phase 32 | Complete |
 | PLAN-32-02 | Phase 32 | Complete |
 | PLAN-32-03 | Phase 32 | Complete |
+| GATEISSUE-01 | Phase 33 | Complete |
+| GATEISSUE-02 | Phase 33 | Complete |
+| GATEISSUE-03 | Phase 33 | Complete |
+| PLAN-33-01 | Phase 33 | Complete |
+| PLAN-33-02 | Phase 33 | Complete |
+| PLAN-33-03 | Phase 33 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 91 total
-- Mapped to phases: 91
+- v1.5 requirements: 97 total
+- Mapped to phases: 97
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 32 Trial Feedback Issue Audit.*
+*Requirements updated: 2026-05-29 after Phase 33 External Gate Issue Audit Rerun Guard.*

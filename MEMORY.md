@@ -90,6 +90,11 @@
   issue-form feedback through `gh issue view`, maps the body into the existing
   packet audit, rejects issue #5 as incomplete tracker feedback, and returns
   `gateClearingEvidence: false`.
+- Phase 33 updated `docs/EXTERNAL-EVIDENCE-GATES.md` and
+  `scripts/validate-external-evidence-gates.mjs` so the
+  `FIRST-USER-FEEDBACK` rerun path preserves both
+  `pnpm trial:feedback-audit` and `pnpm trial:feedback-issue-audit`, with a
+  regression test that rejects dropping the issue audit command.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -201,8 +206,7 @@
 1. Use the validated v1.5 tokenless runbook, checklist, trial packet intake,
    optional feedback draft helper, readiness preflight, packet audit helper,
    GitHub issue feedback audit helper, intake material validator, and external
-   gate validator for the next real
-   first-user run:
+   gate validator for the next real first-user run:
    affected surface, severity, owner,
    disposition or next action, environment summary, reproduction detail,
    diagnostics status, follow-up route or no-action rationale, and redaction

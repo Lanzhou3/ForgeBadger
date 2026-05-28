@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 32 trial feedback issue audit complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 33 external gate issue-audit rerun guard complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -351,6 +351,32 @@ Plans:
    mutation or network-dependent release claims.
 5. Trial docs describe the audit as read-only and non-gate-clearing.
 
+### Phase 33: External Gate Issue Audit Rerun Guard
+
+**Goal:** Ensure the canonical external evidence gate registry protects the
+GitHub issue-form feedback audit rerun path for `FIRST-USER-FEEDBACK`.
+
+**Requirements:** GATEISSUE-01, GATEISSUE-02, GATEISSUE-03, PLAN-33-01,
+PLAN-33-02, PLAN-33-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 33-01-PLAN.md — gate registry rerun-path update, validator regression,
+  source-of-truth sync, and gate-preserving verification.
+
+**Success criteria:**
+
+1. `docs/EXTERNAL-EVIDENCE-GATES.md` names both first-user audit commands:
+   `pnpm trial:feedback-audit` and `pnpm trial:feedback-issue-audit`.
+2. `pnpm evidence:gates-validate` fails if the issue audit command is removed
+   from the `FIRST-USER-FEEDBACK` rerun path.
+3. `FIRST-USER-FEEDBACK` remains `Caveat`.
+4. The guard does not collect evidence, submit issues, attach artifacts, or
+   clear external gates.
+5. Planning and report docs keep real first-user packet collection pending.
+
 ## Archived Milestones
 
 <details>
@@ -473,6 +499,7 @@ Full archive:
 | 30. Trial Issue Route Preflight | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 31. Trial Readiness Preflight Bundle | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 32. Trial Feedback Issue Audit | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 33. External Gate Issue Audit Rerun Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

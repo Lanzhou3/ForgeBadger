@@ -73,6 +73,14 @@ describe("validateExternalEvidenceGates", () => {
     assert.equal(result.ok, false);
     assert.match(result.errors.join("\n"), /FIRST-USER-FEEDBACK.*pnpm trial:feedback-audit/);
   });
+
+  it("requires the first-user feedback rerun path to include the issue audit helper", () => {
+    const registry = buildRegistryFixture().replace("; pnpm trial:feedback-issue-audit", "");
+    const result = validateExternalEvidenceGates({ registry });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /FIRST-USER-FEEDBACK.*pnpm trial:feedback-issue-audit/);
+  });
 });
 
 function buildRegistryFixture() {

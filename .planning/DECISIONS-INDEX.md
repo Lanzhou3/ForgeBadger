@@ -34,6 +34,8 @@ This bounded index summarizes decisions that downstream GSD workflows should car
   artifacts.
 - GitHub issue-form feedback audit may prove an issue body is ready for human
   triage, but it remains read-only and cannot clear external evidence gates.
+- The external gate registry must preserve both first-user feedback audit
+  routes: Markdown packet audit and GitHub issue-form audit.
 
 ## Locked Decisions
 
@@ -65,6 +67,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.5 trial issue route preflight | `pnpm trial:issue-routes-validate` checks GitHub issue #3, #4, and #5 are open and mapped to expected external evidence routes; `gateClearingEvidence` remains false. | `docs/reports/phase-30-trial-issue-route-preflight-2026-05-29.md` |
 | v1.5 trial readiness preflight bundle | `pnpm trial:readiness-validate` aggregates trial intake, issue-route, and external gate validators before a real collection round; `gateClearingEvidence` remains false. | `docs/reports/phase-31-trial-readiness-preflight-bundle-2026-05-29.md` |
 | v1.5 trial feedback issue audit | `pnpm trial:feedback-issue-audit -- --issue=<number>` audits GitHub issue-form feedback through the packet audit path; `gateClearingEvidence` remains false. | `docs/reports/phase-32-trial-feedback-issue-audit-2026-05-29.md` |
+| v1.5 external gate issue-audit rerun guard | `pnpm evidence:gates-validate` requires `pnpm trial:feedback-issue-audit` in the `FIRST-USER-FEEDBACK` rerun path alongside the Markdown packet audit. | `docs/reports/phase-33-external-gate-issue-audit-rerun-guard-2026-05-29.md` |
 
 ## Deferred Ideas
 
