@@ -14,7 +14,11 @@
   evidence gate registry plus real redacted artifacts or precise blockers.
   Phase 17 created the registry; Phase 18 reran `pnpm smoke:copilot-provider`
   and recorded `LIVE-PROVIDER` as `Caveat` with
-  `missing_provider_credential`.
+  `missing_provider_credential`; Phase 19 reran Feishu CLI preflight,
+  `pnpm smoke:feishu-public-webhook`, Feishu/Copilot regression, and Gateway
+  typecheck, then recorded `FEISHU-CALLBACK` as `Blocked` because public HTTPS
+  routing, operator webhook setup environment, and Feishu developer-console URL
+  verification were unavailable.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -123,29 +127,35 @@
 
 ## Next Work
 
-1. Plan Phase 19 Feishu public callback evidence, but keep the callback gate
-   `Blocked` until public HTTPS Gateway routing and Feishu developer-console
-   URL verification are available.
-2. Rerun the `LIVE-PROVIDER` gate only after a disposable provider credential
+1. Plan Phase 20 Platform And First-User Acceptance Closure. Keep
+   `WINDOWS-WSL` as `Caveat` until a real Windows/WSL host completes the
+   terminal checklist, keep `FIRST-USER-FEEDBACK` as `Caveat` until a completed
+   redacted feedback packet is attached, and publish the v1.4 closeout matrix
+   without overclaiming.
+2. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,
+   operator webhook setup environment, and Feishu developer-console URL
+   verification are available. Phase 19 proved bot CLI preflight and local
+   regression only; those do not clear the real callback gate.
+3. Rerun the `LIVE-PROVIDER` gate only after a disposable provider credential
    and explicit model id are available; Phase 18 currently records
    `missing_provider_credential`.
-3. Keep Codex app-server turn input disabled unless the Gateway is explicitly
+4. Keep Codex app-server turn input disabled unless the Gateway is explicitly
    started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Treat `/turn` as a
    default-403 feature-flag prototype API, not a Web-exposed user workflow.
    Gateway does not persist prompt/response transcript content; add
    user-facing retention controls before exposing real turn input in Web. Do not
    add provider API-key or model override application to this Codex app-server
    path.
-4. If stopped/error app-server records grow in long-running usage, add an
+5. If stopped/error app-server records grow in long-running usage, add an
    explicit TTL or pagination strategy instead of deleting them immediately and
    losing observable process state.
-5. Run a physical Windows/WSL manual smoke when that platform is available; the
+6. Run a physical Windows/WSL manual smoke when that platform is available; the
    current pass covers CLI mode behavior, CI/release gate automation, checklist
    fields, and runbook remediation, not a real Windows host. Record that
    evidence in GitHub issue #4.
-6. Collect first-user Copilot hardening feedback through the trial feedback
+7. Collect first-user Copilot hardening feedback through the trial feedback
    form and issue #5. Focus on dependency failure states, CLI availability
    recovery, provider configuration recovery, and platform-specific
    remediation.
-7. Keep SSH/remote execution as a separate architecture item, not part of the
+8. Keep SSH/remote execution as a separate architecture item, not part of the
    local Codex app-server prototype.

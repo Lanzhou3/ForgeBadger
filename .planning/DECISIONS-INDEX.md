@@ -26,6 +26,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.3 direction | Next milestone focuses on AI-native project execution traceability: Copilot proposals, Project Manager board, terminal context, provider health, and open-source trust. | `docs/reports/pm-review-audit-2026-05-22.md`, `.planning/REQUIREMENTS.md` |
 | v1.4 direction | External release caveats require a canonical evidence registry and real redacted artifacts before any `Pass` reclassification. | `docs/OPEN-SOURCE-READINESS.md`, `.planning/REQUIREMENTS.md` |
 | v1.4 live provider gate | `LIVE-PROVIDER` remains `Caveat` after Phase 18 because the smoke rerun returned `missing_provider_credential`; no live `Pass` can be claimed without a disposable credential and explicit model id. | `docs/reports/phase-18-live-provider-evidence-rerun-2026-05-29.md` |
+| v1.4 Feishu callback gate | `FEISHU-CALLBACK` remains `Blocked` after Phase 19 because CLI bot preflight and local regression do not replace public HTTPS routing plus Feishu developer-console URL verification. | `docs/reports/phase-19-feishu-public-callback-evidence-2026-05-29.md` |
 
 ## Deferred Ideas
 

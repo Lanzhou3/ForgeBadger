@@ -55,17 +55,22 @@ Plans:
 
 ### Phase 19: Feishu Public Callback Evidence
 
-**Goal:** Record a real Feishu developer-console callback attempt against public HTTPS Gateway routing.
+**Goal:** Record a real Feishu developer-console callback attempt or a precise blocker against public HTTPS Gateway routing.
 
 **Requirements:** FEI-LIVE-01, FEI-LIVE-02, FEI-LIVE-03
 
-**Plans:** TBD after Phase 17.
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 19-01-PLAN.md — Feishu CLI preflight, public-webhook helper blocker, boundary regression, and callback gate closeout.
 
 **Success criteria:**
 
 1. Feishu console URL verification is recorded as `Pass`, `Caveat`, or `Blocked` with environment and rerun steps.
 2. Evidence covers signature/raw-body handling, replay/rate policy, tenant allowlist checks, and redaction boundaries.
 3. Feishu free-form text still cannot approve pending actions, send terminal input, or mutate Project Manager state.
+4. CLI/helper/regression evidence does not override the missing real developer-console callback proof.
 
 ### Phase 20: Platform And First-User Acceptance Closure
 
@@ -171,7 +176,7 @@ Full archive:
 | 16. Open Source Readiness Packet | v1.3 | 1/1 | Complete | 2026-05-29 |
 | 17. External Evidence Registry | v1.4 | 1/1 | Complete | 2026-05-29 |
 | 18. Live Provider Evidence Rerun | v1.4 | 1/1 | Complete (Caveat) | 2026-05-29 |
-| 19. Feishu Public Callback Evidence | v1.4 | TBD | Planned | - |
+| 19. Feishu Public Callback Evidence | v1.4 | 1/1 | Complete (Blocked) | 2026-05-29 |
 | 20. Platform And First-User Acceptance Closure | v1.4 | TBD | Planned | - |
 
 ## Backlog

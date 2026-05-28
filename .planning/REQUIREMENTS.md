@@ -33,9 +33,9 @@
 
 ### Feishu Callback Evidence
 
-- [ ] **FEI-LIVE-01**: A real Feishu developer-console URL verification attempt can be recorded against a public HTTPS Gateway webhook URL.
-- [ ] **FEI-LIVE-02**: Feishu callback evidence confirms raw-body signature verification, replay/rate policy, tenant allowlist checks, and redaction boundaries.
-- [ ] **FEI-LIVE-03**: Feishu free-form text remains unable to approve pending actions, send terminal input, or directly mutate Project Manager state.
+- [x] **FEI-LIVE-01**: Feishu developer-console URL verification evidence records either a real public HTTPS callback attempt or a precise blocker with rerun steps.
+- [x] **FEI-LIVE-02**: Feishu callback evidence records raw-body signature, replay/rate, tenant allowlist, user mapping, encrypted-payload, and redaction boundaries through local regression when live console verification is blocked.
+- [x] **FEI-LIVE-03**: Feishu free-form text remains unable to approve pending actions, send terminal input, or directly mutate Project Manager state.
 
 ### Platform And First-User Evidence
 
@@ -72,9 +72,9 @@
 | PROV-01 | Phase 18 | Complete (Caveat) |
 | PROV-02 | Phase 18 | Complete (Caveat) |
 | PROV-03 | Phase 18 | Complete |
-| FEI-LIVE-01 | Phase 19 | Planned |
-| FEI-LIVE-02 | Phase 19 | Planned |
-| FEI-LIVE-03 | Phase 19 | Planned |
+| FEI-LIVE-01 | Phase 19 | Complete (Blocked) |
+| FEI-LIVE-02 | Phase 19 | Complete (Blocked) |
+| FEI-LIVE-03 | Phase 19 | Complete (Blocked) |
 | UXE-01 | Phase 20 | Planned |
 | UXE-02 | Phase 20 | Planned |
 | UXE-03 | Phase 20 | Planned |
