@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 21 foundation complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 22 operator dry-run complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -56,6 +56,34 @@ Plans:
 5. Phase 21 introduces no runtime expansion, no raw evidence storage, and no
    request for secrets, raw provider payloads, raw Feishu bodies, or raw
    terminal transcripts.
+
+### Phase 22: Operator Trial Dry Run
+
+**Goal:** Run the v1.5 trial loop from the maintainer/operator side on the
+current host and record bounded evidence before collecting a real first-user
+packet.
+
+**Requirements:** DRYRUN-01, DRYRUN-02, DRYRUN-03, DRYSAFE-01, DRYSAFE-02,
+PLAN-22-01, PLAN-22-02, PLAN-22-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 22-01-PLAN.md — current-host dependency, startup, provider-smoke,
+  cleanup, and feedback-packet dry-run evidence.
+
+**Success criteria:**
+
+1. Current-host dependency evidence is recorded without secrets: OS, WSL probe,
+   Node, pnpm, tmux, Claude Code, OpenCode, Codex CLI, and `openforge doctor`.
+2. Source startup health is verified on loopback and temporary Gateway/Web
+   processes are stopped afterwards.
+3. Provider smoke behavior is recorded without a disposable credential and
+   `LIVE-PROVIDER` remains `Caveat`.
+4. The dry-run report explicitly states that it is operator evidence, not
+   completed first-user feedback.
+5. Feedback checklist wording matches the full v1.5 packet shape.
 
 ## Archived Milestones
 
@@ -168,6 +196,7 @@ Full archive:
 | 19. Feishu Public Callback Evidence | v1.4 | 1/1 | Complete (Blocked) | 2026-05-29 |
 | 20. Platform And First-User Acceptance Closure | v1.4 | 1/1 | Complete (Caveat) | 2026-05-29 |
 | 21. First-User Trial Operations | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 22. Operator Trial Dry Run | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

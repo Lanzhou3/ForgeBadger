@@ -25,6 +25,13 @@
   feedback template and GitHub issue form, removed first-user browser-token
   fallback guidance, and kept all external gates caveated or blocked until real
   artifacts exist.
+- Phase 22 completed a maintainer/operator dry-run of the v1.5 trial loop on
+  the current host. It recorded Linux `not_wsl`, Node `v24.14.1`, pnpm
+  `10.33.2`, tmux `3.4`, Claude Code `2.1.152`, OpenCode `1.15.4`, Codex CLI
+  `0.134.0`, `openforge doctor` terminal mode `native_tmux`, Gateway/Web
+  loopback startup health, provider smoke skipped with
+  `missing_provider_credential`, and the source dev-script `.env` override
+  behavior as a docs/support gap. It did not clear any external gate.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -137,36 +144,39 @@
    surface, severity, owner, disposition or next action, environment summary,
    reproduction detail, diagnostics status, follow-up route or no-action
    rationale, and redaction review.
-2. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,
+2. Decide whether to document or adjust the source dev-script `.env` override
+   behavior before relying on command-prefix overrides for isolated source
+   fallback trials.
+3. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,
    operator webhook setup environment, and Feishu developer-console URL
    verification are available. Phase 19 proved bot CLI preflight and local
    regression only; those do not clear the real callback gate.
-3. Keep `WINDOWS-WSL` as `Caveat` until a real Windows/WSL host completes the
+4. Keep `WINDOWS-WSL` as `Caveat` until a real Windows/WSL host completes the
    terminal checklist. Phase 20 recorded the current host as Linux `not_wsl`,
    which is not physical WSL evidence.
-4. Keep `FIRST-USER-FEEDBACK` as `Caveat` until a completed redacted feedback
+5. Keep `FIRST-USER-FEEDBACK` as `Caveat` until a completed redacted feedback
    packet is attached or linked with severity, owner, disposition, environment,
    reproduction detail, diagnostics status, and follow-up route.
-5. Rerun the `LIVE-PROVIDER` gate only after a disposable provider credential
+6. Rerun the `LIVE-PROVIDER` gate only after a disposable provider credential
    and explicit model id are available; Phase 18 currently records
    `missing_provider_credential`.
-6. Keep Codex app-server turn input disabled unless the Gateway is explicitly
+7. Keep Codex app-server turn input disabled unless the Gateway is explicitly
    started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Treat `/turn` as a
    default-403 feature-flag prototype API, not a Web-exposed user workflow.
    Gateway does not persist prompt/response transcript content; add
    user-facing retention controls before exposing real turn input in Web. Do not
    add provider API-key or model override application to this Codex app-server
    path.
-7. If stopped/error app-server records grow in long-running usage, add an
+8. If stopped/error app-server records grow in long-running usage, add an
    explicit TTL or pagination strategy instead of deleting them immediately and
    losing observable process state.
-8. Run a physical Windows/WSL manual smoke when that platform is available; the
+9. Run a physical Windows/WSL manual smoke when that platform is available; the
    current pass covers CLI mode behavior, CI/release gate automation, checklist
    fields, and runbook remediation, not a real Windows host. Record that
    evidence in GitHub issue #4.
-9. Collect first-user Copilot hardening feedback through the trial feedback
+10. Collect first-user Copilot hardening feedback through the trial feedback
    form and issue #5. Focus on dependency failure states, CLI availability
    recovery, provider configuration recovery, and platform-specific
    remediation.
-10. Keep SSH/remote execution as a separate architecture item, not part of the
+11. Keep SSH/remote execution as a separate architecture item, not part of the
    local Codex app-server prototype.

@@ -2,16 +2,17 @@
 
 ## v1.5 First-User Trial Operations (Active: 2026-05-29)
 
-**Phases planned:** 1 phase, 1 plan
+**Phases planned:** 2 phases, 2 plans
 
 **Goal:**
 
 Turn cautious local-first readiness into an operator-run first-user trial loop
 with redacted evidence routing, feedback triage, and truthful gate decisions.
 
-**Current phase:**
+**Current phases:**
 
 - [x] Phase 21: First-User Trial Operations — 1/1 plans complete.
+- [x] Phase 22: Operator Trial Dry Run — 1/1 plans complete.
 
 **Acceptance boundary:**
 
@@ -20,6 +21,8 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and
   `FIRST-USER-FEEDBACK` keep their v1.4 states until the required artifacts in
   `docs/EXTERNAL-EVIDENCE-GATES.md` exist.
+- Operator dry-run evidence can improve the collection loop, but it is not a
+  substitute for a completed first-user packet.
 
 ---
 

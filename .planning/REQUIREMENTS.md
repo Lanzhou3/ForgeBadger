@@ -69,6 +69,33 @@
 - [x] **PLAN-21-03**: Phase 21 verification proves milestone references,
   preserved external gate states, and secret-safe evidence wording.
 
+### Operator Dry Run
+
+- [x] **DRYRUN-01**: Maintainer/operator can run a current-host dry-run that
+  records dependency versions, WSL classification, and `openforge doctor`
+  terminal-runtime status without requesting secrets or raw local output.
+- [x] **DRYRUN-02**: Source startup health is verified with bounded loopback
+  evidence for Gateway `/api/v1/health` and Web `/login`, and temporary
+  processes are stopped afterwards.
+- [x] **DRYRUN-03**: Provider-smoke collection records the missing disposable
+  credential path as `missing_provider_credential` and preserves
+  `LIVE-PROVIDER` as `Caveat`.
+- [x] **DRYSAFE-01**: Operator dry-run evidence is explicitly not completed
+  first-user feedback and cannot clear `FIRST-USER-FEEDBACK`.
+- [x] **DRYSAFE-02**: The dry-run records source-startup `.env` override
+  behavior as a docs/support gap without exposing `.env` contents or local
+  database contents.
+
+### Phase 22 Planning Closure
+
+- [x] **PLAN-22-01**: Phase 22 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-22-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect Phase 22 completion while keeping real
+  first-user packet collection pending.
+- [x] **PLAN-22-03**: Phase 22 verification proves external gate states remain
+  unchanged and no secret-like evidence wording was introduced.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -97,11 +124,19 @@
 | PLAN-21-01 | Phase 21 | Complete |
 | PLAN-21-02 | Phase 21 | Complete |
 | PLAN-21-03 | Phase 21 | Complete |
+| DRYRUN-01 | Phase 22 | Complete |
+| DRYRUN-02 | Phase 22 | Complete |
+| DRYRUN-03 | Phase 22 | Complete |
+| DRYSAFE-01 | Phase 22 | Complete |
+| DRYSAFE-02 | Phase 22 | Complete |
+| PLAN-22-01 | Phase 22 | Complete |
+| PLAN-22-02 | Phase 22 | Complete |
+| PLAN-22-03 | Phase 22 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 12 total
-- Mapped to phases: 12
+- v1.5 requirements: 20 total
+- Mapped to phases: 20
 - Unmapped: 0
 
 ---
-*Requirements completed: 2026-05-29 for Phase 21 First-User Trial Operations foundation.*
+*Requirements updated: 2026-05-29 after Phase 22 Operator Trial Dry Run.*

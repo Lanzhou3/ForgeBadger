@@ -192,8 +192,10 @@ Forbidden Project Manager evidence content:
       `FIRST-USER-FEEDBACK` before claiming completed first-user evidence.
 - [ ] Map each issue to the closest Phase 3 hardening requirement in the
       evidence appendix below.
-- [ ] For every `pass with caveats` or `blocked` result, record owner, next
-      action, evidence needed to clear the status, and follow-up phase or issue.
+- [ ] For every `pass with caveats` or `blocked` result, record affected
+      surface, severity, owner, disposition, next action or no-action
+      rationale, evidence needed to clear the status, follow-up route, and
+      redaction review.
 
 ## Feedback Capture
 
@@ -238,10 +240,14 @@ feedback:
 
 For every `pass with caveats` or `blocked` result, record:
 
+- Affected surface:
+- Severity:
 - Owner:
-- Next action:
+- Disposition:
+- Next action or no-action rationale:
 - Evidence needed to move from `Caveat`/`Blocked` to `Pass`:
-- Follow-up phase or issue:
+- Follow-up route, phase, or issue:
+- Redaction review completed:
 
 ### Copilot Detail
 

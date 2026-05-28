@@ -10,6 +10,8 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 - AI-native project management is a traceability layer for AI CLI execution, not a generic PM-suite replacement.
 - v1.4 focused on external evidence closure before any new runtime expansion.
 - v1.5 focuses on first-user trial operations before any new runtime expansion.
+- Phase 22 operator dry-run evidence is support/readiness evidence only; it
+  cannot clear first-user or external manual gates.
 
 ## Locked Decisions
 
@@ -30,6 +32,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.4 Feishu callback gate | `FEISHU-CALLBACK` remains `Blocked` after Phase 19 because CLI bot preflight and local regression do not replace public HTTPS routing plus Feishu developer-console URL verification. | `docs/reports/phase-19-feishu-public-callback-evidence-2026-05-29.md` |
 | v1.4 closeout | v1.4 is complete as a truthful evidence-closure milestone, with `LIVE-PROVIDER`, `WINDOWS-WSL`, and `FIRST-USER-FEEDBACK` preserved as `Caveat`, and `FEISHU-CALLBACK` preserved as `Blocked`. | `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md` |
 | v1.5 direction | First-user trial operations is the next milestone; it packages trial evidence routing and feedback triage before any runtime expansion. | `docs/superpowers/specs/2026-05-29-openforge-v1.5-first-user-trial-operations-design.md`, `.planning/phases/OF-21-first-user-trial-operations/21-01-PLAN.md` |
+| v1.5 operator dry-run | Phase 22 records current-host operator evidence and a source `.env` override support gap, but it does not clear `FIRST-USER-FEEDBACK` or other external gates. | `docs/reports/phase-22-operator-trial-dry-run-2026-05-29.md` |
 
 ## Deferred Ideas
 
