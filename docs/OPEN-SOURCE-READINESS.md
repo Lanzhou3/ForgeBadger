@@ -47,7 +47,7 @@ the registry for state, artifact shape, owner, and closeout rules.
 | Live provider pass | Caveat until a disposable live provider credential and explicit model id are used. | Run the provider smoke/readiness flow with redacted output and record only bounded status/code/model metadata. |
 | Physical Windows/WSL terminal | Caveat until a real Windows host with WSL completes the terminal checklist. | Run `docs/TRIAL-CHECKLIST.md` Windows/WSL section and attach WSL terminal evidence. |
 | Feishu developer-console callback | Blocked until a real Feishu console URL verification reaches the public Gateway webhook. | Provision public HTTPS routing, run console verification, and update the Feishu evidence report. |
-| Completed first-user feedback | Caveat until at least one completed feedback packet is attached or linked. | Use `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml` or `docs/TRIAL-FEEDBACK.md`. |
+| Completed first-user feedback | `FIRST-USER-FEEDBACK` stays Caveat until at least one completed feedback packet is attached or linked. | Use `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml` or `docs/TRIAL-FEEDBACK.md`; run `pnpm trial:feedback-audit -- <packet.md>` for Markdown packets or `pnpm trial:feedback-issue-audit -- --issue=<number>` for GitHub issue-form feedback before maintainer triage. |
 
 Current closeout: `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`.
 

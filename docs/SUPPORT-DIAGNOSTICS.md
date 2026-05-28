@@ -332,6 +332,9 @@ Route to maintainer/operator when the issue is missing external evidence:
 - no physical Windows/WSL host;
 - no public HTTPS Gateway URL;
 - no Feishu developer-console URL verification action;
-- no completed first-user feedback packet. Use
-  `docs/EXTERNAL-EVIDENCE-GATES.md` gate `FIRST-USER-FEEDBACK` for the
-  required packet shape.
+- no completed first-user feedback packet. Use `docs/TRIAL-FEEDBACK.md` or
+  `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml`, then run
+  `pnpm trial:feedback-audit -- <packet.md>` for Markdown packets or
+  `pnpm trial:feedback-issue-audit -- --issue=<number>` for GitHub issue-form
+  feedback before maintainer triage. Use `docs/EXTERNAL-EVIDENCE-GATES.md`
+  gate `FIRST-USER-FEEDBACK` for the required packet shape.

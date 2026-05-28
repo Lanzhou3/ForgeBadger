@@ -14,6 +14,8 @@ const DEFAULT_GITHUB_ISSUE_FORM_PATH = path.join(
 const DEFAULT_MARKDOWN_TEMPLATE_PATH = path.join(REPO_ROOT, "docs", "TRIAL-FEEDBACK.md");
 const DEFAULT_TRIAL_RUNBOOK_PATH = path.join(REPO_ROOT, "docs", "TRIAL-RUNBOOK.md");
 const DEFAULT_TRIAL_CHECKLIST_PATH = path.join(REPO_ROOT, "docs", "TRIAL-CHECKLIST.md");
+const DEFAULT_OPEN_SOURCE_READINESS_PATH = path.join(REPO_ROOT, "docs", "OPEN-SOURCE-READINESS.md");
+const DEFAULT_SUPPORT_DIAGNOSTICS_PATH = path.join(REPO_ROOT, "docs", "SUPPORT-DIAGNOSTICS.md");
 
 export const REQUIRED_GITHUB_FIELDS = [
   "result",
@@ -117,6 +119,14 @@ export const REQUIRED_CHECKLIST_PHRASES = [
   "Redaction review completed:"
 ];
 
+export const REQUIRED_FIRST_USER_ENTRYPOINT_PHRASES = [
+  "docs/TRIAL-FEEDBACK.md",
+  ".github/ISSUE_TEMPLATE/openforge-trial-feedback.yml",
+  "pnpm trial:feedback-audit",
+  "pnpm trial:feedback-issue-audit",
+  "FIRST-USER-FEEDBACK"
+];
+
 export const REQUIRED_SAFETY_PHRASES = {
   github: [
     "Do not paste API keys",
@@ -213,6 +223,18 @@ export function validateTrialFeedbackIntake(options = {}) {
     "docs/TRIAL-CHECKLIST.md",
     errors
   );
+  const openSourceReadiness = readInput(
+    options.openSourceReadiness,
+    options.openSourceReadinessPath ?? DEFAULT_OPEN_SOURCE_READINESS_PATH,
+    "docs/OPEN-SOURCE-READINESS.md",
+    errors
+  );
+  const supportDiagnostics = readInput(
+    options.supportDiagnostics,
+    options.supportDiagnosticsPath ?? DEFAULT_SUPPORT_DIAGNOSTICS_PATH,
+    "docs/SUPPORT-DIAGNOSTICS.md",
+    errors
+  );
 
   if (githubIssueForm !== undefined) {
     validateGithubIssueForm(githubIssueForm, errors);
@@ -227,6 +249,12 @@ export function validateTrialFeedbackIntake(options = {}) {
   }
   if (trialChecklist !== undefined) {
     validateTrialChecklist(trialChecklist, errors);
+  }
+  if (openSourceReadiness !== undefined) {
+    validateFirstUserEntrypoint(openSourceReadiness, "open-source readiness", errors);
+  }
+  if (supportDiagnostics !== undefined) {
+    validateFirstUserEntrypoint(supportDiagnostics, "support diagnostics", errors);
   }
 
   return { ok: errors.length === 0, errors };
@@ -386,6 +414,14 @@ function validateTrialChecklist(source, errors) {
 
   validateUnsafeIntakeLanguage(source, "Trial checklist", errors);
   validateForbiddenBrowserTokenGuidance(source, "trial checklist", errors);
+}
+
+function validateFirstUserEntrypoint(source, label, errors) {
+  for (const phrase of REQUIRED_FIRST_USER_ENTRYPOINT_PHRASES) {
+    if (!source.includes(phrase)) {
+      errors.push(`${label} is missing required first-user audit route: ${phrase}`);
+    }
+  }
 }
 
 function validateForbiddenBrowserTokenGuidance(source, label, errors) {

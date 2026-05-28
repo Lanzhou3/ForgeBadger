@@ -373,6 +373,29 @@
   coverage, aggregate readiness validation, docs references, and unchanged
   external gate states.
 
+### First-User Entrypoint Audit Route Guard
+
+- [x] **ENTRYPOINT-01**: Public and support first-user entrypoints must name
+  both completed-feedback collection paths: Markdown packet and GitHub issue
+  form.
+- [x] **ENTRYPOINT-02**: Public and support first-user entrypoints must name
+  both maintainer audit commands before triage:
+  `pnpm trial:feedback-audit` and `pnpm trial:feedback-issue-audit`.
+- [x] **ENTRYPOINTSAFE-01**: Entrypoint validation must remain structural only
+  and must not collect feedback, submit issues, attach artifacts, or clear any
+  external evidence gate.
+
+### Phase 34 Planning Closure
+
+- [x] **PLAN-34-01**: Phase 34 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-34-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the first-user entrypoint audit-route
+  guard while keeping real first-user packet collection pending.
+- [x] **PLAN-34-03**: Phase 34 verification proves red/green intake-validator
+  coverage, aggregate readiness validation, docs references, and unchanged
+  external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -486,11 +509,17 @@
 | PLAN-33-01 | Phase 33 | Complete |
 | PLAN-33-02 | Phase 33 | Complete |
 | PLAN-33-03 | Phase 33 | Complete |
+| ENTRYPOINT-01 | Phase 34 | Complete |
+| ENTRYPOINT-02 | Phase 34 | Complete |
+| ENTRYPOINTSAFE-01 | Phase 34 | Complete |
+| PLAN-34-01 | Phase 34 | Complete |
+| PLAN-34-02 | Phase 34 | Complete |
+| PLAN-34-03 | Phase 34 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 97 total
-- Mapped to phases: 97
+- v1.5 requirements: 103 total
+- Mapped to phases: 103
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 33 External Gate Issue Audit Rerun Guard.*
+*Requirements updated: 2026-05-29 after Phase 34 First-User Entrypoint Audit Route Guard.*

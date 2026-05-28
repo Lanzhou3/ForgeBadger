@@ -95,6 +95,11 @@
   `FIRST-USER-FEEDBACK` rerun path preserves both
   `pnpm trial:feedback-audit` and `pnpm trial:feedback-issue-audit`, with a
   regression test that rejects dropping the issue audit command.
+- Phase 34 updated `docs/OPEN-SOURCE-READINESS.md`,
+  `docs/SUPPORT-DIAGNOSTICS.md`, and
+  `scripts/validate-trial-feedback-intake.mjs` so public/support entrypoints
+  must preserve both feedback collection paths and both audit commands before
+  maintainer triage.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and

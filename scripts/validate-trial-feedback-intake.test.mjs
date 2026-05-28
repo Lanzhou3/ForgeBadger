@@ -150,6 +150,29 @@ describe("validateTrialFeedbackIntake", () => {
     assert.match(result.errors.join("\n"), /trial checklist.*browser developer tools/);
     assert.match(result.errors.join("\n"), /trial checklist.*openforge\.token/);
   });
+
+  it("rejects first-user entrypoint docs that omit feedback audit routes", () => {
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm: buildIssueFormFixture(),
+      markdownTemplate: buildMarkdownTemplateFixture(),
+      trialRunbook: buildTrialRunbookFixture(),
+      trialChecklist: buildTrialChecklistFixture(),
+      openSourceReadiness: [
+        "# Open Source Readiness",
+        "Use `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml` or `docs/TRIAL-FEEDBACK.md`."
+      ].join("\n"),
+      supportDiagnostics: [
+        "# Support Diagnostics",
+        "Use docs/EXTERNAL-EVIDENCE-GATES.md gate FIRST-USER-FEEDBACK for the required packet shape."
+      ].join("\n")
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /open-source readiness.*pnpm trial:feedback-audit/);
+    assert.match(result.errors.join("\n"), /open-source readiness.*pnpm trial:feedback-issue-audit/);
+    assert.match(result.errors.join("\n"), /support diagnostics.*pnpm trial:feedback-audit/);
+    assert.match(result.errors.join("\n"), /support diagnostics.*pnpm trial:feedback-issue-audit/);
+  });
 });
 
 function buildIssueFormFixture() {
@@ -209,5 +232,23 @@ function buildTrialRunbookFixture() {
     "Click **Export diagnostics JSON**.",
     "Do not ask first users to retrieve browser auth tokens from developer tools.",
     "Maintainer-only fallback"
+  ].join("\n");
+}
+
+function buildTrialChecklistFixture() {
+  return [
+    "# OpenForge Trial Checklist",
+    "Use this checklist as the first-user trial entry point.",
+    "docs/EXTERNAL-EVIDENCE-GATES.md",
+    "`pnpm trial:intake-validate`",
+    "`pnpm trial:issue-routes-validate`",
+    "`pnpm trial:readiness-validate`",
+    "`pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md`",
+    "`pnpm trial:feedback-issue-audit -- --issue=<number>`",
+    "`pnpm evidence:gates-validate`",
+    "`FIRST-USER-FEEDBACK`",
+    "Templates and empty issue forms do not count as completed feedback.",
+    "Follow-up route, phase, or issue:",
+    "Redaction review completed:"
   ].join("\n");
 }

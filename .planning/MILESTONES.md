@@ -2,7 +2,7 @@
 
 ## v1.5 First-User Trial Operations (Active: 2026-05-29)
 
-**Phases planned:** 13 phases, 13 plans
+**Phases planned:** 14 phases, 14 plans
 
 **Goal:**
 
@@ -24,6 +24,7 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - [x] Phase 31: Trial Readiness Preflight Bundle — 1/1 plans complete.
 - [x] Phase 32: Trial Feedback Issue Audit — 1/1 plans complete.
 - [x] Phase 33: External Gate Issue Audit Rerun Guard — 1/1 plans complete.
+- [x] Phase 34: First-User Entrypoint Audit Route Guard — 1/1 plans complete.
 
 **Acceptance boundary:**
 
@@ -59,6 +60,9 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - External gate issue-audit rerun validation keeps the GitHub issue-form audit
   path visible, but it is not a substitute for a completed, redacted, linked
   first-user packet.
+- First-user entrypoint audit-route validation keeps public/support docs aligned
+  with the audit paths, but it is not a substitute for a completed, redacted,
+  linked first-user packet.
 
 ---
 

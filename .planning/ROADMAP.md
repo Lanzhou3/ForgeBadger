@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 33 external gate issue-audit rerun guard complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 34 first-user entrypoint audit-route guard complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -377,6 +377,33 @@ Plans:
    clear external gates.
 5. Planning and report docs keep real first-user packet collection pending.
 
+### Phase 34: First-User Entrypoint Audit Route Guard
+
+**Goal:** Keep public and support first-user entrypoints aligned with the
+feedback packet and issue-form audit routes.
+
+**Requirements:** ENTRYPOINT-01, ENTRYPOINT-02, ENTRYPOINTSAFE-01,
+PLAN-34-01, PLAN-34-02, PLAN-34-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 34-01-PLAN.md — intake validator entrypoint coverage, public/support doc
+  sync, source-of-truth updates, and gate-preserving verification.
+
+**Success criteria:**
+
+1. `docs/OPEN-SOURCE-READINESS.md` names both first-user feedback audit
+   commands before maintainer triage.
+2. `docs/SUPPORT-DIAGNOSTICS.md` routes missing completed first-user feedback
+   through Markdown packet or GitHub issue-form audit before triage.
+3. `pnpm trial:intake-validate` fails if either entrypoint drops the audit
+   commands or collection paths.
+4. `FIRST-USER-FEEDBACK` remains `Caveat`.
+5. The guard does not collect evidence, submit issues, attach artifacts, or
+   clear external gates.
+
 ## Archived Milestones
 
 <details>
@@ -500,6 +527,7 @@ Full archive:
 | 31. Trial Readiness Preflight Bundle | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 32. Trial Feedback Issue Audit | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 33. External Gate Issue Audit Rerun Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 34. First-User Entrypoint Audit Route Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: First-User Trial Operations
 status: phase_complete
-stopped_at: Phase 33 external gate issue-audit rerun guard complete; real first-user packet collection pending
-last_updated: 2026-05-29T15:35:00+08:00
+stopped_at: Phase 34 first-user entrypoint audit-route guard complete; real first-user packet collection pending
+last_updated: 2026-05-29T15:55:00+08:00
 last_activity: 2026-05-29
 progress:
-  total_phases: 13
-  completed_phases: 13
-  total_plans: 13
-  completed_plans: 13
+  total_phases: 14
+  completed_phases: 14
+  total_plans: 14
+  completed_plans: 14
   percent: 100
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** Phase 33 protected the GitHub issue-form feedback audit path in the external evidence gate registry. The next concrete step is collecting a real first-user trial packet through the validated runbook, checklist, template, issue form, draft helper, readiness preflight, packet or issue audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
+**Current focus:** Phase 34 protected first-user/support entrypoint docs from dropping feedback audit routes. The next concrete step is collecting a real first-user trial packet through the validated runbook, checklist, template, issue form, draft helper, readiness preflight, packet or issue audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
 
 ## Current Position
 
-Phase: 33. External Gate Issue Audit Rerun Guard
-Plan: 33-01 complete
+Phase: 34. First-User Entrypoint Audit Route Guard
+Plan: 34-01 complete
 Status: Phase Complete
 Last activity: 2026-05-29
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-29
 
 **Velocity:**
 
-- Total plans completed: 58
+- Total plans completed: 59
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -75,6 +75,7 @@ Last activity: 2026-05-29
 | 31. Trial Readiness Preflight Bundle | 1/1 | - | - |
 | 32. Trial Feedback Issue Audit | 1/1 | - | - |
 | 33. External Gate Issue Audit Rerun Guard | 1/1 | - | - |
+| 34. First-User Entrypoint Audit Route Guard | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -111,6 +112,7 @@ Recent decisions affecting current work:
 - [Phase 31]: `pnpm trial:readiness-validate` aggregates trial intake, issue-route, and external gate registry validators. The live preflight passed and returned `gateClearingEvidence: false`. External gates remain unchanged.
 - [Phase 32]: `pnpm trial:feedback-issue-audit -- --issue=<number>` audits GitHub issue-form feedback through the same packet audit path. Issue #5 was correctly rejected as a tracker rather than completed feedback. External gates remain unchanged.
 - [Phase 33]: `pnpm evidence:gates-validate` now requires `pnpm trial:feedback-issue-audit` in the `FIRST-USER-FEEDBACK` rerun path alongside the Markdown packet audit. External gates remain unchanged.
+- [Phase 34]: `pnpm trial:intake-validate` now validates `docs/OPEN-SOURCE-READINESS.md` and `docs/SUPPORT-DIAGNOSTICS.md` preserve both feedback audit routes before maintainer triage. External gates remain unchanged.
 
 ### Pending Todos
 
@@ -149,8 +151,8 @@ Next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T15:35:00+08:00
-Stopped at: Phase 33 external gate issue-audit rerun guard complete; real first-user packet collection pending
+Last session: 2026-05-29T15:55:00+08:00
+Stopped at: Phase 34 first-user entrypoint audit-route guard complete; real first-user packet collection pending
 Resume file: None
 
 ## Operator Next Steps
