@@ -29,10 +29,10 @@
 
 ### Project Manager Board Workflow
 
-- [ ] **BOARD-01**: User can manage work items in a Kanban-style board grouped by bounded status.
-- [ ] **BOARD-02**: User can edit and delete work items with Gateway validation, tenant scoping, ledger events, and clear destructive-action confirmation.
-- [ ] **BOARD-03**: User can perform bounded batch actions on selected work items without bypassing status-transition rules.
-- [ ] **BOARD-04**: The existing table/detail workflow remains usable for dense review and does not regress.
+- [x] **BOARD-01**: User can manage work items in a Kanban-style board grouped by bounded status.
+- [x] **BOARD-02**: User can edit and delete work items with Gateway validation, tenant scoping, ledger events, and clear destructive-action confirmation.
+- [x] **BOARD-03**: User can perform bounded batch actions on selected work items without bypassing status-transition rules.
+- [x] **BOARD-04**: The existing table/detail workflow remains usable for dense review and does not regress.
 
 ### Terminal Workspace Context
 
@@ -77,10 +77,10 @@
 | TRACE-02 | Phase 12 | Complete |
 | TRACE-03 | Phase 12 | Complete |
 | TRACE-04 | Phase 12 | Complete |
-| BOARD-01 | Phase 13 | Planned |
-| BOARD-02 | Phase 13 | Planned |
-| BOARD-03 | Phase 13 | Planned |
-| BOARD-04 | Phase 13 | Planned |
+| BOARD-01 | Phase 13 | Complete |
+| BOARD-02 | Phase 13 | Complete |
+| BOARD-03 | Phase 13 | Complete |
+| BOARD-04 | Phase 13 | Complete |
 | CTX-01 | Phase 14 | Planned |
 | CTX-02 | Phase 14 | Planned |
 | CTX-03 | Phase 14 | Planned |
