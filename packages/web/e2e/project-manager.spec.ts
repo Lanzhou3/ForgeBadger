@@ -513,6 +513,37 @@ async function mockProjectDetailApis(
       return;
     }
 
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/workspace/tree` && method === "GET") {
+      await route.fulfill({
+        json: envelope({
+          projectId: PROJECT_ID,
+          rootPath: "/workspace/project-manager-e2e",
+          path: "",
+          truncated: false,
+          entries: [],
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/workspace/file` && method === "GET") {
+      await route.fulfill({
+        json: envelope({
+          projectId: PROJECT_ID,
+          rootPath: "/workspace/project-manager-e2e",
+          path: url.searchParams.get("path") ?? "",
+          name: "workspace.txt",
+          sizeBytes: 0,
+          updatedAt: "2026-05-29T00:00:00.000Z",
+          encoding: "utf8",
+          content: "",
+          truncated: false,
+          binary: false,
+        }),
+      });
+      return;
+    }
+
     if (url.pathname === "/api/v1/sessions" && method === "GET") {
       expect(url.searchParams.get("projectId")).toBe(PROJECT_ID);
       await route.fulfill({ json: envelope({ sessions: [] }) });

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProjectManagerPanel } from "@/components/projects/ProjectManagerPanel";
+import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -909,55 +910,58 @@ export default function ProjectDetailPage() {
             </div>
 
             <TabsContent value="sessions" className="mt-4">
-              {projectSessions.length === 0 ? (
-                <Card>
-                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                    {t("projects.noSessions")}
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("common.name")}</TableHead>
-                        <TableHead>{t("common.status")}</TableHead>
-                        <TableHead className="text-right">{t("projects.action")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {projectSessions.map((session) => (
-                        <TableRow key={session.id}>
-                          <TableCell className="font-medium">
-                            {session.name || session.tmuxName || session.id}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={
-                                session.status === "running"
-                                  ? "default"
-                                  : session.status === "error"
-                                    ? "destructive"
-                                    : "secondary"
-                              }
-                            >
-                              {session.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Link href={`/sessions/${session.id}`}>
-                              <Button variant="ghost" size="sm">
-                                <Play className="mr-2 size-3" />
-                                {t("common.connect")}
-                              </Button>
-                            </Link>
-                          </TableCell>
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                {projectSessions.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                      {t("projects.noSessions")}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{t("common.name")}</TableHead>
+                          <TableHead>{t("common.status")}</TableHead>
+                          <TableHead className="text-right">{t("projects.action")}</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </Card>
-              )}
+                      </TableHeader>
+                      <TableBody>
+                        {projectSessions.map((session) => (
+                          <TableRow key={session.id}>
+                            <TableCell className="font-medium">
+                              {session.name || session.tmuxName || session.id}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  session.status === "running"
+                                    ? "default"
+                                    : session.status === "error"
+                                      ? "destructive"
+                                      : "secondary"
+                                }
+                              >
+                                {session.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Link href={`/sessions/${session.id}`}>
+                                <Button variant="ghost" size="sm">
+                                  <Play className="mr-2 size-3" />
+                                  {t("common.connect")}
+                                </Button>
+                              </Link>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </Card>
+                )}
+                <WorkspaceContextPanel projectId={id} enabled={activeTab === "sessions"} />
+              </div>
             </TabsContent>
 
             <TabsContent value="project-manager" className="mt-4">

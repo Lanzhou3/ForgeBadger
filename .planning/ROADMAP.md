@@ -79,7 +79,7 @@ Plans:
 Plans:
 
 - [x] 14-01-PLAN.md — Gateway safe workspace tree/file read contract and API docs.
-- [ ] 14-02-PLAN.md — Web project/session workspace sidecar using the safe Gateway contract.
+- [x] 14-02-PLAN.md — Web project/session workspace sidecar using the safe Gateway contract.
 - [ ] 14-03-PLAN.md — Project Manager file path, terminal snapshot marker, and session id evidence refs.
 
 **Success criteria:**
@@ -181,7 +181,7 @@ Full archive:
 | 11. Evidence, Ledger, And Acceptance Gates | v1.2 | 3/3 | Complete   | 2026-05-22 |
 | 12. Copilot Project-Manager Traceability | v1.3 | 4/4 | Complete    | 2026-05-22 |
 | 13. Project Manager Board Workflow | v1.3 | 3/3 | Complete | 2026-05-29 |
-| 14. Terminal Workspace Context | v1.3 | 1/3 | In Progress | — |
+| 14. Terminal Workspace Context | v1.3 | 2/3 | In Progress | — |
 | 15. Model Provider Setup And Health | v1.3 | 0/0 | Planned | — |
 | 16. Open Source Readiness Packet | v1.3 | 0/0 | Planned | — |
 

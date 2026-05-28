@@ -52,6 +52,8 @@ import {
   getGlobalAiConfig,
   getProjectAgentSequence,
   getProjectAiConfig,
+  getProjectWorkspaceFile,
+  getProjectWorkspaceTree,
   createDefaultAgentPack,
   createGateASession,
   listAdminUsers,
@@ -964,6 +966,26 @@ describe("api client", () => {
       3,
       "http://127.0.0.1:48731/api/v1/projects/project-1/agents/default-pack",
       expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("reads workspace context routes through REST", async () => {
+    await getProjectWorkspaceTree("project/1", {
+      path: "src",
+      depth: 2,
+      limit: 20,
+    });
+    await getProjectWorkspaceFile("project/1", "src/index.ts");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/workspace/tree?path=src&depth=2&limit=20",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/workspace/file?path=src%2Findex.ts",
+      expect.objectContaining({ headers: expect.any(Object) })
     );
   });
 

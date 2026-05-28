@@ -950,6 +950,36 @@ export interface AiConfigSnapshot {
   forms: AiConfigForm[];
 }
 
+export interface WorkspaceTreeEntry {
+  name: string;
+  path: string;
+  kind: "directory" | "file" | "symlink" | "other" | string;
+  sizeBytes?: number;
+  updatedAt?: string;
+  children?: WorkspaceTreeEntry[];
+}
+
+export interface WorkspaceTreeSnapshot {
+  projectId: string;
+  rootPath: string;
+  path: string;
+  entries: WorkspaceTreeEntry[];
+  truncated: boolean;
+}
+
+export interface WorkspaceFileSnapshot {
+  projectId: string;
+  rootPath: string;
+  path: string;
+  name: string;
+  sizeBytes: number;
+  updatedAt: string;
+  encoding: "utf8" | string;
+  content: string;
+  truncated: boolean;
+  binary: boolean;
+}
+
 export interface SnapshotRestoreResult {
   session: Session;
   mode: "attach_tmux" | "recreate_session";
@@ -1555,6 +1585,10 @@ function projectManagerPath(projectId: string, suffix: string): string {
   return `/api/v1/projects/${encodeURIComponent(projectId)}/project-manager${suffix}`;
 }
 
+function projectWorkspacePath(projectId: string, suffix: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/workspace${suffix}`;
+}
+
 export async function listProjects(): Promise<{ projects: Project[] }> {
   return fetchJson("/api/v1/projects") as Promise<{ projects: Project[] }>;
 }
@@ -1586,6 +1620,26 @@ export async function getProjectAiConfig(id: string): Promise<AiConfigSnapshot> 
 
 export async function getGlobalAiConfig(id: string): Promise<AiConfigSnapshot> {
   return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/ai-config/global`) as Promise<AiConfigSnapshot>;
+}
+
+export async function getProjectWorkspaceTree(
+  id: string,
+  params: { path?: string; depth?: number; limit?: number } = {}
+): Promise<WorkspaceTreeSnapshot> {
+  const searchParams = new URLSearchParams();
+  if (params.path) searchParams.set("path", params.path);
+  if (params.depth !== undefined) searchParams.set("depth", String(params.depth));
+  if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return fetchJson(projectWorkspacePath(id, `/tree${query ? `?${query}` : ""}`)) as Promise<WorkspaceTreeSnapshot>;
+}
+
+export async function getProjectWorkspaceFile(
+  id: string,
+  filePath: string
+): Promise<WorkspaceFileSnapshot> {
+  const searchParams = new URLSearchParams({ path: filePath });
+  return fetchJson(projectWorkspacePath(id, `/file?${searchParams.toString()}`)) as Promise<WorkspaceFileSnapshot>;
 }
 
 export async function updateProjectAiConfigFile(

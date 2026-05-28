@@ -1942,6 +1942,37 @@ async function mockCopilotApis(
       return;
     }
 
+    if (url.pathname === "/api/v1/projects/project-123/workspace/tree" && method === "GET") {
+      await route.fulfill({
+        json: envelope({
+          projectId: "project-123",
+          rootPath: "/workspace/project-123",
+          path: "",
+          truncated: false,
+          entries: [],
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/projects/project-123/workspace/file" && method === "GET") {
+      await route.fulfill({
+        json: envelope({
+          projectId: "project-123",
+          rootPath: "/workspace/project-123",
+          path: url.searchParams.get("path") ?? "",
+          name: "workspace.txt",
+          sizeBytes: 0,
+          updatedAt: "2026-05-29T00:00:00.000Z",
+          encoding: "utf8",
+          content: "",
+          truncated: false,
+          binary: false,
+        }),
+      });
+      return;
+    }
+
     if (url.pathname === "/api/v1/sessions" && method === "GET") {
       await route.fulfill({ json: envelope({ sessions: [] }) });
       return;
