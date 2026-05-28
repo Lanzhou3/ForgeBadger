@@ -71,6 +71,8 @@ describe("copilot routes", () => {
   let sentSessionInputs: Array<{ sessionId: string; data: string }>;
   let createdSessionInputs: Array<{ userId: string; sessionId: string; cwd: string; command: string }>;
   let capturedSessionIds: string[];
+  let terminalHistoryOutputs: string[];
+  let sessionInputTrackingDelaysMs: number[];
   let runtimeSessionSnapshots: Array<{ id: string; status: string; tmuxName: string }> | null;
   let stoppedSessionInputs: Array<{ sessionId: string; tmuxName?: string; userId?: string }>;
   let providerModelFetchInputs: Array<{ baseUrl: string; apiKey?: string; modelsUrl?: string; timeoutMs?: number }>;
@@ -98,6 +100,8 @@ describe("copilot routes", () => {
     sentSessionInputs = [];
     createdSessionInputs = [];
     capturedSessionIds = [];
+    terminalHistoryOutputs = [];
+    sessionInputTrackingDelaysMs = [];
     runtimeSessionSnapshots = null;
     stoppedSessionInputs = [];
     providerModelFetchInputs = [];
@@ -159,7 +163,7 @@ describe("copilot routes", () => {
         },
         async captureHistory(sessionId: string) {
           capturedSessionIds.push(sessionId);
-          return "Claude Code output:\nCurrent task is complete.\n";
+          return terminalHistoryOutputs.shift() ?? "Claude Code output:\nCurrent task is complete.\n";
         },
         listSessions() {
           if (!runtimeSessionSnapshots) {
@@ -220,7 +224,8 @@ describe("copilot routes", () => {
           }
         };
       },
-      adapterCommandRunner
+      adapterCommandRunner,
+      sessionInputTrackingDelaysMs
     }));
   });
 
@@ -644,6 +649,54 @@ describe("copilot routes", () => {
     assert.equal(deletedMessage.status, 200);
     assert.equal(deletedMessage.body.data.message.deletedAt !== null, true);
     assert.deepEqual(messagesAfterDelete.body.data.messages.map((message: { role: string }) => message.role), ["assistant"]);
+  });
+
+  it("includes recent conversation context when replying to follow-up messages", async () => {
+    createOpenAiProvider();
+    const repo = new CopilotRepository(db, userId);
+    const conversation = repo.createConversation({
+      title: "Frontend review",
+      source: "copilot"
+    });
+    repo.createConversationMessage(conversation.id, {
+      role: "user",
+      content: "看下当前aether-glass项目的会话是否正常活跃？最新的操作记录是什么"
+    });
+    repo.createConversationMessage(conversation.id, {
+      role: "assistant",
+      content: "最新操作是 Claude Code 完成了 aether-glass 前端全量代码审查，发现 CRITICAL：XSS-vulnerable token storage；HIGH：WebSocket 内存泄漏风险。"
+    });
+    modelEventResponses = [
+      [{
+        type: "tool_call_requested",
+        id: "tool-call-dashboard",
+        name: "openforge.get_dashboard_summary",
+        input: {}
+      }],
+      [{
+        type: "assistant_message",
+        text: "严重问题是 XSS-vulnerable token storage 和 WebSocket 内存泄漏风险。"
+      }]
+    ];
+
+    const sent = await makeRequest(app, "POST", `/api/v1/copilot/conversations/${conversation.id}/messages`, {
+      prompt: "有哪些严重问题？",
+      source: "copilot"
+    }, authHeaders());
+
+    const run = repo.getRun(sent.body.data.run.id as string);
+    assert.equal(sent.status, 201);
+    assert.equal(sent.body.code, 0);
+    assert.equal(run?.goal, "有哪些严重问题？");
+    assert.equal(calls.length, 2);
+    assert.match(calls[0]?.input ?? "", /Conversation context/);
+    assert.match(calls[0]?.input ?? "", /aether-glass 前端全量代码审查/);
+    assert.match(calls[0]?.input ?? "", /XSS-vulnerable token storage/);
+    assert.match(calls[0]?.input ?? "", /Current user request:\n有哪些严重问题？/);
+    assert.match(calls[1]?.input ?? "", /Conversation context/);
+    assert.match(calls[1]?.input ?? "", /WebSocket 内存泄漏风险/);
+    assert.match(calls[1]?.input ?? "", /Original user request:\n有哪些严重问题？/);
+    assert.match(sent.body.data.messages.at(-1)?.content ?? "", /XSS-vulnerable token storage/);
   });
 
   it("does not let conversation replies confuse active projects with running sessions", async () => {
@@ -1553,6 +1606,54 @@ describe("copilot routes", () => {
     assert.deepEqual(capturedSessionIds, [session.id]);
   });
 
+  it("auto-gathers session evidence when proposing session input directly", async () => {
+    createOpenAiProvider();
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const session = sessionRepo.create({
+      projectId: project.id,
+      name: "Claude Code",
+      aiTool: "claude",
+      workingDir: "/tmp/openforge",
+      tmuxSession: "of-user123-session_direct"
+    });
+    sessionRepo.update(session.id, { status: "running" });
+    modelEvents = [{
+      type: "tool_call_requested",
+      id: "tool-call-input",
+      name: "openforge.propose_session_input",
+      input: {
+        sessionId: session.id,
+        input: "pwd",
+        submit: true
+      }
+    }];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Send pwd to Claude Code",
+      source: "copilot"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.run.status, "waiting_for_approval");
+    assert.equal(res.body.data.pendingActions.length, 1);
+    assert.equal(res.body.data.pendingActions[0].type, "openforge.propose_session_input");
+    assert.equal(res.body.data.pendingActions[0].input.sessionId, session.id);
+    assert.deepEqual(capturedSessionIds, [session.id]);
+    const storedEvents = new CopilotRepository(db, userId).listEvents(res.body.data.run.id);
+    assert.ok(storedEvents.some((event) =>
+      event.type === "tool_result" && event.message === "openforge.get_session_detail"
+    ));
+    assert.ok(storedEvents.some((event) =>
+      event.type === "tool_result" && event.message === "openforge.get_session_terminal_snapshot"
+    ));
+  });
+
   it("keeps session-stop tool runs waiting for approval", async () => {
     createOpenAiProvider();
     const project = new ProjectRepository(db, userId).create({
@@ -2105,7 +2206,7 @@ describe("copilot routes", () => {
         name: "openforge.list_sessions",
         input: {}
       }],
-      [{ type: "assistant_message", text: "OpenForge has one running Claude session." }]
+      [{ type: "assistant_message", text: "OpenForge has one running Claude session: Main session." }]
     ];
 
     const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
@@ -2129,7 +2230,7 @@ describe("copilot routes", () => {
     assert.ok(Array.isArray(calls[1]?.tools));
     assert.ok(Array.isArray(calls[2]?.tools));
     assert.match(calls[2]?.input ?? "", /openforge\.list_sessions/);
-    assert.match(res.body.data.events.at(-1)?.message ?? "", /OpenForge 有 1 个正在运行的会话/);
+    assert.match(res.body.data.events.at(-1)?.message ?? "", /OpenForge has one running Claude session/);
     assert.match(res.body.data.events.at(-1)?.message ?? "", /Main session/);
   });
 
@@ -2359,6 +2460,78 @@ describe("copilot routes", () => {
     assert.doesNotMatch(JSON.stringify(res.body), /说明存在活跃会话/);
     assert.match(res.body.data.events.at(-1)?.message ?? "", /aether-glass 没有正在运行的会话/);
     assert.match(res.body.data.events.at(-1)?.message ?? "", /项目状态 active 只表示项目记录可用/);
+  });
+
+  it("keeps model summaries for live sessions with terminal progress evidence", async () => {
+    createOpenAiProvider();
+    const project = new ProjectRepository(db, userId).create({
+      name: "aether-glass",
+      path: "/tmp/aether-glass",
+      aiTool: "claude"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const createdSession = sessionRepo.create({
+      projectId: project.id,
+      name: "aether-glass",
+      aiTool: "claude",
+      workingDir: "/tmp/aether-glass",
+      tmuxSession: "of-aether-glass"
+    });
+    const session = sessionRepo.updateStatus(createdSession.id, "running") ?? createdSession;
+    new ActivityRepository(db, userId).create({
+      projectId: project.id,
+      sessionId: session.id,
+      type: "session_terminal_review",
+      status: "success",
+      message: "Claude Code completed frontend review"
+    });
+    terminalHistoryOutputs = [
+      "Claude Code review progress:\nFound 18 frontend findings.\nRecap: review completed.\n"
+    ];
+    modelEventResponses = [
+      [
+        {
+          type: "tool_call_requested",
+          id: "tool-call-projects",
+          name: "openforge.list_projects",
+          input: {}
+        },
+        {
+          type: "tool_call_requested",
+          id: "tool-call-sessions",
+          name: "openforge.list_sessions",
+          input: {}
+        },
+        {
+          type: "tool_call_requested",
+          id: "tool-call-activity",
+          name: "openforge.get_recent_activity",
+          input: { limit: 5 }
+        },
+        {
+          type: "tool_call_requested",
+          id: "tool-call-terminal",
+          name: "openforge.get_session_terminal_snapshot",
+          input: { sessionId: session.id, maxBytes: 512 }
+        }
+      ],
+      [{
+        type: "assistant_message",
+        text: "aether-glass 有 1 个正在运行的会话。最新 Claude Code 进度显示 frontend review 已完成，并汇总了 18 个发现。"
+      }]
+    ];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "看下当前aether-glass项目的会话是否正常活跃？最新的操作记录是什么",
+      source: "copilot"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.run.status, "completed");
+    assert.match(res.body.data.events.at(-1)?.message ?? "", /frontend review 已完成/);
+    assert.match(res.body.data.events.at(-1)?.message ?? "", /18 个发现/);
+    assert.doesNotMatch(res.body.data.events.at(-1)?.message ?? "", /^aether-glass 有 1 个正在运行的会话。$/u);
   });
 
   it("lets Copilot inspect bounded terminal output before answering session questions", async () => {
@@ -3854,6 +4027,85 @@ describe("copilot routes", () => {
     assert.deepEqual(sentSessionInputs, [{ sessionId: session.id, data: "pwd\n" }]);
   });
 
+  it("submits approved session-input actions by default when submit is omitted", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const session = sessionRepo.create({
+      projectId: project.id,
+      name: "Claude Code",
+      aiTool: "claude",
+      workingDir: "/tmp/openforge",
+      tmuxSession: "of-user123-session_submit_default"
+    });
+    sessionRepo.update(session.id, { status: "running" });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_session_input", {
+      sessionId: session.id,
+      input: "pwd"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.action.result.submitted, true);
+    assert.deepEqual(sentSessionInputs, [{ sessionId: session.id, data: "pwd\n" }]);
+  });
+
+  it("tracks approved session input until terminal output stabilizes", async () => {
+    sessionInputTrackingDelaysMs.push(1, 1, 1);
+    terminalHistoryOutputs = [
+      "Before command\n",
+      "Before command\nReview running...\n",
+      "Before command\nReview complete.\n",
+      "Before command\nReview complete.\n"
+    ];
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const session = sessionRepo.create({
+      projectId: project.id,
+      name: "Claude Code",
+      aiTool: "claude",
+      workingDir: "/tmp/openforge",
+      tmuxSession: "of-user123-session_tracking"
+    });
+    sessionRepo.update(session.id, { status: "running" });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_session_input", {
+      sessionId: session.id,
+      input: "review frontend"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.action.result.terminal.available, true);
+    assert.match(res.body.data.action.result.terminal.text, /Review complete/);
+    assert.equal(res.body.data.action.result.terminal.tracking.status, "stable");
+    assert.equal(res.body.data.action.result.terminal.tracking.samples, 3);
+    assert.deepEqual(capturedSessionIds, [session.id, session.id, session.id, session.id]);
+    assert.deepEqual(sentSessionInputs, [{ sessionId: session.id, data: "review frontend\n" }]);
+  });
+
   it("approves session-input actions for OpenCode and Codex running terminal sessions", async () => {
     const sessionRepo = new SessionRepository(db, userId);
     const scenarios: Array<{ aiTool: "opencode" | "codex"; command: string }> = [
@@ -4034,6 +4286,80 @@ describe("copilot routes", () => {
     assert.match(calls[0]?.input ?? "", /Current task is complete/);
     assert.equal(assistant?.content, "已发送到会话，并根据最新终端输出确认任务已完成。");
     assert.deepEqual(runActivity?.events?.map((event) => event.type), ["pending_action_approved"]);
+  });
+
+  it("instructs the model not to claim terminal completion when session-input tracking times out", async () => {
+    const providerId = createOpenAiProvider();
+    const model = new ModelProviderRepository(db, userId, masterKey).listModelProfiles(providerId)[0];
+    assert.ok(model);
+    sessionInputTrackingDelaysMs.push(1);
+    terminalHistoryOutputs = [
+      "Before command\n",
+      "Before command\nReview still running step 1\n",
+      "Before command\nReview still running step 2\n"
+    ];
+    modelEventResponses = [[{
+      type: "assistant_message",
+      text: "已发送到会话，终端仍可能继续运行。"
+    }]];
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const session = sessionRepo.create({
+      projectId: project.id,
+      name: "Claude Code",
+      aiTool: "claude",
+      workingDir: "/tmp/openforge",
+      tmuxSession: "of-user123-session_tracking_timeout"
+    });
+    sessionRepo.update(session.id, { status: "running" });
+    const repo = new CopilotRepository(db, userId);
+    const conversation = repo.createConversation({
+      title: "Drive session",
+      source: "session",
+      sourceRefId: session.id
+    });
+    const run = repo.createRun({
+      status: "waiting_for_approval",
+      providerProfileId: providerId,
+      modelProfileId: model.id,
+      source: "session",
+      sourceRefId: session.id,
+      goal: "让 Claude Code review 前端代码"
+    });
+    repo.createConversationMessage(conversation.id, {
+      role: "user",
+      content: "让 Claude Code review 前端代码",
+      runId: run.id
+    });
+    const action = repo.createPendingAction(run.id, {
+      type: "openforge.propose_session_input",
+      input: {
+        sessionId: session.id,
+        input: "review frontend",
+        submit: true
+      }
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${run.id}/pending-actions/${action.id}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.run.status, "completed");
+    assert.equal(res.body.data.action.result.terminal.tracking.status, "changed_timeout");
+    assert.match(calls[0]?.input ?? "", /"status": "changed_timeout"/);
+    assert.match(
+      calls[0]?.instructions ?? "",
+      /do not claim the terminal work is complete/i
+    );
   });
 
   it("approves session-stop actions by stopping the running terminal session", async () => {

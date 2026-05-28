@@ -4,16 +4,12 @@ import { useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { CopilotChatPanel } from "@/components/copilot/copilot-chat-panel";
-import { useLanguage } from "@/hooks/use-language";
-import { getCopilotLaunchPromptKey, resolveCopilotLaunchContext } from "@/lib/copilot";
+import { resolveCopilotLaunchContext } from "@/lib/copilot";
 import type { CopilotSource } from "@/lib/api";
 
 export default function CopilotPage() {
-  const { t } = useLanguage();
   const searchParams = useSearchParams();
   const launchContext = useMemo(() => resolveCopilotLaunchContext(searchParams), [searchParams]);
-  const promptKey = getCopilotLaunchPromptKey(launchContext.intent);
-  const initialPrompt = promptKey ? t(promptKey) : "";
   const source = normalizeSource(launchContext.source);
 
   return (
@@ -21,7 +17,6 @@ export default function CopilotPage() {
       <CopilotChatPanel
         variant="page"
         className="min-h-0 flex-1"
-        initialPrompt={initialPrompt}
         initialSource={source}
         initialSourceRefId={launchContext.sourceRefId}
       />

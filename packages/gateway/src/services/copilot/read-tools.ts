@@ -129,7 +129,7 @@ const proposeProjectConfigSyncInput = z.object({
 const proposeSessionInputInput = z.object({
   sessionId: z.string().min(1),
   input: z.string().min(1).max(8_000),
-  submit: z.boolean().optional()
+  submit: z.boolean().default(true)
 }).strict();
 const proposeSessionStartInput = z.object({
   sessionId: z.string().min(1),
@@ -2143,21 +2143,52 @@ function countTrustedProjectManagerEvidenceRefs(workItem: ProjectManagerWorkItem
   }).length;
 }
 
-function createSessionInputProposal(
+async function createSessionInputProposal(
   input: unknown,
-  context: Pick<CopilotToolContext, "db" | "userId" | "runId">
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId" | "sessionManager">
 ) {
   const parsed = proposeSessionInputInput.parse(input);
   const session = new SessionRepository(context.db, context.userId).getById(parsed.sessionId);
   if (!session || session.status !== "running" || !session.tmuxSession) {
     throw new CopilotToolValidationError("Copilot session input target is not a running terminal session");
   }
-  if (!hasSameRunSessionInputEvidence(context, parsed.sessionId)) {
+  if (!await ensureSameRunSessionInputEvidence(context, session)) {
     throw new CopilotToolValidationError(
       "Copilot session input requires same-run session detail and terminal snapshot evidence"
     );
   }
   return createPendingProposal(context, "openforge.propose_session_input", parsed);
+}
+
+async function ensureSameRunSessionInputEvidence(
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId" | "sessionManager">,
+  session: Session
+): Promise<boolean> {
+  if (!context.runId) return false;
+  if (hasSameRunSessionInputEvidence(context, session.id)) return true;
+  const repo = new CopilotRepository(context.db, context.userId);
+  const events = repo.listEvents(context.runId);
+  const hasDetail = events.some((event) =>
+    event.type === "tool_result" &&
+    event.message === "openforge.get_session_detail" &&
+    outputSessionId(event.payload) === session.id
+  );
+  if (!hasDetail) {
+    const project = new ProjectRepository(context.db, context.userId).getById(session.projectId) ?? undefined;
+    repo.addEvent(context.runId, {
+      type: "tool_result",
+      message: "openforge.get_session_detail",
+      payload: { output: { session: toSessionDetail(session, project, readRuntimeSessions(context)) } }
+    });
+  }
+  const snapshot = await getSessionTerminalSnapshot({ sessionId: session.id }, context);
+  if (!isAvailableSessionTerminalSnapshot(snapshot, session.id)) return false;
+  repo.addEvent(context.runId, {
+    type: "tool_result",
+    message: "openforge.get_session_terminal_snapshot",
+    payload: { output: snapshot }
+  });
+  return true;
 }
 
 function hasSameRunSessionInputEvidence(
@@ -2191,6 +2222,11 @@ function outputTerminalAvailable(payload: Record<string, unknown>): boolean {
   const output = toPlainRecord(payload.output);
   const terminal = toPlainRecord(output?.terminal);
   return terminal?.available === true;
+}
+
+function isAvailableSessionTerminalSnapshot(output: unknown, sessionId: string): boolean {
+  if (!output || typeof output !== "object" || Array.isArray(output)) return false;
+  return outputSessionId({ output }) === sessionId && outputTerminalAvailable({ output });
 }
 
 function toPlainRecord(value: unknown): Record<string, unknown> | null {

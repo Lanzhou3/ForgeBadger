@@ -1667,7 +1667,7 @@ describe("copilot tools", () => {
     assert.equal(new SessionRepository(db, userId).list().length, 0);
   });
 
-  it("requires same-run session detail and terminal snapshot before proposing session input", async () => {
+  it("records same-run session detail and terminal snapshot before proposing session input", async () => {
     const project = new ProjectRepository(db, userId).create({
       name: "OpenForge",
       path: "/tmp/openforge",
@@ -1689,40 +1689,45 @@ describe("copilot tools", () => {
       goal: "Send input to a running session"
     });
 
-    const withoutEvidence = await executeCopilotTool(
+    const withoutTerminalAccess = await executeCopilotTool(
       registry,
       "openforge.propose_session_input",
       { sessionId: session.id, input: "pwd\\n", submit: true },
       context(userId, run.id)
     );
 
-    copilot.addEvent(run.id, {
-      type: "tool_result",
-      message: "openforge.get_session_detail",
-      payload: { output: { session: { id: session.id, status: "running", isLive: true } } }
-    });
-    copilot.addEvent(run.id, {
-      type: "tool_result",
-      message: "openforge.get_session_terminal_snapshot",
-      payload: {
-        output: {
-          session: { id: session.id },
-          terminal: { available: true, truncated: false, text: "Claude Code ready" }
-        }
-      }
-    });
-    const withEvidence = await executeCopilotTool(
+    const withAutoEvidence = await executeCopilotTool(
       registry,
       "openforge.propose_session_input",
-      { sessionId: session.id, input: "pwd\\n", submit: true },
-      context(userId, run.id)
+      { sessionId: session.id, input: "pwd\\n" },
+      {
+        ...context(userId, run.id),
+        sessionManager: {
+          async captureHistory(sessionId: string) {
+            assert.equal(sessionId, session.id);
+            return "Claude Code ready";
+          }
+        }
+      }
     );
 
     const actions = new CopilotRepository(db, userId).listPendingActions(run.id);
-    assert.equal(withoutEvidence.ok, false);
-    assert.equal(withoutEvidence.error.code, "copilot_tool_validation_failed");
-    assert.match(withoutEvidence.error.message, /terminal snapshot/i);
-    assert.equal(withEvidence.ok, true);
+    const evidenceEvents = new CopilotRepository(db, userId).listEvents(run.id);
+    assert.equal(withoutTerminalAccess.ok, false);
+    assert.equal(withoutTerminalAccess.error.code, "copilot_tool_validation_failed");
+    assert.match(withoutTerminalAccess.error.message, /terminal snapshot/i);
+    assert.equal(withAutoEvidence.ok, true);
+    assert.ok(evidenceEvents.some((event) =>
+      event.type === "tool_result" &&
+      event.message === "openforge.get_session_detail" &&
+      event.payload.output?.session?.id === session.id
+    ));
+    assert.ok(evidenceEvents.some((event) =>
+      event.type === "tool_result" &&
+      event.message === "openforge.get_session_terminal_snapshot" &&
+      event.payload.output?.session?.id === session.id &&
+      event.payload.output?.terminal?.available === true
+    ));
     assert.equal(actions.length, 1);
     assert.equal(actions[0]?.type, "openforge.propose_session_input");
     assert.deepEqual(actions[0]?.input, { sessionId: session.id, input: "pwd\\n", submit: true });

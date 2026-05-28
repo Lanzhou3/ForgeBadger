@@ -52,6 +52,7 @@ export interface CopilotOrchestratorOptions {
 export interface RunCopilotTextInput {
   userId: string;
   prompt: string;
+  conversationContext?: string;
   providerProfileId?: string;
   modelProfileId?: string;
   source: "dashboard" | "project" | "session" | "settings" | "copilot" | "models" | "feishu";
@@ -86,6 +87,9 @@ export class CopilotOrchestrator {
   async runText(input: RunCopilotTextInput): Promise<RunCopilotTextResult> {
     const repo = new CopilotRepository(this.options.db, input.userId);
     const redactedPrompt = redactCopilotText(input.prompt);
+    const redactedConversationContext = input.conversationContext
+      ? redactCopilotText(input.conversationContext)
+      : null;
     let run = repo.createRun(toCreateRunInput({ ...input, prompt: redactedPrompt }));
     const control = this.runControls.start(run.id);
     try {
@@ -132,6 +136,7 @@ export class CopilotOrchestrator {
         recalledRun,
         selected.selection,
         redactedPrompt,
+        redactedConversationContext,
         recall.context,
         sourceContext,
         previousEvents,
@@ -177,6 +182,7 @@ export class CopilotOrchestrator {
           },
           output: input.result
         }],
+        null,
         previousEvents,
         control.signal
       );
@@ -190,6 +196,7 @@ export class CopilotOrchestrator {
     run: CopilotRun,
     selection: CopilotProviderSelection,
     prompt: string,
+    conversationContext: string | null,
     recallContext: string | null,
     sourceContext: string | null,
     previousEvents: CopilotRunEvent[],
@@ -199,7 +206,7 @@ export class CopilotOrchestrator {
       repo,
       run,
       selection,
-      toModelRequest(selection, prompt, this.toolRegistry, recallContext, sourceContext),
+      toModelRequest(selection, prompt, this.toolRegistry, recallContext, sourceContext, conversationContext),
       previousEvents,
       runSignal
     );
@@ -215,6 +222,7 @@ export class CopilotOrchestrator {
       selection,
       previousEvents,
       events,
+      conversationContext,
       runSignal
     );
     if (forcedSessionEvidence) return forcedSessionEvidence;
@@ -223,7 +231,17 @@ export class CopilotOrchestrator {
     const failed = events.find((event) => event.type === "run_failed");
     if (failed) return this.failAfterEvents(repo, run, failed, allEvents, 502);
     const toolCalls = events.filter((event) => event.type === "tool_call_requested");
-    if (toolCalls.length > 0) return await this.executeTools(repo, run, selection, toolCalls, allEvents, runSignal);
+    if (toolCalls.length > 0) {
+      return await this.executeTools(
+        repo,
+        run,
+        selection,
+        toolCalls,
+        allEvents,
+        conversationContext,
+        runSignal
+      );
+    }
     const completed = repo.updateRun(run.id, { status: "completed", completedAt: Date.now() }) ?? run;
     return { ok: true, run: completed, events: allEvents };
   }
@@ -234,6 +252,7 @@ export class CopilotOrchestrator {
     selection: CopilotProviderSelection,
     toolCalls: Array<Extract<CopilotModelEvent, { type: "tool_call_requested" }>>,
     events: CopilotRunEvent[],
+    conversationContext: string | null,
     runSignal: AbortSignal
   ): Promise<RunCopilotTextResult> {
     const context: CopilotToolContext = {
@@ -279,6 +298,7 @@ export class CopilotOrchestrator {
       run,
       selection,
       toolResults,
+      conversationContext,
       currentEvents,
       runSignal
     );
@@ -292,6 +312,7 @@ export class CopilotOrchestrator {
       toolCall: Extract<CopilotModelEvent, { type: "tool_call_requested" }>;
       output: unknown;
     }>,
+    conversationContext: string | null,
     events: CopilotRunEvent[],
     runSignal: AbortSignal
   ): Promise<RunCopilotTextResult> {
@@ -299,7 +320,7 @@ export class CopilotOrchestrator {
       repo,
       run,
       selection,
-      toToolResultModelRequest(selection, run.goal, toolResults, this.toolRegistry),
+      toToolResultModelRequest(selection, run.goal, conversationContext, toolResults, this.toolRegistry),
       events,
       runSignal
     );
@@ -316,6 +337,7 @@ export class CopilotOrchestrator {
       selection,
       events,
       followUp,
+      conversationContext,
       runSignal
     );
     if (forcedSessionEvidence) return forcedSessionEvidence;
@@ -331,6 +353,7 @@ export class CopilotOrchestrator {
         selection,
         toolCalls,
         allEvents,
+        conversationContext,
         runSignal
       );
     }
@@ -344,6 +367,7 @@ export class CopilotOrchestrator {
     selection: CopilotProviderSelection,
     previousEvents: CopilotRunEvent[],
     candidateEvents: CopilotModelEvent[],
+    conversationContext: string | null,
     runSignal: AbortSignal
   ): Promise<RunCopilotTextResult | null> {
     if (!requiresSessionStatusEvidence(run.goal)) return null;
@@ -357,7 +381,15 @@ export class CopilotOrchestrator {
       input: { limit: 50 }
     };
     const stored = this.storeModelEvent(repo, run, toolCall);
-    return await this.executeTools(repo, run, selection, [toolCall], [...previousEvents, stored], runSignal);
+    return await this.executeTools(
+      repo,
+      run,
+      selection,
+      [toolCall],
+      [...previousEvents, stored],
+      conversationContext,
+      runSignal
+    );
   }
 
   private storeModelEvent(repo: CopilotRepository, run: CopilotRun, event: CopilotModelEvent): CopilotRunEvent {
@@ -551,13 +583,17 @@ function toModelRequest(
   prompt: string,
   toolRegistry: CopilotToolRegistry,
   recallContext: string | null,
-  sourceContext: string | null
+  sourceContext: string | null,
+  conversationContext: string | null
 ): CopilotModelRequest {
   const contextBlocks = [sourceContext, recallContext].filter((block): block is string => Boolean(block));
+  const requestBlock = buildConversationAwareRequestBlock(prompt, conversationContext, "Current user request");
   return {
     model: selection.model.modelId,
     instructions: buildCopilotInstructions(),
-    input: contextBlocks.length > 0 ? [...contextBlocks, "", "User request:", prompt].join("\n") : prompt,
+    input: contextBlocks.length > 0
+      ? [...contextBlocks, "", conversationContext ? requestBlock : ["User request:", prompt].join("\n")].join("\n")
+      : requestBlock,
     tools: toModelToolDefinitions(toolRegistry),
     maxOutputTokens: 1024
   };
@@ -726,7 +762,8 @@ function applyDeterministicSessionStatusAnswerIfNeeded(
   }
   if (!candidateEvents.some((event) => event.type === "assistant_message")) return candidateEvents;
   const answer = deriveDeterministicSessionStatusAnswer(prompt, evidenceEvents);
-  return answer ? [{ type: "assistant_message", text: answer }] : candidateEvents;
+  if (!answer) return candidateEvents;
+  return isNoLiveSessionAnswer(answer) ? [{ type: "assistant_message", text: answer }] : candidateEvents;
 }
 
 function stripPrematureAssistantMessagesForSessionEvidence(
@@ -800,6 +837,10 @@ function deriveDeterministicSessionStatusAnswer(prompt: string, events: CopilotR
   return null;
 }
 
+function isNoLiveSessionAnswer(answer: string): boolean {
+  return /没有正在运行的会话|no running sessions|no live running session/iu.test(answer);
+}
+
 function readToolOutputs(events: CopilotRunEvent[], toolName: string): unknown[] {
   return events
     .filter((event) => event.type === "tool_result" && event.message === toolName)
@@ -847,22 +888,24 @@ function readBooleanField(record: Record<string, unknown>, key: string): boolean
 function toToolResultModelRequest(
   selection: Pick<CopilotProviderSelection, "model">,
   originalPrompt: string,
+  conversationContext: string | null,
   toolResults: Array<{
     toolCall: Extract<CopilotModelEvent, { type: "tool_call_requested" }>;
     output: unknown;
   }>,
   toolRegistry: CopilotToolRegistry
 ): CopilotModelRequest {
+  const requestBlock = buildConversationAwareRequestBlock(originalPrompt, conversationContext, "Original user request");
   return {
     model: selection.model.modelId,
     instructions: buildCopilotInstructions([
       "Use the provided OpenForge tool results to answer the user's original request.",
       "When more OpenForge context is required, request another available OpenForge tool instead of guessing.",
       "Only say a session is active or running when a session tool result shows a session with that status.",
+      "If an approved terminal input result has terminal.tracking.status changed_timeout or unchanged_timeout, summarize the latest captured output, say the terminal work may still be running, and do not claim the terminal work is complete unless the captured terminal text itself proves completion.",
     ]),
     input: [
-      "Original user request:",
-      originalPrompt,
+      requestBlock,
       "",
       toolResults.length === 1 ? "Tool result:" : "Tool results:",
       ...toolResults.flatMap(({ toolCall, output }, index) => [
@@ -875,6 +918,23 @@ function toToolResultModelRequest(
     tools: toModelToolDefinitions(toolRegistry),
     maxOutputTokens: 1024
   };
+}
+
+function buildConversationAwareRequestBlock(
+  prompt: string,
+  conversationContext: string | null,
+  promptLabel: "Current user request" | "Original user request"
+): string {
+  if (!conversationContext) return promptLabel === "Original user request"
+    ? [promptLabel, prompt].join(":\n")
+    : prompt;
+  return [
+    "Conversation context:",
+    conversationContext,
+    "",
+    `${promptLabel}:`,
+    prompt
+  ].join("\n");
 }
 
 function storeModelEvent(

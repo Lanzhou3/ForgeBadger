@@ -495,7 +495,7 @@ describe("copilot display helpers", () => {
         input: { sessionId: "session-123", input: "pwd", submit: true },
       })
     ).toEqual({
-      detail: "session-123 / submit",
+      detail: "Send terminal input",
       preview: "pwd",
     });
     expect(
@@ -1149,7 +1149,7 @@ describe("copilot display helpers", () => {
         },
       })
     ).toEqual({
-      detail: "session-123 / submitted",
+      detail: "Terminal input approved",
       preview: "4 bytes sent",
     });
     expect(
@@ -1169,8 +1169,49 @@ describe("copilot display helpers", () => {
         },
       })
     ).toEqual({
-      detail: "session-123 / submitted",
+      detail: "Terminal input approved",
       preview: "pwd /data/OpenForge",
+    });
+    expect(
+      getCopilotEventResultSummary({
+        type: "pending_action_approved",
+        payload: {
+          actionType: "openforge.propose_session_input",
+          result: {
+            sessionId: "session-123",
+            submitted: true,
+            terminal: {
+              available: true,
+              text: "\u001b[38;5;246mpwd\u001b[0m\n[39m/data/OpenForge",
+            },
+          },
+        },
+      })
+    ).toEqual({
+      detail: "Terminal input approved",
+      preview: "pwd /data/OpenForge",
+    });
+    expect(
+      getCopilotEventResultSummary({
+        type: "pending_action_approved",
+        payload: {
+          actionType: "openforge.propose_session_input",
+          result: {
+            sessionId: "session-123",
+            submitted: true,
+            terminal: {
+              available: true,
+              text: "Review still running...",
+              tracking: {
+                status: "changed_timeout",
+              },
+            },
+          },
+        },
+      })
+    ).toEqual({
+      detail: "Terminal input approved; latest output may still be running",
+      preview: "Review still running...",
     });
     expect(
       getCopilotEventResultSummary({
@@ -1513,7 +1554,7 @@ describe("copilot display helpers", () => {
         output: {
           terminal: {
             available: true,
-            text: "pwd\n/data/OpenForge\n",
+            text: "\u001b[38;5;246mpwd\u001b[0m\n[39m/data/OpenForge\n",
           },
         },
       })

@@ -455,7 +455,7 @@ export function readCopilotTerminalSnapshotText(payload: Record<string, unknown>
   const result = readRecord(payload?.result);
   const terminal = readRecord(output?.terminal) ?? readRecord(result?.terminal);
   if (!terminal || terminal.available !== true) return "";
-  return readString(terminal, "text") ?? "";
+  return stripTerminalControlSequences(readString(terminal, "text") ?? "");
 }
 
 export function getCopilotPendingActionSummary(
@@ -982,12 +982,8 @@ function summarizeProjectConfigSync(payload: Record<string, unknown>): CopilotPe
 }
 
 function summarizeSessionInput(payload: Record<string, unknown>): CopilotPendingActionSummary {
-  const detail = joinPresent([
-    readString(payload, "sessionId") ?? "session",
-    payload.submit === true ? "submit" : "input",
-  ]);
   return {
-    detail,
+    detail: payload.submit === true ? "Send terminal input" : "Prepare terminal input",
     preview: previewText(readString(payload, "input")),
   };
 }
@@ -1329,11 +1325,12 @@ function summarizeSessionCreateResult(payload: Record<string, unknown>): Copilot
 function summarizeSessionInputResult(payload: Record<string, unknown>): CopilotPendingActionSummary {
   const bytes = readNumber(payload, "bytes");
   const terminalPreview = readTerminalResultPreview(payload);
+  const trackingStatus = readTerminalTrackingStatus(payload);
+  const detail = isTerminalTrackingTimeout(trackingStatus)
+    ? "Terminal input approved; latest output may still be running"
+    : payload.submitted === true ? "Terminal input approved" : "Terminal input sent";
   return {
-    detail: joinPresent([
-      readString(payload, "sessionId") ?? "session",
-      payload.submitted === true ? "submitted" : "input sent",
-    ]),
+    detail,
     preview: terminalPreview ?? (bytes > 0 ? `${bytes} bytes sent` : undefined),
   };
 }
@@ -1836,7 +1833,17 @@ function readBoolean(payload: Record<string, unknown>, key: string): boolean {
 function readTerminalResultPreview(payload: Record<string, unknown>): string | undefined {
   const terminal = readRecord(payload.terminal);
   if (!terminal || terminal.available !== true) return undefined;
-  return previewText(readString(terminal, "text"));
+  return previewText(stripTerminalControlSequences(readString(terminal, "text") ?? ""));
+}
+
+function readTerminalTrackingStatus(payload: Record<string, unknown>): string | null {
+  const terminal = readRecord(payload.terminal);
+  const tracking = readRecord(terminal?.tracking);
+  return tracking ? readString(tracking, "status") : null;
+}
+
+function isTerminalTrackingTimeout(status: string | null): boolean {
+  return status === "changed_timeout" || status === "unchanged_timeout";
 }
 
 function readChangedFiles(payload: Record<string, unknown>): string[] {
@@ -1865,6 +1872,14 @@ function previewText(value: string | null, maxLength = 140): string | undefined 
   if (!normalized) return undefined;
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+export function stripTerminalControlSequences(text: string): string {
+  return text
+    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/gu, "")
+    .replace(/\[(?:\d{1,3}(?:;\d{1,3})*)?[A-Za-z]/gu, "")
+    .replace(/(^|\s)(?:\d{1,3};)*\d{1,3}m(?=\s|$)/gu, "$1")
+    .replace(/\r/gu, "");
 }
 
 function searchableCopilotProviderText(provider: CopilotProviderChoice): string {

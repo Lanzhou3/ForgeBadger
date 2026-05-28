@@ -10,7 +10,6 @@ import {
   Bot,
   CheckCircle2,
   FileCode2,
-  KeyRound,
   Wrench,
   Plus,
   ArrowRight,
@@ -67,7 +66,6 @@ export default function DashboardPage() {
       : t(terminalRemediation.detailKey);
   const dashboardCopilotHref = buildCopilotLaunchHref({
     source: "dashboard",
-    intent: "launch_readiness",
   });
 
   const stats = [
@@ -136,13 +134,6 @@ export default function DashboardPage() {
       detail: dashboardHealth?.models.message ?? t("dashboard.modelHealthDescription"),
       healthy: dashboardHealth?.models.healthy ?? false,
       icon: Bot,
-      href: "/models",
-    },
-    {
-      label: t("dashboard.credentialHealth"),
-      detail: dashboardHealth?.credentials.message ?? t("dashboard.credentialHealthDescription"),
-      healthy: dashboardHealth?.credentials.healthy ?? false,
-      icon: KeyRound,
       href: "/models",
     },
     {

@@ -171,7 +171,7 @@ const projectConfigSyncApprovalSchema = z.object({
 const sessionInputApprovalSchema = z.object({
   sessionId: z.string().min(1),
   input: z.string().min(1).max(8_000),
-  submit: z.boolean().optional()
+  submit: z.boolean().default(true)
 }).strict();
 const sessionStartApprovalSchema = z.object({
   sessionId: z.string().min(1),
@@ -313,6 +313,7 @@ const projectManagerAttachEvidenceApprovalSchema = z.object({
 }).strict();
 const defaultStaleCopilotRunTimeoutMs = 15 * 60 * 1000;
 const defaultStaleCopilotApprovalTimeoutMs = 24 * 60 * 60 * 1000;
+const defaultSessionInputTrackingDelaysMs = [1_500, 2_500, 4_000, 6_000];
 
 export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   db: Database;
@@ -326,6 +327,7 @@ export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   executeFeishuCommand?: (request: FeishuCommandRequest) => Promise<FeishuCommandResult>;
   staleRunTimeoutMs?: number;
   staleApprovalTimeoutMs?: number;
+  sessionInputTrackingDelaysMs?: number[];
 }
 
 type PendingActionApprover = (
@@ -479,6 +481,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     // The DB live-run constraint is the source of truth; clear stale process locks after recovery.
     if (activeRunUsers.has(userId)) activeRunUsers.delete(userId);
     activeRunUsers.add(userId);
+    const conversationContext = buildConversationContext(repo.listConversationMessages(req.params.id));
     const userMessage = repo.createConversationMessage(req.params.id, {
       role: "user",
       content: parseResult.data.prompt,
@@ -494,7 +497,8 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         source: parseResult.data.source,
         ...(parseResult.data.providerProfileId ? { providerProfileId: parseResult.data.providerProfileId } : {}),
         ...(parseResult.data.modelProfileId ? { modelProfileId: parseResult.data.modelProfileId } : {}),
-        ...(parseResult.data.sourceRefId ? { sourceRefId: parseResult.data.sourceRefId } : {})
+        ...(parseResult.data.sourceRefId ? { sourceRefId: parseResult.data.sourceRefId } : {}),
+        ...(conversationContext ? { conversationContext } : {})
       };
       const startedRunRef: { current: CopilotRun | null } = { current: null };
       const orchestrator = new CopilotOrchestrator({
@@ -989,6 +993,36 @@ function messagesEnvelope(
     },
     message: ""
   };
+}
+
+const maxConversationContextMessages = 8;
+const maxConversationContextMessageChars = 1_200;
+const maxConversationContextChars = 6_000;
+
+function buildConversationContext(messages: CopilotMessage[]): string | undefined {
+  const contextMessages = messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .filter((message) => message.content.trim().length > 0)
+    .slice(-maxConversationContextMessages)
+    .map(toConversationContextLine)
+    .filter((line) => line.length > 0);
+  if (contextMessages.length === 0) return undefined;
+  const context = contextMessages.join("\n");
+  return context.length > maxConversationContextChars
+    ? context.slice(context.length - maxConversationContextChars)
+    : context;
+}
+
+function toConversationContextLine(message: CopilotMessage): string {
+  const role = message.role === "assistant" ? "assistant" : "user";
+  const content = redactCopilotText(message.content)
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!content) return "";
+  const truncated = content.length > maxConversationContextMessageChars
+    ? `${content.slice(0, maxConversationContextMessageChars)}...`
+    : content;
+  return `${role}: ${truncated}`;
 }
 
 function memoryItemEnvelope(type: CopilotMemoryItemType, item: CopilotMemoryEntry | CopilotMemoryNote) {
@@ -2455,15 +2489,60 @@ async function approveCopilotSessionInput(
       "Copilot terminal input is not available"
     );
   }
-  const data = buildApprovedSessionInput(parsed.data.input, parsed.data.submit === true);
+  const shouldSubmit = parsed.data.submit !== false;
+  const trackingDelaysMs = options.sessionInputTrackingDelaysMs ?? defaultSessionInputTrackingDelaysMs;
+  const before = shouldSubmit && trackingDelaysMs.length > 0
+    ? await captureApprovedSessionInputHistory(options, session)
+    : null;
+  const data = buildApprovedSessionInput(parsed.data.input, shouldSubmit);
   await options.sessionManager.sendInput(session.id, data);
   new SessionRepository(options.db, userId).update(session.id, { lastActive: new Date() });
-  const terminal = await captureApprovedSessionInputHistory(options, session);
+  const terminal = shouldSubmit
+    ? await trackApprovedSessionInputHistory(options, session, before?.text, trackingDelaysMs)
+    : await captureApprovedSessionInputHistory(options, session);
   return {
     sessionId: session.id,
-    submitted: parsed.data.submit === true,
+    submitted: shouldSubmit,
     bytes: Buffer.byteLength(data, "utf8"),
     terminal
+  };
+}
+
+async function trackApprovedSessionInputHistory(
+  options: CopilotRoutesOptions,
+  session: Session,
+  previousText: string | undefined,
+  delays: number[]
+): Promise<{ available: boolean; text?: string; truncated?: boolean; reason?: string; tracking?: Record<string, unknown> }> {
+  let latest = await captureApprovedSessionInputHistory(options, session);
+  let latestText = latest.text ?? "";
+  let changed = latest.available && (previousText === undefined || latestText !== previousText);
+  let samples = 1;
+  if (delays.length === 0) {
+    return { ...latest, tracking: { status: changed ? "changed" : "single_sample", samples } };
+  }
+  for (const delayMs of delays) {
+    await sleep(delayMs);
+    const next = await captureApprovedSessionInputHistory(options, session);
+    samples += 1;
+    const nextText = next.text ?? "";
+    const nextChanged = next.available && (previousText === undefined || nextText !== previousText);
+    if (changed && next.available && nextText === latestText) {
+      return { ...next, tracking: { status: "stable", samples, waitedMs: sumDelays(delays, samples - 1) } };
+    }
+    if (next.available) {
+      latest = next;
+      latestText = nextText;
+      changed = changed || nextChanged;
+    }
+  }
+  return {
+    ...latest,
+    tracking: {
+      status: changed ? "changed_timeout" : "unchanged_timeout",
+      samples,
+      waitedMs: sumDelays(delays, delays.length)
+    }
   };
 }
 
@@ -2476,7 +2555,7 @@ async function captureApprovedSessionInputHistory(
   }
   try {
     const raw = await options.sessionManager.captureHistory(session.id);
-    const redacted = redactCopilotText(raw);
+    const redacted = redactCopilotText(stripTerminalControlSequences(raw));
     const maxLength = 4_000;
     const truncated = redacted.length > maxLength;
     const text = truncated ? redacted.slice(redacted.length - maxLength) : redacted;
@@ -2490,6 +2569,23 @@ function sessionInputApprovalError(code: string, message: string): Record<string
   return {
     error: { code, message }
   };
+}
+
+function stripTerminalControlSequences(text: string): string {
+  return text
+    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/gu, "")
+    .replace(/\[(?:\d{1,3}(?:;\d{1,3})*)?[A-Za-z]/gu, "")
+    .replace(/(^|\s)(?:\d{1,3};)*\d{1,3}m(?=\s|$)/gu, "$1")
+    .replace(/\r/gu, "");
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sumDelays(delays: number[], count: number): number {
+  return delays.slice(0, count).reduce((total, delay) => total + delay, 0);
 }
 
 async function approveCopilotSessionStart(

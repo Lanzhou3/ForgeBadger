@@ -392,6 +392,8 @@ export function CopilotChatPanel({
     () => (activeRun?.events ?? []).filter((event) => event.type !== "assistant_message"),
     [activeRun?.events]
   );
+  const activeResolvedActionIds = useMemo(() => readResolvedPendingActionIds(timelineEvents), [timelineEvents]);
+  const activePendingActionIds = useMemo(() => new Set(pendingActions.map((action) => action.id)), [pendingActions]);
   const activeRunHasActivity = timelineEvents.length > 0 || pendingActions.length > 0;
   const activeRunHasStream = Boolean(activeRun?.run.id && streamingAssistantText.trim());
   const activeRunAwaitingFirstEvent =
@@ -427,6 +429,10 @@ export function CopilotChatPanel({
     streamingAssistantText,
     visibleMessages
   ]);
+  const visibleResolvedActionIds = useMemo(
+    () => collectResolvedPendingActionIds(visibleMessagesWithActivity, timelineEvents),
+    [visibleMessagesWithActivity, timelineEvents]
+  );
   const hasVisibleChatActivity =
     visibleMessagesWithActivity.length > 0 ||
     sendMessageMutation.isPending ||
@@ -816,6 +822,9 @@ export function CopilotChatPanel({
                 {visibleMessagesWithActivity.map((message) => {
                   const showRunActivity = message.id === activityAssistantMessageId && activeRunHasActivity;
                   const persistedActivity = readCopilotMessageRunActivity<CopilotRunEvent, CopilotPendingAction>(message);
+                  const resolvedActionIds = readResolvedPendingActionIds(
+                    showRunActivity ? timelineEvents : persistedActivity.events
+                  );
                   return (
                     <MessageBubble
                       key={message.id}
@@ -825,7 +834,17 @@ export function CopilotChatPanel({
                       runEvents={showRunActivity ? timelineEvents : persistedActivity.events}
                       pendingActions={showRunActivity
                         ? pendingActions
-                        : persistedActivity.pendingActions.filter(shouldShowAssistantPendingAction)}
+                        : persistedActivity.pendingActions.filter((action) =>
+                          shouldShowAssistantPendingAction(action) &&
+                          !resolvedActionIds.has(action.id) &&
+                          !visibleResolvedActionIds.has(action.id) &&
+                          shouldKeepPersistedPendingActionVisible(
+                            action,
+                            activeRun?.run ?? null,
+                            activeResolvedActionIds,
+                            activePendingActionIds
+                          )
+                        )}
                       deciding={decidePendingActionMutation.isPending}
                       onDelete={() => deleteMessageMutation.mutate(message.id)}
                       onDecide={(action, decision) => decidePendingActionMutation.mutate({ action, decision })}
@@ -933,7 +952,7 @@ function RunEventRow({ event }: { event: CopilotRunEvent }) {
   const { t } = useLanguage();
   const key = getCopilotEventLabelKey(event.type);
   const label = key ? t(key) : getCopilotEventLabel(event.type);
-  const detail = event.message ?? readToolName(event.payload) ?? "";
+  const detail = readRunEventDetail(event);
   const terminalText = readTerminalSnapshotText(event.payload);
   const memoryResults = readMemoryRecallResults(event.payload);
   const resultSummary = getCopilotEventResultSummary(event);
@@ -1739,6 +1758,28 @@ function BubbleAvatar({ icon }: { icon: ReactNode }) {
   );
 }
 
+function readRunEventDetail(event: CopilotRunEvent): string {
+  if (event.type === "tool_call_requested" || event.type === "tool_result") {
+    const toolName = event.message ?? readToolName(event.payload);
+    if (toolName.startsWith("openforge.")) {
+      const key = getCopilotPendingActionLabelKey(toolName);
+      return key ? "" : getCopilotPendingActionLabel(toolName);
+    }
+    return toolName;
+  }
+  if (event.type === "pending_action_approved" || event.type === "pending_action_rejected") {
+    const actionType = readPayloadActionType(event.payload) ?? event.message ?? "";
+    if (actionType.startsWith("openforge.")) return "";
+    return actionType;
+  }
+  return event.message ?? readToolName(event.payload) ?? "";
+}
+
+function readPayloadActionType(payload: Record<string, unknown> | undefined): string | null {
+  const value = payload?.actionType;
+  return typeof value === "string" ? value : null;
+}
+
 function readToolName(payload: Record<string, unknown> | undefined): string {
   const output = payload?.output;
   if (!output || typeof output !== "object" || Array.isArray(output)) return "";
@@ -1759,6 +1800,42 @@ const PROJECT_MANAGER_PENDING_ACTION_TYPES = new Set([
 function shouldShowAssistantPendingAction(action: CopilotPendingAction): boolean {
   return action.status === "pending" ||
     (action.status === "failed" && PROJECT_MANAGER_PENDING_ACTION_TYPES.has(action.type));
+}
+
+function shouldKeepPersistedPendingActionVisible(
+  action: CopilotPendingAction,
+  activeRun: CopilotRun | null,
+  resolvedActionIds: Set<string>,
+  activePendingActionIds: Set<string>
+): boolean {
+  if (!activeRun || action.runId !== activeRun.id) return true;
+  if (resolvedActionIds.has(action.id)) return false;
+  if (!isCopilotRunLive(activeRun.status) && !activePendingActionIds.has(action.id)) return false;
+  return true;
+}
+
+function readResolvedPendingActionIds(events: CopilotRunEvent[]): Set<string> {
+  const ids = new Set<string>();
+  for (const event of events) {
+    if (event.type !== "pending_action_approved" && event.type !== "pending_action_rejected") continue;
+    const actionId = readString(event.payload?.actionId);
+    if (actionId) ids.add(actionId);
+  }
+  return ids;
+}
+
+function collectResolvedPendingActionIds(
+  messages: CopilotMessage[],
+  activeEvents: CopilotRunEvent[]
+): Set<string> {
+  const ids = readResolvedPendingActionIds(activeEvents);
+  for (const message of messages) {
+    const activity = readCopilotMessageRunActivity<CopilotRunEvent, CopilotPendingAction>(message);
+    for (const id of readResolvedPendingActionIds(activity.events)) {
+      ids.add(id);
+    }
+  }
+  return ids;
 }
 
 function readFailedProjectManagerAction(error: unknown): CopilotPendingAction | null {
