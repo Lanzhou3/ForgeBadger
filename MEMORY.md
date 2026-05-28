@@ -100,6 +100,10 @@
   `scripts/validate-trial-feedback-intake.mjs` so public/support entrypoints
   must preserve both feedback collection paths and both audit commands before
   maintainer triage.
+- Phase 35 updated `README.md` and
+  `scripts/validate-trial-feedback-intake.mjs` so root/localized README trial
+  entrypoints must preserve the runbook, checklist, troubleshooting, feedback
+  template, and GitHub issue-form links.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and

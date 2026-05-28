@@ -46,6 +46,9 @@
   (`LIVE-PROVIDER`), issue #4 (`WINDOWS-WSL`), issue #5
   (`FIRST-USER-FEEDBACK`), and the Feishu callback evidence report or a future
   public-callback artifact.
+- [x] **TRIALOPS-07**: Root and localized README trial entrypoints must expose
+  both first-user feedback collection paths: Markdown packet template and
+  GitHub issue form.
 
 ### Evidence Safety
 
@@ -396,6 +399,32 @@
   coverage, aggregate readiness validation, docs references, and unchanged
   external gate states.
 
+### README Trial Entrypoint Guard
+
+- [x] **READMEENTRY-01**: The root README First User Trial section must link
+  the trial runbook, trial checklist, troubleshooting, Markdown feedback
+  template, and GitHub feedback issue form.
+- [x] **READMEENTRY-02**: The localized README first-user trial sections must
+  preserve equivalent runbook, checklist, troubleshooting, feedback template,
+  and GitHub feedback issue-form links.
+- [x] **READMEENTRY-03**: The trial intake validator must read `README.md`,
+  `docs/README.zh-CN.md`, and `docs/README.zh-TW.md` by default and reject
+  missing trial-entrypoint links.
+- [x] **READMEENTRYSAFE-01**: README trial-entrypoint validation must remain
+  structural only and must not collect feedback, submit issues, attach
+  artifacts, or clear any external evidence gate.
+
+### Phase 35 Planning Closure
+
+- [x] **PLAN-35-01**: Phase 35 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-35-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the README trial-entrypoint guard while
+  keeping real first-user packet collection pending.
+- [x] **PLAN-35-03**: Phase 35 verification proves red/green intake-validator
+  coverage, aggregate readiness validation, docs references, and unchanged
+  external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -418,6 +447,7 @@
 | TRIALOPS-04 | Phase 21 | Complete |
 | TRIALOPS-05 | Phase 21 | Complete |
 | TRIALOPS-06 | Phase 21 | Complete |
+| TRIALOPS-07 | Phase 35 | Complete |
 | TRIALSAFE-01 | Phase 21 | Complete |
 | TRIALSAFE-02 | Phase 21 | Complete |
 | TRIALSAFE-03 | Phase 21 | Complete |
@@ -515,11 +545,18 @@
 | PLAN-34-01 | Phase 34 | Complete |
 | PLAN-34-02 | Phase 34 | Complete |
 | PLAN-34-03 | Phase 34 | Complete |
+| READMEENTRY-01 | Phase 35 | Complete |
+| READMEENTRY-02 | Phase 35 | Complete |
+| READMEENTRY-03 | Phase 35 | Complete |
+| READMEENTRYSAFE-01 | Phase 35 | Complete |
+| PLAN-35-01 | Phase 35 | Complete |
+| PLAN-35-02 | Phase 35 | Complete |
+| PLAN-35-03 | Phase 35 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 103 total
-- Mapped to phases: 103
+- v1.5 requirements: 111 total
+- Mapped to phases: 111
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 34 First-User Entrypoint Audit Route Guard.*
+*Requirements updated: 2026-05-29 after Phase 35 README Trial Entrypoint Guard.*

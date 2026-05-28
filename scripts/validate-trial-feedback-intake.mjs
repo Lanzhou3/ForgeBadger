@@ -16,6 +16,9 @@ const DEFAULT_TRIAL_RUNBOOK_PATH = path.join(REPO_ROOT, "docs", "TRIAL-RUNBOOK.m
 const DEFAULT_TRIAL_CHECKLIST_PATH = path.join(REPO_ROOT, "docs", "TRIAL-CHECKLIST.md");
 const DEFAULT_OPEN_SOURCE_READINESS_PATH = path.join(REPO_ROOT, "docs", "OPEN-SOURCE-READINESS.md");
 const DEFAULT_SUPPORT_DIAGNOSTICS_PATH = path.join(REPO_ROOT, "docs", "SUPPORT-DIAGNOSTICS.md");
+const DEFAULT_ROOT_README_PATH = path.join(REPO_ROOT, "README.md");
+const DEFAULT_ZH_CN_README_PATH = path.join(REPO_ROOT, "docs", "README.zh-CN.md");
+const DEFAULT_ZH_TW_README_PATH = path.join(REPO_ROOT, "docs", "README.zh-TW.md");
 
 export const REQUIRED_GITHUB_FIELDS = [
   "result",
@@ -127,6 +130,22 @@ export const REQUIRED_FIRST_USER_ENTRYPOINT_PHRASES = [
   "FIRST-USER-FEEDBACK"
 ];
 
+export const REQUIRED_ROOT_README_TRIAL_ENTRYPOINT_PHRASES = [
+  "docs/TRIAL-RUNBOOK.md",
+  "docs/TRIAL-CHECKLIST.md",
+  "docs/TROUBLESHOOTING.md",
+  "docs/TRIAL-FEEDBACK.md",
+  ".github/ISSUE_TEMPLATE/openforge-trial-feedback.yml"
+];
+
+export const REQUIRED_LOCALIZED_README_TRIAL_ENTRYPOINT_PHRASES = [
+  "TRIAL-RUNBOOK.md",
+  "TRIAL-CHECKLIST.md",
+  "TROUBLESHOOTING.md",
+  "TRIAL-FEEDBACK.md",
+  "../.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml"
+];
+
 export const REQUIRED_SAFETY_PHRASES = {
   github: [
     "Do not paste API keys",
@@ -235,6 +254,24 @@ export function validateTrialFeedbackIntake(options = {}) {
     "docs/SUPPORT-DIAGNOSTICS.md",
     errors
   );
+  const rootReadme = readInput(
+    options.rootReadme,
+    options.rootReadmePath ?? DEFAULT_ROOT_README_PATH,
+    "README.md",
+    errors
+  );
+  const zhCnReadme = readInput(
+    options.zhCnReadme,
+    options.zhCnReadmePath ?? DEFAULT_ZH_CN_README_PATH,
+    "docs/README.zh-CN.md",
+    errors
+  );
+  const zhTwReadme = readInput(
+    options.zhTwReadme,
+    options.zhTwReadmePath ?? DEFAULT_ZH_TW_README_PATH,
+    "docs/README.zh-TW.md",
+    errors
+  );
 
   if (githubIssueForm !== undefined) {
     validateGithubIssueForm(githubIssueForm, errors);
@@ -255,6 +292,30 @@ export function validateTrialFeedbackIntake(options = {}) {
   }
   if (supportDiagnostics !== undefined) {
     validateFirstUserEntrypoint(supportDiagnostics, "support diagnostics", errors);
+  }
+  if (rootReadme !== undefined) {
+    validateReadmeTrialEntrypoint(
+      rootReadme,
+      "root README",
+      REQUIRED_ROOT_README_TRIAL_ENTRYPOINT_PHRASES,
+      errors
+    );
+  }
+  if (zhCnReadme !== undefined) {
+    validateReadmeTrialEntrypoint(
+      zhCnReadme,
+      "Simplified Chinese README",
+      REQUIRED_LOCALIZED_README_TRIAL_ENTRYPOINT_PHRASES,
+      errors
+    );
+  }
+  if (zhTwReadme !== undefined) {
+    validateReadmeTrialEntrypoint(
+      zhTwReadme,
+      "Traditional Chinese README",
+      REQUIRED_LOCALIZED_README_TRIAL_ENTRYPOINT_PHRASES,
+      errors
+    );
   }
 
   return { ok: errors.length === 0, errors };
@@ -420,6 +481,14 @@ function validateFirstUserEntrypoint(source, label, errors) {
   for (const phrase of REQUIRED_FIRST_USER_ENTRYPOINT_PHRASES) {
     if (!source.includes(phrase)) {
       errors.push(`${label} is missing required first-user audit route: ${phrase}`);
+    }
+  }
+}
+
+function validateReadmeTrialEntrypoint(source, label, requiredPhrases, errors) {
+  for (const phrase of requiredPhrases) {
+    if (!source.includes(phrase)) {
+      errors.push(`${label} is missing required first-user trial entrypoint: ${phrase}`);
     }
   }
 }

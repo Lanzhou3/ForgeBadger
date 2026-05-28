@@ -36,6 +36,7 @@ not part of the current local-first MVP.
 - [Trial checklist](docs/TRIAL-CHECKLIST.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Trial feedback template](docs/TRIAL-FEEDBACK.md)
+- [GitHub feedback issue form](.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml)
 
 ## Why OpenForge
 

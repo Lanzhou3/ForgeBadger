@@ -66,6 +66,7 @@ docs/reports/*
 !docs/reports/phase-32-trial-feedback-issue-audit-2026-05-29.md
 !docs/reports/phase-33-external-gate-issue-audit-rerun-guard-2026-05-29.md
 !docs/reports/phase-34-first-user-entrypoint-audit-route-guard-2026-05-29.md
+!docs/reports/phase-35-readme-trial-entrypoint-guard-2026-05-29.md
 !docs/EXTERNAL-EVIDENCE-GATES.md
 !docs/OPEN-SOURCE-READINESS.md
 !docs/README.zh-CN.md

@@ -38,6 +38,8 @@ This bounded index summarizes decisions that downstream GSD workflows should car
   routes: Markdown packet audit and GitHub issue-form audit.
 - Public and support first-user entrypoints must route completed feedback
   through the same audit commands before maintainer triage.
+- Root and localized README trial entrypoints must expose both feedback
+  collection paths so first users do not bypass the issue-form route.
 
 ## Locked Decisions
 
@@ -71,6 +73,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.5 trial feedback issue audit | `pnpm trial:feedback-issue-audit -- --issue=<number>` audits GitHub issue-form feedback through the packet audit path; `gateClearingEvidence` remains false. | `docs/reports/phase-32-trial-feedback-issue-audit-2026-05-29.md` |
 | v1.5 external gate issue-audit rerun guard | `pnpm evidence:gates-validate` requires `pnpm trial:feedback-issue-audit` in the `FIRST-USER-FEEDBACK` rerun path alongside the Markdown packet audit. | `docs/reports/phase-33-external-gate-issue-audit-rerun-guard-2026-05-29.md` |
 | v1.5 first-user entrypoint audit-route guard | `pnpm trial:intake-validate` guards open-source readiness and support diagnostics docs so they preserve both feedback audit routes before maintainer triage. | `docs/reports/phase-34-first-user-entrypoint-audit-route-guard-2026-05-29.md` |
+| v1.5 README trial-entrypoint guard | `pnpm trial:intake-validate` guards root and localized README trial sections so they preserve runbook, checklist, troubleshooting, feedback template, and GitHub issue-form links. | `docs/reports/phase-35-readme-trial-entrypoint-guard-2026-05-29.md` |
 
 ## Deferred Ideas
 

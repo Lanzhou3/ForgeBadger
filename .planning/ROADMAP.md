@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 34 first-user entrypoint audit-route guard complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 35 README trial-entrypoint guard complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -400,6 +400,33 @@ Plans:
    through Markdown packet or GitHub issue-form audit before triage.
 3. `pnpm trial:intake-validate` fails if either entrypoint drops the audit
    commands or collection paths.
+4. `FIRST-USER-FEEDBACK` remains `Caveat`.
+5. The guard does not collect evidence, submit issues, attach artifacts, or
+   clear external gates.
+
+### Phase 35: README Trial Entrypoint Guard
+
+**Goal:** Keep the repository README and localized README trial entrypoints
+aligned with both first-user feedback collection paths.
+
+**Requirements:** TRIALOPS-07, READMEENTRY-01, READMEENTRY-02,
+READMEENTRY-03, READMEENTRYSAFE-01, PLAN-35-01, PLAN-35-02, PLAN-35-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 35-01-PLAN.md — README trial-entrypoint validator coverage, root README
+  sync, source-of-truth updates, and gate-preserving verification.
+
+**Success criteria:**
+
+1. `README.md` links the GitHub feedback issue form from the First User Trial
+   section.
+2. `pnpm trial:intake-validate` reads `README.md`,
+   `docs/README.zh-CN.md`, and `docs/README.zh-TW.md` by default.
+3. The validator fails if any README trial entrypoint drops the runbook,
+   checklist, troubleshooting, feedback template, or GitHub issue-form link.
 4. `FIRST-USER-FEEDBACK` remains `Caveat`.
 5. The guard does not collect evidence, submit issues, attach artifacts, or
    clear external gates.

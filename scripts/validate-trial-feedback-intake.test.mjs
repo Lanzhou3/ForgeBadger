@@ -173,6 +173,31 @@ describe("validateTrialFeedbackIntake", () => {
     assert.match(result.errors.join("\n"), /support diagnostics.*pnpm trial:feedback-audit/);
     assert.match(result.errors.join("\n"), /support diagnostics.*pnpm trial:feedback-issue-audit/);
   });
+
+  it("rejects README trial entrypoints that omit the GitHub feedback issue form", () => {
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm: buildIssueFormFixture(),
+      markdownTemplate: buildMarkdownTemplateFixture(),
+      trialRunbook: buildTrialRunbookFixture(),
+      trialChecklist: buildTrialChecklistFixture(),
+      openSourceReadiness: buildFirstUserEntrypointFixture(),
+      supportDiagnostics: buildFirstUserEntrypointFixture(),
+      rootReadme: [
+        "# OpenForge",
+        "## First User Trial",
+        "- [Trial runbook](docs/TRIAL-RUNBOOK.md)",
+        "- [Trial checklist](docs/TRIAL-CHECKLIST.md)",
+        "- [Troubleshooting](docs/TROUBLESHOOTING.md)",
+        "- [Trial feedback template](docs/TRIAL-FEEDBACK.md)"
+      ].join("\n")
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(
+      result.errors.join("\n"),
+      /root README.*\.github\/ISSUE_TEMPLATE\/openforge-trial-feedback\.yml/
+    );
+  });
 });
 
 function buildIssueFormFixture() {
@@ -250,5 +275,15 @@ function buildTrialChecklistFixture() {
     "Templates and empty issue forms do not count as completed feedback.",
     "Follow-up route, phase, or issue:",
     "Redaction review completed:"
+  ].join("\n");
+}
+
+function buildFirstUserEntrypointFixture() {
+  return [
+    "docs/TRIAL-FEEDBACK.md",
+    ".github/ISSUE_TEMPLATE/openforge-trial-feedback.yml",
+    "pnpm trial:feedback-audit",
+    "pnpm trial:feedback-issue-audit",
+    "FIRST-USER-FEEDBACK"
   ].join("\n");
 }
