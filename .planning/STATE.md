@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: External Evidence Closure
-status: in_progress
-stopped_at: Phase 19 complete as Blocked; Phase 20 Platform And First-User Acceptance Closure planning pending
-last_updated: 2026-05-29T04:55:00+08:00
+status: complete
+stopped_at: v1.4 complete with external evidence caveats preserved; next milestone selection pending
+last_updated: 2026-05-29T04:07:00+08:00
 last_activity: 2026-05-29
 progress:
   total_phases: 4
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
-  percent: 75
+  completed_phases: 4
+  total_plans: 4
+  completed_plans: 4
+  percent: 100
 ---
 
 # Project State
@@ -21,20 +21,20 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** v1.4 External Evidence Closure; Phase 19 recorded Feishu public callback evidence as `Blocked`, Phase 20 Platform And First-User Acceptance Closure planning pending.
+**Current focus:** v1.4 External Evidence Closure is complete with `LIVE-PROVIDER`, `WINDOWS-WSL`, and `FIRST-USER-FEEDBACK` preserved as `Caveat`, and `FEISHU-CALLBACK` preserved as `Blocked`.
 
 ## Current Position
 
-Phase: 20 Platform And First-User Acceptance Closure
-Plan: TBD
-Status: Planned
+Phase: v1.4 milestone closeout
+Plan: 20-01 complete
+Status: Complete
 Last activity: 2026-05-29
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 37
+- Total plans completed: 38
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -61,6 +61,7 @@ Last activity: 2026-05-29
 | 17. External Evidence Registry | 1/1 | - | - |
 | 18. Live Provider Evidence Rerun | 1/1 | - | - |
 | 19. Feishu Public Callback Evidence | 1/1 | - | - |
+| 20. Platform And First-User Acceptance Closure | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -82,12 +83,13 @@ Recent decisions affecting current work:
 - [Phase 17]: `docs/EXTERNAL-EVIDENCE-GATES.md` is the canonical registry for `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and `FIRST-USER-FEEDBACK`; mocked tests, docs, and empty templates do not clear those gates.
 - [Phase 18]: `pnpm smoke:copilot-provider` rerun produced redacted skipped JSON with `missing_provider_credential`; `LIVE-PROVIDER` remains `Caveat`, not `Pass`.
 - [Phase 19]: Feishu CLI bot preflight and endpoint checks passed, and Feishu/Copilot boundary regression passed 183 tests, but `FEISHU-CALLBACK` remains `Blocked` because no public HTTPS Gateway route, operator webhook setup environment, or Feishu developer-console URL verification action was available.
+- [Phase 20]: v1.4 closeout records current host as Linux `not_wsl`, keeps `WINDOWS-WSL` as `Caveat`, keeps `FIRST-USER-FEEDBACK` as `Caveat` because no completed feedback packet is attached, and publishes `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`.
 
 ### Pending Todos
 
-Milestone next steps:
+Next steps:
 
-- Plan Phase 20 Platform And First-User Acceptance Closure.
+- Select the next milestone.
 - Prepare Feishu developer-console callback evidence only when public HTTPS Gateway routing is available.
 - Collect physical Windows/WSL and first-user feedback evidence when those external environments/users are available.
 - Rerun live provider evidence only after a disposable provider credential and explicit model id are available.
@@ -113,10 +115,10 @@ Milestone next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T04:55:00+08:00
-Stopped at: Phase 19 complete as Blocked; Phase 20 Platform And First-User Acceptance Closure planning pending
+Last session: 2026-05-29T04:07:00+08:00
+Stopped at: v1.4 complete with external evidence caveats preserved; next milestone selection pending
 Resume file: None
 
 ## Operator Next Steps
 
-- Start Phase 20 planning for physical Windows/WSL, first-user feedback, and v1.4 closeout matrix evidence.
+- Select the next milestone or collect one of the remaining external evidence packets.

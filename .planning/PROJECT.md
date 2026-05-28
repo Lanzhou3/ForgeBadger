@@ -4,15 +4,15 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is v1.4 External Evidence Closure planning. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness. v1.4 now focuses on converting the remaining live-provider, physical Windows/WSL, Feishu developer-console callback, and first-user feedback caveats into truthful evidence-gate decisions.
+The current product stage is post-v1.4 milestone selection. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix.
 
 ## Current Milestone
 
-v1.4 External Evidence Closure is selected. Phase 17 External Evidence Registry is complete, Phase 18 Live Provider Evidence Rerun is complete as `Caveat`, Phase 19 Feishu Public Callback Evidence is complete as `Blocked`, and Phase 20 Platform And First-User Acceptance Closure is next.
+v1.4 External Evidence Closure is complete and archived. The next milestone is not selected yet.
 
-**Last shipped:** v1.3 AI-Native Project Execution Traceability on 2026-05-29.
+**Last shipped:** v1.4 External Evidence Closure on 2026-05-29.
 
-**Next milestone goal:** Convert preserved external caveats into a canonical evidence gate system with runnable collection paths, redacted artifacts, and `Pass`/`Caveat`/`Blocked` closeout decisions.
+**Next milestone goal:** TBD. Candidate directions are real external evidence collection, first-user trial execution, or a focused product slice that keeps local-first control and traceability boundaries intact.
 
 **Shipped v1.2 features:**
 - Project detail Web surface for project-manager goal, work item, status, evidence, and ledger state.
@@ -71,9 +71,9 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - [x] v1.4 creates a canonical external evidence gate registry before any preserved caveat can be cleared.
 - [x] v1.4 records live provider evidence with disposable credential/model metadata or a precise blocker.
 - [x] v1.4 records Feishu developer-console callback evidence with public HTTPS routing or a precise blocker.
-- [ ] v1.4 records physical Windows/WSL terminal evidence from a real host or a precise blocker.
-- [ ] v1.4 maps completed first-user feedback into severity, owner, disposition, and follow-up routing, or keeps the missing packet as a caveat.
-- [ ] v1.4 publishes a release closeout matrix that keeps any remaining external gaps visible.
+- [x] v1.4 records physical Windows/WSL terminal evidence from a real host or a precise blocker.
+- [x] v1.4 maps completed first-user feedback into severity, owner, disposition, and follow-up routing, or keeps the missing packet as a caveat.
+- [x] v1.4 publishes a release closeout matrix that keeps any remaining external gaps visible.
 
 ### Out of Scope
 
@@ -98,6 +98,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - External v1.1 caveats remain tracked in the readiness reports and should not be silently reclassified during v1.4.
 - Phase 18 reran `pnpm smoke:copilot-provider`; no disposable provider credential was available, so `LIVE-PROVIDER` remains `Caveat` with `missing_provider_credential`.
 - Phase 19 reran Feishu CLI preflight, `pnpm smoke:feishu-public-webhook`, Feishu/Copilot regression, and Gateway typecheck. Bot CLI preflight and local regression passed, but `FEISHU-CALLBACK` remains `Blocked` because no public HTTPS Gateway route, operator webhook setup environment, or Feishu developer-console URL verification action was available.
+- Phase 20 closed v1.4 with `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`; `WINDOWS-WSL` and `FIRST-USER-FEEDBACK` remain `Caveat` because no real WSL host or completed feedback packet was available.
 - Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints
@@ -127,7 +128,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Package v1.1 as a cautious first-user handoff | Phase 8 readiness packet makes trial/support/closeout inspectable while preserving caveats | Good - v1.1 completed with explicit caveats |
 | Promote project-manager ledger to Web before remote runtime work | The backend ledger is already tenant-scoped and audited, but first users need a visible project workflow before higher-risk remote execution | Good - v1.2 shipped project-context Project Manager UI with evidence, ledger, and handoff gates |
 | Treat AI-native project management as execution traceability, not generic PM | The product differentiation is linking prompts, approvals, terminal context, evidence, and ledger state to AI CLI work | Selected for v1.3 |
-| Close external evidence before expanding scope | Open-source readiness exposes the repository, but live provider, Windows/WSL, Feishu callback, and first-user feedback still need real artifacts | Selected for v1.4 |
+| Close external evidence before expanding scope | Open-source readiness exposes the repository, but live provider, Windows/WSL, Feishu callback, and first-user feedback still need real artifacts | Shipped in v1.4 as truthful caveat/blocker closeout |
 
 ## Evolution
 
@@ -147,4 +148,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-29 after selecting v1.4 External Evidence Closure.*
+*Last updated: 2026-05-29 after closing v1.4 External Evidence Closure.*

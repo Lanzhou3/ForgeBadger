@@ -1,6 +1,6 @@
 # Open Source Readiness
 
-> Status: v1.3 open-source packet | Date: 2026-05-29
+> Status: v1.4 external evidence closeout | Date: 2026-05-29
 
 OpenForge is published as a local-first AI CLI control plane. The open-source
 packet is meant to make local trial, contribution, support, and security
@@ -36,7 +36,8 @@ review before they can become supported scope.
 
 ## Required Caveats
 
-The open-source packet does not clear external evidence caveats. Keep these
+The open-source packet does not clear external evidence caveats. v1.4 added a
+canonical registry and closeout report, but the external gates below still stay
 visible until real evidence is attached. The canonical gate registry is
 `docs/EXTERNAL-EVIDENCE-GATES.md`; if this table and the registry differ, use
 the registry for state, artifact shape, owner, and closeout rules.
@@ -47,6 +48,8 @@ the registry for state, artifact shape, owner, and closeout rules.
 | Physical Windows/WSL terminal | Caveat until a real Windows host with WSL completes the terminal checklist. | Run `docs/TRIAL-CHECKLIST.md` Windows/WSL section and attach WSL terminal evidence. |
 | Feishu developer-console callback | Blocked until a real Feishu console URL verification reaches the public Gateway webhook. | Provision public HTTPS routing, run console verification, and update the Feishu evidence report. |
 | Completed first-user feedback | Caveat until at least one completed feedback packet is attached or linked. | Use `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml` or `docs/TRIAL-FEEDBACK.md`. |
+
+Current closeout: `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`.
 
 ## Contribution Safety
 

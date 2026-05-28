@@ -1,29 +1,62 @@
 # Milestones
 
-## v1.3 AI-Native Project Execution Traceability (Selected: 2026-05-22)
+## v1.4 External Evidence Closure (Shipped: 2026-05-29)
 
-**Status:** Ready for Phase 12 planning
+**Phases completed:** 4 phases, 4 plans
 
-**Planned phases:** 5 phases
+**Key accomplishments:**
 
-- Phase 12: Copilot Project-Manager Traceability
-- Phase 13: Project Manager Board Workflow
-- Phase 14: Terminal Workspace Context
-- Phase 15: Model Provider Setup And Health
-- Phase 16: Open Source Readiness Packet
+- Canonical external evidence registry for live provider, physical Windows/WSL,
+  Feishu public callback, and first-user feedback gates.
+- Live provider smoke rerun recorded as `Caveat` with
+  `missing_provider_credential` and Codex subscription boundary preserved.
+- Feishu callback evidence refreshed with usable bot CLI preflight and passing
+  local regression, while preserving the real developer-console callback as
+  `Blocked`.
+- v1.4 closeout matrix preserves `LIVE-PROVIDER`, `WINDOWS-WSL`, and
+  `FIRST-USER-FEEDBACK` as `Caveat`, and `FEISHU-CALLBACK` as `Blocked`.
 
-**Milestone goal:**
+**Archived:**
 
-Extend the v1.2 Project Manager workflow into an AI-native execution traceability layer that links Copilot, terminal context, evidence, provider readiness, and open-source trust without changing OpenForge into a generic project-management suite.
+- `.planning/milestones/v1.4-ROADMAP.md`
+- `.planning/milestones/v1.4-REQUIREMENTS.md`
+- `.planning/milestones/v1.4-phases/`
 
-**Start readiness:**
+**Known deferred items at close:**
 
-- v1.2 is archived.
-- `.planning/REQUIREMENTS.md` defines v1.3 requirements and phase mapping.
-- Before this v1.3 planning update, tracked code was clean; the current tracked changes are the v1.3 planning documents, and unrelated untracked `upload_img/` remains outside milestone scope.
-- v1.1 external caveats remain explicit caveats and are not silently reclassified.
+- Disposable live provider credential/model evidence.
+- Physical Windows/WSL terminal evidence.
+- Public HTTPS Feishu developer-console callback verification.
+- Completed first-user feedback packet.
 
-**Next:** Run `$gsd-plan-phase 12`.
+**What's next:** Select the next milestone or collect one of the remaining
+external evidence packets.
+
+---
+
+## v1.3 AI-Native Project Execution Traceability (Shipped: 2026-05-29)
+
+**Phases completed:** 5 phases, 15 plans
+
+**Key accomplishments:**
+
+- Copilot-to-Project-Manager traceability through pending-action approval.
+- Project Manager board workflow, edit/delete, and bounded batch status actions.
+- Safe terminal workspace context and bounded file/session/terminal evidence references.
+- Provider setup and health checks with Codex subscription boundaries preserved.
+- Open-source readiness packet with contribution, security, issue templates, and caveat-preserving closeout.
+
+**Archived:**
+
+- `.planning/milestones/v1.3-ROADMAP.md`
+- `.planning/milestones/v1.3-REQUIREMENTS.md`
+- `.planning/milestones/v1.3-phases/`
+
+**Known deferred items at close:**
+
+- Real external evidence remained for live provider, physical Windows/WSL,
+  Feishu developer-console callback, and completed first-user feedback; v1.4
+  was selected to close those truthfully.
 
 ---
 

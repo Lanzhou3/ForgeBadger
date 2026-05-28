@@ -8,17 +8,17 @@
   `.planning/milestones/v1.3-*`. It shipped Copilot-to-Project-Manager
   traceability, Project Manager board workflow, safe terminal workspace
   context, provider readiness UX, and the open-source readiness packet.
-- v1.4 External Evidence Closure is the active milestone. Its purpose is to
-  convert the remaining live-provider, physical Windows/WSL, Feishu
-  developer-console callback, and first-user feedback caveats into a canonical
-  evidence gate registry plus real redacted artifacts or precise blockers.
-  Phase 17 created the registry; Phase 18 reran `pnpm smoke:copilot-provider`
-  and recorded `LIVE-PROVIDER` as `Caveat` with
+- v1.4 External Evidence Closure is complete and archived under
+  `.planning/milestones/v1.4-*`. It converted the remaining live-provider,
+  physical Windows/WSL, Feishu developer-console callback, and first-user
+  feedback caveats into a canonical evidence gate registry plus real redacted
+  artifacts or precise blockers. Phase 17 created the registry; Phase 18 reran
+  `pnpm smoke:copilot-provider` and recorded `LIVE-PROVIDER` as `Caveat` with
   `missing_provider_credential`; Phase 19 reran Feishu CLI preflight,
   `pnpm smoke:feishu-public-webhook`, Feishu/Copilot regression, and Gateway
-  typecheck, then recorded `FEISHU-CALLBACK` as `Blocked` because public HTTPS
-  routing, operator webhook setup environment, and Feishu developer-console URL
-  verification were unavailable.
+  typecheck, then recorded `FEISHU-CALLBACK` as `Blocked`; Phase 20 published
+  `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`, preserving
+  `WINDOWS-WSL` and `FIRST-USER-FEEDBACK` as `Caveat`.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -127,35 +127,39 @@
 
 ## Next Work
 
-1. Plan Phase 20 Platform And First-User Acceptance Closure. Keep
-   `WINDOWS-WSL` as `Caveat` until a real Windows/WSL host completes the
-   terminal checklist, keep `FIRST-USER-FEEDBACK` as `Caveat` until a completed
-   redacted feedback packet is attached, and publish the v1.4 closeout matrix
-   without overclaiming.
+1. Select the next milestone. Candidate directions are real external evidence
+   collection, first-user trial execution, or a focused product slice that keeps
+   local-first control and traceability boundaries intact.
 2. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,
    operator webhook setup environment, and Feishu developer-console URL
    verification are available. Phase 19 proved bot CLI preflight and local
    regression only; those do not clear the real callback gate.
-3. Rerun the `LIVE-PROVIDER` gate only after a disposable provider credential
+3. Keep `WINDOWS-WSL` as `Caveat` until a real Windows/WSL host completes the
+   terminal checklist. Phase 20 recorded the current host as Linux `not_wsl`,
+   which is not physical WSL evidence.
+4. Keep `FIRST-USER-FEEDBACK` as `Caveat` until a completed redacted feedback
+   packet is attached or linked with severity, owner, disposition, environment,
+   reproduction detail, diagnostics status, and follow-up route.
+5. Rerun the `LIVE-PROVIDER` gate only after a disposable provider credential
    and explicit model id are available; Phase 18 currently records
    `missing_provider_credential`.
-4. Keep Codex app-server turn input disabled unless the Gateway is explicitly
+6. Keep Codex app-server turn input disabled unless the Gateway is explicitly
    started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Treat `/turn` as a
    default-403 feature-flag prototype API, not a Web-exposed user workflow.
    Gateway does not persist prompt/response transcript content; add
    user-facing retention controls before exposing real turn input in Web. Do not
    add provider API-key or model override application to this Codex app-server
    path.
-5. If stopped/error app-server records grow in long-running usage, add an
+7. If stopped/error app-server records grow in long-running usage, add an
    explicit TTL or pagination strategy instead of deleting them immediately and
    losing observable process state.
-6. Run a physical Windows/WSL manual smoke when that platform is available; the
+8. Run a physical Windows/WSL manual smoke when that platform is available; the
    current pass covers CLI mode behavior, CI/release gate automation, checklist
    fields, and runbook remediation, not a real Windows host. Record that
    evidence in GitHub issue #4.
-7. Collect first-user Copilot hardening feedback through the trial feedback
+9. Collect first-user Copilot hardening feedback through the trial feedback
    form and issue #5. Focus on dependency failure states, CLI availability
    recovery, provider configuration recovery, and platform-specific
    remediation.
-8. Keep SSH/remote execution as a separate architecture item, not part of the
+10. Keep SSH/remote execution as a separate architecture item, not part of the
    local Codex app-server prototype.
