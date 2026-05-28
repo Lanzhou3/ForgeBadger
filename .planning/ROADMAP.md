@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 23 source fallback support fix complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 24 intake contract validation complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -110,6 +110,34 @@ Plans:
 5. Runbook, smoke, troubleshooting, and CI docs describe the behavior without
    exposing secrets or raw state.
 6. External evidence gate states remain unchanged.
+
+### Phase 24: Trial Feedback Intake Contract
+
+**Goal:** Make the GitHub issue form and Markdown feedback template a
+machine-verified intake contract before collecting real first-user packets.
+
+**Requirements:** INTAKE-01, INTAKE-02, INTAKE-03, INTAKE-04,
+INTAKESAFE-01, PLAN-24-01, PLAN-24-02, PLAN-24-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 24-01-PLAN.md — intake validator, CI harness coverage, source-of-truth
+  updates, and caveat-preserving verification.
+
+**Success criteria:**
+
+1. The GitHub trial feedback issue form preserves required fields, field
+   types, required dropdown options, required mandatory flags,
+   owner/disposition routing, and safety confirmations.
+2. The Markdown trial feedback template preserves minimum packet sections,
+   diagnostics guidance, Copilot evidence, terminal evidence, triage routing,
+   and bounded support notes.
+3. Public intake text rejects affirmative requests for raw evidence or secrets.
+4. CI runs the intake contract test with the existing script harness.
+5. The validator does not fabricate first-user evidence or move any external
+   gate to `Pass`.
 
 ## Archived Milestones
 
@@ -224,6 +252,7 @@ Full archive:
 | 21. First-User Trial Operations | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 22. Operator Trial Dry Run | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 23. Source Env Override Preservation | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 24. Trial Feedback Intake Contract | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

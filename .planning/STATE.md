@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: First-User Trial Operations
 status: phase_complete
-stopped_at: Phase 23 source env override preservation complete; real first-user packet collection pending
-last_updated: 2026-05-29T05:00:00+08:00
+stopped_at: Phase 24 trial feedback intake contract complete; real first-user packet collection pending
+last_updated: 2026-05-29T05:19:00+08:00
 last_activity: 2026-05-29
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
+  total_phases: 4
+  completed_phases: 4
+  total_plans: 4
+  completed_plans: 4
   percent: 100
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** Phase 23 fixed the source fallback env override support gap found during the operator dry-run. The next concrete step is collecting a real first-user trial packet through the updated template or issue form while preserving v1.4 external gate states until real artifacts exist.
+**Current focus:** Phase 24 added machine validation for the first-user feedback issue form and Markdown template. The next concrete step is collecting a real first-user trial packet through the validated template or issue form while preserving v1.4 external gate states until real artifacts exist.
 
 ## Current Position
 
-Phase: 23. Source Env Override Preservation
-Plan: 23-01 complete
+Phase: 24. Trial Feedback Intake Contract
+Plan: 24-01 complete
 Status: Phase Complete
 Last activity: 2026-05-29
 
@@ -65,6 +65,7 @@ Last activity: 2026-05-29
 | 21. First-User Trial Operations | 1/1 | - | - |
 | 22. Operator Trial Dry Run | 1/1 | - | - |
 | 23. Source Env Override Preservation | 1/1 | - | - |
+| 24. Trial Feedback Intake Contract | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -91,12 +92,13 @@ Recent decisions affecting current work:
 - [Phase 21]: The minimum first-user trial packet must capture affected surface, severity, owner, disposition or next action, environment summary, reproduction detail, diagnostics status, follow-up route or no-action rationale, and redaction review. Phase 21 also updates `docs/TRIAL-FEEDBACK.md` and the GitHub issue template to remove first-user browser-token fallback and replace raw log/output requests with bounded summaries.
 - [Phase 22]: Operator dry-run records the current host as Linux `not_wsl`, dependency checks as usable for local tmux terminals, Gateway/Web loopback startup as healthy, provider smoke as skipped with `missing_provider_credential`, and source dev-script `.env` override behavior as a docs/support gap. It does not clear `FIRST-USER-FEEDBACK` or any other external gate.
 - [Phase 23]: Source fallback Gateway/Web scripts now load root `.env` through `scripts/run-with-root-env.mjs`, preserving command-prefix env values over `.env`. Red/green tests, CI script harness coverage, Gateway `OPENFORGE_DB_PATH` prefix smoke, and Web `OPENFORGE_WEB_PORT` prefix smoke passed. External gates remain unchanged.
+- [Phase 24]: First-user trial feedback intake is now a machine-verified contract through `scripts/validate-trial-feedback-intake.mjs`, covering required issue-form fields/types/options, Markdown sections, triage routing, redaction language, and unsafe raw-evidence wording. CI script harness coverage includes the validator. External gates remain unchanged.
 
 ### Pending Todos
 
 Next steps:
 
-- Collect a real first-user trial packet through the updated template or issue form.
+- Collect a real first-user trial packet through the validated template or issue form.
 - Use the v1.5 trial-operations loop for the next real first-user trial packet.
 - Prepare Feishu developer-console callback evidence only when public HTTPS Gateway routing is available.
 - Collect physical Windows/WSL and first-user feedback evidence when those external environments/users are available.
@@ -123,10 +125,10 @@ Next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T05:00:00+08:00
-Stopped at: Phase 23 source env override preservation complete; real first-user packet collection pending
+Last session: 2026-05-29T05:19:00+08:00
+Stopped at: Phase 24 trial feedback intake contract complete; real first-user packet collection pending
 Resume file: None
 
 ## Operator Next Steps
 
-- Collect a real first-user trial packet, then triage it through the v1.5 operating loop and the external evidence gate registry.
+- Collect a real first-user trial packet through the validated intake contract, then triage it through the v1.5 operating loop and the external evidence gate registry.

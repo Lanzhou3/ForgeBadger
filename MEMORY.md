@@ -37,6 +37,12 @@
   Gateway/Web package script wiring, CI harness coverage, source fallback docs,
   and real Gateway/Web prefix smoke evidence. Command-prefix env values now win
   over root `.env` while `.env` still fills missing values.
+- Phase 24 added `scripts/validate-trial-feedback-intake.mjs` and
+  `scripts/validate-trial-feedback-intake.test.mjs` so the first-user trial
+  feedback GitHub issue form and Markdown template are machine-validated for
+  required fields, field types, dropdown options, triage routing, redaction
+  language, and unsafe raw-evidence requests. CI script harness coverage now
+  includes the intake contract. This does not clear `FIRST-USER-FEEDBACK`.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -145,7 +151,8 @@
 
 ## Next Work
 
-1. Use the v1.5 trial packet shape for the next real first-user run: affected
+1. Use the validated v1.5 trial packet intake for the next real first-user run:
+   affected
    surface, severity, owner, disposition or next action, environment summary,
    reproduction detail, diagnostics status, follow-up route or no-action
    rationale, and redaction review.

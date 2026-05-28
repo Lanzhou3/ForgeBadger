@@ -1,0 +1,151 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import {
+  REQUIRED_GITHUB_FIELD_TYPES,
+  REQUIRED_GITHUB_FIELDS,
+  REQUIRED_GITHUB_OPTIONS,
+  REQUIRED_CAVEAT_OWNER_PHRASES,
+  REQUIRED_MARKDOWN_PHRASES,
+  REQUIRED_MARKDOWN_SECTIONS,
+  REQUIRED_SAFETY_PHRASES,
+  validateTrialFeedbackIntake
+} from "./validate-trial-feedback-intake.mjs";
+
+describe("validateTrialFeedbackIntake", () => {
+  it("accepts the checked-in trial feedback intake contract", async () => {
+    const result = await validateTrialFeedbackIntake();
+
+    assert.deepEqual(result, { ok: true, errors: [] });
+  });
+
+  it("rejects missing required GitHub issue fields", async () => {
+    const githubIssueForm = buildIssueFormFixture().replace("id: diagnostics", "id: diagnostic_notes");
+    const markdownTemplate = buildMarkdownTemplateFixture();
+
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm,
+      markdownTemplate
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /diagnostics/);
+  });
+
+  it("rejects GitHub option and required-flag drift", () => {
+    const githubIssueForm = buildIssueFormFixture()
+      .replace("        - blocked", "        - blocked externally")
+      .replace(
+        "id: copilot\n    validations:\n      required: true",
+        "id: copilot\n    validations:\n      required: false"
+      );
+    const markdownTemplate = buildMarkdownTemplateFixture();
+
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm,
+      markdownTemplate
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /result.*blocked/);
+    assert.match(result.errors.join("\n"), /copilot.*required: true/);
+  });
+
+  it("rejects GitHub field type drift", () => {
+    const githubIssueForm = buildIssueFormFixture().replace(
+      "- type: checkboxes\n    id: safety",
+      "- type: textarea\n    id: safety"
+    );
+    const markdownTemplate = buildMarkdownTemplateFixture();
+
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm,
+      markdownTemplate
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /safety.*checkboxes/);
+  });
+
+  it("rejects missing Markdown sections and safety language", () => {
+    const githubIssueForm = buildIssueFormFixture();
+    const markdownTemplate = buildMarkdownTemplateFixture()
+      .replace("## Diagnostics Export", "## Diagnostics")
+      .replace("Do not include plaintext API keys", "Never include plaintext API keys");
+
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm,
+      markdownTemplate
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /Diagnostics Export/);
+    assert.match(result.errors.join("\n"), /Do not include plaintext API keys/);
+  });
+
+  it("rejects public intake language that asks users to paste unsafe raw evidence", () => {
+    const githubIssueForm = buildIssueFormFixture().replace(
+      "Do not paste API keys",
+      "Paste raw provider payloads and your API key"
+    );
+    const markdownTemplate = buildMarkdownTemplateFixture();
+
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm,
+      markdownTemplate
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /unsafe intake language/);
+  });
+});
+
+function buildIssueFormFixture() {
+  const body = [
+    "name: OpenForge first-user trial feedback",
+    "labels:",
+    "  - trial-feedback",
+    "body:"
+  ];
+  for (const field of REQUIRED_GITHUB_FIELDS) {
+    body.push(`  - type: ${REQUIRED_GITHUB_FIELD_TYPES[field]}`);
+    body.push(`    id: ${field}`);
+    if (REQUIRED_GITHUB_OPTIONS[field]) {
+      body.push("    attributes:");
+      body.push("      options:");
+      for (const option of REQUIRED_GITHUB_OPTIONS[field]) {
+        body.push(`        - ${option}`);
+      }
+    } else if (field === "safety") {
+      body.push("    attributes:");
+      body.push("      options:");
+      for (const phrase of REQUIRED_SAFETY_PHRASES.github) {
+        body.push(`        - label: ${phrase}`);
+        body.push("          required: true");
+      }
+    }
+    if (field !== "safety") {
+      body.push("    validations:");
+      body.push(`      required: ${field === "windows_wsl" ? "false" : "true"}`);
+    }
+  }
+  for (const phrase of REQUIRED_CAVEAT_OWNER_PHRASES) {
+    body.push(phrase);
+  }
+  return `${body.join("\n")}\n`;
+}
+
+function buildMarkdownTemplateFixture() {
+  const body = [];
+  for (const section of REQUIRED_MARKDOWN_SECTIONS) {
+    body.push(`## ${section}`);
+    body.push("");
+  }
+  for (const phrase of REQUIRED_SAFETY_PHRASES.markdown) {
+    body.push(phrase);
+  }
+  for (const phrase of REQUIRED_MARKDOWN_PHRASES) {
+    body.push(phrase);
+  }
+  return `${body.join("\n")}\n`;
+}

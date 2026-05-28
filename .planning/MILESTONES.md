@@ -2,7 +2,7 @@
 
 ## v1.5 First-User Trial Operations (Active: 2026-05-29)
 
-**Phases planned:** 3 phases, 3 plans
+**Phases planned:** 4 phases, 4 plans
 
 **Goal:**
 
@@ -14,6 +14,7 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - [x] Phase 21: First-User Trial Operations — 1/1 plans complete.
 - [x] Phase 22: Operator Trial Dry Run — 1/1 plans complete.
 - [x] Phase 23: Source Env Override Preservation — 1/1 plans complete.
+- [x] Phase 24: Trial Feedback Intake Contract — 1/1 plans complete.
 
 **Acceptance boundary:**
 
@@ -24,6 +25,8 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
   `docs/EXTERNAL-EVIDENCE-GATES.md` exist.
 - Operator dry-run evidence can improve the collection loop, but it is not a
   substitute for a completed first-user packet.
+- Intake contract validation can prevent feedback-template drift, but it is
+  not a substitute for completed first-user feedback.
 
 ---
 

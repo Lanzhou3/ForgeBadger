@@ -14,6 +14,8 @@ This bounded index summarizes decisions that downstream GSD workflows should car
   cannot clear first-user or external manual gates.
 - Source fallback command-prefix env values must win over root `.env` values
   so operators can run disposable dry-runs without editing local configuration.
+- Trial feedback intake templates are a machine-verified contract, but a valid
+  empty template is not first-user evidence.
 
 ## Locked Decisions
 
@@ -36,6 +38,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.5 direction | First-user trial operations is the next milestone; it packages trial evidence routing and feedback triage before any runtime expansion. | `docs/superpowers/specs/2026-05-29-openforge-v1.5-first-user-trial-operations-design.md`, `.planning/phases/OF-21-first-user-trial-operations/21-01-PLAN.md` |
 | v1.5 operator dry-run | Phase 22 records current-host operator evidence and a source `.env` override support gap, but it does not clear `FIRST-USER-FEEDBACK` or other external gates. | `docs/reports/phase-22-operator-trial-dry-run-2026-05-29.md` |
 | v1.5 source env runner | Gateway/Web source scripts load root `.env` through an env-preserving runner so command-prefix overrides such as `OPENFORGE_DB_PATH=/tmp/...` remain authoritative for that run. | `docs/reports/phase-23-source-env-runner-2026-05-29.md` |
+| v1.5 intake contract | First-user feedback issue form and Markdown template required fields, routing, and safety wording are checked by a bounded validator in CI; this does not clear `FIRST-USER-FEEDBACK`. | `docs/reports/phase-24-trial-feedback-intake-contract-2026-05-29.md` |
 
 ## Deferred Ideas
 

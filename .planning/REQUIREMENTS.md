@@ -121,6 +121,34 @@
 - [x] **PLAN-23-03**: Phase 23 verification proves red/green test coverage,
   real Gateway/Web prefix smoke behavior, and unchanged external gate states.
 
+### Trial Feedback Intake Contract
+
+- [x] **INTAKE-01**: The GitHub first-user trial feedback issue form must keep
+  required field IDs, field types, required dropdown options, mandatory-field
+  `required: true` flags, owner/disposition routing, and safety confirmations.
+- [x] **INTAKE-02**: The Markdown trial feedback template must keep minimum
+  packet sections, dependency/version checks, diagnostics export guidance,
+  triage routing, Copilot evidence, terminal evidence, and bounded support
+  notes.
+- [x] **INTAKE-03**: Public intake language must reject affirmative requests to
+  paste, upload, submit, or attach raw evidence, or to paste keys/tokens.
+- [x] **INTAKE-04**: CI must run the intake contract validator test with the
+  existing script harness tests.
+- [x] **INTAKESAFE-01**: Validating empty templates or form structure must not
+  be treated as a completed first-user feedback packet or clear any external
+  evidence gate.
+
+### Phase 24 Planning Closure
+
+- [x] **PLAN-24-01**: Phase 24 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-24-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the intake contract validation while
+  keeping real first-user packet collection pending.
+- [x] **PLAN-24-03**: Phase 24 verification proves red/green validator test
+  coverage, CI script harness wiring, safety wording checks, and unchanged
+  external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -165,11 +193,19 @@
 | PLAN-23-01 | Phase 23 | Complete |
 | PLAN-23-02 | Phase 23 | Complete |
 | PLAN-23-03 | Phase 23 | Complete |
+| INTAKE-01 | Phase 24 | Complete |
+| INTAKE-02 | Phase 24 | Complete |
+| INTAKE-03 | Phase 24 | Complete |
+| INTAKE-04 | Phase 24 | Complete |
+| INTAKESAFE-01 | Phase 24 | Complete |
+| PLAN-24-01 | Phase 24 | Complete |
+| PLAN-24-02 | Phase 24 | Complete |
+| PLAN-24-03 | Phase 24 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 28 total
-- Mapped to phases: 28
+- v1.5 requirements: 36 total
+- Mapped to phases: 36
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 23 Source Env Override Preservation.*
+*Requirements updated: 2026-05-29 after Phase 24 Trial Feedback Intake Contract.*
