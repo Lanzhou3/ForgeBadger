@@ -116,6 +116,12 @@ Plans:
 
 **Requirements:** OSS-01, OSS-02, OSS-03
 
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 16-01-PLAN.md — Open-source readiness packet, safe feedback routing, and caveat-preserving closeout.
+
 **Success criteria:**
 
 1. License selection and rationale are documented.
@@ -191,7 +197,7 @@ Full archive:
 | 13. Project Manager Board Workflow | v1.3 | 3/3 | Complete | 2026-05-29 |
 | 14. Terminal Workspace Context | v1.3 | 3/3 | Complete | 2026-05-29 |
 | 15. Model Provider Setup And Health | v1.3 | 3/3 | Complete | 2026-05-29 |
-| 16. Open Source Readiness Packet | v1.3 | 0/0 | Planned | — |
+| 16. Open Source Readiness Packet | v1.3 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

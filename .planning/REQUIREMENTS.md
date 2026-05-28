@@ -50,9 +50,9 @@
 
 ### Open Source Readiness
 
-- [ ] **OSS-01**: Repository declares an open-source license and records the license rationale.
-- [ ] **OSS-02**: README, CONTRIBUTING, SECURITY, and issue templates explain local-first scope, prerequisites, support boundaries, and safe feedback handling.
-- [ ] **OSS-03**: Release/readiness docs avoid overclaiming external caveats and keep live-provider, Windows/WSL, Feishu callback, and first-user feedback rerun paths visible.
+- [x] **OSS-01**: Repository declares an open-source license and records the license rationale.
+- [x] **OSS-02**: README, CONTRIBUTING, SECURITY, and issue templates explain local-first scope, prerequisites, support boundaries, and safe feedback handling.
+- [x] **OSS-03**: Release/readiness docs avoid overclaiming external caveats and keep live-provider, Windows/WSL, Feishu callback, and first-user feedback rerun paths visible.
 
 ## Out of Scope
 
@@ -89,9 +89,9 @@
 | MODEL-02 | Phase 15 | Complete |
 | MODEL-03 | Phase 15 | Complete |
 | MODEL-04 | Phase 15 | Complete |
-| OSS-01 | Phase 16 | Planned |
-| OSS-02 | Phase 16 | Planned |
-| OSS-03 | Phase 16 | Planned |
+| OSS-01 | Phase 16 | Complete |
+| OSS-02 | Phase 16 | Complete |
+| OSS-03 | Phase 16 | Complete |
 
 **Coverage:**
 - v1.3 requirements: 22 total

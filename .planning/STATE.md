@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: AI-Native Project Execution Traceability
-status: ready_to_plan
-stopped_at: Phase 15 complete — ready to plan Phase 16 Open Source Readiness Packet
-last_updated: 2026-05-29T03:17:17+08:00
+status: complete
+stopped_at: v1.3 milestone complete — Phases 12-16 closed with external caveats preserved
+last_updated: 2026-05-29T03:25:30+08:00
 last_activity: 2026-05-29
 progress:
   total_phases: 5
-  completed_phases: 4
-  total_plans: 13
-  completed_plans: 13
-  percent: 80
+  completed_phases: 5
+  total_plans: 14
+  completed_plans: 14
+  percent: 100
 ---
 
 # Project State
@@ -21,20 +21,20 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-22)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while turning AI-assisted work into auditable project state.
-**Current focus:** Phase 16 — open source readiness packet
+**Current focus:** v1.3 milestone complete; next milestone planning pending
 
 ## Current Position
 
-Phase: 16
-Plan: TBD
-Status: Ready to plan
+Phase: Complete
+Plan: N/A
+Status: Complete
 Last activity: 2026-05-29
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 34
+- Total plans completed: 35
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -92,6 +92,8 @@ Last activity: 2026-05-29
 | Phase 15 P02 | completed | 3 tasks | 8 files |
 | Phase 15 P03 | completed | 3 tasks | 10 files |
 | 15 | 3/3 | - | - |
+| Phase 16 P01 | completed | 3 tasks | 11 files |
+| 16 | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -140,12 +142,13 @@ Recent decisions affecting current work:
 - [Phase 15]: Gateway model-provider readiness is a structured, tenant-scoped contract with provider/model/credential/adapter/remote-model checks, actionable codes, and Codex subscription-managed isolation. — Plan 15-01 implementation.
 - [Phase 15]: Web /models exposes provider readiness checks and Codex subscription identity as separate visible surfaces; provider readiness sends selected adapter/model/credential to Gateway and never renders plaintext credentials or raw provider payloads. — Plan 15-02 implementation.
 - [Phase 15]: MODEL-01 through MODEL-04 are complete with Gateway/browser/API coverage, trial/support recovery docs, and a closeout report; live external provider pass remains a caveat until a disposable credential run is attached. — Plan 15-03 closeout.
+- [Phase 16]: Open-source readiness is complete with MIT rationale, root contribution/security entry points, safe GitHub issue routing, and caveat-preserving closeout. — Plan 16-01 closeout.
 
 ### Pending Todos
 
-Phase 16 next steps:
+Milestone next steps:
 
-- Plan Phase 16 Open Source Readiness Packet for OSS-01 through OSS-03.
+- Start a new milestone only after selecting the next product direction or evidence target.
 
 ### Blockers/Concerns
 
@@ -160,6 +163,7 @@ Phase 16 next steps:
 - v1.3 is ready to begin. Before this v1.3 planning update, tracked code was clean; the current tracked changes are the v1.3 planning documents, and unrelated untracked `upload_img/` remains outside milestone scope.
 - Phase 14 Terminal Workspace Context is complete. Workspace file context and Project Manager evidence refs remain bounded pointers; raw file/terminal content is intentionally not persisted as evidence.
 - Phase 15 Model Provider Setup And Health is complete. Provider readiness recovery is product-contract and mocked-browser verified; real live-provider pass still requires a disposable credential run.
+- Phase 16 Open Source Readiness Packet is complete. The open-source packet preserves external caveats instead of reclassifying them.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -173,10 +177,10 @@ Phase 16 next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T03:17:17+08:00
-Stopped at: Completed Phase 15 / 15-03-PLAN.md
+Last session: 2026-05-29T03:25:30+08:00
+Stopped at: Completed v1.3 milestone / Phase 16 16-01-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Start Phase 16 planning for the open-source readiness packet.
+- Choose the next milestone or attach external evidence to clear preserved caveats.

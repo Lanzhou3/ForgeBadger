@@ -10,6 +10,7 @@ body:
       value: |
         Use this form for local first-user trial feedback. Review all attachments before sharing.
         Do not paste API keys, passwords, JWTs, attach tokens, private keys, unrelated project secrets, or the `openforge.token` value.
+        If this is a general bug, use the OpenForge bug report template. If it may expose a vulnerability or secret, follow `SECURITY.md` instead of opening a public issue.
 
   - type: dropdown
     id: result
