@@ -191,6 +191,9 @@ Forbidden Project Manager evidence content:
 - [ ] Optional: generate a local draft with
       `pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md`
       and complete/redact it before sharing.
+- [ ] If using a Markdown packet, run
+      `pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md`; treat a
+      pass as ready for human triage only, not automatic gate clearance.
 - [ ] Check `docs/EXTERNAL-EVIDENCE-GATES.md` gate
       `FIRST-USER-FEEDBACK` before claiming completed first-user evidence.
 - [ ] Map each issue to the closest Phase 3 hardening requirement in the

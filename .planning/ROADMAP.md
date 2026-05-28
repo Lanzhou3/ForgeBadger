@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 26 feedback draft generator complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 27 feedback packet audit complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -190,6 +190,35 @@ Plans:
    upload files, or collect raw terminal/provider/Feishu evidence.
 5. Trial docs link the helper while preserving `FIRST-USER-FEEDBACK` as
    `Caveat` until a completed redacted packet is linked.
+
+### Phase 27: Trial Feedback Packet Audit
+
+**Goal:** Add a local audit command that rejects generated drafts, placeholder
+packets, missing required fields, and obvious secret-like content before a
+Markdown feedback packet enters maintainer triage.
+
+**Requirements:** PACKETAUDIT-01, PACKETAUDIT-02, PACKETAUDIT-03,
+PACKETSAFE-01, PLAN-27-01, PLAN-27-02, PLAN-27-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 27-01-PLAN.md — packet audit helper, script harness coverage, trial docs
+  links, and gate-preserving verification.
+
+**Success criteria:**
+
+1. A local command audits completed Markdown feedback packets for required
+   sections, field values, reproduction steps, behavior descriptions,
+   diagnostics status, triage routing, browser evidence, and bounded support
+   summaries.
+2. Generated drafts and placeholder-only packets are rejected.
+3. Obvious secret-like token/key content is rejected before maintainer triage.
+4. Passing audit means ready for maintainer triage only and never clears
+   `FIRST-USER-FEEDBACK` or any other external evidence gate automatically.
+5. Trial docs and CI link the audit helper without uploading packets, reading
+   browser storage, exporting diagnostics, or mutating gate state.
 
 ## Archived Milestones
 

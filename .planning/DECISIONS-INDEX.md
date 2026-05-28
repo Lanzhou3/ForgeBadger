@@ -20,6 +20,8 @@ This bounded index summarizes decisions that downstream GSD workflows should car
   perspective; local API token fallback is maintainer-only.
 - Feedback draft generation may pre-fill bounded environment metadata, but it
   must not collect raw evidence or clear external gates.
+- Feedback packet audit may reject incomplete or unsafe Markdown packets before
+  triage, but passing audit must not clear external gates automatically.
 
 ## Locked Decisions
 
@@ -45,6 +47,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.5 intake contract | First-user feedback issue form and Markdown template required fields, routing, and safety wording are checked by a bounded validator in CI; this does not clear `FIRST-USER-FEEDBACK`. | `docs/reports/phase-24-trial-feedback-intake-contract-2026-05-29.md` |
 | v1.5 tokenless diagnostics | First-user runbook diagnostics use Web Settings export; browser-token/devtools curl fallback is rejected by the validator and remains maintainer-only if local API fallback is needed. | `docs/reports/phase-25-tokenless-trial-diagnostics-2026-05-29.md` |
 | v1.5 feedback draft helper | `pnpm trial:feedback-draft` may generate a local Markdown draft with bounded metadata, but the draft is not submitted, not reviewed, and not gate-clearing evidence. | `docs/reports/phase-26-trial-feedback-draft-generator-2026-05-29.md` |
+| v1.5 feedback packet audit | `pnpm trial:feedback-audit` rejects generated drafts, placeholders, missing fields, and secret-like content before maintainer triage; `gateClearingEvidence` remains false. | `docs/reports/phase-27-trial-feedback-packet-audit-2026-05-29.md` |
 
 ## Deferred Ideas
 

@@ -18,6 +18,15 @@ The draft pre-fills bounded environment metadata only. It is not submitted,
 not reviewed, and not gate-clearing evidence until a user completes it, reviews
 redaction, and links or attaches it through the feedback path.
 
+Before a completed Markdown packet is used for maintainer triage, run:
+
+```bash
+pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
+```
+
+Passing audit means ready for human triage only. It does not automatically
+clear `FIRST-USER-FEEDBACK`.
+
 The primary path is the npm/CLI startup. Source startup is a fallback for local
 debugging and contribution.
 
@@ -267,6 +276,12 @@ pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md
 Review and complete the draft before sharing. It intentionally leaves
 diagnostics, reproduction steps, expected behavior, actual behavior, severity,
 owner, disposition, and redaction review as human-filled fields.
+
+After completing and redacting a Markdown packet, run:
+
+```bash
+pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
+```
 
 Do not upload secrets, API keys, plaintext credentials, local private keys, or
 private project source unless you intentionally choose to share them.

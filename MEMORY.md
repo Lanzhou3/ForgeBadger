@@ -55,6 +55,13 @@
   bounded metadata, redacts token-shaped values, and explicitly states it is
   not submitted, not reviewed, and not gate-clearing evidence. This does not
   clear `FIRST-USER-FEEDBACK`.
+- Phase 27 added `scripts/audit-trial-feedback-packet.mjs`,
+  `scripts/audit-trial-feedback-packet.test.mjs`, and
+  `pnpm trial:feedback-audit`. The audit rejects generated drafts,
+  placeholder-only packets, missing required fields, and obvious secret-like
+  content before maintainer triage. Passing audit means ready for maintainer
+  triage only; `gateClearingEvidence` remains false and this does not clear
+  `FIRST-USER-FEEDBACK`.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -163,11 +170,11 @@
 
 ## Next Work
 
-1. Use the validated v1.5 tokenless runbook, trial packet intake, and optional
-   feedback draft helper for the next real first-user run: affected surface,
-   severity, owner, disposition or next action, environment summary,
-   reproduction detail, diagnostics status, follow-up route or no-action
-   rationale, and redaction review.
+1. Use the validated v1.5 tokenless runbook, trial packet intake, optional
+   feedback draft helper, and packet audit helper for the next real first-user
+   run: affected surface, severity, owner, disposition or next action,
+   environment summary, reproduction detail, diagnostics status, follow-up
+   route or no-action rationale, and redaction review.
 2. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,
    operator webhook setup environment, and Feishu developer-console URL
    verification are available. Phase 19 proved bot CLI preflight and local

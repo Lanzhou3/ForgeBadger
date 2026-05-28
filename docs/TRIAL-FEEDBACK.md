@@ -14,6 +14,15 @@ pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md
 The generated file is only a draft. It does not clear
 `FIRST-USER-FEEDBACK` until it is completed, redacted, and attached or linked.
 
+Before using a completed Markdown packet for maintainer triage, run:
+
+```bash
+pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
+```
+
+Passing audit means ready for human triage only. It does not automatically
+clear `FIRST-USER-FEEDBACK`.
+
 ## Summary
 
 - Result: pass / pass with caveats / blocked
@@ -36,23 +45,23 @@ Result rubric:
 
 ## Dependency Versions
 
-```bash
-node --version
-tmux -V
-claude --version
-openforge doctor
-```
+- node --version:
+- tmux -V:
+- claude --version:
+- openforge doctor summary:
 
 Optional:
 
-```bash
-opencode --version
-codex --version
-```
+- opencode --version, if checked:
+- codex --version, if checked:
 
 ## Diagnostics Export
 
 Diagnostics are generated locally and are not uploaded automatically.
+
+- Diagnostics export attached: yes / no
+- Export path used: Settings -> Export diagnostics JSON / unavailable
+- Redaction review completed: yes / no
 
 First-user path:
 
@@ -94,7 +103,6 @@ Maintainer-only fallback:
 - Follow-up route: issue #3 LIVE-PROVIDER / issue #4 WINDOWS-WSL / issue #5 FIRST-USER-FEEDBACK / Feishu callback evidence report / new issue / next phase / no action
 - Next action or no-action rationale:
 - Caveat status: none / pass with caveats / blocked
-- Redaction review completed: yes / no
 
 Requirement mapping guide:
 

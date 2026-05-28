@@ -195,6 +195,34 @@
   script harness coverage, CLI smoke output, docs references, and unchanged
   external gate states.
 
+### Trial Feedback Packet Audit
+
+- [x] **PACKETAUDIT-01**: A local command must audit completed Markdown
+  feedback packets for required sections, field values, completed reproduction
+  steps, expected and actual behavior, diagnostics status, triage routing,
+  browser evidence summaries, and bounded support summaries.
+- [x] **PACKETAUDIT-02**: The audit must reject generated drafts,
+  placeholder-only packets, missing required fields, and incomplete expected or
+  actual behavior sections before maintainer triage.
+- [x] **PACKETAUDIT-03**: The audit must reject obvious secret-like content,
+  including bearer tokens, `sk-*` keys, `openforge.token`, OpenForge secret
+  environment assignments, and generic key/token/password/private-key
+  assignments.
+- [x] **PACKETSAFE-01**: A passing audit means ready for maintainer triage only;
+  it must not automatically clear `FIRST-USER-FEEDBACK` or any other external
+  evidence gate.
+
+### Phase 27 Planning Closure
+
+- [x] **PLAN-27-01**: Phase 27 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-27-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the feedback packet audit while keeping
+  real first-user packet collection pending.
+- [x] **PLAN-27-03**: Phase 27 verification proves audit tests, CI script
+  harness coverage, CLI rejection of generated drafts, docs references, and
+  unchanged external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -260,11 +288,18 @@
 | PLAN-26-01 | Phase 26 | Complete |
 | PLAN-26-02 | Phase 26 | Complete |
 | PLAN-26-03 | Phase 26 | Complete |
+| PACKETAUDIT-01 | Phase 27 | Complete |
+| PACKETAUDIT-02 | Phase 27 | Complete |
+| PACKETAUDIT-03 | Phase 27 | Complete |
+| PACKETSAFE-01 | Phase 27 | Complete |
+| PLAN-27-01 | Phase 27 | Complete |
+| PLAN-27-02 | Phase 27 | Complete |
+| PLAN-27-03 | Phase 27 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 49 total
-- Mapped to phases: 49
+- v1.5 requirements: 56 total
+- Mapped to phases: 56
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 26 Trial Feedback Draft Generator.*
+*Requirements updated: 2026-05-29 after Phase 27 Trial Feedback Packet Audit.*

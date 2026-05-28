@@ -2,7 +2,7 @@
 
 ## v1.5 First-User Trial Operations (Active: 2026-05-29)
 
-**Phases planned:** 6 phases, 6 plans
+**Phases planned:** 7 phases, 7 plans
 
 **Goal:**
 
@@ -17,6 +17,7 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - [x] Phase 24: Trial Feedback Intake Contract — 1/1 plans complete.
 - [x] Phase 25: Tokenless Trial Diagnostics — 1/1 plans complete.
 - [x] Phase 26: Trial Feedback Draft Generator — 1/1 plans complete.
+- [x] Phase 27: Trial Feedback Packet Audit — 1/1 plans complete.
 
 **Acceptance boundary:**
 
@@ -33,6 +34,9 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
   it is not a substitute for a completed first-user packet.
 - A generated feedback draft reduces collection friction, but it is not a
   substitute for a completed, redacted, linked first-user packet.
+- A passing feedback packet audit means ready for maintainer triage only; it is
+  not a substitute for maintainer gate-clearance judgment or linked external
+  evidence.
 
 ---
 
