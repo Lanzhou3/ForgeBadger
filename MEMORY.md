@@ -84,6 +84,12 @@
   `pnpm trial:readiness-validate`. The live preflight aggregates trial intake,
   issue-route, and external gate registry validators before a real collection
   round, while returning `gateClearingEvidence: false`.
+- Phase 32 added `scripts/audit-trial-feedback-issue.mjs`,
+  `scripts/audit-trial-feedback-issue.test.mjs`, and
+  `pnpm trial:feedback-issue-audit -- --issue=<number>`. It reads GitHub
+  issue-form feedback through `gh issue view`, maps the body into the existing
+  packet audit, rejects issue #5 as incomplete tracker feedback, and returns
+  `gateClearingEvidence: false`.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -194,7 +200,8 @@
 
 1. Use the validated v1.5 tokenless runbook, checklist, trial packet intake,
    optional feedback draft helper, readiness preflight, packet audit helper,
-   intake material validator, and external gate validator for the next real
+   GitHub issue feedback audit helper, intake material validator, and external
+   gate validator for the next real
    first-user run:
    affected surface, severity, owner,
    disposition or next action, environment summary, reproduction detail,

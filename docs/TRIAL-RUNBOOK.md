@@ -27,6 +27,17 @@ pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
 Passing audit means ready for human triage only. It does not automatically
 clear `FIRST-USER-FEEDBACK`.
 
+If feedback was filed through the GitHub issue form, a maintainer can audit
+the issue body directly:
+
+```bash
+pnpm trial:feedback-issue-audit -- --issue=<number>
+```
+
+This command reads the issue through GitHub CLI, converts the issue-form body
+to the same packet shape, and applies the packet audit. It is read-only and
+does not comment on the issue, attach artifacts, or clear any external gate.
+
 Before editing the trial runbook, checklist, feedback template, or GitHub issue
 form, run:
 
@@ -315,6 +326,12 @@ After completing and redacting a Markdown packet, run:
 
 ```bash
 pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
+```
+
+After filing feedback through the GitHub issue form, a maintainer can run:
+
+```bash
+pnpm trial:feedback-issue-audit -- --issue=<number>
 ```
 
 After editing trial intake materials, run:

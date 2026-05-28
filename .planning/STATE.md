@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: First-User Trial Operations
 status: phase_complete
-stopped_at: Phase 31 trial readiness preflight bundle complete; real first-user packet collection pending
-last_updated: 2026-05-29T07:45:00+08:00
+stopped_at: Phase 32 trial feedback issue audit complete; real first-user packet collection pending
+last_updated: 2026-05-29T08:15:00+08:00
 last_activity: 2026-05-29
 progress:
-  total_phases: 11
-  completed_phases: 11
-  total_plans: 11
-  completed_plans: 11
+  total_phases: 12
+  completed_phases: 12
+  total_plans: 12
+  completed_plans: 12
   percent: 100
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** Phase 31 added a read-only trial readiness preflight bundle that runs intake, issue-route, and gate-registry checks together. The next concrete step is collecting a real first-user trial packet through the validated runbook, checklist, template, issue form, draft helper, readiness preflight, audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
+**Current focus:** Phase 32 added a read-only GitHub issue-form feedback audit path. The next concrete step is collecting a real first-user trial packet through the validated runbook, checklist, template, issue form, draft helper, readiness preflight, packet or issue audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
 
 ## Current Position
 
-Phase: 31. Trial Readiness Preflight Bundle
-Plan: 31-01 complete
+Phase: 32. Trial Feedback Issue Audit
+Plan: 32-01 complete
 Status: Phase Complete
 Last activity: 2026-05-29
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-29
 
 **Velocity:**
 
-- Total plans completed: 43
+- Total plans completed: 57
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -73,6 +73,7 @@ Last activity: 2026-05-29
 | 29. Trial Materials Consistency Guard | 1/1 | - | - |
 | 30. Trial Issue Route Preflight | 1/1 | - | - |
 | 31. Trial Readiness Preflight Bundle | 1/1 | - | - |
+| 32. Trial Feedback Issue Audit | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -107,6 +108,7 @@ Recent decisions affecting current work:
 - [Phase 29]: `pnpm trial:intake-validate` verifies the trial runbook, checklist, feedback template, and GitHub issue form remain aligned on audit commands, gate-routing commands, redaction review, and browser-token safety boundaries. External gates remain unchanged.
 - [Phase 30]: `pnpm trial:issue-routes-validate` verifies GitHub issue #3, #4, and #5 are readable, open, and mapped to their expected route titles/labels. The live preflight passed and returned `gateClearingEvidence: false`. External gates remain unchanged.
 - [Phase 31]: `pnpm trial:readiness-validate` aggregates trial intake, issue-route, and external gate registry validators. The live preflight passed and returned `gateClearingEvidence: false`. External gates remain unchanged.
+- [Phase 32]: `pnpm trial:feedback-issue-audit -- --issue=<number>` audits GitHub issue-form feedback through the same packet audit path. Issue #5 was correctly rejected as a tracker rather than completed feedback. External gates remain unchanged.
 
 ### Pending Todos
 
@@ -117,6 +119,7 @@ Next steps:
 - Run `pnpm trial:issue-routes-validate` before routing a real collection round to the existing GitHub follow-up issues.
 - Run `pnpm trial:readiness-validate` before starting a real first-user collection round.
 - Run `pnpm trial:feedback-audit -- <packet.md>` before maintainer triage of any completed Markdown packet.
+- Run `pnpm trial:feedback-issue-audit -- --issue=<number>` before maintainer triage of any completed GitHub issue-form packet.
 - Run `pnpm evidence:gates-validate` before changing any external gate registry state.
 - Use the v1.5 trial-operations loop for the next real first-user trial packet.
 - Prepare Feishu developer-console callback evidence only when public HTTPS Gateway routing is available.
@@ -144,10 +147,10 @@ Next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T07:45:00+08:00
-Stopped at: Phase 31 trial readiness preflight bundle complete; real first-user packet collection pending
+Last session: 2026-05-29T08:15:00+08:00
+Stopped at: Phase 32 trial feedback issue audit complete; real first-user packet collection pending
 Resume file: None
 
 ## Operator Next Steps
 
-- Collect a real first-user trial packet through the validated tokenless runbook, checklist, intake contract, draft helper, readiness preflight, packet audit helper, and external gate validator, then triage it through the v1.5 operating loop and the external evidence gate registry.
+- Collect a real first-user trial packet through the validated tokenless runbook, checklist, intake contract, draft helper, readiness preflight, packet or issue audit helper, and external gate validator, then triage it through the v1.5 operating loop and the external evidence gate registry.

@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 31 trial readiness preflight bundle complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 32 trial feedback issue audit complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -326,6 +326,31 @@ Plans:
    live GitHub network/auth state.
 5. Trial docs describe the preflight as read-only and non-gate-clearing.
 
+### Phase 32: Trial Feedback Issue Audit
+
+**Goal:** Add a maintainer audit command that reads GitHub issue-form trial
+feedback and applies the existing packet audit before human triage.
+
+**Requirements:** ISSUEAUDIT-01, ISSUEAUDIT-02, ISSUEAUDIT-03,
+ISSUEAUDITSAFE-01, PLAN-32-01, PLAN-32-02, PLAN-32-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 32-01-PLAN.md — issue body adapter, read-only GitHub audit command,
+  mocked CI harness test, docs sync, and gate-preserving verification.
+
+**Success criteria:**
+
+1. A root command audits a GitHub issue-form feedback issue by number.
+2. The command requires the `trial-feedback` label and converts issue-form
+   fields into the existing packet audit shape.
+3. Secret-like content in the raw issue body is rejected.
+4. CI covers the issue audit through mocked issue data, not live GitHub
+   mutation or network-dependent release claims.
+5. Trial docs describe the audit as read-only and non-gate-clearing.
+
 ## Archived Milestones
 
 <details>
@@ -447,6 +472,7 @@ Full archive:
 | 29. Trial Materials Consistency Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 30. Trial Issue Route Preflight | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 31. Trial Readiness Preflight Bundle | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 32. Trial Feedback Issue Audit | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

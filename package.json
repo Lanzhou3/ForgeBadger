@@ -20,6 +20,7 @@
     "trial:issue-routes-validate": "node scripts/validate-trial-issue-routes.mjs",
     "trial:readiness-validate": "node scripts/validate-trial-readiness.mjs",
     "trial:feedback-audit": "node scripts/audit-trial-feedback-packet.mjs",
+    "trial:feedback-issue-audit": "node scripts/audit-trial-feedback-issue.mjs",
     "trial:feedback-draft": "node scripts/create-trial-feedback-draft.mjs",
     "typecheck": "pnpm -r typecheck",
     "verify:npm": "node scripts/verify-npm-package.mjs"

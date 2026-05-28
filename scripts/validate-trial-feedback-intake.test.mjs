@@ -145,6 +145,7 @@ describe("validateTrialFeedbackIntake", () => {
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:issue-routes-validate/);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:readiness-validate/);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:feedback-audit/);
+    assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:feedback-issue-audit/);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm evidence:gates-validate/);
     assert.match(result.errors.join("\n"), /trial checklist.*browser developer tools/);
     assert.match(result.errors.join("\n"), /trial checklist.*openforge\.token/);

@@ -23,6 +23,16 @@ pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
 Passing audit means ready for human triage only. It does not automatically
 clear `FIRST-USER-FEEDBACK`.
 
+If this feedback was filed as a GitHub issue, maintainers can audit the issue
+body directly:
+
+```bash
+pnpm trial:feedback-issue-audit -- --issue=<number>
+```
+
+Passing issue audit means ready for human triage only. It does not comment on
+the issue or clear any external gate.
+
 Before changing the trial runbook, checklist, template, or issue form, run:
 
 ```bash

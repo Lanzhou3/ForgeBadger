@@ -24,6 +24,7 @@ describe("validateTrialReadiness", () => {
     );
     assert.deepEqual(result.errors, []);
     assert.match(result.nextSteps.join("\n"), /Run the first-user trial/);
+    assert.match(result.nextSteps.join("\n"), /trial:feedback-issue-audit/);
   });
 
   it("fails when any readiness check fails and prefixes the source check", async () => {

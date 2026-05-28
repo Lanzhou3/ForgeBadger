@@ -109,6 +109,7 @@ export const REQUIRED_CHECKLIST_PHRASES = [
   "`pnpm trial:issue-routes-validate`",
   "`pnpm trial:readiness-validate`",
   "`pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md`",
+  "`pnpm trial:feedback-issue-audit -- --issue=<number>`",
   "`pnpm evidence:gates-validate`",
   "`FIRST-USER-FEEDBACK`",
   "Templates and empty issue forms do not count as completed feedback.",

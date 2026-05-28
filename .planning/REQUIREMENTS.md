@@ -328,6 +328,30 @@
   live readiness preflight, script harness coverage, docs references, and
   unchanged external gate states.
 
+### Trial Feedback Issue Audit
+
+- [x] **ISSUEAUDIT-01**: A maintainer-run command must audit a GitHub
+  issue-form feedback issue by issue number.
+- [x] **ISSUEAUDIT-02**: The issue audit must require the `trial-feedback`
+  label and convert issue-form sections into the existing Markdown packet audit
+  shape.
+- [x] **ISSUEAUDIT-03**: The issue audit must reject incomplete issue bodies
+  and secret-like raw issue body content before maintainer triage.
+- [x] **ISSUEAUDITSAFE-01**: Issue audit must be read-only and must not comment
+  on issues, mutate labels, attach artifacts, close issues, or clear any
+  external evidence gate.
+
+### Phase 32 Planning Closure
+
+- [x] **PLAN-32-01**: Phase 32 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-32-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the trial feedback issue audit while
+  keeping real first-user packet collection pending.
+- [x] **PLAN-32-03**: Phase 32 verification proves red/green issue audit tests,
+  mocked script harness coverage, expected live rejection of the tracker issue,
+  docs references, and unchanged external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -428,11 +452,18 @@
 | PLAN-31-01 | Phase 31 | Complete |
 | PLAN-31-02 | Phase 31 | Complete |
 | PLAN-31-03 | Phase 31 | Complete |
+| ISSUEAUDIT-01 | Phase 32 | Complete |
+| ISSUEAUDIT-02 | Phase 32 | Complete |
+| ISSUEAUDIT-03 | Phase 32 | Complete |
+| ISSUEAUDITSAFE-01 | Phase 32 | Complete |
+| PLAN-32-01 | Phase 32 | Complete |
+| PLAN-32-02 | Phase 32 | Complete |
+| PLAN-32-03 | Phase 32 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 84 total
-- Mapped to phases: 84
+- v1.5 requirements: 91 total
+- Mapped to phases: 91
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 31 Trial Readiness Preflight Bundle.*
+*Requirements updated: 2026-05-29 after Phase 32 Trial Feedback Issue Audit.*
