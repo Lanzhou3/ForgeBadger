@@ -36,10 +36,10 @@
 
 ### Terminal Workspace Context
 
-- [ ] **CTX-01**: Session and project views expose a safe file tree sidecar rooted at the project path.
-- [ ] **CTX-02**: File tree reads use existing safe path resolution rules and reject traversal, symlink escape, and sensitive system paths.
-- [ ] **CTX-03**: User can attach file path, terminal snapshot marker, or session id as bounded evidence references to a work item.
-- [ ] **CTX-04**: Terminal, file context, and project-manager evidence remain references only; raw terminal scrollback is not stored in SQLite.
+- [x] **CTX-01**: Session and project views expose a safe file tree sidecar rooted at the project path.
+- [x] **CTX-02**: File tree reads use existing safe path resolution rules and reject traversal, symlink escape, and sensitive system paths.
+- [x] **CTX-03**: User can attach file path, terminal snapshot marker, or session id as bounded evidence references to a work item.
+- [x] **CTX-04**: Terminal, file context, and project-manager evidence remain references only; raw terminal scrollback is not stored in SQLite.
 
 ### Model Provider Setup And Health
 
@@ -81,10 +81,10 @@
 | BOARD-02 | Phase 13 | Complete |
 | BOARD-03 | Phase 13 | Complete |
 | BOARD-04 | Phase 13 | Complete |
-| CTX-01 | Phase 14 | Planned |
-| CTX-02 | Phase 14 | Planned |
-| CTX-03 | Phase 14 | Planned |
-| CTX-04 | Phase 14 | Planned |
+| CTX-01 | Phase 14 | Complete |
+| CTX-02 | Phase 14 | Complete |
+| CTX-03 | Phase 14 | Complete |
+| CTX-04 | Phase 14 | Complete |
 | MODEL-01 | Phase 15 | Planned |
 | MODEL-02 | Phase 15 | Planned |
 | MODEL-03 | Phase 15 | Planned |

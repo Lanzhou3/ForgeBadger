@@ -97,6 +97,7 @@ interface GoalDraft {
 
 type WorkItemStatusFilter = ProjectManagerWorkItemStatus | "all";
 type WorkItemViewMode = "board" | "table";
+type EvidenceReferenceType = "custom" | "file_path" | "terminal_snapshot" | "session";
 
 interface WorkItemDraft {
   title: string;
@@ -115,10 +116,12 @@ interface WorkItemDraft {
 }
 
 interface EvidenceDraft {
+  referenceType: EvidenceReferenceType;
   kind: string;
   label: string;
   ref: string;
   path: string;
+  sessionId: string;
 }
 
 interface EditWorkItemDraft {
@@ -147,6 +150,13 @@ const LEDGER_FILTER_OPTIONS: Array<{ labelKey: TranslationKey; value: LedgerFilt
   { value: "evidence", labelKey: "projects.projectManagerLedgerFilterEvidence" },
   { value: "manual_completion", labelKey: "projects.projectManagerLedgerFilterManualCompletion" },
   { value: "blockers", labelKey: "projects.projectManagerLedgerFilterBlockers" },
+];
+
+const EVIDENCE_REFERENCE_TYPE_OPTIONS: Array<{ labelKey: TranslationKey; value: EvidenceReferenceType }> = [
+  { value: "custom", labelKey: "projects.projectManagerEvidenceTypeCustom" },
+  { value: "file_path", labelKey: "projects.projectManagerEvidenceTypeFilePath" },
+  { value: "terminal_snapshot", labelKey: "projects.projectManagerEvidenceTypeTerminalSnapshot" },
+  { value: "session", labelKey: "projects.projectManagerEvidenceTypeSession" },
 ];
 
 const LEDGER_FILTER_EVENTS: Record<Exclude<LedgerFilter, "all">, ProjectManagerLedgerEventType[]> = {
@@ -536,7 +546,21 @@ export function ProjectManagerPanel({
       setEvidenceAttachError(t("projects.projectManagerEvidenceKindRequired"));
       return;
     }
-    if (evidenceDraft.ref.trim().length === 0 && evidenceDraft.path.trim().length === 0) {
+    if (evidenceDraft.referenceType === "file_path" && evidenceDraft.path.trim().length === 0) {
+      setEvidenceAttachError(t("projects.projectManagerEvidencePathRequired"));
+      return;
+    }
+    if (
+      (evidenceDraft.referenceType === "terminal_snapshot" || evidenceDraft.referenceType === "session") &&
+      evidenceDraft.sessionId.trim().length === 0
+    ) {
+      setEvidenceAttachError(t("projects.projectManagerEvidenceSessionRequired"));
+      return;
+    }
+    const hasGeneratedMarker =
+      evidenceDraft.sessionId.trim().length > 0 &&
+      (evidenceDraft.referenceType === "terminal_snapshot" || evidenceDraft.referenceType === "session");
+    if (evidenceDraft.ref.trim().length === 0 && evidenceDraft.path.trim().length === 0 && !hasGeneratedMarker) {
       setEvidenceAttachError(t("projects.projectManagerEvidenceReferenceRequired"));
       return;
     }
@@ -1467,6 +1491,28 @@ function ProjectManagerWorkItemDetailSheet({
                 {t("projects.projectManagerEvidenceReferenceHint")}
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="project-manager-evidence-type">{t("projects.projectManagerEvidenceReferenceType")}</Label>
+                  <select
+                    id="project-manager-evidence-type"
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
+                    value={evidenceDraft.referenceType}
+                    disabled={isEvidenceSaving}
+                    onChange={(event) =>
+                      onEvidenceDraftChange(applyEvidenceReferenceType(
+                        evidenceDraft,
+                        readEvidenceReferenceType(event.target.value),
+                        t
+                      ))
+                    }
+                  >
+                    {EVIDENCE_REFERENCE_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {t(option.labelKey)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="project-manager-evidence-kind">{t("projects.projectManagerRefKind")}</Label>
                   <Input
@@ -1506,7 +1552,26 @@ function ProjectManagerWorkItemDetailSheet({
                     onChange={(event) => onEvidenceDraftChange({ ...evidenceDraft, path: event.target.value })}
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="project-manager-evidence-session-id">{t("projects.projectManagerEvidenceSessionId")}</Label>
+                  <Input
+                    id="project-manager-evidence-session-id"
+                    value={evidenceDraft.sessionId}
+                    aria-invalid={
+                      !!evidenceError &&
+                      (evidenceDraft.referenceType === "terminal_snapshot" || evidenceDraft.referenceType === "session") &&
+                      evidenceDraft.sessionId.trim().length === 0
+                    }
+                    disabled={isEvidenceSaving}
+                    onChange={(event) => onEvidenceDraftChange({ ...evidenceDraft, sessionId: event.target.value })}
+                  />
+                </div>
               </div>
+              {evidenceDraft.referenceType === "terminal_snapshot" && (
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {t("projects.projectManagerTerminalSnapshotMarkerHint")}
+                </p>
+              )}
               {evidenceError && (
                 <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                   {evidenceError}
@@ -2215,10 +2280,12 @@ function createWorkItemDraft(): WorkItemDraft {
 
 function createEvidenceDraft(): EvidenceDraft {
   return {
+    referenceType: "custom",
     kind: "",
     label: "",
     ref: "",
     path: "",
+    sessionId: "",
   };
 }
 
@@ -2280,10 +2347,11 @@ function batchStatusTargets(items: ProjectManagerWorkItem[]): ProjectManagerWork
 function createSingleEvidenceReference(draft: EvidenceDraft): ProjectManagerEvidenceRef | undefined {
   const kind = draft.kind.trim();
   const label = draft.label.trim();
-  const ref = draft.ref.trim();
+  const sessionId = draft.sessionId.trim();
+  const ref = draft.ref.trim() || generatedEvidenceRef(draft.referenceType, sessionId);
   const path = draft.path.trim();
 
-  if (!kind || (!ref && !path)) {
+  if (!kind || (!ref && !path && !sessionId)) {
     return undefined;
   }
 
@@ -2292,6 +2360,7 @@ function createSingleEvidenceReference(draft: EvidenceDraft): ProjectManagerEvid
     ...(label ? { label } : {}),
     ...(ref ? { ref } : {}),
     ...(path ? { path } : {}),
+    ...(sessionId ? { sessionId } : {}),
   };
 }
 
@@ -2302,11 +2371,62 @@ function createReference(ref: ProjectManagerEvidenceRef): ProjectManagerEvidence
       .filter(([, value]) => typeof value === "string" && value.length > 0)
   ) as ProjectManagerEvidenceRef;
 
-  if (!trimmed.ref && !trimmed.path && !trimmed.feishuMessageId) {
+  if (!trimmed.ref && !trimmed.path && !trimmed.sessionId && !trimmed.feishuMessageId) {
     return undefined;
   }
 
   return trimmed;
+}
+
+function readEvidenceReferenceType(value: string): EvidenceReferenceType {
+  return EVIDENCE_REFERENCE_TYPE_OPTIONS.some((option) => option.value === value)
+    ? (value as EvidenceReferenceType)
+    : "custom";
+}
+
+function applyEvidenceReferenceType(
+  draft: EvidenceDraft,
+  referenceType: EvidenceReferenceType,
+  t: Translate
+): EvidenceDraft {
+  if (referenceType === "custom") {
+    return { ...draft, referenceType };
+  }
+  if (referenceType === "file_path") {
+    return {
+      ...draft,
+      referenceType,
+      kind: "file_path",
+      label: t("projects.projectManagerEvidenceTypeFilePath"),
+      ref: "",
+      sessionId: "",
+    };
+  }
+  if (referenceType === "terminal_snapshot") {
+    return {
+      ...draft,
+      referenceType,
+      kind: "terminal_snapshot",
+      label: t("projects.projectManagerEvidenceTypeTerminalSnapshot"),
+      ref: "",
+      path: "",
+    };
+  }
+  return {
+    ...draft,
+    referenceType,
+    kind: "session",
+    label: t("projects.projectManagerEvidenceTypeSession"),
+    ref: "",
+    path: "",
+  };
+}
+
+function generatedEvidenceRef(referenceType: EvidenceReferenceType, sessionId: string): string {
+  if (!sessionId) return "";
+  if (referenceType === "terminal_snapshot") return `terminal-snapshot:${sessionId}:latest`;
+  if (referenceType === "session") return `session:${sessionId}`;
+  return "";
 }
 
 const UNSAFE_EVIDENCE_REFERENCE_PATTERNS = [
@@ -2324,7 +2444,8 @@ const UNSAFE_EVIDENCE_REFERENCE_PATTERNS = [
 ];
 
 function validateEvidenceReferenceInput(draft: EvidenceDraft): boolean {
-  return [draft.ref, draft.path].some((value) =>
+  const generatedRef = generatedEvidenceRef(draft.referenceType, draft.sessionId.trim());
+  return [draft.ref, draft.path, draft.sessionId, generatedRef].some((value) =>
     UNSAFE_EVIDENCE_REFERENCE_PATTERNS.some((pattern) => pattern.test(value))
   );
 }

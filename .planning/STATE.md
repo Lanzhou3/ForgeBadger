@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: AI-Native Project Execution Traceability
 status: ready_to_plan
-stopped_at: Phase 14 plan 02 complete — ready to plan 14-03 Project Manager evidence refs
-last_updated: 2026-05-29T02:20:17+08:00
+stopped_at: Phase 14 complete — ready to plan Phase 15 model provider setup and health
+last_updated: 2026-05-29T02:37:41+08:00
 last_activity: 2026-05-29
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 10
-  completed_plans: 9
-  percent: 53
+  completed_plans: 10
+  percent: 59
 ---
 
 # Project State
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-22)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while turning AI-assisted work into auditable project state.
-**Current focus:** Phase 14 — terminal workspace context
+**Current focus:** Phase 15 — model provider setup and health
 
 ## Current Position
 
-Phase: 14
-Plan: 14-03 next
+Phase: 15
+Plan: 15 next
 Status: Ready to plan
 Last activity: 2026-05-29
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-29
 
 **Velocity:**
 
-- Total plans completed: 30
+- Total plans completed: 31
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -86,7 +86,8 @@ Last activity: 2026-05-29
 | 13 | 3 | - | - |
 | Phase 14 P01 | completed | 4 tasks | 8 files |
 | Phase 14 P02 | completed | 4 tasks | 10 files |
-| 14 | 2/3 | - | - |
+| Phase 14 P03 | completed | 3 tasks | 6 files |
+| 14 | 3/3 | - | - |
 
 ## Accumulated Context
 
@@ -131,12 +132,13 @@ Recent decisions affecting current work:
 - [Phase 14]: Workspace context starts with a Gateway-owned read-only project file tree/file preview contract; Web sidecar and evidence attachment build on this API instead of direct filesystem access. — Plan 14-01 implementation.
 - [Phase 14]: Workspace context file reads stay bounded UTF-8 previews and reject traversal, absolute paths, binary files, and symbolic links; raw file content is not persisted as project-manager evidence. — Plan 14-01 implementation.
 - [Phase 14]: Web workspace context uses one read-only `WorkspaceContextPanel` across project and session views; it never persists preview content as project-manager evidence. — Plan 14-02 implementation.
+- [Phase 14]: Project Manager workspace evidence refs use bounded `file_path`, `terminal_snapshot`, and `session` markers; raw terminal scrollback and file contents remain outside SQLite evidence storage. — Plan 14-03 implementation.
 
 ### Pending Todos
 
-Phase 14 next steps:
+Phase 15 next steps:
 
-- Plan 14-03 Project Manager evidence refs for file path, terminal snapshot marker, and session id references.
+- Plan Phase 15 model provider setup and health checks.
 
 ### Blockers/Concerns
 
@@ -149,6 +151,7 @@ Phase 14 next steps:
 - v1.2 shipped the Project Manager Web Workflow and archived phases 9-11 under `.planning/milestones/v1.2-phases/`.
 - v1.2 did not reclassify v1.1 live-provider, physical Windows/WSL, Feishu console-callback, or first-user feedback caveats because no new real external evidence was attached.
 - v1.3 is ready to begin. Before this v1.3 planning update, tracked code was clean; the current tracked changes are the v1.3 planning documents, and unrelated untracked `upload_img/` remains outside milestone scope.
+- Phase 14 Terminal Workspace Context is complete. Workspace file context and Project Manager evidence refs remain bounded pointers; raw file/terminal content is intentionally not persisted as evidence.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -162,10 +165,10 @@ Phase 14 next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T02:20:17+08:00
-Stopped at: Completed 14-02-PLAN.md
+Last session: 2026-05-29T02:37:41+08:00
+Stopped at: Completed 14-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Start 14-03 planning for Project Manager file path, terminal snapshot marker, and session id evidence references.
+- Start Phase 15 planning for model provider setup and health.

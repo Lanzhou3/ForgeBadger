@@ -48,7 +48,7 @@ test("opens Project Manager from deep link and renders Copilot trace markers", a
   await expect(sheet.getByText("Action", { exact: true })).toBeVisible();
   await expect(sheet.getByText("pm-action-done", { exact: true })).toBeVisible();
   await expect(sheet.getByText(/test.*Traceability E2E.*verified/).first()).toBeVisible();
-  await expect(sheet.getByText("Session", { exact: true })).toBeVisible();
+  await expect(sheet.locator("div").filter({ hasText: /^Session$/ }).first()).toBeVisible();
   await expect(sheet.getByText("session-trace-1", { exact: true })).toBeVisible();
   await expect(sheet.getByText("Ledger", { exact: true })).toBeVisible();
   await expect(sheet.getByText("copilot_observation_recorded", { exact: true })).toBeVisible();
@@ -231,13 +231,68 @@ test("attaches one bounded evidence reference from work item details", async ({ 
   await expect(sheet).toBeVisible();
   await sheet.getByLabel("Kind").fill("report");
   await sheet.getByLabel("Label").fill("Phase 11 evidence");
-  await sheet.getByLabel("Reference").fill("PMEV-01");
+  await sheet.getByRole("textbox", { name: "Reference" }).fill("PMEV-01");
   await sheet.getByLabel("Path").fill("docs/reports/phase-11-evidence.md");
   await sheet.getByRole("button", { name: "Attach evidence" }).click();
 
   await expect(sheet.getByText("PMEV-01")).toBeVisible();
   await expect(sheet.getByText("docs/reports/phase-11-evidence.md")).toBeVisible();
   await expect(panel.locator("tbody tr", { hasText: "Review external evidence" }).locator("td").nth(3)).toHaveText("1");
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
+test("attaches workspace evidence references from work item details", async ({ page }) => {
+  const unhandledApiRoutes = await mockProjectDetailApis(page);
+
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Project Manager" }).click();
+
+  const panel = page.getByTestId("project-manager-panel");
+  await panel.getByRole("button", { name: "Table" }).click();
+  await panel.getByLabel("Filter by status").selectOption("blocked");
+  await panel.getByRole("button", { name: "View details" }).click();
+
+  const sheet = page.getByRole("dialog", { name: "Review external evidence" });
+  await expect(sheet).toBeVisible();
+
+  await sheet.getByLabel("Reference type").selectOption("file_path");
+  await sheet.getByLabel("Path").fill("packages/web/src/components/projects/WorkspaceContextPanel.tsx");
+  await sheet.getByRole("button", { name: "Attach evidence" }).click();
+  await expect(sheet.getByText("file_path")).toBeVisible();
+  await expect(sheet.getByText("packages/web/src/components/projects/WorkspaceContextPanel.tsx")).toBeVisible();
+
+  await sheet.getByLabel("Reference type").selectOption("terminal_snapshot");
+  await sheet.getByLabel("Session ID").fill("session-trace-1");
+  await sheet.getByRole("button", { name: "Attach evidence" }).click();
+  await expect(sheet.getByRole("listitem").filter({ hasText: "terminal-snapshot:session-trace-1:latest" })).toBeVisible();
+
+  await sheet.getByLabel("Reference type").selectOption("session");
+  await sheet.getByLabel("Session ID").fill("session-trace-1");
+  await sheet.getByRole("button", { name: "Attach evidence" }).click();
+  await expect(sheet.getByRole("listitem").filter({ hasText: "session:session-trace-1" })).toBeVisible();
+  await expect(panel.locator("tbody tr", { hasText: "Review external evidence" }).locator("td").nth(3)).toHaveText("3");
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
+test("blocks raw terminal text in workspace evidence references", async ({ page }) => {
+  const unhandledApiRoutes = await mockProjectDetailApis(page);
+
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Project Manager" }).click();
+
+  const panel = page.getByTestId("project-manager-panel");
+  await panel.getByRole("button", { name: "Table" }).click();
+  await panel.getByLabel("Filter by status").selectOption("blocked");
+  await panel.getByRole("button", { name: "View details" }).click();
+
+  const sheet = page.getByRole("dialog", { name: "Review external evidence" });
+  await expect(sheet).toBeVisible();
+  await sheet.getByLabel("Reference type").selectOption("terminal_snapshot");
+  await sheet.getByLabel("Session ID").fill("session-trace-1");
+  await sheet.getByRole("textbox", { name: "Reference" }).fill("$ claude --dangerously-skip-permissions\nstdout: secret output");
+  await sheet.getByRole("button", { name: "Attach evidence" }).click();
+
+  await expect(sheet.getByText("Use a short reference or path, not raw output or secrets.")).toBeVisible();
   expect(unhandledApiRoutes).toEqual([]);
 });
 
@@ -256,14 +311,14 @@ test("keeps safe evidence draft values visible after attach failure", async ({ p
   await expect(sheet).toBeVisible();
   await sheet.getByLabel("Kind").fill("report");
   await sheet.getByLabel("Label").fill("Phase 11 evidence");
-  await sheet.getByLabel("Reference").fill("PMEV-01");
+  await sheet.getByRole("textbox", { name: "Reference" }).fill("PMEV-01");
   await sheet.getByLabel("Path").fill("docs/reports/phase-11-evidence.md");
   await sheet.getByRole("button", { name: "Attach evidence" }).click();
 
   await expect(sheet.getByText("Could not attach evidence reference.")).toBeVisible();
   await expect(sheet.getByLabel("Kind")).toHaveValue("report");
   await expect(sheet.getByLabel("Label")).toHaveValue("Phase 11 evidence");
-  await expect(sheet.getByLabel("Reference")).toHaveValue("PMEV-01");
+  await expect(sheet.getByRole("textbox", { name: "Reference" })).toHaveValue("PMEV-01");
   await expect(sheet.getByLabel("Path")).toHaveValue("docs/reports/phase-11-evidence.md");
   await expect(sheet).toBeVisible();
   expect(unhandledApiRoutes).toEqual([]);
@@ -285,7 +340,7 @@ test("completes the v1.2 Project Manager workflow under strict route mocks", asy
   const sheet = page.getByRole("dialog", { name: "Review external evidence" });
   await sheet.getByLabel("Kind").fill("report");
   await sheet.getByLabel("Label").fill("Phase 11 evidence");
-  await sheet.getByLabel("Reference").fill("PMEV-01");
+  await sheet.getByRole("textbox", { name: "Reference" }).fill("PMEV-01");
   await sheet.getByLabel("Path").fill("docs/reports/phase-11-evidence.md");
   await sheet.getByRole("button", { name: "Attach evidence" }).click();
   await expect(sheet.getByText("PMEV-01")).toBeVisible();
@@ -818,14 +873,9 @@ async function mockProjectDetailApis(
       const body = JSON.parse(route.request().postData() ?? "{}") as {
         evidenceRefs?: unknown;
       };
-      expect(body).toEqual({
-        evidenceRefs: [{
-          kind: "report",
-          label: "Phase 11 evidence",
-          ref: "PMEV-01",
-          path: "docs/reports/phase-11-evidence.md",
-        }],
-      });
+      const evidenceRefs = Array.isArray(body.evidenceRefs) ? body.evidenceRefs : [];
+      expect(evidenceRefs.length).toBe(1);
+      assertProjectManagerEvidenceRef(evidenceRefs[0]);
       const updatedWorkItem = workItems.find((item) => item.id === workItemId);
       expect(updatedWorkItem).toBeTruthy();
       workItems = workItems.map((item) => item.id === workItemId
@@ -834,12 +884,7 @@ async function mockProjectDetailApis(
           evidenceRefCount: item.evidenceRefCount + 1,
           evidenceRefs: [
             ...item.evidenceRefs,
-            {
-              kind: "report",
-              label: "Phase 11 evidence",
-              ref: "PMEV-01",
-              path: "docs/reports/phase-11-evidence.md",
-            },
+            evidenceRefs[0],
           ],
           updatedAt: 1779379000000,
         }
@@ -1031,6 +1076,49 @@ async function fulfillProjectManagerError(route: Route, status: number) {
         : "Could not load project manager state.",
     },
   });
+}
+
+function assertProjectManagerEvidenceRef(value: unknown) {
+  if (!value || typeof value !== "object") {
+    throw new Error("Expected evidence reference object");
+  }
+  const ref = value as Record<string, unknown>;
+  if (ref.kind === "report") {
+    expect(ref).toEqual({
+      kind: "report",
+      label: "Phase 11 evidence",
+      ref: "PMEV-01",
+      path: "docs/reports/phase-11-evidence.md",
+    });
+    return;
+  }
+  if (ref.kind === "file_path") {
+    expect(ref).toEqual({
+      kind: "file_path",
+      label: "File path",
+      path: "packages/web/src/components/projects/WorkspaceContextPanel.tsx",
+    });
+    return;
+  }
+  if (ref.kind === "terminal_snapshot") {
+    expect(ref).toEqual({
+      kind: "terminal_snapshot",
+      label: "Terminal snapshot",
+      ref: "terminal-snapshot:session-trace-1:latest",
+      sessionId: "session-trace-1",
+    });
+    return;
+  }
+  if (ref.kind === "session") {
+    expect(ref).toEqual({
+      kind: "session",
+      label: "Session",
+      ref: "session:session-trace-1",
+      sessionId: "session-trace-1",
+    });
+    return;
+  }
+  throw new Error(`Unexpected evidence reference kind: ${String(ref.kind)}`);
 }
 
 function envelope(data: unknown) {

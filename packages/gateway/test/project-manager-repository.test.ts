@@ -410,4 +410,40 @@ describe("ProjectManagerRepository", () => {
     assert.doesNotMatch(stored, /unsafe-command|terminal transcript|failure output/u);
     assert.match(stored, /\[REDACTED\]/u);
   });
+
+  it("keeps terminal snapshot and session evidence references bounded", () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const item = repo.createWorkItem(projectId, {
+      title: "Attach terminal context"
+    });
+    const sessionId = "session-trace-1";
+
+    const updated = repo.attachEvidence(projectId, item.id, {
+      evidenceRefs: [{
+        kind: "terminal_snapshot",
+        label: "Latest terminal snapshot",
+        ref: `terminal-snapshot:${sessionId}:latest`,
+        sessionId
+      }, {
+        kind: "session",
+        label: "Session context",
+        ref: `session:${sessionId}`,
+        sessionId
+      }],
+      details: {
+        note: "bounded marker only",
+        rawTerminalOutput: "$ claude --dangerously-skip-permissions\nstdout: secret output"
+      }
+    });
+    const events = repo.listLedgerEvents(projectId, { workItemId: item.id });
+    const stored = JSON.stringify({ updated, events });
+
+    assert.deepEqual(updated.evidenceRefs.map((ref) => ref.kind), ["terminal_snapshot", "session"]);
+    assert.equal(updated.evidenceRefs[0]?.sessionId, sessionId);
+    assert.equal(updated.evidenceRefs[0]?.ref, `terminal-snapshot:${sessionId}:latest`);
+    assert.equal(events[1]?.eventType, "evidence_attached");
+    assert.equal(events[1]?.evidenceRefs[0]?.sessionId, sessionId);
+    assert.doesNotMatch(stored, /dangerously-skip-permissions|secret output/u);
+    assert.match(stored, /\[REDACTED\]/u);
+  });
 });

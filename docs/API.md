@@ -250,6 +250,18 @@ reference may include only these fields:
 - `feishuMessageId`
 - `createdAt`
 
+Phase 14 workspace/terminal references use the same bounded structure:
+
+- file path evidence uses `kind: "file_path"` plus a project-relative `path`;
+- terminal snapshot evidence uses `kind: "terminal_snapshot"`, `sessionId`,
+  and a marker-style `ref` such as `terminal-snapshot:<sessionId>:latest`;
+- session evidence uses `kind: "session"`, `sessionId`, and optionally
+  `ref: "session:<sessionId>"`.
+
+These references are pointers only. They must not contain raw file contents,
+terminal scrollback, CLI stdout/stderr, provider payloads, Feishu message
+bodies, tokens, API keys, attach tokens, or other secrets.
+
 Ledger route responses expose safe trace markers through
 `ProjectManagerLedgerTrace`; raw `details` are never included in REST DTOs.
 Trace fields are copied only from this allowlist:
