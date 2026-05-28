@@ -145,8 +145,13 @@ pnpm --dir packages/gateway dev
 In another terminal, start Web:
 
 ```bash
-pnpm --dir packages/web exec next dev --hostname 127.0.0.1 --port 48732
+pnpm --dir packages/web dev
 ```
+
+The source fallback dev scripts load repository root `.env` values while
+preserving environment variables that are already set in the shell. This lets
+operators run an isolated trial by prefixing a specific variable, for example
+`OPENFORGE_DB_PATH=/tmp/openforge-trial/openforge.db pnpm --dir packages/gateway dev`.
 
 Open:
 

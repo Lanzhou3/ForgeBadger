@@ -43,8 +43,13 @@ Start Gateway, then Web in separate shells:
 
 ```bash
 pnpm --dir packages/gateway dev
-pnpm --dir packages/web exec next dev --hostname 127.0.0.1 --port 48732
+pnpm --dir packages/web dev
 ```
+
+Source fallback scripts load the root `.env` without overriding variables
+already present in the shell. For disposable smoke state, a command prefix such
+as `OPENFORGE_DB_PATH=/tmp/openforge-smoke.db pnpm --dir packages/gateway dev`
+therefore takes precedence over the same key in `.env`.
 
 Open `http://127.0.0.1:48732`.
 

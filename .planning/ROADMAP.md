@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 22 operator dry-run complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 23 source fallback support fix complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -84,6 +84,32 @@ Plans:
 4. The dry-run report explicitly states that it is operator evidence, not
    completed first-user feedback.
 5. Feedback checklist wording matches the full v1.5 packet shape.
+
+### Phase 23: Source Env Override Preservation
+
+**Goal:** Fix the source fallback startup support gap found in Phase 22 so
+command-prefix env overrides win over repository root `.env` values.
+
+**Requirements:** ENVRUN-01, ENVRUN-02, ENVRUN-03, ENVRUN-04, ENVSAFE-01,
+PLAN-23-01, PLAN-23-02, PLAN-23-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 23-01-PLAN.md — env-preserving source runner, package script wiring,
+  docs, CI, and real Gateway/Web prefix smoke verification.
+
+**Success criteria:**
+
+1. Source fallback scripts still load repository root `.env`.
+2. Existing command-prefix env values are preserved over `.env`, including
+   `OPENFORGE_DB_PATH` and `OPENFORGE_WEB_PORT`.
+3. Gateway/Web package scripts use the preserving runner.
+4. CI covers the runner and source script wiring.
+5. Runbook, smoke, troubleshooting, and CI docs describe the behavior without
+   exposing secrets or raw state.
+6. External evidence gate states remain unchanged.
 
 ## Archived Milestones
 
@@ -197,6 +223,7 @@ Full archive:
 | 20. Platform And First-User Acceptance Closure | v1.4 | 1/1 | Complete (Caveat) | 2026-05-29 |
 | 21. First-User Trial Operations | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 22. Operator Trial Dry Run | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 23. Source Env Override Preservation | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

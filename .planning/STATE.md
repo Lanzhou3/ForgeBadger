@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: First-User Trial Operations
 status: phase_complete
-stopped_at: Phase 22 operator trial dry-run complete; real first-user packet collection pending
-last_updated: 2026-05-29T04:49:00+08:00
+stopped_at: Phase 23 source env override preservation complete; real first-user packet collection pending
+last_updated: 2026-05-29T05:00:00+08:00
 last_activity: 2026-05-29
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 2
-  completed_plans: 2
+  total_phases: 3
+  completed_phases: 3
+  total_plans: 3
+  completed_plans: 3
   percent: 100
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** Phase 22 completed a maintainer/operator dry-run of the v1.5 trial loop. The next concrete step is collecting a real first-user trial packet through the updated template or issue form while preserving v1.4 external gate states until real artifacts exist.
+**Current focus:** Phase 23 fixed the source fallback env override support gap found during the operator dry-run. The next concrete step is collecting a real first-user trial packet through the updated template or issue form while preserving v1.4 external gate states until real artifacts exist.
 
 ## Current Position
 
-Phase: 22. Operator Trial Dry Run
-Plan: 22-01 complete
+Phase: 23. Source Env Override Preservation
+Plan: 23-01 complete
 Status: Phase Complete
 Last activity: 2026-05-29
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-29
 
 **Velocity:**
 
-- Total plans completed: 40
+- Total plans completed: 41
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -64,6 +64,7 @@ Last activity: 2026-05-29
 | 20. Platform And First-User Acceptance Closure | 1/1 | - | - |
 | 21. First-User Trial Operations | 1/1 | - | - |
 | 22. Operator Trial Dry Run | 1/1 | - | - |
+| 23. Source Env Override Preservation | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -89,6 +90,7 @@ Recent decisions affecting current work:
 - [Milestone v1.5]: First-user trial operations is the next milestone. It operationalizes real trial evidence and feedback collection before remote/runtime expansion.
 - [Phase 21]: The minimum first-user trial packet must capture affected surface, severity, owner, disposition or next action, environment summary, reproduction detail, diagnostics status, follow-up route or no-action rationale, and redaction review. Phase 21 also updates `docs/TRIAL-FEEDBACK.md` and the GitHub issue template to remove first-user browser-token fallback and replace raw log/output requests with bounded summaries.
 - [Phase 22]: Operator dry-run records the current host as Linux `not_wsl`, dependency checks as usable for local tmux terminals, Gateway/Web loopback startup as healthy, provider smoke as skipped with `missing_provider_credential`, and source dev-script `.env` override behavior as a docs/support gap. It does not clear `FIRST-USER-FEEDBACK` or any other external gate.
+- [Phase 23]: Source fallback Gateway/Web scripts now load root `.env` through `scripts/run-with-root-env.mjs`, preserving command-prefix env values over `.env`. Red/green tests, CI script harness coverage, Gateway `OPENFORGE_DB_PATH` prefix smoke, and Web `OPENFORGE_WEB_PORT` prefix smoke passed. External gates remain unchanged.
 
 ### Pending Todos
 
@@ -96,7 +98,6 @@ Next steps:
 
 - Collect a real first-user trial packet through the updated template or issue form.
 - Use the v1.5 trial-operations loop for the next real first-user trial packet.
-- Decide whether to document or adjust the source dev-script `.env` override behavior before asking operators to run isolated source fallback trials.
 - Prepare Feishu developer-console callback evidence only when public HTTPS Gateway routing is available.
 - Collect physical Windows/WSL and first-user feedback evidence when those external environments/users are available.
 - Rerun live provider evidence only after a disposable provider credential and explicit model id are available.
@@ -122,8 +123,8 @@ Next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T04:49:00+08:00
-Stopped at: Phase 22 operator trial dry-run complete; real first-user packet collection pending
+Last session: 2026-05-29T05:00:00+08:00
+Stopped at: Phase 23 source env override preservation complete; real first-user packet collection pending
 Resume file: None
 
 ## Operator Next Steps

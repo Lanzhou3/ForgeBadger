@@ -96,6 +96,31 @@
 - [x] **PLAN-22-03**: Phase 22 verification proves external gate states remain
   unchanged and no secret-like evidence wording was introduced.
 
+### Source Fallback Env Runner
+
+- [x] **ENVRUN-01**: Source fallback Gateway/Web scripts load repository root
+  `.env` without overwriting command-prefix environment variables.
+- [x] **ENVRUN-02**: Gateway source `dev` and `start` scripts run through the
+  env-preserving runner while preserving existing command shapes.
+- [x] **ENVRUN-03**: Web source `build`, `dev`, and `start` scripts run through
+  the env-preserving runner, and Web `dev`/`start` still apply default host and
+  port values after env loading.
+- [x] **ENVRUN-04**: CI script harness tests cover `.env` merge precedence and
+  Gateway/Web package script wiring.
+- [x] **ENVSAFE-01**: Source fallback docs describe env precedence and
+  disposable-state usage without exposing `.env` contents, secrets, local
+  databases, or raw terminal output.
+
+### Phase 23 Planning Closure
+
+- [x] **PLAN-23-01**: Phase 23 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-23-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the source env-runner fix while keeping
+  real first-user packet collection pending.
+- [x] **PLAN-23-03**: Phase 23 verification proves red/green test coverage,
+  real Gateway/Web prefix smoke behavior, and unchanged external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -132,11 +157,19 @@
 | PLAN-22-01 | Phase 22 | Complete |
 | PLAN-22-02 | Phase 22 | Complete |
 | PLAN-22-03 | Phase 22 | Complete |
+| ENVRUN-01 | Phase 23 | Complete |
+| ENVRUN-02 | Phase 23 | Complete |
+| ENVRUN-03 | Phase 23 | Complete |
+| ENVRUN-04 | Phase 23 | Complete |
+| ENVSAFE-01 | Phase 23 | Complete |
+| PLAN-23-01 | Phase 23 | Complete |
+| PLAN-23-02 | Phase 23 | Complete |
+| PLAN-23-03 | Phase 23 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 20 total
-- Mapped to phases: 20
+- v1.5 requirements: 28 total
+- Mapped to phases: 28
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 22 Operator Trial Dry Run.*
+*Requirements updated: 2026-05-29 after Phase 23 Source Env Override Preservation.*

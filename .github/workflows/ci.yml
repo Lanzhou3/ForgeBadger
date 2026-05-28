@@ -56,7 +56,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Script harness tests
-        run: node --test scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
+        run: node --test scripts/run-with-root-env.test.mjs scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
 
       - name: Workspace typecheck
         run: pnpm -r typecheck

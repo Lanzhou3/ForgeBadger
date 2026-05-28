@@ -50,10 +50,7 @@ describe("local release smoke harness", () => {
     }));
 
     assert.equal(plan.gateway, "pnpm --dir packages/gateway dev");
-    assert.equal(
-      plan.web,
-      "pnpm --dir packages/web exec next dev --hostname 127.0.0.1 --port 48732"
-    );
+    assert.equal(plan.web, "pnpm --dir packages/web dev");
     assert.equal(plan.environment.OPENFORGE_MASTER_KEY, "[redacted]");
     assert.equal(plan.environment.OPENFORGE_JWT_SECRET, "[redacted]");
     assert.deepEqual(plan.manualEvidence, requiredManualSmokeEvidence());

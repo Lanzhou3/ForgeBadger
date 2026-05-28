@@ -32,6 +32,11 @@
   loopback startup health, provider smoke skipped with
   `missing_provider_credential`, and the source dev-script `.env` override
   behavior as a docs/support gap. It did not clear any external gate.
+- Phase 23 fixed that source fallback `.env` override gap with
+  `scripts/run-with-root-env.mjs`, `scripts/run-with-root-env.test.mjs`,
+  Gateway/Web package script wiring, CI harness coverage, source fallback docs,
+  and real Gateway/Web prefix smoke evidence. Command-prefix env values now win
+  over root `.env` while `.env` still fills missing values.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -144,39 +149,36 @@
    surface, severity, owner, disposition or next action, environment summary,
    reproduction detail, diagnostics status, follow-up route or no-action
    rationale, and redaction review.
-2. Decide whether to document or adjust the source dev-script `.env` override
-   behavior before relying on command-prefix overrides for isolated source
-   fallback trials.
-3. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,
+2. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,
    operator webhook setup environment, and Feishu developer-console URL
    verification are available. Phase 19 proved bot CLI preflight and local
    regression only; those do not clear the real callback gate.
-4. Keep `WINDOWS-WSL` as `Caveat` until a real Windows/WSL host completes the
+3. Keep `WINDOWS-WSL` as `Caveat` until a real Windows/WSL host completes the
    terminal checklist. Phase 20 recorded the current host as Linux `not_wsl`,
    which is not physical WSL evidence.
-5. Keep `FIRST-USER-FEEDBACK` as `Caveat` until a completed redacted feedback
+4. Keep `FIRST-USER-FEEDBACK` as `Caveat` until a completed redacted feedback
    packet is attached or linked with severity, owner, disposition, environment,
    reproduction detail, diagnostics status, and follow-up route.
-6. Rerun the `LIVE-PROVIDER` gate only after a disposable provider credential
+5. Rerun the `LIVE-PROVIDER` gate only after a disposable provider credential
    and explicit model id are available; Phase 18 currently records
    `missing_provider_credential`.
-7. Keep Codex app-server turn input disabled unless the Gateway is explicitly
+6. Keep Codex app-server turn input disabled unless the Gateway is explicitly
    started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Treat `/turn` as a
    default-403 feature-flag prototype API, not a Web-exposed user workflow.
    Gateway does not persist prompt/response transcript content; add
    user-facing retention controls before exposing real turn input in Web. Do not
    add provider API-key or model override application to this Codex app-server
    path.
-8. If stopped/error app-server records grow in long-running usage, add an
+7. If stopped/error app-server records grow in long-running usage, add an
    explicit TTL or pagination strategy instead of deleting them immediately and
    losing observable process state.
-9. Run a physical Windows/WSL manual smoke when that platform is available; the
+8. Run a physical Windows/WSL manual smoke when that platform is available; the
    current pass covers CLI mode behavior, CI/release gate automation, checklist
    fields, and runbook remediation, not a real Windows host. Record that
    evidence in GitHub issue #4.
-10. Collect first-user Copilot hardening feedback through the trial feedback
+9. Collect first-user Copilot hardening feedback through the trial feedback
    form and issue #5. Focus on dependency failure states, CLI availability
    recovery, provider configuration recovery, and platform-specific
    remediation.
-11. Keep SSH/remote execution as a separate architecture item, not part of the
+10. Keep SSH/remote execution as a separate architecture item, not part of the
    local Codex app-server prototype.

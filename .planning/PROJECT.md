@@ -4,13 +4,13 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is v1.5 First-User Trial Operations. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix. v1.5 turns that evidence posture into an operator-run first-user trial loop and has now completed an operator dry-run of that loop on the current host.
+The current product stage is v1.5 First-User Trial Operations. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix. v1.5 turns that evidence posture into an operator-run first-user trial loop, completed an operator dry-run on the current host, and fixed the source fallback env override support gap found by that dry-run.
 
 ## Current Milestone
 
-v1.5 First-User Trial Operations has completed its foundation phase and an
-operator dry-run. The remaining work is real first-user trial packet collection
-and triage.
+v1.5 First-User Trial Operations has completed its foundation phase, an
+operator dry-run, and the source fallback env override fix. The remaining work
+is real first-user trial packet collection and triage.
 
 **Last shipped:** v1.4 External Evidence Closure on 2026-05-29.
 
@@ -82,6 +82,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - [x] v1.5 preserves `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and `FIRST-USER-FEEDBACK` states until registry-required artifacts exist.
 - [x] v1.5 keeps first-user guidance secret-safe and avoids raw evidence blob storage.
 - [x] v1.5 operator dry-run records current-host dependency/startup/provider-smoke evidence without pretending it is first-user feedback.
+- [x] v1.5 source fallback scripts preserve command-prefix env overrides while still loading repository root `.env`.
 
 ### Out of Scope
 
@@ -117,6 +118,10 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
   source startup on loopback, provider smoke skipped with
   `missing_provider_credential`, and a source-startup `.env` override
   docs/support gap. It did not clear any external gate.
+- Phase 23 fixed the source-startup `.env` override support gap with
+  `scripts/run-with-root-env.mjs`, Gateway/Web package script wiring, CI
+  harness coverage, runbook/smoke/troubleshooting docs, and real Gateway/Web
+  command-prefix smoke evidence.
 - Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints
@@ -149,6 +154,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Close external evidence before expanding scope | Open-source readiness exposes the repository, but live provider, Windows/WSL, Feishu callback, and first-user feedback still need real artifacts | Shipped in v1.4 as truthful caveat/blocker closeout |
 | Operationalize first-user trial before runtime expansion | The remaining risk is evidence collection and user feedback routing, not another broad runtime surface | Selected for v1.5 |
 | Run operator dry-run before real first-user collection | Maintainers should prove the collection loop, redaction boundary, and startup path are understandable before asking a real user for feedback | Good - Phase 22 recorded bounded evidence and one docs/support gap |
+| Preserve command-prefix env over root `.env` in source fallback | Operators need disposable state for trial/smoke runs without editing or leaking local `.env` | Good - Phase 23 added a preserving env runner and real startup proof |
 
 ## Evolution
 
@@ -168,4 +174,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-29 after completing Phase 22 Operator Trial Dry Run.*
+*Last updated: 2026-05-29 after completing Phase 23 Source Env Override Preservation.*

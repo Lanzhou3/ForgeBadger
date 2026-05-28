@@ -12,7 +12,7 @@ terminal.
 
 ```bash
 pnpm install --frozen-lockfile
-node --test scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
+node --test scripts/run-with-root-env.test.mjs scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
 pnpm -r typecheck
 pnpm -r test
 RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts

@@ -12,6 +12,8 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 - v1.5 focuses on first-user trial operations before any new runtime expansion.
 - Phase 22 operator dry-run evidence is support/readiness evidence only; it
   cannot clear first-user or external manual gates.
+- Source fallback command-prefix env values must win over root `.env` values
+  so operators can run disposable dry-runs without editing local configuration.
 
 ## Locked Decisions
 
@@ -33,6 +35,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.4 closeout | v1.4 is complete as a truthful evidence-closure milestone, with `LIVE-PROVIDER`, `WINDOWS-WSL`, and `FIRST-USER-FEEDBACK` preserved as `Caveat`, and `FEISHU-CALLBACK` preserved as `Blocked`. | `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md` |
 | v1.5 direction | First-user trial operations is the next milestone; it packages trial evidence routing and feedback triage before any runtime expansion. | `docs/superpowers/specs/2026-05-29-openforge-v1.5-first-user-trial-operations-design.md`, `.planning/phases/OF-21-first-user-trial-operations/21-01-PLAN.md` |
 | v1.5 operator dry-run | Phase 22 records current-host operator evidence and a source `.env` override support gap, but it does not clear `FIRST-USER-FEEDBACK` or other external gates. | `docs/reports/phase-22-operator-trial-dry-run-2026-05-29.md` |
+| v1.5 source env runner | Gateway/Web source scripts load root `.env` through an env-preserving runner so command-prefix overrides such as `OPENFORGE_DB_PATH=/tmp/...` remain authoritative for that run. | `docs/reports/phase-23-source-env-runner-2026-05-29.md` |
 
 ## Deferred Ideas
 
