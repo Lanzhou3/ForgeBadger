@@ -1,5 +1,28 @@
 # Milestones
 
+## v1.5 First-User Trial Operations (Active: 2026-05-29)
+
+**Phases planned:** 1 phase, 1 plan
+
+**Goal:**
+
+Turn cautious local-first readiness into an operator-run first-user trial loop
+with redacted evidence routing, feedback triage, and truthful gate decisions.
+
+**Current phase:**
+
+- [x] Phase 21: First-User Trial Operations — 1/1 plans complete.
+
+**Acceptance boundary:**
+
+- No new runtime authority, remote execution, hosted collaboration, Codex Web
+  turn workflow, or Feishu execution authority.
+- `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and
+  `FIRST-USER-FEEDBACK` keep their v1.4 states until the required artifacts in
+  `docs/EXTERNAL-EVIDENCE-GATES.md` exist.
+
+---
+
 ## v1.4 External Evidence Closure (Shipped: 2026-05-29)
 
 **Phases completed:** 4 phases, 4 plans
@@ -29,8 +52,8 @@
 - Public HTTPS Feishu developer-console callback verification.
 - Completed first-user feedback packet.
 
-**What's next:** Select the next milestone or collect one of the remaining
-external evidence packets.
+**What's next:** v1.5 First-User Trial Operations has been selected; collect
+one of the remaining external evidence packets through that operating loop.
 
 ---
 

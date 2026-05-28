@@ -8,7 +8,8 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 - The strongest product wedge is reliable browser control and recovery of local AI CLI sessions.
 - Copilot, Feishu, and Codex app-server features must strengthen that wedge instead of broadening into unbounded autonomy.
 - AI-native project management is a traceability layer for AI CLI execution, not a generic PM-suite replacement.
-- v1.4 focuses on external evidence closure before any new runtime expansion.
+- v1.4 focused on external evidence closure before any new runtime expansion.
+- v1.5 focuses on first-user trial operations before any new runtime expansion.
 
 ## Locked Decisions
 
@@ -28,6 +29,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.4 live provider gate | `LIVE-PROVIDER` remains `Caveat` after Phase 18 because the smoke rerun returned `missing_provider_credential`; no live `Pass` can be claimed without a disposable credential and explicit model id. | `docs/reports/phase-18-live-provider-evidence-rerun-2026-05-29.md` |
 | v1.4 Feishu callback gate | `FEISHU-CALLBACK` remains `Blocked` after Phase 19 because CLI bot preflight and local regression do not replace public HTTPS routing plus Feishu developer-console URL verification. | `docs/reports/phase-19-feishu-public-callback-evidence-2026-05-29.md` |
 | v1.4 closeout | v1.4 is complete as a truthful evidence-closure milestone, with `LIVE-PROVIDER`, `WINDOWS-WSL`, and `FIRST-USER-FEEDBACK` preserved as `Caveat`, and `FEISHU-CALLBACK` preserved as `Blocked`. | `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md` |
+| v1.5 direction | First-user trial operations is the next milestone; it packages trial evidence routing and feedback triage before any runtime expansion. | `docs/superpowers/specs/2026-05-29-openforge-v1.5-first-user-trial-operations-design.md`, `.planning/phases/OF-21-first-user-trial-operations/21-01-PLAN.md` |
 
 ## Deferred Ideas
 

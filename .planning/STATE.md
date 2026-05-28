@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: External Evidence Closure
-status: complete
-stopped_at: v1.4 complete with external evidence caveats preserved; next milestone selection pending
-last_updated: 2026-05-29T04:07:00+08:00
+milestone: v1.5
+milestone_name: First-User Trial Operations
+status: phase_complete
+stopped_at: Phase 21 first-user trial operations foundation complete; real trial packet collection pending
+last_updated: 2026-05-29T05:10:00+08:00
 last_activity: 2026-05-29
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 1
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
   percent: 100
 ---
 
@@ -21,20 +21,20 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** v1.4 External Evidence Closure is complete with `LIVE-PROVIDER`, `WINDOWS-WSL`, and `FIRST-USER-FEEDBACK` preserved as `Caveat`, and `FEISHU-CALLBACK` preserved as `Blocked`.
+**Current focus:** Phase 21 completed the v1.5 First-User Trial Operations foundation. The next concrete step is collecting a real first-user trial packet through the updated template or issue form while preserving v1.4 external gate states until real artifacts exist.
 
 ## Current Position
 
-Phase: v1.4 milestone closeout
-Plan: 20-01 complete
-Status: Complete
+Phase: 21. First-User Trial Operations
+Plan: 21-01 complete
+Status: Phase Complete
 Last activity: 2026-05-29
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 38
+- Total plans completed: 39
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -62,6 +62,7 @@ Last activity: 2026-05-29
 | 18. Live Provider Evidence Rerun | 1/1 | - | - |
 | 19. Feishu Public Callback Evidence | 1/1 | - | - |
 | 20. Platform And First-User Acceptance Closure | 1/1 | - | - |
+| 21. First-User Trial Operations | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -84,12 +85,15 @@ Recent decisions affecting current work:
 - [Phase 18]: `pnpm smoke:copilot-provider` rerun produced redacted skipped JSON with `missing_provider_credential`; `LIVE-PROVIDER` remains `Caveat`, not `Pass`.
 - [Phase 19]: Feishu CLI bot preflight and endpoint checks passed, and Feishu/Copilot boundary regression passed 183 tests, but `FEISHU-CALLBACK` remains `Blocked` because no public HTTPS Gateway route, operator webhook setup environment, or Feishu developer-console URL verification action was available.
 - [Phase 20]: v1.4 closeout records current host as Linux `not_wsl`, keeps `WINDOWS-WSL` as `Caveat`, keeps `FIRST-USER-FEEDBACK` as `Caveat` because no completed feedback packet is attached, and publishes `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`.
+- [Milestone v1.5]: First-user trial operations is the next milestone. It operationalizes real trial evidence and feedback collection before remote/runtime expansion.
+- [Phase 21]: The minimum first-user trial packet must capture affected surface, severity, owner, disposition or next action, environment summary, reproduction detail, diagnostics status, follow-up route or no-action rationale, and redaction review. Phase 21 also updates `docs/TRIAL-FEEDBACK.md` and the GitHub issue template to remove first-user browser-token fallback and replace raw log/output requests with bounded summaries.
 
 ### Pending Todos
 
 Next steps:
 
-- Select the next milestone.
+- Collect a real first-user trial packet through the updated template or issue form.
+- Use the v1.5 trial-operations loop for the next real first-user trial packet.
 - Prepare Feishu developer-console callback evidence only when public HTTPS Gateway routing is available.
 - Collect physical Windows/WSL and first-user feedback evidence when those external environments/users are available.
 - Rerun live provider evidence only after a disposable provider credential and explicit model id are available.
@@ -115,10 +119,10 @@ Next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T04:07:00+08:00
-Stopped at: v1.4 complete with external evidence caveats preserved; next milestone selection pending
+Last session: 2026-05-29T05:10:00+08:00
+Stopped at: Phase 21 first-user trial operations foundation complete; real trial packet collection pending
 Resume file: None
 
 ## Operator Next Steps
 
-- Select the next milestone or collect one of the remaining external evidence packets.
+- Collect a real first-user trial packet, then triage it through the v1.5 operating loop and the external evidence gate registry.

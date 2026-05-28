@@ -24,6 +24,24 @@ body:
       required: true
 
   - type: dropdown
+    id: affected_surface
+    attributes:
+      label: Affected surface
+      options:
+        - onboarding
+        - dependency
+        - provider
+        - platform
+        - terminal
+        - Copilot
+        - Feishu
+        - Project Manager
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
     id: startup_path
     attributes:
       label: Startup path
@@ -55,8 +73,8 @@ body:
   - type: textarea
     id: doctor
     attributes:
-      label: openforge doctor output
-      description: Paste the redacted `openforge doctor` output. Native Windows users should include the runtime warning.
+      label: openforge doctor summary
+      description: Summarize the redacted `openforge doctor` result. Native Windows users should include the runtime warning. Do not attach raw terminal transcripts.
       render: text
     validations:
       required: true
@@ -160,15 +178,16 @@ body:
   - type: textarea
     id: caveat_owner
     attributes:
-      label: Owner and next action for caveats
-      description: Required for pass with caveats or blocked results.
+      label: Owner, disposition, and follow-up route
+      description: Required for pass with caveats or blocked results. Also use this to justify no-action outcomes.
       value: |
         Owner:
-        Next action:
+        Disposition: gate-clearing evidence / preserved caveat / preserved blocker / product defect / docs or support gap / no action
+        Follow-up route: issue #3 LIVE-PROVIDER / issue #4 WINDOWS-WSL / issue #5 FIRST-USER-FEEDBACK / Feishu callback evidence report / new issue / next phase / no action
+        Next action or no-action rationale:
         Evidence needed to move to pass:
-        Follow-up phase or issue:
     validations:
-      required: false
+      required: true
 
   - type: textarea
     id: windows_wsl
@@ -187,12 +206,12 @@ body:
     id: diagnostics
     attributes:
       label: Diagnostics and browser evidence
-      description: Attach redacted diagnostics when possible and include console/network failures.
+      description: Attach redacted diagnostics when possible and include bounded console/network summaries. Do not attach raw logs, provider payloads, Feishu bodies, terminal transcripts, local databases, or .env files.
       value: |
         Diagnostics export attached: yes / no
-        Browser console errors:
-        Browser network failures:
-        Screenshots or notes:
+        Browser console error summary:
+        Browser network failure summary:
+        Screenshots or notes, redacted:
     validations:
       required: true
 
@@ -218,4 +237,6 @@ body:
         - label: I reviewed this issue and attachments for secrets before submitting.
           required: true
         - label: Any API keys, passwords, JWTs, attach tokens, private keys, project secrets, and `openforge.token` values have been removed.
+          required: true
+        - label: I did not attach raw terminal transcripts, raw provider payloads, raw Feishu bodies, local databases, `.env` files, or private AI CLI config.
           required: true

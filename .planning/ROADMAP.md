@@ -7,91 +7,76 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 21 foundation complete; real trial packet collection pending.
 
-## Current Milestone: v1.4 External Evidence Closure
+## Current Milestone: v1.5 First-User Trial Operations
 
-**Goal:** Convert remaining external release caveats into a truthful evidence gate system with runnable collection paths, redacted artifacts, and closeout decisions.
+**Goal:** Turn cautious local-first readiness into an operator-run first-user
+trial loop with redacted evidence routing, feedback triage, and truthful gate
+decisions.
 
-**Scope rule:** v1.4 strengthens release trust for the local-first AI CLI control plane. It does not add hosted collaboration, cloud workers, autonomous remote execution, Feishu execution authority, or Codex Web prompt/turn product workflow.
+**Scope rule:** v1.5 operationalizes real trial collection for the existing
+local-first AI CLI control plane. It does not add hosted collaboration, cloud
+workers, autonomous remote execution, Feishu execution authority, or Codex Web
+prompt/turn product workflow.
 
-**Closeout:** Complete with explicit caveats and blockers. v1.4 did not reclassify external gates to `Pass` without real artifacts.
+**Entry condition:** v1.4 is complete with `LIVE-PROVIDER`, `WINDOWS-WSL`, and
+`FIRST-USER-FEEDBACK` preserved as `Caveat`, and `FEISHU-CALLBACK` preserved as
+`Blocked`.
 
-### Phase 17: External Evidence Registry
+### Phase 21: First-User Trial Operations
 
-**Goal:** Create one canonical gate registry and release evidence matrix before any gate can be cleared.
+**Goal:** Select the next milestone, define the first-user trial packet, and
+pin the routing rules that turn trial outcomes into evidence, issues, or
+explicitly preserved caveats.
 
-**Requirements:** EVPOS-01, EVPOS-02, EVPOS-03, EVID-01, EVID-02, EVID-03
-
-**Plans:** 1 plan
-
-Plans:
-
-- [x] 17-01-PLAN.md — External evidence gate registry, doc links, and Phase 17 verification.
-
-**Success criteria:**
-
-1. A canonical registry lists every external gate, current state, owner, clearing condition, artifact shape, redaction rules, and target report/issue route.
-2. Trial, support, open-source, and closeout docs link to that registry instead of duplicating stale caveat wording.
-3. Closeout wording says mocked tests and template existence do not clear external gates.
-4. No evidence guidance asks users to paste secrets, raw provider payloads, Feishu bodies, or raw terminal transcripts.
-
-### Phase 18: Live Provider Evidence Rerun
-
-**Goal:** Run or precisely block live provider evidence using a disposable credential and explicit model id.
-
-**Requirements:** PROV-01, PROV-02, PROV-03
+**Requirements:** TRIALOPS-01, TRIALOPS-02, TRIALOPS-03, TRIALOPS-04,
+TRIALOPS-05, TRIALOPS-06, TRIALSAFE-01, TRIALSAFE-02, TRIALSAFE-03,
+PLAN-21-01, PLAN-21-02, PLAN-21-03
 
 **Plans:** 1 plan
 
 Plans:
 
-- [x] 18-01-PLAN.md — Live provider smoke rerun, redacted caveat evidence, and Codex boundary closeout.
+- [x] 21-01-PLAN.md — v1.5 selection, first-user trial packet, evidence routing, and gate-preserving verification.
 
 **Success criteria:**
 
-1. `pnpm smoke:copilot-provider` has a redacted evidence artifact with provider, model id, command, result, and timestamp, or a precise blocker.
-2. Failure evidence distinguishes credential/model/network/timeout/outage/product-contract classes.
-3. Codex subscription-managed paths remain excluded from provider key/model override evidence.
-
-### Phase 19: Feishu Public Callback Evidence
-
-**Goal:** Record a real Feishu developer-console callback attempt or a precise blocker against public HTTPS Gateway routing.
-
-**Requirements:** FEI-LIVE-01, FEI-LIVE-02, FEI-LIVE-03
-
-**Plans:** 1 plan
-
-Plans:
-
-- [x] 19-01-PLAN.md — Feishu CLI preflight, public-webhook helper blocker, boundary regression, and callback gate closeout.
-
-**Success criteria:**
-
-1. Feishu console URL verification is recorded as `Pass`, `Caveat`, or `Blocked` with environment and rerun steps.
-2. Evidence covers signature/raw-body handling, replay/rate policy, tenant allowlist checks, and redaction boundaries.
-3. Feishu free-form text still cannot approve pending actions, send terminal input, or mutate Project Manager state.
-4. CLI/helper/regression evidence does not override the missing real developer-console callback proof.
-
-### Phase 20: Platform And First-User Acceptance Closure
-
-**Goal:** Close or truthfully preserve physical Windows/WSL and first-user feedback gates, then publish a v1.4 closeout matrix.
-
-**Requirements:** UXE-01, UXE-02, UXE-03, REL-01, REL-02
-
-**Plans:** 1 plan
-
-Plans:
-
-- [x] 20-01-PLAN.md — Current-host platform metadata, first-user feedback caveat, v1.4 closeout matrix, and milestone archive.
-
-**Success criteria:**
-
-1. Physical Windows/WSL evidence records real WSL dependency, terminal, reconnect, Gateway restart, and cleanup behavior, or a precise blocker.
-2. At least one completed first-user feedback packet is triaged into severity, owner, disposition, affected surface, and follow-up route, or the missing packet remains a caveat.
-3. v1.4 closeout lists every gate as `Pass`, `Caveat`, or `Blocked` with artifact links or precise blockers.
-4. Public docs continue to preserve any remaining caveats with rerun paths.
+1. The active source-of-truth docs name v1.5 and Phase 21 as the current
+   direction instead of leaving the next milestone unselected.
+2. A minimum first-user trial packet is defined with severity, owner,
+   disposition, environment, reproduction, diagnostics status, follow-up route,
+   and redaction review.
+3. Trial outcomes route to `docs/EXTERNAL-EVIDENCE-GATES.md`,
+   `docs/TRIAL-FEEDBACK.md`, the GitHub feedback issue template, and the
+   existing follow-up issue/report destinations.
+4. `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and
+   `FIRST-USER-FEEDBACK` keep their v1.4 states unless a real required
+   artifact exists.
+5. Phase 21 introduces no runtime expansion, no raw evidence storage, and no
+   request for secrets, raw provider payloads, raw Feishu bodies, or raw
+   terminal transcripts.
 
 ## Archived Milestones
+
+<details>
+<summary>✅ v1.4 External Evidence Closure (Phases 17-20) — SHIPPED 2026-05-29</summary>
+
+- [x] Phase 17: External Evidence Registry — 1/1 plan completed 2026-05-29.
+- [x] Phase 18: Live Provider Evidence Rerun — 1/1 plan completed as
+  `Complete (Caveat)` 2026-05-29.
+- [x] Phase 19: Feishu Public Callback Evidence — 1/1 plan completed as
+  `Complete (Blocked)` 2026-05-29.
+- [x] Phase 20: Platform And First-User Acceptance Closure — 1/1 plan completed
+  as `Complete (Caveat)` 2026-05-29.
+
+Full archive:
+
+- `.planning/milestones/v1.4-ROADMAP.md`
+- `.planning/milestones/v1.4-REQUIREMENTS.md`
+- `.planning/milestones/v1.4-phases/`
+
+</details>
 
 <details>
 <summary>✅ v1.0 Post-Beta Trust Closure (Phases 1-5) — SHIPPED 2026-05-20</summary>
@@ -182,10 +167,11 @@ Full archive:
 | 18. Live Provider Evidence Rerun | v1.4 | 1/1 | Complete (Caveat) | 2026-05-29 |
 | 19. Feishu Public Callback Evidence | v1.4 | 1/1 | Complete (Blocked) | 2026-05-29 |
 | 20. Platform And First-User Acceptance Closure | v1.4 | 1/1 | Complete (Caveat) | 2026-05-29 |
+| 21. First-User Trial Operations | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 
-Deferred outside v1.4 unless reprioritized:
+Deferred outside v1.5 unless reprioritized:
 
 - Project-manager global dashboard and advanced analytics.
 - SSH/remote execution runtime implementation from the Phase 5 architecture package.

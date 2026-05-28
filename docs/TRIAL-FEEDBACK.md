@@ -8,6 +8,7 @@ attachments before sharing.
 ## Summary
 
 - Result: pass / pass with caveats / blocked
+- Affected surface: onboarding / dependency / provider / platform / terminal / Copilot / Feishu / Project Manager / docs / other
 - Startup path: npm/CLI / source fallback
 - OpenForge version or commit:
 - Operating system:
@@ -44,27 +45,22 @@ codex --version
 
 Diagnostics are generated locally and are not uploaded automatically.
 
-Preferred path:
+First-user path:
 
 1. Log in to the Web console.
 2. Open Settings.
 3. Click **Export diagnostics JSON**.
 4. Attach the downloaded redacted diagnostics file to the issue or handoff note.
 
-Fallback local API path:
+Maintainer-only fallback:
 
-```bash
-curl --noproxy '*' -fsS \
-  -H "authorization: Bearer <token>" \
-  http://127.0.0.1:48731/api/v1/diagnostics/export
-```
-
-For local trial use, get `<token>` from the logged-in browser session:
-   browser developer tools -> Application or Storage -> Local Storage ->
-   the OpenForge browser auth token entry.
-
-Do not include plaintext API keys, passwords, tokens, private keys, unrelated
-project secrets, or the browser auth token value.
+- If the Web export cannot be used, a maintainer may collect diagnostics through
+  the local API using their own existing authenticated environment.
+- Do not ask first users to retrieve browser auth tokens from developer tools.
+- Do not include plaintext API keys, passwords, JWTs, attach tokens, private
+  keys, unrelated project secrets, browser auth token values, local databases,
+  `.env` files, raw provider payloads, raw Feishu bodies, or raw terminal
+  transcripts.
 
 ## Reproduction Steps
 
@@ -80,13 +76,16 @@ project secrets, or the browser auth token value.
 
 ## Triage
 
+- Affected surface: onboarding / dependency / provider / platform / terminal / Copilot / Feishu / Project Manager / docs / other
 - Category: dependency / provider / CLI / platform / Copilot / docs / E2E / other
 - Severity: blocker / high / medium / low
 - Mapped requirement: UX-01 / UX-02 / UX-03 / UX-04 / UX-05 / UX-06 / UX-07 / REL-*
-- Follow-up phase: Phase 3 hardening / Phase 4 / Phase 5 / later
 - Owner:
-- Next action:
+- Disposition: gate-clearing evidence / preserved caveat / preserved blocker / product defect / docs or support gap / no action
+- Follow-up route: issue #3 LIVE-PROVIDER / issue #4 WINDOWS-WSL / issue #5 FIRST-USER-FEEDBACK / Feishu callback evidence report / new issue / next phase / no action
+- Next action or no-action rationale:
 - Caveat status: none / pass with caveats / blocked
+- Redaction review completed: yes / no
 
 Requirement mapping guide:
 
@@ -113,9 +112,9 @@ Requirement mapping guide:
 - Copilot memory write proposal tested: yes / no / skipped
 - Copilot memory notes:
 - Confirmed no terminal/shell/Codex turn input in Copilot: yes / no
-- Screenshots or written observations:
+- Screenshots or written observations, redacted:
 - Terminal attach result:
-- Terminal input/output result:
+- Terminal input/output result summary, no raw transcript:
 - Terminal resize result:
 - Refresh/reconnect result:
 - Stop-session result:
@@ -123,9 +122,9 @@ Requirement mapping guide:
 - Physical Windows/WSL result, if applicable:
 - Claude permission prompt behavior, if encountered:
 
-## Logs
+## Bounded Support Notes
 
-- Gateway logs:
-- Web logs:
+- Gateway log summary, no raw log attachment:
+- Web log summary, no raw log attachment:
 - tmux session name:
-- Relevant command output:
+- Relevant command result summary, no raw private output:

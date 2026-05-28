@@ -1,90 +1,107 @@
-# Requirements: OpenForge v1.4 External Evidence Closure
+# Requirements: OpenForge v1.5 First-User Trial Operations
 
 **Defined:** 2026-05-29
-**Core Value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Milestone Goal:** Convert the remaining live-provider, physical Windows/WSL, Feishu developer-console callback, and first-user feedback caveats into an explicit evidence gate system with runnable collection paths and truthful closeout decisions.
+**Core Value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while first-user trial outcomes become redacted, routed, and auditable evidence.
+**Milestone Goal:** Turn the v1.4 external evidence closeout into an operator-run first-user trial loop that preserves caveats until real artifacts exist and routes feedback into concrete follow-up.
 
 ## Readiness Assessment
 
-- v1.3 AI-Native Project Execution Traceability is complete and archived under `.planning/milestones/v1.3-*`.
-- OpenForge is now suitable for cautious open-source inspection and local-first trial, but release claims remain bounded by external evidence caveats.
-- The next product risk is not another broad feature surface; it is proving real-world provider, platform, Feishu, and first-user behavior without exposing secrets or raw transcripts.
-- `upload_img/` remains unrelated untracked local data and is outside milestone scope.
+- v1.4 External Evidence Closure is complete and archived under
+  `.planning/milestones/v1.4-*`.
+- `docs/EXTERNAL-EVIDENCE-GATES.md` is the canonical registry for external gate
+  states and clearing conditions.
+- OpenForge is suitable for cautious local-first trial, but live provider,
+  physical Windows/WSL, Feishu developer-console callback, and completed
+  first-user feedback evidence still require real external artifacts.
+- The next product risk is operational: first users and maintainers need a
+  clear, secret-safe loop for running the trial, filing feedback, and deciding
+  whether an outcome unlocks a gate or becomes a follow-up defect.
+- `upload_img/` remains unrelated untracked local data and is outside milestone
+  scope.
 
-## v1.4 Requirements
+## v1.5 Requirements
 
 ### Product Position
 
-- [x] **EVPOS-01**: OpenForge remains a local-first AI CLI control plane; v1.4 does not add hosted collaboration, cloud workers, autonomous remote execution, or Feishu execution authority.
-- [x] **EVPOS-02**: Release/readiness claims are sourced from bounded evidence artifacts, not from the existence of checklists, templates, or mocked tests alone.
-- [x] **EVPOS-03**: Evidence collection defaults to redacted metadata, bounded status fields, commands, timestamps, environment summaries, and artifact links; raw provider payloads, Feishu bodies, terminal transcripts, tokens, and secrets remain excluded.
+- [x] **TRIALOPS-01**: OpenForge remains a local-first AI CLI control plane with
+  AI-native execution traceability; v1.5 does not add hosted collaboration,
+  cloud workers, autonomous remote execution, Feishu execution authority, or
+  Codex Web prompt/turn workflow.
+- [x] **TRIALOPS-02**: v1.5 turns readiness into a first-user operating loop:
+  run trial steps, collect bounded evidence, file feedback, triage outcome, and
+  update gate status only when the required artifact exists.
+- [x] **TRIALOPS-03**: Trial evidence and feedback route through existing
+  canonical paths instead of creating competing source-of-truth documents.
 
-### Evidence Registry
+### Trial Packet
 
-- [x] **EVID-01**: A canonical external evidence gate registry lists live provider, physical Windows/WSL terminal, Feishu developer-console callback, and completed first-user feedback gates.
-- [x] **EVID-02**: Every gate records current state, owner, clearing condition, rerun command or runbook, allowed artifact shape, redaction rules, and target report or issue destination.
-- [x] **EVID-03**: Milestone and phase closeouts must reference the registry and may only move a gate to `Pass` when the required artifact exists.
+- [x] **TRIALOPS-04**: A minimum completed first-user trial packet must include
+  affected surface, severity, owner, disposition or next action, environment
+  summary, reproduction detail, diagnostics status or unavailable reason,
+  follow-up route or no-action rationale, and redaction review.
+- [x] **TRIALOPS-05**: Trial outcomes must map to one of: gate-clearing evidence,
+  preserved caveat/blocker, product defect, documentation/support gap, or
+  explicit no-action rationale.
+- [x] **TRIALOPS-06**: Trial routes must preserve links to issue #3
+  (`LIVE-PROVIDER`), issue #4 (`WINDOWS-WSL`), issue #5
+  (`FIRST-USER-FEEDBACK`), and the Feishu callback evidence report or a future
+  public-callback artifact.
 
-### Live Provider Evidence
+### Evidence Safety
 
-- [x] **PROV-01**: A disposable live provider smoke run can be recorded with explicit provider, model id, command, bounded result, and redacted artifact path.
-- [x] **PROV-02**: Provider evidence distinguishes credential failure, unsupported model, endpoint/network failure, timeout, provider outage, and product-contract failure.
-- [x] **PROV-03**: Codex subscription-managed launch paths remain isolated from provider API-key/model override evidence.
+- [x] **TRIALSAFE-01**: `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and
+  `FIRST-USER-FEEDBACK` keep their v1.4 states unless
+  `docs/EXTERNAL-EVIDENCE-GATES.md` clearing conditions are satisfied.
+- [x] **TRIALSAFE-02**: First-user trial guidance must not ask users to paste
+  API keys, JWTs, attach tokens, raw terminal transcripts, raw provider
+  payloads, raw Feishu bodies, local databases, `.env` files, or private AI CLI
+  config.
+- [x] **TRIALSAFE-03**: Any automation proposed later in v1.5 must produce
+  bounded metadata or prefilled issue/report fields only; raw evidence blob
+  storage remains out of scope.
 
-### Feishu Callback Evidence
+### Phase 21 Planning Closure
 
-- [x] **FEI-LIVE-01**: Feishu developer-console URL verification evidence records either a real public HTTPS callback attempt or a precise blocker with rerun steps.
-- [x] **FEI-LIVE-02**: Feishu callback evidence records raw-body signature, replay/rate, tenant allowlist, user mapping, encrypted-payload, and redaction boundaries through local regression when live console verification is blocked.
-- [x] **FEI-LIVE-03**: Feishu free-form text remains unable to approve pending actions, send terminal input, or directly mutate Project Manager state.
-
-### Platform And First-User Evidence
-
-- [x] **UXE-01**: Physical Windows/WSL evidence is recorded as a precise `Caveat` with current-host metadata and a real-host rerun path because no physical Windows/WSL host was available.
-- [x] **UXE-02**: First-user feedback is recorded as a precise `Caveat` with template/issue-form collection paths because no completed redacted feedback packet was attached.
-- [x] **UXE-03**: Support and trial docs route users to evidence gates without asking them to paste secrets, raw terminal content, or private project data.
-
-### Release Closeout
-
-- [x] **REL-01**: v1.4 closeout produces a `Pass`/`Caveat`/`Blocked` matrix for every external evidence gate with artifact links or precise blockers.
-- [x] **REL-02**: Public/open-source docs continue to avoid overclaiming and surface any remaining caveats with rerun paths.
+- [x] **PLAN-21-01**: Active source-of-truth docs select v1.5 and Phase 21
+  instead of leaving the next milestone unselected.
+- [x] **PLAN-21-02**: Phase 21 has context, design, and implementation plan
+  artifacts with exact files and verification commands.
+- [x] **PLAN-21-03**: Phase 21 verification proves milestone references,
+  preserved external gate states, and secret-safe evidence wording.
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| New runtime capability | v1.4 is evidence closure and release trust work. |
+| New runtime capability | v1.5 starts with trial operations, not product surface expansion. |
 | Hosted collaboration, cloud deployment, billing, marketplace, telemetry | Requires separate architecture and security review. |
 | Autonomous remote execution or unattended coding loops | Changes authority boundaries and threat model. |
 | Feishu free-form approvals or terminal input | Feishu remains controlled collaboration ingress only. |
+| Codex app-server Web turn input | The feature-flag prototype remains default-disabled and not user-facing. |
 | Raw evidence blob storage | Evidence remains bounded references and redacted artifacts. |
-| Clearing external caveats without artifacts | v1.4 exists specifically to prevent false pass claims. |
+| Clearing external caveats without artifacts | The v1.4 registry remains authoritative. |
 
 ## Traceability
 
 | Requirement | Target Phase | Status |
 |-------------|--------------|--------|
-| EVPOS-01 | Phase 17 | Complete |
-| EVPOS-02 | Phase 17 | Complete |
-| EVPOS-03 | Phase 17 | Complete |
-| EVID-01 | Phase 17 | Complete |
-| EVID-02 | Phase 17 | Complete |
-| EVID-03 | Phase 17 | Complete |
-| PROV-01 | Phase 18 | Complete (Caveat) |
-| PROV-02 | Phase 18 | Complete (Caveat) |
-| PROV-03 | Phase 18 | Complete |
-| FEI-LIVE-01 | Phase 19 | Complete (Blocked) |
-| FEI-LIVE-02 | Phase 19 | Complete (Blocked) |
-| FEI-LIVE-03 | Phase 19 | Complete (Blocked) |
-| UXE-01 | Phase 20 | Complete (Caveat) |
-| UXE-02 | Phase 20 | Complete (Caveat) |
-| UXE-03 | Phase 20 | Complete |
-| REL-01 | Phase 20 | Complete (Caveat) |
-| REL-02 | Phase 20 | Complete |
+| TRIALOPS-01 | Phase 21 | Complete |
+| TRIALOPS-02 | Phase 21 | Complete |
+| TRIALOPS-03 | Phase 21 | Complete |
+| TRIALOPS-04 | Phase 21 | Complete |
+| TRIALOPS-05 | Phase 21 | Complete |
+| TRIALOPS-06 | Phase 21 | Complete |
+| TRIALSAFE-01 | Phase 21 | Complete |
+| TRIALSAFE-02 | Phase 21 | Complete |
+| TRIALSAFE-03 | Phase 21 | Complete |
+| PLAN-21-01 | Phase 21 | Complete |
+| PLAN-21-02 | Phase 21 | Complete |
+| PLAN-21-03 | Phase 21 | Complete |
 
 **Coverage:**
-- v1.4 requirements: 17 total
-- Mapped to phases: 17
+- v1.5 requirements: 12 total
+- Mapped to phases: 12
 - Unmapped: 0
 
 ---
-*Requirements closed: 2026-05-29 with v1.4 external evidence closeout.*
+*Requirements completed: 2026-05-29 for Phase 21 First-User Trial Operations foundation.*

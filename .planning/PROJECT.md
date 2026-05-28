@@ -4,15 +4,16 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is post-v1.4 milestone selection. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix.
+The current product stage is v1.5 First-User Trial Operations. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix. v1.5 turns that evidence posture into an operator-run first-user trial loop.
 
 ## Current Milestone
 
-v1.4 External Evidence Closure is complete and archived. The next milestone is not selected yet.
+v1.5 First-User Trial Operations has completed its foundation phase. The
+remaining work is real first-user trial packet collection and triage.
 
 **Last shipped:** v1.4 External Evidence Closure on 2026-05-29.
 
-**Next milestone goal:** TBD. Candidate directions are real external evidence collection, first-user trial execution, or a focused product slice that keeps local-first control and traceability boundaries intact.
+**Current milestone goal:** Make first-user trial execution auditable: run the local-first trial, collect redacted evidence, route feedback, and decide whether each result clears a gate, remains a caveat/blocker, or becomes a follow-up defect.
 
 **Shipped v1.2 features:**
 - Project detail Web surface for project-manager goal, work item, status, evidence, and ledger state.
@@ -65,15 +66,20 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - [x] v1.3 adds safe project-rooted workspace context and bounded file/session/terminal evidence references.
 - [x] v1.3 simplifies provider setup and adds actionable provider/model health checks while preserving Codex subscription boundaries.
 - [x] v1.3 adds open-source readiness docs, root contribution/security entry points, issue templates, and caveat-preserving closeout.
-
-### Active
-
 - [x] v1.4 creates a canonical external evidence gate registry before any preserved caveat can be cleared.
 - [x] v1.4 records live provider evidence with disposable credential/model metadata or a precise blocker.
 - [x] v1.4 records Feishu developer-console callback evidence with public HTTPS routing or a precise blocker.
 - [x] v1.4 records physical Windows/WSL terminal evidence from a real host or a precise blocker.
 - [x] v1.4 maps completed first-user feedback into severity, owner, disposition, and follow-up routing, or keeps the missing packet as a caveat.
 - [x] v1.4 publishes a release closeout matrix that keeps any remaining external gaps visible.
+
+### Active
+
+- [x] v1.5 selects First-User Trial Operations as the next milestone without expanding runtime authority.
+- [x] v1.5 defines a minimum first-user trial packet with affected surface, severity, owner, disposition, environment, reproduction, diagnostics status, follow-up route, and redaction review.
+- [x] v1.5 routes trial outcomes through the existing external evidence registry, trial feedback docs, GitHub issue template, and follow-up issue/report destinations.
+- [x] v1.5 preserves `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and `FIRST-USER-FEEDBACK` states until registry-required artifacts exist.
+- [x] v1.5 keeps first-user guidance secret-safe and avoids raw evidence blob storage.
 
 ### Out of Scope
 
@@ -95,10 +101,15 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - v1.2 shipped the Project Manager Web workflow and archived its roadmap, requirements, phase artifacts, UAT, security, validation, and verification evidence under `.planning/milestones/`.
 - v1.3 was selected from the PM review audit triage: AI-native project management is now the near-term differentiator, but only as an execution traceability layer on top of the local AI CLI control plane.
 - v1.3 shipped and is archived under `.planning/milestones/v1.3-*`.
-- External v1.1 caveats remain tracked in the readiness reports and should not be silently reclassified during v1.4.
+- External evidence caveats remain tracked in the readiness reports and gate
+  registry and should not be silently reclassified during v1.5.
 - Phase 18 reran `pnpm smoke:copilot-provider`; no disposable provider credential was available, so `LIVE-PROVIDER` remains `Caveat` with `missing_provider_credential`.
 - Phase 19 reran Feishu CLI preflight, `pnpm smoke:feishu-public-webhook`, Feishu/Copilot regression, and Gateway typecheck. Bot CLI preflight and local regression passed, but `FEISHU-CALLBACK` remains `Blocked` because no public HTTPS Gateway route, operator webhook setup environment, or Feishu developer-console URL verification action was available.
 - Phase 20 closed v1.4 with `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`; `WINDOWS-WSL` and `FIRST-USER-FEEDBACK` remain `Caveat` because no real WSL host or completed feedback packet was available.
+- v1.5 selected First-User Trial Operations. Phase 21 defined the trial packet,
+  evidence routing, and verification loop; updated feedback intake docs; and
+  preserved all external gate states. The next task is collecting a real
+  first-user trial packet.
 - Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints
@@ -129,6 +140,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Promote project-manager ledger to Web before remote runtime work | The backend ledger is already tenant-scoped and audited, but first users need a visible project workflow before higher-risk remote execution | Good - v1.2 shipped project-context Project Manager UI with evidence, ledger, and handoff gates |
 | Treat AI-native project management as execution traceability, not generic PM | The product differentiation is linking prompts, approvals, terminal context, evidence, and ledger state to AI CLI work | Selected for v1.3 |
 | Close external evidence before expanding scope | Open-source readiness exposes the repository, but live provider, Windows/WSL, Feishu callback, and first-user feedback still need real artifacts | Shipped in v1.4 as truthful caveat/blocker closeout |
+| Operationalize first-user trial before runtime expansion | The remaining risk is evidence collection and user feedback routing, not another broad runtime surface | Selected for v1.5 |
 
 ## Evolution
 
@@ -148,4 +160,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-29 after closing v1.4 External Evidence Closure.*
+*Last updated: 2026-05-29 after completing Phase 21 First-User Trial Operations foundation.*

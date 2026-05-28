@@ -19,6 +19,12 @@
   typecheck, then recorded `FEISHU-CALLBACK` as `Blocked`; Phase 20 published
   `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`, preserving
   `WINDOWS-WSL` and `FIRST-USER-FEEDBACK` as `Caveat`.
+- v1.5 First-User Trial Operations completed its Phase 21 foundation. Phase 21
+  selected the next milestone, defined the first-user trial packet, evidence
+  routing, and gate-preserving verification loop, updated the first-user
+  feedback template and GitHub issue form, removed first-user browser-token
+  fallback guidance, and kept all external gates caveated or blocked until real
+  artifacts exist.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -127,9 +133,10 @@
 
 ## Next Work
 
-1. Select the next milestone. Candidate directions are real external evidence
-   collection, first-user trial execution, or a focused product slice that keeps
-   local-first control and traceability boundaries intact.
+1. Use the v1.5 trial packet shape for the next real first-user run: affected
+   surface, severity, owner, disposition or next action, environment summary,
+   reproduction detail, diagnostics status, follow-up route or no-action
+   rationale, and redaction review.
 2. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,
    operator webhook setup environment, and Feishu developer-console URL
    verification are available. Phase 19 proved bot CLI preflight and local
