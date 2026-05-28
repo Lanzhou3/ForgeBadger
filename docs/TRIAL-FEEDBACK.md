@@ -42,6 +42,17 @@ Passing route validation only means issue #3, #4, and #5 are available for
 triage links. It does not collect first-user evidence or clear any external
 gate.
 
+Before a real collection round, maintainers can run the complete readiness
+preflight:
+
+```bash
+pnpm trial:readiness-validate
+```
+
+Passing readiness only means the trial intake materials, issue routes, and gate
+registry are aligned. It does not collect first-user evidence or clear any
+external gate.
+
 ## Summary
 
 - Result: pass / pass with caveats / blocked

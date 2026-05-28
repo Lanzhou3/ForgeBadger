@@ -257,7 +257,8 @@
   Markdown feedback template, and trial runbook.
 - [x] **MATERIALS-02**: The checklist contract must preserve the first-user
   entry-point wording, external gate registry reference, `pnpm
-  trial:intake-validate`, `pnpm trial:feedback-audit`, `pnpm
+  trial:intake-validate`, `pnpm trial:issue-routes-validate`,
+  `pnpm trial:readiness-validate`, `pnpm trial:feedback-audit`, `pnpm
   evidence:gates-validate`, `FIRST-USER-FEEDBACK`, follow-up routing, and
   redaction review anchors.
 - [x] **MATERIALS-03**: Checklist validation must reject unsafe raw-evidence
@@ -301,6 +302,31 @@
 - [x] **PLAN-30-03**: Phase 30 verification proves red/green route tests, live
   route preflight, script harness coverage, docs references, and unchanged
   external gate states.
+
+### Trial Readiness Preflight Bundle
+
+- [x] **READY-01**: A maintainer-run command must aggregate trial intake
+  validation, GitHub issue-route validation, and external evidence gate
+  registry validation before real collection starts.
+- [x] **READY-02**: The readiness command must return per-check status,
+  prefixed aggregate errors, and next-step guidance.
+- [x] **READY-03**: CI must cover the readiness aggregate contract with mocked
+  validator results so CI does not depend on live GitHub network/auth state.
+- [x] **READYSAFE-01**: Readiness validation must be read-only and must not
+  collect feedback, submit GitHub issues, attach artifacts, or clear any
+  external evidence gate. The aggregate must fail if a subcheck claims
+  gate-clearing evidence.
+
+### Phase 31 Planning Closure
+
+- [x] **PLAN-31-01**: Phase 31 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-31-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the trial readiness preflight bundle
+  while keeping real first-user packet collection pending.
+- [x] **PLAN-31-03**: Phase 31 verification proves red/green readiness tests,
+  live readiness preflight, script harness coverage, docs references, and
+  unchanged external gate states.
 
 ## Out of Scope
 
@@ -395,11 +421,18 @@
 | PLAN-30-01 | Phase 30 | Complete |
 | PLAN-30-02 | Phase 30 | Complete |
 | PLAN-30-03 | Phase 30 | Complete |
+| READY-01 | Phase 31 | Complete |
+| READY-02 | Phase 31 | Complete |
+| READY-03 | Phase 31 | Complete |
+| READYSAFE-01 | Phase 31 | Complete |
+| PLAN-31-01 | Phase 31 | Complete |
+| PLAN-31-02 | Phase 31 | Complete |
+| PLAN-31-03 | Phase 31 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 77 total
-- Mapped to phases: 77
+- v1.5 requirements: 84 total
+- Mapped to phases: 84
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 30 Trial Issue Route Preflight.*
+*Requirements updated: 2026-05-29 after Phase 31 Trial Readiness Preflight Bundle.*

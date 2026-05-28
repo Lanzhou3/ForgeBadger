@@ -192,6 +192,8 @@ Forbidden Project Manager evidence content:
       keep the output with maintainer handoff notes.
 - [ ] Maintainer preflight, if routing to existing GitHub follow-up issues:
       run `pnpm trial:issue-routes-validate`.
+- [ ] Maintainer readiness bundle before a real collection round:
+      run `pnpm trial:readiness-validate`.
 - [ ] Optional: generate a local draft with
       `pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md`
       and complete/redact it before sharing.

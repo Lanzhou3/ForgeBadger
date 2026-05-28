@@ -2,7 +2,7 @@
 
 ## v1.5 First-User Trial Operations (Active: 2026-05-29)
 
-**Phases planned:** 10 phases, 10 plans
+**Phases planned:** 11 phases, 11 plans
 
 **Goal:**
 
@@ -21,6 +21,7 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - [x] Phase 28: External Evidence Gate Drift Guard — 1/1 plans complete.
 - [x] Phase 29: Trial Materials Consistency Guard — 1/1 plans complete.
 - [x] Phase 30: Trial Issue Route Preflight — 1/1 plans complete.
+- [x] Phase 31: Trial Readiness Preflight Bundle — 1/1 plans complete.
 
 **Acceptance boundary:**
 
@@ -48,6 +49,8 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - Trial issue-route validation proves the referenced GitHub follow-up issues
   are currently open, but it is not a substitute for a completed, redacted,
   linked first-user packet.
+- Trial readiness validation aggregates local preflights, but it is not a
+  substitute for a completed, redacted, linked first-user packet.
 
 ---
 

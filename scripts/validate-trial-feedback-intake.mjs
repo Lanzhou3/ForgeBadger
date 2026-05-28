@@ -107,6 +107,7 @@ export const REQUIRED_CHECKLIST_PHRASES = [
   "docs/EXTERNAL-EVIDENCE-GATES.md",
   "`pnpm trial:intake-validate`",
   "`pnpm trial:issue-routes-validate`",
+  "`pnpm trial:readiness-validate`",
   "`pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md`",
   "`pnpm evidence:gates-validate`",
   "`FIRST-USER-FEEDBACK`",

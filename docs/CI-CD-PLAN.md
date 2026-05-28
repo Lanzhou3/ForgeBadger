@@ -12,7 +12,7 @@ terminal.
 
 ```bash
 pnpm install --frozen-lockfile
-node --test scripts/validate-external-evidence-gates.test.mjs scripts/validate-trial-issue-routes.test.mjs scripts/audit-trial-feedback-packet.test.mjs scripts/create-trial-feedback-draft.test.mjs scripts/validate-trial-feedback-intake.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
+node --test scripts/validate-external-evidence-gates.test.mjs scripts/validate-trial-issue-routes.test.mjs scripts/validate-trial-readiness.test.mjs scripts/audit-trial-feedback-packet.test.mjs scripts/create-trial-feedback-draft.test.mjs scripts/validate-trial-feedback-intake.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
 pnpm trial:intake-validate
 pnpm evidence:gates-validate
 pnpm -r typecheck
@@ -25,9 +25,10 @@ git diff --check
 Acceptance:
 
 - Script-level smoke harness tests pass, including the external evidence gate
-  validator, trial issue-route preflight contract, trial feedback packet audit,
-  draft generator, intake contract validator, tokenless runbook diagnostics
-  contract validator, and trial checklist consistency guard.
+  validator, trial issue-route preflight contract, trial readiness bundle,
+  trial feedback packet audit, draft generator, intake contract validator,
+  tokenless runbook diagnostics contract validator, and trial checklist
+  consistency guard.
 - `pnpm trial:intake-validate` and `pnpm evidence:gates-validate` pass before
   trial material or external gate registry changes are accepted.
 - TypeScript emits no type errors.
@@ -35,6 +36,15 @@ Acceptance:
 - Real tmux integration tests pass when tmux is installed.
 - Provider SSOT and Codex subscription-boundary regressions pass.
 - `git diff --check` reports no whitespace errors.
+
+Maintainer-only live preflight:
+
+```bash
+pnpm trial:readiness-validate
+```
+
+This command requires GitHub CLI access for the live issue-route check. It is
+not a CI gate and does not clear external evidence gates.
 
 ### Build Checks
 

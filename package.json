@@ -18,6 +18,7 @@
     "test": "pnpm -r test",
     "trial:intake-validate": "node scripts/validate-trial-feedback-intake.mjs",
     "trial:issue-routes-validate": "node scripts/validate-trial-issue-routes.mjs",
+    "trial:readiness-validate": "node scripts/validate-trial-readiness.mjs",
     "trial:feedback-audit": "node scripts/audit-trial-feedback-packet.mjs",
     "trial:feedback-draft": "node scripts/create-trial-feedback-draft.mjs",
     "typecheck": "pnpm -r typecheck",

@@ -79,6 +79,11 @@
   (`LIVE-PROVIDER`), #4 (`WINDOWS-WSL`), and #5
   (`FIRST-USER-FEEDBACK`) are open and correctly routed, while returning
   `gateClearingEvidence: false`.
+- Phase 31 added `scripts/validate-trial-readiness.mjs`,
+  `scripts/validate-trial-readiness.test.mjs`, and
+  `pnpm trial:readiness-validate`. The live preflight aggregates trial intake,
+  issue-route, and external gate registry validators before a real collection
+  round, while returning `gateClearingEvidence: false`.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -188,7 +193,7 @@
 ## Next Work
 
 1. Use the validated v1.5 tokenless runbook, checklist, trial packet intake,
-   optional feedback draft helper, issue-route preflight, packet audit helper,
+   optional feedback draft helper, readiness preflight, packet audit helper,
    intake material validator, and external gate validator for the next real
    first-user run:
    affected surface, severity, owner,

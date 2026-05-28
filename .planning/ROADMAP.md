@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 30 trial issue route preflight complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 31 trial readiness preflight bundle complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -266,8 +266,8 @@ Plans:
 **Success criteria:**
 
 1. The trial intake validator reads `docs/TRIAL-CHECKLIST.md` by default.
-2. Checklist drift tests reject missing intake-validation, packet-audit, and
-   external-gate-validation commands.
+2. Checklist drift tests reject missing intake-validation, issue-route,
+   readiness, packet-audit, and external-gate-validation commands.
 3. Checklist safety checks reject unsafe raw-evidence wording and
    non-negated browser-token guidance.
 4. Trial docs name `pnpm trial:intake-validate` as a local
@@ -297,6 +297,33 @@ Plans:
 3. The command reports `gateClearingEvidence: false`.
 4. CI covers the route contract through mocked issue data, not live GitHub
    mutation or network-dependent release claims.
+5. Trial docs describe the preflight as read-only and non-gate-clearing.
+
+### Phase 31: Trial Readiness Preflight Bundle
+
+**Goal:** Add a maintainer preflight that runs trial intake, issue-route, and
+external gate registry checks together before a real first-user collection
+round.
+
+**Requirements:** READY-01, READY-02, READY-03, READYSAFE-01,
+PLAN-31-01, PLAN-31-02, PLAN-31-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 31-01-PLAN.md — readiness validator, live preflight, CI harness test,
+  docs sync, and gate-preserving verification.
+
+**Success criteria:**
+
+1. A root command runs trial intake, issue-route, and external gate registry
+   validation together.
+2. The command returns per-check status, prefixed errors, next steps, and
+   `gateClearingEvidence: false`.
+3. The command fails if any subcheck claims gate-clearing evidence.
+4. CI covers the aggregate readiness contract through mocked validators, not
+   live GitHub network/auth state.
 5. Trial docs describe the preflight as read-only and non-gate-clearing.
 
 ## Archived Milestones
@@ -419,6 +446,7 @@ Full archive:
 | 28. External Evidence Gate Drift Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 29. Trial Materials Consistency Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 30. Trial Issue Route Preflight | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 31. Trial Readiness Preflight Bundle | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

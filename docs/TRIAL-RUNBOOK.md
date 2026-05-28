@@ -49,6 +49,18 @@ This requires GitHub CLI access to `Lanzhou3/OpenForge` and checks that issue
 It does not create or update GitHub issues and does not clear any external
 gate.
 
+To run the local intake, issue-route, and gate-registry preflights together,
+use:
+
+```bash
+pnpm trial:readiness-validate
+```
+
+This command is also read-only. Passing readiness means the trial materials,
+route issues, and gate registry are aligned for a real collection round. It
+does not collect feedback, submit issues, attach artifacts, or clear any
+external gate.
+
 The primary path is the npm/CLI startup. Source startup is a fallback for local
 debugging and contribution.
 
@@ -316,6 +328,12 @@ rerun:
 
 ```bash
 pnpm trial:issue-routes-validate
+```
+
+Before a real collection round, a maintainer can run all preflight validators:
+
+```bash
+pnpm trial:readiness-validate
 ```
 
 Do not upload secrets, API keys, plaintext credentials, local private keys, or
