@@ -58,7 +58,7 @@ Plans:
 Plans:
 
 - [x] 13-01-PLAN.md — Backend edit/delete/batch status contract, ledger/audit events, Web API helpers.
-- [ ] 13-02-PLAN.md — Board view, edit/delete dialogs, and batch status controls in the Web Project Manager surface.
+- [x] 13-02-PLAN.md — Board view, edit/delete dialogs, and batch status controls in the Web Project Manager surface.
 - [ ] 13-03-PLAN.md — Browser coverage, docs closeout, and dense table/detail regression verification.
 
 **Success criteria:**
@@ -172,7 +172,7 @@ Full archive:
 | 10. Goal And Work Item Operations | v1.2 | 3/3 | Complete   | 2026-05-22 |
 | 11. Evidence, Ledger, And Acceptance Gates | v1.2 | 3/3 | Complete   | 2026-05-22 |
 | 12. Copilot Project-Manager Traceability | v1.3 | 4/4 | Complete    | 2026-05-22 |
-| 13. Project Manager Board Workflow | v1.3 | 1/3 | In Progress | — |
+| 13. Project Manager Board Workflow | v1.3 | 2/3 | In Progress | — |
 | 14. Terminal Workspace Context | v1.3 | 0/0 | Planned | — |
 | 15. Model Provider Setup And Health | v1.3 | 0/0 | Planned | — |
 | 16. Open Source Readiness Packet | v1.3 | 0/0 | Planned | — |

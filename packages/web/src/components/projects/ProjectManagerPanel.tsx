@@ -9,8 +9,12 @@ import {
   ClipboardList,
   Eye,
   History,
+  LayoutDashboard,
+  Pencil,
   Plus,
   RefreshCw,
+  Table2,
+  Trash2,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -51,12 +55,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { useLanguage } from "@/hooks/use-language";
 import {
   attachProjectManagerWorkItemEvidence,
+  batchUpdateProjectManagerWorkItemStatuses,
+  deleteProjectManagerWorkItem,
   GatewayApiError,
   getProjectManagerGoal,
   listProjectManagerLedger,
   listProjectManagerWorkItems,
   createProjectManagerWorkItem,
   updateProjectManagerGoal,
+  updateProjectManagerWorkItem,
   updateProjectManagerWorkItemStatus,
   type ProjectManagerEvidenceRef,
   type ProjectManagerLedgerEvent,
@@ -64,6 +71,7 @@ import {
   type ProjectManagerLedgerEventType,
   type ProjectManagerGoal,
   type ProjectManagerWorkItemInput,
+  type ProjectManagerWorkItemUpdateInput,
   type ProjectManagerGoalInput,
   type ProjectManagerWorkItem,
   type ProjectManagerWorkItemStatusInput,
@@ -88,6 +96,7 @@ interface GoalDraft {
 }
 
 type WorkItemStatusFilter = ProjectManagerWorkItemStatus | "all";
+type WorkItemViewMode = "board" | "table";
 
 interface WorkItemDraft {
   title: string;
@@ -110,6 +119,13 @@ interface EvidenceDraft {
   label: string;
   ref: string;
   path: string;
+}
+
+interface EditWorkItemDraft {
+  title: string;
+  description: string;
+  priority: string;
+  acceptanceCriteriaText: string;
 }
 
 const WORK_ITEM_LIMIT = 50;
@@ -161,10 +177,19 @@ export function ProjectManagerPanel({
   const [goalDraft, setGoalDraft] = useState<GoalDraft>(() => createGoalDraft(null));
   const [goalFormError, setGoalFormError] = useState<string | null>(null);
   const [workItemStatusFilter, setWorkItemStatusFilter] = useState<WorkItemStatusFilter>("all");
+  const [workItemViewMode, setWorkItemViewMode] = useState<WorkItemViewMode>("board");
+  const [selectedBoardWorkItemIds, setSelectedBoardWorkItemIds] = useState<string[]>([]);
+  const [batchTargetStatus, setBatchTargetStatus] = useState<ProjectManagerWorkItemStatus | "">("");
+  const [batchStatusError, setBatchStatusError] = useState<string | null>(null);
   const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(null);
   const [isCreateWorkItemOpen, setIsCreateWorkItemOpen] = useState(false);
   const [workItemDraft, setWorkItemDraft] = useState<WorkItemDraft>(() => createWorkItemDraft());
   const [createWorkItemError, setCreateWorkItemError] = useState<string | null>(null);
+  const [editingWorkItemId, setEditingWorkItemId] = useState<string | null>(null);
+  const [editWorkItemDraft, setEditWorkItemDraft] = useState<EditWorkItemDraft>(() => createEditWorkItemDraft(null));
+  const [editWorkItemError, setEditWorkItemError] = useState<string | null>(null);
+  const [deletingWorkItemId, setDeletingWorkItemId] = useState<string | null>(null);
+  const [deleteWorkItemError, setDeleteWorkItemError] = useState<string | null>(null);
   const [evidenceDraft, setEvidenceDraft] = useState<EvidenceDraft>(() => createEvidenceDraft());
   const [evidenceAttachError, setEvidenceAttachError] = useState<string | null>(null);
   const [ledgerFilter, setLedgerFilter] = useState<LedgerFilter>("all");
@@ -186,8 +211,8 @@ export function ProjectManagerPanel({
   const goal = goalQuery.data?.goal ?? null;
 
   const workItemsQuery = useQuery({
-    queryKey: ["project-manager", projectId, "work-items", { status: workItemStatusFilter, limit: WORK_ITEM_LIMIT }],
-    queryFn: () => listProjectManagerWorkItems(projectId, createWorkItemQueryParams(workItemStatusFilter)),
+    queryKey: ["project-manager", projectId, "work-items", { limit: WORK_ITEM_LIMIT }],
+    queryFn: () => listProjectManagerWorkItems(projectId, { limit: WORK_ITEM_LIMIT }),
     enabled: canLoad,
     retry: false,
   });
@@ -212,6 +237,12 @@ export function ProjectManagerPanel({
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
     ]);
   };
+  const updateWorkItemsCache = (updater: (items: ProjectManagerWorkItem[]) => ProjectManagerWorkItem[]) => {
+    queryClient.setQueriesData<{ workItems: ProjectManagerWorkItem[] }>(
+      { queryKey: ["project-manager", projectId, "work-items"] },
+      (current) => current ? { workItems: updater(current.workItems) } : current
+    );
+  };
 
   const goalMutation = useMutation({
     mutationFn: (input: ProjectManagerGoalInput) => updateProjectManagerGoal(projectId, input),
@@ -228,10 +259,11 @@ export function ProjectManagerPanel({
 
   const createWorkItemMutation = useMutation({
     mutationFn: (input: ProjectManagerWorkItemInput) => createProjectManagerWorkItem(projectId, input),
-    onSuccess: async () => {
+    onSuccess: async ({ workItem }) => {
       setCreateWorkItemError(null);
       setWorkItemDraft(createWorkItemDraft());
       setIsCreateWorkItemOpen(false);
+      updateWorkItemsCache((items) => [...items.filter((item) => item.id !== workItem.id), workItem]);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
@@ -239,6 +271,62 @@ export function ProjectManagerPanel({
     },
     onError: (error) => {
       setCreateWorkItemError(projectManagerMutationMessage(error, t("projects.projectManagerCreateWorkItemError")));
+    },
+  });
+
+  const editWorkItemMutation = useMutation({
+    mutationFn: ({ input, workItemId }: { input: ProjectManagerWorkItemUpdateInput; workItemId: string }) =>
+      updateProjectManagerWorkItem(projectId, workItemId, input),
+    onSuccess: async ({ workItem }) => {
+      setEditWorkItemError(null);
+      setEditingWorkItemId(null);
+      setEditWorkItemDraft(createEditWorkItemDraft(null));
+      updateWorkItemsCache((items) => items.map((item) => item.id === workItem.id ? workItem : item));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+      ]);
+    },
+    onError: (error) => {
+      setEditWorkItemError(projectManagerMutationMessage(error, t("projects.projectManagerUpdateWorkItemError")));
+    },
+  });
+
+  const deleteWorkItemMutation = useMutation({
+    mutationFn: ({ workItemId }: { workItemId: string }) =>
+      deleteProjectManagerWorkItem(projectId, workItemId, { confirm: true }),
+    onSuccess: async ({ workItem }, variables) => {
+      setDeleteWorkItemError(null);
+      setDeletingWorkItemId(null);
+      setSelectedWorkItemId((current) => current === variables.workItemId ? null : current);
+      setSelectedBoardWorkItemIds((ids) => ids.filter((id) => id !== variables.workItemId));
+      updateWorkItemsCache((items) => items.filter((item) => item.id !== workItem.id));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+      ]);
+    },
+    onError: (error) => {
+      setDeleteWorkItemError(projectManagerMutationMessage(error, t("projects.projectManagerDeleteWorkItemError")));
+    },
+  });
+
+  const batchStatusMutation = useMutation({
+    mutationFn: (input: { updates: Array<{ workItemId: string; status: ProjectManagerWorkItemStatus }> }) =>
+      batchUpdateProjectManagerWorkItemStatuses(projectId, input),
+    onSuccess: async ({ workItems: updatedWorkItems }) => {
+      setBatchStatusError(null);
+      setBatchTargetStatus("");
+      setSelectedBoardWorkItemIds([]);
+      const updatedById = new Map(updatedWorkItems.map((item) => [item.id, item]));
+      updateWorkItemsCache((items) => items.map((item) => updatedById.get(item.id) ?? item));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+      ]);
+    },
+    onError: (error) => {
+      setBatchStatusError(projectManagerMutationMessage(error, t("projects.projectManagerBatchStatusError")));
     },
   });
 
@@ -281,9 +369,19 @@ export function ProjectManagerPanel({
   const isLoading = goalQuery.isLoading || workItemsQuery.isLoading;
   const isRefreshing = goalQuery.isFetching || workItemsQuery.isFetching || ledgerQuery.isFetching;
   const workItems = workItemsQuery.data?.workItems ?? [];
+  const tableWorkItems = filterWorkItemsForTable(workItems, workItemStatusFilter);
   const ledgerEvents = ledgerQuery.data?.events ?? [];
   const filteredLedgerEvents = filterLedgerEvents(ledgerEvents, ledgerFilter);
   const selectedWorkItem = workItems.find((item) => item.id === selectedWorkItemId) ?? null;
+  const editingWorkItem = workItems.find((item) => item.id === editingWorkItemId) ?? null;
+  const deletingWorkItem = workItems.find((item) => item.id === deletingWorkItemId) ?? null;
+  const selectedBoardWorkItems = selectedBoardWorkItemIds
+    .map((id) => workItems.find((item) => item.id === id))
+    .filter((item): item is ProjectManagerWorkItem => Boolean(item));
+  const batchTargetOptions = batchStatusTargets(selectedBoardWorkItems);
+  const effectiveBatchTargetStatus = batchTargetOptions.includes(batchTargetStatus as ProjectManagerWorkItemStatus)
+    ? batchTargetStatus
+    : "";
   const pendingDoneWorkItem = workItems.find((item) => item.id === pendingDoneWorkItemId) ?? null;
 
   useEffect(() => {
@@ -371,6 +469,65 @@ export function ProjectManagerPanel({
 
     setCreateWorkItemError(null);
     createWorkItemMutation.mutate(createWorkItemInput(workItemDraft, title));
+  };
+
+  const openEditWorkItemDialog = (item: ProjectManagerWorkItem) => {
+    setEditWorkItemError(null);
+    setEditWorkItemDraft(createEditWorkItemDraft(item));
+    setEditingWorkItemId(item.id);
+  };
+
+  const saveEditedWorkItem = () => {
+    if (!editingWorkItem) return;
+    const title = editWorkItemDraft.title.trim();
+    if (!title) {
+      setEditWorkItemError(t("projects.projectManagerWorkItemTitleRequired"));
+      return;
+    }
+
+    setEditWorkItemError(null);
+    editWorkItemMutation.mutate({
+      workItemId: editingWorkItem.id,
+      input: createWorkItemUpdateInput(editWorkItemDraft, title),
+    });
+  };
+
+  const openDeleteWorkItemDialog = (item: ProjectManagerWorkItem) => {
+    setDeleteWorkItemError(null);
+    setDeletingWorkItemId(item.id);
+  };
+
+  const confirmDeleteWorkItem = () => {
+    if (!deletingWorkItem) return;
+    setDeleteWorkItemError(null);
+    deleteWorkItemMutation.mutate({ workItemId: deletingWorkItem.id });
+  };
+
+  const toggleBoardWorkItemSelection = (item: ProjectManagerWorkItem, selected: boolean) => {
+    setBatchStatusError(null);
+    setSelectedBoardWorkItemIds((ids) => {
+      if (selected) return ids.includes(item.id) ? ids : [...ids, item.id];
+      return ids.filter((id) => id !== item.id);
+    });
+  };
+
+  const submitBatchStatusChange = () => {
+    if (selectedBoardWorkItems.length === 0) {
+      setBatchStatusError(t("projects.projectManagerBatchStatusSelectionRequired"));
+      return;
+    }
+    if (!effectiveBatchTargetStatus) {
+      setBatchStatusError(t("projects.projectManagerBatchStatusTargetRequired"));
+      return;
+    }
+
+    setBatchStatusError(null);
+    batchStatusMutation.mutate({
+      updates: selectedBoardWorkItems.map((item) => ({
+        workItemId: item.id,
+        status: effectiveBatchTargetStatus,
+      })),
+    });
   };
 
   const attachEvidence = () => {
@@ -467,16 +624,34 @@ export function ProjectManagerPanel({
             onSave={saveGoal}
           />
           <ProjectManagerWorkItemsCard
+            batchStatusError={batchStatusError}
+            batchStatusPending={batchStatusMutation.isPending}
+            batchTargetOptions={batchTargetOptions}
+            batchTargetStatus={effectiveBatchTargetStatus}
             isFetching={workItemsQuery.isFetching}
+            onBatchStatusSubmit={submitBatchStatusChange}
+            onBatchTargetStatusChange={setBatchTargetStatus}
+            onClearSelection={() => {
+              setBatchStatusError(null);
+              setBatchTargetStatus("");
+              setSelectedBoardWorkItemIds([]);
+            }}
             onCreate={openCreateWorkItemDialog}
+            onDelete={openDeleteWorkItemDialog}
+            onEdit={openEditWorkItemDialog}
             onStatusFilterChange={setWorkItemStatusFilter}
             onStatusChange={requestStatusChange}
+            onToggleSelection={toggleBoardWorkItemSelection}
             onViewDetails={(item) => setSelectedWorkItemId(item.id)}
+            selectedWorkItemIds={selectedBoardWorkItemIds}
             statusError={statusMutationError}
             statusFilter={workItemStatusFilter}
             statusMutationPending={statusMutation.isPending}
+            viewMode={workItemViewMode}
+            onViewModeChange={setWorkItemViewMode}
             highlightedWorkItemId={requestedWorkItemId}
             t={t}
+            tableWorkItems={tableWorkItems}
             workItems={workItems}
           />
           <ProjectManagerLedgerCard
@@ -518,6 +693,35 @@ export function ProjectManagerPanel({
         onOpenChange={setIsCreateWorkItemOpen}
         onSave={saveWorkItem}
         open={isCreateWorkItemOpen}
+        t={t}
+      />
+      <EditWorkItemDialog
+        draft={editWorkItemDraft}
+        error={editWorkItemError}
+        isSaving={editWorkItemMutation.isPending}
+        item={editingWorkItem}
+        onDraftChange={setEditWorkItemDraft}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingWorkItemId(null);
+            setEditWorkItemError(null);
+            setEditWorkItemDraft(createEditWorkItemDraft(null));
+          }
+        }}
+        onSave={saveEditedWorkItem}
+        t={t}
+      />
+      <DeleteWorkItemDialog
+        error={deleteWorkItemError}
+        isDeleting={deleteWorkItemMutation.isPending}
+        item={deletingWorkItem}
+        onConfirm={confirmDeleteWorkItem}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeletingWorkItemId(null);
+            setDeleteWorkItemError(null);
+          }
+        }}
         t={t}
       />
       <DoneReasonDialog
@@ -698,31 +902,62 @@ function ProjectManagerGoalCard({
 }
 
 function ProjectManagerWorkItemsCard({
+  batchStatusError,
+  batchStatusPending,
+  batchTargetOptions,
+  batchTargetStatus,
   highlightedWorkItemId,
   isFetching,
+  onBatchStatusSubmit,
+  onBatchTargetStatusChange,
+  onClearSelection,
   onCreate,
+  onDelete,
+  onEdit,
   onStatusFilterChange,
   onStatusChange,
+  onToggleSelection,
   onViewDetails,
+  onViewModeChange,
+  selectedWorkItemIds,
   statusError,
   statusFilter,
   statusMutationPending,
+  tableWorkItems,
+  viewMode,
   workItems,
   t,
 }: {
+  batchStatusError: string | null;
+  batchStatusPending: boolean;
+  batchTargetOptions: ProjectManagerWorkItemStatus[];
+  batchTargetStatus: ProjectManagerWorkItemStatus | "";
   highlightedWorkItemId?: string | null;
   isFetching: boolean;
+  onBatchStatusSubmit: () => void;
+  onBatchTargetStatusChange: (status: ProjectManagerWorkItemStatus | "") => void;
+  onClearSelection: () => void;
   onCreate: () => void;
+  onDelete: (item: ProjectManagerWorkItem) => void;
+  onEdit: (item: ProjectManagerWorkItem) => void;
   onStatusFilterChange: (status: WorkItemStatusFilter) => void;
   onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
+  onToggleSelection: (item: ProjectManagerWorkItem, selected: boolean) => void;
   onViewDetails: (item: ProjectManagerWorkItem) => void;
+  onViewModeChange: (mode: WorkItemViewMode) => void;
+  selectedWorkItemIds: string[];
   statusError: string | null;
   statusFilter: WorkItemStatusFilter;
   statusMutationPending: boolean;
+  tableWorkItems: ProjectManagerWorkItem[];
+  viewMode: WorkItemViewMode;
   workItems: ProjectManagerWorkItem[];
   t: Translate;
 }) {
-  const isFilterEmpty = statusFilter !== "all" && workItems.length === 0;
+  const isFilterEmpty = statusFilter !== "all" && tableWorkItems.length === 0;
+  const selectedWorkItemCount = selectedWorkItemIds.filter((id) =>
+    workItems.some((item) => item.id === id)
+  ).length;
 
   return (
     <Card>
@@ -731,7 +966,27 @@ function ProjectManagerWorkItemsCard({
           <ClipboardList className="size-4" />
           {t("projects.projectManagerWorkItems")}
         </CardTitle>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+          <div className="inline-flex rounded-md border border-border/70 bg-muted/20 p-1">
+            <Button
+              size="sm"
+              variant={viewMode === "board" ? "default" : "ghost"}
+              aria-pressed={viewMode === "board"}
+              onClick={() => onViewModeChange("board")}
+            >
+              <LayoutDashboard className="mr-2 size-4" />
+              {t("projects.projectManagerBoard")}
+            </Button>
+            <Button
+              size="sm"
+              variant={viewMode === "table" ? "default" : "ghost"}
+              aria-pressed={viewMode === "table"}
+              onClick={() => onViewModeChange("table")}
+            >
+              <Table2 className="mr-2 size-4" />
+              {t("projects.projectManagerTable")}
+            </Button>
+          </div>
           <div className="flex items-center gap-2">
             <Label htmlFor="project-manager-work-item-filter" className="text-xs text-muted-foreground">
               {t("projects.projectManagerFilterByStatus")}
@@ -763,6 +1018,11 @@ function ProjectManagerWorkItemsCard({
             {statusError}
           </p>
         )}
+        {batchStatusError && (
+          <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {batchStatusError}
+          </p>
+        )}
         {workItems.length === 0 ? (
           <EmptyState
             title={isFilterEmpty
@@ -772,60 +1032,331 @@ function ProjectManagerWorkItemsCard({
               ? t("projects.projectManagerFilterEmptyBody")
               : t("projects.projectManagerNoWorkItemsBody")}
           />
+        ) : viewMode === "board" ? (
+          <ProjectManagerWorkItemBoard
+            batchStatusPending={batchStatusPending}
+            batchTargetOptions={batchTargetOptions}
+            batchTargetStatus={batchTargetStatus}
+            highlightedWorkItemId={highlightedWorkItemId}
+            onBatchStatusSubmit={onBatchStatusSubmit}
+            onBatchTargetStatusChange={onBatchTargetStatusChange}
+            onClearSelection={onClearSelection}
+            onDelete={onDelete}
+            onEdit={onEdit}
+            onStatusChange={onStatusChange}
+            onToggleSelection={onToggleSelection}
+            onViewDetails={onViewDetails}
+            selectedWorkItemCount={selectedWorkItemCount}
+            selectedWorkItemIds={selectedWorkItemIds}
+            statusMutationPending={statusMutationPending}
+            t={t}
+            workItems={workItems}
+          />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("common.name")}</TableHead>
-                <TableHead>{t("common.status")}</TableHead>
-                <TableHead>{t("projects.projectManagerPriority")}</TableHead>
-                <TableHead>{t("projects.projectManagerEvidenceRefs")}</TableHead>
-                <TableHead>{t("projects.projectManagerUpdated")}</TableHead>
-                <TableHead className="text-right">{t("common.actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {workItems.map((item) => (
-                <TableRow
-                  key={item.id}
-                  className={cn(
-                    item.id === highlightedWorkItemId && "border-primary/60 bg-primary/5"
-                  )}
-                >
-                  <TableCell className="max-w-[240px] whitespace-normal break-words font-medium">
-                    {item.title}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={statusBadgeVariant(item.status)}>
-                      {statusLabel(item.status, t)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{item.priority}</TableCell>
-                  <TableCell className="font-mono text-xs tabular-nums">{item.evidenceRefCount}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {formatTimestamp(item.updatedAt)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex flex-col justify-end gap-2 sm:flex-row">
-                      <Button size="sm" variant="outline" onClick={() => onViewDetails(item)}>
-                        <Eye className="mr-2 size-4" />
-                        {t("projects.projectManagerViewDetails")}
-                      </Button>
-                      <ProjectManagerStatusActions
-                        disabled={statusMutationPending}
-                        item={item}
-                        onStatusChange={onStatusChange}
-                        t={t}
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          tableWorkItems.length === 0 ? (
+            <EmptyState
+              title={t("projects.projectManagerFilterEmptyTitle")}
+              body={t("projects.projectManagerFilterEmptyBody")}
+            />
+          ) : (
+            <ProjectManagerWorkItemTable
+              highlightedWorkItemId={highlightedWorkItemId}
+              onStatusChange={onStatusChange}
+              onViewDetails={onViewDetails}
+              statusMutationPending={statusMutationPending}
+              t={t}
+              workItems={tableWorkItems}
+            />
+          )
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function ProjectManagerWorkItemBoard({
+  batchStatusPending,
+  batchTargetOptions,
+  batchTargetStatus,
+  highlightedWorkItemId,
+  onBatchStatusSubmit,
+  onBatchTargetStatusChange,
+  onClearSelection,
+  onDelete,
+  onEdit,
+  onStatusChange,
+  onToggleSelection,
+  onViewDetails,
+  selectedWorkItemCount,
+  selectedWorkItemIds,
+  statusMutationPending,
+  t,
+  workItems,
+}: {
+  batchStatusPending: boolean;
+  batchTargetOptions: ProjectManagerWorkItemStatus[];
+  batchTargetStatus: ProjectManagerWorkItemStatus | "";
+  highlightedWorkItemId?: string | null;
+  onBatchStatusSubmit: () => void;
+  onBatchTargetStatusChange: (status: ProjectManagerWorkItemStatus | "") => void;
+  onClearSelection: () => void;
+  onDelete: (item: ProjectManagerWorkItem) => void;
+  onEdit: (item: ProjectManagerWorkItem) => void;
+  onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
+  onToggleSelection: (item: ProjectManagerWorkItem, selected: boolean) => void;
+  onViewDetails: (item: ProjectManagerWorkItem) => void;
+  selectedWorkItemCount: number;
+  selectedWorkItemIds: string[];
+  statusMutationPending: boolean;
+  t: Translate;
+  workItems: ProjectManagerWorkItem[];
+}) {
+  return (
+    <div className="space-y-3" data-testid="project-manager-board">
+      <div className="flex flex-col gap-3 rounded-md border border-border/70 bg-muted/10 p-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="text-sm font-medium">{t("projects.projectManagerBatchActions")}</div>
+          <p className="text-xs text-muted-foreground">
+            {t("projects.projectManagerSelected")}: {selectedWorkItemCount}
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="space-y-1">
+            <Label htmlFor="project-manager-batch-status" className="text-xs text-muted-foreground">
+              {t("projects.projectManagerBatchTargetStatus")}
+            </Label>
+            <select
+              id="project-manager-batch-status"
+              className="h-9 min-w-48 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
+              value={batchTargetStatus}
+              disabled={batchStatusPending || selectedWorkItemCount === 0 || batchTargetOptions.length === 0}
+              onChange={(event) => onBatchTargetStatusChange(event.target.value as ProjectManagerWorkItemStatus | "")}
+            >
+              <option value="">{t("projects.projectManagerBatchTargetStatus")}</option>
+              {batchTargetOptions.map((status) => (
+                <option key={status} value={status}>
+                  {statusLabel(status, t)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button
+            size="sm"
+            onClick={onBatchStatusSubmit}
+            disabled={batchStatusPending || selectedWorkItemCount === 0 || !batchTargetStatus}
+          >
+            {t("projects.projectManagerMoveSelected")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onClearSelection}
+            disabled={batchStatusPending || selectedWorkItemCount === 0}
+          >
+            {t("projects.projectManagerClearSelection")}
+          </Button>
+        </div>
+        {selectedWorkItemCount > 0 && batchTargetOptions.length === 0 && (
+          <p className="text-xs text-muted-foreground">{t("projects.projectManagerNoBatchTargets")}</p>
+        )}
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+        {WORK_ITEM_STATUSES.map((status) => {
+          const columnItems = workItems.filter((item) => item.status === status);
+          return (
+            <section
+              key={status}
+              className="min-h-56 rounded-md border border-border/70 bg-background/40"
+              data-testid={`project-manager-board-column-${status}`}
+            >
+              <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <Badge variant={statusBadgeVariant(status)}>{statusLabel(status, t)}</Badge>
+                  <span className="font-mono text-xs text-muted-foreground tabular-nums">
+                    {columnItems.length}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 p-2">
+                {columnItems.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-border/70 px-3 py-6 text-center text-xs text-muted-foreground">
+                    {t("projects.projectManagerBoardEmptyColumn")}
+                  </div>
+                ) : (
+                  columnItems.map((item) => (
+                    <ProjectManagerBoardCard
+                      key={item.id}
+                      highlighted={item.id === highlightedWorkItemId}
+                      item={item}
+                      onDelete={onDelete}
+                      onEdit={onEdit}
+                      onStatusChange={onStatusChange}
+                      onToggleSelection={onToggleSelection}
+                      onViewDetails={onViewDetails}
+                      selected={selectedWorkItemIds.includes(item.id)}
+                      statusMutationPending={statusMutationPending || batchStatusPending}
+                      t={t}
+                    />
+                  ))
+                )}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ProjectManagerBoardCard({
+  highlighted,
+  item,
+  onDelete,
+  onEdit,
+  onStatusChange,
+  onToggleSelection,
+  onViewDetails,
+  selected,
+  statusMutationPending,
+  t,
+}: {
+  highlighted: boolean;
+  item: ProjectManagerWorkItem;
+  onDelete: (item: ProjectManagerWorkItem) => void;
+  onEdit: (item: ProjectManagerWorkItem) => void;
+  onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
+  onToggleSelection: (item: ProjectManagerWorkItem, selected: boolean) => void;
+  onViewDetails: (item: ProjectManagerWorkItem) => void;
+  selected: boolean;
+  statusMutationPending: boolean;
+  t: Translate;
+}) {
+  return (
+    <article
+      className={cn(
+        "rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs",
+        highlighted && "border-primary/60 bg-primary/5",
+        selected && "ring-2 ring-primary/35"
+      )}
+      data-testid={`project-manager-board-card-${item.id}`}
+    >
+      <div className="flex items-start gap-2">
+        <label className="mt-1 inline-flex items-center">
+          <input
+            type="checkbox"
+            className="size-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            checked={selected}
+            aria-label={t("projects.projectManagerSelectWorkItem")}
+            onChange={(event) => onToggleSelection(item, event.target.checked)}
+          />
+        </label>
+        <div className="min-w-0 flex-1">
+          <div className="break-words text-sm font-medium leading-5">{item.title}</div>
+          {item.description && (
+            <p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-muted-foreground">
+              {item.description}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Badge variant="outline">{t("projects.projectManagerPriority")}: {item.priority}</Badge>
+        <Badge variant="outline">{t("projects.projectManagerEvidenceRefs")}: {item.evidenceRefCount}</Badge>
+        {item.feishuRefCount > 0 && (
+          <Badge variant="outline">{t("projects.projectManagerFeishuRefs")}: {item.feishuRefCount}</Badge>
+        )}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="xs" variant="outline" onClick={() => onViewDetails(item)}>
+          <Eye className="mr-1 size-3" />
+          {t("projects.projectManagerViewDetails")}
+        </Button>
+        <Button size="xs" variant="outline" onClick={() => onEdit(item)}>
+          <Pencil className="mr-1 size-3" />
+          {t("projects.projectManagerEditWorkItem")}
+        </Button>
+        <Button size="xs" variant="destructive" onClick={() => onDelete(item)}>
+          <Trash2 className="mr-1 size-3" />
+          {t("projects.projectManagerDeleteWorkItem")}
+        </Button>
+        <ProjectManagerStatusActions
+          disabled={statusMutationPending}
+          item={item}
+          onStatusChange={onStatusChange}
+          t={t}
+          size="xs"
+        />
+      </div>
+    </article>
+  );
+}
+
+function ProjectManagerWorkItemTable({
+  highlightedWorkItemId,
+  onStatusChange,
+  onViewDetails,
+  statusMutationPending,
+  workItems,
+  t,
+}: {
+  highlightedWorkItemId?: string | null;
+  onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
+  onViewDetails: (item: ProjectManagerWorkItem) => void;
+  statusMutationPending: boolean;
+  workItems: ProjectManagerWorkItem[];
+  t: Translate;
+}) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t("common.name")}</TableHead>
+          <TableHead>{t("common.status")}</TableHead>
+          <TableHead>{t("projects.projectManagerPriority")}</TableHead>
+          <TableHead>{t("projects.projectManagerEvidenceRefs")}</TableHead>
+          <TableHead>{t("projects.projectManagerUpdated")}</TableHead>
+          <TableHead className="text-right">{t("common.actions")}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {workItems.map((item) => (
+          <TableRow
+            key={item.id}
+            className={cn(
+              item.id === highlightedWorkItemId && "border-primary/60 bg-primary/5"
+            )}
+          >
+            <TableCell className="max-w-[240px] whitespace-normal break-words font-medium">
+              {item.title}
+            </TableCell>
+            <TableCell>
+              <Badge variant={statusBadgeVariant(item.status)}>
+                {statusLabel(item.status, t)}
+              </Badge>
+            </TableCell>
+            <TableCell className="font-mono text-xs">{item.priority}</TableCell>
+            <TableCell className="font-mono text-xs tabular-nums">{item.evidenceRefCount}</TableCell>
+            <TableCell className="text-xs text-muted-foreground">
+              {formatTimestamp(item.updatedAt)}
+            </TableCell>
+            <TableCell className="text-right">
+              <div className="flex flex-col justify-end gap-2 sm:flex-row">
+                <Button size="sm" variant="outline" onClick={() => onViewDetails(item)}>
+                  <Eye className="mr-2 size-4" />
+                  {t("projects.projectManagerViewDetails")}
+                </Button>
+                <ProjectManagerStatusActions
+                  disabled={statusMutationPending}
+                  item={item}
+                  onStatusChange={onStatusChange}
+                  t={t}
+                />
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -1133,6 +1664,152 @@ function CreateWorkItemDialog({
   );
 }
 
+function EditWorkItemDialog({
+  draft,
+  error,
+  isSaving,
+  item,
+  onDraftChange,
+  onOpenChange,
+  onSave,
+  t,
+}: {
+  draft: EditWorkItemDraft;
+  error: string | null;
+  isSaving: boolean;
+  item: ProjectManagerWorkItem | null;
+  onDraftChange: (draft: EditWorkItemDraft) => void;
+  onOpenChange: (open: boolean) => void;
+  onSave: () => void;
+  t: Translate;
+}) {
+  return (
+    <Dialog open={!!item} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[min(760px,calc(100vh-2rem))] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t("projects.projectManagerEditWorkItem")}</DialogTitle>
+          <DialogDescription>{t("projects.projectManagerEditWorkItemBody")}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_120px]">
+            <div className="space-y-2">
+              <Label htmlFor="project-manager-edit-work-item-title">
+                {t("projects.projectManagerWorkItemTitle")}
+              </Label>
+              <Input
+                id="project-manager-edit-work-item-title"
+                value={draft.title}
+                aria-invalid={!!error && draft.title.trim().length === 0}
+                disabled={isSaving}
+                onChange={(event) => onDraftChange({ ...draft, title: event.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="project-manager-edit-work-item-priority">
+                {t("projects.projectManagerPriority")}
+              </Label>
+              <Input
+                id="project-manager-edit-work-item-priority"
+                inputMode="numeric"
+                value={draft.priority}
+                disabled={isSaving}
+                onChange={(event) => onDraftChange({ ...draft, priority: event.target.value })}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="project-manager-edit-work-item-description">
+              {t("projects.projectManagerWorkItemDescription")}
+            </Label>
+            <Textarea
+              id="project-manager-edit-work-item-description"
+              value={draft.description}
+              disabled={isSaving}
+              onChange={(event) => onDraftChange({ ...draft, description: event.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="project-manager-edit-work-item-acceptance">
+              {t("projects.projectManagerAcceptanceCriteria")}
+            </Label>
+            <Textarea
+              id="project-manager-edit-work-item-acceptance"
+              value={draft.acceptanceCriteriaText}
+              disabled={isSaving}
+              placeholder={t("projects.projectManagerTextListHint")}
+              onChange={(event) => onDraftChange({ ...draft, acceptanceCriteriaText: event.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">{t("projects.projectManagerTextListHint")}</p>
+          </div>
+          {error && (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+            {t("projects.projectManagerCancel")}
+          </Button>
+          <Button onClick={onSave} disabled={isSaving}>
+            {t("projects.projectManagerSaveWorkItem")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteWorkItemDialog({
+  error,
+  isDeleting,
+  item,
+  onConfirm,
+  onOpenChange,
+  t,
+}: {
+  error: string | null;
+  isDeleting: boolean;
+  item: ProjectManagerWorkItem | null;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+  t: Translate;
+}) {
+  return (
+    <Dialog open={!!item} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("projects.projectManagerDeleteWorkItem")}</DialogTitle>
+          <DialogDescription>{t("projects.projectManagerDeleteWorkItemBody")}</DialogDescription>
+        </DialogHeader>
+        {item && (
+          <div className="space-y-3">
+            <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+              <div className="break-words text-sm font-medium">{item.title}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {statusLabel(item.status, t)} · {t("projects.projectManagerEvidenceRefs")}: {item.evidenceRefCount}
+              </div>
+            </div>
+            {error && (
+              <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isDeleting}>
+            {t("projects.projectManagerCancel")}
+          </Button>
+          <Button variant="destructive" onClick={onConfirm} disabled={isDeleting}>
+            {t("projects.projectManagerDeleteWorkItem")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ReferenceDraftFields({
   disabled,
   draft,
@@ -1206,11 +1883,13 @@ function ProjectManagerStatusActions({
   disabled,
   item,
   onStatusChange,
+  size = "sm",
   t,
 }: {
   disabled: boolean;
   item: ProjectManagerWorkItem;
   onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
+  size?: "xs" | "sm";
   t: Translate;
 }) {
   const nextStatuses = PROJECT_MANAGER_STATUS_TRANSITIONS[item.status];
@@ -1221,8 +1900,8 @@ function ProjectManagerStatusActions({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" disabled={disabled}>
-          <ArrowRightCircle className="mr-2 size-4" />
+        <Button size={size} variant="outline" disabled={disabled}>
+          <ArrowRightCircle className={size === "xs" ? "mr-1 size-3" : "mr-2 size-4"} />
           {t("projects.projectManagerChangeStatus")}
         </Button>
       </DropdownMenuTrigger>
@@ -1512,10 +2191,8 @@ function createGoalDraft(goal: ProjectManagerGoal | null): GoalDraft {
   };
 }
 
-function createWorkItemQueryParams(status: WorkItemStatusFilter) {
-  return status === "all"
-    ? { limit: WORK_ITEM_LIMIT }
-    : { status, limit: WORK_ITEM_LIMIT };
+function filterWorkItemsForTable(workItems: ProjectManagerWorkItem[], status: WorkItemStatusFilter) {
+  return status === "all" ? workItems : workItems.filter((item) => item.status === status);
 }
 
 function createWorkItemDraft(): WorkItemDraft {
@@ -1545,6 +2222,15 @@ function createEvidenceDraft(): EvidenceDraft {
   };
 }
 
+function createEditWorkItemDraft(item: ProjectManagerWorkItem | null): EditWorkItemDraft {
+  return {
+    title: item?.title ?? "",
+    description: item?.description ?? "",
+    priority: String(item?.priority ?? 0),
+    acceptanceCriteriaText: formatProjectManagerTextList(item?.acceptanceCriteria ?? []),
+  };
+}
+
 function createWorkItemInput(draft: WorkItemDraft, title: string): ProjectManagerWorkItemInput {
   const priority = Number.parseInt(draft.priority, 10);
   const evidenceRef = createReference({
@@ -1569,6 +2255,26 @@ function createWorkItemInput(draft: WorkItemDraft, title: string): ProjectManage
     ...(evidenceRef ? { evidenceRefs: [evidenceRef] } : {}),
     ...(feishuRef ? { feishuRefs: [feishuRef] } : {}),
   };
+}
+
+function createWorkItemUpdateInput(draft: EditWorkItemDraft, title: string): ProjectManagerWorkItemUpdateInput {
+  const priority = Number.parseInt(draft.priority, 10);
+  return {
+    title,
+    description: draft.description.trim() || null,
+    priority: Number.isFinite(priority) ? priority : 0,
+    acceptanceCriteria: parseProjectManagerTextList(draft.acceptanceCriteriaText),
+  };
+}
+
+function batchStatusTargets(items: ProjectManagerWorkItem[]): ProjectManagerWorkItemStatus[] {
+  if (items.length === 0) return [];
+  return WORK_ITEM_STATUSES.filter((candidate) =>
+    items.every((item) =>
+      PROJECT_MANAGER_STATUS_TRANSITIONS[item.status].includes(candidate) &&
+      (candidate !== "done" || item.evidenceRefCount > 0)
+    )
+  );
 }
 
 function createSingleEvidenceReference(draft: EvidenceDraft): ProjectManagerEvidenceRef | undefined {

@@ -25,6 +25,7 @@ test("renders populated Project Manager state from exact API routes", async ({ p
   await expect(panel).toBeVisible();
   await expect(panel.getByRole("heading", { name: "Project Manager" })).toBeVisible();
   await expect(panel.getByText("Ship v1.2 Project Manager workflow")).toBeVisible();
+  await panel.getByRole("button", { name: "Table" }).click();
   await expect(panel.getByRole("row", { name: /Expose Project Manager tab/ })).toBeVisible();
   await expect(panel.getByText("Work item status changed")).toBeVisible();
   await expect(panel.getByRole("button", { name: "Refresh project manager" }).first()).toBeVisible();
@@ -107,6 +108,7 @@ test("filters, inspects, and creates Project Manager work items", async ({ page 
   await page.getByRole("tab", { name: "Project Manager" }).click();
 
   const panel = page.getByTestId("project-manager-panel");
+  await panel.getByRole("button", { name: "Table" }).click();
   await panel.getByLabel("Filter by status").selectOption("blocked");
   await expect(panel.getByRole("row", { name: /Review external evidence/ })).toBeVisible();
   await expect(panel.locator("table tbody tr", { hasText: "Expose Project Manager tab" })).toHaveCount(0);
@@ -137,6 +139,57 @@ test("filters, inspects, and creates Project Manager work items", async ({ page 
   expect(unhandledApiRoutes).toEqual([]);
 });
 
+test("manages work items from the Project Manager board", async ({ page }) => {
+  const deletedWorkItemIds: string[] = [];
+  const unhandledApiRoutes = await mockProjectDetailApis(page, {
+    onDeleteWorkItem: (workItemId) => deletedWorkItemIds.push(workItemId),
+  });
+
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Project Manager" }).click();
+
+  const panel = page.getByTestId("project-manager-panel");
+  const board = panel.getByTestId("project-manager-board");
+  await expect(board).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Board" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Table" })).toBeVisible();
+
+  const blockedCard = panel.getByTestId("project-manager-board-card-work-item-2");
+  await expect(blockedCard.getByText("Review external evidence")).toBeVisible();
+  await blockedCard.getByRole("button", { name: "Edit work item" }).click();
+
+  const editDialog = page.getByRole("dialog", { name: "Edit work item" });
+  await editDialog.getByLabel("Title").fill("Review external evidence packet");
+  await editDialog.getByLabel("Priority").fill("8");
+  await editDialog.getByLabel("Description").fill("Confirm beta evidence caveats before trial.");
+  await editDialog.getByLabel("Acceptance criteria").fill("Caveats remain explicit\nBoard edit is saved\n");
+  await editDialog.getByRole("button", { name: "Save work item" }).click();
+  await expect(blockedCard.getByText("Review external evidence packet")).toBeVisible();
+
+  await panel.getByTestId("project-manager-board-card-work-item-1")
+    .getByLabel("Select work item")
+    .check();
+  await panel.getByTestId("project-manager-board-card-work-item-3")
+    .getByLabel("Select work item")
+    .check();
+  await panel.getByLabel("Batch target status").selectOption("ready_for_review");
+  await panel.getByRole("button", { name: "Move selected" }).click();
+
+  const reviewColumn = panel.getByTestId("project-manager-board-column-ready_for_review");
+  await expect(reviewColumn.getByText("Expose Project Manager tab")).toBeVisible();
+  await expect(reviewColumn.getByText("Draft release note")).toBeVisible();
+
+  await panel.getByTestId("project-manager-board-card-work-item-2")
+    .getByRole("button", { name: "Delete work item" })
+    .click();
+  const deleteDialog = page.getByRole("dialog", { name: "Delete work item" });
+  await expect(deleteDialog.getByText("Review external evidence packet")).toBeVisible();
+  await deleteDialog.getByRole("button", { name: "Delete work item" }).click();
+  await expect.poll(() => deletedWorkItemIds).toEqual(["work-item-2"]);
+  await expect(panel.getByTestId("project-manager-board-card-work-item-2")).toHaveCount(0);
+  expect(unhandledApiRoutes).toEqual([]);
+});
+
 test("changes work item status and guards evidence-free done", async ({ page }) => {
   const unhandledApiRoutes = await mockProjectDetailApis(page);
 
@@ -144,6 +197,7 @@ test("changes work item status and guards evidence-free done", async ({ page }) 
   await page.getByRole("tab", { name: "Project Manager" }).click();
 
   const panel = page.getByTestId("project-manager-panel");
+  await panel.getByRole("button", { name: "Table" }).click();
   const evidenceRow = panel.getByRole("row", { name: /Expose Project Manager tab/ });
   await evidenceRow.getByRole("button", { name: "Change status" }).click();
   await page.getByRole("menuitem", { name: "Ready for review" }).click();
@@ -169,6 +223,7 @@ test("attaches one bounded evidence reference from work item details", async ({ 
   await page.getByRole("tab", { name: "Project Manager" }).click();
 
   const panel = page.getByTestId("project-manager-panel");
+  await panel.getByRole("button", { name: "Table" }).click();
   await panel.getByLabel("Filter by status").selectOption("blocked");
   await panel.getByRole("button", { name: "View details" }).click();
 
@@ -193,6 +248,7 @@ test("keeps safe evidence draft values visible after attach failure", async ({ p
   await page.getByRole("tab", { name: "Project Manager" }).click();
 
   const panel = page.getByTestId("project-manager-panel");
+  await panel.getByRole("button", { name: "Table" }).click();
   await panel.getByLabel("Filter by status").selectOption("blocked");
   await panel.getByRole("button", { name: "View details" }).click();
 
@@ -221,6 +277,7 @@ test("completes the v1.2 Project Manager workflow under strict route mocks", asy
 
   const panel = page.getByTestId("project-manager-panel");
   await expect(panel.getByText("Ship v1.2 Project Manager workflow")).toBeVisible();
+  await panel.getByRole("button", { name: "Table" }).click();
   const workItemRow = panel.getByRole("row", { name: /Review external evidence/ });
   await expect(workItemRow).toBeVisible();
   await workItemRow.getByRole("button", { name: "View details" }).click();
@@ -305,6 +362,7 @@ async function mockProjectDetailApis(
   overrides: {
     evidenceAttachStatus?: number;
     ledgerStatus?: number;
+    onDeleteWorkItem?: (workItemId: string) => void;
     onLedgerLimit?: (limit: number) => void;
     projectManagerStatus?: number;
   } = {}
@@ -605,6 +663,80 @@ async function mockProjectDetailApis(
       };
       workItems = [...workItems, createdWorkItem];
       await route.fulfill({ json: envelope({ workItem: createdWorkItem }) });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/work-items/batch/status` && method === "POST") {
+      const body = JSON.parse(route.request().postData() ?? "{}") as {
+        updates?: Array<{ workItemId?: unknown; status?: unknown }>;
+      };
+      expect(body).toEqual({
+        updates: [
+          { workItemId: "work-item-1", status: "ready_for_review" },
+          { workItemId: "work-item-3", status: "ready_for_review" },
+        ],
+      });
+      const targetIds = new Set(body.updates?.map((update) => update.workItemId));
+      workItems = workItems.map((item) => targetIds.has(item.id)
+        ? { ...item, status: "ready_for_review", updatedAt: 1779379700000 }
+        : item);
+      await route.fulfill({
+        json: envelope({
+          workItems: workItems.filter((item) => targetIds.has(item.id)),
+        }),
+      });
+      return;
+    }
+
+    const editMatch = url.pathname.match(
+      new RegExp(`^/api/v1/projects/${PROJECT_ID}/project-manager/work-items/([^/]+)$`)
+    );
+    if (editMatch && method === "PATCH") {
+      const workItemId = decodeURIComponent(editMatch[1]);
+      const body = JSON.parse(route.request().postData() ?? "{}") as {
+        title?: unknown;
+        description?: unknown;
+        priority?: unknown;
+        acceptanceCriteria?: unknown;
+      };
+      expect(workItemId).toBe("work-item-2");
+      expect(body).toEqual({
+        title: "Review external evidence packet",
+        description: "Confirm beta evidence caveats before trial.",
+        priority: 8,
+        acceptanceCriteria: ["Caveats remain explicit", "Board edit is saved"],
+      });
+      workItems = workItems.map((item) => item.id === workItemId
+        ? {
+          ...item,
+          title: body.title as string,
+          description: body.description as string,
+          priority: body.priority as number,
+          acceptanceCriteria: body.acceptanceCriteria as string[],
+          updatedAt: 1779379600000,
+        }
+        : item);
+      await route.fulfill({
+        json: envelope({ workItem: workItems.find((item) => item.id === workItemId) }),
+      });
+      return;
+    }
+
+    const deleteMatch = url.pathname.match(
+      new RegExp(`^/api/v1/projects/${PROJECT_ID}/project-manager/work-items/([^/]+)$`)
+    );
+    if (deleteMatch && method === "DELETE") {
+      const workItemId = decodeURIComponent(deleteMatch[1]);
+      const body = JSON.parse(route.request().postData() ?? "{}") as {
+        confirm?: unknown;
+      };
+      expect(workItemId).toBe("work-item-2");
+      expect(body).toEqual({ confirm: true });
+      const deletedWorkItem = workItems.find((item) => item.id === workItemId);
+      expect(deletedWorkItem).toBeTruthy();
+      workItems = workItems.filter((item) => item.id !== workItemId);
+      overrides.onDeleteWorkItem?.(workItemId);
+      await route.fulfill({ json: envelope({ workItem: deletedWorkItem }) });
       return;
     }
 
