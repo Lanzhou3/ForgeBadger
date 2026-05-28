@@ -26,6 +26,7 @@ import type { OpenForgeEventBus } from "../services/event-bus.js";
 import type { CredentialMode } from "../config-generation/types.js";
 import { buildProjectConfigFiles } from "../services/project-config-files.js";
 import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } from "../services/project-ai-config.js";
+import { listWorkspaceTree, readWorkspaceFile } from "../services/workspace-context.js";
 import { recordActivity } from "../services/activity-events.js";
 import { createDefaultAgentPack } from "../services/default-agent-pack.js";
 
@@ -61,6 +62,16 @@ const aiConfigWriteSchema = z.object({
   relativePath: z.string().min(1).max(512),
   content: z.string().max(128 * 1024)
 });
+
+const workspaceTreeQuerySchema = z.object({
+  path: z.string().max(512).optional(),
+  depth: z.coerce.number().int().min(1).max(3).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional()
+}).strict();
+
+const workspaceFileQuerySchema = z.object({
+  path: z.string().min(1).max(512)
+}).strict();
 
 const agentSequenceSchema = z.object({
   agentIds: z.array(z.string().min(1)).max(50)
@@ -683,6 +694,72 @@ export function createProjectRoutes(
       res.status(400).json({
         code: 1,
         message: error instanceof Error ? error.message : "AI config write failed"
+      });
+    }
+  });
+
+  router.get("/:id/workspace/tree", async (req, res) => {
+    const parseResult = workspaceTreeQuerySchema.safeParse(req.query ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const projectRepo = new ProjectRepository(db, userId);
+    const project = projectRepo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const tree = await listWorkspaceTree(project.path, parseResult.data);
+      res.json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          ...tree
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Workspace tree read failed"
+      });
+    }
+  });
+
+  router.get("/:id/workspace/file", async (req, res) => {
+    const parseResult = workspaceFileQuerySchema.safeParse(req.query ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const projectRepo = new ProjectRepository(db, userId);
+    const project = projectRepo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const file = await readWorkspaceFile(project.path, parseResult.data.path);
+      res.json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          ...file
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Workspace file read failed"
       });
     }
   });

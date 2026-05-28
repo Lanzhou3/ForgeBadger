@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: AI-Native Project Execution Traceability
 status: ready_to_plan
-stopped_at: Phase 13 complete (3/3) — ready to discuss Phase 14
-last_updated: 2026-05-29T01:55:00+08:00
+stopped_at: Phase 14 plan 01 complete — ready to plan 14-02 Web workspace sidecar
+last_updated: 2026-05-29T01:59:57+08:00
 last_activity: 2026-05-29
 progress:
   total_phases: 5
   completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
-  percent: 40
+  total_plans: 10
+  completed_plans: 8
+  percent: 47
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-22)
 ## Current Position
 
 Phase: 14
-Plan: Not started
+Plan: 14-02 next
 Status: Ready to plan
 Last activity: 2026-05-29
 
@@ -84,6 +84,8 @@ Last activity: 2026-05-29
 | Phase 13 P02 | completed | 5 tasks | 4 files |
 | Phase 13 P03 | completed | 3 tasks | 3 files |
 | 13 | 3 | - | - |
+| Phase 14 P01 | completed | 4 tasks | 8 files |
+| 14 | 1/3 | - | - |
 
 ## Accumulated Context
 
@@ -125,10 +127,15 @@ Recent decisions affecting current work:
 - [Phase 12]: Web Project Manager trace helpers expose bounded DTO fields, fixed pending-action/result/failure summaries, and safe anchors without raw prompt, terminal, provider, or diff fallback. — Plan 12-03 implementation.
 - [Phase OF-12]: Project Manager trace display stays marker-only and never renders arbitrary ledger details payloads.
 - [Phase OF-12]: PM approval UI uses existing Plan 12-03 summary metadata as the rendering contract.
+- [Phase 14]: Workspace context starts with a Gateway-owned read-only project file tree/file preview contract; Web sidecar and evidence attachment build on this API instead of direct filesystem access. — Plan 14-01 implementation.
+- [Phase 14]: Workspace context file reads stay bounded UTF-8 previews and reject traversal, absolute paths, binary files, and symbolic links; raw file content is not persisted as project-manager evidence. — Plan 14-01 implementation.
 
 ### Pending Todos
 
-None in `.planning/todos/` yet. v1.3 requirements are defined in `.planning/REQUIREMENTS.md`.
+Phase 14 next steps:
+
+- Plan 14-02 Web workspace sidecar for project/session views.
+- Plan 14-03 Project Manager evidence refs for file path, terminal snapshot marker, and session id references.
 
 ### Blockers/Concerns
 
@@ -154,10 +161,10 @@ None in `.planning/todos/` yet. v1.3 requirements are defined in `.planning/REQU
 
 ## Session Continuity
 
-Last session: 2026-05-22T16:30:32.612Z
-Stopped at: Completed 12-04-PLAN.md
+Last session: 2026-05-29T01:59:57+08:00
+Stopped at: Completed 14-01-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Run the Phase 12 verification pass against `.planning/phases/OF-12-copilot-project-manager-traceability/12-04-SUMMARY.md`.
+- Start 14-02 planning for the Web project/session workspace sidecar.

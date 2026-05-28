@@ -825,6 +825,8 @@ mixed into `/ws/terminal/:sessionId`.
 - `GET /api/v1/projects/:id/ai-config`
 - `GET /api/v1/projects/:id/ai-config/global`
 - `PUT /api/v1/projects/:id/ai-config/files`
+- `GET /api/v1/projects/:id/workspace/tree`
+- `GET /api/v1/projects/:id/workspace/file`
 - `POST /api/v1/projects/:id/generate-config`
 - `GET /api/v1/projects/:id/agent-sequence`
 - `PUT /api/v1/projects/:id/agent-sequence`
@@ -901,6 +903,24 @@ Project AI config management:
 - The response includes form metadata for common Claude Code, OpenCode, and
   Codex settings. The Web console uses those fields to edit JSON/JSONC, simple
   TOML, and instruction-file content while keeping the raw file editor visible.
+
+Project workspace context:
+
+- `GET /api/v1/projects/:id/workspace/tree` returns a read-only file tree
+  rooted at the tenant-scoped project path. Optional query parameters are
+  `path`, `depth` (1-3), and `limit` (1-500). The response includes safe
+  project-relative POSIX paths, file sizes, update timestamps, and a `truncated`
+  marker when the limit is reached.
+- `GET /api/v1/projects/:id/workspace/file?path=<relative-path>` returns a
+  bounded UTF-8 preview for one regular text file under the project root. The
+  response includes `content`, `sizeBytes`, `truncated`, and `binary: false`.
+- Workspace context routes reuse the same safe path boundary as config writes:
+  project roots under sensitive system roots are rejected, absolute paths and
+  traversal are rejected, and symbolic-link targets are not followed for tree
+  traversal or file reads.
+- These routes are read-only. They do not store file contents, terminal
+  scrollback, or evidence blobs in SQLite; later Project Manager evidence uses
+  bounded references to these paths rather than copying raw content.
 
 CI usage example:
 
