@@ -10,6 +10,7 @@ The v1.1 evidence matrix remains
 callback evidence remains
 `docs/reports/phase-7-feishu-callback-evidence-2026-05-21.md`. Do not mark a
 `Caveat` or `Blocked` row as `Pass` unless the required real evidence exists.
+The canonical external gate registry is `docs/EXTERNAL-EVIDENCE-GATES.md`.
 The first-user readiness closeout is
 `docs/reports/v1.1-readiness-closeout-2026-05-21.md`, and support triage starts
 from `docs/SUPPORT-DIAGNOSTICS.md`.
@@ -121,6 +122,8 @@ Forbidden Project Manager evidence content:
 
 ### Provider Readiness And Copilot Smoke
 
+- [ ] Check `docs/EXTERNAL-EVIDENCE-GATES.md` gate `LIVE-PROVIDER` before
+      claiming a live provider pass.
 - [ ] Open `/models` and choose the Provider, Model, Credential, and apply
       target that will be used for the smoke.
 - [ ] Click **Check readiness** in the Provider Health card. Record only
@@ -153,6 +156,8 @@ Forbidden Project Manager evidence content:
 
 ### Optional Feishu Smoke
 
+- [ ] Check `docs/EXTERNAL-EVIDENCE-GATES.md` gate `FEISHU-CALLBACK` before
+      claiming a Feishu public callback pass.
 - [ ] If testing live Feishu, run `pnpm smoke:feishu-public-webhook` with
       operator-controlled environment values and record only sanitized output.
 - [ ] Configure a public HTTPS URL for
@@ -183,6 +188,8 @@ Forbidden Project Manager evidence content:
 
 - [ ] Complete `docs/TRIAL-FEEDBACK.md` or open the GitHub issue form
       `OpenForge first-user trial feedback`.
+- [ ] Check `docs/EXTERNAL-EVIDENCE-GATES.md` gate
+      `FIRST-USER-FEEDBACK` before claiming completed first-user evidence.
 - [ ] Map each issue to the closest Phase 3 hardening requirement in the
       evidence appendix below.
 - [ ] For every `pass with caveats` or `blocked` result, record owner, next
@@ -192,7 +199,8 @@ Forbidden Project Manager evidence content:
 
 Completed first-user feedback is currently a `Caveat`. The owner is
 `maintainer/operator`. The caveat clears only when at least one real completed
-feedback packet is attached or linked from closeout with:
+feedback packet is attached or linked from closeout with the artifact shape in
+`docs/EXTERNAL-EVIDENCE-GATES.md`:
 
 - reproducible steps;
 - affected surfaces;
@@ -237,6 +245,7 @@ For every `pass with caveats` or `blocked` result, record:
 
 ### Copilot Detail
 
+- Canonical gate: `docs/EXTERNAL-EVIDENCE-GATES.md` gate `LIVE-PROVIDER`.
 - Phase 6 live provider and platform evidence is tracked in
   `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`.
 - Do not remove the live-provider caveat without a disposable live provider
@@ -248,6 +257,7 @@ For every `pass with caveats` or `blocked` result, record:
 
 ### Feishu Callback Detail
 
+- Canonical gate: `docs/EXTERNAL-EVIDENCE-GATES.md` gate `FEISHU-CALLBACK`.
 - Phase 7 Feishu live-exposure evidence is tracked in
   `docs/reports/phase-7-feishu-callback-evidence-2026-05-21.md`.
 - `lark-cli auth status`, `lark-cli doctor`, long-running event consumers, and

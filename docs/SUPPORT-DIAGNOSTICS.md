@@ -10,6 +10,8 @@ sensitive terminal output.
 - Confirm the report uses `docs/TRIAL-CHECKLIST.md` and either
   `docs/TRIAL-FEEDBACK.md` or the GitHub issue form
   `OpenForge first-user trial feedback`.
+- Check `docs/EXTERNAL-EVIDENCE-GATES.md` before reclassifying live-provider,
+  Windows/WSL, Feishu callback, or first-user feedback evidence.
 - Prefer the Web Settings diagnostics export. The local API is
   `GET /api/v1/diagnostics/export`; it is authenticated, tenant scoped,
   local-only, and redacted.
@@ -87,6 +89,8 @@ Acceptable evidence references are short pointers, not raw evidence. Examples:
 
 ## Provider Failures
 
+Canonical gate: `docs/EXTERNAL-EVIDENCE-GATES.md` gate `LIVE-PROVIDER`.
+
 Run or request:
 
 ```bash
@@ -158,6 +162,9 @@ Redact:
 
 ## Runtime And Terminal Failures
 
+Canonical gate: `docs/EXTERNAL-EVIDENCE-GATES.md` gate `WINDOWS-WSL` when the
+report claims physical Windows/WSL terminal evidence.
+
 Run or request:
 
 ```bash
@@ -213,6 +220,8 @@ Redact:
 - raw command output that includes credentials.
 
 ## Feishu Failures
+
+Canonical gate: `docs/EXTERNAL-EVIDENCE-GATES.md` gate `FEISHU-CALLBACK`.
 
 Run or request:
 
@@ -323,4 +332,6 @@ Route to maintainer/operator when the issue is missing external evidence:
 - no physical Windows/WSL host;
 - no public HTTPS Gateway URL;
 - no Feishu developer-console URL verification action;
-- no completed first-user feedback packet.
+- no completed first-user feedback packet. Use
+  `docs/EXTERNAL-EVIDENCE-GATES.md` gate `FIRST-USER-FEEDBACK` for the
+  required packet shape.

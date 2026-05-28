@@ -186,6 +186,7 @@ prototype intentionally keeps prompt/turn input disabled for beta feedback.
 - [Development plan](docs/DEVELOPMENT-PLAN.md)
 - [API reference](docs/API.md)
 - [Open source readiness](docs/OPEN-SOURCE-READINESS.md)
+- [External evidence gates](docs/EXTERNAL-EVIDENCE-GATES.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Security notes](docs/SECURITY.md)

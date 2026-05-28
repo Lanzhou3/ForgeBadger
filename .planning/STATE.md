@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: External Evidence Closure
 status: in_progress
-stopped_at: v1.4 milestone opened; Phase 17 plan ready
-last_updated: 2026-05-29T04:20:00+08:00
+stopped_at: Phase 17 complete; Phase 18 live provider evidence planning pending
+last_updated: 2026-05-29T04:30:00+08:00
 last_activity: 2026-05-29
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 1
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 25
 ---
 
 # Project State
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** v1.4 External Evidence Closure, starting with Phase 17 external evidence registry.
+**Current focus:** v1.4 External Evidence Closure; Phase 17 registry complete, Phase 18 live provider evidence planning pending.
 
 ## Current Position
 
-Phase: 17 External Evidence Registry
-Plan: 17-01-PLAN.md
+Phase: 18 Live Provider Evidence Rerun
+Plan: TBD
 Status: Planned
 Last activity: 2026-05-29
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-29
 
 **Velocity:**
 
-- Total plans completed: 35
+- Total plans completed: 36
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -58,7 +58,7 @@ Last activity: 2026-05-29
 | 14. Terminal Workspace Context | 3/3 | - | - |
 | 15. Model Provider Setup And Health | 3/3 | - | - |
 | 16. Open Source Readiness Packet | 1/1 | - | - |
-| 17. External Evidence Registry | 0/1 | - | - |
+| 17. External Evidence Registry | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -77,13 +77,14 @@ Recent decisions affecting current work:
 - [Phase 15]: Gateway model-provider readiness is a structured, tenant-scoped contract with actionable codes and Codex subscription-managed isolation.
 - [Phase 16]: Open-source readiness is complete with MIT rationale, root contribution/security entry points, safe GitHub issue routing, and caveat-preserving closeout.
 - [Milestone v1.4]: External evidence closure must create a single evidence gate registry before any preserved caveat can be reclassified as `Pass`.
+- [Phase 17]: `docs/EXTERNAL-EVIDENCE-GATES.md` is the canonical registry for `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and `FIRST-USER-FEEDBACK`; mocked tests, docs, and empty templates do not clear those gates.
 
 ### Pending Todos
 
 Milestone next steps:
 
-- Execute Phase 17 plan and create the canonical external evidence registry.
-- After Phase 17, run or precisely block the live provider evidence rerun with a disposable credential and explicit model id.
+- Plan Phase 18 live provider evidence rerun.
+- Run or precisely block the live provider evidence rerun with a disposable credential and explicit model id.
 - Prepare Feishu developer-console callback evidence only when public HTTPS Gateway routing is available.
 - Collect physical Windows/WSL and first-user feedback evidence when those external environments/users are available.
 
@@ -108,10 +109,10 @@ Milestone next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T04:20:00+08:00
-Stopped at: v1.4 milestone opened; Phase 17 17-01-PLAN.md ready
-Resume file: `.planning/phases/OF-17-external-evidence-registry/17-01-PLAN.md`
+Last session: 2026-05-29T04:30:00+08:00
+Stopped at: Phase 17 complete; Phase 18 live provider evidence planning pending
+Resume file: None
 
 ## Operator Next Steps
 
-- Run `$gsd-execute-phase 17` or execute `.planning/phases/OF-17-external-evidence-registry/17-01-PLAN.md`.
+- Start Phase 18 planning for live provider evidence rerun.

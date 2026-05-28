@@ -37,7 +37,9 @@ review before they can become supported scope.
 ## Required Caveats
 
 The open-source packet does not clear external evidence caveats. Keep these
-visible until real evidence is attached:
+visible until real evidence is attached. The canonical gate registry is
+`docs/EXTERNAL-EVIDENCE-GATES.md`; if this table and the registry differ, use
+the registry for state, artifact shape, owner, and closeout rules.
 
 | Caveat | Current State | Rerun Path |
 |--------|---------------|------------|
@@ -69,5 +71,6 @@ Before presenting the repository as broadly ready for first external users:
 - confirm `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and issue templates are current;
 - rerun the automated checks listed in `docs/RELEASE-PLAN.md`;
 - keep `docs/SMOKE-TEST.md`, `docs/TRIAL-CHECKLIST.md`, and
-  `docs/SUPPORT-DIAGNOSTICS.md` aligned;
+  `docs/SUPPORT-DIAGNOSTICS.md` aligned with
+  `docs/EXTERNAL-EVIDENCE-GATES.md`;
 - update closeout reports only with evidence that was actually collected.

@@ -26,7 +26,7 @@
 
 Plans:
 
-- [ ] 17-01-PLAN.md — External evidence gate registry, doc links, and Phase 17 verification.
+- [x] 17-01-PLAN.md — External evidence gate registry, doc links, and Phase 17 verification.
 
 **Success criteria:**
 
@@ -165,7 +165,7 @@ Full archive:
 | 14. Terminal Workspace Context | v1.3 | 3/3 | Complete | 2026-05-29 |
 | 15. Model Provider Setup And Health | v1.3 | 3/3 | Complete | 2026-05-29 |
 | 16. Open Source Readiness Packet | v1.3 | 1/1 | Complete | 2026-05-29 |
-| 17. External Evidence Registry | v1.4 | 0/1 | Planned | - |
+| 17. External Evidence Registry | v1.4 | 1/1 | Complete | 2026-05-29 |
 | 18. Live Provider Evidence Rerun | v1.4 | TBD | Planned | - |
 | 19. Feishu Public Callback Evidence | v1.4 | TBD | Planned | - |
 | 20. Platform And First-User Acceptance Closure | v1.4 | TBD | Planned | - |

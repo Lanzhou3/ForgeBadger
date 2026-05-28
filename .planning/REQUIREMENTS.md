@@ -15,15 +15,15 @@
 
 ### Product Position
 
-- [ ] **EVPOS-01**: OpenForge remains a local-first AI CLI control plane; v1.4 does not add hosted collaboration, cloud workers, autonomous remote execution, or Feishu execution authority.
-- [ ] **EVPOS-02**: Release/readiness claims are sourced from bounded evidence artifacts, not from the existence of checklists, templates, or mocked tests alone.
-- [ ] **EVPOS-03**: Evidence collection defaults to redacted metadata, bounded status fields, commands, timestamps, environment summaries, and artifact links; raw provider payloads, Feishu bodies, terminal transcripts, tokens, and secrets remain excluded.
+- [x] **EVPOS-01**: OpenForge remains a local-first AI CLI control plane; v1.4 does not add hosted collaboration, cloud workers, autonomous remote execution, or Feishu execution authority.
+- [x] **EVPOS-02**: Release/readiness claims are sourced from bounded evidence artifacts, not from the existence of checklists, templates, or mocked tests alone.
+- [x] **EVPOS-03**: Evidence collection defaults to redacted metadata, bounded status fields, commands, timestamps, environment summaries, and artifact links; raw provider payloads, Feishu bodies, terminal transcripts, tokens, and secrets remain excluded.
 
 ### Evidence Registry
 
-- [ ] **EVID-01**: A canonical external evidence gate registry lists live provider, physical Windows/WSL terminal, Feishu developer-console callback, and completed first-user feedback gates.
-- [ ] **EVID-02**: Every gate records current state, owner, clearing condition, rerun command or runbook, allowed artifact shape, redaction rules, and target report or issue destination.
-- [ ] **EVID-03**: Milestone and phase closeouts must reference the registry and may only move a gate to `Pass` when the required artifact exists.
+- [x] **EVID-01**: A canonical external evidence gate registry lists live provider, physical Windows/WSL terminal, Feishu developer-console callback, and completed first-user feedback gates.
+- [x] **EVID-02**: Every gate records current state, owner, clearing condition, rerun command or runbook, allowed artifact shape, redaction rules, and target report or issue destination.
+- [x] **EVID-03**: Milestone and phase closeouts must reference the registry and may only move a gate to `Pass` when the required artifact exists.
 
 ### Live Provider Evidence
 
@@ -63,12 +63,12 @@
 
 | Requirement | Target Phase | Status |
 |-------------|--------------|--------|
-| EVPOS-01 | Phase 17 | Planned |
-| EVPOS-02 | Phase 17 | Planned |
-| EVPOS-03 | Phase 17 | Planned |
-| EVID-01 | Phase 17 | Planned |
-| EVID-02 | Phase 17 | Planned |
-| EVID-03 | Phase 17 | Planned |
+| EVPOS-01 | Phase 17 | Complete |
+| EVPOS-02 | Phase 17 | Complete |
+| EVPOS-03 | Phase 17 | Complete |
+| EVID-01 | Phase 17 | Complete |
+| EVID-02 | Phase 17 | Complete |
+| EVID-03 | Phase 17 | Complete |
 | PROV-01 | Phase 18 | Planned |
 | PROV-02 | Phase 18 | Planned |
 | PROV-03 | Phase 18 | Planned |
