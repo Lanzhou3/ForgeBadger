@@ -171,6 +171,30 @@
   coverage, runbook token fallback removal, CI script harness coverage, and
   unchanged external gate states.
 
+### Trial Feedback Draft Generator
+
+- [x] **DRAFT-01**: A local command must generate a first-user feedback
+  Markdown draft with bounded environment metadata and required packet sections.
+- [x] **DRAFT-02**: The draft must explicitly state that it is not submitted,
+  not reviewed, and not gate-clearing evidence.
+- [x] **DRAFT-03**: Trial runbook, checklist, and feedback template must link
+  the draft helper as optional support for real feedback collection.
+- [x] **DRAFTSAFE-01**: The draft helper must not export diagnostics, read
+  browser storage, read tokens, upload files, or collect raw terminal,
+  provider, or Feishu evidence; token-shaped values in draft fields are
+  redacted.
+
+### Phase 26 Planning Closure
+
+- [x] **PLAN-26-01**: Phase 26 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-26-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the feedback draft helper while keeping
+  real first-user packet collection pending.
+- [x] **PLAN-26-03**: Phase 26 verification proves red/green generator tests,
+  script harness coverage, CLI smoke output, docs references, and unchanged
+  external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -229,11 +253,18 @@
 | PLAN-25-01 | Phase 25 | Complete |
 | PLAN-25-02 | Phase 25 | Complete |
 | PLAN-25-03 | Phase 25 | Complete |
+| DRAFT-01 | Phase 26 | Complete |
+| DRAFT-02 | Phase 26 | Complete |
+| DRAFT-03 | Phase 26 | Complete |
+| DRAFTSAFE-01 | Phase 26 | Complete |
+| PLAN-26-01 | Phase 26 | Complete |
+| PLAN-26-02 | Phase 26 | Complete |
+| PLAN-26-03 | Phase 26 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 42 total
-- Mapped to phases: 42
+- v1.5 requirements: 49 total
+- Mapped to phases: 49
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 25 Tokenless Trial Diagnostics.*
+*Requirements updated: 2026-05-29 after Phase 26 Trial Feedback Draft Generator.*

@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 25 tokenless runbook diagnostics complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 26 feedback draft generator complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -164,6 +164,33 @@ Plans:
 4. The intake validator checks the runbook in CI.
 5. External evidence gate states remain unchanged.
 
+### Phase 26: Trial Feedback Draft Generator
+
+**Goal:** Add a local helper that generates a redaction-aware first-user
+feedback draft without collecting raw evidence or clearing gates.
+
+**Requirements:** DRAFT-01, DRAFT-02, DRAFT-03, DRAFTSAFE-01,
+PLAN-26-01, PLAN-26-02, PLAN-26-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 26-01-PLAN.md — draft generator, script harness coverage, docs links,
+  and gate-preserving verification.
+
+**Success criteria:**
+
+1. A local command generates a Markdown feedback draft with bounded environment
+   metadata and required first-user packet sections.
+2. The draft explicitly states it is not submitted, not reviewed, and not
+   gate-clearing evidence.
+3. Token-shaped values are redacted from draft fields.
+4. The helper does not export diagnostics, read browser storage, read tokens,
+   upload files, or collect raw terminal/provider/Feishu evidence.
+5. Trial docs link the helper while preserving `FIRST-USER-FEEDBACK` as
+   `Caveat` until a completed redacted packet is linked.
+
 ## Archived Milestones
 
 <details>
@@ -279,6 +306,7 @@ Full archive:
 | 23. Source Env Override Preservation | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 24. Trial Feedback Intake Contract | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 25. Tokenless Trial Diagnostics | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 26. Trial Feedback Draft Generator | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

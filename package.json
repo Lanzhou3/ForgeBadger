@@ -15,6 +15,7 @@
     "smoke:codex-app-server": "node scripts/smoke-codex-app-server.mjs",
     "smoke:npm": "node scripts/smoke-npm-package.mjs",
     "test": "pnpm -r test",
+    "trial:feedback-draft": "node scripts/create-trial-feedback-draft.mjs",
     "typecheck": "pnpm -r typecheck",
     "verify:npm": "node scripts/verify-npm-package.mjs"
   },

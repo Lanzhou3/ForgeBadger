@@ -8,6 +8,16 @@ browser terminal path, collect diagnostics, and submit feedback. Prefer the
 GitHub issue form `OpenForge first-user trial feedback` when filing feedback;
 use `docs/TRIAL-FEEDBACK.md` as the offline copy/paste template.
 
+To start from a local Markdown draft, run:
+
+```bash
+pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md
+```
+
+The draft pre-fills bounded environment metadata only. It is not submitted,
+not reviewed, and not gate-clearing evidence until a user completes it, reviews
+redaction, and links or attaches it through the feedback path.
+
 The primary path is the npm/CLI startup. Source startup is a fallback for local
 debugging and contribution.
 
@@ -247,6 +257,16 @@ Recommended feedback attachments:
 - Session id and project path.
 - Claude Code version.
 - Screenshots when they make the failure easier to understand.
+
+Optional draft helper:
+
+```bash
+pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md
+```
+
+Review and complete the draft before sharing. It intentionally leaves
+diagnostics, reproduction steps, expected behavior, actual behavior, severity,
+owner, disposition, and redaction review as human-filled fields.
 
 Do not upload secrets, API keys, plaintext credentials, local private keys, or
 private project source unless you intentionally choose to share them.

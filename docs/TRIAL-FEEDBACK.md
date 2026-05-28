@@ -5,6 +5,15 @@ form `OpenForge first-user trial feedback` when filing feedback from the
 repository; use this document as the offline copy/paste template. Review all
 attachments before sharing.
 
+Optional local draft helper:
+
+```bash
+pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md
+```
+
+The generated file is only a draft. It does not clear
+`FIRST-USER-FEEDBACK` until it is completed, redacted, and attached or linked.
+
 ## Summary
 
 - Result: pass / pass with caveats / blocked

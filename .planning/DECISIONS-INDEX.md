@@ -18,6 +18,8 @@ This bounded index summarizes decisions that downstream GSD workflows should car
   empty template is not first-user evidence.
 - First-user diagnostics collection must stay tokenless from the user's
   perspective; local API token fallback is maintainer-only.
+- Feedback draft generation may pre-fill bounded environment metadata, but it
+  must not collect raw evidence or clear external gates.
 
 ## Locked Decisions
 
@@ -42,6 +44,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.5 source env runner | Gateway/Web source scripts load root `.env` through an env-preserving runner so command-prefix overrides such as `OPENFORGE_DB_PATH=/tmp/...` remain authoritative for that run. | `docs/reports/phase-23-source-env-runner-2026-05-29.md` |
 | v1.5 intake contract | First-user feedback issue form and Markdown template required fields, routing, and safety wording are checked by a bounded validator in CI; this does not clear `FIRST-USER-FEEDBACK`. | `docs/reports/phase-24-trial-feedback-intake-contract-2026-05-29.md` |
 | v1.5 tokenless diagnostics | First-user runbook diagnostics use Web Settings export; browser-token/devtools curl fallback is rejected by the validator and remains maintainer-only if local API fallback is needed. | `docs/reports/phase-25-tokenless-trial-diagnostics-2026-05-29.md` |
+| v1.5 feedback draft helper | `pnpm trial:feedback-draft` may generate a local Markdown draft with bounded metadata, but the draft is not submitted, not reviewed, and not gate-clearing evidence. | `docs/reports/phase-26-trial-feedback-draft-generator-2026-05-29.md` |
 
 ## Deferred Ideas
 

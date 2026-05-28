@@ -4,14 +4,15 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is v1.5 First-User Trial Operations. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix. v1.5 turns that evidence posture into an operator-run first-user trial loop, completed an operator dry-run on the current host, fixed the source fallback env override support gap found by that dry-run, added machine validation for the trial feedback intake contract, and removed browser-token fallback guidance from the first-user runbook.
+The current product stage is v1.5 First-User Trial Operations. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix. v1.5 turns that evidence posture into an operator-run first-user trial loop, completed an operator dry-run on the current host, fixed the source fallback env override support gap found by that dry-run, added machine validation for the trial feedback intake contract, removed browser-token fallback guidance from the first-user runbook, and added a local feedback draft helper.
 
 ## Current Milestone
 
 v1.5 First-User Trial Operations has completed its foundation phase, an
 operator dry-run, the source fallback env override fix, trial feedback intake
-contract validation, and tokenless runbook diagnostics guidance. The remaining
-work is real first-user trial packet collection and triage.
+contract validation, tokenless runbook diagnostics guidance, and a local
+feedback draft helper. The remaining work is real first-user trial packet
+collection and triage.
 
 **Last shipped:** v1.4 External Evidence Closure on 2026-05-29.
 
@@ -86,6 +87,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - [x] v1.5 source fallback scripts preserve command-prefix env overrides while still loading repository root `.env`.
 - [x] v1.5 trial feedback issue form and Markdown template are machine-validated for required packet fields, routing, and safety language.
 - [x] v1.5 first-user runbook diagnostics guidance uses Web Settings export and rejects browser-token/devtools fallback wording.
+- [x] v1.5 local feedback draft helper pre-fills bounded metadata without collecting raw evidence or clearing gates.
 
 ### Out of Scope
 
@@ -134,6 +136,9 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
   replaced first-user browser-token diagnostics fallback with Web Settings
   diagnostics export plus maintainer-only local API fallback wording. It did
   not clear `FIRST-USER-FEEDBACK`.
+- Phase 26 added `pnpm trial:feedback-draft`, a local Markdown draft helper
+  that pre-fills bounded local metadata and leaves evidence, triage, and
+  redaction fields for humans. It did not clear `FIRST-USER-FEEDBACK`.
 - Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints
@@ -169,6 +174,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Preserve command-prefix env over root `.env` in source fallback | Operators need disposable state for trial/smoke runs without editing or leaking local `.env` | Good - Phase 23 added a preserving env runner and real startup proof |
 | Validate trial feedback intake before collection | Required fields and redaction guidance should not drift before real first users submit packets | Good - Phase 24 added contract tests and CI harness coverage without clearing gates |
 | Keep first-user diagnostics tokenless | Asking first users to retrieve browser tokens is a support and security liability | Good - Phase 25 moved the runbook to Settings export and validator coverage |
+| Generate feedback drafts without collecting evidence | Drafts reduce first-user friction but must not become false gate evidence | Good - Phase 26 adds bounded draft generation and explicit caveat language |
 
 ## Evolution
 
@@ -188,4 +194,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-29 after completing Phase 25 Tokenless Trial Diagnostics.*
+*Last updated: 2026-05-29 after completing Phase 26 Trial Feedback Draft Generator.*

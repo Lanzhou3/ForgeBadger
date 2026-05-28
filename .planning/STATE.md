@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: First-User Trial Operations
 status: phase_complete
-stopped_at: Phase 25 tokenless trial diagnostics complete; real first-user packet collection pending
-last_updated: 2026-05-29T05:28:00+08:00
+stopped_at: Phase 26 trial feedback draft generator complete; real first-user packet collection pending
+last_updated: 2026-05-29T05:35:00+08:00
 last_activity: 2026-05-29
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 5
-  completed_plans: 5
+  total_phases: 6
+  completed_phases: 6
+  total_plans: 6
+  completed_plans: 6
   percent: 100
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** Phase 25 removed browser-token fallback guidance from the first-user runbook and extended intake validation to cover tokenless diagnostics guidance. The next concrete step is collecting a real first-user trial packet through the validated runbook, template, or issue form while preserving v1.4 external gate states until real artifacts exist.
+**Current focus:** Phase 26 added a local trial feedback draft generator that pre-fills bounded metadata without collecting raw evidence. The next concrete step is collecting a real first-user trial packet through the validated runbook, template, issue form, or draft helper while preserving v1.4 external gate states until real artifacts exist.
 
 ## Current Position
 
-Phase: 25. Tokenless Trial Diagnostics
-Plan: 25-01 complete
+Phase: 26. Trial Feedback Draft Generator
+Plan: 26-01 complete
 Status: Phase Complete
 Last activity: 2026-05-29
 
@@ -67,6 +67,7 @@ Last activity: 2026-05-29
 | 23. Source Env Override Preservation | 1/1 | - | - |
 | 24. Trial Feedback Intake Contract | 1/1 | - | - |
 | 25. Tokenless Trial Diagnostics | 1/1 | - | - |
+| 26. Trial Feedback Draft Generator | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -95,12 +96,13 @@ Recent decisions affecting current work:
 - [Phase 23]: Source fallback Gateway/Web scripts now load root `.env` through `scripts/run-with-root-env.mjs`, preserving command-prefix env values over `.env`. Red/green tests, CI script harness coverage, Gateway `OPENFORGE_DB_PATH` prefix smoke, and Web `OPENFORGE_WEB_PORT` prefix smoke passed. External gates remain unchanged.
 - [Phase 24]: First-user trial feedback intake is now a machine-verified contract through `scripts/validate-trial-feedback-intake.mjs`, covering required issue-form fields/types/options, Markdown sections, triage routing, redaction language, and unsafe raw-evidence wording. CI script harness coverage includes the validator. External gates remain unchanged.
 - [Phase 25]: The first-user runbook no longer asks users to retrieve browser auth tokens from developer tools. Diagnostics guidance now uses Settings -> Export diagnostics JSON, with local API fallback labeled maintainer-only, and the validator rejects token fallback wording. External gates remain unchanged.
+- [Phase 26]: `pnpm trial:feedback-draft` generates a local Markdown draft with bounded metadata, redacts token-shaped values, and explicitly states the draft is not submitted, not reviewed, and not gate-clearing evidence. External gates remain unchanged.
 
 ### Pending Todos
 
 Next steps:
 
-- Collect a real first-user trial packet through the validated runbook, template, or issue form.
+- Collect a real first-user trial packet through the validated runbook, template, issue form, or draft helper.
 - Use the v1.5 trial-operations loop for the next real first-user trial packet.
 - Prepare Feishu developer-console callback evidence only when public HTTPS Gateway routing is available.
 - Collect physical Windows/WSL and first-user feedback evidence when those external environments/users are available.
@@ -127,10 +129,10 @@ Next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T05:28:00+08:00
-Stopped at: Phase 25 tokenless trial diagnostics complete; real first-user packet collection pending
+Last session: 2026-05-29T05:35:00+08:00
+Stopped at: Phase 26 trial feedback draft generator complete; real first-user packet collection pending
 Resume file: None
 
 ## Operator Next Steps
 
-- Collect a real first-user trial packet through the validated tokenless runbook and intake contract, then triage it through the v1.5 operating loop and the external evidence gate registry.
+- Collect a real first-user trial packet through the validated tokenless runbook, intake contract, or draft helper, then triage it through the v1.5 operating loop and the external evidence gate registry.

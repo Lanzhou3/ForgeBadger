@@ -188,6 +188,9 @@ Forbidden Project Manager evidence content:
 
 - [ ] Complete `docs/TRIAL-FEEDBACK.md` or open the GitHub issue form
       `OpenForge first-user trial feedback`.
+- [ ] Optional: generate a local draft with
+      `pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md`
+      and complete/redact it before sharing.
 - [ ] Check `docs/EXTERNAL-EVIDENCE-GATES.md` gate
       `FIRST-USER-FEEDBACK` before claiming completed first-user evidence.
 - [ ] Map each issue to the closest Phase 3 hardening requirement in the
