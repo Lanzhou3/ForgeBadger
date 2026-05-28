@@ -388,6 +388,128 @@ describe("model provider routes", () => {
     );
   });
 
+  it("checks provider readiness with remote model-list evidence", async () => {
+    const fetchedInputs: FetchProviderModelsInput[] = [];
+    const readinessApp = express();
+    readinessApp.locals.jwtSecret = secret;
+    readinessApp.use(express.json());
+    readinessApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
+      loadProviderCatalog: async () => testProviderCatalog,
+      fetchProviderModels: async (input) => {
+        fetchedInputs.push(input);
+        return [
+          { id: "deepseek-chat", ownedBy: "deepseek" },
+          { id: "deepseek-reasoner", ownedBy: "deepseek" }
+        ];
+      }
+    }));
+    const created = await makeRequest(readinessApp, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+    const providerId = created.body.data.provider.id;
+    const model = await makeRequest(readinessApp, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "DeepSeek Chat",
+      modelId: "deepseek-chat"
+    }, authHeaders());
+    const credential = await makeRequest(readinessApp, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
+      plaintextSecret: "sk-deepseek"
+    }, authHeaders());
+
+    const readiness = await makeRequest(readinessApp, "POST", `/api/v1/model-providers/${providerId}/readiness`, {
+      adapter: "claude",
+      modelProfileId: model.body.data.model.id,
+      credentialId: credential.body.data.credential.id,
+      includeRemoteCheck: true,
+      timeoutMs: 5000
+    }, authHeaders());
+
+    assert.equal(readiness.status, 200);
+    assert.equal(readiness.body.code, 0);
+    assert.equal(readiness.body.data.readiness.status, "ready");
+    assert.equal(readiness.body.data.readiness.code, "ready");
+    assert.equal(readiness.body.data.readiness.checks.remoteModelList, "passed");
+    assert.equal(readiness.body.data.readiness.remote.modelCount, 2);
+    assert.equal(readiness.body.data.readiness.remote.matchedModelId, "deepseek-chat");
+    assert.equal(fetchedInputs[0]?.apiKey, "sk-deepseek");
+    assert.equal(fetchedInputs[0]?.modelsUrl, "https://api.deepseek.com/models");
+    assert.equal(JSON.stringify(readiness.body).includes("sk-deepseek"), false);
+  });
+
+  it("returns structured provider readiness when an active credential is missing", async () => {
+    let fetchCalled = false;
+    const readinessApp = express();
+    readinessApp.locals.jwtSecret = secret;
+    readinessApp.use(express.json());
+    readinessApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
+      loadProviderCatalog: async () => testProviderCatalog,
+      fetchProviderModels: async () => {
+        fetchCalled = true;
+        return [];
+      }
+    }));
+    const created = await makeRequest(readinessApp, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+    const providerId = created.body.data.provider.id;
+    const model = await makeRequest(readinessApp, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "DeepSeek Chat",
+      modelId: "deepseek-chat"
+    }, authHeaders());
+
+    const readiness = await makeRequest(readinessApp, "POST", `/api/v1/model-providers/${providerId}/readiness`, {
+      adapter: "opencode",
+      modelProfileId: model.body.data.model.id,
+      includeRemoteCheck: true
+    }, authHeaders());
+
+    assert.equal(readiness.status, 200);
+    assert.equal(readiness.body.code, 0);
+    assert.equal(readiness.body.data.readiness.status, "needs_attention");
+    assert.equal(readiness.body.data.readiness.code, "missing_active_credential");
+    assert.equal(readiness.body.data.readiness.checks.credential, "missing");
+    assert.match(readiness.body.data.readiness.steps.join("\n"), /credential/i);
+    assert.equal(fetchCalled, false);
+  });
+
+  it("keeps Codex provider readiness subscription-managed", async () => {
+    let fetchCalled = false;
+    const readinessApp = express();
+    readinessApp.locals.jwtSecret = secret;
+    readinessApp.use(express.json());
+    readinessApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
+      loadProviderCatalog: async () => testProviderCatalog,
+      fetchProviderModels: async () => {
+        fetchCalled = true;
+        return [];
+      }
+    }));
+    const created = await makeRequest(readinessApp, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+    const providerId = created.body.data.provider.id;
+    const model = await makeRequest(readinessApp, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "DeepSeek Chat",
+      modelId: "deepseek-chat"
+    }, authHeaders());
+    const credential = await makeRequest(readinessApp, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
+      plaintextSecret: "sk-deepseek"
+    }, authHeaders());
+
+    const readiness = await makeRequest(readinessApp, "POST", `/api/v1/model-providers/${providerId}/readiness`, {
+      adapter: "codex",
+      modelProfileId: model.body.data.model.id,
+      credentialId: credential.body.data.credential.id,
+      includeRemoteCheck: true
+    }, authHeaders());
+
+    assert.equal(readiness.status, 200);
+    assert.equal(readiness.body.code, 0);
+    assert.equal(readiness.body.data.readiness.status, "managed_elsewhere");
+    assert.equal(readiness.body.data.readiness.code, "codex_subscription_managed");
+    assert.equal(readiness.body.data.readiness.checks.adapter, "managed_elsewhere");
+    assert.equal(fetchCalled, false);
+  });
+
   it("syncs static catalog models without calling a provider model endpoint", async () => {
     let fetchCalled = false;
     const syncApp = express();

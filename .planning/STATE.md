@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: AI-Native Project Execution Traceability
 status: ready_to_plan
-stopped_at: Phase 14 complete — ready to plan Phase 15 model provider setup and health
-last_updated: 2026-05-29T02:37:41+08:00
+stopped_at: Phase 15 plan 01 complete — ready to plan 15-02 Provider Health & Identity Web surface
+last_updated: 2026-05-29T02:52:32+08:00
 last_activity: 2026-05-29
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 10
-  completed_plans: 10
-  percent: 59
+  total_plans: 13
+  completed_plans: 11
+  percent: 65
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-22)
 ## Current Position
 
 Phase: 15
-Plan: 15 next
+Plan: 15-02 next
 Status: Ready to plan
 Last activity: 2026-05-29
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-29
 
 **Velocity:**
 
-- Total plans completed: 31
+- Total plans completed: 32
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -88,6 +88,8 @@ Last activity: 2026-05-29
 | Phase 14 P02 | completed | 4 tasks | 10 files |
 | Phase 14 P03 | completed | 3 tasks | 6 files |
 | 14 | 3/3 | - | - |
+| Phase 15 P01 | completed | 3 tasks | 5 files |
+| 15 | 1/3 | - | - |
 
 ## Accumulated Context
 
@@ -133,12 +135,13 @@ Recent decisions affecting current work:
 - [Phase 14]: Workspace context file reads stay bounded UTF-8 previews and reject traversal, absolute paths, binary files, and symbolic links; raw file content is not persisted as project-manager evidence. — Plan 14-01 implementation.
 - [Phase 14]: Web workspace context uses one read-only `WorkspaceContextPanel` across project and session views; it never persists preview content as project-manager evidence. — Plan 14-02 implementation.
 - [Phase 14]: Project Manager workspace evidence refs use bounded `file_path`, `terminal_snapshot`, and `session` markers; raw terminal scrollback and file contents remain outside SQLite evidence storage. — Plan 14-03 implementation.
+- [Phase 15]: Gateway model-provider readiness is a structured, tenant-scoped contract with provider/model/credential/adapter/remote-model checks, actionable codes, and Codex subscription-managed isolation. — Plan 15-01 implementation.
 
 ### Pending Todos
 
 Phase 15 next steps:
 
-- Plan Phase 15 model provider setup and health checks.
+- Plan 15-02 Provider Health & Identity Web surface using the Gateway readiness contract.
 
 ### Blockers/Concerns
 
@@ -165,10 +168,10 @@ Phase 15 next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T02:37:41+08:00
-Stopped at: Completed 14-03-PLAN.md
+Last session: 2026-05-29T02:52:32+08:00
+Stopped at: Completed 15-01-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Start Phase 15 planning for model provider setup and health.
+- Start 15-02 planning for the Web provider health panel and Codex identity messaging.

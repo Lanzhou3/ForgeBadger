@@ -21,6 +21,10 @@ import {
 } from "../services/model-catalog.js";
 import { checkModelEndpoint } from "../services/model-endpoint-health.js";
 import {
+  buildModelProviderReadiness,
+  type ProviderReadinessAdapter
+} from "../services/model-provider-readiness.js";
+import {
   applyModelProviderConfig,
   previewModelProviderConfig
 } from "../services/model-config-apply.js";
@@ -71,6 +75,13 @@ const applySchema = z.object({
 });
 const endpointTestSchema = z.object({
   timeoutMs: z.number().int().min(100).max(15000).optional()
+});
+const readinessSchema = z.object({
+  adapter: adapterSchema,
+  modelProfileId: z.string().min(1).optional(),
+  credentialId: z.string().min(1).optional(),
+  timeoutMs: z.number().int().min(100).max(30000).optional(),
+  includeRemoteCheck: z.boolean().optional()
 });
 const syncModelsSchema = z.object({
   credentialId: z.string().min(1).optional(),
@@ -401,6 +412,37 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
     });
     res.json({ code: 0, data: { health }, message: "" });
+  });
+
+  router.post("/:id/readiness", async (req, res) => {
+    const parseResult = readinessSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid provider readiness payload" });
+      return;
+    }
+    const repo = repoFor(db, masterKey, req);
+    const provider = repo.getProviderProfile(req.params.id);
+    if (!provider) {
+      res.status(404).json({ code: 1, message: "Provider not found" });
+      return;
+    }
+    const model = selectModel(repo, provider, parseResult.data.modelProfileId);
+    const credential = selectCredential(repo, provider.id, parseResult.data.credentialId);
+    const catalogPreset = (await loadProviderCatalog()).find((preset) => preset.id === provider.providerKey);
+    const readiness = await buildModelProviderReadiness({
+      provider,
+      model,
+      credential,
+      adapter: parseResult.data.adapter as ProviderReadinessAdapter,
+      modelProfileId: parseResult.data.modelProfileId,
+      credentialId: parseResult.data.credentialId,
+      includeRemoteCheck: parseResult.data.includeRemoteCheck ?? false,
+      ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {}),
+      ...(catalogPreset?.modelFetch?.modelsUrl ? { modelsUrl: catalogPreset.modelFetch.modelsUrl } : {}),
+      decryptCredential: credential ? () => repo.decryptCredential(credential.id) : undefined,
+      fetchProviderModels
+    });
+    res.json({ code: 0, data: { readiness }, message: "" });
   });
 
   router.post("/:id/preview-apply", async (req, res) => {

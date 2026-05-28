@@ -1126,6 +1126,7 @@ timeout used by the check.
 - `GET /api/v1/model-providers/:id/models`
 - `POST /api/v1/model-providers/:id/models`
 - `POST /api/v1/model-providers/:id/models/sync`
+- `POST /api/v1/model-providers/:id/readiness`
 - `POST /api/v1/model-providers/:id/preview-apply`
 - `POST /api/v1/model-providers/:id/apply`
 
@@ -1182,6 +1183,48 @@ Creating a custom Provider Profile:
 Model sync uses the selected Provider Profile base URL, saved credential, and
 current catalog metadata when available. Plaintext credentials are decrypted
 only inside Gateway memory for the outbound provider request.
+
+`POST /api/v1/model-providers/:id/readiness` evaluates a Provider Profile,
+target adapter, selected model, selected credential, and optional remote
+model-list evidence without mutating provider state.
+
+Request body:
+
+```json
+{
+  "adapter": "claude",
+  "modelProfileId": "model-profile-id",
+  "credentialId": "credential-id",
+  "timeoutMs": 5000,
+  "includeRemoteCheck": true
+}
+```
+
+Response data contains `readiness.status`, `readiness.code`, `checks`,
+`steps`, and optional safe `remote` metadata. Readiness codes include:
+
+- `ready`
+- `provider_disabled`
+- `unsupported_target`
+- `missing_model`
+- `missing_active_credential`
+- `remote_validation_unavailable`
+- `remote_model_missing`
+- `remote_validation_failed`
+- `codex_subscription_managed`
+
+When `includeRemoteCheck` is true and the provider has a safe model-list
+endpoint, Gateway decrypts the selected credential only in memory and calls the
+provider's model-list endpoint through the existing HTTPS/SSRF-safe fetch
+helper. Remote failure metadata is categorized as `invalid_credential`,
+`timeout`, `provider_outage`, or `endpoint_or_network_failure`. The response
+must not include plaintext credentials, authorization headers, provider request
+payloads, provider response bodies, tokens, API keys, or other secrets.
+
+For `adapter: "codex"`, readiness returns
+`codex_subscription_managed`; it does not decrypt provider credentials, does
+not call provider endpoints, and does not enable provider apply wiring. Codex
+continues to use the subscription-managed SDK identity path.
 
 ### API Keys And Credential Mode
 

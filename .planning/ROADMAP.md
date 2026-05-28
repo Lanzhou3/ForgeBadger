@@ -95,6 +95,14 @@ Plans:
 
 **Requirements:** MODEL-01, MODEL-02, MODEL-03, MODEL-04
 
+**Plans:** 3 plans
+
+Plans:
+
+- [x] 15-01-PLAN.md — Gateway model-provider readiness contract, remote model-list health, and Codex isolation.
+- [ ] 15-02-PLAN.md — Web guided provider setup checklist and visible readiness actions.
+- [ ] 15-03-PLAN.md — Browser coverage, docs closeout, and Phase 15 requirement verification.
+
 **Success criteria:**
 
 1. Provider setup explains provider, credential, and model profile relationships in one guided flow.
@@ -182,7 +190,7 @@ Full archive:
 | 12. Copilot Project-Manager Traceability | v1.3 | 4/4 | Complete    | 2026-05-22 |
 | 13. Project Manager Board Workflow | v1.3 | 3/3 | Complete | 2026-05-29 |
 | 14. Terminal Workspace Context | v1.3 | 3/3 | Complete | 2026-05-29 |
-| 15. Model Provider Setup And Health | v1.3 | 0/0 | Planned | — |
+| 15. Model Provider Setup And Health | v1.3 | 1/3 | In Progress | — |
 | 16. Open Source Readiness Packet | v1.3 | 0/0 | Planned | — |
 
 ## Backlog
