@@ -52,6 +52,7 @@ docs/reports/*
 !docs/API.md
 !docs/CI-CD-PLAN.md
 !docs/DEVELOPMENT-PLAN.md
+!docs/frontend-redesign-requirements.md
 !docs/PRD-v1.1-MVP.md
 !docs/TECH-ARCHITECTURE.md
 !docs/TEST-PLAN.md
