@@ -32,6 +32,16 @@ pnpm trial:intake-validate
 Passing validation means the intake materials remain structurally aligned. It
 does not collect first-user evidence or clear any external gate.
 
+Maintainers can verify the existing follow-up issues before routing feedback:
+
+```bash
+pnpm trial:issue-routes-validate
+```
+
+Passing route validation only means issue #3, #4, and #5 are available for
+triage links. It does not collect first-user evidence or clear any external
+gate.
+
 ## Summary
 
 - Result: pass / pass with caveats / blocked

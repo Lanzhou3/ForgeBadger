@@ -190,6 +190,8 @@ Forbidden Project Manager evidence content:
       `OpenForge first-user trial feedback`.
 - [ ] If trial intake materials changed, run `pnpm trial:intake-validate` and
       keep the output with maintainer handoff notes.
+- [ ] Maintainer preflight, if routing to existing GitHub follow-up issues:
+      run `pnpm trial:issue-routes-validate`.
 - [ ] Optional: generate a local draft with
       `pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md`
       and complete/redact it before sharing.

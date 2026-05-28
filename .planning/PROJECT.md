@@ -4,7 +4,7 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is v1.5 First-User Trial Operations. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix. v1.5 turns that evidence posture into an operator-run first-user trial loop, completed an operator dry-run on the current host, fixed the source fallback env override support gap found by that dry-run, added machine validation for the trial feedback intake contract, removed browser-token fallback guidance from the first-user runbook, added a local feedback draft helper, added a local packet audit that keeps incomplete or unsafe Markdown packets out of maintainer triage, added a gate registry drift guard, and extended the intake validator to keep the first-user checklist aligned with runbook/template/issue-form/audit/gate instructions.
+The current product stage is v1.5 First-User Trial Operations. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix. v1.5 turns that evidence posture into an operator-run first-user trial loop, completed an operator dry-run on the current host, fixed the source fallback env override support gap found by that dry-run, added machine validation for the trial feedback intake contract, removed browser-token fallback guidance from the first-user runbook, added a local feedback draft helper, added a local packet audit that keeps incomplete or unsafe Markdown packets out of maintainer triage, added a gate registry drift guard, extended the intake validator to keep the first-user checklist aligned with runbook/template/issue-form/audit/gate instructions, and added a read-only GitHub issue route preflight for follow-up issues #3, #4, and #5.
 
 ## Current Milestone
 
@@ -13,7 +13,8 @@ operator dry-run, the source fallback env override fix, trial feedback intake
 contract validation, tokenless runbook diagnostics guidance, a local feedback
 draft helper, a local feedback packet audit, and an external evidence gate
 drift guard. The trial checklist is now covered by the same intake validation
-loop. The remaining work is real first-user trial packet collection and
+loop, and the existing GitHub follow-up issue routes have a read-only preflight
+command. The remaining work is real first-user trial packet collection and
 maintainer triage.
 
 **Last shipped:** v1.4 External Evidence Closure on 2026-05-29.
@@ -80,6 +81,8 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - [x] v1.5 validates first-user trial intake materials across runbook,
   checklist, feedback template, and GitHub issue form without treating
   templates as completed first-user evidence.
+- [x] v1.5 validates GitHub follow-up issue routes #3, #4, and #5 without
+  treating issue availability as completed first-user evidence.
 
 ### Active
 
@@ -158,6 +161,10 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
   validator to cover `docs/TRIAL-CHECKLIST.md` so checklist edits cannot drop
   audit commands, gate-routing commands, redaction review, or browser-token
   safety boundaries. It does not clear any external gate.
+- Phase 30 added `pnpm trial:issue-routes-validate`, a read-only GitHub CLI
+  preflight that checks issue #3, #4, and #5 are open and mapped to expected
+  trial routes. The live preflight passed and returned
+  `gateClearingEvidence: false`.
 - Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints
@@ -197,6 +204,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Audit feedback packets before maintainer triage | Completed Markdown packets need a local completeness and redaction check before they are treated as actionable intake | Good - Phase 27 rejects drafts, placeholders, missing fields, and obvious secret-like content while keeping gate clearance manual |
 | Validate external gate registry drift | Gate status changes should be deliberate and reviewable because CI-green, templates, and local checks do not clear external evidence | Good - Phase 28 adds a validator for exact gate states and rerun anchors |
 | Validate trial checklist drift | The checklist is the first-user entry point and must not silently drop audit, gate-routing, or safety instructions | Good - Phase 29 folds checklist validation into the existing intake contract |
+| Validate trial issue routes | First-user trial feedback needs live follow-up issue destinations that remain open and correctly labeled | Good - Phase 30 adds a read-only preflight and mocked CI coverage |
 
 ## Evolution
 
@@ -216,4 +224,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-29 after completing Phase 29 Trial Materials Consistency Guard.*
+*Last updated: 2026-05-29 after completing Phase 30 Trial Issue Route Preflight.*

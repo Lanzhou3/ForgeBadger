@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: First-User Trial Operations
 status: phase_complete
-stopped_at: Phase 29 trial materials consistency guard complete; real first-user packet collection pending
-last_updated: 2026-05-29T06:40:00+08:00
+stopped_at: Phase 30 trial issue route preflight complete; real first-user packet collection pending
+last_updated: 2026-05-29T07:10:00+08:00
 last_activity: 2026-05-29
 progress:
-  total_phases: 9
-  completed_phases: 9
-  total_plans: 9
-  completed_plans: 9
+  total_phases: 10
+  completed_phases: 10
+  total_plans: 10
+  completed_plans: 10
   percent: 100
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** Phase 29 extended the trial intake validator to cover the first-user checklist, preventing checklist drift across runbook/template/issue-form/audit/gate instructions. The next concrete step is collecting a real first-user trial packet through the validated runbook, checklist, template, issue form, draft helper, audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
+**Current focus:** Phase 30 added a read-only GitHub issue route preflight for follow-up issues #3, #4, and #5. The next concrete step is collecting a real first-user trial packet through the validated runbook, checklist, template, issue form, draft helper, issue-route preflight, audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
 
 ## Current Position
 
-Phase: 29. Trial Materials Consistency Guard
-Plan: 29-01 complete
+Phase: 30. Trial Issue Route Preflight
+Plan: 30-01 complete
 Status: Phase Complete
 Last activity: 2026-05-29
 
@@ -71,6 +71,7 @@ Last activity: 2026-05-29
 | 27. Trial Feedback Packet Audit | 1/1 | - | - |
 | 28. External Evidence Gate Drift Guard | 1/1 | - | - |
 | 29. Trial Materials Consistency Guard | 1/1 | - | - |
+| 30. Trial Issue Route Preflight | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -103,6 +104,7 @@ Recent decisions affecting current work:
 - [Phase 27]: `pnpm trial:feedback-audit` rejects generated drafts, placeholder-only packets, missing required fields, and obvious secret-like content before maintainer triage. Passing audit means ready for maintainer triage only; `gateClearingEvidence` remains false and external gates remain unchanged.
 - [Phase 28]: `pnpm evidence:gates-validate` verifies the external evidence registry keeps required gate rows, exact current states, and concrete rerun/target anchors. External gates remain unchanged.
 - [Phase 29]: `pnpm trial:intake-validate` verifies the trial runbook, checklist, feedback template, and GitHub issue form remain aligned on audit commands, gate-routing commands, redaction review, and browser-token safety boundaries. External gates remain unchanged.
+- [Phase 30]: `pnpm trial:issue-routes-validate` verifies GitHub issue #3, #4, and #5 are readable, open, and mapped to their expected route titles/labels. The live preflight passed and returned `gateClearingEvidence: false`. External gates remain unchanged.
 
 ### Pending Todos
 
@@ -110,6 +112,7 @@ Next steps:
 
 - Collect a real first-user trial packet through the validated runbook, template, issue form, or draft helper.
 - Run `pnpm trial:intake-validate` after changing trial intake materials.
+- Run `pnpm trial:issue-routes-validate` before routing a real collection round to the existing GitHub follow-up issues.
 - Run `pnpm trial:feedback-audit -- <packet.md>` before maintainer triage of any completed Markdown packet.
 - Run `pnpm evidence:gates-validate` before changing any external gate registry state.
 - Use the v1.5 trial-operations loop for the next real first-user trial packet.
@@ -138,10 +141,10 @@ Next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T06:40:00+08:00
-Stopped at: Phase 29 trial materials consistency guard complete; real first-user packet collection pending
+Last session: 2026-05-29T07:10:00+08:00
+Stopped at: Phase 30 trial issue route preflight complete; real first-user packet collection pending
 Resume file: None
 
 ## Operator Next Steps
 
-- Collect a real first-user trial packet through the validated tokenless runbook, checklist, intake contract, draft helper, packet audit helper, and external gate validator, then triage it through the v1.5 operating loop and the external evidence gate registry.
+- Collect a real first-user trial packet through the validated tokenless runbook, checklist, intake contract, draft helper, issue-route preflight, packet audit helper, and external gate validator, then triage it through the v1.5 operating loop and the external evidence gate registry.

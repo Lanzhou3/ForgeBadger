@@ -37,6 +37,18 @@ pnpm trial:intake-validate
 This checks the trial intake materials stay aligned. It does not collect
 evidence, submit feedback, or clear any external gate.
 
+Before a maintainer starts a real trial collection round, optionally verify the
+GitHub follow-up routes:
+
+```bash
+pnpm trial:issue-routes-validate
+```
+
+This requires GitHub CLI access to `Lanzhou3/OpenForge` and checks that issue
+#3, #4, and #5 still exist, are open, and match their expected routing labels.
+It does not create or update GitHub issues and does not clear any external
+gate.
+
 The primary path is the npm/CLI startup. Source startup is a fallback for local
 debugging and contribution.
 
@@ -297,6 +309,13 @@ After editing trial intake materials, run:
 
 ```bash
 pnpm trial:intake-validate
+```
+
+If routing feedback to the existing GitHub follow-up issues, a maintainer can
+rerun:
+
+```bash
+pnpm trial:issue-routes-validate
 ```
 
 Do not upload secrets, API keys, plaintext credentials, local private keys, or

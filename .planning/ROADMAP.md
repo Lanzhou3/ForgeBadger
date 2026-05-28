@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 29 trial materials consistency guard complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 30 trial issue route preflight complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -275,6 +275,30 @@ Plans:
 5. The validator does not collect first-user feedback, export diagnostics,
    upload artifacts, submit issues, or clear any external gate.
 
+### Phase 30: Trial Issue Route Preflight
+
+**Goal:** Add a maintainer preflight that verifies GitHub follow-up issue routes
+#3, #4, and #5 remain usable before routing real first-user trial evidence.
+
+**Requirements:** ROUTE-01, ROUTE-02, ROUTE-03, ROUTESAFE-01,
+PLAN-30-01, PLAN-30-02, PLAN-30-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 30-01-PLAN.md — issue-route validator, live preflight, CI harness test,
+  docs sync, and gate-preserving verification.
+
+**Success criteria:**
+
+1. A root command validates issue #3, #4, and #5 route metadata.
+2. The command rejects missing, closed, mistitled, or mislabeled route issues.
+3. The command reports `gateClearingEvidence: false`.
+4. CI covers the route contract through mocked issue data, not live GitHub
+   mutation or network-dependent release claims.
+5. Trial docs describe the preflight as read-only and non-gate-clearing.
+
 ## Archived Milestones
 
 <details>
@@ -393,6 +417,8 @@ Full archive:
 | 26. Trial Feedback Draft Generator | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 27. Trial Feedback Packet Audit | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 28. External Evidence Gate Drift Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 29. Trial Materials Consistency Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 30. Trial Issue Route Preflight | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

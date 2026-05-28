@@ -278,6 +278,30 @@
   coverage, CLI validation, script harness coverage, docs references, and
   unchanged external gate states.
 
+### Trial Issue Route Preflight
+
+- [x] **ROUTE-01**: A maintainer-run command must validate that GitHub issue
+  #3 maps to `LIVE-PROVIDER`, issue #4 maps to `WINDOWS-WSL`, and issue #5
+  maps to `FIRST-USER-FEEDBACK`.
+- [x] **ROUTE-02**: The route validator must reject missing, unreadable,
+  closed, mistitled, or mislabeled follow-up issues.
+- [x] **ROUTE-03**: CI must cover the route validator contract with mocked
+  issue data so CI does not depend on live GitHub network/auth state.
+- [x] **ROUTESAFE-01**: Route validation must be read-only and must not create,
+  update, close, label, or comment on GitHub issues, collect feedback, attach
+  artifacts, or clear any external evidence gate.
+
+### Phase 30 Planning Closure
+
+- [x] **PLAN-30-01**: Phase 30 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-30-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the trial issue route preflight while
+  keeping real first-user packet collection pending.
+- [x] **PLAN-30-03**: Phase 30 verification proves red/green route tests, live
+  route preflight, script harness coverage, docs references, and unchanged
+  external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -364,11 +388,18 @@
 | PLAN-29-01 | Phase 29 | Complete |
 | PLAN-29-02 | Phase 29 | Complete |
 | PLAN-29-03 | Phase 29 | Complete |
+| ROUTE-01 | Phase 30 | Complete |
+| ROUTE-02 | Phase 30 | Complete |
+| ROUTE-03 | Phase 30 | Complete |
+| ROUTESAFE-01 | Phase 30 | Complete |
+| PLAN-30-01 | Phase 30 | Complete |
+| PLAN-30-02 | Phase 30 | Complete |
+| PLAN-30-03 | Phase 30 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 70 total
-- Mapped to phases: 70
+- v1.5 requirements: 77 total
+- Mapped to phases: 77
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 29 Trial Materials Consistency Guard.*
+*Requirements updated: 2026-05-29 after Phase 30 Trial Issue Route Preflight.*

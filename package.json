@@ -17,6 +17,7 @@
     "smoke:npm": "node scripts/smoke-npm-package.mjs",
     "test": "pnpm -r test",
     "trial:intake-validate": "node scripts/validate-trial-feedback-intake.mjs",
+    "trial:issue-routes-validate": "node scripts/validate-trial-issue-routes.mjs",
     "trial:feedback-audit": "node scripts/audit-trial-feedback-packet.mjs",
     "trial:feedback-draft": "node scripts/create-trial-feedback-draft.mjs",
     "typecheck": "pnpm -r typecheck",

@@ -26,6 +26,9 @@ This bounded index summarizes decisions that downstream GSD workflows should car
   must not collect evidence or change gate states by itself.
 - Trial intake material validation includes the first-user checklist, but it
   remains a structural guard and cannot substitute for a completed packet.
+- Trial issue-route validation may prove follow-up issues are currently open,
+  but it remains a read-only preflight and cannot substitute for feedback
+  artifacts.
 
 ## Locked Decisions
 
@@ -54,6 +57,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.5 feedback packet audit | `pnpm trial:feedback-audit` rejects generated drafts, placeholders, missing fields, and secret-like content before maintainer triage; `gateClearingEvidence` remains false. | `docs/reports/phase-27-trial-feedback-packet-audit-2026-05-29.md` |
 | v1.5 external gate drift guard | `pnpm evidence:gates-validate` requires the four external gate rows to keep their current Caveat/Blocked states and concrete rerun anchors until real artifacts justify a reviewed validator update. | `docs/reports/phase-28-external-evidence-gate-drift-guard-2026-05-29.md` |
 | v1.5 trial materials consistency guard | `pnpm trial:intake-validate` validates the runbook, checklist, feedback template, and GitHub issue form as a local structural contract; it does not collect first-user evidence or clear gates. | `docs/reports/phase-29-trial-materials-consistency-guard-2026-05-29.md` |
+| v1.5 trial issue route preflight | `pnpm trial:issue-routes-validate` checks GitHub issue #3, #4, and #5 are open and mapped to expected external evidence routes; `gateClearingEvidence` remains false. | `docs/reports/phase-30-trial-issue-route-preflight-2026-05-29.md` |
 
 ## Deferred Ideas
 

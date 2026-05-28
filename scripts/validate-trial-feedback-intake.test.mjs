@@ -142,6 +142,7 @@ describe("validateTrialFeedbackIntake", () => {
 
     assert.equal(result.ok, false);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:intake-validate/);
+    assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:issue-routes-validate/);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:feedback-audit/);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm evidence:gates-validate/);
     assert.match(result.errors.join("\n"), /trial checklist.*browser developer tools/);

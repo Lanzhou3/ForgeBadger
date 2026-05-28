@@ -73,6 +73,12 @@
   to run both trial intake and external gate validators. The checklist now
   preserves audit commands, gate-routing commands, redaction review, and
   browser-token safety boundaries without clearing any external gate.
+- Phase 30 added `scripts/validate-trial-issue-routes.mjs`,
+  `scripts/validate-trial-issue-routes.test.mjs`, and
+  `pnpm trial:issue-routes-validate`. The live preflight verified issue #3
+  (`LIVE-PROVIDER`), #4 (`WINDOWS-WSL`), and #5
+  (`FIRST-USER-FEEDBACK`) are open and correctly routed, while returning
+  `gateClearingEvidence: false`.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -182,8 +188,9 @@
 ## Next Work
 
 1. Use the validated v1.5 tokenless runbook, checklist, trial packet intake,
-   optional feedback draft helper, packet audit helper, intake material
-   validator, and external gate validator for the next real first-user run:
+   optional feedback draft helper, issue-route preflight, packet audit helper,
+   intake material validator, and external gate validator for the next real
+   first-user run:
    affected surface, severity, owner,
    disposition or next action, environment summary, reproduction detail,
    diagnostics status, follow-up route or no-action rationale, and redaction
