@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: AI-Native Project Execution Traceability
 status: ready_to_plan
-stopped_at: Phase 15 plan 02 complete — ready to plan 15-03 Phase 15 browser coverage and closeout
-last_updated: 2026-05-29T03:10:05+08:00
+stopped_at: Phase 15 complete — ready to plan Phase 16 Open Source Readiness Packet
+last_updated: 2026-05-29T03:17:17+08:00
 last_activity: 2026-05-29
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 13
-  completed_plans: 12
-  percent: 71
+  completed_plans: 13
+  percent: 80
 ---
 
 # Project State
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-22)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while turning AI-assisted work into auditable project state.
-**Current focus:** Phase 15 — model provider setup and health
+**Current focus:** Phase 16 — open source readiness packet
 
 ## Current Position
 
-Phase: 15
-Plan: 15-03
+Phase: 16
+Plan: TBD
 Status: Ready to plan
 Last activity: 2026-05-29
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-29
 
 **Velocity:**
 
-- Total plans completed: 33
+- Total plans completed: 34
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -90,7 +90,8 @@ Last activity: 2026-05-29
 | 14 | 3/3 | - | - |
 | Phase 15 P01 | completed | 3 tasks | 5 files |
 | Phase 15 P02 | completed | 3 tasks | 8 files |
-| 15 | 2/3 | - | - |
+| Phase 15 P03 | completed | 3 tasks | 10 files |
+| 15 | 3/3 | - | - |
 
 ## Accumulated Context
 
@@ -138,12 +139,13 @@ Recent decisions affecting current work:
 - [Phase 14]: Project Manager workspace evidence refs use bounded `file_path`, `terminal_snapshot`, and `session` markers; raw terminal scrollback and file contents remain outside SQLite evidence storage. — Plan 14-03 implementation.
 - [Phase 15]: Gateway model-provider readiness is a structured, tenant-scoped contract with provider/model/credential/adapter/remote-model checks, actionable codes, and Codex subscription-managed isolation. — Plan 15-01 implementation.
 - [Phase 15]: Web /models exposes provider readiness checks and Codex subscription identity as separate visible surfaces; provider readiness sends selected adapter/model/credential to Gateway and never renders plaintext credentials or raw provider payloads. — Plan 15-02 implementation.
+- [Phase 15]: MODEL-01 through MODEL-04 are complete with Gateway/browser/API coverage, trial/support recovery docs, and a closeout report; live external provider pass remains a caveat until a disposable credential run is attached. — Plan 15-03 closeout.
 
 ### Pending Todos
 
-Phase 15 next steps:
+Phase 16 next steps:
 
-- Plan 15-03 Browser coverage, docs closeout, and Phase 15 requirement verification.
+- Plan Phase 16 Open Source Readiness Packet for OSS-01 through OSS-03.
 
 ### Blockers/Concerns
 
@@ -157,6 +159,7 @@ Phase 15 next steps:
 - v1.2 did not reclassify v1.1 live-provider, physical Windows/WSL, Feishu console-callback, or first-user feedback caveats because no new real external evidence was attached.
 - v1.3 is ready to begin. Before this v1.3 planning update, tracked code was clean; the current tracked changes are the v1.3 planning documents, and unrelated untracked `upload_img/` remains outside milestone scope.
 - Phase 14 Terminal Workspace Context is complete. Workspace file context and Project Manager evidence refs remain bounded pointers; raw file/terminal content is intentionally not persisted as evidence.
+- Phase 15 Model Provider Setup And Health is complete. Provider readiness recovery is product-contract and mocked-browser verified; real live-provider pass still requires a disposable credential run.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - v1.1 intentionally excludes remote runtime and project-manager Web UI to keep the milestone focused on real-world beta readiness evidence.
 
@@ -170,10 +173,10 @@ Phase 15 next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T03:10:05+08:00
-Stopped at: Completed 15-02-PLAN.md
+Last session: 2026-05-29T03:17:17+08:00
+Stopped at: Completed Phase 15 / 15-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Start 15-03 planning for Phase 15 browser coverage, docs closeout, and final requirement verification.
+- Start Phase 16 planning for the open-source readiness packet.

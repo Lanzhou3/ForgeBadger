@@ -121,6 +121,15 @@ Forbidden Project Manager evidence content:
 
 ### Provider Readiness And Copilot Smoke
 
+- [ ] Open `/models` and choose the Provider, Model, Credential, and apply
+      target that will be used for the smoke.
+- [ ] Click **Check readiness** in the Provider Health card. Record only
+      `readiness.status`, `readiness.code`, remote error category, matched model
+      id, and next step text. Do not copy API keys, Authorization headers,
+      provider request/response bodies, or provider payloads.
+- [ ] If Codex is the runtime under test, confirm the Codex subscription card
+      shows subscription-managed identity and that provider apply remains
+      disabled for Codex.
 - [ ] Maintainer live-provider harness result recorded, if available:
       `pnpm smoke:copilot-provider`.
 - [ ] If live provider smoke is skipped, record the visible reason: missing

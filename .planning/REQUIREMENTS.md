@@ -43,10 +43,10 @@
 
 ### Model Provider Setup And Health
 
-- [ ] **MODEL-01**: User gets a guided provider setup path that reduces provider profile, credential, and model profile confusion.
-- [ ] **MODEL-02**: Provider/model health can verify credential and selected model readiness with a safe lightweight provider call where supported, not only endpoint `HEAD`.
-- [ ] **MODEL-03**: Provider errors distinguish invalid credential, endpoint/network failure, unsupported model, timeout, and provider outage with actionable remediation.
-- [ ] **MODEL-04**: Codex subscription-managed launch paths remain isolated from provider API-key/model override injection.
+- [x] **MODEL-01**: User gets a guided provider setup path that reduces provider profile, credential, and model profile confusion.
+- [x] **MODEL-02**: Provider/model health can verify credential and selected model readiness with a safe lightweight provider call where supported, not only endpoint `HEAD`.
+- [x] **MODEL-03**: Provider errors distinguish invalid credential, endpoint/network failure, unsupported model, timeout, and provider outage with actionable remediation.
+- [x] **MODEL-04**: Codex subscription-managed launch paths remain isolated from provider API-key/model override injection.
 
 ### Open Source Readiness
 
@@ -85,10 +85,10 @@
 | CTX-02 | Phase 14 | Complete |
 | CTX-03 | Phase 14 | Complete |
 | CTX-04 | Phase 14 | Complete |
-| MODEL-01 | Phase 15 | Planned |
-| MODEL-02 | Phase 15 | Planned |
-| MODEL-03 | Phase 15 | Planned |
-| MODEL-04 | Phase 15 | Planned |
+| MODEL-01 | Phase 15 | Complete |
+| MODEL-02 | Phase 15 | Complete |
+| MODEL-03 | Phase 15 | Complete |
+| MODEL-04 | Phase 15 | Complete |
 | OSS-01 | Phase 16 | Planned |
 | OSS-02 | Phase 16 | Planned |
 | OSS-03 | Phase 16 | Planned |

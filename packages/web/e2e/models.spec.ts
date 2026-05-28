@@ -178,13 +178,95 @@ test("Models provider readiness shows actionable remote failures", async ({ page
   await expect(page.getByText(/sk-|test-minimax-token/)).toHaveCount(0);
 });
 
+test("Models provider readiness distinguishes remote recovery categories", async ({ page }) => {
+  const readinessQueue = [
+    readinessFixture({
+      code: "remote_validation_failed",
+      remoteModelList: "failed",
+      remote: {
+        checked: true,
+        errorCode: "timeout",
+        error: "Request timed out",
+      },
+      steps: ["Retry with a longer timeout or check network connectivity to the provider endpoint."],
+    }),
+    readinessFixture({
+      code: "remote_validation_failed",
+      remoteModelList: "failed",
+      remote: {
+        checked: true,
+        errorCode: "provider_outage",
+        error: "HTTP 503: unavailable",
+      },
+      steps: ["Retry later or check the provider status page."],
+    }),
+    readinessFixture({
+      code: "remote_validation_failed",
+      remoteModelList: "failed",
+      remote: {
+        checked: true,
+        errorCode: "endpoint_or_network_failure",
+        error: "fetch failed",
+      },
+      steps: ["Check the provider endpoint, network access, and model-list support."],
+    }),
+    readinessFixture({
+      code: "remote_model_missing",
+      remoteModelList: "missing_model",
+      remote: {
+        checked: true,
+        modelCount: 2,
+      },
+      steps: ["The provider model list did not include provider-01-model. Sync models or choose a model ID returned by the provider."],
+    }),
+  ];
+  await mockModelsApis(page, {
+    configuredProviders: [providerProfile()],
+    configuredModels: [modelProfile()],
+    configuredCredentials: [credentialSummary()],
+    readiness: readinessQueue,
+  });
+
+  await page.goto("/models");
+  const healthCard = page.getByTestId("provider-health-card");
+
+  for (const expectation of [
+    {
+      code: "remote_validation_failed",
+      marker: "Error category: timeout",
+      step: "Retry with a longer timeout or check network connectivity to the provider endpoint.",
+    },
+    {
+      code: "remote_validation_failed",
+      marker: "Error category: provider_outage",
+      step: "Retry later or check the provider status page.",
+    },
+    {
+      code: "remote_validation_failed",
+      marker: "Error category: endpoint_or_network_failure",
+      step: "Check the provider endpoint, network access, and model-list support.",
+    },
+    {
+      code: "remote_model_missing",
+      marker: "missing_model",
+      step: "The provider model list did not include provider-01-model. Sync models or choose a model ID returned by the provider.",
+    },
+  ]) {
+    await page.getByRole("button", { name: "Check readiness" }).click();
+    await expect(healthCard.getByText(expectation.code, { exact: true })).toBeVisible();
+    await expect(healthCard.getByText(expectation.marker)).toBeVisible();
+    await expect(healthCard.getByText(expectation.step)).toBeVisible();
+    await expect(page.getByText(/sk-|test-minimax-token|Bearer/)).toHaveCount(0);
+  }
+});
+
 async function mockModelsApis(
   page: Page,
   overrides: {
     configuredProviders?: Array<Record<string, unknown>>;
     configuredModels?: Array<Record<string, unknown>>;
     configuredCredentials?: Array<Record<string, unknown>>;
-    readiness?: Record<string, unknown>;
+    readiness?: Record<string, unknown> | Array<Record<string, unknown>>;
   } = {}
 ) {
   const requests: {
@@ -306,9 +388,12 @@ async function mockModelsApis(
 
     if (url.pathname === "/api/v1/model-providers/provider-profile-1/readiness" && method === "POST") {
       requests.readiness = route.request().postDataJSON();
+      const readiness = Array.isArray(overrides.readiness)
+        ? overrides.readiness.shift()
+        : overrides.readiness;
       await route.fulfill({
         json: envelope({
-          readiness: overrides.readiness ?? {
+          readiness: readiness ?? {
             status: "ready",
             code: "ready",
             checkedAt: "2026-05-29T02:00:00.000Z",
@@ -419,6 +504,41 @@ function providerProfile() {
     region: "global",
     productType: "payg_api",
     status: "active",
+  };
+}
+
+function readinessFixture(overrides: {
+  code: string;
+  remoteModelList: string;
+  remote: Record<string, unknown>;
+  steps: string[];
+}) {
+  return {
+    status: "needs_attention",
+    code: overrides.code,
+    checkedAt: "2026-05-29T02:00:00.000Z",
+    provider: {
+      id: "provider-profile-1",
+      name: "Provider 01",
+      providerKey: "provider-01",
+      apiFormat: "openai-compatible",
+      authType: "api_key",
+    },
+    selection: {
+      adapter: "claude",
+      modelProfileId: "model-1",
+      modelId: "provider-01-model",
+      credentialId: "credential-1",
+    },
+    checks: {
+      provider: "ready",
+      adapter: "supported",
+      model: "selected",
+      credential: "ready",
+      remoteModelList: overrides.remoteModelList,
+    },
+    remote: overrides.remote,
+    steps: overrides.steps,
   };
 }
 

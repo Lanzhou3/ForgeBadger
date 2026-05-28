@@ -101,7 +101,7 @@ Plans:
 
 - [x] 15-01-PLAN.md — Gateway model-provider readiness contract, remote model-list health, and Codex isolation.
 - [x] 15-02-PLAN.md — Web provider health panel, guided setup checklist, and Codex identity messaging.
-- [ ] 15-03-PLAN.md — Browser coverage, docs closeout, and Phase 15 requirement verification.
+- [x] 15-03-PLAN.md — Browser coverage, docs closeout, and Phase 15 requirement verification.
 
 **Success criteria:**
 
@@ -190,7 +190,7 @@ Full archive:
 | 12. Copilot Project-Manager Traceability | v1.3 | 4/4 | Complete    | 2026-05-22 |
 | 13. Project Manager Board Workflow | v1.3 | 3/3 | Complete | 2026-05-29 |
 | 14. Terminal Workspace Context | v1.3 | 3/3 | Complete | 2026-05-29 |
-| 15. Model Provider Setup And Health | v1.3 | 2/3 | In Progress | — |
+| 15. Model Provider Setup And Health | v1.3 | 3/3 | Complete | 2026-05-29 |
 | 16. Open Source Readiness Packet | v1.3 | 0/0 | Planned | — |
 
 ## Backlog

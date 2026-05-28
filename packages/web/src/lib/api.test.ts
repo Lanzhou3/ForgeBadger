@@ -6,6 +6,7 @@ import {
   createApiKey,
   checkModelHealth,
   checkModelEndpointHealth,
+  checkModelProviderReadiness,
   cloneTemplate,
   approveCopilotPendingAction,
   cancelCopilotRun,
@@ -204,6 +205,30 @@ describe("api client", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ credentialId: "credential-1" }),
+      })
+    );
+  });
+
+  it("checks model provider readiness through REST", async () => {
+    await checkModelProviderReadiness("provider-1", {
+      adapter: "claude",
+      modelProfileId: "model-1",
+      credentialId: "credential-1",
+      includeRemoteCheck: true,
+      timeoutMs: 5000,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/readiness",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          adapter: "claude",
+          modelProfileId: "model-1",
+          credentialId: "credential-1",
+          includeRemoteCheck: true,
+          timeoutMs: 5000,
+        }),
       })
     );
   });

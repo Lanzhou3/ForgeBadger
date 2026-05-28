@@ -100,6 +100,10 @@ Collect these redacted artifacts:
 - visible readiness reason from Copilot/Web: no compatible provider, missing
   active credential, missing active model, disabled provider, or provider
   request failure class;
+- `/models` Provider Health fields: `readiness.status`, `readiness.code`,
+  `checks.remoteModelList`, `remote.errorCode`, matched model id, and next-step
+  text. Do not collect plaintext credentials, Authorization headers, provider
+  request/response bodies, or raw provider payloads.
 - diagnostics export summary from `GET /api/v1/diagnostics/export`;
 - browser console/network failure names, status codes, and OpenForge request
   paths;
@@ -110,9 +114,23 @@ Classify:
 - Missing disposable credential, missing active model, or missing compatible
   provider is an environment `Caveat` until the operator provides a disposable
   credential and explicit model id.
-- A configured provider that returns a recoverable auth, quota, network, or
-  unsupported-model error is a provider readiness issue. Preserve the provider
-  error class, not raw provider request or response bodies.
+- `invalid_credential` means the selected credential failed provider auth;
+  rotate or replace the credential before retrying.
+- `timeout` means the provider call did not complete inside the readiness
+  timeout; retry once, then check host network/proxy connectivity.
+- `provider_outage` means the provider returned a 5xx-style failure; check the
+  provider status page or retry later.
+- `endpoint_or_network_failure` means OpenForge could not reach the configured
+  endpoint or model-list route; verify base URL, proxy, DNS, and models support.
+- `remote_model_missing` means the selected model id was not returned by the
+  provider model list; sync models or pick a returned model id.
+- `codex_subscription_managed` is expected for Codex. It is not a third-party
+  provider key failure; Codex must keep using the subscription-managed SDK
+  identity path.
+- A configured provider that returns a recoverable auth, quota, network,
+  unsupported-model, timeout, or outage error is a provider readiness issue.
+  Preserve the provider error class, not raw provider request or response
+  bodies.
 - Copilot exposing terminal input, raw shell execution, automatic tmux input, or
   Codex app-server `/turn` input is a product contract failure and should be
   escalated to engineering.
