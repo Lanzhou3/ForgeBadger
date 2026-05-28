@@ -22,6 +22,8 @@ This bounded index summarizes decisions that downstream GSD workflows should car
   must not collect raw evidence or clear external gates.
 - Feedback packet audit may reject incomplete or unsafe Markdown packets before
   triage, but passing audit must not clear external gates automatically.
+- External evidence gate validation may block accidental registry drift, but it
+  must not collect evidence or change gate states by itself.
 
 ## Locked Decisions
 
@@ -48,6 +50,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.5 tokenless diagnostics | First-user runbook diagnostics use Web Settings export; browser-token/devtools curl fallback is rejected by the validator and remains maintainer-only if local API fallback is needed. | `docs/reports/phase-25-tokenless-trial-diagnostics-2026-05-29.md` |
 | v1.5 feedback draft helper | `pnpm trial:feedback-draft` may generate a local Markdown draft with bounded metadata, but the draft is not submitted, not reviewed, and not gate-clearing evidence. | `docs/reports/phase-26-trial-feedback-draft-generator-2026-05-29.md` |
 | v1.5 feedback packet audit | `pnpm trial:feedback-audit` rejects generated drafts, placeholders, missing fields, and secret-like content before maintainer triage; `gateClearingEvidence` remains false. | `docs/reports/phase-27-trial-feedback-packet-audit-2026-05-29.md` |
+| v1.5 external gate drift guard | `pnpm evidence:gates-validate` requires the four external gate rows to keep their current Caveat/Blocked states and concrete rerun anchors until real artifacts justify a reviewed validator update. | `docs/reports/phase-28-external-evidence-gate-drift-guard-2026-05-29.md` |
 
 ## Deferred Ideas
 

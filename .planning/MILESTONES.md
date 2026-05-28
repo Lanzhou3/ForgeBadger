@@ -2,7 +2,7 @@
 
 ## v1.5 First-User Trial Operations (Active: 2026-05-29)
 
-**Phases planned:** 7 phases, 7 plans
+**Phases planned:** 8 phases, 8 plans
 
 **Goal:**
 
@@ -18,6 +18,7 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - [x] Phase 25: Tokenless Trial Diagnostics — 1/1 plans complete.
 - [x] Phase 26: Trial Feedback Draft Generator — 1/1 plans complete.
 - [x] Phase 27: Trial Feedback Packet Audit — 1/1 plans complete.
+- [x] Phase 28: External Evidence Gate Drift Guard — 1/1 plans complete.
 
 **Acceptance boundary:**
 
@@ -37,6 +38,8 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - A passing feedback packet audit means ready for maintainer triage only; it is
   not a substitute for maintainer gate-clearance judgment or linked external
   evidence.
+- External evidence gate validation prevents accidental status drift, but it is
+  not a substitute for the real artifacts required to move a gate to `Pass`.
 
 ---
 

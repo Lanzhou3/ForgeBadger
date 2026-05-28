@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: First-User Trial Operations
 status: phase_complete
-stopped_at: Phase 27 trial feedback packet audit complete; real first-user packet collection pending
-last_updated: 2026-05-29T05:50:19+08:00
+stopped_at: Phase 28 external evidence gate drift guard complete; real first-user packet collection pending
+last_updated: 2026-05-29T06:05:10+08:00
 last_activity: 2026-05-29
 progress:
-  total_phases: 7
-  completed_phases: 7
-  total_plans: 7
-  completed_plans: 7
+  total_phases: 8
+  completed_phases: 8
+  total_plans: 8
+  completed_plans: 8
   percent: 100
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** Phase 27 added a local trial feedback packet audit that rejects generated drafts, placeholder-only packets, missing required fields, and obvious secret-like content before maintainer triage. The next concrete step is collecting a real first-user trial packet through the validated runbook, template, issue form, draft helper, and audit helper while preserving v1.4 external gate states until real artifacts exist.
+**Current focus:** Phase 28 added an external evidence gate drift guard that validates required gate rows, current Caveat/Blocked states, and concrete rerun anchors. The next concrete step is collecting a real first-user trial packet through the validated runbook, template, issue form, draft helper, audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
 
 ## Current Position
 
-Phase: 27. Trial Feedback Packet Audit
-Plan: 27-01 complete
+Phase: 28. External Evidence Gate Drift Guard
+Plan: 28-01 complete
 Status: Phase Complete
 Last activity: 2026-05-29
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-29
 
 **Velocity:**
 
-- Total plans completed: 42
+- Total plans completed: 43
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -69,6 +69,7 @@ Last activity: 2026-05-29
 | 25. Tokenless Trial Diagnostics | 1/1 | - | - |
 | 26. Trial Feedback Draft Generator | 1/1 | - | - |
 | 27. Trial Feedback Packet Audit | 1/1 | - | - |
+| 28. External Evidence Gate Drift Guard | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -99,6 +100,7 @@ Recent decisions affecting current work:
 - [Phase 25]: The first-user runbook no longer asks users to retrieve browser auth tokens from developer tools. Diagnostics guidance now uses Settings -> Export diagnostics JSON, with local API fallback labeled maintainer-only, and the validator rejects token fallback wording. External gates remain unchanged.
 - [Phase 26]: `pnpm trial:feedback-draft` generates a local Markdown draft with bounded metadata, redacts token-shaped values, and explicitly states the draft is not submitted, not reviewed, and not gate-clearing evidence. External gates remain unchanged.
 - [Phase 27]: `pnpm trial:feedback-audit` rejects generated drafts, placeholder-only packets, missing required fields, and obvious secret-like content before maintainer triage. Passing audit means ready for maintainer triage only; `gateClearingEvidence` remains false and external gates remain unchanged.
+- [Phase 28]: `pnpm evidence:gates-validate` verifies the external evidence registry keeps required gate rows, exact current states, and concrete rerun/target anchors. External gates remain unchanged.
 
 ### Pending Todos
 
@@ -106,6 +108,7 @@ Next steps:
 
 - Collect a real first-user trial packet through the validated runbook, template, issue form, or draft helper.
 - Run `pnpm trial:feedback-audit -- <packet.md>` before maintainer triage of any completed Markdown packet.
+- Run `pnpm evidence:gates-validate` before changing any external gate registry state.
 - Use the v1.5 trial-operations loop for the next real first-user trial packet.
 - Prepare Feishu developer-console callback evidence only when public HTTPS Gateway routing is available.
 - Collect physical Windows/WSL and first-user feedback evidence when those external environments/users are available.
@@ -132,10 +135,10 @@ Next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T05:50:19+08:00
-Stopped at: Phase 27 trial feedback packet audit complete; real first-user packet collection pending
+Last session: 2026-05-29T06:05:10+08:00
+Stopped at: Phase 28 external evidence gate drift guard complete; real first-user packet collection pending
 Resume file: None
 
 ## Operator Next Steps
 
-- Collect a real first-user trial packet through the validated tokenless runbook, intake contract, draft helper, and packet audit helper, then triage it through the v1.5 operating loop and the external evidence gate registry.
+- Collect a real first-user trial packet through the validated tokenless runbook, intake contract, draft helper, packet audit helper, and external gate validator, then triage it through the v1.5 operating loop and the external evidence gate registry.

@@ -62,6 +62,12 @@
   content before maintainer triage. Passing audit means ready for maintainer
   triage only; `gateClearingEvidence` remains false and this does not clear
   `FIRST-USER-FEEDBACK`.
+- Phase 28 added `scripts/validate-external-evidence-gates.mjs`,
+  `scripts/validate-external-evidence-gates.test.mjs`, and
+  `pnpm evidence:gates-validate`. The validator keeps
+  `LIVE-PROVIDER=Caveat`, `WINDOWS-WSL=Caveat`,
+  `FEISHU-CALLBACK=Blocked`, and `FIRST-USER-FEEDBACK=Caveat` unless a future
+  reviewed change updates the validator with linked real artifact evidence.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -171,10 +177,11 @@
 ## Next Work
 
 1. Use the validated v1.5 tokenless runbook, trial packet intake, optional
-   feedback draft helper, and packet audit helper for the next real first-user
-   run: affected surface, severity, owner, disposition or next action,
-   environment summary, reproduction detail, diagnostics status, follow-up
-   route or no-action rationale, and redaction review.
+   feedback draft helper, packet audit helper, and external gate validator for
+   the next real first-user run: affected surface, severity, owner,
+   disposition or next action, environment summary, reproduction detail,
+   diagnostics status, follow-up route or no-action rationale, and redaction
+   review.
 2. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,
    operator webhook setup environment, and Feishu developer-console URL
    verification are available. Phase 19 proved bot CLI preflight and local

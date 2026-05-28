@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 27 feedback packet audit complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 28 external gate drift guard complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -220,6 +220,33 @@ Plans:
 5. Trial docs and CI link the audit helper without uploading packets, reading
    browser storage, exporting diagnostics, or mutating gate state.
 
+### Phase 28: External Evidence Gate Drift Guard
+
+**Goal:** Add a machine-verified guard for `docs/EXTERNAL-EVIDENCE-GATES.md`
+so external gate states cannot drift to `Pass` without an intentional validator
+update and linked real artifact.
+
+**Requirements:** GATEGUARD-01, GATEGUARD-02, GATEGUARD-03, GATESAFE-01,
+PLAN-28-01, PLAN-28-02, PLAN-28-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 28-01-PLAN.md — external evidence registry validator, CI coverage,
+  rerun-path sync, and gate-preserving verification.
+
+**Success criteria:**
+
+1. A local command validates all required external gate rows.
+2. Current gate states remain `LIVE-PROVIDER=Caveat`,
+   `WINDOWS-WSL=Caveat`, `FEISHU-CALLBACK=Blocked`, and
+   `FIRST-USER-FEEDBACK=Caveat`.
+3. Rerun paths keep the concrete live-provider smoke command and
+   first-user feedback packet audit command visible.
+4. CI runs the validator through the script harness.
+5. The validator does not collect evidence or clear any gate by itself.
+
 ## Archived Milestones
 
 <details>
@@ -336,6 +363,8 @@ Full archive:
 | 24. Trial Feedback Intake Contract | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 25. Tokenless Trial Diagnostics | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 26. Trial Feedback Draft Generator | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 27. Trial Feedback Packet Audit | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 28. External Evidence Gate Drift Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

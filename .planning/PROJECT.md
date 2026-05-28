@@ -4,15 +4,16 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is v1.5 First-User Trial Operations. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix. v1.5 turns that evidence posture into an operator-run first-user trial loop, completed an operator dry-run on the current host, fixed the source fallback env override support gap found by that dry-run, added machine validation for the trial feedback intake contract, removed browser-token fallback guidance from the first-user runbook, added a local feedback draft helper, and added a local packet audit that keeps incomplete or unsafe Markdown packets out of maintainer triage.
+The current product stage is v1.5 First-User Trial Operations. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix. v1.5 turns that evidence posture into an operator-run first-user trial loop, completed an operator dry-run on the current host, fixed the source fallback env override support gap found by that dry-run, added machine validation for the trial feedback intake contract, removed browser-token fallback guidance from the first-user runbook, added a local feedback draft helper, added a local packet audit that keeps incomplete or unsafe Markdown packets out of maintainer triage, and added a gate registry drift guard.
 
 ## Current Milestone
 
 v1.5 First-User Trial Operations has completed its foundation phase, an
 operator dry-run, the source fallback env override fix, trial feedback intake
 contract validation, tokenless runbook diagnostics guidance, a local feedback
-draft helper, and a local feedback packet audit. The remaining work is real
-first-user trial packet collection and maintainer triage.
+draft helper, a local feedback packet audit, and an external evidence gate
+drift guard. The remaining work is real first-user trial packet collection and
+maintainer triage.
 
 **Last shipped:** v1.4 External Evidence Closure on 2026-05-29.
 
@@ -89,6 +90,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - [x] v1.5 first-user runbook diagnostics guidance uses Web Settings export and rejects browser-token/devtools fallback wording.
 - [x] v1.5 local feedback draft helper pre-fills bounded metadata without collecting raw evidence or clearing gates.
 - [x] v1.5 local feedback packet audit rejects generated drafts, placeholders, missing required fields, and obvious secret-like content before maintainer triage.
+- [x] v1.5 external evidence gate registry is machine-validated against accidental status drift.
 
 ### Out of Scope
 
@@ -144,6 +146,10 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
   that rejects generated drafts, placeholder content, missing required fields,
   and obvious secret-like content before maintainer triage. It does not clear
   `FIRST-USER-FEEDBACK`.
+- Phase 28 added `pnpm evidence:gates-validate`, a registry validator that
+  keeps external gate rows, current Caveat/Blocked states, and concrete rerun
+  anchors from drifting without reviewed source changes. It does not clear any
+  external gate.
 - Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints
@@ -181,6 +187,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Keep first-user diagnostics tokenless | Asking first users to retrieve browser tokens is a support and security liability | Good - Phase 25 moved the runbook to Settings export and validator coverage |
 | Generate feedback drafts without collecting evidence | Drafts reduce first-user friction but must not become false gate evidence | Good - Phase 26 adds bounded draft generation and explicit caveat language |
 | Audit feedback packets before maintainer triage | Completed Markdown packets need a local completeness and redaction check before they are treated as actionable intake | Good - Phase 27 rejects drafts, placeholders, missing fields, and obvious secret-like content while keeping gate clearance manual |
+| Validate external gate registry drift | Gate status changes should be deliberate and reviewable because CI-green, templates, and local checks do not clear external evidence | Good - Phase 28 adds a validator for exact gate states and rerun anchors |
 
 ## Evolution
 
@@ -200,4 +207,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-29 after completing Phase 27 Trial Feedback Packet Audit.*
+*Last updated: 2026-05-29 after completing Phase 28 External Evidence Gate Drift Guard.*

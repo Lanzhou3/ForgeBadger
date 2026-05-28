@@ -223,6 +223,33 @@
   harness coverage, CLI rejection of generated drafts, docs references, and
   unchanged external gate states.
 
+### External Evidence Gate Drift Guard
+
+- [x] **GATEGUARD-01**: A local command must validate that
+  `docs/EXTERNAL-EVIDENCE-GATES.md` contains all required external gate rows:
+  `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and
+  `FIRST-USER-FEEDBACK`.
+- [x] **GATEGUARD-02**: The validator must reject accidental current-state
+  drift from `LIVE-PROVIDER=Caveat`, `WINDOWS-WSL=Caveat`,
+  `FEISHU-CALLBACK=Blocked`, and `FIRST-USER-FEEDBACK=Caveat`.
+- [x] **GATEGUARD-03**: The validator and registry must preserve concrete
+  rerun and target anchors, including `pnpm smoke:copilot-provider` for
+  `LIVE-PROVIDER` and `pnpm trial:feedback-audit` for
+  `FIRST-USER-FEEDBACK`.
+- [x] **GATESAFE-01**: Gate validation must not collect evidence, attach
+  artifacts, or move any external gate to `Pass` by itself.
+
+### Phase 28 Planning Closure
+
+- [x] **PLAN-28-01**: Phase 28 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-28-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the gate drift guard while keeping real
+  first-user packet collection pending.
+- [x] **PLAN-28-03**: Phase 28 verification proves validator tests, CI script
+  harness coverage, CLI smoke, docs references, and unchanged external gate
+  states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -295,11 +322,18 @@
 | PLAN-27-01 | Phase 27 | Complete |
 | PLAN-27-02 | Phase 27 | Complete |
 | PLAN-27-03 | Phase 27 | Complete |
+| GATEGUARD-01 | Phase 28 | Complete |
+| GATEGUARD-02 | Phase 28 | Complete |
+| GATEGUARD-03 | Phase 28 | Complete |
+| GATESAFE-01 | Phase 28 | Complete |
+| PLAN-28-01 | Phase 28 | Complete |
+| PLAN-28-02 | Phase 28 | Complete |
+| PLAN-28-03 | Phase 28 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 56 total
-- Mapped to phases: 56
+- v1.5 requirements: 63 total
+- Mapped to phases: 63
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 27 Trial Feedback Packet Audit.*
+*Requirements updated: 2026-05-29 after Phase 28 External Evidence Gate Drift Guard.*

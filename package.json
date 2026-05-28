@@ -8,6 +8,7 @@
     "build": "pnpm -r build",
     "build:npm": "node scripts/build-npm-package.mjs",
     "dev": "pnpm -r --parallel dev",
+    "evidence:gates-validate": "node scripts/validate-external-evidence-gates.mjs",
     "openforge": "pnpm --filter @openforge/gateway openforge",
     "pack:npm": "pnpm --filter openforge pack --dry-run",
     "smoke:copilot-provider": "pnpm --dir packages/gateway exec tsx ../../scripts/smoke-copilot-provider.ts",

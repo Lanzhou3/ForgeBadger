@@ -196,6 +196,8 @@ Forbidden Project Manager evidence content:
       pass as ready for human triage only, not automatic gate clearance.
 - [ ] Check `docs/EXTERNAL-EVIDENCE-GATES.md` gate
       `FIRST-USER-FEEDBACK` before claiming completed first-user evidence.
+- [ ] Run `pnpm evidence:gates-validate` before changing any external gate
+      state.
 - [ ] Map each issue to the closest Phase 3 hardening requirement in the
       evidence appendix below.
 - [ ] For every `pass with caveats` or `blocked` result, record affected
