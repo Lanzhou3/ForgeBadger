@@ -139,9 +139,12 @@ Authenticated REST endpoints are mounted under the project-scoped prefix
 - `PUT /api/v1/projects/:projectId/project-manager/goal`
 - `GET /api/v1/projects/:projectId/project-manager/work-items`
 - `POST /api/v1/projects/:projectId/project-manager/work-items`
+- `POST /api/v1/projects/:projectId/project-manager/work-items/batch/status`
 - `GET /api/v1/projects/:projectId/project-manager/work-items/:workItemId`
+- `PATCH /api/v1/projects/:projectId/project-manager/work-items/:workItemId`
 - `PATCH /api/v1/projects/:projectId/project-manager/work-items/:workItemId/status`
 - `POST /api/v1/projects/:projectId/project-manager/work-items/:workItemId/evidence`
+- `DELETE /api/v1/projects/:projectId/project-manager/work-items/:workItemId`
 - `GET /api/v1/projects/:projectId/project-manager/ledger`
 
 All Project Manager Ledger REST endpoints use the canonical OpenForge response
@@ -275,6 +278,16 @@ non-empty manual completion reason. If completion uses the manual reason path,
 the mutation must append a `manual_completion_recorded` ledger event and an
 `audit_logs` row that records the presence of the manual completion reason
 without storing sensitive raw details.
+
+Editing a work item through `PATCH /work-items/:workItemId` may update title,
+description, priority, and acceptance criteria only; status and evidence remain
+separate operations so board interactions cannot bypass transition and evidence
+guards. Deleting a work item requires `{ "confirm": true }`, appends a
+`work_item_deleted` ledger event with a bounded `targetId` marker, writes an
+audit row, and then deletes the projection row. Batch status updates are limited
+to 20 work items, execute in one repository transaction, reject duplicate work
+item ids, and use the same transition, completion, evidence, ledger, and audit
+rules as single-item status updates.
 
 Project-manager diagnostics expose counts and safe latest status markers only
 for Project Manager Ledger state. Diagnostics may include goal, work item,

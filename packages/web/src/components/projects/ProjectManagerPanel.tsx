@@ -1785,6 +1785,8 @@ function eventLabel(eventType: ProjectManagerLedgerEventType, t: Translate) {
   const labels: Record<ProjectManagerLedgerEventType, TranslationKey> = {
     goal_updated: "projects.projectManagerEventGoalUpdated",
     work_item_created: "projects.projectManagerEventWorkItemCreated",
+    work_item_updated: "projects.projectManagerEventWorkItemUpdated",
+    work_item_deleted: "projects.projectManagerEventWorkItemDeleted",
     work_item_status_changed: "projects.projectManagerEventWorkItemStatusChanged",
     evidence_attached: "projects.projectManagerEventEvidenceAttached",
     blocker_recorded: "projects.projectManagerEventBlockerRecorded",

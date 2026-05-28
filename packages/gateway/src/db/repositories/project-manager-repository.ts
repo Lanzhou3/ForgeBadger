@@ -15,6 +15,8 @@ export const PROJECT_MANAGER_WORK_ITEM_STATUSES = [
 export const PROJECT_MANAGER_LEDGER_EVENT_TYPES = [
   "goal_updated",
   "work_item_created",
+  "work_item_updated",
+  "work_item_deleted",
   "work_item_status_changed",
   "evidence_attached",
   "blocker_recorded",
@@ -113,6 +115,14 @@ export interface CreateProjectManagerWorkItemInput {
   details?: Record<string, unknown> | undefined;
 }
 
+export interface UpdateProjectManagerWorkItemInput {
+  title?: string | undefined;
+  description?: string | null | undefined;
+  priority?: number | undefined;
+  acceptanceCriteria?: string[] | undefined;
+  details?: Record<string, unknown> | undefined;
+}
+
 export interface UpdateProjectManagerWorkItemStatusInput {
   status: ProjectManagerWorkItemStatus;
   evidenceRefs?: ProjectManagerEvidenceRef[] | undefined;
@@ -120,8 +130,21 @@ export interface UpdateProjectManagerWorkItemStatusInput {
   details?: Record<string, unknown> | undefined;
 }
 
+export interface BatchUpdateProjectManagerWorkItemStatusInput extends UpdateProjectManagerWorkItemStatusInput {
+  workItemId: string;
+}
+
+export interface BatchUpdateProjectManagerWorkItemStatusesInput {
+  updates: BatchUpdateProjectManagerWorkItemStatusInput[];
+}
+
 export interface AttachProjectManagerEvidenceInput {
   evidenceRefs: ProjectManagerEvidenceRef[];
+  details?: Record<string, unknown> | undefined;
+}
+
+export interface DeleteProjectManagerWorkItemInput {
+  confirm: true;
   details?: Record<string, unknown> | undefined;
 }
 
@@ -271,6 +294,8 @@ export class ProjectManagerRepository {
     const status = normalizeStatus(input.status ?? "todo");
     const item = normalizeWorkItemInput(input);
     const eventDetails = mergeLedgerDetails({
+      targetType: "work_item",
+      targetId: id,
       status,
       evidenceRefCount: item.evidenceRefs.length,
       acceptanceCriteriaCount: item.acceptanceCriteria.length
@@ -341,6 +366,65 @@ export class ProjectManagerRepository {
     return row ? toWorkItem(row) : undefined;
   }
 
+  updateWorkItem(
+    projectId: string,
+    workItemId: string,
+    input: UpdateProjectManagerWorkItemInput
+  ): ProjectManagerWorkItem {
+    const existing = this.requireWorkItem(projectId, workItemId);
+    const nextTitle = input.title === undefined
+      ? existing.title
+      : normalizeRequiredText(input.title, "work item title", 256);
+    const nextDescription = input.description === undefined
+      ? existing.description
+      : normalizeOptionalText(input.description, 4_000);
+    const nextPriority = input.priority === undefined ? existing.priority : normalizePriority(input.priority);
+    const nextAcceptanceCriteria = input.acceptanceCriteria === undefined
+      ? existing.acceptanceCriteria
+      : normalizeTextList(input.acceptanceCriteria);
+    const details = input.details === undefined ? existing.details : normalizeDetails(input.details);
+    const changedFields = [
+      nextTitle !== existing.title ? "title" : null,
+      nextDescription !== existing.description ? "description" : null,
+      nextPriority !== existing.priority ? "priority" : null,
+      JSON.stringify(nextAcceptanceCriteria) !== JSON.stringify(existing.acceptanceCriteria) ? "acceptanceCriteria" : null
+    ].filter((field): field is string => Boolean(field));
+    if (changedFields.length === 0 && input.details === undefined) {
+      throw new Error("At least one work item field must change");
+    }
+    const eventDetails = mergeLedgerDetails({
+      targetType: "work_item",
+      targetId: workItemId,
+      changedFields
+    }, input.details === undefined ? {} : details);
+    const now = Date.now();
+
+    const write = this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE project_manager_work_items
+        SET title = ?, description = ?, priority = ?, acceptance_criteria_json = ?, details_json = ?, updated_at = ?
+        WHERE id = ? AND user_id = ? AND project_id = ?
+      `).run(
+        nextTitle,
+        nextDescription,
+        nextPriority,
+        JSON.stringify(nextAcceptanceCriteria),
+        JSON.stringify(details),
+        now,
+        workItemId,
+        this.userId,
+        projectId
+      );
+      this.insertLedgerEvent(projectId, workItemId, "work_item_updated", existing.status, existing.evidenceRefs, existing.feishuRefs, eventDetails, now);
+      this.writeAudit("project_manager.work_item.update", "project_manager_work_item", workItemId, {
+        projectId,
+        changedFields
+      });
+    });
+    write();
+    return this.getWorkItem(projectId, workItemId) as ProjectManagerWorkItem;
+  }
+
   updateWorkItemStatus(
     projectId: string,
     workItemId: string,
@@ -357,9 +441,7 @@ export class ProjectManagerRepository {
     }
 
     const details = normalizeDetails(input.details ?? {});
-    const eventType: ProjectManagerLedgerEventType = nextStatus === "done" && hasManualReason
-      ? "manual_completion_recorded"
-      : "work_item_status_changed";
+    const eventType = statusLedgerEventType(existing.status, nextStatus, hasManualReason);
     const eventDetails = mergeLedgerDetails({
       fromStatus: existing.status,
       toStatus: nextStatus,
@@ -384,6 +466,104 @@ export class ProjectManagerRepository {
     });
     write();
     return this.getWorkItem(projectId, workItemId) as ProjectManagerWorkItem;
+  }
+
+  batchUpdateWorkItemStatuses(
+    projectId: string,
+    input: BatchUpdateProjectManagerWorkItemStatusesInput
+  ): ProjectManagerWorkItem[] {
+    if (input.updates.length === 0) throw new Error("Batch status updates are required");
+    if (input.updates.length > 20) throw new Error("Batch status updates cannot exceed 20 items");
+    const seen = new Set<string>();
+    const prepared = input.updates.map((update) => {
+      if (seen.has(update.workItemId)) throw new Error("Duplicate work item in batch status update");
+      seen.add(update.workItemId);
+      const existing = this.requireWorkItem(projectId, update.workItemId);
+      const nextStatus = normalizeStatus(update.status);
+      validateTransition(existing.status, nextStatus);
+      const inputEvidenceRefs = normalizeEvidenceRefs(update.evidenceRefs ?? []);
+      const evidenceRefs = [...existing.evidenceRefs, ...inputEvidenceRefs];
+      const hasManualReason = typeof update.manualCompletionReason === "string" && update.manualCompletionReason.trim().length > 0;
+      if (nextStatus === "done" && evidenceRefs.length === 0 && !hasManualReason) {
+        throw new Error("Marking done requires evidence references or a manual completion reason");
+      }
+      const details = normalizeDetails(update.details ?? {});
+      return {
+        existing,
+        nextStatus,
+        evidenceRefs,
+        hasManualReason,
+        details,
+        eventType: statusLedgerEventType(existing.status, nextStatus, hasManualReason)
+      };
+    });
+    const now = Date.now();
+    const write = this.db.transaction(() => {
+      for (const item of prepared) {
+        const eventDetails = mergeLedgerDetails({
+          fromStatus: item.existing.status,
+          toStatus: item.nextStatus,
+          evidenceRefCount: item.evidenceRefs.length,
+          manualCompletionReasonPresent: item.hasManualReason,
+          batch: true
+        }, item.details);
+        this.db.prepare(`
+          UPDATE project_manager_work_items
+          SET status = ?, evidence_refs_json = ?, details_json = ?, updated_at = ?
+          WHERE id = ? AND user_id = ? AND project_id = ?
+        `).run(
+          item.nextStatus,
+          JSON.stringify(item.evidenceRefs),
+          JSON.stringify(item.details),
+          now,
+          item.existing.id,
+          this.userId,
+          projectId
+        );
+        this.insertLedgerEvent(projectId, item.existing.id, item.eventType, item.nextStatus, item.evidenceRefs, item.existing.feishuRefs, eventDetails, now);
+        this.writeAudit("project_manager.work_item.status_change", "project_manager_work_item", item.existing.id, {
+          projectId,
+          fromStatus: item.existing.status,
+          toStatus: item.nextStatus,
+          evidenceRefCount: item.evidenceRefs.length,
+          manualCompletionReasonPresent: item.hasManualReason,
+          batch: true
+        });
+      }
+    });
+    write();
+    return input.updates.map((update) => this.getWorkItem(projectId, update.workItemId) as ProjectManagerWorkItem);
+  }
+
+  deleteWorkItem(
+    projectId: string,
+    workItemId: string,
+    input: DeleteProjectManagerWorkItemInput
+  ): ProjectManagerWorkItem {
+    if (input.confirm !== true) throw new Error("Work item deletion requires confirmation");
+    const existing = this.requireWorkItem(projectId, workItemId);
+    const details = normalizeDetails(input.details ?? {});
+    const eventDetails = mergeLedgerDetails({
+      targetType: "work_item",
+      targetId: workItemId,
+      status: existing.status,
+      evidenceRefCount: existing.evidenceRefs.length
+    }, details);
+    const now = Date.now();
+    const write = this.db.transaction(() => {
+      this.insertLedgerEvent(projectId, null, "work_item_deleted", existing.status, existing.evidenceRefs, existing.feishuRefs, eventDetails, now);
+      this.db.prepare(`
+        DELETE FROM project_manager_work_items
+        WHERE id = ? AND user_id = ? AND project_id = ?
+      `).run(workItemId, this.userId, projectId);
+      this.writeAudit("project_manager.work_item.delete", "project_manager_work_item", workItemId, {
+        projectId,
+        status: existing.status,
+        evidenceRefCount: existing.evidenceRefs.length
+      });
+    });
+    write();
+    return existing;
   }
 
   attachEvidence(
@@ -600,6 +780,17 @@ function validateTransition(from: ProjectManagerWorkItemStatus, to: ProjectManag
   if (from === to) return;
   if (statusTransitions[from].includes(to)) return;
   throw new Error(`Invalid project-manager status transition from ${from} to ${to}`);
+}
+
+function statusLedgerEventType(
+  fromStatus: ProjectManagerWorkItemStatus,
+  nextStatus: ProjectManagerWorkItemStatus,
+  hasManualReason: boolean
+): ProjectManagerLedgerEventType {
+  if (nextStatus === "done" && hasManualReason) return "manual_completion_recorded";
+  if (nextStatus === "blocked" && fromStatus !== "blocked") return "blocker_recorded";
+  if (fromStatus === "blocked" && nextStatus !== "blocked") return "blocker_resolved";
+  return "work_item_status_changed";
 }
 
 function normalizeRequiredText(value: string, label: string, maxLength: number): string {

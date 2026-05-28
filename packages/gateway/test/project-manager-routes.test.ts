@@ -178,6 +178,58 @@ describe("project-manager routes", () => {
     assert.equal(response.body.data.events[0].eventType, "evidence_attached");
   });
 
+  it("updates, deletes, and batch-moves work items through tenant-scoped routes", async () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const first = repo.createWorkItem(projectId, { title: "Board first" });
+    const second = repo.createWorkItem(projectId, { title: "Board second" });
+    const deleted = repo.createWorkItem(projectId, { title: "Board deleted" });
+
+    const edit = await request("PATCH", `/api/v1/projects/${projectId}/project-manager/work-items/${first.id}`, {
+      title: "Board first edited",
+      description: "Edited from the board",
+      priority: 9,
+      acceptanceCriteria: ["board edit is saved"]
+    });
+    const invalidDelete = await request("DELETE", `/api/v1/projects/${projectId}/project-manager/work-items/${deleted.id}`, {
+      confirm: false
+    });
+    const deleteRes = await request("DELETE", `/api/v1/projects/${projectId}/project-manager/work-items/${deleted.id}`, {
+      confirm: true
+    });
+    const invalidBatch = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/batch/status`, {
+      updates: [
+        { workItemId: first.id, status: "done" }
+      ]
+    });
+    assert.equal(invalidBatch.status, 400);
+    assert.equal(repo.getWorkItem(projectId, first.id)?.status, "todo");
+
+    const batch = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/batch/status`, {
+      updates: [
+        { workItemId: first.id, status: "in_progress" },
+        { workItemId: second.id, status: "blocked" }
+      ]
+    });
+    const ledger = await request("GET", `/api/v1/projects/${projectId}/project-manager/ledger?limit=20`);
+
+    assert.equal(edit.status, 200);
+    assert.equal(edit.body.data.workItem.title, "Board first edited");
+    assert.equal(edit.body.data.workItem.priority, 9);
+    assert.equal(invalidDelete.status, 400);
+    assert.equal(deleteRes.status, 200);
+    assert.equal(deleteRes.body.data.workItem.id, deleted.id);
+    assert.equal(repo.getWorkItem(projectId, deleted.id), undefined);
+    assert.equal(batch.status, 200);
+    assert.deepEqual(batch.body.data.workItems.map((item: { id: string; status: string }) => [item.id, item.status]), [
+      [first.id, "in_progress"],
+      [second.id, "blocked"]
+    ]);
+    assert.ok(ledger.body.data.events.some((event: { eventType: string }) => event.eventType === "work_item_updated"));
+    assert.ok(ledger.body.data.events.some((event: { eventType: string; trace?: { targetId?: string } }) =>
+      event.eventType === "work_item_deleted" && event.trace?.targetId === deleted.id
+    ));
+  });
+
   it("returns pending action evidence refs and bounded ledger trace without raw details", async () => {
     const repo = new ProjectManagerRepository(db, owner.id);
     const rawPromptKey = ["raw", "Prompt"].join("");

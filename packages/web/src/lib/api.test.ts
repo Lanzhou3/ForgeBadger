@@ -131,8 +131,11 @@ type ProjectManagerApiClient = {
   listProjectManagerWorkItems: (projectId: string, params?: unknown) => Promise<unknown>;
   createProjectManagerWorkItem: (projectId: string, input: unknown) => Promise<unknown>;
   getProjectManagerWorkItem: (projectId: string, workItemId: string) => Promise<unknown>;
+  updateProjectManagerWorkItem: (projectId: string, workItemId: string, input: unknown) => Promise<unknown>;
   updateProjectManagerWorkItemStatus: (projectId: string, workItemId: string, input: unknown) => Promise<unknown>;
+  batchUpdateProjectManagerWorkItemStatuses: (projectId: string, input: unknown) => Promise<unknown>;
   attachProjectManagerWorkItemEvidence: (projectId: string, workItemId: string, input: unknown) => Promise<unknown>;
+  deleteProjectManagerWorkItem: (projectId: string, workItemId: string, input: unknown) => Promise<unknown>;
   listProjectManagerLedger: (projectId: string, params?: unknown) => Promise<unknown>;
 };
 
@@ -986,10 +989,22 @@ describe("api client", () => {
       feishuRefs: [{ kind: "message", label: "Approval", ref: "om_123", feishuMessageId: "om_msg_123" }],
     });
     await projectManagerApi.getProjectManagerWorkItem("project/1", "work/item-1");
+    await projectManagerApi.updateProjectManagerWorkItem("project/1", "work/item-1", {
+      title: "Expose board tab",
+      description: null,
+      priority: 20,
+      acceptanceCriteria: ["Board tab is visible"],
+    });
     await projectManagerApi.updateProjectManagerWorkItemStatus("project/1", "work/item-1", {
       status: "ready_for_review",
       evidenceRefs: [{ kind: "test", ref: "vitest" }],
       manualCompletionReason: "Reviewed locally",
+    });
+    await projectManagerApi.batchUpdateProjectManagerWorkItemStatuses("project/1", {
+      updates: [
+        { workItemId: "work/item-1", status: "in_progress" },
+        { workItemId: "work/item-2", status: "blocked" },
+      ],
     });
     await projectManagerApi.attachProjectManagerWorkItemEvidence("project/1", "work/item-1", {
       evidenceRefs: [{
@@ -998,6 +1013,9 @@ describe("api client", () => {
         ref: "PMEV-01",
         path: "docs/reports/phase-11-evidence.md",
       }],
+    });
+    await projectManagerApi.deleteProjectManagerWorkItem("project/1", "work/item-3", {
+      confirm: true,
     });
     await projectManagerApi.listProjectManagerLedger("project/1", {
       eventType: "work_item_status_changed",
@@ -1050,6 +1068,19 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       6,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          title: "Expose board tab",
+          description: null,
+          priority: 20,
+          acceptanceCriteria: ["Board tab is visible"],
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      7,
       "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/status",
       expect.objectContaining({
         method: "PATCH",
@@ -1061,7 +1092,20 @@ describe("api client", () => {
       })
     );
     expect(fetch).toHaveBeenNthCalledWith(
-      7,
+      8,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/batch/status",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          updates: [
+            { workItemId: "work/item-1", status: "in_progress" },
+            { workItemId: "work/item-2", status: "blocked" },
+          ],
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      9,
       "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/evidence",
       expect.objectContaining({
         method: "POST",
@@ -1076,7 +1120,15 @@ describe("api client", () => {
       })
     );
     expect(fetch).toHaveBeenNthCalledWith(
-      8,
+      10,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-3",
+      expect.objectContaining({
+        method: "DELETE",
+        body: JSON.stringify({ confirm: true }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      11,
       "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/ledger?eventType=work_item_status_changed&limit=10",
       expect.objectContaining({ headers: expect.any(Object) })
     );

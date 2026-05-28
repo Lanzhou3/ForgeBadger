@@ -98,10 +98,30 @@ export interface ProjectManagerWorkItemInput {
   feishuRefs?: ProjectManagerEvidenceRef[];
 }
 
+export interface ProjectManagerWorkItemUpdateInput {
+  title?: string;
+  description?: string | null;
+  priority?: number;
+  acceptanceCriteria?: string[];
+}
+
 export interface ProjectManagerWorkItemStatusInput {
   status: ProjectManagerWorkItemStatus;
   evidenceRefs?: ProjectManagerEvidenceRef[];
   manualCompletionReason?: string;
+}
+
+export interface ProjectManagerBatchStatusInput {
+  updates: Array<{
+    workItemId: string;
+    status: ProjectManagerWorkItemStatus;
+    evidenceRefs?: ProjectManagerEvidenceRef[];
+    manualCompletionReason?: string;
+  }>;
+}
+
+export interface ProjectManagerWorkItemDeleteInput {
+  confirm: true;
 }
 
 export interface ProjectManagerEvidenceInput {
@@ -111,6 +131,8 @@ export interface ProjectManagerEvidenceInput {
 export type ProjectManagerLedgerEventType =
   | "goal_updated"
   | "work_item_created"
+  | "work_item_updated"
+  | "work_item_deleted"
   | "work_item_status_changed"
   | "evidence_attached"
   | "blocker_recorded"
@@ -1641,6 +1663,17 @@ export async function getProjectManagerWorkItem(
   }>;
 }
 
+export async function updateProjectManagerWorkItem(
+  projectId: string,
+  workItemId: string,
+  input: ProjectManagerWorkItemUpdateInput
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, `/work-items/${encodeURIComponent(workItemId)}`), {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItem: ProjectManagerWorkItem }>;
+}
+
 export async function updateProjectManagerWorkItemStatus(
   projectId: string,
   workItemId: string,
@@ -1652,6 +1685,16 @@ export async function updateProjectManagerWorkItemStatus(
   }) as Promise<{ workItem: ProjectManagerWorkItem }>;
 }
 
+export async function batchUpdateProjectManagerWorkItemStatuses(
+  projectId: string,
+  input: ProjectManagerBatchStatusInput
+): Promise<{ workItems: ProjectManagerWorkItem[] }> {
+  return fetchJson(projectManagerPath(projectId, "/work-items/batch/status"), {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItems: ProjectManagerWorkItem[] }>;
+}
+
 export async function attachProjectManagerWorkItemEvidence(
   projectId: string,
   workItemId: string,
@@ -1659,6 +1702,17 @@ export async function attachProjectManagerWorkItemEvidence(
 ): Promise<{ workItem: ProjectManagerWorkItem }> {
   return fetchJson(projectManagerPath(projectId, `/work-items/${encodeURIComponent(workItemId)}/evidence`), {
     method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItem: ProjectManagerWorkItem }>;
+}
+
+export async function deleteProjectManagerWorkItem(
+  projectId: string,
+  workItemId: string,
+  input: ProjectManagerWorkItemDeleteInput
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, `/work-items/${encodeURIComponent(workItemId)}`), {
+    method: "DELETE",
     body: JSON.stringify(input),
   }) as Promise<{ workItem: ProjectManagerWorkItem }>;
 }

@@ -48,10 +48,30 @@ const workItemCreateSchema = z.object({
   feishuRefs: z.array(evidenceRefSchema).max(20).optional()
 }).strict();
 
+const workItemUpdateSchema = z.object({
+  title: z.string().min(1).max(256).optional(),
+  description: z.string().min(1).max(4_000).nullable().optional(),
+  priority: z.number().int().min(0).max(100).optional(),
+  acceptanceCriteria: z.array(z.string().min(1).max(1_000)).max(50).optional()
+}).strict().refine((value) => Object.keys(value).length > 0);
+
 const statusBodySchema = z.object({
   status: statusSchema,
   evidenceRefs: z.array(evidenceRefSchema).max(20).optional(),
   manualCompletionReason: z.string().min(1).max(1_000).optional()
+}).strict();
+
+const batchStatusBodySchema = z.object({
+  updates: z.array(z.object({
+    workItemId: z.string().min(1).max(128),
+    status: statusSchema,
+    evidenceRefs: z.array(evidenceRefSchema).max(20).optional(),
+    manualCompletionReason: z.string().min(1).max(1_000).optional()
+  }).strict()).min(1).max(20)
+}).strict();
+
+const deleteWorkItemBodySchema = z.object({
+  confirm: z.literal(true)
 }).strict();
 
 const evidenceBodySchema = z.object({
@@ -135,6 +155,22 @@ export function createProjectManagerRoutes(db: Database): Router {
     }
   });
 
+  router.post("/:projectId/project-manager/work-items/batch/status", (req, res) => {
+    const parse = batchStatusBodySchema.safeParse(req.body ?? {});
+    if (!parse.success) return sendInvalidInput(res);
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    try {
+      const workItems = new ProjectManagerRepository(db, userId)
+        .batchUpdateWorkItemStatuses(project.id, parse.data)
+        .map(toWorkItemDto);
+      res.json({ code: 0, data: { workItems }, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Work item batch status update failed");
+    }
+  });
+
   router.get("/:projectId/project-manager/work-items/:workItemId", (req, res) => {
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
@@ -142,6 +178,22 @@ export function createProjectManagerRoutes(db: Database): Router {
     const workItem = new ProjectManagerRepository(db, userId).getWorkItem(project.id, req.params.workItemId);
     if (!workItem) return sendWorkItemNotFound(res);
     res.json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
+  });
+
+  router.patch("/:projectId/project-manager/work-items/:workItemId", (req, res) => {
+    const parse = workItemUpdateSchema.safeParse(req.body ?? {});
+    if (!parse.success) return sendInvalidInput(res);
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const repo = new ProjectManagerRepository(db, userId);
+    if (!repo.getWorkItem(project.id, req.params.workItemId)) return sendWorkItemNotFound(res);
+    try {
+      const workItem = repo.updateWorkItem(project.id, req.params.workItemId, parse.data);
+      res.json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Work item update failed");
+    }
   });
 
   router.patch("/:projectId/project-manager/work-items/:workItemId/status", (req, res) => {
@@ -173,6 +225,22 @@ export function createProjectManagerRoutes(db: Database): Router {
       res.json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Evidence attachment failed");
+    }
+  });
+
+  router.delete("/:projectId/project-manager/work-items/:workItemId", (req, res) => {
+    const parse = deleteWorkItemBodySchema.safeParse(req.body ?? {});
+    if (!parse.success) return sendInvalidInput(res);
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const repo = new ProjectManagerRepository(db, userId);
+    if (!repo.getWorkItem(project.id, req.params.workItemId)) return sendWorkItemNotFound(res);
+    try {
+      const workItem = repo.deleteWorkItem(project.id, req.params.workItemId, parse.data);
+      res.json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Work item deletion failed");
     }
   });
 

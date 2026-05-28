@@ -95,6 +95,79 @@ describe("ProjectManagerRepository", () => {
     assert.equal(auditLogs.length, 2);
   });
 
+  it("edits and deletes work items with ledger and audit rows", () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const item = repo.createWorkItem(projectId, {
+      title: "Draft board item",
+      description: "Before edit",
+      acceptanceCriteria: ["old criterion"]
+    });
+
+    const updated = repo.updateWorkItem(projectId, item.id, {
+      title: "Refine board item",
+      description: null,
+      priority: 42,
+      acceptanceCriteria: ["new criterion"]
+    });
+    const removed = repo.deleteWorkItem(projectId, item.id, { confirm: true });
+
+    const events = repo.listLedgerEvents(projectId);
+    const itemEvents = events.filter((event) => event.details.targetId === item.id || event.workItemId === item.id);
+    const auditLogs = new AuditLogRepository(db, owner.id).list({
+      resourceType: "project_manager_work_item",
+      resourceId: item.id
+    });
+
+    assert.equal(updated.title, "Refine board item");
+    assert.equal(updated.description, null);
+    assert.equal(updated.priority, 42);
+    assert.deepEqual(updated.acceptanceCriteria, ["new criterion"]);
+    assert.equal(removed.id, item.id);
+    assert.equal(repo.getWorkItem(projectId, item.id), undefined);
+    assert.deepEqual(itemEvents.map((event) => event.eventType), [
+      "work_item_created",
+      "work_item_updated",
+      "work_item_deleted"
+    ]);
+    assert.equal(itemEvents.at(-1)?.workItemId, null);
+    assert.equal(itemEvents.at(-1)?.details.targetId, item.id);
+    assert.equal(auditLogs.length, 3);
+  });
+
+  it("batch-updates work item statuses atomically through transition rules", () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const first = repo.createWorkItem(projectId, { title: "Move first" });
+    const second = repo.createWorkItem(projectId, { title: "Move second" });
+    const third = repo.createWorkItem(projectId, { title: "Done without evidence" });
+    repo.updateWorkItemStatus(projectId, third.id, { status: "in_progress" });
+
+    assert.throws(
+      () => repo.batchUpdateWorkItemStatuses(projectId, {
+        updates: [
+          { workItemId: first.id, status: "in_progress" },
+          { workItemId: third.id, status: "done" }
+        ]
+      }),
+      /evidence|manual completion/i
+    );
+    assert.equal(repo.getWorkItem(projectId, first.id)?.status, "todo");
+    assert.equal(repo.getWorkItem(projectId, third.id)?.status, "in_progress");
+
+    const updated = repo.batchUpdateWorkItemStatuses(projectId, {
+      updates: [
+        { workItemId: first.id, status: "in_progress" },
+        { workItemId: second.id, status: "blocked" }
+      ]
+    });
+
+    assert.deepEqual(updated.map((item) => [item.id, item.status]), [
+      [first.id, "in_progress"],
+      [second.id, "blocked"]
+    ]);
+    assert.equal(repo.listLedgerEvents(projectId, { workItemId: first.id }).at(-1)?.eventType, "work_item_status_changed");
+    assert.equal(repo.listLedgerEvents(projectId, { workItemId: second.id }).at(-1)?.eventType, "blocker_recorded");
+  });
+
   it("filters ledger events by type before applying the result limit", () => {
     const repo = new ProjectManagerRepository(db, owner.id);
     const item = repo.createWorkItem(projectId, { title: "Collect evidence" });
