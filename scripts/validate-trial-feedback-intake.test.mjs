@@ -98,6 +98,29 @@ describe("validateTrialFeedbackIntake", () => {
     assert.equal(result.ok, false);
     assert.match(result.errors.join("\n"), /unsafe intake language/);
   });
+
+  it("rejects first-user runbook guidance that asks users to retrieve browser tokens", () => {
+    const githubIssueForm = buildIssueFormFixture();
+    const markdownTemplate = buildMarkdownTemplateFixture();
+    const trialRunbook = [
+      "# OpenForge First-User Trial Runbook",
+      "## Diagnostics",
+      "Export diagnostics from the local Gateway after logging in:",
+      "curl -H \"authorization: Bearer <token>\" http://127.0.0.1:48731/api/v1/diagnostics/export",
+      "Open browser developer tools for the OpenForge Web console.",
+      "Read Local Storage and use the `openforge.token` value."
+    ].join("\n");
+
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm,
+      markdownTemplate,
+      trialRunbook
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /first-user runbook.*browser developer tools/);
+    assert.match(result.errors.join("\n"), /first-user runbook.*openforge\.token/);
+  });
 });
 
 function buildIssueFormFixture() {

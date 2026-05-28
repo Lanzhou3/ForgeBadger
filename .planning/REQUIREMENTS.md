@@ -149,6 +149,28 @@
   coverage, CI script harness wiring, safety wording checks, and unchanged
   external gate states.
 
+### Tokenless Trial Diagnostics
+
+- [x] **RUNBOOKSAFE-01**: First-user diagnostics guidance must use Web Settings
+  diagnostics export instead of asking users to retrieve browser auth tokens.
+- [x] **RUNBOOKSAFE-02**: Any local API diagnostics fallback must be labeled
+  maintainer-only and must use the maintainer's own authenticated environment.
+- [x] **RUNBOOKSAFE-03**: The trial intake validator must reject runbook
+  guidance that asks first users to open browser developer tools, read Local
+  Storage, use `openforge.token`, or run curl with
+  `authorization: Bearer <token>`.
+
+### Phase 25 Planning Closure
+
+- [x] **PLAN-25-01**: Phase 25 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-25-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the tokenless runbook diagnostics fix
+  while keeping real first-user packet collection pending.
+- [x] **PLAN-25-03**: Phase 25 verification proves red/green validator
+  coverage, runbook token fallback removal, CI script harness coverage, and
+  unchanged external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -201,11 +223,17 @@
 | PLAN-24-01 | Phase 24 | Complete |
 | PLAN-24-02 | Phase 24 | Complete |
 | PLAN-24-03 | Phase 24 | Complete |
+| RUNBOOKSAFE-01 | Phase 25 | Complete |
+| RUNBOOKSAFE-02 | Phase 25 | Complete |
+| RUNBOOKSAFE-03 | Phase 25 | Complete |
+| PLAN-25-01 | Phase 25 | Complete |
+| PLAN-25-02 | Phase 25 | Complete |
+| PLAN-25-03 | Phase 25 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 36 total
-- Mapped to phases: 36
+- v1.5 requirements: 42 total
+- Mapped to phases: 42
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 24 Trial Feedback Intake Contract.*
+*Requirements updated: 2026-05-29 after Phase 25 Tokenless Trial Diagnostics.*

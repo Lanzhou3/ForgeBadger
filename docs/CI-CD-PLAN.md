@@ -23,7 +23,7 @@ git diff --check
 Acceptance:
 
 - Script-level smoke harness tests pass, including the trial feedback intake
-  contract validator.
+  and tokenless runbook diagnostics contract validator.
 - TypeScript emits no type errors.
 - CLI, Gateway `node:test`, and Web Vitest suites pass.
 - Real tmux integration tests pass when tmux is installed.

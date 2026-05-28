@@ -43,6 +43,12 @@
   required fields, field types, dropdown options, triage routing, redaction
   language, and unsafe raw-evidence requests. CI script harness coverage now
   includes the intake contract. This does not clear `FIRST-USER-FEEDBACK`.
+- Phase 25 extended the intake validator to `docs/TRIAL-RUNBOOK.md` and removed
+  first-user browser-token diagnostics fallback. The runbook now directs first
+  users to Settings -> Export diagnostics JSON and labels local API fallback as
+  maintainer-only. Validator coverage rejects browser developer tools, Local
+  Storage, `openforge.token`, and `authorization: Bearer <token>` guidance in
+  first-user runbook text. This does not clear `FIRST-USER-FEEDBACK`.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -151,9 +157,9 @@
 
 ## Next Work
 
-1. Use the validated v1.5 trial packet intake for the next real first-user run:
-   affected
-   surface, severity, owner, disposition or next action, environment summary,
+1. Use the validated v1.5 tokenless runbook and trial packet intake for the
+   next real first-user run: affected surface, severity, owner, disposition or
+   next action, environment summary,
    reproduction detail, diagnostics status, follow-up route or no-action
    rationale, and redaction review.
 2. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,

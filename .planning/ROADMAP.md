@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 24 intake contract validation complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 25 tokenless runbook diagnostics complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -139,6 +139,31 @@ Plans:
 5. The validator does not fabricate first-user evidence or move any external
    gate to `Pass`.
 
+### Phase 25: Tokenless Trial Diagnostics
+
+**Goal:** Remove browser-token fallback guidance from the first-user runbook
+and make the runbook part of the machine-verified trial intake contract.
+
+**Requirements:** RUNBOOKSAFE-01, RUNBOOKSAFE-02, RUNBOOKSAFE-03,
+PLAN-25-01, PLAN-25-02, PLAN-25-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 25-01-PLAN.md — runbook tokenless diagnostics regression, validator
+  extension, runbook fix, and caveat-preserving verification.
+
+**Success criteria:**
+
+1. First-user diagnostics guidance uses Web Settings -> Export diagnostics JSON.
+2. Maintainer local API fallback is explicitly maintainer-only.
+3. The runbook does not instruct first users to open browser developer tools,
+   read Local Storage, use browser auth tokens, or run curl with
+   `authorization: Bearer <token>`.
+4. The intake validator checks the runbook in CI.
+5. External evidence gate states remain unchanged.
+
 ## Archived Milestones
 
 <details>
@@ -253,6 +278,7 @@ Full archive:
 | 22. Operator Trial Dry Run | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 23. Source Env Override Preservation | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 24. Trial Feedback Intake Contract | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 25. Tokenless Trial Diagnostics | v1.5 | 1/1 | Complete | 2026-05-29 |
 
 ## Backlog
 

@@ -2,7 +2,7 @@
 
 ## v1.5 First-User Trial Operations (Active: 2026-05-29)
 
-**Phases planned:** 4 phases, 4 plans
+**Phases planned:** 5 phases, 5 plans
 
 **Goal:**
 
@@ -15,6 +15,7 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - [x] Phase 22: Operator Trial Dry Run — 1/1 plans complete.
 - [x] Phase 23: Source Env Override Preservation — 1/1 plans complete.
 - [x] Phase 24: Trial Feedback Intake Contract — 1/1 plans complete.
+- [x] Phase 25: Tokenless Trial Diagnostics — 1/1 plans complete.
 
 **Acceptance boundary:**
 
@@ -27,6 +28,8 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
   substitute for a completed first-user packet.
 - Intake contract validation can prevent feedback-template drift, but it is
   not a substitute for completed first-user feedback.
+- Tokenless runbook diagnostics guidance reduces first-user support risk, but
+  it is not a substitute for a completed first-user packet.
 
 ---
 

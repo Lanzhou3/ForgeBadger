@@ -217,22 +217,24 @@ Collect diagnostics before changing local state after a failure.
 Diagnostics export is local-only and authenticated. Diagnostics are not
 uploaded automatically.
 
-Export diagnostics from the local Gateway after logging in:
+First-user path:
 
-```bash
-curl --noproxy '*' -fsS \
-  -H "authorization: Bearer <token>" \
-  http://127.0.0.1:48731/api/v1/diagnostics/export
-```
+1. Log in to the Web console.
+2. Open Settings.
+3. Click **Export diagnostics JSON**.
+4. Attach the downloaded redacted diagnostics file to the issue or handoff note
+   after reviewing it.
 
-For a local trial, get `<token>` from the logged-in browser session:
+Maintainer-only fallback:
 
-1. Open browser developer tools for the OpenForge Web console.
-2. Open Application or Storage.
-3. Read Local Storage for the Web origin.
-4. Use the `openforge.token` value only in the local curl command.
-
-Do not paste the token into feedback, screenshots, shared logs, or issues.
+- If the Web export cannot be used, a maintainer may collect diagnostics
+  through the authenticated local API using their own existing authenticated
+  environment.
+- Do not ask first users to retrieve browser auth tokens from developer tools.
+- Do not paste tokens, API keys, passwords, JWTs, attach tokens, private keys,
+  project secrets, provider payloads, Feishu bodies, local databases, `.env`
+  files, private AI CLI config, or raw terminal transcripts into feedback,
+  screenshots, shared logs, or issues.
 
 Recommended feedback attachments:
 
@@ -257,7 +259,7 @@ For npm/CLI startup, stop the foreground `openforge start` process with
 For source fallback, stop both foreground dev processes with `Ctrl-C`:
 
 - `pnpm --dir packages/gateway dev`
-- `pnpm --dir packages/web exec next dev --hostname 127.0.0.1 --port 48732`
+- `pnpm --dir packages/web dev`
 
 OpenForge sessions are tmux-backed. Stopping Gateway or Web should not kill a
 running CLI session by itself.

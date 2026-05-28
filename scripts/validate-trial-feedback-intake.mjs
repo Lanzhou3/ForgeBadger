@@ -12,6 +12,7 @@ const DEFAULT_GITHUB_ISSUE_FORM_PATH = path.join(
   "openforge-trial-feedback.yml"
 );
 const DEFAULT_MARKDOWN_TEMPLATE_PATH = path.join(REPO_ROOT, "docs", "TRIAL-FEEDBACK.md");
+const DEFAULT_TRIAL_RUNBOOK_PATH = path.join(REPO_ROOT, "docs", "TRIAL-RUNBOOK.md");
 
 export const REQUIRED_GITHUB_FIELDS = [
   "result",
@@ -93,6 +94,13 @@ export const REQUIRED_MARKDOWN_SECTIONS = [
   "Bounded Support Notes"
 ];
 
+export const REQUIRED_RUNBOOK_PHRASES = [
+  "Open Settings.",
+  "Click **Export diagnostics JSON**.",
+  "Do not ask first users to retrieve browser auth tokens from developer tools.",
+  "Maintainer-only fallback"
+];
+
 export const REQUIRED_SAFETY_PHRASES = {
   github: [
     "Do not paste API keys",
@@ -156,6 +164,13 @@ const UNSAFE_INTAKE_PATTERNS = [
   /\bretrieve\s+browser\s+auth\s+tokens?\s+from\s+developer\s+tools\b/i
 ];
 
+const FORBIDDEN_FIRST_USER_RUNBOOK_PATTERNS = [
+  { pattern: /\bbrowser developer tools\b/i, label: "browser developer tools" },
+  { pattern: /\bRead Local Storage\b/i, label: "Read Local Storage" },
+  { pattern: /\bopenforge\.token\b/i, label: "openforge.token" },
+  { pattern: /\bauthorization:\s*Bearer\s*<token>\b/i, label: "authorization: Bearer <token>" }
+];
+
 export function validateTrialFeedbackIntake(options = {}) {
   const errors = [];
   const githubIssueForm = readInput(
@@ -170,6 +185,12 @@ export function validateTrialFeedbackIntake(options = {}) {
     "docs/TRIAL-FEEDBACK.md",
     errors
   );
+  const trialRunbook = readInput(
+    options.trialRunbook,
+    options.trialRunbookPath ?? DEFAULT_TRIAL_RUNBOOK_PATH,
+    "docs/TRIAL-RUNBOOK.md",
+    errors
+  );
 
   if (githubIssueForm !== undefined) {
     validateGithubIssueForm(githubIssueForm, errors);
@@ -178,6 +199,9 @@ export function validateTrialFeedbackIntake(options = {}) {
   if (markdownTemplate !== undefined) {
     validateMarkdownTemplate(markdownTemplate, errors);
     validateUnsafeIntakeLanguage(markdownTemplate, "Markdown template", errors);
+  }
+  if (trialRunbook !== undefined) {
+    validateTrialRunbook(trialRunbook, errors);
   }
 
   return { ok: errors.length === 0, errors };
@@ -314,6 +338,25 @@ function validateMarkdownTemplate(source, errors) {
   for (const phrase of [...REQUIRED_MARKDOWN_PHRASES, ...REQUIRED_SAFETY_PHRASES.markdown]) {
     if (!source.includes(phrase)) {
       errors.push(`Markdown trial feedback template is missing required language: ${phrase}`);
+    }
+  }
+}
+
+function validateTrialRunbook(source, errors) {
+  for (const phrase of REQUIRED_RUNBOOK_PHRASES) {
+    if (!source.includes(phrase)) {
+      errors.push(`first-user runbook is missing required diagnostics guidance: ${phrase}`);
+    }
+  }
+
+  const lines = source.split(/\r?\n/);
+  for (const [index, line] of lines.entries()) {
+    for (const { pattern, label } of FORBIDDEN_FIRST_USER_RUNBOOK_PATTERNS) {
+      if (pattern.test(line) && !isNegatedSafetyInstruction(line)) {
+        errors.push(
+          `first-user runbook contains forbidden browser-token guidance on line ${index + 1}: ${label}`
+        );
+      }
     }
   }
 }
