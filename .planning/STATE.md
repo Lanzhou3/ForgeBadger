@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: AI-Native Project Execution Traceability
 status: ready_to_plan
-stopped_at: Phase 15 plan 01 complete — ready to plan 15-02 Provider Health & Identity Web surface
-last_updated: 2026-05-29T02:52:32+08:00
+stopped_at: Phase 15 plan 02 complete — ready to plan 15-03 Phase 15 browser coverage and closeout
+last_updated: 2026-05-29T03:10:05+08:00
 last_activity: 2026-05-29
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 13
-  completed_plans: 11
-  percent: 65
+  completed_plans: 12
+  percent: 71
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: `.planning/PROJECT.md` (updated 2026-05-22)
 ## Current Position
 
 Phase: 15
-Plan: 15-02 next
+Plan: 15-03
 Status: Ready to plan
 Last activity: 2026-05-29
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-29
 
 **Velocity:**
 
-- Total plans completed: 32
+- Total plans completed: 33
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -89,7 +89,8 @@ Last activity: 2026-05-29
 | Phase 14 P03 | completed | 3 tasks | 6 files |
 | 14 | 3/3 | - | - |
 | Phase 15 P01 | completed | 3 tasks | 5 files |
-| 15 | 1/3 | - | - |
+| Phase 15 P02 | completed | 3 tasks | 8 files |
+| 15 | 2/3 | - | - |
 
 ## Accumulated Context
 
@@ -136,12 +137,13 @@ Recent decisions affecting current work:
 - [Phase 14]: Web workspace context uses one read-only `WorkspaceContextPanel` across project and session views; it never persists preview content as project-manager evidence. — Plan 14-02 implementation.
 - [Phase 14]: Project Manager workspace evidence refs use bounded `file_path`, `terminal_snapshot`, and `session` markers; raw terminal scrollback and file contents remain outside SQLite evidence storage. — Plan 14-03 implementation.
 - [Phase 15]: Gateway model-provider readiness is a structured, tenant-scoped contract with provider/model/credential/adapter/remote-model checks, actionable codes, and Codex subscription-managed isolation. — Plan 15-01 implementation.
+- [Phase 15]: Web /models exposes provider readiness checks and Codex subscription identity as separate visible surfaces; provider readiness sends selected adapter/model/credential to Gateway and never renders plaintext credentials or raw provider payloads. — Plan 15-02 implementation.
 
 ### Pending Todos
 
 Phase 15 next steps:
 
-- Plan 15-02 Provider Health & Identity Web surface using the Gateway readiness contract.
+- Plan 15-03 Browser coverage, docs closeout, and Phase 15 requirement verification.
 
 ### Blockers/Concerns
 
@@ -168,10 +170,10 @@ Phase 15 next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T02:52:32+08:00
-Stopped at: Completed 15-01-PLAN.md
+Last session: 2026-05-29T03:10:05+08:00
+Stopped at: Completed 15-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Start 15-02 planning for the Web provider health panel and Codex identity messaging.
+- Start 15-03 planning for Phase 15 browser coverage, docs closeout, and final requirement verification.

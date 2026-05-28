@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Cloud,
   Database,
+  ExternalLink,
   KeyRound,
   Layers3,
   Play,
@@ -42,12 +43,14 @@ import {
 import { useLanguage } from "@/hooks/use-language";
 import {
   applyProviderConfig,
+  checkModelProviderReadiness,
   createModelProvider,
   createProviderCredential,
   createProviderModel,
   deleteProviderCredential,
   deleteProviderModel,
   deleteModelProvider,
+  getCodexSubscriptionStatus,
   listModelProviders,
   listProviderCatalog,
   previewProviderApply,
@@ -55,6 +58,8 @@ import {
   setDefaultProviderModel,
   syncProviderModels,
   updateProviderModel,
+  type CodexSubscriptionStatus,
+  type ModelProviderReadiness,
   type ModelProfile,
   type ProviderApplyPreview,
   type ProviderApplyAdapter,
@@ -120,6 +125,7 @@ export default function ModelsPage() {
   const [selectedCredentialId, setSelectedCredentialId] = useState("");
   const [selectedApplyAdapter, setSelectedApplyAdapter] = useState<ProviderApplyAdapter>("claude");
   const [applyPreview, setApplyPreview] = useState<ProviderApplyPreview | null>(null);
+  const [providerReadiness, setProviderReadiness] = useState<ModelProviderReadiness | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [providerQueryText, setProviderQueryText] = useState("");
   const [catalogQueryText, setCatalogQueryText] = useState("");
@@ -137,6 +143,10 @@ export default function ModelsPage() {
   const catalogQuery = useQuery({
     queryKey: ["model-provider-catalog"],
     queryFn: listProviderCatalog,
+  });
+  const codexSubscriptionQuery = useQuery({
+    queryKey: ["codex-subscription-status"],
+    queryFn: getCodexSubscriptionStatus,
   });
   const providers = providerQuery.data?.providers ?? [];
   const models = providerQuery.data?.models ?? [];
@@ -202,6 +212,7 @@ export default function ModelsPage() {
       providerCredentials.some((credential) => credential.id === current) ? current : providerCredentials[0]?.id || ""
     );
     setApplyPreview(null);
+    setProviderReadiness(null);
   }, [providerModels, providerCredentials]);
 
   useEffect(() => {
@@ -212,6 +223,10 @@ export default function ModelsPage() {
     const targets = applyTargetsForProvider(selectedProvider);
     setSelectedApplyAdapter((current) => targets.includes(current) ? current : targets[0] ?? "claude");
   }, [selectedProvider]);
+
+  useEffect(() => {
+    setProviderReadiness(null);
+  }, [selectedApplyAdapter, selectedCredentialId, selectedModelId, selectedProviderId]);
 
   useEffect(() => {
     if (selectedModel) {
@@ -427,8 +442,29 @@ export default function ModelsPage() {
     },
   });
 
+  const readinessMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedProviderId) throw new Error(t("models.providerRequired"));
+      return checkModelProviderReadiness(selectedProviderId, {
+        adapter: selectedApplyAdapter,
+        ...(selectedModelId ? { modelProfileId: selectedModelId } : {}),
+        ...(selectedCredentialId ? { credentialId: selectedCredentialId } : {}),
+        includeRemoteCheck: true,
+        timeoutMs: 5000,
+      });
+    },
+    onSuccess: (result) => {
+      setProviderReadiness(result.readiness);
+      setNotice(result.readiness.status === "ready"
+        ? t("models.providerReadinessReadyNotice")
+        : t("models.providerReadinessNeedsAttentionNotice")
+      );
+    },
+  });
+
   function refreshProviders() {
     setApplyPreview(null);
+    setProviderReadiness(null);
     return queryClient.invalidateQueries({ queryKey: ["model-providers"] });
   }
 
@@ -472,7 +508,8 @@ export default function ModelsPage() {
     setDefaultModelMutation.error ??
     syncModelsMutation.error ??
     previewMutation.error ??
-    applyMutation.error;
+    applyMutation.error ??
+    readinessMutation.error;
   return (
     <div className="space-y-5 overflow-x-hidden p-4 pt-16 md:p-6">
       <div>
@@ -752,25 +789,39 @@ export default function ModelsPage() {
         </div>
 
         <div className="min-w-0 xl:col-start-2 2xl:col-start-auto">
-          <ApplyColumn
-            provider={selectedProvider}
-            models={providerModels}
-            credentials={providerCredentials}
-            projectRoot={projectRoot}
-            selectedModelId={selectedModelId}
-            selectedCredentialId={selectedCredentialId}
-            selectedAdapter={selectedApplyAdapter}
-            preview={applyPreview}
-            isPreviewing={previewMutation.isPending}
-            isApplying={applyMutation.isPending}
-            onProjectRootChange={setProjectRoot}
-            onModelChange={setSelectedModelId}
-            onCredentialChange={setSelectedCredentialId}
-            onAdapterChange={setSelectedApplyAdapter}
-            onPreview={() => previewMutation.mutate()}
-            onApply={() => applyMutation.mutate()}
-            t={t}
-          />
+          <div className="space-y-4">
+            <ProviderHealthCard
+              readiness={providerReadiness}
+              isChecking={readinessMutation.isPending}
+              canCheck={Boolean(selectedProvider)}
+              onCheck={() => readinessMutation.mutate()}
+              t={t}
+            />
+            <CodexIdentityCard
+              status={codexSubscriptionQuery.data?.status}
+              isLoading={codexSubscriptionQuery.isLoading}
+              t={t}
+            />
+            <ApplyColumn
+              provider={selectedProvider}
+              models={providerModels}
+              credentials={providerCredentials}
+              projectRoot={projectRoot}
+              selectedModelId={selectedModelId}
+              selectedCredentialId={selectedCredentialId}
+              selectedAdapter={selectedApplyAdapter}
+              preview={applyPreview}
+              isPreviewing={previewMutation.isPending}
+              isApplying={applyMutation.isPending}
+              onProjectRootChange={setProjectRoot}
+              onModelChange={setSelectedModelId}
+              onCredentialChange={setSelectedCredentialId}
+              onAdapterChange={setSelectedApplyAdapter}
+              onPreview={() => previewMutation.mutate()}
+              onApply={() => applyMutation.mutate()}
+              t={t}
+            />
+          </div>
         </div>
       </div>
       <ProviderSetupDialog
@@ -1196,6 +1247,144 @@ function productTypeLabel(productType: string | null | undefined, t: (key: any) 
   if (productType === "subscription") return t("models.productTypeSubscription");
   if (productType === "local") return t("models.productTypeLocal");
   return t("models.productTypePaygApi");
+}
+
+function ProviderHealthCard({
+  readiness,
+  isChecking,
+  canCheck,
+  onCheck,
+  t,
+}: {
+  readiness: ModelProviderReadiness | null;
+  isChecking: boolean;
+  canCheck: boolean;
+  onCheck: () => void;
+  t: (key: any) => string;
+}) {
+  return (
+    <Card data-testid="provider-health-card">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldCheck className="size-5" />
+              {t("models.providerHealth")}
+            </CardTitle>
+            <CardDescription>{t("models.providerHealthDescription")}</CardDescription>
+          </div>
+          <Button type="button" variant="outline" disabled={!canCheck || isChecking} onClick={onCheck}>
+            <RefreshCw className={`size-4 ${isChecking ? "animate-spin" : ""}`} />
+            {t("models.checkReadiness")}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!readiness ? (
+          <EmptyLine text={t("models.providerHealthEmpty")} />
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={readiness.status === "ready" ? "default" : readiness.status === "managed_elsewhere" ? "secondary" : "outline"}>
+                {readiness.status}
+              </Badge>
+              <Badge variant="outline">{readiness.code}</Badge>
+              <span className="text-xs text-muted-foreground">{formatCheckedAt(readiness.checkedAt)}</span>
+            </div>
+            <div className="grid gap-2 text-sm">
+              {readinessCheckEntries(readiness, t).map(([label, value]) => (
+                <div key={label} className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2">
+                  <span className="text-muted-foreground">{label}</span>
+                  <Badge variant={isReadyCheckValue(value) ? "default" : "outline"}>{value}</Badge>
+                </div>
+              ))}
+            </div>
+            {readiness.remote && (
+              <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <div>{t("models.providerHealthRemoteChecked")}: {String(readiness.remote.checked)}</div>
+                {readiness.remote.modelCount !== undefined && <div>{t("models.providerHealthRemoteModelCount")}: {readiness.remote.modelCount}</div>}
+                {readiness.remote.matchedModelId && <div>{t("models.providerHealthMatchedModel")}: {readiness.remote.matchedModelId}</div>}
+                {readiness.remote.errorCode && <div>{t("models.providerHealthErrorCode")}: {readiness.remote.errorCode}</div>}
+                {readiness.remote.error && <div>{t("models.providerHealthError")}: {readiness.remote.error}</div>}
+              </div>
+            )}
+            {readiness.steps.length > 0 && (
+              <div className="space-y-2 rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                <div className="font-medium">{t("models.providerHealthNextSteps")}</div>
+                <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                  {readiness.steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CodexIdentityCard({ status, isLoading, t }: {
+  status: CodexSubscriptionStatus | undefined;
+  isLoading: boolean;
+  t: (key: any) => string;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldCheck className="size-5" />
+          {t("models.codexSubscription")}
+        </CardTitle>
+        <CardDescription>{t("models.codexSubscriptionDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {isLoading ? (
+          <EmptyLine text={t("common.loading")} />
+        ) : status ? (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant={status.providerApplyEnabled ? "outline" : "secondary"}>
+                {status.providerApplyEnabled ? t("models.providerApplyEnabled") : t("models.providerApplyDisabled")}
+              </Badge>
+              <Badge variant="outline">{status.connectionState}</Badge>
+              <Badge variant="outline">{status.identitySource}</Badge>
+            </div>
+            <div className="grid gap-2">
+              <SummaryCell label={t("models.codexAccountLabel")} value={status.accountLabel ?? t("models.codexNoAccount")} />
+              <SummaryCell label={t("models.codexSdkPackage")} value={`${status.sdk.packageName} / ${status.sdk.installed ? t("models.sdkInstalled") : t("models.sdkMissing")}`} />
+            </div>
+            <a className="inline-flex items-center gap-1 text-xs text-primary hover:underline" href={status.sdk.docsUrl} target="_blank" rel="noreferrer">
+              {t("models.codexOfficialDocs")}
+              <ExternalLink className="size-3" />
+            </a>
+          </>
+        ) : (
+          <EmptyLine text={t("models.codexStatusUnavailable")} />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function readinessCheckEntries(readiness: ModelProviderReadiness, t: (key: any) => string): Array<[string, string]> {
+  return [
+    [t("models.providerHealthCheckProvider"), readiness.checks.provider],
+    [t("models.providerHealthCheckTarget"), readiness.checks.adapter],
+    [t("models.providerHealthCheckModel"), readiness.checks.model],
+    [t("models.providerHealthCheckCredential"), readiness.checks.credential],
+    [t("models.providerHealthCheckRemoteModelList"), readiness.checks.remoteModelList],
+  ];
+}
+
+function isReadyCheckValue(value: string): boolean {
+  return value === "ready" || value === "supported" || value === "selected" || value === "passed" || value === "not_required";
+}
+
+function formatCheckedAt(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 function applyTargetsForProvider(provider: ProviderProfile | undefined): ProviderApplyAdapter[] {

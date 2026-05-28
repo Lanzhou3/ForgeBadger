@@ -753,6 +753,32 @@ export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "
 export type ProviderApplyAdapter = "claude" | "opencode" | "openforge-copilot" | "codex";
 export type ProviderSupportedAdapter = "claude" | "opencode";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
+export type ProviderReadinessAdapter = ProviderApplyAdapter;
+export type ProviderReadinessStatus = "ready" | "needs_attention" | "managed_elsewhere";
+export type ProviderReadinessCode =
+  | "ready"
+  | "provider_disabled"
+  | "unsupported_target"
+  | "missing_model"
+  | "missing_active_credential"
+  | "remote_validation_unavailable"
+  | "remote_model_missing"
+  | "remote_validation_failed"
+  | "codex_subscription_managed";
+export type ProviderReadinessCheckStatus =
+  | "ready"
+  | "disabled"
+  | "supported"
+  | "unsupported"
+  | "managed_elsewhere"
+  | "selected"
+  | "missing"
+  | "not_required"
+  | "passed"
+  | "missing_model"
+  | "unavailable"
+  | "failed"
+  | "skipped";
 
 export interface ProviderCatalogModel {
   id: string;
@@ -862,6 +888,40 @@ export interface ProviderApplyPreview {
     providerName: string;
     modelName: string;
   };
+}
+
+export interface ModelProviderReadiness {
+  status: ProviderReadinessStatus;
+  code: ProviderReadinessCode;
+  checkedAt: string;
+  provider: {
+    id: string;
+    name: string;
+    providerKey: string;
+    apiFormat: string;
+    authType: string;
+  };
+  selection: {
+    adapter: ProviderReadinessAdapter;
+    modelProfileId?: string;
+    modelId?: string;
+    credentialId?: string;
+  };
+  checks: {
+    provider: ProviderReadinessCheckStatus;
+    adapter: ProviderReadinessCheckStatus;
+    model: ProviderReadinessCheckStatus;
+    credential: ProviderReadinessCheckStatus;
+    remoteModelList: ProviderReadinessCheckStatus;
+  };
+  remote?: {
+    checked: boolean;
+    modelCount?: number;
+    matchedModelId?: string;
+    errorCode?: string;
+    error?: string;
+  };
+  steps: string[];
 }
 
 export interface CodexSubscriptionStatus {
@@ -2555,6 +2615,22 @@ export async function syncProviderModels(
     method: "POST",
     body: JSON.stringify(data),
   }) as Promise<ProviderModelSyncResult>;
+}
+
+export async function checkModelProviderReadiness(
+  providerId: string,
+  data: {
+    adapter: ProviderReadinessAdapter;
+    modelProfileId?: string;
+    credentialId?: string;
+    timeoutMs?: number;
+    includeRemoteCheck?: boolean;
+  }
+): Promise<{ readiness: ModelProviderReadiness }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/readiness`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ readiness: ModelProviderReadiness }>;
 }
 
 export async function previewProviderApply(
