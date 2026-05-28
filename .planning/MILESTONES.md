@@ -2,7 +2,7 @@
 
 ## v1.5 First-User Trial Operations (Active: 2026-05-29)
 
-**Phases planned:** 8 phases, 8 plans
+**Phases planned:** 9 phases, 9 plans
 
 **Goal:**
 
@@ -19,6 +19,7 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - [x] Phase 26: Trial Feedback Draft Generator — 1/1 plans complete.
 - [x] Phase 27: Trial Feedback Packet Audit — 1/1 plans complete.
 - [x] Phase 28: External Evidence Gate Drift Guard — 1/1 plans complete.
+- [x] Phase 29: Trial Materials Consistency Guard — 1/1 plans complete.
 
 **Acceptance boundary:**
 
@@ -40,6 +41,9 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
   evidence.
 - External evidence gate validation prevents accidental status drift, but it is
   not a substitute for the real artifacts required to move a gate to `Pass`.
+- Trial materials consistency validation prevents checklist/runbook/template
+  drift, but it is not a substitute for a completed, redacted, linked
+  first-user packet.
 
 ---
 

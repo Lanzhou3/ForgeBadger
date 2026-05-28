@@ -121,6 +121,32 @@ describe("validateTrialFeedbackIntake", () => {
     assert.match(result.errors.join("\n"), /first-user runbook.*browser developer tools/);
     assert.match(result.errors.join("\n"), /first-user runbook.*openforge\.token/);
   });
+
+  it("rejects checklist drift that removes gate-routing commands or asks for browser tokens", () => {
+    const githubIssueForm = buildIssueFormFixture();
+    const markdownTemplate = buildMarkdownTemplateFixture();
+    const trialRunbook = buildTrialRunbookFixture();
+    const trialChecklist = [
+      "# OpenForge Trial Checklist",
+      "Use this checklist as the first-user trial entry point.",
+      "Read browser developer tools and copy the `openforge.token` value into the handoff.",
+      "Feedback capture is complete after a maintainer reads the packet."
+    ].join("\n");
+
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm,
+      markdownTemplate,
+      trialRunbook,
+      trialChecklist
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:intake-validate/);
+    assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:feedback-audit/);
+    assert.match(result.errors.join("\n"), /trial checklist.*pnpm evidence:gates-validate/);
+    assert.match(result.errors.join("\n"), /trial checklist.*browser developer tools/);
+    assert.match(result.errors.join("\n"), /trial checklist.*openforge\.token/);
+  });
 });
 
 function buildIssueFormFixture() {
@@ -171,4 +197,14 @@ function buildMarkdownTemplateFixture() {
     body.push(phrase);
   }
   return `${body.join("\n")}\n`;
+}
+
+function buildTrialRunbookFixture() {
+  return [
+    "# OpenForge First-User Trial Runbook",
+    "Open Settings.",
+    "Click **Export diagnostics JSON**.",
+    "Do not ask first users to retrieve browser auth tokens from developer tools.",
+    "Maintainer-only fallback"
+  ].join("\n");
 }

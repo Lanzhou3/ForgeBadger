@@ -58,6 +58,11 @@ jobs:
       - name: Script harness tests
         run: node --test scripts/validate-external-evidence-gates.test.mjs scripts/audit-trial-feedback-packet.test.mjs scripts/create-trial-feedback-draft.test.mjs scripts/validate-trial-feedback-intake.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
 
+      - name: Trial material and evidence registry validators
+        run: |
+          pnpm trial:intake-validate
+          pnpm evidence:gates-validate
+
       - name: Workspace typecheck
         run: pnpm -r typecheck
 

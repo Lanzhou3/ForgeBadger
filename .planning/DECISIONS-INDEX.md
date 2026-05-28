@@ -24,6 +24,8 @@ This bounded index summarizes decisions that downstream GSD workflows should car
   triage, but passing audit must not clear external gates automatically.
 - External evidence gate validation may block accidental registry drift, but it
   must not collect evidence or change gate states by itself.
+- Trial intake material validation includes the first-user checklist, but it
+  remains a structural guard and cannot substitute for a completed packet.
 
 ## Locked Decisions
 
@@ -51,6 +53,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.5 feedback draft helper | `pnpm trial:feedback-draft` may generate a local Markdown draft with bounded metadata, but the draft is not submitted, not reviewed, and not gate-clearing evidence. | `docs/reports/phase-26-trial-feedback-draft-generator-2026-05-29.md` |
 | v1.5 feedback packet audit | `pnpm trial:feedback-audit` rejects generated drafts, placeholders, missing fields, and secret-like content before maintainer triage; `gateClearingEvidence` remains false. | `docs/reports/phase-27-trial-feedback-packet-audit-2026-05-29.md` |
 | v1.5 external gate drift guard | `pnpm evidence:gates-validate` requires the four external gate rows to keep their current Caveat/Blocked states and concrete rerun anchors until real artifacts justify a reviewed validator update. | `docs/reports/phase-28-external-evidence-gate-drift-guard-2026-05-29.md` |
+| v1.5 trial materials consistency guard | `pnpm trial:intake-validate` validates the runbook, checklist, feedback template, and GitHub issue form as a local structural contract; it does not collect first-user evidence or clear gates. | `docs/reports/phase-29-trial-materials-consistency-guard-2026-05-29.md` |
 
 ## Deferred Ideas
 

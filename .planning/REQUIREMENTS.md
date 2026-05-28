@@ -250,6 +250,34 @@
   harness coverage, CLI smoke, docs references, and unchanged external gate
   states.
 
+### Trial Materials Consistency Guard
+
+- [x] **MATERIALS-01**: The trial intake validator must read
+  `docs/TRIAL-CHECKLIST.md` by default alongside the GitHub issue form,
+  Markdown feedback template, and trial runbook.
+- [x] **MATERIALS-02**: The checklist contract must preserve the first-user
+  entry-point wording, external gate registry reference, `pnpm
+  trial:intake-validate`, `pnpm trial:feedback-audit`, `pnpm
+  evidence:gates-validate`, `FIRST-USER-FEEDBACK`, follow-up routing, and
+  redaction review anchors.
+- [x] **MATERIALS-03**: Checklist validation must reject unsafe raw-evidence
+  language and non-negated browser-token guidance such as browser developer
+  tools, Local Storage, `openforge.token`, or `authorization: Bearer <token>`.
+- [x] **MATERIALSSAFE-01**: Trial-material validation must not collect
+  feedback, export diagnostics, upload artifacts, submit issues, or clear any
+  external evidence gate.
+
+### Phase 29 Planning Closure
+
+- [x] **PLAN-29-01**: Phase 29 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-29-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the trial materials consistency guard
+  while keeping real first-user packet collection pending.
+- [x] **PLAN-29-03**: Phase 29 verification proves red/green checklist drift
+  coverage, CLI validation, script harness coverage, docs references, and
+  unchanged external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -329,11 +357,18 @@
 | PLAN-28-01 | Phase 28 | Complete |
 | PLAN-28-02 | Phase 28 | Complete |
 | PLAN-28-03 | Phase 28 | Complete |
+| MATERIALS-01 | Phase 29 | Complete |
+| MATERIALS-02 | Phase 29 | Complete |
+| MATERIALS-03 | Phase 29 | Complete |
+| MATERIALSSAFE-01 | Phase 29 | Complete |
+| PLAN-29-01 | Phase 29 | Complete |
+| PLAN-29-02 | Phase 29 | Complete |
+| PLAN-29-03 | Phase 29 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 63 total
-- Mapped to phases: 63
+- v1.5 requirements: 70 total
+- Mapped to phases: 70
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 28 External Evidence Gate Drift Guard.*
+*Requirements updated: 2026-05-29 after Phase 29 Trial Materials Consistency Guard.*

@@ -68,6 +68,11 @@
   `LIVE-PROVIDER=Caveat`, `WINDOWS-WSL=Caveat`,
   `FEISHU-CALLBACK=Blocked`, and `FIRST-USER-FEEDBACK=Caveat` unless a future
   reviewed change updates the validator with linked real artifact evidence.
+- Phase 29 extended `scripts/validate-trial-feedback-intake.mjs` to validate
+  `docs/TRIAL-CHECKLIST.md`, added `pnpm trial:intake-validate`, and wired CI
+  to run both trial intake and external gate validators. The checklist now
+  preserves audit commands, gate-routing commands, redaction review, and
+  browser-token safety boundaries without clearing any external gate.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -176,9 +181,10 @@
 
 ## Next Work
 
-1. Use the validated v1.5 tokenless runbook, trial packet intake, optional
-   feedback draft helper, packet audit helper, and external gate validator for
-   the next real first-user run: affected surface, severity, owner,
+1. Use the validated v1.5 tokenless runbook, checklist, trial packet intake,
+   optional feedback draft helper, packet audit helper, intake material
+   validator, and external gate validator for the next real first-user run:
+   affected surface, severity, owner,
    disposition or next action, environment summary, reproduction detail,
    diagnostics status, follow-up route or no-action rationale, and redaction
    review.

@@ -13,6 +13,8 @@ terminal.
 ```bash
 pnpm install --frozen-lockfile
 node --test scripts/validate-external-evidence-gates.test.mjs scripts/audit-trial-feedback-packet.test.mjs scripts/create-trial-feedback-draft.test.mjs scripts/validate-trial-feedback-intake.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
+pnpm trial:intake-validate
+pnpm evidence:gates-validate
 pnpm -r typecheck
 pnpm -r test
 RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
@@ -24,7 +26,10 @@ Acceptance:
 
 - Script-level smoke harness tests pass, including the external evidence gate
   validator, trial feedback packet audit, draft generator, intake contract
-  validator, and tokenless runbook diagnostics contract validator.
+  validator, tokenless runbook diagnostics contract validator, and trial
+  checklist consistency guard.
+- `pnpm trial:intake-validate` and `pnpm evidence:gates-validate` pass before
+  trial material or external gate registry changes are accepted.
 - TypeScript emits no type errors.
 - CLI, Gateway `node:test`, and Web Vitest suites pass.
 - Real tmux integration tests pass when tmux is installed.

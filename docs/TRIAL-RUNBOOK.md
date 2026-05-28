@@ -27,6 +27,16 @@ pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
 Passing audit means ready for human triage only. It does not automatically
 clear `FIRST-USER-FEEDBACK`.
 
+Before editing the trial runbook, checklist, feedback template, or GitHub issue
+form, run:
+
+```bash
+pnpm trial:intake-validate
+```
+
+This checks the trial intake materials stay aligned. It does not collect
+evidence, submit feedback, or clear any external gate.
+
 The primary path is the npm/CLI startup. Source startup is a fallback for local
 debugging and contribution.
 
@@ -281,6 +291,12 @@ After completing and redacting a Markdown packet, run:
 
 ```bash
 pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
+```
+
+After editing trial intake materials, run:
+
+```bash
+pnpm trial:intake-validate
 ```
 
 Do not upload secrets, API keys, plaintext credentials, local private keys, or

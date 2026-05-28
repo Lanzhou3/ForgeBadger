@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 28 external gate drift guard complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 29 trial materials consistency guard complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -246,6 +246,34 @@ Plans:
    first-user feedback packet audit command visible.
 4. CI runs the validator through the script harness.
 5. The validator does not collect evidence or clear any gate by itself.
+
+### Phase 29: Trial Materials Consistency Guard
+
+**Goal:** Extend the trial intake validator so the first-user trial checklist
+cannot drift away from the runbook, feedback template, issue form, packet audit,
+or external gate validator before real packet collection.
+
+**Requirements:** MATERIALS-01, MATERIALS-02, MATERIALS-03, MATERIALSSAFE-01,
+PLAN-29-01, PLAN-29-02, PLAN-29-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 29-01-PLAN.md — checklist drift coverage, root intake validator command,
+  trial docs sync, and gate-preserving verification.
+
+**Success criteria:**
+
+1. The trial intake validator reads `docs/TRIAL-CHECKLIST.md` by default.
+2. Checklist drift tests reject missing intake-validation, packet-audit, and
+   external-gate-validation commands.
+3. Checklist safety checks reject unsafe raw-evidence wording and
+   non-negated browser-token guidance.
+4. Trial docs name `pnpm trial:intake-validate` as a local
+   materials-consistency guard.
+5. The validator does not collect first-user feedback, export diagnostics,
+   upload artifacts, submit issues, or clear any external gate.
 
 ## Archived Milestones
 

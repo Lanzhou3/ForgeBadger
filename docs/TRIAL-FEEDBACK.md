@@ -23,6 +23,15 @@ pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
 Passing audit means ready for human triage only. It does not automatically
 clear `FIRST-USER-FEEDBACK`.
 
+Before changing the trial runbook, checklist, template, or issue form, run:
+
+```bash
+pnpm trial:intake-validate
+```
+
+Passing validation means the intake materials remain structurally aligned. It
+does not collect first-user evidence or clear any external gate.
+
 ## Summary
 
 - Result: pass / pass with caveats / blocked

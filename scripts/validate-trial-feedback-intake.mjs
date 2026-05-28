@@ -13,6 +13,7 @@ const DEFAULT_GITHUB_ISSUE_FORM_PATH = path.join(
 );
 const DEFAULT_MARKDOWN_TEMPLATE_PATH = path.join(REPO_ROOT, "docs", "TRIAL-FEEDBACK.md");
 const DEFAULT_TRIAL_RUNBOOK_PATH = path.join(REPO_ROOT, "docs", "TRIAL-RUNBOOK.md");
+const DEFAULT_TRIAL_CHECKLIST_PATH = path.join(REPO_ROOT, "docs", "TRIAL-CHECKLIST.md");
 
 export const REQUIRED_GITHUB_FIELDS = [
   "result",
@@ -99,6 +100,18 @@ export const REQUIRED_RUNBOOK_PHRASES = [
   "Click **Export diagnostics JSON**.",
   "Do not ask first users to retrieve browser auth tokens from developer tools.",
   "Maintainer-only fallback"
+];
+
+export const REQUIRED_CHECKLIST_PHRASES = [
+  "Use this checklist as the first-user trial entry point.",
+  "docs/EXTERNAL-EVIDENCE-GATES.md",
+  "`pnpm trial:intake-validate`",
+  "`pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md`",
+  "`pnpm evidence:gates-validate`",
+  "`FIRST-USER-FEEDBACK`",
+  "Templates and empty issue forms do not count as completed feedback.",
+  "Follow-up route, phase, or issue:",
+  "Redaction review completed:"
 ];
 
 export const REQUIRED_SAFETY_PHRASES = {
@@ -191,6 +204,12 @@ export function validateTrialFeedbackIntake(options = {}) {
     "docs/TRIAL-RUNBOOK.md",
     errors
   );
+  const trialChecklist = readInput(
+    options.trialChecklist,
+    options.trialChecklistPath ?? DEFAULT_TRIAL_CHECKLIST_PATH,
+    "docs/TRIAL-CHECKLIST.md",
+    errors
+  );
 
   if (githubIssueForm !== undefined) {
     validateGithubIssueForm(githubIssueForm, errors);
@@ -202,6 +221,9 @@ export function validateTrialFeedbackIntake(options = {}) {
   }
   if (trialRunbook !== undefined) {
     validateTrialRunbook(trialRunbook, errors);
+  }
+  if (trialChecklist !== undefined) {
+    validateTrialChecklist(trialChecklist, errors);
   }
 
   return { ok: errors.length === 0, errors };
@@ -349,12 +371,27 @@ function validateTrialRunbook(source, errors) {
     }
   }
 
+  validateForbiddenBrowserTokenGuidance(source, "first-user runbook", errors);
+}
+
+function validateTrialChecklist(source, errors) {
+  for (const phrase of REQUIRED_CHECKLIST_PHRASES) {
+    if (!source.includes(phrase)) {
+      errors.push(`trial checklist is missing required first-user guidance: ${phrase}`);
+    }
+  }
+
+  validateUnsafeIntakeLanguage(source, "Trial checklist", errors);
+  validateForbiddenBrowserTokenGuidance(source, "trial checklist", errors);
+}
+
+function validateForbiddenBrowserTokenGuidance(source, label, errors) {
   const lines = source.split(/\r?\n/);
   for (const [index, line] of lines.entries()) {
-    for (const { pattern, label } of FORBIDDEN_FIRST_USER_RUNBOOK_PATTERNS) {
+    for (const { pattern, label: patternLabel } of FORBIDDEN_FIRST_USER_RUNBOOK_PATTERNS) {
       if (pattern.test(line) && !isNegatedSafetyInstruction(line)) {
         errors.push(
-          `first-user runbook contains forbidden browser-token guidance on line ${index + 1}: ${label}`
+          `${label} contains forbidden browser-token guidance on line ${index + 1}: ${patternLabel}`
         );
       }
     }
