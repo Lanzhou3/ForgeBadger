@@ -76,6 +76,13 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
   GitHub feedback issues, but it is not a substitute for a completed,
   redacted, linked first-user packet or maintainer gate-clearance judgment.
 
+**Closeout:**
+
+- Operations-tooling closeout: `docs/reports/v1.5-first-user-trial-operations-closeout-2026-05-29.md`.
+- Remaining external work: collect and audit a completed first-user feedback
+  packet or issue-form item before any `FIRST-USER-FEEDBACK` gate
+  reclassification.
+
 ---
 
 ## v1.4 External Evidence Closure (Shipped: 2026-05-29)

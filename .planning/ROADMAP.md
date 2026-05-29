@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 37 trial feedback candidate issue audit complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Operations-tooling closeout recorded in `docs/reports/v1.5-first-user-trial-operations-closeout-2026-05-29.md`; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 

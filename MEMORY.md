@@ -114,6 +114,10 @@
   `trial-feedback` issues, skips known route trackers, audits non-tracker
   candidates through the single issue-form audit path, and reports ready or
   blocked candidates without clearing gates.
+- v1.5 operations-tooling closeout is recorded in
+  `docs/reports/v1.5-first-user-trial-operations-closeout-2026-05-29.md`.
+  The closeout keeps all external gates unchanged and names completed,
+  redacted first-user packet collection as the remaining external work.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
