@@ -2,7 +2,7 @@
 
 ## v1.5 First-User Trial Operations (Active: 2026-05-29)
 
-**Phases planned:** 16 phases, 16 plans
+**Phases planned:** 17 phases, 17 plans
 
 **Goal:**
 
@@ -27,6 +27,7 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - [x] Phase 34: First-User Entrypoint Audit Route Guard — 1/1 plans complete.
 - [x] Phase 35: README Trial Entrypoint Guard — 1/1 plans complete.
 - [x] Phase 36: Copilot Evidence Packet Audit Guard — 1/1 plans complete.
+- [x] Phase 37: Trial Feedback Candidate Issue Audit — 1/1 plans complete.
 
 **Acceptance boundary:**
 
@@ -70,6 +71,9 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
   completed, redacted, linked first-user packet.
 - Copilot evidence packet audit validation prevents incomplete Copilot feedback
   from entering maintainer triage, but it is not a substitute for a completed,
+  redacted, linked first-user packet or maintainer gate-clearance judgment.
+- Trial feedback candidate issue audit can discover and classify non-tracker
+  GitHub feedback issues, but it is not a substitute for a completed,
   redacted, linked first-user packet or maintainer gate-clearance judgment.
 
 ---

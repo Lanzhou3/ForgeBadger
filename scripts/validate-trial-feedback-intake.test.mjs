@@ -146,6 +146,7 @@ describe("validateTrialFeedbackIntake", () => {
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:readiness-validate/);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:feedback-audit/);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:feedback-issue-audit/);
+    assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:feedback-issues-audit/);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm evidence:gates-validate/);
     assert.match(result.errors.join("\n"), /trial checklist.*browser developer tools/);
     assert.match(result.errors.join("\n"), /trial checklist.*openforge\.token/);
@@ -172,6 +173,27 @@ describe("validateTrialFeedbackIntake", () => {
     assert.match(result.errors.join("\n"), /open-source readiness.*pnpm trial:feedback-issue-audit/);
     assert.match(result.errors.join("\n"), /support diagnostics.*pnpm trial:feedback-audit/);
     assert.match(result.errors.join("\n"), /support diagnostics.*pnpm trial:feedback-issue-audit/);
+  });
+
+  it("rejects first-user docs that omit bulk GitHub feedback candidate audit guidance", () => {
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm: buildIssueFormFixture(),
+      markdownTemplate: buildMarkdownTemplateFixture(),
+      trialRunbook: buildTrialRunbookFixture(),
+      trialChecklist: buildTrialChecklistFixture(),
+      openSourceReadiness: buildFirstUserEntrypointFixture().replace(
+        "pnpm trial:feedback-issues-audit\n",
+        ""
+      ),
+      supportDiagnostics: buildFirstUserEntrypointFixture().replace(
+        "pnpm trial:feedback-issues-audit\n",
+        ""
+      )
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /open-source readiness.*pnpm trial:feedback-issues-audit/);
+    assert.match(result.errors.join("\n"), /support diagnostics.*pnpm trial:feedback-issues-audit/);
   });
 
   it("rejects README trial entrypoints that omit the GitHub feedback issue form", () => {
@@ -304,6 +326,7 @@ function buildTrialChecklistFixture() {
     "`pnpm trial:readiness-validate`",
     "`pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md`",
     "`pnpm trial:feedback-issue-audit -- --issue=<number>`",
+    "`pnpm trial:feedback-issues-audit`",
     "`pnpm evidence:gates-validate`",
     "`FIRST-USER-FEEDBACK`",
     "Templates and empty issue forms do not count as completed feedback.",
@@ -318,6 +341,7 @@ function buildFirstUserEntrypointFixture() {
     ".github/ISSUE_TEMPLATE/openforge-trial-feedback.yml",
     "pnpm trial:feedback-audit",
     "pnpm trial:feedback-issue-audit",
+    "pnpm trial:feedback-issues-audit",
     "FIRST-USER-FEEDBACK"
   ].join("\n");
 }

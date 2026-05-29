@@ -52,6 +52,9 @@
 - [x] **TRIALOPS-08**: Completed first-user feedback must include Copilot
   smoke/provider, prompt, read-tool, pending-action, memory-write, and
   terminal-boundary evidence before maintainer triage.
+- [x] **TRIALOPS-09**: Maintainers must be able to discover and audit
+  non-tracker GitHub `trial-feedback` issue candidates in one read-only pass
+  before maintainer triage.
 
 ### Evidence Safety
 
@@ -452,6 +455,28 @@
   audit coverage, intake validation, aggregate readiness validation, docs
   references, and unchanged external gate states.
 
+### Trial Feedback Candidate Issue Audit
+
+- [x] **ISSUECAND-01**: Batch GitHub feedback issue audit must list
+  `trial-feedback` issues and skip known route tracker issues.
+- [x] **ISSUECAND-02**: Non-tracker candidate issues must be audited through
+  the existing single GitHub issue-form audit path and summarized as ready or
+  blocked for maintainer triage.
+- [x] **ISSUECANDSAFE-01**: Candidate issue audit must be read-only and must
+  return `gateClearingEvidence: false`; it must not collect feedback, mutate
+  issues, attach artifacts, or clear external gates.
+
+### Phase 37 Planning Closure
+
+- [x] **PLAN-37-01**: Phase 37 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-37-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the trial feedback candidate issue audit
+  while keeping real first-user packet collection pending.
+- [x] **PLAN-37-03**: Phase 37 verification proves red/green candidate audit,
+  intake validation, external gate validation, live candidate scan, aggregate
+  readiness validation, docs references, and unchanged external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -476,6 +501,7 @@
 | TRIALOPS-06 | Phase 21 | Complete |
 | TRIALOPS-07 | Phase 35 | Complete |
 | TRIALOPS-08 | Phase 36 | Complete |
+| TRIALOPS-09 | Phase 37 | Complete |
 | TRIALSAFE-01 | Phase 21 | Complete |
 | TRIALSAFE-02 | Phase 21 | Complete |
 | TRIALSAFE-03 | Phase 21 | Complete |
@@ -587,11 +613,17 @@
 | PLAN-36-01 | Phase 36 | Complete |
 | PLAN-36-02 | Phase 36 | Complete |
 | PLAN-36-03 | Phase 36 | Complete |
+| ISSUECAND-01 | Phase 37 | Complete |
+| ISSUECAND-02 | Phase 37 | Complete |
+| ISSUECANDSAFE-01 | Phase 37 | Complete |
+| PLAN-37-01 | Phase 37 | Complete |
+| PLAN-37-02 | Phase 37 | Complete |
+| PLAN-37-03 | Phase 37 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 119 total
-- Mapped to phases: 119
+- v1.5 requirements: 126 total
+- Mapped to phases: 126
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 36 Copilot Evidence Packet Audit Guard.*
+*Requirements updated: 2026-05-29 after Phase 37 Trial Feedback Candidate Issue Audit.*

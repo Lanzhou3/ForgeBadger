@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 36 Copilot evidence packet audit guard complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 37 trial feedback candidate issue audit complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -460,6 +460,37 @@ Plans:
 5. `FIRST-USER-FEEDBACK` remains `Caveat`.
 6. The guard does not collect evidence, submit issues, attach artifacts, or
    clear external gates.
+
+### Phase 37: Trial Feedback Candidate Issue Audit
+
+**Goal:** Let maintainers discover and audit GitHub `trial-feedback` issue
+candidates in one read-only command without confusing route trackers for
+completed first-user feedback.
+
+**Requirements:** TRIALOPS-09, ISSUECAND-01, ISSUECAND-02, ISSUECANDSAFE-01,
+PLAN-37-01, PLAN-37-02, PLAN-37-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 37-01-PLAN.md — GitHub `trial-feedback` candidate discovery, route
+  tracker skipping, single-issue audit reuse, docs/gate guards, source-of-truth
+  updates, and gate-preserving verification.
+
+**Success criteria:**
+
+1. `pnpm trial:feedback-issues-audit` lists GitHub issues labeled
+   `trial-feedback`.
+2. Known route tracker issues are skipped and not treated as completed
+   feedback.
+3. Non-tracker candidates are audited through the existing GitHub issue-form
+   audit path and summarized as ready or blocked.
+4. The command returns `gateClearingEvidence: false`.
+5. Trial docs and external gate registry preserve the bulk candidate audit
+   command.
+6. The current live candidate scan confirms no completed non-tracker feedback
+   issue exists yet, so `FIRST-USER-FEEDBACK` remains `Caveat`.
 
 ## Archived Milestones
 

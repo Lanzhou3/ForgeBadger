@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: First-User Trial Operations
 status: phase_complete
-stopped_at: Phase 36 Copilot evidence packet audit guard complete; real first-user packet collection pending
-last_updated: 2026-05-29T07:59:08+08:00
+stopped_at: Phase 37 trial feedback candidate issue audit complete; real first-user packet collection pending
+last_updated: 2026-05-29T08:22:14+08:00
 last_activity: 2026-05-29
 progress:
-  total_phases: 16
-  completed_phases: 16
-  total_plans: 16
-  completed_plans: 16
+  total_phases: 17
+  completed_phases: 17
+  total_plans: 17
+  completed_plans: 17
   percent: 100
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** Phase 36 protected completed-feedback audit paths from accepting packets that omit required Copilot smoke and boundary evidence. The next concrete step is collecting a real first-user trial packet through the validated runbook, checklist, template, issue form, draft helper, readiness preflight, packet or issue audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
+**Current focus:** Phase 37 added a read-only GitHub `trial-feedback` candidate audit that skips route trackers and audits non-tracker candidates before maintainer triage. The next concrete step is collecting a real first-user trial packet through the validated runbook, checklist, template, issue form, draft helper, readiness preflight, packet or issue audit helper, candidate audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
 
 ## Current Position
 
-Phase: 36. Copilot Evidence Packet Audit Guard
-Plan: 36-01 complete
+Phase: 37. Trial Feedback Candidate Issue Audit
+Plan: 37-01 complete
 Status: Phase Complete
 Last activity: 2026-05-29
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-29
 
 **Velocity:**
 
-- Total plans completed: 60
+- Total plans completed: 61
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -78,6 +78,7 @@ Last activity: 2026-05-29
 | 34. First-User Entrypoint Audit Route Guard | 1/1 | - | - |
 | 35. README Trial Entrypoint Guard | 1/1 | - | - |
 | 36. Copilot Evidence Packet Audit Guard | 1/1 | - | - |
+| 37. Trial Feedback Candidate Issue Audit | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -117,6 +118,7 @@ Recent decisions affecting current work:
 - [Phase 34]: `pnpm trial:intake-validate` now validates `docs/OPEN-SOURCE-READINESS.md` and `docs/SUPPORT-DIAGNOSTICS.md` preserve both feedback audit routes before maintainer triage. External gates remain unchanged.
 - [Phase 35]: `pnpm trial:intake-validate` now validates `README.md`, `docs/README.zh-CN.md`, and `docs/README.zh-TW.md` preserve the runbook, checklist, troubleshooting, feedback template, and GitHub issue-form links. External gates remain unchanged.
 - [Phase 36]: `pnpm trial:feedback-audit` and `pnpm trial:feedback-issue-audit` now reject missing Copilot smoke/provider, prompt, read-tool, pending-action, memory-write, and terminal-boundary evidence before maintainer triage. External gates remain unchanged.
+- [Phase 37]: `pnpm trial:feedback-issues-audit` now scans GitHub `trial-feedback` issues, skips route trackers, audits non-tracker candidates, and reports ready/blocked candidates while keeping `gateClearingEvidence: false`. External gates remain unchanged.
 
 ### Pending Todos
 
@@ -128,6 +130,7 @@ Next steps:
 - Run `pnpm trial:readiness-validate` before starting a real first-user collection round.
 - Run `pnpm trial:feedback-audit -- <packet.md>` before maintainer triage of any completed Markdown packet.
 - Run `pnpm trial:feedback-issue-audit -- --issue=<number>` before maintainer triage of any completed GitHub issue-form packet.
+- Run `pnpm trial:feedback-issues-audit` to discover non-tracker GitHub feedback candidates before maintainer triage.
 - Run `pnpm evidence:gates-validate` before changing any external gate registry state.
 - Use the v1.5 trial-operations loop for the next real first-user trial packet.
 - Prepare Feishu developer-console callback evidence only when public HTTPS Gateway routing is available.
@@ -155,10 +158,10 @@ Next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T07:59:08+08:00
-Stopped at: Phase 36 Copilot evidence packet audit guard complete; real first-user packet collection pending
+Last session: 2026-05-29T08:22:14+08:00
+Stopped at: Phase 37 trial feedback candidate issue audit complete; real first-user packet collection pending
 Resume file: None
 
 ## Operator Next Steps
 
-- Collect a real first-user trial packet through the validated tokenless runbook, checklist, intake contract, draft helper, readiness preflight, packet or issue audit helper, and external gate validator, then triage it through the v1.5 operating loop and the external evidence gate registry.
+- Collect a real first-user trial packet through the validated tokenless runbook, checklist, intake contract, draft helper, readiness preflight, packet or issue audit helper, candidate issue audit helper, and external gate validator, then triage it through the v1.5 operating loop and the external evidence gate registry.

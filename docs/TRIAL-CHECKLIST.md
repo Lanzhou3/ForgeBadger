@@ -203,6 +203,9 @@ Forbidden Project Manager evidence content:
 - [ ] If feedback was filed as a GitHub issue, run
       `pnpm trial:feedback-issue-audit -- --issue=<number>`; treat a pass as
       ready for human triage only, not automatic gate clearance.
+- [ ] To scan GitHub `trial-feedback` issues for non-tracker completed
+      feedback candidates, run `pnpm trial:feedback-issues-audit`; treat ready
+      results as maintainer-triage input only.
 - [ ] Check `docs/EXTERNAL-EVIDENCE-GATES.md` gate
       `FIRST-USER-FEEDBACK` before claiming completed first-user evidence.
 - [ ] Run `pnpm evidence:gates-validate` before changing any external gate

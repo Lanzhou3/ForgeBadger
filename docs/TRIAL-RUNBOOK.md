@@ -38,6 +38,18 @@ This command reads the issue through GitHub CLI, converts the issue-form body
 to the same packet shape, and applies the packet audit. It is read-only and
 does not comment on the issue, attach artifacts, or clear any external gate.
 
+To discover and audit all non-tracker GitHub `trial-feedback` issue candidates
+in one read-only pass, run:
+
+```bash
+pnpm trial:feedback-issues-audit
+```
+
+This skips the known routing tracker issues, audits candidate feedback issues
+through the same single-issue path, and reports which issues are ready for
+maintainer triage. It does not collect feedback, comment on issues, or clear
+`FIRST-USER-FEEDBACK`.
+
 Before editing the trial runbook, checklist, feedback template, or GitHub issue
 form, run:
 
@@ -332,6 +344,12 @@ After filing feedback through the GitHub issue form, a maintainer can run:
 
 ```bash
 pnpm trial:feedback-issue-audit -- --issue=<number>
+```
+
+To scan GitHub `trial-feedback` issue candidates and skip route trackers, run:
+
+```bash
+pnpm trial:feedback-issues-audit
 ```
 
 After editing trial intake materials, run:

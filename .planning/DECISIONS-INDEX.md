@@ -77,6 +77,7 @@ This bounded index summarizes decisions that downstream GSD workflows should car
 | v1.5 first-user entrypoint audit-route guard | `pnpm trial:intake-validate` guards open-source readiness and support diagnostics docs so they preserve both feedback audit routes before maintainer triage. | `docs/reports/phase-34-first-user-entrypoint-audit-route-guard-2026-05-29.md` |
 | v1.5 README trial-entrypoint guard | `pnpm trial:intake-validate` guards root and localized README trial sections so they preserve runbook, checklist, troubleshooting, feedback template, and GitHub issue-form links. | `docs/reports/phase-35-readme-trial-entrypoint-guard-2026-05-29.md` |
 | v1.5 Copilot evidence packet audit guard | `pnpm trial:feedback-audit` and `pnpm trial:feedback-issue-audit` reject completed-looking feedback that omits Copilot smoke and boundary evidence before maintainer triage. | `docs/reports/phase-36-copilot-evidence-packet-audit-guard-2026-05-29.md` |
+| v1.5 trial feedback candidate issue audit | `pnpm trial:feedback-issues-audit` scans GitHub `trial-feedback` issues, skips route trackers, and audits non-tracker candidates without clearing gates. | `docs/reports/phase-37-trial-feedback-candidate-issue-audit-2026-05-29.md` |
 
 ## Deferred Ideas
 

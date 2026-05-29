@@ -115,6 +115,7 @@ export const REQUIRED_CHECKLIST_PHRASES = [
   "`pnpm trial:readiness-validate`",
   "`pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md`",
   "`pnpm trial:feedback-issue-audit -- --issue=<number>`",
+  "`pnpm trial:feedback-issues-audit`",
   "`pnpm evidence:gates-validate`",
   "`FIRST-USER-FEEDBACK`",
   "Templates and empty issue forms do not count as completed feedback.",
@@ -127,6 +128,7 @@ export const REQUIRED_FIRST_USER_ENTRYPOINT_PHRASES = [
   ".github/ISSUE_TEMPLATE/openforge-trial-feedback.yml",
   "pnpm trial:feedback-audit",
   "pnpm trial:feedback-issue-audit",
+  "pnpm trial:feedback-issues-audit",
   "FIRST-USER-FEEDBACK"
 ];
 

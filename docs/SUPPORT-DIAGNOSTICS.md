@@ -336,5 +336,7 @@ Route to maintainer/operator when the issue is missing external evidence:
   `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml`, then run
   `pnpm trial:feedback-audit -- <packet.md>` for Markdown packets or
   `pnpm trial:feedback-issue-audit -- --issue=<number>` for GitHub issue-form
-  feedback before maintainer triage. Use `docs/EXTERNAL-EVIDENCE-GATES.md`
-  gate `FIRST-USER-FEEDBACK` for the required packet shape.
+  feedback before maintainer triage. Use `pnpm trial:feedback-issues-audit` to
+  scan non-tracker GitHub `trial-feedback` issue candidates. Use
+  `docs/EXTERNAL-EVIDENCE-GATES.md` gate `FIRST-USER-FEEDBACK` for the required
+  packet shape.

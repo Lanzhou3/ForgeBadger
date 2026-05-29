@@ -95,7 +95,8 @@ function readyNextSteps() {
     "Run the first-user trial with docs/TRIAL-RUNBOOK.md and docs/TRIAL-CHECKLIST.md.",
     "Complete or file a redacted feedback packet before maintainer triage.",
     "Run pnpm trial:feedback-audit -- <packet.md> before using Markdown feedback as evidence.",
-    "Run pnpm trial:feedback-issue-audit -- --issue=<number> before using GitHub issue feedback as evidence."
+    "Run pnpm trial:feedback-issue-audit -- --issue=<number> before using GitHub issue feedback as evidence.",
+    "Run pnpm trial:feedback-issues-audit to scan non-tracker GitHub feedback candidates before maintainer triage."
   ];
 }
 

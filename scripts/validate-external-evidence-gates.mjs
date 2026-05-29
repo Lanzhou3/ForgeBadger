@@ -37,7 +37,12 @@ export const EXPECTED_EXTERNAL_GATES = [
     currentState: "Caveat",
     ownerPhrase: "real trial packet",
     clearingPhrase: "completed redacted first-user feedback packet",
-    rerunPhrases: ["docs/TRIAL-FEEDBACK.md", "pnpm trial:feedback-audit", "pnpm trial:feedback-issue-audit"],
+    rerunPhrases: [
+      "docs/TRIAL-FEEDBACK.md",
+      "pnpm trial:feedback-audit",
+      "pnpm trial:feedback-issue-audit",
+      "pnpm trial:feedback-issues-audit"
+    ],
     targetPhrases: ["issue #5", "completed trial feedback issue"]
   }
 ];

@@ -6,7 +6,7 @@ import { auditTrialFeedbackPacket } from "./audit-trial-feedback-packet.mjs";
 
 const DEFAULT_REPOSITORY = "Lanzhou3/OpenForge";
 const REQUIRED_LABEL = "trial-feedback";
-const ROUTE_TRACKER_ISSUES = new Map([
+export const TRIAL_FEEDBACK_ROUTE_TRACKER_ISSUES = new Map([
   [3, "Record live Copilot provider smoke with disposable credential"],
   [4, "Run physical Windows and WSL OpenForge smoke"],
   [5, "Collect first-user Copilot hardening feedback"]
@@ -38,7 +38,7 @@ export async function auditTrialFeedbackIssue(options = {}) {
   if (!labels.has(REQUIRED_LABEL)) {
     errors.push(`GitHub issue #${issueNumber} must keep label: ${REQUIRED_LABEL}`);
   }
-  const trackerTitle = ROUTE_TRACKER_ISSUES.get(issueNumber);
+  const trackerTitle = TRIAL_FEEDBACK_ROUTE_TRACKER_ISSUES.get(issueNumber);
   if (trackerTitle && issue.title === trackerTitle) {
     errors.push(`GitHub issue #${issueNumber} is a route tracker, not a completed feedback packet.`);
   }

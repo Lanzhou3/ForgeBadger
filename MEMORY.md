@@ -108,6 +108,12 @@
   first-user feedback must include Copilot smoke/provider, prompt, read-tool,
   pending-action, memory-write, and terminal-boundary evidence before
   maintainer triage.
+- Phase 37 added `scripts/audit-trial-feedback-issues.mjs`,
+  `scripts/audit-trial-feedback-issues.test.mjs`, and
+  `pnpm trial:feedback-issues-audit`. The read-only helper lists GitHub
+  `trial-feedback` issues, skips known route trackers, audits non-tracker
+  candidates through the single issue-form audit path, and reports ready or
+  blocked candidates without clearing gates.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
