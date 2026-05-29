@@ -57,6 +57,8 @@ describe("db schema", () => {
       "copilot_runs",
       "integration_feishu_configs",
       "integration_feishu_user_mappings",
+      "integration_feishu_webhook_rate_windows",
+      "integration_feishu_webhook_replay_entries",
       "model_cost_rates",
       "model_profiles",
       "model_provider_profiles",
@@ -64,6 +66,9 @@ describe("db schema", () => {
       "notifications",
       "plugins",
       "project_agent_sequences",
+      "project_manager_goals",
+      "project_manager_ledger_events",
+      "project_manager_work_items",
       "project_skills",
       "projects",
       "provider_credentials",
@@ -151,5 +156,33 @@ describe("db schema", () => {
 
   it("is idempotent when running migrations twice", () => {
     assert.doesNotThrow(() => runMigrationTwice(db));
+  });
+
+  it("creates project-manager ledger tables with tenant and project indexes", () => {
+    const expectedTables = [
+      "project_manager_goals",
+      "project_manager_work_items",
+      "project_manager_ledger_events"
+    ];
+
+    for (const tableName of expectedTables) {
+      const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+      const names = columns.map((column) => column.name);
+      assert.equal(names.includes("user_id"), true, `${tableName} must include user_id`);
+      assert.equal(names.includes("project_id"), true, `${tableName} must include project_id`);
+    }
+
+    const indexes = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_project_manager_%' ORDER BY name")
+      .all() as Array<{ name: string }>;
+
+    assert.deepEqual(indexes.map((index) => index.name), [
+      "idx_project_manager_goals_user_project",
+      "idx_project_manager_ledger_events_created",
+      "idx_project_manager_ledger_events_type",
+      "idx_project_manager_ledger_events_user_project",
+      "idx_project_manager_work_items_status",
+      "idx_project_manager_work_items_user_project"
+    ]);
   });
 });

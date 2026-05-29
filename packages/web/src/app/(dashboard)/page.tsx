@@ -10,7 +10,6 @@ import {
   Bot,
   CheckCircle2,
   FileCode2,
-  KeyRound,
   Wrench,
   Plus,
   ArrowRight,
@@ -35,7 +34,7 @@ import {
 } from "@/lib/api";
 import { buildCopilotLaunchHref } from "@/lib/copilot";
 import { normalizeSessionStatus } from "@/lib/session-status";
-import { terminalRuntimeTranslationKey } from "@/lib/terminal-runtime";
+import { getTerminalRuntimeRemediation } from "@/lib/terminal-runtime";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function DashboardPage() {
@@ -58,9 +57,15 @@ export default function DashboardPage() {
   const dashboardStats = dashboard?.stats;
   const dashboardHealth = dashboard?.health;
   const terminalRuntime = dependenciesQuery.data?.terminalRuntime;
+  const terminalRemediation = getTerminalRuntimeRemediation(terminalRuntime?.mode);
+  const dependenciesHealthy = dependenciesQuery.isSuccess && terminalRuntime?.supported === true;
+  const dependenciesDetail = dependenciesQuery.isLoading
+    ? t("dashboard.dependenciesHealthLoading")
+    : dependenciesQuery.isError || !terminalRuntime
+      ? t("dashboard.dependenciesHealthUnavailable")
+      : t(terminalRemediation.detailKey);
   const dashboardCopilotHref = buildCopilotLaunchHref({
     source: "dashboard",
-    intent: "launch_readiness",
   });
 
   const stats = [
@@ -112,10 +117,10 @@ export default function DashboardPage() {
     },
     {
       label: t("dashboard.dependenciesHealth"),
-      detail: t(terminalRuntimeTranslationKey(terminalRuntime?.mode)),
-      healthy: terminalRuntime?.supported ?? !dependenciesQuery.isError,
+      detail: dependenciesDetail,
+      healthy: dependenciesHealthy,
       icon: CheckCircle2,
-      href: "/settings",
+      href: terminalRemediation.href,
     },
     {
       label: t("dashboard.configHealth"),
@@ -129,13 +134,6 @@ export default function DashboardPage() {
       detail: dashboardHealth?.models.message ?? t("dashboard.modelHealthDescription"),
       healthy: dashboardHealth?.models.healthy ?? false,
       icon: Bot,
-      href: "/models",
-    },
-    {
-      label: t("dashboard.credentialHealth"),
-      detail: dashboardHealth?.credentials.message ?? t("dashboard.credentialHealthDescription"),
-      healthy: dashboardHealth?.credentials.healthy ?? false,
-      icon: KeyRound,
       href: "/models",
     },
     {

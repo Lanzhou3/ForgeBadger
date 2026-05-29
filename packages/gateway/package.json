@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json && mkdir -p dist/src/db && cp -R src/db/migrations dist/src/db/",
-    "dev": "set -a; [ -f ../../.env ] && . ../../.env; set +a; tsx watch src/index.ts",
+    "dev": "node ../../scripts/run-with-root-env.mjs tsx watch src/index.ts",
     "openforge": "tsx src/cli/init.ts",
-    "start": "set -a; [ -f ../../.env ] && . ../../.env; set +a; node dist/src/index.js",
+    "start": "node ../../scripts/run-with-root-env.mjs node dist/src/index.js",
     "test": "node --test --import tsx",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

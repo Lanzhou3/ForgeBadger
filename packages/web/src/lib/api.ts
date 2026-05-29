@@ -33,6 +33,138 @@ export interface Project {
   status?: string;
 }
 
+export interface ProjectManagerEvidenceRef {
+  kind?: string;
+  label?: string;
+  status?: string;
+  ref?: string;
+  path?: string;
+  sessionId?: string;
+  copilotRunId?: string;
+  pendingActionId?: string;
+  feishuChatId?: string;
+  feishuMessageId?: string;
+  createdAt?: string;
+}
+
+export interface ProjectManagerGoal {
+  id: string;
+  projectId: string;
+  summary: string;
+  constraints: string[];
+  acceptanceCriteria: string[];
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProjectManagerGoalInput {
+  summary: string;
+  constraints?: string[];
+  acceptanceCriteria?: string[];
+  status?: string;
+}
+
+export type ProjectManagerWorkItemStatus =
+  | "todo"
+  | "in_progress"
+  | "blocked"
+  | "ready_for_review"
+  | "done"
+  | "cancelled";
+
+export interface ProjectManagerWorkItem {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string | null;
+  status: ProjectManagerWorkItemStatus;
+  priority: number;
+  acceptanceCriteria: string[];
+  evidenceRefCount: number;
+  evidenceRefs: ProjectManagerEvidenceRef[];
+  feishuRefCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProjectManagerWorkItemInput {
+  title: string;
+  description?: string | null;
+  status?: ProjectManagerWorkItemStatus;
+  priority?: number;
+  acceptanceCriteria?: string[];
+  evidenceRefs?: ProjectManagerEvidenceRef[];
+  feishuRefs?: ProjectManagerEvidenceRef[];
+}
+
+export interface ProjectManagerWorkItemUpdateInput {
+  title?: string;
+  description?: string | null;
+  priority?: number;
+  acceptanceCriteria?: string[];
+}
+
+export interface ProjectManagerWorkItemStatusInput {
+  status: ProjectManagerWorkItemStatus;
+  evidenceRefs?: ProjectManagerEvidenceRef[];
+  manualCompletionReason?: string;
+}
+
+export interface ProjectManagerBatchStatusInput {
+  updates: Array<{
+    workItemId: string;
+    status: ProjectManagerWorkItemStatus;
+    evidenceRefs?: ProjectManagerEvidenceRef[];
+    manualCompletionReason?: string;
+  }>;
+}
+
+export interface ProjectManagerWorkItemDeleteInput {
+  confirm: true;
+}
+
+export interface ProjectManagerEvidenceInput {
+  evidenceRefs: ProjectManagerEvidenceRef[];
+}
+
+export type ProjectManagerLedgerEventType =
+  | "goal_updated"
+  | "work_item_created"
+  | "work_item_updated"
+  | "work_item_deleted"
+  | "work_item_status_changed"
+  | "evidence_attached"
+  | "blocker_recorded"
+  | "blocker_resolved"
+  | "copilot_observation_recorded"
+  | "feishu_reference_linked"
+  | "next_step_proposed"
+  | "manual_completion_recorded";
+
+export interface ProjectManagerLedgerTrace {
+  copilotRunId?: string;
+  pendingActionId?: string;
+  actionType?: "create_work_item" | "update_work_item_status" | "attach_evidence" | string;
+  targetType?: "project" | "work_item" | string;
+  targetId?: string;
+  evidenceRefCount?: number;
+  approvalStatus?: "approved" | "failed" | "rejected" | string;
+  executionStatus?: "succeeded" | "failed" | string;
+}
+
+export interface ProjectManagerLedgerEvent {
+  id: string;
+  projectId: string;
+  workItemId: string | null;
+  eventType: ProjectManagerLedgerEventType;
+  status: ProjectManagerWorkItemStatus | null;
+  evidenceRefCount: number;
+  feishuRefCount: number;
+  trace?: ProjectManagerLedgerTrace;
+  createdAt: number;
+}
+
 export interface Template {
   id: string;
   userId?: string | null;
@@ -621,6 +753,32 @@ export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "
 export type ProviderApplyAdapter = "claude" | "opencode" | "openforge-copilot" | "codex";
 export type ProviderSupportedAdapter = "claude" | "opencode";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
+export type ProviderReadinessAdapter = ProviderApplyAdapter;
+export type ProviderReadinessStatus = "ready" | "needs_attention" | "managed_elsewhere";
+export type ProviderReadinessCode =
+  | "ready"
+  | "provider_disabled"
+  | "unsupported_target"
+  | "missing_model"
+  | "missing_active_credential"
+  | "remote_validation_unavailable"
+  | "remote_model_missing"
+  | "remote_validation_failed"
+  | "codex_subscription_managed";
+export type ProviderReadinessCheckStatus =
+  | "ready"
+  | "disabled"
+  | "supported"
+  | "unsupported"
+  | "managed_elsewhere"
+  | "selected"
+  | "missing"
+  | "not_required"
+  | "passed"
+  | "missing_model"
+  | "unavailable"
+  | "failed"
+  | "skipped";
 
 export interface ProviderCatalogModel {
   id: string;
@@ -732,6 +890,40 @@ export interface ProviderApplyPreview {
   };
 }
 
+export interface ModelProviderReadiness {
+  status: ProviderReadinessStatus;
+  code: ProviderReadinessCode;
+  checkedAt: string;
+  provider: {
+    id: string;
+    name: string;
+    providerKey: string;
+    apiFormat: string;
+    authType: string;
+  };
+  selection: {
+    adapter: ProviderReadinessAdapter;
+    modelProfileId?: string;
+    modelId?: string;
+    credentialId?: string;
+  };
+  checks: {
+    provider: ProviderReadinessCheckStatus;
+    adapter: ProviderReadinessCheckStatus;
+    model: ProviderReadinessCheckStatus;
+    credential: ProviderReadinessCheckStatus;
+    remoteModelList: ProviderReadinessCheckStatus;
+  };
+  remote?: {
+    checked: boolean;
+    modelCount?: number;
+    matchedModelId?: string;
+    errorCode?: string;
+    error?: string;
+  };
+  steps: string[];
+}
+
 export interface CodexSubscriptionStatus {
   providerApplyEnabled: boolean;
   identitySource: "chatgpt_subscription_sdk";
@@ -816,6 +1008,36 @@ export interface AiConfigSnapshot {
   projectRoot: string;
   files: AiConfigFile[];
   forms: AiConfigForm[];
+}
+
+export interface WorkspaceTreeEntry {
+  name: string;
+  path: string;
+  kind: "directory" | "file" | "symlink" | "other" | string;
+  sizeBytes?: number;
+  updatedAt?: string;
+  children?: WorkspaceTreeEntry[];
+}
+
+export interface WorkspaceTreeSnapshot {
+  projectId: string;
+  rootPath: string;
+  path: string;
+  entries: WorkspaceTreeEntry[];
+  truncated: boolean;
+}
+
+export interface WorkspaceFileSnapshot {
+  projectId: string;
+  rootPath: string;
+  path: string;
+  name: string;
+  sizeBytes: number;
+  updatedAt: string;
+  encoding: "utf8" | string;
+  content: string;
+  truncated: boolean;
+  binary: boolean;
 }
 
 export interface SnapshotRestoreResult {
@@ -1123,7 +1345,7 @@ export function apiUrl(path: string): string {
 export async function fetchJson<T = unknown>(path: string, options: ApiRequestOptions = {}) {
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
-  const res = await fetch(apiUrl(path), request).finally(cleanup);
+  const res = await fetch(apiUrl(path), request).catch(normalizeFetchError).finally(cleanup);
   const envelope = await readApiEnvelope<T>(res);
   if (!res.ok) {
     throw errorFromResponse(res, envelope);
@@ -1140,7 +1362,7 @@ export async function fetchJson<T = unknown>(path: string, options: ApiRequestOp
 export async function fetchEnvelope<T = unknown>(path: string, options: ApiRequestOptions = {}) {
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
-  const res = await fetch(apiUrl(path), request).finally(cleanup);
+  const res = await fetch(apiUrl(path), request).catch(normalizeFetchError).finally(cleanup);
   const envelope = await readApiEnvelope<T>(res);
   if (!res.ok) {
     throw errorFromResponse(res, envelope);
@@ -1183,6 +1405,13 @@ function buildApiRequest(options: ApiRequestOptions, token: string | null): {
 
 function formatHttpError(res: Response): string {
   return `Gateway request failed with HTTP ${res.status}`;
+}
+
+function normalizeFetchError(error: unknown): never {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    throw new GatewayApiError("Gateway request timed out. Check that the Gateway service is running.");
+  }
+  throw error;
 }
 
 async function readApiEnvelope<T>(res: Response): Promise<ApiEnvelope<T> | null> {
@@ -1412,6 +1641,14 @@ export function chooseDefaultRuntimeAdapter(
   return adapters.find(isAdapterLaunchable)?.id;
 }
 
+function projectManagerPath(projectId: string, suffix: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/project-manager${suffix}`;
+}
+
+function projectWorkspacePath(projectId: string, suffix: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/workspace${suffix}`;
+}
+
 export async function listProjects(): Promise<{ projects: Project[] }> {
   return fetchJson("/api/v1/projects") as Promise<{ projects: Project[] }>;
 }
@@ -1445,6 +1682,26 @@ export async function getGlobalAiConfig(id: string): Promise<AiConfigSnapshot> {
   return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/ai-config/global`) as Promise<AiConfigSnapshot>;
 }
 
+export async function getProjectWorkspaceTree(
+  id: string,
+  params: { path?: string; depth?: number; limit?: number } = {}
+): Promise<WorkspaceTreeSnapshot> {
+  const searchParams = new URLSearchParams();
+  if (params.path) searchParams.set("path", params.path);
+  if (params.depth !== undefined) searchParams.set("depth", String(params.depth));
+  if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return fetchJson(projectWorkspacePath(id, `/tree${query ? `?${query}` : ""}`)) as Promise<WorkspaceTreeSnapshot>;
+}
+
+export async function getProjectWorkspaceFile(
+  id: string,
+  filePath: string
+): Promise<WorkspaceFileSnapshot> {
+  const searchParams = new URLSearchParams({ path: filePath });
+  return fetchJson(projectWorkspacePath(id, `/file?${searchParams.toString()}`)) as Promise<WorkspaceFileSnapshot>;
+}
+
 export async function updateProjectAiConfigFile(
   id: string,
   relativePath: string,
@@ -1470,6 +1727,121 @@ export async function createDefaultAgentPack(id: string): Promise<DefaultAgentPa
   return fetchJson(`/api/v1/projects/${id}/agents/default-pack`, {
     method: "POST",
   }) as Promise<DefaultAgentPackResult>;
+}
+
+export async function getProjectManagerGoal(
+  projectId: string
+): Promise<{ goal: ProjectManagerGoal | null }> {
+  return fetchJson(projectManagerPath(projectId, "/goal")) as Promise<{ goal: ProjectManagerGoal | null }>;
+}
+
+export async function updateProjectManagerGoal(
+  projectId: string,
+  input: ProjectManagerGoalInput
+): Promise<{ goal: ProjectManagerGoal }> {
+  return fetchJson(projectManagerPath(projectId, "/goal"), {
+    method: "PUT",
+    body: JSON.stringify(input),
+  }) as Promise<{ goal: ProjectManagerGoal }>;
+}
+
+export async function listProjectManagerWorkItems(
+  projectId: string,
+  params: { status?: ProjectManagerWorkItemStatus; limit?: number } = {}
+): Promise<{ workItems: ProjectManagerWorkItem[] }> {
+  const searchParams = new URLSearchParams();
+  if (params.status) searchParams.set("status", params.status);
+  if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return fetchJson(projectManagerPath(projectId, `/work-items${query ? `?${query}` : ""}`)) as Promise<{
+    workItems: ProjectManagerWorkItem[];
+  }>;
+}
+
+export async function createProjectManagerWorkItem(
+  projectId: string,
+  input: ProjectManagerWorkItemInput
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, "/work-items"), {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItem: ProjectManagerWorkItem }>;
+}
+
+export async function getProjectManagerWorkItem(
+  projectId: string,
+  workItemId: string
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, `/work-items/${encodeURIComponent(workItemId)}`)) as Promise<{
+    workItem: ProjectManagerWorkItem;
+  }>;
+}
+
+export async function updateProjectManagerWorkItem(
+  projectId: string,
+  workItemId: string,
+  input: ProjectManagerWorkItemUpdateInput
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, `/work-items/${encodeURIComponent(workItemId)}`), {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItem: ProjectManagerWorkItem }>;
+}
+
+export async function updateProjectManagerWorkItemStatus(
+  projectId: string,
+  workItemId: string,
+  input: ProjectManagerWorkItemStatusInput
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, `/work-items/${encodeURIComponent(workItemId)}/status`), {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItem: ProjectManagerWorkItem }>;
+}
+
+export async function batchUpdateProjectManagerWorkItemStatuses(
+  projectId: string,
+  input: ProjectManagerBatchStatusInput
+): Promise<{ workItems: ProjectManagerWorkItem[] }> {
+  return fetchJson(projectManagerPath(projectId, "/work-items/batch/status"), {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItems: ProjectManagerWorkItem[] }>;
+}
+
+export async function attachProjectManagerWorkItemEvidence(
+  projectId: string,
+  workItemId: string,
+  input: ProjectManagerEvidenceInput
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, `/work-items/${encodeURIComponent(workItemId)}/evidence`), {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItem: ProjectManagerWorkItem }>;
+}
+
+export async function deleteProjectManagerWorkItem(
+  projectId: string,
+  workItemId: string,
+  input: ProjectManagerWorkItemDeleteInput
+): Promise<{ workItem: ProjectManagerWorkItem }> {
+  return fetchJson(projectManagerPath(projectId, `/work-items/${encodeURIComponent(workItemId)}`), {
+    method: "DELETE",
+    body: JSON.stringify(input),
+  }) as Promise<{ workItem: ProjectManagerWorkItem }>;
+}
+
+export async function listProjectManagerLedger(
+  projectId: string,
+  params: { eventType?: ProjectManagerLedgerEventType; limit?: number } = {}
+): Promise<{ events: ProjectManagerLedgerEvent[] }> {
+  const searchParams = new URLSearchParams();
+  if (params.eventType) searchParams.set("eventType", params.eventType);
+  if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return fetchJson(projectManagerPath(projectId, `/ledger${query ? `?${query}` : ""}`)) as Promise<{
+    events: ProjectManagerLedgerEvent[];
+  }>;
 }
 
 export async function deleteProject(id: string): Promise<unknown> {
@@ -2243,6 +2615,22 @@ export async function syncProviderModels(
     method: "POST",
     body: JSON.stringify(data),
   }) as Promise<ProviderModelSyncResult>;
+}
+
+export async function checkModelProviderReadiness(
+  providerId: string,
+  data: {
+    adapter: ProviderReadinessAdapter;
+    modelProfileId?: string;
+    credentialId?: string;
+    timeoutMs?: number;
+    includeRemoteCheck?: boolean;
+  }
+): Promise<{ readiness: ModelProviderReadiness }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/readiness`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ readiness: ModelProviderReadiness }>;
 }
 
 export async function previewProviderApply(

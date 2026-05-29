@@ -25,6 +25,12 @@ import {
 import { FeishuIntegrationRepository } from "../db/repositories/feishu-integration-repository.js";
 import { ModelProviderRepository, type ModelProfile, type ProviderProfile } from "../db/repositories/model-provider-repository.js";
 import { ProjectRepository, type Project } from "../db/repositories/project-repository.js";
+import {
+  PROJECT_MANAGER_WORK_ITEM_STATUSES,
+  ProjectManagerRepository,
+  type ProjectManagerEvidenceRef,
+  type ProjectManagerWorkItem
+} from "../db/repositories/project-manager-repository.js";
 import { AgentRepository, type Agent } from "../db/repositories/agent-repository.js";
 import { PluginRepository } from "../db/repositories/plugin-repository.js";
 import { ProjectSkillRepository } from "../db/repositories/project-skill-repository.js";
@@ -165,7 +171,7 @@ const projectConfigSyncApprovalSchema = z.object({
 const sessionInputApprovalSchema = z.object({
   sessionId: z.string().min(1),
   input: z.string().min(1).max(8_000),
-  submit: z.boolean().optional()
+  submit: z.boolean().default(true)
 }).strict();
 const sessionStartApprovalSchema = z.object({
   sessionId: z.string().min(1),
@@ -270,7 +276,44 @@ const troubleshootingStepsApprovalSchema = z.object({
   summary: z.string().min(1).optional(),
   steps: z.array(z.string().min(1)).min(1).max(10).optional()
 }).strict();
+const projectManagerEvidenceRefApprovalSchema = z.object({
+  kind: z.string().trim().min(1).max(64),
+  label: z.string().trim().min(1).max(256),
+  status: z.string().trim().min(1).max(64),
+  ref: z.string().trim().min(1).max(512).optional(),
+  path: z.string().trim().min(1).max(512).optional(),
+  sessionId: z.string().trim().min(1).max(128).optional()
+}).strict();
+const projectManagerCreateWorkItemApprovalSchema = z.object({
+  actionType: z.literal("create_work_item"),
+  projectId: z.string().min(1),
+  title: z.string().trim().min(1).max(256),
+  description: z.string().trim().min(1).max(4_000).optional(),
+  status: z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES).optional(),
+  priority: z.number().int().min(0).max(100).optional(),
+  acceptanceCriteria: z.array(z.string().trim().min(1).max(1_000)).max(50).optional(),
+  evidenceRefs: z.array(projectManagerEvidenceRefApprovalSchema).max(20).optional(),
+  copilotRunId: z.string().min(1)
+}).strict();
+const projectManagerUpdateStatusApprovalSchema = z.object({
+  actionType: z.literal("update_work_item_status"),
+  projectId: z.string().min(1),
+  workItemId: z.string().min(1),
+  status: z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES),
+  evidenceRefCount: z.number().int().min(0).optional(),
+  trustedEvidenceRefCount: z.number().int().min(0).optional(),
+  copilotRunId: z.string().min(1)
+}).strict();
+const projectManagerAttachEvidenceApprovalSchema = z.object({
+  actionType: z.literal("attach_evidence"),
+  projectId: z.string().min(1),
+  workItemId: z.string().min(1),
+  evidenceRef: projectManagerEvidenceRefApprovalSchema,
+  copilotRunId: z.string().min(1)
+}).strict();
 const defaultStaleCopilotRunTimeoutMs = 15 * 60 * 1000;
+const defaultStaleCopilotApprovalTimeoutMs = 24 * 60 * 60 * 1000;
+const defaultSessionInputTrackingDelaysMs = [1_500, 2_500, 4_000, 6_000];
 
 export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   db: Database;
@@ -283,6 +326,8 @@ export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   loadProviderCatalog?: () => Promise<ProviderCatalogPreset[]>;
   executeFeishuCommand?: (request: FeishuCommandRequest) => Promise<FeishuCommandResult>;
   staleRunTimeoutMs?: number;
+  staleApprovalTimeoutMs?: number;
+  sessionInputTrackingDelaysMs?: number[];
 }
 
 type PendingActionApprover = (
@@ -430,12 +475,13 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     if (!repo.getConversation(req.params.id)) {
       return res.status(404).json({ code: 1, message: "Copilot conversation not found" });
     }
-    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs);
+    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs, options.staleApprovalTimeoutMs);
     const existingActiveRun = repo.findActiveRun();
     if (existingActiveRun) return sendRunAlreadyActive(res, existingActiveRun);
     // The DB live-run constraint is the source of truth; clear stale process locks after recovery.
     if (activeRunUsers.has(userId)) activeRunUsers.delete(userId);
     activeRunUsers.add(userId);
+    const conversationContext = buildConversationContext(repo.listConversationMessages(req.params.id));
     const userMessage = repo.createConversationMessage(req.params.id, {
       role: "user",
       content: parseResult.data.prompt,
@@ -451,7 +497,8 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
         source: parseResult.data.source,
         ...(parseResult.data.providerProfileId ? { providerProfileId: parseResult.data.providerProfileId } : {}),
         ...(parseResult.data.modelProfileId ? { modelProfileId: parseResult.data.modelProfileId } : {}),
-        ...(parseResult.data.sourceRefId ? { sourceRefId: parseResult.data.sourceRefId } : {})
+        ...(parseResult.data.sourceRefId ? { sourceRefId: parseResult.data.sourceRefId } : {}),
+        ...(conversationContext ? { conversationContext } : {})
       };
       const startedRunRef: { current: CopilotRun | null } = { current: null };
       const orchestrator = new CopilotOrchestrator({
@@ -592,7 +639,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     if (!parseResult.success) return sendInvalid(res, "Invalid copilot run payload");
     const userId = userIdFor(req);
     const repo = new CopilotRepository(options.db, userId);
-    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs);
+    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs, options.staleApprovalTimeoutMs);
     const existingActiveRun = repo.findActiveRun();
     if (existingActiveRun) return sendRunAlreadyActive(res, existingActiveRun);
     // The DB live-run constraint is the source of truth; clear stale process locks after recovery.
@@ -726,6 +773,19 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     } catch {
       const cancelled = rejectClaimIfRunCancelled(repo, target.run.id, claimed.id);
       if (cancelled) return sendRunCancelledDuringApproval(res);
+      if (isProjectManagerPendingActionType(claimed.type)) {
+        const failed = failProjectManagerPendingAction(repo, claimed, {
+          code: "project_manager_action_failed",
+          message: "Project Manager action failed"
+        });
+        completeRunIfNoPendingActions(repo, target.run);
+        res.status(500).json({
+          code: 1,
+          message: "Project Manager action failed",
+          details: { code: "project_manager_action_failed", action: failed }
+        });
+        return;
+      }
       repo.updatePendingActionIfStatus(claimed.id, "processing", {
         status: "pending",
         result: null,
@@ -742,6 +802,12 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     const cancelled = rejectClaimIfRunCancelled(repo, target.run.id, claimed.id);
     if (cancelled) return sendRunCancelledDuringApproval(res);
     if (isApprovalError(result)) {
+      if (isProjectManagerPendingActionType(claimed.type)) {
+        const failed = failProjectManagerPendingAction(repo, claimed, result.error);
+        completeRunIfNoPendingActions(repo, target.run);
+        res.status(400).json({ code: 1, message: result.error.message, details: { code: result.error.code, action: failed } });
+        return;
+      }
       repo.updatePendingActionIfStatus(claimed.id, "processing", {
         status: "pending",
         result: null,
@@ -861,9 +927,18 @@ function repoFor(db: Database, req: unknown): CopilotRepository {
   return new CopilotRepository(db, userIdFor(req));
 }
 
-function recoverStaleCopilotRuns(repo: CopilotRepository, timeoutMs = defaultStaleCopilotRunTimeoutMs): void {
+function recoverStaleCopilotRuns(
+  repo: CopilotRepository,
+  timeoutMs = defaultStaleCopilotRunTimeoutMs,
+  approvalTimeoutMs = defaultStaleCopilotApprovalTimeoutMs
+): void {
+  const now = Date.now();
   const timeout = Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : defaultStaleCopilotRunTimeoutMs;
-  repo.recoverStaleExecutionRuns(Date.now() - timeout);
+  const approvalTimeout = Number.isFinite(approvalTimeoutMs)
+    ? Math.max(0, approvalTimeoutMs)
+    : defaultStaleCopilotApprovalTimeoutMs;
+  repo.recoverStaleExecutionRuns(now - timeout, now);
+  repo.recoverStaleApprovalRuns(now - approvalTimeout, now);
 }
 
 function memoryRepoFor(db: Database, req: unknown): CopilotMemoryRepository {
@@ -918,6 +993,36 @@ function messagesEnvelope(
     },
     message: ""
   };
+}
+
+const maxConversationContextMessages = 8;
+const maxConversationContextMessageChars = 1_200;
+const maxConversationContextChars = 6_000;
+
+function buildConversationContext(messages: CopilotMessage[]): string | undefined {
+  const contextMessages = messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .filter((message) => message.content.trim().length > 0)
+    .slice(-maxConversationContextMessages)
+    .map(toConversationContextLine)
+    .filter((line) => line.length > 0);
+  if (contextMessages.length === 0) return undefined;
+  const context = contextMessages.join("\n");
+  return context.length > maxConversationContextChars
+    ? context.slice(context.length - maxConversationContextChars)
+    : context;
+}
+
+function toConversationContextLine(message: CopilotMessage): string {
+  const role = message.role === "assistant" ? "assistant" : "user";
+  const content = redactCopilotText(message.content)
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!content) return "";
+  const truncated = content.length > maxConversationContextMessageChars
+    ? `${content.slice(0, maxConversationContextMessageChars)}...`
+    : content;
+  return `${role}: ${truncated}`;
 }
 
 function memoryItemEnvelope(type: CopilotMemoryItemType, item: CopilotMemoryEntry | CopilotMemoryNote) {
@@ -1204,6 +1309,35 @@ function sendRunCancelledDuringApproval(
     message: "Copilot run was cancelled before the pending action could be approved",
     details: { code: "copilot_run_cancelled" }
   });
+}
+
+function failProjectManagerPendingAction(
+  repo: CopilotRepository,
+  action: CopilotPendingAction,
+  error: { code: string; message: string }
+): CopilotPendingAction {
+  const result = {
+    error,
+    details: { code: error.code },
+    projectManager: omitUndefined({
+      actionType: projectManagerSemanticActionType(action.type),
+      copilotRunId: stringField(action.input, "copilotRunId") ?? action.runId,
+      pendingActionId: action.id,
+      approvalStatus: "failed",
+      executionStatus: "failed"
+    })
+  };
+  return repo.updatePendingActionIfStatus(action.id, "processing", {
+    status: "failed",
+    result
+  }) ?? repo.getPendingAction(action.id) ?? action;
+}
+
+function projectManagerSemanticActionType(type: string): string | undefined {
+  if (type === "openforge.propose_project_manager_create_work_item") return "create_work_item";
+  if (type === "openforge.propose_project_manager_update_work_item_status") return "update_work_item_status";
+  if (type === "openforge.propose_project_manager_attach_evidence") return "attach_evidence";
+  return undefined;
 }
 
 function recordPendingActionDecision(
@@ -1593,6 +1727,9 @@ async function approvePendingAction(
   if (action.type === "openforge.propose_model_provider_apply") {
     return await approveCopilotModelProviderApply(action, options, userId);
   }
+  if (isProjectManagerPendingActionType(action.type)) {
+    return approveCopilotProjectManagerAction(action, options, userId);
+  }
   if (isFeishuPendingActionType(action.type)) {
     return await approveCopilotFeishuAction(action, options, userId);
   }
@@ -1611,6 +1748,250 @@ async function approvePendingAction(
       message: "Copilot pending action type is not supported"
     }
   };
+}
+
+const projectManagerPendingActionTypes = new Set([
+  "openforge.propose_project_manager_create_work_item",
+  "openforge.propose_project_manager_update_work_item_status",
+  "openforge.propose_project_manager_attach_evidence"
+]);
+
+function isProjectManagerPendingActionType(type: string): boolean {
+  return projectManagerPendingActionTypes.has(type);
+}
+
+function approveCopilotProjectManagerAction(
+  action: CopilotPendingAction,
+  options: CopilotRoutesOptions,
+  userId: string
+): Record<string, unknown> {
+  if (action.type === "openforge.propose_project_manager_create_work_item") {
+    return approveProjectManagerCreateWorkItem(action, options, userId);
+  }
+  if (action.type === "openforge.propose_project_manager_update_work_item_status") {
+    return approveProjectManagerUpdateWorkItemStatus(action, options, userId);
+  }
+  return approveProjectManagerAttachEvidence(action, options, userId);
+}
+
+function approveProjectManagerCreateWorkItem(
+  action: CopilotPendingAction,
+  options: CopilotRoutesOptions,
+  userId: string
+): Record<string, unknown> {
+  const parsed = projectManagerCreateWorkItemApprovalSchema.safeParse(action.input);
+  if (!parsed.success) return projectManagerApprovalError("project_manager_action_invalid", "Project Manager action payload is invalid");
+  const project = new ProjectRepository(options.db, userId).getById(parsed.data.projectId);
+  if (!project) return projectManagerApprovalError("project_manager_action_not_available", "Project Manager action target is not available");
+  const repo = new ProjectManagerRepository(options.db, userId);
+  try {
+    const evidenceRefs = stampProjectManagerEvidenceRefs(parsed.data.evidenceRefs ?? [], action, parsed.data.copilotRunId);
+    const item = repo.createWorkItem(project.id, {
+      title: parsed.data.title,
+      description: parsed.data.description,
+      status: parsed.data.status,
+      priority: parsed.data.priority,
+      acceptanceCriteria: parsed.data.acceptanceCriteria,
+      evidenceRefs,
+      details: buildProjectManagerTraceDetails(action, {
+        actionType: "create_work_item",
+        targetType: "work_item",
+        evidenceRefCount: evidenceRefs.length,
+        copilotRunId: parsed.data.copilotRunId
+      })
+    });
+    return projectManagerApprovalResult(action, {
+      actionType: "create_work_item",
+      projectId: project.id,
+      workItemId: item.id,
+      status: item.status,
+      evidenceRefCount: item.evidenceRefs.length,
+      copilotRunId: parsed.data.copilotRunId
+    });
+  } catch {
+    return projectManagerApprovalError("project_manager_action_failed", "Project Manager action failed");
+  }
+}
+
+function approveProjectManagerUpdateWorkItemStatus(
+  action: CopilotPendingAction,
+  options: CopilotRoutesOptions,
+  userId: string
+): Record<string, unknown> {
+  const parsed = projectManagerUpdateStatusApprovalSchema.safeParse(action.input);
+  if (!parsed.success) return projectManagerApprovalError("project_manager_action_invalid", "Project Manager action payload is invalid");
+  const target = getProjectManagerActionTarget(options.db, userId, parsed.data.projectId, parsed.data.workItemId);
+  if (!target.ok) return projectManagerApprovalError(target.code, target.message);
+  const trustedEvidenceRefCount = trustedEvidenceRefs(target.workItem).length;
+  if (parsed.data.status === "done" && trustedEvidenceRefCount === 0) {
+    return projectManagerApprovalError("project_manager_trusted_evidence_required", "Copilot completion requires existing accepted or verified evidence");
+  }
+  try {
+    const item = target.repo.updateWorkItemStatus(target.project.id, target.workItem.id, {
+      status: parsed.data.status,
+      details: buildProjectManagerTraceDetails(action, {
+        actionType: "update_work_item_status",
+        targetType: "work_item",
+        targetId: target.workItem.id,
+        evidenceRefCount: target.workItem.evidenceRefs.length,
+        copilotRunId: parsed.data.copilotRunId
+      })
+    });
+    return projectManagerApprovalResult(action, {
+      actionType: "update_work_item_status",
+      projectId: target.project.id,
+      workItemId: item.id,
+      status: item.status,
+      evidenceRefCount: item.evidenceRefs.length,
+      trustedEvidenceRefCount,
+      copilotRunId: parsed.data.copilotRunId
+    });
+  } catch {
+    return projectManagerApprovalError("project_manager_action_failed", "Project Manager action failed");
+  }
+}
+
+function approveProjectManagerAttachEvidence(
+  action: CopilotPendingAction,
+  options: CopilotRoutesOptions,
+  userId: string
+): Record<string, unknown> {
+  const parsed = projectManagerAttachEvidenceApprovalSchema.safeParse(action.input);
+  if (!parsed.success) return projectManagerApprovalError("project_manager_action_invalid", "Project Manager action payload is invalid");
+  const target = getProjectManagerActionTarget(options.db, userId, parsed.data.projectId, parsed.data.workItemId);
+  if (!target.ok) return projectManagerApprovalError(target.code, target.message);
+  try {
+    const evidenceRef = stampProjectManagerEvidenceRef(parsed.data.evidenceRef, action, parsed.data.copilotRunId);
+    const item = target.repo.attachEvidence(target.project.id, target.workItem.id, {
+      evidenceRefs: [evidenceRef],
+      details: buildProjectManagerTraceDetails(action, {
+        actionType: "attach_evidence",
+        targetType: "work_item",
+        targetId: target.workItem.id,
+        evidenceRefCount: target.workItem.evidenceRefs.length + 1,
+        copilotRunId: parsed.data.copilotRunId
+      })
+    });
+    return projectManagerApprovalResult(action, {
+      actionType: "attach_evidence",
+      projectId: target.project.id,
+      workItemId: item.id,
+      status: item.status,
+      evidenceRefCount: 1,
+      copilotRunId: parsed.data.copilotRunId
+    });
+  } catch {
+    return projectManagerApprovalError("project_manager_action_failed", "Project Manager action failed");
+  }
+}
+
+function getProjectManagerActionTarget(
+  db: Database,
+  userId: string,
+  projectId: string,
+  workItemId: string
+): (
+  { ok: true; project: Project; workItem: ProjectManagerWorkItem; repo: ProjectManagerRepository } |
+  { ok: false; code: string; message: string }
+) {
+  const project = new ProjectRepository(db, userId).getById(projectId);
+  if (!project) return projectManagerTargetError();
+  const repo = new ProjectManagerRepository(db, userId);
+  const workItem = repo.getWorkItem(project.id, workItemId);
+  if (!workItem) return projectManagerTargetError();
+  return { ok: true, project, workItem, repo };
+}
+
+function projectManagerTargetError(): { ok: false; code: string; message: string } {
+  return {
+    ok: false,
+    code: "project_manager_action_not_available",
+    message: "Project Manager action target is not available"
+  };
+}
+
+function stampProjectManagerEvidenceRefs(
+  refs: ProjectManagerEvidenceRef[],
+  action: CopilotPendingAction,
+  copilotRunId: string
+): ProjectManagerEvidenceRef[] {
+  return refs.map((ref) => stampProjectManagerEvidenceRef(ref, action, copilotRunId));
+}
+
+function stampProjectManagerEvidenceRef(
+  ref: ProjectManagerEvidenceRef,
+  action: CopilotPendingAction,
+  copilotRunId: string
+): ProjectManagerEvidenceRef {
+  return {
+    ...ref,
+    copilotRunId,
+    pendingActionId: action.id
+  };
+}
+
+function trustedEvidenceRefs(workItem: ProjectManagerWorkItem): ProjectManagerEvidenceRef[] {
+  return workItem.evidenceRefs.filter((ref) => {
+    const status = ref.status?.trim().toLowerCase();
+    return status === "accepted" || status === "verified";
+  });
+}
+
+function buildProjectManagerTraceDetails(
+  action: CopilotPendingAction,
+  input: {
+    actionType: string;
+    targetType: string;
+    targetId?: string | undefined;
+    evidenceRefCount: number;
+    copilotRunId: string;
+  }
+): Record<string, unknown> {
+  return omitUndefined({
+    copilotRunId: input.copilotRunId,
+    pendingActionId: action.id,
+    actionType: input.actionType,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    evidenceRefCount: input.evidenceRefCount,
+    approvalStatus: "approved",
+    executionStatus: "succeeded"
+  });
+}
+
+function projectManagerApprovalResult(
+  action: CopilotPendingAction,
+  input: {
+    actionType: string;
+    projectId: string;
+    workItemId: string;
+    status: string;
+    evidenceRefCount: number;
+    trustedEvidenceRefCount?: number | undefined;
+    copilotRunId: string;
+  }
+): Record<string, unknown> {
+  return {
+    projectManager: omitUndefined({
+      actionType: input.actionType,
+      projectId: input.projectId,
+      workItemId: input.workItemId,
+      targetType: "work_item",
+      targetId: input.workItemId,
+      status: input.status,
+      evidenceRefCount: input.evidenceRefCount,
+      trustedEvidenceRefCount: input.trustedEvidenceRefCount,
+      copilotRunId: input.copilotRunId,
+      pendingActionId: action.id,
+      approvalStatus: "approved",
+      executionStatus: "succeeded"
+    }),
+    executed: true
+  };
+}
+
+function projectManagerApprovalError(code: string, message: string): Record<string, unknown> {
+  return { error: { code, message } };
 }
 
 const feishuPendingActionOperations = {
@@ -2108,15 +2489,60 @@ async function approveCopilotSessionInput(
       "Copilot terminal input is not available"
     );
   }
-  const data = buildApprovedSessionInput(parsed.data.input, parsed.data.submit === true);
+  const shouldSubmit = parsed.data.submit !== false;
+  const trackingDelaysMs = options.sessionInputTrackingDelaysMs ?? defaultSessionInputTrackingDelaysMs;
+  const before = shouldSubmit && trackingDelaysMs.length > 0
+    ? await captureApprovedSessionInputHistory(options, session)
+    : null;
+  const data = buildApprovedSessionInput(parsed.data.input, shouldSubmit);
   await options.sessionManager.sendInput(session.id, data);
   new SessionRepository(options.db, userId).update(session.id, { lastActive: new Date() });
-  const terminal = await captureApprovedSessionInputHistory(options, session);
+  const terminal = shouldSubmit
+    ? await trackApprovedSessionInputHistory(options, session, before?.text, trackingDelaysMs)
+    : await captureApprovedSessionInputHistory(options, session);
   return {
     sessionId: session.id,
-    submitted: parsed.data.submit === true,
+    submitted: shouldSubmit,
     bytes: Buffer.byteLength(data, "utf8"),
     terminal
+  };
+}
+
+async function trackApprovedSessionInputHistory(
+  options: CopilotRoutesOptions,
+  session: Session,
+  previousText: string | undefined,
+  delays: number[]
+): Promise<{ available: boolean; text?: string; truncated?: boolean; reason?: string; tracking?: Record<string, unknown> }> {
+  let latest = await captureApprovedSessionInputHistory(options, session);
+  let latestText = latest.text ?? "";
+  let changed = latest.available && (previousText === undefined || latestText !== previousText);
+  let samples = 1;
+  if (delays.length === 0) {
+    return { ...latest, tracking: { status: changed ? "changed" : "single_sample", samples } };
+  }
+  for (const delayMs of delays) {
+    await sleep(delayMs);
+    const next = await captureApprovedSessionInputHistory(options, session);
+    samples += 1;
+    const nextText = next.text ?? "";
+    const nextChanged = next.available && (previousText === undefined || nextText !== previousText);
+    if (changed && next.available && nextText === latestText) {
+      return { ...next, tracking: { status: "stable", samples, waitedMs: sumDelays(delays, samples - 1) } };
+    }
+    if (next.available) {
+      latest = next;
+      latestText = nextText;
+      changed = changed || nextChanged;
+    }
+  }
+  return {
+    ...latest,
+    tracking: {
+      status: changed ? "changed_timeout" : "unchanged_timeout",
+      samples,
+      waitedMs: sumDelays(delays, delays.length)
+    }
   };
 }
 
@@ -2129,7 +2555,7 @@ async function captureApprovedSessionInputHistory(
   }
   try {
     const raw = await options.sessionManager.captureHistory(session.id);
-    const redacted = redactCopilotText(raw);
+    const redacted = redactCopilotText(stripTerminalControlSequences(raw));
     const maxLength = 4_000;
     const truncated = redacted.length > maxLength;
     const text = truncated ? redacted.slice(redacted.length - maxLength) : redacted;
@@ -2143,6 +2569,23 @@ function sessionInputApprovalError(code: string, message: string): Record<string
   return {
     error: { code, message }
   };
+}
+
+function stripTerminalControlSequences(text: string): string {
+  return text
+    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/gu, "")
+    .replace(/\[(?:\d{1,3}(?:;\d{1,3})*)?[A-Za-z]/gu, "")
+    .replace(/(^|\s)(?:\d{1,3};)*\d{1,3}m(?=\s|$)/gu, "$1")
+    .replace(/\r/gu, "");
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sumDelays(delays: number[], count: number): number {
+  return delays.slice(0, count).reduce((total, delay) => total + delay, 0);
 }
 
 async function approveCopilotSessionStart(
@@ -2878,6 +3321,52 @@ async function approveCopilotModelProviderSync(
   try {
     const catalog = await (options.loadProviderCatalog ?? loadProviderCatalogFromSource)();
     const catalogPreset = catalog.find((preset) => preset.id === target.provider.providerKey);
+    if (catalogPreset?.modelSource === "static") {
+      const createdModels = syncModelProviderStaticModels(repo, target.provider, catalogPreset);
+      const models = listModelProviderStaticModels(repo, target.provider, catalogPreset);
+      recordActivity({
+        db: options.db,
+        eventBus: options.eventBus,
+        userId,
+        type: "config_sync",
+        status: "success",
+        message: `Models synced for ${target.provider.name}`,
+        metadata: {
+          source: "copilot",
+          providerProfileId: target.provider.id,
+          fetchedCount: catalogPreset.defaultModels.length,
+          createdCount: createdModels.length
+        }
+      });
+      new AuditLogRepository(options.db, userId).create({
+        action: "model_provider.models_sync",
+        resourceType: "model_provider",
+        resourceId: target.provider.id,
+        details: {
+          source: "copilot",
+          fetchedCount: catalogPreset.defaultModels.length,
+          createdCount: createdModels.length
+        }
+      });
+      return {
+        provider: toModelProviderSyncPayload(target.provider),
+        fetchedCount: catalogPreset.defaultModels.length,
+        createdCount: createdModels.length,
+        models: models.map((model) => ({
+          id: model.id,
+          name: model.name,
+          modelId: model.modelId,
+          isDefault: model.isDefault
+        })),
+        executed: true
+      };
+    }
+    if (target.provider.authType !== "none" && !target.credential) {
+      return modelProviderSyncApprovalError(
+        "copilot_model_provider_sync_unavailable",
+        "Copilot model provider sync provider has no active credential"
+      );
+    }
     const fetchedModels = await (options.fetchProviderModels ?? fetchProviderModelsFromEndpoint)({
       baseUrl: target.modelFetchBaseUrl,
       ...(target.credential ? { apiKey: repo.decryptCredential(target.credential.id) } : {}),
@@ -2958,14 +3447,41 @@ function getModelProviderSyncApprovalTarget(
     };
   }
   const credential = selectProviderApplyCredential(repo, provider.id, input.credentialId);
-  if (provider.authType !== "none" && !credential) {
-    return {
-      ok: false,
-      code: "copilot_model_provider_sync_unavailable",
-      message: "Copilot model provider sync provider has no active credential"
-    };
-  }
   return { ok: true, provider, modelFetchBaseUrl, ...(credential ? { credential } : {}) };
+}
+
+function syncModelProviderStaticModels(
+  repo: ModelProviderRepository,
+  provider: ProviderProfile,
+  preset: ProviderCatalogPreset
+): ModelProfile[] {
+  const existing = new Set(repo.listModelProfiles(provider.id).map((model) => model.modelId));
+  const hasDefault = repo.listModelProfiles().some((model) => model.isDefault);
+  const created: ModelProfile[] = [];
+  for (const model of preset.defaultModels) {
+    if (existing.has(model.modelId)) continue;
+    created.push(repo.createModelProfile({
+      providerProfileId: provider.id,
+      name: model.name,
+      modelId: model.modelId,
+      capabilities: model.capabilities,
+      contextWindow: model.contextWindow ?? null,
+      isDefault: !hasDefault && created.length === 0
+    }));
+    existing.add(model.modelId);
+  }
+  return created;
+}
+
+function listModelProviderStaticModels(
+  repo: ModelProviderRepository,
+  provider: ProviderProfile,
+  preset: ProviderCatalogPreset
+): ModelProfile[] {
+  const modelsById = new Map(repo.listModelProfiles(provider.id).map((model) => [model.modelId, model]));
+  return preset.defaultModels
+    .map((model) => modelsById.get(model.modelId))
+    .filter((model): model is ModelProfile => Boolean(model));
 }
 
 function syncModelProviderFetchedModels(
@@ -3254,6 +3770,10 @@ function isApprovalError(result: Record<string, unknown>): result is { error: { 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function omitUndefined(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
 }
 
 function stringField(payload: Record<string, unknown>, key: string): string | undefined {

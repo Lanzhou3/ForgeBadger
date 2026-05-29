@@ -21,6 +21,10 @@ import {
 } from "../services/model-catalog.js";
 import { checkModelEndpoint } from "../services/model-endpoint-health.js";
 import {
+  buildModelProviderReadiness,
+  type ProviderReadinessAdapter
+} from "../services/model-provider-readiness.js";
+import {
   applyModelProviderConfig,
   previewModelProviderConfig
 } from "../services/model-config-apply.js";
@@ -71,6 +75,13 @@ const applySchema = z.object({
 });
 const endpointTestSchema = z.object({
   timeoutMs: z.number().int().min(100).max(15000).optional()
+});
+const readinessSchema = z.object({
+  adapter: adapterSchema,
+  modelProfileId: z.string().min(1).optional(),
+  credentialId: z.string().min(1).optional(),
+  timeoutMs: z.number().int().min(100).max(30000).optional(),
+  includeRemoteCheck: z.boolean().optional()
 });
 const syncModelsSchema = z.object({
   credentialId: z.string().min(1).optional(),
@@ -213,13 +224,26 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       res.status(400).json({ code: 1, message: "Credential does not belong to the selected provider" });
       return;
     }
-    if (provider.authType !== "none" && !credential) {
-      res.status(400).json({ code: 1, message: "Provider credential is required to sync models" });
-      return;
-    }
 
     try {
       const catalogPreset = (await loadProviderCatalog()).find((preset) => preset.id === provider.providerKey);
+      if (catalogPreset?.modelSource === "static") {
+        const created = seedMissingModelsForPreset(repo, provider, catalogPreset);
+        res.json({
+          code: 0,
+          data: {
+            fetchedCount: catalogPreset.defaultModels.length,
+            createdCount: created.length,
+            models: listPresetModels(repo, provider, catalogPreset)
+          },
+          message: ""
+        });
+        return;
+      }
+      if (provider.authType !== "none" && !credential) {
+        res.status(400).json({ code: 1, message: "Provider credential is required to sync models" });
+        return;
+      }
       const fetchedModels = await fetchProviderModels({
         baseUrl: modelFetchBaseUrl,
         apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
@@ -388,6 +412,37 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
     });
     res.json({ code: 0, data: { health }, message: "" });
+  });
+
+  router.post("/:id/readiness", async (req, res) => {
+    const parseResult = readinessSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid provider readiness payload" });
+      return;
+    }
+    const repo = repoFor(db, masterKey, req);
+    const provider = repo.getProviderProfile(req.params.id);
+    if (!provider) {
+      res.status(404).json({ code: 1, message: "Provider not found" });
+      return;
+    }
+    const model = selectModel(repo, provider, parseResult.data.modelProfileId);
+    const credential = selectCredential(repo, provider.id, parseResult.data.credentialId);
+    const catalogPreset = (await loadProviderCatalog()).find((preset) => preset.id === provider.providerKey);
+    const readiness = await buildModelProviderReadiness({
+      provider,
+      model,
+      credential,
+      adapter: parseResult.data.adapter as ProviderReadinessAdapter,
+      modelProfileId: parseResult.data.modelProfileId,
+      credentialId: parseResult.data.credentialId,
+      includeRemoteCheck: parseResult.data.includeRemoteCheck ?? false,
+      ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {}),
+      ...(catalogPreset?.modelFetch?.modelsUrl ? { modelsUrl: catalogPreset.modelFetch.modelsUrl } : {}),
+      decryptCredential: credential ? () => repo.decryptCredential(credential.id) : undefined,
+      fetchProviderModels
+    });
+    res.json({ code: 0, data: { readiness }, message: "" });
   });
 
   router.post("/:id/preview-apply", async (req, res) => {
@@ -683,6 +738,17 @@ function syncFetchedModels(
     created.push(model);
   }
   return created;
+}
+
+function listPresetModels(
+  repo: ModelProviderRepository,
+  provider: ProviderProfile,
+  preset: ProviderCatalogPreset
+): ModelProfile[] {
+  const modelsById = new Map(repo.listModelProfiles(provider.id).map((model) => [model.modelId, model]));
+  return preset.defaultModels
+    .map((model) => modelsById.get(model.modelId))
+    .filter((model): model is ModelProfile => Boolean(model));
 }
 
 function repoFor(db: Database, masterKey: string, req: unknown): ModelProviderRepository {

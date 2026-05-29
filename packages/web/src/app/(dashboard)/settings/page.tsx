@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Cpu, Download, FlaskConical, Globe2, KeyRound, MessageSquare, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Bell, Cpu, Download, FlaskConical, Globe2, KeyRound, MessageSquare, RefreshCw, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,7 +46,12 @@ export default function SettingsPage() {
   const [browserNotificationPermission, setBrowserNotificationPermission] =
     useState<BrowserNotificationPermission>("unsupported");
   const [diagnosticsState, setDiagnosticsState] = useState<"idle" | "exporting" | "success" | "error">("idle");
-  const { data: adapterData, isLoading: adaptersLoading } = useQuery({
+  const {
+    data: adapterData,
+    isLoading: adaptersLoading,
+    isError: adaptersError,
+    refetch: refetchAdapters,
+  } = useQuery({
     queryKey: ["adapter-discovery"],
     queryFn: discoverAdapters,
   });
@@ -186,10 +191,39 @@ export default function SettingsPage() {
                 <p className="text-sm text-muted-foreground">
                   {t("settings.discoveryLoading")}
                 </p>
+              ) : adaptersError ? (
+                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 size-4 text-destructive" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-destructive">
+                        {t("settings.discoveryLoadFailed")}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t("settings.discoveryLoadFailedDescription")}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => void refetchAdapters()}
+                  >
+                    <RefreshCw className="mr-2 size-3.5" />
+                    {t("settings.discoveryRetry")}
+                  </Button>
+                </div>
               ) : (
-                adapterData?.adapters.map((adapter) => (
-                  <AdapterItem key={adapter.id} adapter={adapter} />
-                ))
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.adapterReadinessNotice")}
+                  </p>
+                  {adapterData?.adapters.map((adapter) => (
+                    <AdapterItem key={adapter.id} adapter={adapter} />
+                  ))}
+                </>
               )}
             </CardContent>
           </Card>

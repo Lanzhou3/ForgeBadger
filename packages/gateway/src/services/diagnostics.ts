@@ -16,6 +16,7 @@ import {
   templates
 } from "../db/schema.js";
 import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
+import { ProjectManagerRepository, type ProjectManagerSummary } from "../db/repositories/project-manager-repository.js";
 import type { Database } from "../db/types.js";
 import { getDashboardSummary } from "./dashboard-summary.js";
 import { listAdapterDefinitions } from "./adapter-discovery.js";
@@ -63,6 +64,7 @@ export interface LocalDiagnosticsExport {
   integrations: {
     feishu: FeishuIntegrationDiagnostics;
   };
+  projectManager: ProjectManagerSummary;
   environment: Record<string, unknown>;
 }
 
@@ -167,6 +169,7 @@ export function buildLocalDiagnosticsExport(
     integrations: {
       feishu: buildFeishuIntegrationDiagnostics(input.feishuStatus)
     },
+    projectManager: new ProjectManagerRepository(input.db, input.userId).getSummary(),
     environment: redactDiagnosticValue(pickDiagnosticEnv(input.env ?? process.env)) as Record<string, unknown>
   };
 }

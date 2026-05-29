@@ -4,7 +4,7 @@
 
 **Goal:** Add the first safe inbound Feishu command bridge so authorized Feishu chats can create Copilot conversations and runs without gaining direct terminal or approval authority.
 
-**Current status:** Completed in `28c9365 fix: harden copilot run gates` on `post-beta-release-gates`. GitHub PR #2 is open against `master`, mergeable, and the remote CI checks for this head SHA are green as of 2026-05-19.
+**Current status:** Completed in `28c9365 fix: harden copilot run gates` on `post-beta-release-gates`, included in GitHub PR #2, and merged to `master` on 2026-05-19 after the remote CI checks for that release-gate head passed.
 
 **Product positioning:** OpenForge remains a local-first AI CLI control plane with an approval-gated Copilot. Feishu is only a controlled collaboration channel into Copilot, not the execution authority, not a Feishu bot platform, and not a remote autonomous development entry point.
 

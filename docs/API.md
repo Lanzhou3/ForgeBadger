@@ -108,6 +108,216 @@ distribution, and per-provider readiness summaries. Plaintext secrets, encrypted
 secrets, credential previews, default headers, and foreign-tenant providers are
 not included.
 
+### Project Manager Ledger
+
+The Project Manager Ledger is Gateway-owned OpenForge control-plane state. It
+does not make Feishu or terminal sessions an authority for project-manager
+state; Feishu may be referenced only as bounded collaboration metadata, and
+terminal sessions may be referenced only by safe identifiers or evidence
+references.
+
+Phase 4 introduces migration-backed durable state in
+`packages/gateway/src/db/migrations/0022_project_manager_ledger.sql` with these
+exact tables:
+
+- `project_manager_goals`
+- `project_manager_work_items`
+- `project_manager_ledger_events`
+
+Every project-manager table includes `user_id`. Project-scoped rows also
+include `project_id`; this includes project goals, work items, and ledger
+events. Repository methods must be constructed with the authenticated
+`user_id`, must filter by `user_id` internally, and must include `project_id`
+for project-scoped reads and mutations. Route handlers must also verify that
+`:projectId` is visible to the authenticated user before returning or mutating
+project-manager data.
+
+Authenticated REST endpoints are mounted under the project-scoped prefix
+`/api/v1/projects/:projectId/project-manager`:
+
+- `GET /api/v1/projects/:projectId/project-manager/goal`
+- `PUT /api/v1/projects/:projectId/project-manager/goal`
+- `GET /api/v1/projects/:projectId/project-manager/work-items`
+- `POST /api/v1/projects/:projectId/project-manager/work-items`
+- `POST /api/v1/projects/:projectId/project-manager/work-items/batch/status`
+- `GET /api/v1/projects/:projectId/project-manager/work-items/:workItemId`
+- `PATCH /api/v1/projects/:projectId/project-manager/work-items/:workItemId`
+- `PATCH /api/v1/projects/:projectId/project-manager/work-items/:workItemId/status`
+- `POST /api/v1/projects/:projectId/project-manager/work-items/:workItemId/evidence`
+- `DELETE /api/v1/projects/:projectId/project-manager/work-items/:workItemId`
+- `GET /api/v1/projects/:projectId/project-manager/ledger`
+
+All Project Manager Ledger REST endpoints use the canonical OpenForge response
+envelope. Success responses return:
+
+```json
+{
+  "code": 0,
+  "data": {},
+  "message": ""
+}
+```
+
+Error responses return:
+
+```json
+{
+  "code": 1,
+  "message": "error description",
+  "details": {}
+}
+```
+
+Inputs are zod validated at the Gateway boundary. Invalid `projectId`,
+`workItemId`, pagination, status, evidence, or goal payloads return `400` with
+the error envelope. Missing or cross-tenant projects and work items return
+`404` without leaking whether another tenant owns the resource.
+
+Copilot can explain project-manager state through these read-only tools:
+
+- `openforge.get_project_goal`
+- `openforge.list_project_work_items`
+- `openforge.get_project_work_item`
+- `openforge.get_project_development_ledger`
+
+These tools are tenant-scoped, project-scoped, redacted, and read-only. They
+return concise current state plus bounded evidence references only. They must
+not return raw terminal transcripts, unbounded ledger details, Feishu webhook
+verification material, provider credentials, attach tokens, or cross-tenant
+mapping details.
+
+Phase 12 adds Project Manager traceability on top of the local-first AI CLI
+control plane. It does not broaden OpenForge into a generic project-management
+suite. Copilot-origin Project Manager writes are proposals only: each proposal
+must become exactly one pending action, must use the canonical stored
+pending-action payload at approval time, and must execute through the
+Gateway-owned Project Manager repository transaction. The only Project Manager
+write semantics in this contract are `create_work_item`,
+`update_work_item_status`, and `attach_evidence`.
+
+Work item status is a bounded product state. Allowed statuses are:
+
+- `todo`
+- `in_progress`
+- `blocked`
+- `ready_for_review`
+- `done`
+- `cancelled`
+
+Allowed Phase 4 transitions are:
+
+| From | To |
+|------|----|
+| `todo` | `in_progress`, `blocked`, `cancelled` |
+| `in_progress` | `blocked`, `ready_for_review`, `done`, `cancelled` |
+| `blocked` | `todo`, `in_progress`, `cancelled` |
+| `ready_for_review` | `in_progress`, `done`, `cancelled` |
+| `done` | terminal |
+| `cancelled` | terminal |
+
+Every state mutation updates the current projection and appends a
+`project_manager_ledger_events` row atomically. The same mutation also writes
+an `audit_logs` row with tenant-scoped, redacted details. Stored event and
+audit details must summarize the mutation and counts only; they must not store
+raw prompts, raw terminal transcripts, raw CLI stderr, provider request
+payloads, or secret-bearing Feishu material.
+
+Ledger event type is also bounded. Allowed event types are:
+
+- `goal_updated`
+- `work_item_created`
+- `work_item_status_changed`
+- `evidence_attached`
+- `blocker_recorded`
+- `blocker_resolved`
+- `copilot_observation_recorded`
+- `feishu_reference_linked`
+- `next_step_proposed`
+- `manual_completion_recorded`
+
+Evidence references are structured references, not raw evidence blobs. A
+reference may include only these fields:
+
+- `kind`
+- `label`
+- `status`
+- `ref`
+- `path`
+- `sessionId`
+- `copilotRunId`
+- `pendingActionId`
+- `feishuChatId`
+- `feishuMessageId`
+- `createdAt`
+
+Phase 14 workspace/terminal references use the same bounded structure:
+
+- file path evidence uses `kind: "file_path"` plus a project-relative `path`;
+- terminal snapshot evidence uses `kind: "terminal_snapshot"`, `sessionId`,
+  and a marker-style `ref` such as `terminal-snapshot:<sessionId>:latest`;
+- session evidence uses `kind: "session"`, `sessionId`, and optionally
+  `ref: "session:<sessionId>"`.
+
+These references are pointers only. They must not contain raw file contents,
+terminal scrollback, CLI stdout/stderr, provider payloads, Feishu message
+bodies, tokens, API keys, attach tokens, or other secrets.
+
+Ledger route responses expose safe trace markers through
+`ProjectManagerLedgerTrace`; raw `details` are never included in REST DTOs.
+Trace fields are copied only from this allowlist:
+
+```ts
+interface ProjectManagerLedgerTrace {
+  copilotRunId?: string;
+  pendingActionId?: string;
+  actionType?: string;
+  targetType?: string;
+  targetId?: string;
+  evidenceRefCount?: number;
+  approvalStatus?: string;
+  executionStatus?: string;
+}
+```
+
+The trace contract intentionally excludes raw prompt text, raw terminal output,
+provider payloads, full approval diffs, full execution summaries, tokens, API
+keys, JWTs, private keys, stdout, stderr, and other secret-looking fields. If a
+future implementation needs a new trace field, it must add that field to the
+allowlist and tests before exposing it.
+
+Marking a work item `done` requires at least one evidence reference or a
+non-empty manual completion reason. If completion uses the manual reason path,
+the mutation must append a `manual_completion_recorded` ledger event and an
+`audit_logs` row that records the presence of the manual completion reason
+without storing sensitive raw details.
+
+Editing a work item through `PATCH /work-items/:workItemId` may update title,
+description, priority, and acceptance criteria only; status and evidence remain
+separate operations so board interactions cannot bypass transition and evidence
+guards. Deleting a work item requires `{ "confirm": true }`, appends a
+`work_item_deleted` ledger event with a bounded `targetId` marker, writes an
+audit row, and then deletes the projection row. Batch status updates are limited
+to 20 work items, execute in one repository transaction, reject duplicate work
+item ids, and use the same transition, completion, evidence, ledger, and audit
+rules as single-item status updates.
+
+Project-manager diagnostics expose counts and safe latest status markers only
+for Project Manager Ledger state. Diagnostics may include goal, work item,
+ledger event, and status totals, plus the latest safe marker timestamps. They
+must not include raw ledger details, raw evidence details, raw terminal
+transcripts, raw CLI stderr, raw Feishu messages, webhook signatures, event
+encrypt keys, Feishu tokens, provider credentials, API keys, JWTs, attach
+tokens, private keys, or cross-tenant mapping details.
+
+Feishu free-form text is never an approval or execution channel for the Project
+Manager Ledger. Feishu free-form text cannot approve pending actions, cannot
+send terminal input, cannot mutate ledger records directly, and cannot bypass
+the existing pending-action approval routes. Feishu outbound updates remain
+approval gated through the existing Copilot prepare-tool and pending-action
+policy checks, including chat allowlists, identity mode, user mapping, and
+tenant configuration. Ledger events may link a bounded Feishu reference, but
+they do not execute Feishu writes.
+
 ### Integrations
 
 - `GET /api/v1/integrations/feishu/status`
@@ -116,6 +326,7 @@ not included.
 - `GET /api/v1/integrations/feishu/user-mappings`
 - `PUT /api/v1/integrations/feishu/user-mappings`
 - `POST /api/v1/integrations/feishu/inbound`
+- `POST /api/v1/integrations/feishu/webhook/:publicId`
 
 Feishu integration endpoints are authenticated, tenant scoped, and
 Gateway-owned. Status discovers the local `lark-cli` binary, reports version
@@ -129,9 +340,102 @@ strings, send terminal input, approve actions from Feishu text, or start
 unattended development loops. Outbound Feishu writes are only available through
 Copilot prepare tools plus explicit OpenForge pending-action approval.
 The inbound endpoint is an authenticated OpenForge test adapter, not a public
-Feishu webhook. Public webhook signature verification, event listener
-consumption, approval links, direct terminal input, batch authorization, and
-unattended loops are separate non-goals for this slice.
+Feishu webhook. The public callback contract below uses a separate route and
+auth boundary. Event listener consumption, approval links, direct terminal
+input, batch authorization, and unattended loops remain separate non-goals for
+this slice.
+
+`POST /api/v1/integrations/feishu/webhook/:publicId` is the public Feishu
+event callback route. It is separate from the authenticated `/inbound` test
+adapter and does not use the OpenForge REST envelope because Feishu expects
+protocol-compatible webhook responses. The `publicId` resolves the tenant
+integration before verification, but it is not a secret or an auth factor.
+Public webhook handling is disabled by default and remains inert until a tenant
+explicitly enables it and stores the required encrypted verification token and
+encrypted event encrypt key for that integration.
+
+For v1.1 release evidence, Feishu developer-console URL verification is a
+manual/live gate. Local signed-route tests and `lark-cli` event consumers are
+automated or CLI preflight evidence only; they do not replace a real
+developer-console HTTP callback to this route.
+
+Ordinary public webhook events must include
+`X-Lark-Request-Timestamp`, `X-Lark-Request-Nonce`, and `X-Lark-Signature`.
+Gateway verifies the signature against the raw request body, checks timestamp
+freshness with a narrow five-minute default window, and rejects missing,
+malformed, stale, far-future, or mismatched requests before event
+normalization and before Copilot execution. URL verification is setup-only:
+`url_verification` returns only `{"challenge":"..."}` and does not create a
+Copilot run, mutate policy, dispatch Feishu commands, or write terminal input.
+Encrypted event payloads with a top-level `encrypt` field are explicitly
+unsupported in this slice and fail closed with
+`feishu_webhook_encrypted_payload_unsupported`. Tenants that require encrypted
+Feishu app mode must leave public webhook enablement off until decrypt support
+is added and tested. Unencrypted public events still validate the configured
+Feishu verification token after signature and timestamp checks.
+
+Replay protection and public webhook rate limits use dedicated persistent
+repository state, not audit-log search and not in-memory maps. Replay keys
+include tenant/integration identity plus Feishu event id or message id; the
+same nonce/signature replay is also rejected within the timestamp window. Rate
+limits apply per tenant/integration, per chat, and, once resolved, per mapped
+OpenForge user. SQLite-backed replay and rate storage are supported only for
+the local single-Gateway deployment. Multi-instance public webhook deployment
+requires a shared replay and shared rate-limit store before webhook enablement;
+without that shared store the public webhook route must fail closed or remain
+disabled for that deployment mode.
+
+After signature, timestamp, replay, and rate checks pass, public events
+normalize into the same bounded inbound command policy used by `/inbound`:
+the integration must be enabled, not emergency-disabled, configured with
+identity mode `user` or `bot`, constrained by explicit `allowedChatIds`, mapped
+to the current tenant through a mapped Feishu user, and, when a `projectId` is
+present, scoped to a project visible to that user. A current
+`queued`, `running`, or `waiting_for_approval` Copilot run blocks a new public
+webhook run. Only the minimum supported Feishu message events for the command
+bridge are actionable; unknown authentic event types are acknowledged without
+side effects.
+
+Public webhook text such as `approve`, `批准`, or `/approve <id>` is not an
+approval channel and must not approve pending actions. Public webhook events
+also cannot send direct terminal input, run shell commands, create unattended
+development loops, or execute model-generated Feishu command strings. Accepted
+events may create a Copilot conversation/run with `source: "feishu"` only after
+all boundary checks pass.
+
+Failure responses are minimal. Signature, timestamp, decrypt, token, disabled
+route, and unknown-tenant failures return non-2xx responses and create no
+Copilot run. Once an authentic tenant event has been resolved, non-actionable
+or policy-rejected events may return a minimal 2xx acknowledgement when retrying
+would amplify load or leak policy state. Logs, audit rows, model context, and
+API-visible metadata must not include raw request bodies, signatures, Feishu
+tokens, event encrypt keys, credentials, raw Feishu message text, `Bearer ...`
+values, or `sk-*` style secrets.
+
+Implemented public webhook response examples:
+
+```json
+{ "challenge": "challenge-value" }
+```
+
+```json
+{ "msg": "ok" }
+```
+
+```json
+{ "msg": "ignored" }
+```
+
+```json
+{ "msg": "feishu_webhook_signature_invalid" }
+```
+
+Public webhook audit rows use bounded metadata only. Accepted rows include the
+public id or integration id, Feishu event id or message id, chat id, mapped
+OpenForge user id, optional project id, run id, conversation id, pending action
+count, and redacted text summary. Policy rejection rows include a reason code
+and redacted metadata sufficient for diagnostics without exposing request
+secrets or private message content.
 
 Successful status response:
 
@@ -162,7 +466,10 @@ Successful config response:
       "emergencyDisabled": false,
       "identityMode": "unknown",
       "allowedChatIds": [],
-      "commandPrefix": "/openforge"
+      "commandPrefix": "/openforge",
+      "publicWebhookId": null,
+      "publicWebhookEnabled": false,
+      "webhookConfiguredAt": null
     }
   },
   "message": ""
@@ -406,6 +713,9 @@ Prepare tools create pending actions and do not directly mutate runtime state:
 - `openforge.propose_project_import`
 - `openforge.propose_project_delete`
 - `openforge.propose_project_config_sync`
+- `openforge.propose_project_manager_create_work_item`
+- `openforge.propose_project_manager_update_work_item_status`
+- `openforge.propose_project_manager_attach_evidence`
 - `openforge.propose_session_input`
 - `openforge.propose_session_start`
 - `openforge.propose_session_stop`
@@ -432,6 +742,12 @@ Prepare tools create pending actions and do not directly mutate runtime state:
 - `openforge.propose_feishu_task_update`
 - `openforge.propose_memory_write`
 - `openforge.propose_memory_delete`
+
+The three Project Manager prepare tools map one-to-one to the Phase 12
+`create_work_item`, `update_work_item_status`, and `attach_evidence` semantics.
+They create pending actions only; they do not mutate Project Manager state until
+the user approves the stored action through the existing approval route. No
+other Project Manager prepare-tool semantics are part of this contract.
 
 Approval uses the canonical stored pending-action payload. The client cannot
 replace the action payload at approval time. Diagnostics approval returns a
@@ -521,6 +837,8 @@ mixed into `/ws/terminal/:sessionId`.
 - `GET /api/v1/projects/:id/ai-config`
 - `GET /api/v1/projects/:id/ai-config/global`
 - `PUT /api/v1/projects/:id/ai-config/files`
+- `GET /api/v1/projects/:id/workspace/tree`
+- `GET /api/v1/projects/:id/workspace/file`
 - `POST /api/v1/projects/:id/generate-config`
 - `GET /api/v1/projects/:id/agent-sequence`
 - `PUT /api/v1/projects/:id/agent-sequence`
@@ -597,6 +915,24 @@ Project AI config management:
 - The response includes form metadata for common Claude Code, OpenCode, and
   Codex settings. The Web console uses those fields to edit JSON/JSONC, simple
   TOML, and instruction-file content while keeping the raw file editor visible.
+
+Project workspace context:
+
+- `GET /api/v1/projects/:id/workspace/tree` returns a read-only file tree
+  rooted at the tenant-scoped project path. Optional query parameters are
+  `path`, `depth` (1-3), and `limit` (1-500). The response includes safe
+  project-relative POSIX paths, file sizes, update timestamps, and a `truncated`
+  marker when the limit is reached.
+- `GET /api/v1/projects/:id/workspace/file?path=<relative-path>` returns a
+  bounded UTF-8 preview for one regular text file under the project root. The
+  response includes `content`, `sizeBytes`, `truncated`, and `binary: false`.
+- Workspace context routes reuse the same safe path boundary as config writes:
+  project roots under sensitive system roots are rejected, absolute paths and
+  traversal are rejected, and symbolic-link targets are not followed for tree
+  traversal or file reads.
+- These routes are read-only. They do not store file contents, terminal
+  scrollback, or evidence blobs in SQLite; later Project Manager evidence uses
+  bounded references to these paths rather than copying raw content.
 
 CI usage example:
 
@@ -790,6 +1126,7 @@ timeout used by the check.
 - `GET /api/v1/model-providers/:id/models`
 - `POST /api/v1/model-providers/:id/models`
 - `POST /api/v1/model-providers/:id/models/sync`
+- `POST /api/v1/model-providers/:id/readiness`
 - `POST /api/v1/model-providers/:id/preview-apply`
 - `POST /api/v1/model-providers/:id/apply`
 
@@ -846,6 +1183,48 @@ Creating a custom Provider Profile:
 Model sync uses the selected Provider Profile base URL, saved credential, and
 current catalog metadata when available. Plaintext credentials are decrypted
 only inside Gateway memory for the outbound provider request.
+
+`POST /api/v1/model-providers/:id/readiness` evaluates a Provider Profile,
+target adapter, selected model, selected credential, and optional remote
+model-list evidence without mutating provider state.
+
+Request body:
+
+```json
+{
+  "adapter": "claude",
+  "modelProfileId": "model-profile-id",
+  "credentialId": "credential-id",
+  "timeoutMs": 5000,
+  "includeRemoteCheck": true
+}
+```
+
+Response data contains `readiness.status`, `readiness.code`, `checks`,
+`steps`, and optional safe `remote` metadata. Readiness codes include:
+
+- `ready`
+- `provider_disabled`
+- `unsupported_target`
+- `missing_model`
+- `missing_active_credential`
+- `remote_validation_unavailable`
+- `remote_model_missing`
+- `remote_validation_failed`
+- `codex_subscription_managed`
+
+When `includeRemoteCheck` is true and the provider has a safe model-list
+endpoint, Gateway decrypts the selected credential only in memory and calls the
+provider's model-list endpoint through the existing HTTPS/SSRF-safe fetch
+helper. Remote failure metadata is categorized as `invalid_credential`,
+`timeout`, `provider_outage`, or `endpoint_or_network_failure`. The response
+must not include plaintext credentials, authorization headers, provider request
+payloads, provider response bodies, tokens, API keys, or other secrets.
+
+For `adapter: "codex"`, readiness returns
+`codex_subscription_managed`; it does not decrypt provider credentials, does
+not call provider endpoints, and does not enable provider apply wiring. Codex
+continues to use the subscription-managed SDK identity path.
 
 ### API Keys And Credential Mode
 

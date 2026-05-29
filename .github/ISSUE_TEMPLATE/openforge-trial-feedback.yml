@@ -10,6 +10,7 @@ body:
       value: |
         Use this form for local first-user trial feedback. Review all attachments before sharing.
         Do not paste API keys, passwords, JWTs, attach tokens, private keys, unrelated project secrets, or the `openforge.token` value.
+        If this is a general bug, use the OpenForge bug report template. If it may expose a vulnerability or secret, follow `SECURITY.md` instead of opening a public issue.
 
   - type: dropdown
     id: result
@@ -19,6 +20,24 @@ body:
         - pass
         - pass with caveats
         - blocked
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected_surface
+    attributes:
+      label: Affected surface
+      options:
+        - onboarding
+        - dependency
+        - provider
+        - platform
+        - terminal
+        - Copilot
+        - Feishu
+        - Project Manager
+        - docs
+        - other
     validations:
       required: true
 
@@ -54,8 +73,8 @@ body:
   - type: textarea
     id: doctor
     attributes:
-      label: openforge doctor output
-      description: Paste the redacted `openforge doctor` output. Native Windows users should include the runtime warning.
+      label: openforge doctor summary
+      description: Summarize the redacted `openforge doctor` result. Native Windows users should include the runtime warning. Do not attach raw terminal transcripts.
       render: text
     validations:
       required: true
@@ -110,6 +129,66 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: mapped_requirement
+    attributes:
+      label: Mapped UX requirement
+      description: Choose the closest Phase 3 requirement for the primary issue.
+      options:
+        - UX-01 dependency/runtime guidance
+        - UX-02 provider/model/credential recovery
+        - UX-03 Copilot run and pending-action state coherence
+        - UX-04 reproducible feedback quality
+        - UX-05 active-run monotonic ordering
+        - UX-06 partial API/query failure recovery
+        - UX-07 E2E mock/selector regression signal
+        - REL-* release evidence caveat
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - dependency
+        - provider
+        - CLI
+        - platform
+        - Copilot
+        - docs
+        - E2E
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: severity
+      options:
+        - blocker
+        - high
+        - medium
+        - low
+    validations:
+      required: true
+
+  - type: textarea
+    id: caveat_owner
+    attributes:
+      label: Owner, disposition, and follow-up route
+      description: Required for pass with caveats or blocked results. Also use this to justify no-action outcomes.
+      value: |
+        Owner:
+        Disposition: gate-clearing evidence / preserved caveat / preserved blocker / product defect / docs or support gap / no action
+        Follow-up route: issue #3 LIVE-PROVIDER / issue #4 WINDOWS-WSL / issue #5 FIRST-USER-FEEDBACK / Feishu callback evidence report / new issue / next phase / no action
+        Next action or no-action rationale:
+        Evidence needed to move to pass:
+    validations:
+      required: true
+
   - type: textarea
     id: windows_wsl
     attributes:
@@ -127,12 +206,12 @@ body:
     id: diagnostics
     attributes:
       label: Diagnostics and browser evidence
-      description: Attach redacted diagnostics when possible and include console/network failures.
+      description: Attach redacted diagnostics when possible and include bounded console/network summaries. Do not attach raw logs, provider payloads, Feishu bodies, terminal transcripts, local databases, or .env files.
       value: |
         Diagnostics export attached: yes / no
-        Browser console errors:
-        Browser network failures:
-        Screenshots or notes:
+        Browser console error summary:
+        Browser network failure summary:
+        Screenshots or notes, redacted:
     validations:
       required: true
 
@@ -158,4 +237,6 @@ body:
         - label: I reviewed this issue and attachments for secrets before submitting.
           required: true
         - label: Any API keys, passwords, JWTs, attach tokens, private keys, project secrets, and `openforge.token` values have been removed.
+          required: true
+        - label: I did not attach raw terminal transcripts, raw provider payloads, raw Feishu bodies, local databases, `.env` files, or private AI CLI config.
           required: true

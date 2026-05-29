@@ -7,6 +7,7 @@ export { ModelRepository } from "./model-repository.js";
 export { NotificationRepository } from "./notification-repository.js";
 export { PluginRepository } from "./plugin-repository.js";
 export { ProjectAgentSequenceRepository } from "./project-agent-sequence-repository.js";
+export { ProjectManagerRepository } from "./project-manager-repository.js";
 export { ProjectRepository } from "./project-repository.js";
 export { ProjectSkillRepository } from "./project-skill-repository.js";
 export { SessionRepository } from "./session-repository.js";

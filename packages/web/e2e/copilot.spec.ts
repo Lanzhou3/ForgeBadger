@@ -14,13 +14,56 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("Copilot chat blocks sending when no provider is configured", async ({ page }) => {
-  await mockCopilotApis(page, { providerConfigured: false });
+  await mockCopilotApis(page, {
+    providerConfigured: false,
+    modelProviders: {
+      providers: [],
+      models: [],
+      credentials: [],
+    },
+  });
 
   await page.goto("/copilot");
   await page.getByPlaceholder(/Ask Copilot/).fill("Summarize release state");
 
-  await expect(page.getByText("Configure a Copilot-compatible model provider first.").first()).toBeVisible();
+  await expect(page.getByText(/Create and enable an OpenAI/).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Configure provider" })).toHaveAttribute("href", "/models");
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+});
+
+test("Copilot chat explains when a compatible provider lacks credentials", async ({ page }) => {
+  await mockCopilotApis(page, {
+    providerConfigured: false,
+    modelProviders: {
+      providers: [{
+        id: "provider-1",
+        providerKey: "openai",
+        name: "OpenAI",
+        baseUrl: null,
+        authType: "api_key",
+        apiFormat: "openai",
+        supportedAdapters: [],
+        status: "active",
+      }],
+      models: [{
+        id: "model-1",
+        providerProfileId: "provider-1",
+        providerKey: "openai",
+        providerName: "OpenAI",
+        baseUrl: null,
+        name: "GPT",
+        modelId: "gpt-test",
+        capabilities: ["chat"],
+        status: "active",
+        isDefault: true,
+      }],
+      credentials: [],
+    },
+  });
+
+  await page.goto("/copilot");
+
+  await expect(page.getByText(/active API key/).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
 });
 
@@ -425,7 +468,7 @@ test("Copilot renders assistant Markdown as rich chat content", async ({ page })
 
   await expect(page.getByRole("table")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Next steps" })).toBeVisible();
-  await expect(page.getByRole("list").filter({ hasText: "Open the active session" })).toBeVisible();
+  await expect(page.getByText("Open the active session")).toBeVisible();
   await expect(page.getByText("Use approvals before sending terminal input.")).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "Project catalog loaded" })).toBeChecked();
   await expect(page.getByRole("cell", { name: "aether-glass" })).toBeVisible();
@@ -839,6 +882,408 @@ test("Copilot renders approved model-provider apply results in the chat flow", a
   await expect(page.getByText(".claude/settings.local.json create / backup created / secrets: ANTHROPIC_AUTH_TOKEN")).toBeVisible();
 });
 
+test("Copilot renders Project Manager pending actions as fixed trace cards", async ({ page }) => {
+  await mockCopilotApis(page, {
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Mark the traceability work done",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "I need approval before updating Project Manager state.",
+              createdAt: 1778490000001,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Mark the traceability work done",
+            source: "copilot",
+          },
+          events: [{
+            id: "event-tool-call",
+            runId: "run-1",
+            type: "tool_call_requested",
+            sequence: 1,
+            message: "openforge.propose_project_manager_update_work_item_status",
+          }],
+          pendingActions: [{
+            id: "pm-action-1",
+            runId: "run-1",
+            type: "openforge.propose_project_manager_update_work_item_status",
+            status: "pending",
+            input: {
+              projectId: "project-123",
+              workItemId: "work-item-trace",
+              status: "done",
+              evidenceRefCount: 0,
+              copilotRunId: "run-1",
+              pendingActionId: "pm-action-1",
+              modelGeneratedSummary: "RAW MODEL PROSE SHOULD NOT RENDER",
+              rawDetails: {
+                terminal: "RAW TERMINAL OUTPUT SHOULD NOT RENDER",
+                provider: "RAW PROVIDER PAYLOAD SHOULD NOT RENDER",
+              },
+            },
+          }],
+        }),
+      });
+    },
+    onGetRun: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Mark the traceability work done",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [{
+            id: "pm-action-1",
+            runId: "run-1",
+            type: "openforge.propose_project_manager_update_work_item_status",
+            status: "pending",
+            input: {
+              projectId: "project-123",
+              workItemId: "work-item-trace",
+              status: "done",
+              evidenceRefCount: 0,
+              copilotRunId: "run-1",
+              pendingActionId: "pm-action-1",
+            },
+          }],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Mark the traceability work done");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const assistantBubble = copilotMessage(page, "I need approval before updating Project Manager state.");
+  await expect(assistantBubble.getByText("Update work item status", { exact: true })).toBeVisible();
+  await expect(assistantBubble.getByText("Action: update_work_item_status")).toBeVisible();
+  await expect(assistantBubble.getByText("Project: project-123")).toBeVisible();
+  await expect(assistantBubble.getByText("Work item: work-item-trace")).toBeVisible();
+  await expect(assistantBubble.getByText("Fields: status", { exact: true })).toBeVisible();
+  await expect(assistantBubble.getByText("Evidence refs: 0").first()).toBeVisible();
+  await expect(assistantBubble.getByText("Trace", { exact: true })).toBeVisible();
+  await expect(assistantBubble.getByText(/Copilot run run-1.*pending action pm-action-1.*target work item work-item-trace/)).toBeVisible();
+  await expect(assistantBubble.getByText("Review before approval")).toBeVisible();
+  await expect(assistantBubble.getByText("Trusted evidence is required before Copilot can mark this done.")).toBeVisible();
+  await expect(assistantBubble.getByRole("button", { name: "Approve" })).toBeDisabled();
+  await expect(assistantBubble.getByRole("button", { name: "Reject" })).toBeVisible();
+  await expect(assistantBubble.getByText("RAW MODEL PROSE SHOULD NOT RENDER")).toHaveCount(0);
+  await expect(assistantBubble.getByText("RAW TERMINAL OUTPUT SHOULD NOT RENDER")).toHaveCount(0);
+  await expect(assistantBubble.getByText("RAW PROVIDER PAYLOAD SHOULD NOT RENDER")).toHaveCount(0);
+});
+
+test("Copilot allows Project Manager done approval when trusted evidence is present", async ({ page }) => {
+  let approved = false;
+  await mockCopilotApis(page, {
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Mark the traceability work done",
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              role: "assistant",
+              content: "I need approval before updating Project Manager state.",
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Mark the traceability work done",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [{
+            id: "pm-action-1",
+            runId: "run-1",
+            type: "openforge.propose_project_manager_update_work_item_status",
+            status: "pending",
+            input: {
+              projectId: "project-123",
+              workItemId: "work-item-trace",
+              status: "done",
+              evidenceRefCount: 2,
+              trustedEvidenceRefCount: 1,
+              copilotRunId: "run-1",
+              pendingActionId: "pm-action-1",
+            },
+          }],
+        }),
+      });
+    },
+    onGetRun: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-1",
+            status: "waiting_for_approval",
+            goal: "Mark the traceability work done",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [{
+            id: "pm-action-1",
+            runId: "run-1",
+            type: "openforge.propose_project_manager_update_work_item_status",
+            status: "pending",
+            input: {
+              projectId: "project-123",
+              workItemId: "work-item-trace",
+              status: "done",
+              evidenceRefCount: 2,
+              trustedEvidenceRefCount: 1,
+              copilotRunId: "run-1",
+              pendingActionId: "pm-action-1",
+            },
+          }],
+        }),
+      });
+    },
+    onDecideAction: async (route) => {
+      approved = true;
+      await route.fulfill({
+        json: envelope({
+          action: {
+            id: "pm-action-1",
+            runId: "run-1",
+            type: "openforge.propose_project_manager_update_work_item_status",
+            status: "approved",
+            result: {
+              projectManager: {
+                actionType: "update_work_item_status",
+                projectId: "project-123",
+                workItemId: "work-item-trace",
+                status: "done",
+                evidenceRefCount: 2,
+                trustedEvidenceRefCount: 1,
+                copilotRunId: "run-1",
+                pendingActionId: "pm-action-1",
+                approvalStatus: "approved",
+                executionStatus: "succeeded",
+              },
+              executed: true,
+            },
+          },
+          run: {
+            id: "run-1",
+            status: "completed",
+            goal: "Mark the traceability work done",
+            source: "copilot",
+          },
+          events: [],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Mark the traceability work done");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(copilotMessage(page, "I need approval before updating Project Manager state.")).toBeVisible();
+  const pendingActions = copilotMessage(page, "Pending actions");
+  await expect(pendingActions.getByText("Trusted evidence: 1", { exact: true })).toBeVisible();
+  await expect(pendingActions.getByText("Trusted evidence is required before Copilot can mark this done.")).toHaveCount(0);
+  const approveButton = pendingActions.getByRole("button", { name: "Approve" });
+  await expect(approveButton).toBeEnabled();
+  await approveButton.click();
+  await expect.poll(() => approved).toBe(true);
+});
+
+test("Copilot renders Project Manager approval anchors and terminal failures", async ({ page }) => {
+  let decisionMode: "approved" | "failed" = "approved";
+  const waitingRunDetail = {
+    run: {
+      id: "run-1",
+      status: "waiting_for_approval",
+      goal: "Attach PM evidence",
+      source: "copilot",
+    },
+    events: [],
+    pendingActions: [{
+      id: "pm-action-2",
+      runId: "run-1",
+      type: "openforge.propose_project_manager_attach_evidence",
+      status: "pending",
+      input: {
+        projectId: "project-123",
+        workItemId: "work-item-trace",
+        copilotRunId: "run-1",
+        pendingActionId: "pm-action-2",
+        evidenceRef: {
+          kind: "test",
+          label: "Traceability E2E",
+          status: "verified",
+          ref: "PW-TRACE-1",
+        },
+      },
+    }],
+  };
+  await mockCopilotApis(page, {
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Attach the PM evidence",
+              createdAt: 1778490000000,
+            },
+            {
+              id: "message-assistant",
+              conversationId: "conversation-1",
+              runId: "run-1",
+              role: "assistant",
+              content: "I need approval before attaching evidence.",
+              createdAt: 1778490000001,
+            },
+          ],
+          ...waitingRunDetail,
+        }),
+      });
+    },
+    onGetRun: async (route) => {
+      await route.fulfill({ json: envelope(waitingRunDetail) });
+    },
+    onDecideAction: async (route) => {
+      if (decisionMode === "failed") {
+        await route.fulfill({
+          status: 400,
+          json: {
+            code: 1,
+            message: "Project Manager action failed",
+            details: {
+              code: "project_manager_action_failed",
+              action: {
+                id: "pm-action-2",
+                runId: "run-1",
+                type: "openforge.propose_project_manager_attach_evidence",
+                status: "failed",
+                result: {
+                  error: {
+                    code: "project_manager_action_failed",
+                    message: "Project Manager action failed",
+                  },
+                  projectManager: {
+                    actionType: "attach_evidence",
+                    projectId: "project-123",
+                    workItemId: "work-item-trace",
+                    targetType: "work_item",
+                    targetId: "work-item-trace",
+                    evidenceRefCount: 1,
+                    copilotRunId: "run-1",
+                    pendingActionId: "pm-action-2",
+                    approvalStatus: "failed",
+                    executionStatus: "failed",
+                  },
+                },
+              },
+            },
+          },
+        });
+        return;
+      }
+      await route.fulfill({
+        json: envelope({
+          action: {
+            id: "pm-action-2",
+            runId: "run-1",
+            type: "openforge.propose_project_manager_attach_evidence",
+            status: "approved",
+          },
+          run: {
+            id: "run-1",
+            status: "completed",
+            goal: "Attach PM evidence",
+            source: "copilot",
+          },
+          events: [{
+            id: "event-approved",
+            runId: "run-1",
+            type: "pending_action_approved",
+            sequence: 2,
+            message: "openforge.propose_project_manager_attach_evidence",
+            payload: {
+              actionId: "pm-action-2",
+              actionType: "openforge.propose_project_manager_attach_evidence",
+              status: "approved",
+              result: {
+                projectManager: {
+                  actionType: "attach_evidence",
+                  projectId: "project-123",
+                  workItemId: "work-item-trace",
+                  targetType: "work_item",
+                  targetId: "work-item-trace",
+                  status: "in_progress",
+                  evidenceRefCount: 1,
+                  copilotRunId: "run-1",
+                  pendingActionId: "pm-action-2",
+                  approvalStatus: "approved",
+                  executionStatus: "succeeded",
+                },
+                executed: true,
+              },
+            },
+          }],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Attach the PM evidence");
+  await page.getByRole("button", { name: "Send" }).click();
+  const assistantBubble = copilotMessage(page, "I need approval before attaching evidence.");
+  await assistantBubble.getByRole("button", { name: "Approve" }).click();
+
+  await expect(page.getByText("Action approved")).toBeVisible();
+  await expect(page.getByText("attach_evidence / work item work-item-trace / succeeded")).toBeVisible();
+  await expect(page.getByRole("link", { name: "View in Project Manager" })).toHaveAttribute(
+    "href",
+    "/projects/project-123?tab=project-manager&workItemId=work-item-trace"
+  );
+
+  decisionMode = "failed";
+  await page.getByRole("button", { name: "New conversation" }).click();
+  await page.getByPlaceholder(/Ask Copilot/).fill("Attach the PM evidence");
+  await page.getByRole("button", { name: "Send" }).click();
+  const failedBubble = copilotMessage(page, "I need approval before attaching evidence.").last();
+  await failedBubble.getByRole("button", { name: "Approve" }).click();
+
+  await expect(failedBubble.getByText("Project Manager action failed. Create a new proposal before retrying.").first()).toBeVisible();
+  await expect(failedBubble.getByText("Execution: failed")).toBeVisible();
+  await expect(failedBubble.getByRole("button", { name: "Approve" })).toHaveCount(0);
+  await expect(failedBubble.getByRole("button", { name: "Reject" })).toHaveCount(0);
+});
+
 test("Copilot renders recalled memory snippets in the assistant activity flow", async ({ page }) => {
   await mockCopilotApis(page, {
     onSendMessage: async (route) => {
@@ -1014,6 +1459,70 @@ test("Copilot keeps showing progress while an async run has not returned events 
   await expect.poll(() => sendCompleted).toBe(true);
   await expect(page.getByText("Copilot is working...")).toBeVisible();
   await expect(page.getByText("Gateway is healthy.")).toHaveCount(0);
+});
+
+test("Copilot ignores stale live run detail after a terminal update", async ({ page }) => {
+  let getRunCount = 0;
+  await mockCopilotApis(page, {
+    onSendMessage: async (route) => {
+      await route.fulfill({
+        status: 202,
+        json: envelope({
+          messages: [
+            {
+              id: "message-user",
+              conversationId: "conversation-1",
+              role: "user",
+              content: "Cancel stale work",
+              createdAt: 1778490000000,
+            },
+          ],
+          run: {
+            id: "run-1",
+            status: "running",
+            goal: "Cancel stale work",
+            source: "copilot",
+            updatedAt: 100,
+          },
+          events: [{ id: "event-1", runId: "run-1", type: "run_started", sequence: 1 }],
+          pendingActions: [],
+        }),
+      });
+    },
+    onGetRun: async (route) => {
+      getRunCount += 1;
+      const terminal = getRunCount === 1;
+      await route.fulfill({
+        json: envelope({
+          run: {
+            id: "run-1",
+            status: terminal ? "cancelled" : "running",
+            goal: "Cancel stale work",
+            source: "copilot",
+            updatedAt: terminal ? 300 : 100,
+          },
+          events: terminal
+            ? [{ id: "event-2", runId: "run-1", type: "run_cancelled", sequence: 2 }]
+            : [{ id: "event-1", runId: "run-1", type: "run_started", sequence: 1 }],
+          pendingActions: [],
+        }),
+      });
+    },
+  });
+
+  await page.goto("/copilot");
+  await page.getByPlaceholder(/Ask Copilot/).fill("Cancel stale work");
+  await page.getByRole("button", { name: "Send" }).click();
+  await dispatchCopilotRunUpdated(page);
+
+  await expect.poll(() => getRunCount).toBeGreaterThanOrEqual(1);
+  await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
+
+  await dispatchCopilotRunUpdated(page);
+
+  await expect.poll(() => getRunCount).toBeGreaterThanOrEqual(2);
+  await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
+  await expect(page.getByText("running", { exact: true })).toHaveCount(0);
 });
 
 test("Copilot renders assistant delta events before the final run response", async ({ page }) => {
@@ -1341,6 +1850,11 @@ async function mockCopilotApis(
     initialMemoryNotes?: Array<Record<string, unknown>>;
     memorySearchResults?: Array<Record<string, unknown>>;
     onDeleteMemory?: (route: Route) => Promise<void>;
+    modelProviders?: {
+      providers: Array<Record<string, unknown>>;
+      models: Array<Record<string, unknown>>;
+      credentials: Array<Record<string, unknown>>;
+    };
   } = {}
 ) {
   let conversations: Array<Record<string, unknown>> = [...(overrides.initialConversations ?? [])];
@@ -1428,6 +1942,37 @@ async function mockCopilotApis(
       return;
     }
 
+    if (url.pathname === "/api/v1/projects/project-123/workspace/tree" && method === "GET") {
+      await route.fulfill({
+        json: envelope({
+          projectId: "project-123",
+          rootPath: "/workspace/project-123",
+          path: "",
+          truncated: false,
+          entries: [],
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/projects/project-123/workspace/file" && method === "GET") {
+      await route.fulfill({
+        json: envelope({
+          projectId: "project-123",
+          rootPath: "/workspace/project-123",
+          path: url.searchParams.get("path") ?? "",
+          name: "workspace.txt",
+          sizeBytes: 0,
+          updatedAt: "2026-05-29T00:00:00.000Z",
+          encoding: "utf8",
+          content: "",
+          truncated: false,
+          binary: false,
+        }),
+      });
+      return;
+    }
+
     if (url.pathname === "/api/v1/sessions" && method === "GET") {
       await route.fulfill({ json: envelope({ sessions: [] }) });
       return;
@@ -1445,6 +1990,17 @@ async function mockCopilotApis(
 
     if (url.pathname === "/api/v1/models" && method === "GET") {
       await route.fulfill({ json: envelope({ models: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/model-providers" && method === "GET") {
+      await route.fulfill({
+        json: envelope(overrides.modelProviders ?? {
+          providers: [],
+          models: [],
+          credentials: [],
+        }),
+      });
       return;
     }
 
@@ -1622,4 +2178,19 @@ function envelope(data: unknown) {
 
 function copilotMessage(page: Page, text: string) {
   return page.getByTestId("copilot-message-bubble").filter({ hasText: text });
+}
+
+async function dispatchCopilotRunUpdated(page: Page) {
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("openforge:gateway-event", {
+      detail: {
+        type: "copilot_run_updated",
+        payload: {
+          event_type: "run_updated",
+          run_id: "run-1",
+          conversation_id: "conversation-1",
+        },
+      },
+    }));
+  });
 }

@@ -10,6 +10,8 @@ import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, FileCode2, File
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ProjectManagerPanel } from "@/components/projects/ProjectManagerPanel";
+import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -81,6 +83,18 @@ const builtinTemplateOptions = [
   { id: "builtin-codex", name: "Codex CLI" },
 ];
 
+const PROJECT_DETAIL_TABS = [
+  "sessions",
+  "project-manager",
+  "agents",
+  "orchestration",
+  "skills",
+  "config",
+  "activity",
+] as const;
+
+type ProjectDetailTab = typeof PROJECT_DETAIL_TABS[number];
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -88,7 +102,9 @@ export default function ProjectDetailPage() {
   const queryClient = useQueryClient();
   const { t } = useLanguage();
   const id = params.id as string;
-  const [activeTab, setActiveTab] = useState("sessions");
+  const [activeTab, setActiveTab] = useState<ProjectDetailTab>(() =>
+    readProjectDetailTab(searchParams.get("tab")) ?? "sessions"
+  );
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState("builtin-claude-code");
   const [selectedRuntimeAdapter, setSelectedRuntimeAdapter] = useState<RuntimeAdapterId | "">("");
@@ -326,6 +342,7 @@ export default function ProjectDetailPage() {
     !selectedRuntimeLaunchable ||
     (selectedCredentialNeedsKey && !selectedApiKeyId);
   const configNeedsReview = searchParams.get("configStatus") === "failed";
+  const projectManagerWorkItemId = normalizeSearchParam(searchParams.get("workItemId"));
   const selectedModel = models.find((model) => model.id === selectedModelId);
   const runningSessionCount = projectSessions.filter((session) => session.status === "running").length;
   const enabledSkillCount = enabledSkillIds.size;
@@ -335,6 +352,30 @@ export default function ProjectDetailPage() {
       setSelectedModelId(defaultModel.id);
     }
   }, [defaultModel, selectedModelId]);
+
+  useEffect(() => {
+    const nextTab = readProjectDetailTab(searchParams.get("tab"));
+    if (nextTab && nextTab !== activeTab) {
+      setActiveTab(nextTab);
+    }
+  }, [activeTab, searchParams]);
+
+  const handleTabChange = (value: string) => {
+    const nextTab = readProjectDetailTab(value);
+    if (!nextTab) return;
+    setActiveTab(nextTab);
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    if (nextTab === "project-manager") {
+      nextSearchParams.set("tab", "project-manager");
+    } else {
+      nextSearchParams.delete("tab");
+      nextSearchParams.delete("workItemId");
+    }
+    const query = nextSearchParams.toString();
+    router.replace(query ? `/projects/${encodeURIComponent(id)}?${query}` : `/projects/${encodeURIComponent(id)}`, {
+      scroll: false,
+    });
+  };
 
   useEffect(() => {
     const nextTemplateId = project?.templateId ?? defaultTemplateForAiTool(project?.aiTool);
@@ -553,10 +594,23 @@ export default function ProjectDetailPage() {
                   ))}
                 </select>
                 {launchableRuntimeAdapters.length === 0 && !adapterDiscoveryLoading ? (
-                  <p className="flex items-center gap-1 text-xs text-destructive">
-                    <AlertTriangle className="size-3.5" />
-                    {t("projects.noLaunchableRuntimeCli")}
-                  </p>
+                  <div className="space-y-2">
+                    <p className="flex items-center gap-1 text-xs text-destructive">
+                      <AlertTriangle className="size-3.5" />
+                      {t("projects.noLaunchableRuntimeCli")}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {t("projects.runtimeCliRecoveryDescription")}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button asChild variant="outline" size="sm">
+                        <Link href="/settings">{t("projects.openSettings")}</Link>
+                      </Button>
+                      <Button asChild variant="ghost" size="sm">
+                        <Link href={projectCopilotHref}>{t("projects.askCopilotReadiness")}</Link>
+                      </Button>
+                    </div>
+                  </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     {t("projects.runtimeCliDescription")}
@@ -842,10 +896,11 @@ export default function ProjectDetailPage() {
             </p>
           )}
 
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <Tabs value={activeTab} onValueChange={handleTabChange}>
             <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:thin]">
             <TabsList className="min-w-max">
               <TabsTrigger value="sessions">{t("nav.sessions")}</TabsTrigger>
+              <TabsTrigger value="project-manager">{t("projects.projectManager")}</TabsTrigger>
               <TabsTrigger value="agents">{t("nav.agents")}</TabsTrigger>
               <TabsTrigger value="orchestration">{t("projects.orchestration")}</TabsTrigger>
               <TabsTrigger value="skills">{t("nav.skills")}</TabsTrigger>
@@ -855,55 +910,66 @@ export default function ProjectDetailPage() {
             </div>
 
             <TabsContent value="sessions" className="mt-4">
-              {projectSessions.length === 0 ? (
-                <Card>
-                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                    {t("projects.noSessions")}
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("common.name")}</TableHead>
-                        <TableHead>{t("common.status")}</TableHead>
-                        <TableHead className="text-right">{t("projects.action")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {projectSessions.map((session) => (
-                        <TableRow key={session.id}>
-                          <TableCell className="font-medium">
-                            {session.name || session.tmuxName || session.id}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={
-                                session.status === "running"
-                                  ? "default"
-                                  : session.status === "error"
-                                    ? "destructive"
-                                    : "secondary"
-                              }
-                            >
-                              {session.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Link href={`/sessions/${session.id}`}>
-                              <Button variant="ghost" size="sm">
-                                <Play className="mr-2 size-3" />
-                                {t("common.connect")}
-                              </Button>
-                            </Link>
-                          </TableCell>
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                {projectSessions.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                      {t("projects.noSessions")}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{t("common.name")}</TableHead>
+                          <TableHead>{t("common.status")}</TableHead>
+                          <TableHead className="text-right">{t("projects.action")}</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </Card>
-              )}
+                      </TableHeader>
+                      <TableBody>
+                        {projectSessions.map((session) => (
+                          <TableRow key={session.id}>
+                            <TableCell className="font-medium">
+                              {session.name || session.tmuxName || session.id}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  session.status === "running"
+                                    ? "default"
+                                    : session.status === "error"
+                                      ? "destructive"
+                                      : "secondary"
+                                }
+                              >
+                                {session.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Link href={`/sessions/${session.id}`}>
+                                <Button variant="ghost" size="sm">
+                                  <Play className="mr-2 size-3" />
+                                  {t("common.connect")}
+                                </Button>
+                              </Link>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </Card>
+                )}
+                <WorkspaceContextPanel projectId={id} enabled={activeTab === "sessions"} />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="project-manager" className="mt-4">
+              <ProjectManagerPanel
+                projectId={id}
+                enabled={activeTab === "project-manager"}
+                selectedWorkItemId={projectManagerWorkItemId}
+              />
             </TabsContent>
 
             <TabsContent value="agents" className="mt-4">
@@ -1693,6 +1759,17 @@ function ComplianceMetric({ label, value }: { label: string; value: number }) {
 
 function sameStringArray(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function readProjectDetailTab(value: string | null): ProjectDetailTab | null {
+  const normalized = normalizeSearchParam(value);
+  if (!normalized) return null;
+  return PROJECT_DETAIL_TABS.includes(normalized as ProjectDetailTab) ? normalized as ProjectDetailTab : null;
+}
+
+function normalizeSearchParam(value: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 function formatProjectActivityTime(value: string): string {

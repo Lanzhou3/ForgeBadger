@@ -1,9 +1,123 @@
 # OpenForge Project Memory
 
-> Updated: 2026-05-13
+> Updated: 2026-05-29
 
 ## Current Stage
 
+- v1.3 AI-Native Project Execution Traceability is complete and archived under
+  `.planning/milestones/v1.3-*`. It shipped Copilot-to-Project-Manager
+  traceability, Project Manager board workflow, safe terminal workspace
+  context, provider readiness UX, and the open-source readiness packet.
+- v1.4 External Evidence Closure is complete and archived under
+  `.planning/milestones/v1.4-*`. It converted the remaining live-provider,
+  physical Windows/WSL, Feishu developer-console callback, and first-user
+  feedback caveats into a canonical evidence gate registry plus real redacted
+  artifacts or precise blockers. Phase 17 created the registry; Phase 18 reran
+  `pnpm smoke:copilot-provider` and recorded `LIVE-PROVIDER` as `Caveat` with
+  `missing_provider_credential`; Phase 19 reran Feishu CLI preflight,
+  `pnpm smoke:feishu-public-webhook`, Feishu/Copilot regression, and Gateway
+  typecheck, then recorded `FEISHU-CALLBACK` as `Blocked`; Phase 20 published
+  `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`, preserving
+  `WINDOWS-WSL` and `FIRST-USER-FEEDBACK` as `Caveat`.
+- v1.5 First-User Trial Operations completed its Phase 21 foundation. Phase 21
+  selected the next milestone, defined the first-user trial packet, evidence
+  routing, and gate-preserving verification loop, updated the first-user
+  feedback template and GitHub issue form, removed first-user browser-token
+  fallback guidance, and kept all external gates caveated or blocked until real
+  artifacts exist.
+- Phase 22 completed a maintainer/operator dry-run of the v1.5 trial loop on
+  the current host. It recorded Linux `not_wsl`, Node `v24.14.1`, pnpm
+  `10.33.2`, tmux `3.4`, Claude Code `2.1.152`, OpenCode `1.15.4`, Codex CLI
+  `0.134.0`, `openforge doctor` terminal mode `native_tmux`, Gateway/Web
+  loopback startup health, provider smoke skipped with
+  `missing_provider_credential`, and the source dev-script `.env` override
+  behavior as a docs/support gap. It did not clear any external gate.
+- Phase 23 fixed that source fallback `.env` override gap with
+  `scripts/run-with-root-env.mjs`, `scripts/run-with-root-env.test.mjs`,
+  Gateway/Web package script wiring, CI harness coverage, source fallback docs,
+  and real Gateway/Web prefix smoke evidence. Command-prefix env values now win
+  over root `.env` while `.env` still fills missing values.
+- Phase 24 added `scripts/validate-trial-feedback-intake.mjs` and
+  `scripts/validate-trial-feedback-intake.test.mjs` so the first-user trial
+  feedback GitHub issue form and Markdown template are machine-validated for
+  required fields, field types, dropdown options, triage routing, redaction
+  language, and unsafe raw-evidence requests. CI script harness coverage now
+  includes the intake contract. This does not clear `FIRST-USER-FEEDBACK`.
+- Phase 25 extended the intake validator to `docs/TRIAL-RUNBOOK.md` and removed
+  first-user browser-token diagnostics fallback. The runbook now directs first
+  users to Settings -> Export diagnostics JSON and labels local API fallback as
+  maintainer-only. Validator coverage rejects browser developer tools, Local
+  Storage, `openforge.token`, and `authorization: Bearer <token>` guidance in
+  first-user runbook text. This does not clear `FIRST-USER-FEEDBACK`.
+- Phase 26 added `scripts/create-trial-feedback-draft.mjs`,
+  `scripts/create-trial-feedback-draft.test.mjs`, and
+  `pnpm trial:feedback-draft`. The helper generates a local Markdown draft with
+  bounded metadata, redacts token-shaped values, and explicitly states it is
+  not submitted, not reviewed, and not gate-clearing evidence. This does not
+  clear `FIRST-USER-FEEDBACK`.
+- Phase 27 added `scripts/audit-trial-feedback-packet.mjs`,
+  `scripts/audit-trial-feedback-packet.test.mjs`, and
+  `pnpm trial:feedback-audit`. The audit rejects generated drafts,
+  placeholder-only packets, missing required fields, and obvious secret-like
+  content before maintainer triage. Passing audit means ready for maintainer
+  triage only; `gateClearingEvidence` remains false and this does not clear
+  `FIRST-USER-FEEDBACK`.
+- Phase 28 added `scripts/validate-external-evidence-gates.mjs`,
+  `scripts/validate-external-evidence-gates.test.mjs`, and
+  `pnpm evidence:gates-validate`. The validator keeps
+  `LIVE-PROVIDER=Caveat`, `WINDOWS-WSL=Caveat`,
+  `FEISHU-CALLBACK=Blocked`, and `FIRST-USER-FEEDBACK=Caveat` unless a future
+  reviewed change updates the validator with linked real artifact evidence.
+- Phase 29 extended `scripts/validate-trial-feedback-intake.mjs` to validate
+  `docs/TRIAL-CHECKLIST.md`, added `pnpm trial:intake-validate`, and wired CI
+  to run both trial intake and external gate validators. The checklist now
+  preserves audit commands, gate-routing commands, redaction review, and
+  browser-token safety boundaries without clearing any external gate.
+- Phase 30 added `scripts/validate-trial-issue-routes.mjs`,
+  `scripts/validate-trial-issue-routes.test.mjs`, and
+  `pnpm trial:issue-routes-validate`. The live preflight verified issue #3
+  (`LIVE-PROVIDER`), #4 (`WINDOWS-WSL`), and #5
+  (`FIRST-USER-FEEDBACK`) are open and correctly routed, while returning
+  `gateClearingEvidence: false`.
+- Phase 31 added `scripts/validate-trial-readiness.mjs`,
+  `scripts/validate-trial-readiness.test.mjs`, and
+  `pnpm trial:readiness-validate`. The live preflight aggregates trial intake,
+  issue-route, and external gate registry validators before a real collection
+  round, while returning `gateClearingEvidence: false`.
+- Phase 32 added `scripts/audit-trial-feedback-issue.mjs`,
+  `scripts/audit-trial-feedback-issue.test.mjs`, and
+  `pnpm trial:feedback-issue-audit -- --issue=<number>`. It reads GitHub
+  issue-form feedback through `gh issue view`, maps the body into the existing
+  packet audit, rejects issue #5 as incomplete tracker feedback, and returns
+  `gateClearingEvidence: false`.
+- Phase 33 updated `docs/EXTERNAL-EVIDENCE-GATES.md` and
+  `scripts/validate-external-evidence-gates.mjs` so the
+  `FIRST-USER-FEEDBACK` rerun path preserves both
+  `pnpm trial:feedback-audit` and `pnpm trial:feedback-issue-audit`, with a
+  regression test that rejects dropping the issue audit command.
+- Phase 34 updated `docs/OPEN-SOURCE-READINESS.md`,
+  `docs/SUPPORT-DIAGNOSTICS.md`, and
+  `scripts/validate-trial-feedback-intake.mjs` so public/support entrypoints
+  must preserve both feedback collection paths and both audit commands before
+  maintainer triage.
+- Phase 35 updated `README.md` and
+  `scripts/validate-trial-feedback-intake.mjs` so root/localized README trial
+  entrypoints must preserve the runbook, checklist, troubleshooting, feedback
+  template, and GitHub issue-form links.
+- Phase 36 updated the feedback packet and issue audits so completed-looking
+  first-user feedback must include Copilot smoke/provider, prompt, read-tool,
+  pending-action, memory-write, and terminal-boundary evidence before
+  maintainer triage.
+- Phase 37 added `scripts/audit-trial-feedback-issues.mjs`,
+  `scripts/audit-trial-feedback-issues.test.mjs`, and
+  `pnpm trial:feedback-issues-audit`. The read-only helper lists GitHub
+  `trial-feedback` issues, skips known route trackers, audits non-tracker
+  candidates through the single issue-form audit path, and reports ready or
+  blocked candidates without clearing gates.
+- v1.5 operations-tooling closeout is recorded in
+  `docs/reports/v1.5-first-user-trial-operations-closeout-2026-05-29.md`.
+  The closeout keeps all external gates unchanged and names completed,
+  redacted first-user packet collection as the remaining external work.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and
@@ -65,14 +179,17 @@
   delete flows, and provider credential rotate/delete flows. Current commit
   series: `c83e595 feat: 支持服务商模型同步` followed by the provider
   management closure commit.
-- Platform AI Copilot product-hardening is collected in
+- Platform AI Copilot product-hardening shipped through
   [PR #2](https://github.com/Lanzhou3/OpenForge/pull/2)
-  `feat: add release gates and platform copilot` on branch
-  `post-beta-release-gates`. The PR is ready for review from the local/CI side:
-  provider-backed Copilot runs, read tools, approval-gated pending actions,
-  provider/model selectors, active memory recall, cancellation/timeout handling,
-  audit logging, provider diagnostics, output redaction, and Web hardening are
-  covered by repository tests, Playwright smoke coverage, package smoke, and CI.
+  `feat: add release gates and platform copilot` from branch
+  `post-beta-release-gates`; PR #2 merged into `master` on 2026-05-19. The
+  branch now carries follow-up GSD planning commits for Phase 1 Beta Evidence
+  Closure after `853969c docs(01): capture phase context` and
+  `4db4dc8 docs(01): create phase plan`. Provider-backed Copilot runs, read
+  tools, approval-gated pending actions, provider/model selectors, active memory
+  recall, cancellation/timeout handling, audit logging, provider diagnostics,
+  output redaction, and Web hardening are covered by repository tests,
+  Playwright smoke coverage, package smoke, and CI.
   The latest Copilot evidence snapshot tracked here is `e024e7f
   docs: add copilot live smoke examples`; GitHub Actions for that head passed
   Workspace Static Checks, Codex Background Task Gates, NPM Package
@@ -109,26 +226,44 @@
 
 ## Next Work
 
-1. Keep Codex app-server turn input disabled unless the Gateway is explicitly
+1. Use the validated v1.5 tokenless runbook, checklist, trial packet intake,
+   optional feedback draft helper, readiness preflight, packet audit helper,
+   GitHub issue feedback audit helper, intake material validator, and external
+   gate validator for the next real first-user run:
+   affected surface, severity, owner,
+   disposition or next action, environment summary, reproduction detail,
+   diagnostics status, follow-up route or no-action rationale, and redaction
+   review.
+2. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,
+   operator webhook setup environment, and Feishu developer-console URL
+   verification are available. Phase 19 proved bot CLI preflight and local
+   regression only; those do not clear the real callback gate.
+3. Keep `WINDOWS-WSL` as `Caveat` until a real Windows/WSL host completes the
+   terminal checklist. Phase 20 recorded the current host as Linux `not_wsl`,
+   which is not physical WSL evidence.
+4. Keep `FIRST-USER-FEEDBACK` as `Caveat` until a completed redacted feedback
+   packet is attached or linked with severity, owner, disposition, environment,
+   reproduction detail, diagnostics status, and follow-up route.
+5. Rerun the `LIVE-PROVIDER` gate only after a disposable provider credential
+   and explicit model id are available; Phase 18 currently records
+   `missing_provider_credential`.
+6. Keep Codex app-server turn input disabled unless the Gateway is explicitly
    started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. Treat `/turn` as a
    default-403 feature-flag prototype API, not a Web-exposed user workflow.
    Gateway does not persist prompt/response transcript content; add
    user-facing retention controls before exposing real turn input in Web. Do not
    add provider API-key or model override application to this Codex app-server
    path.
-2. If stopped/error app-server records grow in long-running usage, add an
+7. If stopped/error app-server records grow in long-running usage, add an
    explicit TTL or pagination strategy instead of deleting them immediately and
    losing observable process state.
-3. Close the Copilot live-provider gate by running `pnpm smoke:copilot-provider`
-   with a disposable provider credential and explicit model id, then record the
-   redacted evidence in GitHub issue #3.
-4. Run a physical Windows/WSL manual smoke when that platform is available; the
+8. Run a physical Windows/WSL manual smoke when that platform is available; the
    current pass covers CLI mode behavior, CI/release gate automation, checklist
    fields, and runbook remediation, not a real Windows host. Record that
    evidence in GitHub issue #4.
-5. Collect first-user Copilot hardening feedback through the trial feedback
+9. Collect first-user Copilot hardening feedback through the trial feedback
    form and issue #5. Focus on dependency failure states, CLI availability
    recovery, provider configuration recovery, and platform-specific
    remediation.
-6. Keep SSH/remote execution as a separate architecture item, not part of the
+10. Keep SSH/remote execution as a separate architecture item, not part of the
    local Codex app-server prototype.

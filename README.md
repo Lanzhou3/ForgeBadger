@@ -36,6 +36,7 @@ not part of the current local-first MVP.
 - [Trial checklist](docs/TRIAL-CHECKLIST.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Trial feedback template](docs/TRIAL-FEEDBACK.md)
+- [GitHub feedback issue form](.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml)
 
 ## Why OpenForge
 
@@ -185,6 +186,10 @@ prototype intentionally keeps prompt/turn input disabled for beta feedback.
 - [Product requirements](docs/PRD-v1.1-MVP.md)
 - [Development plan](docs/DEVELOPMENT-PLAN.md)
 - [API reference](docs/API.md)
+- [Open source readiness](docs/OPEN-SOURCE-READINESS.md)
+- [External evidence gates](docs/EXTERNAL-EVIDENCE-GATES.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 - [Security notes](docs/SECURITY.md)
 - [Smoke test guide](docs/SMOKE-TEST.md)
 - [Release plan](docs/RELEASE-PLAN.md)

@@ -10,6 +10,8 @@ import { ApiKeyRepository } from "../src/db/repositories/api-key-repository.js";
 import { AuditLogRepository } from "../src/db/repositories/audit-log-repository.js";
 import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
+import { ProjectManagerRepository } from "../src/db/repositories/project-manager-repository.js";
+import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import {
   buildLocalDiagnosticsExport,
@@ -203,6 +205,52 @@ describe("local diagnostics export", () => {
         enabled: false
       });
       assert.equal(JSON.stringify(report).includes("sk-diagnostics-secret"), false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("exports tenant-scoped project-manager counts and safe latest markers only", () => {
+    const db = createTestDb();
+    try {
+      const user = new UserRepository(db).create("diagnostics-pm@example.com", "hash");
+      const otherUser = new UserRepository(db).create("diagnostics-pm-other@example.com", "hash");
+      const project = new ProjectRepository(db, user.id).create({
+        name: "Diagnostics PM",
+        path: "/tmp/diagnostics-pm",
+        aiTool: "claude"
+      });
+      const otherProject = new ProjectRepository(db, otherUser.id).create({
+        name: "Diagnostics PM foreign",
+        path: "/tmp/diagnostics-pm-foreign",
+        aiTool: "claude"
+      });
+      const repo = new ProjectManagerRepository(db, user.id);
+      repo.upsertGoal(project.id, { summary: "Diagnostics summary" });
+      const item = repo.createWorkItem(project.id, {
+        title: "Count me",
+        details: { rawTerminalOutput: "OPENFORGE_ATTACH_TOKEN=diagnostics-pm-secret" }
+      });
+      repo.updateWorkItemStatus(project.id, item.id, { status: "in_progress" });
+      new ProjectManagerRepository(db, otherUser.id).createWorkItem(otherProject.id, {
+        title: "Foreign hidden"
+      });
+
+      const report = buildLocalDiagnosticsExport({
+        db,
+        userId: user.id,
+        masterKey: "a".repeat(64),
+        appVersion: "0.0.0-test",
+        now: new Date("2026-05-20T00:00:00.000Z")
+      });
+
+      assert.equal(report.projectManager.goalCount, 1);
+      assert.equal(report.projectManager.workItemCountsByStatus.in_progress, 1);
+      assert.equal(report.projectManager.workItemCountsByStatus.todo, 0);
+      assert.equal(report.projectManager.ledgerEventCount, 3);
+      assert.equal(report.projectManager.latestEvent?.eventType, "work_item_status_changed");
+      assert.equal(JSON.stringify(report).includes("diagnostics-pm-secret"), false);
+      assert.equal(JSON.stringify(report).includes("Foreign hidden"), false);
     } finally {
       db.close();
     }

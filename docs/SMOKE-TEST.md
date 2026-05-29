@@ -6,6 +6,16 @@ First-user trial runs should use `docs/TRIAL-CHECKLIST.md` as the execution
 notes and feedback attachment. Keep this smoke test as the broader manual
 acceptance checklist for maintainers.
 
+Phase 6 live provider and platform evidence is tracked in
+`docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`. Use that report as
+the source of truth for `Pass`, `Caveat`, and `Blocked` status; do not remove
+the live-provider caveat without disposable live provider evidence.
+Phase 8 first-user readiness handoff is
+`docs/reports/v1.1-readiness-closeout-2026-05-21.md`; use it with
+`docs/TRIAL-CHECKLIST.md` and `docs/SUPPORT-DIAGNOSTICS.md` when routing trial
+support. The matrix remains the detailed manual/live gate source for live
+provider, physical Windows/WSL, and Feishu developer-console callback evidence.
+
 Run this checklist before asking a user to try the local console, or when a
 broader maintainer acceptance pass is needed. Use a disposable project
 directory and a disposable SQLite database unless the goal is upgrade
@@ -33,8 +43,13 @@ Start Gateway, then Web in separate shells:
 
 ```bash
 pnpm --dir packages/gateway dev
-pnpm --dir packages/web exec next dev --hostname 127.0.0.1 --port 48732
+pnpm --dir packages/web dev
 ```
+
+Source fallback scripts load the root `.env` without overriding variables
+already present in the shell. For disposable smoke state, a command prefix such
+as `OPENFORGE_DB_PATH=/tmp/openforge-smoke.db pnpm --dir packages/gateway dev`
+therefore takes precedence over the same key in `.env`.
 
 Open `http://127.0.0.1:48732`.
 
@@ -143,13 +158,13 @@ permission prompt event.
   evidence, set `OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1` plus
   `OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER`, `OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL`,
   and a disposable API key. The command must not print the plaintext key.
-  OpenAI example:
+  Set `OPENFORGE_COPILOT_PROVIDER_SMOKE_API_KEY` in your shell or secret
+  manager before running the command. OpenAI example:
 
   ```bash
   OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
   OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER=openai \
   OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
-  OPENFORGE_COPILOT_PROVIDER_SMOKE_API_KEY=<disposable-openai-key> \
   pnpm smoke:copilot-provider
   ```
 
@@ -159,12 +174,16 @@ permission prompt event.
   OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
   OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER=anthropic \
   OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
-  OPENFORGE_COPILOT_PROVIDER_SMOKE_API_KEY=<disposable-anthropic-key> \
   pnpm smoke:copilot-provider
   ```
 
   Record only the redacted JSON result, provider name, model id, pass/fail
   status, and any sanitized failure reason.
+  For Phase 6 evidence reports, use only disposable or rotatable credentials
+  and copy only redacted JSON or public summary fields into
+  `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`, never plaintext
+  keys. Keep the live-provider row as `Caveat` or `Blocked` unless a disposable
+  live run succeeds.
 - Configure a disposable OpenAI or Anthropic provider profile with an active
   model and active test credential.
 - Open `/copilot` from the sidebar.
@@ -205,6 +224,9 @@ Web smoke. It cannot replace these manual checks:
 - real browser terminal attach, input/output, resize, refresh, and reconnect;
 - real Claude Code permission prompt behavior;
 - live Copilot prompt behavior against a disposable provider credential;
+- real Feishu developer-console URL verification against
+  `POST /api/v1/integrations/feishu/webhook/:publicId`; automated signed-route
+  regressions and `lark-cli` long-running event consumers are preflight only;
 - physical Windows native versus WSL behavior;
 - local operator review that diagnostics and logs do not contain secrets.
 

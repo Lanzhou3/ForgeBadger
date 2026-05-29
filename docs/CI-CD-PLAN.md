@@ -12,7 +12,9 @@ terminal.
 
 ```bash
 pnpm install --frozen-lockfile
-node --test scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
+node --test scripts/validate-external-evidence-gates.test.mjs scripts/validate-trial-issue-routes.test.mjs scripts/validate-trial-readiness.test.mjs scripts/audit-trial-feedback-packet.test.mjs scripts/audit-trial-feedback-issue.test.mjs scripts/create-trial-feedback-draft.test.mjs scripts/validate-trial-feedback-intake.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
+pnpm trial:intake-validate
+pnpm evidence:gates-validate
 pnpm -r typecheck
 pnpm -r test
 RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
@@ -22,12 +24,27 @@ git diff --check
 
 Acceptance:
 
-- Script-level smoke harness tests pass.
+- Script-level smoke harness tests pass, including the external evidence gate
+  validator, trial issue-route preflight contract, trial readiness bundle,
+  trial feedback packet audit, GitHub issue feedback audit, draft generator,
+  intake contract validator, tokenless runbook diagnostics contract validator,
+  and trial checklist consistency guard.
+- `pnpm trial:intake-validate` and `pnpm evidence:gates-validate` pass before
+  trial material or external gate registry changes are accepted.
 - TypeScript emits no type errors.
 - CLI, Gateway `node:test`, and Web Vitest suites pass.
 - Real tmux integration tests pass when tmux is installed.
 - Provider SSOT and Codex subscription-boundary regressions pass.
 - `git diff --check` reports no whitespace errors.
+
+Maintainer-only live preflight:
+
+```bash
+pnpm trial:readiness-validate
+```
+
+This command requires GitHub CLI access for the live issue-route check. It is
+not a CI gate and does not clear external evidence gates.
 
 ### Build Checks
 
@@ -145,6 +162,65 @@ Known skip:
 
 - Skip E2E only when CI cannot provide loopback listeners, tmux, or Claude Code
   CLI. Record which dependency is missing.
+
+### Phase 1 Terminal Gate Boundary
+
+CI requires `e2e/mvp1-smoke.spec.ts` as the stable control-plane happy path.
+`e2e/gate-d-smoke.spec.ts` remains release/manual evidence unless the host
+supplies Gateway/Web loopback listeners, tmux, and the real CLI prerequisites
+needed for terminal behavior.
+
+Focused tmux evidence is the explicit command:
+
+```bash
+RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
+```
+
+Do not claim `pnpm -r test` alone satisfies REL-06. If `gate-d-smoke` or the
+focused tmux command is skipped, record `Status: Caveat`, skip reason, owner,
+and next action. The default owner is the release maintainer for the target
+host, and the next action is to rerun the skipped command on a host with the
+missing dependency installed.
+
+### v1.1 Phase 6 Evidence Matrix
+
+The current v1.1 source of truth for live provider, physical Windows/WSL,
+CI core smoke, `gate-d`, focused tmux, Feishu live-exposure readiness, release
+docs consistency, and redaction status is
+`docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`.
+
+The Phase 8 first-user readiness handoff is
+`docs/reports/v1.1-readiness-closeout-2026-05-21.md`, with
+`docs/TRIAL-CHECKLIST.md` as the runnable trial path and
+`docs/SUPPORT-DIAGNOSTICS.md` as the support triage packet. CI and local
+automation remain evidence inputs; they do not replace manual/live evidence for
+live provider, physical Windows/WSL, or Feishu developer-console callback
+status.
+
+Treat these as separate gates:
+
+- CI core smoke: `pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line`.
+- Release/manual browser terminal smoke: `pnpm --dir packages/web exec playwright test e2e/gate-d-smoke.spec.ts --project=chromium --reporter=line`.
+- Focused tmux integration: `RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts`.
+- Physical Windows/WSL terminal smoke: manual real-host checklist, not covered
+  by Ubuntu CI or current-host Linux evidence.
+- Feishu automated route and authority regression:
+  `pnpm --dir packages/gateway test test/feishu-integration.test.ts test/copilot-routes.test.ts`.
+- Feishu manual/live developer-console callback: configure the Feishu event
+  subscription URL to
+  `https://<public-host>/api/v1/integrations/feishu/webhook/<publicWebhookId>`
+  and run URL verification in the Feishu developer console. CI cannot replace
+  this gate.
+
+Do not mark the physical Windows/WSL row `Pass` unless the real WSL checklist
+is completed. Do not mark the live provider row `Pass` unless a disposable live
+provider credential and explicit model id produce a successful redacted smoke
+result. Do not mark the Feishu developer-console callback row `Pass` unless a
+real console callback reached the Gateway public webhook route. Current v1.1
+public webhook support is single Gateway with SQLite replay/rate storage;
+multi-instance public exposure requires shared replay and shared rate-limit
+stores first. Top-level encrypted Feishu payloads must fail closed with
+`feishu_webhook_encrypted_payload_unsupported`.
 
 ## 2. Security Gates
 

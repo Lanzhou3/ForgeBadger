@@ -6,6 +6,16 @@ import { CopilotRepository } from "../../db/repositories/copilot-repository.js";
 import { ModelProviderRepository, type ModelProfile, type ProviderProfile } from "../../db/repositories/model-provider-repository.js";
 import { NotificationRepository, type Notification } from "../../db/repositories/notification-repository.js";
 import { PluginRepository } from "../../db/repositories/plugin-repository.js";
+import {
+  PROJECT_MANAGER_LEDGER_EVENT_TYPES,
+  PROJECT_MANAGER_WORK_ITEM_STATUSES,
+  ProjectManagerRepository,
+  type ProjectManagerEvidenceRef,
+  type ProjectManagerGoal,
+  type ProjectManagerLedgerEvent,
+  type ProjectManagerLedgerEventType,
+  type ProjectManagerWorkItem
+} from "../../db/repositories/project-manager-repository.js";
 import { ProjectRepository, type Project } from "../../db/repositories/project-repository.js";
 import { ProjectSkillRepository, type ProjectSkill } from "../../db/repositories/project-skill-repository.js";
 import { SessionRepository, type Session } from "../../db/repositories/session-repository.js";
@@ -32,6 +42,47 @@ const projectScopedLimitInput = z.object({
 }).strict();
 const projectDetailInput = z.object({
   projectId: z.string().min(1)
+}).strict();
+const projectManagerWorkItemsInput = z.object({
+  projectId: z.string().min(1),
+  status: z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES).optional(),
+  limit: z.number().int().min(1).max(50).optional()
+}).strict();
+const projectManagerWorkItemInput = z.object({
+  projectId: z.string().min(1),
+  workItemId: z.string().min(1)
+}).strict();
+const projectManagerLedgerInput = z.object({
+  projectId: z.string().min(1),
+  eventType: z.enum(PROJECT_MANAGER_LEDGER_EVENT_TYPES).optional(),
+  limit: z.number().int().min(1).max(50).optional()
+}).strict();
+const projectManagerEvidenceRefInput = z.object({
+  kind: z.string().trim().min(1).max(64),
+  label: z.string().trim().min(1).max(256),
+  status: z.string().trim().min(1).max(64),
+  ref: z.string().trim().min(1).max(512).optional(),
+  path: z.string().trim().min(1).max(512).optional(),
+  sessionId: z.string().trim().min(1).max(128).optional()
+}).strict();
+const proposeProjectManagerCreateWorkItemInput = z.object({
+  projectId: z.string().min(1),
+  title: z.string().trim().min(1).max(256),
+  description: z.string().trim().min(1).max(4_000).optional(),
+  status: z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES).optional(),
+  priority: z.number().int().min(0).max(100).optional(),
+  acceptanceCriteria: z.array(z.string().trim().min(1).max(1_000)).max(50).optional(),
+  evidenceRefs: z.array(projectManagerEvidenceRefInput).max(20).optional()
+}).strict();
+const proposeProjectManagerUpdateWorkItemStatusInput = z.object({
+  projectId: z.string().min(1),
+  workItemId: z.string().min(1),
+  status: z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES)
+}).strict();
+const proposeProjectManagerAttachEvidenceInput = z.object({
+  projectId: z.string().min(1),
+  workItemId: z.string().min(1),
+  evidenceRef: projectManagerEvidenceRefInput
 }).strict();
 const skillDetailInput = z.object({
   skillId: z.string().min(1),
@@ -78,7 +129,7 @@ const proposeProjectConfigSyncInput = z.object({
 const proposeSessionInputInput = z.object({
   sessionId: z.string().min(1),
   input: z.string().min(1).max(8_000),
-  submit: z.boolean().optional()
+  submit: z.boolean().default(true)
 }).strict();
 const proposeSessionStartInput = z.object({
   sessionId: z.string().min(1),
@@ -250,6 +301,90 @@ const projectDetailModelInputSchema = {
     projectId: { type: "string", minLength: 1 }
   },
   required: ["projectId"],
+  additionalProperties: false
+};
+const projectManagerWorkItemsModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    status: { type: "string", enum: [...PROJECT_MANAGER_WORK_ITEM_STATUSES] },
+    limit: { type: "integer", minimum: 1, maximum: 50 }
+  },
+  required: ["projectId"],
+  additionalProperties: false
+};
+const projectManagerWorkItemModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    workItemId: { type: "string", minLength: 1 }
+  },
+  required: ["projectId", "workItemId"],
+  additionalProperties: false
+};
+const projectManagerLedgerModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    eventType: { type: "string", enum: [...PROJECT_MANAGER_LEDGER_EVENT_TYPES] },
+    limit: { type: "integer", minimum: 1, maximum: 50 }
+  },
+  required: ["projectId"],
+  additionalProperties: false
+};
+const projectManagerEvidenceRefModelInputSchema = {
+  type: "object",
+  properties: {
+    kind: { type: "string", minLength: 1, maxLength: 64 },
+    label: { type: "string", minLength: 1, maxLength: 256 },
+    status: { type: "string", minLength: 1, maxLength: 64 },
+    ref: { type: "string", minLength: 1, maxLength: 512 },
+    path: { type: "string", minLength: 1, maxLength: 512 },
+    sessionId: { type: "string", minLength: 1, maxLength: 128 }
+  },
+  required: ["kind", "label", "status"],
+  additionalProperties: false
+};
+const proposeProjectManagerCreateWorkItemModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    title: { type: "string", minLength: 1, maxLength: 256 },
+    description: { type: "string", minLength: 1, maxLength: 4_000 },
+    status: { type: "string", enum: [...PROJECT_MANAGER_WORK_ITEM_STATUSES] },
+    priority: { type: "integer", minimum: 0, maximum: 100 },
+    acceptanceCriteria: {
+      type: "array",
+      items: { type: "string", minLength: 1, maxLength: 1_000 },
+      maxItems: 50
+    },
+    evidenceRefs: {
+      type: "array",
+      items: projectManagerEvidenceRefModelInputSchema,
+      maxItems: 20
+    }
+  },
+  required: ["projectId", "title"],
+  additionalProperties: false
+};
+const proposeProjectManagerUpdateWorkItemStatusModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    workItemId: { type: "string", minLength: 1 },
+    status: { type: "string", enum: [...PROJECT_MANAGER_WORK_ITEM_STATUSES] }
+  },
+  required: ["projectId", "workItemId", "status"],
+  additionalProperties: false
+};
+const proposeProjectManagerAttachEvidenceModelInputSchema = {
+  type: "object",
+  properties: {
+    projectId: { type: "string", minLength: 1 },
+    workItemId: { type: "string", minLength: 1 },
+    evidenceRef: projectManagerEvidenceRefModelInputSchema
+  },
+  required: ["projectId", "workItemId", "evidenceRef"],
   additionalProperties: false
 };
 const skillDetailModelInputSchema = {
@@ -670,6 +805,42 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       }
     },
     {
+      name: "openforge.get_project_goal",
+      description: "Read the current project-manager goal for one visible OpenForge project.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: projectDetailInput,
+      modelInputSchema: projectDetailModelInputSchema,
+      execute: async (input, context) => getProjectManagerGoal(input, context)
+    },
+    {
+      name: "openforge.list_project_work_items",
+      description: "List project-manager work items for one visible OpenForge project without raw ledger details.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: projectManagerWorkItemsInput,
+      modelInputSchema: projectManagerWorkItemsModelInputSchema,
+      execute: async (input, context) => listProjectManagerWorkItems(input, context)
+    },
+    {
+      name: "openforge.get_project_work_item",
+      description: "Read one project-manager work item for a visible OpenForge project without raw details.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: projectManagerWorkItemInput,
+      modelInputSchema: projectManagerWorkItemModelInputSchema,
+      execute: async (input, context) => getProjectManagerWorkItem(input, context)
+    },
+    {
+      name: "openforge.get_project_development_ledger",
+      description: "Read bounded project-manager ledger event markers for one visible OpenForge project.",
+      risk: "read",
+      requiresApproval: false,
+      inputSchema: projectManagerLedgerInput,
+      modelInputSchema: projectManagerLedgerModelInputSchema,
+      execute: async (input, context) => getProjectManagerDevelopmentLedger(input, context)
+    },
+    {
       name: "openforge.list_agents",
       description: "List OpenForge agents visible to the current user, optionally scoped to one project.",
       risk: "read",
@@ -847,6 +1018,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
             dashboardHealth: diagnostics.dashboardHealth,
             adapters: diagnostics.adapters,
             modelProviders: diagnostics.modelProviders,
+            projectManager: diagnostics.projectManager,
             copilot: diagnostics.copilot
           }
         };
@@ -905,6 +1077,39 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       modelInputSchema: proposeProjectConfigSyncModelInputSchema,
       execute: async (input, context) =>
         createProjectConfigSyncProposal(input, context)
+    },
+    {
+      name: "openforge.propose_project_manager_create_work_item",
+      description:
+        "Prepare creating one Project Manager work item for user approval. This creates a pending action only and does not mutate Project Manager state.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeProjectManagerCreateWorkItemInput,
+      modelInputSchema: proposeProjectManagerCreateWorkItemModelInputSchema,
+      execute: async (input, context) =>
+        createProjectManagerCreateWorkItemProposal(input, context)
+    },
+    {
+      name: "openforge.propose_project_manager_update_work_item_status",
+      description:
+        "Prepare changing one Project Manager work item status for user approval. Done status requires existing accepted or verified evidence at approval time.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeProjectManagerUpdateWorkItemStatusInput,
+      modelInputSchema: proposeProjectManagerUpdateWorkItemStatusModelInputSchema,
+      execute: async (input, context) =>
+        createProjectManagerUpdateWorkItemStatusProposal(input, context)
+    },
+    {
+      name: "openforge.propose_project_manager_attach_evidence",
+      description:
+        "Prepare attaching one bounded evidence reference to one Project Manager work item for user approval.",
+      risk: "prepare",
+      requiresApproval: true,
+      inputSchema: proposeProjectManagerAttachEvidenceInput,
+      modelInputSchema: proposeProjectManagerAttachEvidenceModelInputSchema,
+      execute: async (input, context) =>
+        createProjectManagerAttachEvidenceProposal(input, context)
     },
     {
       name: "openforge.propose_session_input",
@@ -1170,6 +1375,70 @@ function readLimit(input: unknown): number {
   return typeof value === "number" ? value : 20;
 }
 
+function projectManagerWorkItemOptions(input: unknown) {
+  const data = input as {
+    status?: typeof PROJECT_MANAGER_WORK_ITEM_STATUSES[number] | undefined;
+    limit?: number | undefined;
+  };
+  return {
+    ...(data.status ? { status: data.status } : {}),
+    ...(data.limit !== undefined ? { limit: data.limit } : {})
+  };
+}
+
+function projectManagerLedgerOptions(input: unknown) {
+  const data = input as {
+    eventType?: ProjectManagerLedgerEventType | undefined;
+    limit?: number | undefined;
+  };
+  return {
+    ...(data.eventType ? { eventType: data.eventType } : {}),
+    ...(data.limit !== undefined ? { limit: data.limit } : {})
+  };
+}
+
+function getVisibleProject(context: CopilotToolContext, projectId: string): Project | undefined {
+  return new ProjectRepository(context.db, context.userId).getById(projectId);
+}
+
+async function getProjectManagerGoal(input: unknown, context: CopilotToolContext) {
+  const { projectId } = projectDetailInput.parse(input);
+  const project = getVisibleProject(context, projectId);
+  if (!project) return { goal: null };
+  const goal = new ProjectManagerRepository(context.db, context.userId).getGoal(project.id);
+  return { goal: goal ? toProjectManagerGoalSummary(goal) : null };
+}
+
+async function listProjectManagerWorkItems(input: unknown, context: CopilotToolContext) {
+  const { projectId } = projectManagerWorkItemsInput.parse(input);
+  const project = getVisibleProject(context, projectId);
+  if (!project) return { workItems: [] };
+  return {
+    workItems: new ProjectManagerRepository(context.db, context.userId)
+      .listWorkItems(project.id, projectManagerWorkItemOptions(input))
+      .map(toProjectManagerWorkItemSummary)
+  };
+}
+
+async function getProjectManagerWorkItem(input: unknown, context: CopilotToolContext) {
+  const { projectId, workItemId } = projectManagerWorkItemInput.parse(input);
+  const project = getVisibleProject(context, projectId);
+  if (!project) return { workItem: null };
+  const workItem = new ProjectManagerRepository(context.db, context.userId).getWorkItem(project.id, workItemId);
+  return { workItem: workItem ? toProjectManagerWorkItemSummary(workItem) : null };
+}
+
+async function getProjectManagerDevelopmentLedger(input: unknown, context: CopilotToolContext) {
+  const { projectId } = projectManagerLedgerInput.parse(input);
+  const project = getVisibleProject(context, projectId);
+  if (!project) return { events: [] };
+  return {
+    events: new ProjectManagerRepository(context.db, context.userId)
+      .listLedgerEvents(project.id, projectManagerLedgerOptions(input))
+      .map(toProjectManagerLedgerEventSummary)
+  };
+}
+
 interface RuntimeSessionSummary {
   id: string;
   status: string;
@@ -1215,6 +1484,62 @@ function toProjectDetail(project: Project, sessions: Session[], runtimeSessions:
     templateId: project.templateId,
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString()
+  };
+}
+
+function toProjectManagerGoalSummary(goal: ProjectManagerGoal) {
+  return {
+    id: goal.id,
+    projectId: goal.projectId,
+    summary: goal.summary,
+    constraints: goal.constraints,
+    acceptanceCriteria: goal.acceptanceCriteria,
+    status: goal.status,
+    updatedAt: goal.updatedAt
+  };
+}
+
+function toProjectManagerWorkItemSummary(workItem: ProjectManagerWorkItem) {
+  return {
+    id: workItem.id,
+    projectId: workItem.projectId,
+    title: workItem.title,
+    description: workItem.description,
+    status: workItem.status,
+    priority: workItem.priority,
+    acceptanceCriteria: workItem.acceptanceCriteria,
+    evidenceRefCount: workItem.evidenceRefs.length,
+    evidenceRefs: workItem.evidenceRefs.map(toProjectManagerEvidenceRefSummary),
+    feishuRefCount: workItem.feishuRefs.length,
+    updatedAt: workItem.updatedAt
+  };
+}
+
+function toProjectManagerLedgerEventSummary(event: ProjectManagerLedgerEvent) {
+  return {
+    id: event.id,
+    projectId: event.projectId,
+    workItemId: event.workItemId,
+    eventType: event.eventType,
+    status: event.status,
+    evidenceRefCount: event.evidenceRefs.length,
+    feishuRefCount: event.feishuRefs.length,
+    createdAt: event.createdAt
+  };
+}
+
+function toProjectManagerEvidenceRefSummary(ref: ProjectManagerEvidenceRef) {
+  return {
+    kind: ref.kind,
+    label: ref.label,
+    status: ref.status,
+    ref: ref.ref,
+    path: ref.path,
+    sessionId: ref.sessionId,
+    copilotRunId: ref.copilotRunId,
+    feishuChatId: ref.feishuChatId,
+    feishuMessageId: ref.feishuMessageId,
+    createdAt: ref.createdAt
   };
 }
 
@@ -1744,21 +2069,126 @@ function createProjectConfigSyncProposal(
   return createPendingProposal(context, "openforge.propose_project_config_sync", parsed);
 }
 
-function createSessionInputProposal(
+function createProjectManagerCreateWorkItemProposal(
   input: unknown,
   context: Pick<CopilotToolContext, "db" | "userId" | "runId">
+) {
+  const parsed = proposeProjectManagerCreateWorkItemInput.parse(input);
+  requireVisibleProject(context, parsed.projectId, "Copilot Project Manager work item target is not available");
+  return createPendingProposal(context, "openforge.propose_project_manager_create_work_item", {
+    ...parsed,
+    actionType: "create_work_item",
+    copilotRunId: requireCopilotRunId(context)
+  });
+}
+
+function createProjectManagerUpdateWorkItemStatusProposal(
+  input: unknown,
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId">
+) {
+  const parsed = proposeProjectManagerUpdateWorkItemStatusInput.parse(input);
+  const workItem = requireVisibleProjectManagerWorkItem(context, parsed.projectId, parsed.workItemId);
+  return createPendingProposal(context, "openforge.propose_project_manager_update_work_item_status", {
+    ...parsed,
+    actionType: "update_work_item_status",
+    evidenceRefCount: workItem.evidenceRefs.length,
+    trustedEvidenceRefCount: countTrustedProjectManagerEvidenceRefs(workItem),
+    copilotRunId: requireCopilotRunId(context)
+  });
+}
+
+function createProjectManagerAttachEvidenceProposal(
+  input: unknown,
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId">
+) {
+  const parsed = proposeProjectManagerAttachEvidenceInput.parse(input);
+  requireVisibleProjectManagerWorkItem(context, parsed.projectId, parsed.workItemId);
+  return createPendingProposal(context, "openforge.propose_project_manager_attach_evidence", {
+    ...parsed,
+    actionType: "attach_evidence",
+    copilotRunId: requireCopilotRunId(context)
+  });
+}
+
+function requireCopilotRunId(context: Pick<CopilotToolContext, "runId">): string {
+  if (!context.runId) throw new CopilotToolValidationError("Copilot run is required for pending actions");
+  return context.runId;
+}
+
+function requireVisibleProject(
+  context: Pick<CopilotToolContext, "db" | "userId">,
+  projectId: string,
+  message: string
+): Project {
+  const project = new ProjectRepository(context.db, context.userId).getById(projectId);
+  if (!project) throw new CopilotToolValidationError(message);
+  return project;
+}
+
+function requireVisibleProjectManagerWorkItem(
+  context: Pick<CopilotToolContext, "db" | "userId">,
+  projectId: string,
+  workItemId: string
+): ProjectManagerWorkItem {
+  const project = requireVisibleProject(context, projectId, "Copilot Project Manager work item target is not available");
+  const workItem = new ProjectManagerRepository(context.db, context.userId).getWorkItem(project.id, workItemId);
+  if (!workItem) throw new CopilotToolValidationError("Copilot Project Manager work item target is not available");
+  return workItem;
+}
+
+function countTrustedProjectManagerEvidenceRefs(workItem: ProjectManagerWorkItem): number {
+  return workItem.evidenceRefs.filter((ref) => {
+    const status = ref.status?.trim().toLowerCase();
+    return status === "accepted" || status === "verified";
+  }).length;
+}
+
+async function createSessionInputProposal(
+  input: unknown,
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId" | "sessionManager">
 ) {
   const parsed = proposeSessionInputInput.parse(input);
   const session = new SessionRepository(context.db, context.userId).getById(parsed.sessionId);
   if (!session || session.status !== "running" || !session.tmuxSession) {
     throw new CopilotToolValidationError("Copilot session input target is not a running terminal session");
   }
-  if (!hasSameRunSessionInputEvidence(context, parsed.sessionId)) {
+  if (!await ensureSameRunSessionInputEvidence(context, session)) {
     throw new CopilotToolValidationError(
       "Copilot session input requires same-run session detail and terminal snapshot evidence"
     );
   }
   return createPendingProposal(context, "openforge.propose_session_input", parsed);
+}
+
+async function ensureSameRunSessionInputEvidence(
+  context: Pick<CopilotToolContext, "db" | "userId" | "runId" | "sessionManager">,
+  session: Session
+): Promise<boolean> {
+  if (!context.runId) return false;
+  if (hasSameRunSessionInputEvidence(context, session.id)) return true;
+  const repo = new CopilotRepository(context.db, context.userId);
+  const events = repo.listEvents(context.runId);
+  const hasDetail = events.some((event) =>
+    event.type === "tool_result" &&
+    event.message === "openforge.get_session_detail" &&
+    outputSessionId(event.payload) === session.id
+  );
+  if (!hasDetail) {
+    const project = new ProjectRepository(context.db, context.userId).getById(session.projectId) ?? undefined;
+    repo.addEvent(context.runId, {
+      type: "tool_result",
+      message: "openforge.get_session_detail",
+      payload: { output: { session: toSessionDetail(session, project, readRuntimeSessions(context)) } }
+    });
+  }
+  const snapshot = await getSessionTerminalSnapshot({ sessionId: session.id }, context);
+  if (!isAvailableSessionTerminalSnapshot(snapshot, session.id)) return false;
+  repo.addEvent(context.runId, {
+    type: "tool_result",
+    message: "openforge.get_session_terminal_snapshot",
+    payload: { output: snapshot }
+  });
+  return true;
 }
 
 function hasSameRunSessionInputEvidence(
@@ -1792,6 +2222,11 @@ function outputTerminalAvailable(payload: Record<string, unknown>): boolean {
   const output = toPlainRecord(payload.output);
   const terminal = toPlainRecord(output?.terminal);
   return terminal?.available === true;
+}
+
+function isAvailableSessionTerminalSnapshot(output: unknown, sessionId: string): boolean {
+  if (!output || typeof output !== "object" || Array.isArray(output)) return false;
+  return outputSessionId({ output }) === sessionId && outputTerminalAvailable({ output });
 }
 
 function toPlainRecord(value: unknown): Record<string, unknown> | null {

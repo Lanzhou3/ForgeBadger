@@ -19,6 +19,7 @@ import { SessionRepository } from "../src/db/repositories/session-repository.js"
 import { AgentRepository } from "../src/db/repositories/agent-repository.js";
 import { NotificationRepository } from "../src/db/repositories/notification-repository.js";
 import { PluginRepository } from "../src/db/repositories/plugin-repository.js";
+import { ProjectManagerRepository } from "../src/db/repositories/project-manager-repository.js";
 import { SkillRepository } from "../src/db/repositories/skill-repository.js";
 import { TemplateRepository } from "../src/db/repositories/template-repository.js";
 import { UsageRepository } from "../src/db/repositories/usage-repository.js";
@@ -104,6 +105,358 @@ describe("copilot tools", () => {
     if (!result.ok) return;
     assert.equal(result.requiresApproval, false);
     assert.equal((result.output as { projects: Array<{ id: string }> }).projects[0]?.id, project.id);
+  });
+
+  it("reads project-manager state through tenant-scoped read tools without approval", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge PM",
+      path: "/tmp/openforge-pm-tools",
+      aiTool: "claude"
+    });
+    const repo = new ProjectManagerRepository(db, userId);
+    const goal = repo.upsertGoal(project.id, {
+      summary: "Close the project-manager ledger",
+      acceptanceCriteria: ["tools are read-only"]
+    });
+    const item = repo.createWorkItem(project.id, {
+      title: "Implement Copilot tools",
+      evidenceRefs: [{ kind: "test", label: "unit", status: "passed", ref: "test/copilot-tools.test.ts" }]
+    });
+
+    const tools = [
+      "openforge.get_project_goal",
+      "openforge.list_project_work_items",
+      "openforge.get_project_work_item",
+      "openforge.get_project_development_ledger"
+    ];
+    for (const name of tools) {
+      const definition = registry.tools.get(name);
+      assert.equal(definition?.risk, "read");
+      assert.equal(definition?.requiresApproval, false);
+    }
+
+    const goalResult = await executeCopilotTool(registry, "openforge.get_project_goal", { projectId: project.id }, context(userId));
+    const listResult = await executeCopilotTool(registry, "openforge.list_project_work_items", { projectId: project.id }, context(userId));
+    const itemResult = await executeCopilotTool(registry, "openforge.get_project_work_item", {
+      projectId: project.id,
+      workItemId: item.id
+    }, context(userId));
+    const ledgerResult = await executeCopilotTool(registry, "openforge.get_project_development_ledger", {
+      projectId: project.id,
+      limit: 10
+    }, context(userId));
+
+    assert.equal(goalResult.ok, true);
+    assert.equal(listResult.ok, true);
+    assert.equal(itemResult.ok, true);
+    assert.equal(ledgerResult.ok, true);
+    if (!goalResult.ok || !listResult.ok || !itemResult.ok || !ledgerResult.ok) return;
+    assert.equal(goalResult.requiresApproval, false);
+    assert.equal((goalResult.output as { goal: { id: string } }).goal.id, goal.id);
+    assert.equal((listResult.output as { workItems: Array<{ id: string }> }).workItems[0]?.id, item.id);
+    assert.equal((itemResult.output as { workItem: { evidenceRefCount: number } }).workItem.evidenceRefCount, 1);
+    assert.equal((ledgerResult.output as { events: Array<{ eventType: string }> }).events.length, 2);
+  });
+
+  it("returns empty project-manager tool output for cross-tenant or invalid ids", async () => {
+    const foreignProject = new ProjectRepository(db, otherUserId).create({
+      name: "Foreign PM",
+      path: "/tmp/foreign-pm-tools",
+      aiTool: "claude"
+    });
+    const foreignItem = new ProjectManagerRepository(db, otherUserId).createWorkItem(foreignProject.id, {
+      title: "Foreign task"
+    });
+
+    const goal = await executeCopilotTool(registry, "openforge.get_project_goal", { projectId: foreignProject.id }, context(userId));
+    const list = await executeCopilotTool(registry, "openforge.list_project_work_items", { projectId: foreignProject.id }, context(userId));
+    const item = await executeCopilotTool(registry, "openforge.get_project_work_item", {
+      projectId: foreignProject.id,
+      workItemId: foreignItem.id
+    }, context(userId));
+    const ledger = await executeCopilotTool(registry, "openforge.get_project_development_ledger", {
+      projectId: "missing-project",
+      limit: 5
+    }, context(userId));
+    const invalid = await executeCopilotTool(registry, "openforge.get_project_development_ledger", {
+      projectId: foreignProject.id,
+      limit: 500
+    }, context(userId));
+
+    assert.equal(goal.ok, true);
+    assert.equal(list.ok, true);
+    assert.equal(item.ok, true);
+    assert.equal(ledger.ok, true);
+    assert.equal(invalid.ok, false);
+    if (!goal.ok || !list.ok || !item.ok || !ledger.ok) return;
+    assert.equal((goal.output as { goal: unknown }).goal, null);
+    assert.deepEqual((list.output as { workItems: unknown[] }).workItems, []);
+    assert.equal((item.output as { workItem: unknown }).workItem, null);
+    assert.deepEqual((ledger.output as { events: unknown[] }).events, []);
+  });
+
+  it("filters project-manager ledger tool output by event type before limiting", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "Filtered PM",
+      path: "/tmp/filtered-pm-tools",
+      aiTool: "claude"
+    });
+    const repo = new ProjectManagerRepository(db, userId);
+    const item = repo.createWorkItem(project.id, { title: "Filter ledger" });
+    repo.updateWorkItemStatus(project.id, item.id, { status: "in_progress" });
+    repo.attachEvidence(project.id, item.id, {
+      evidenceRefs: [{ kind: "test", label: "copilot", status: "passed", ref: "test/copilot-tools.test.ts" }]
+    });
+
+    const result = await executeCopilotTool(registry, "openforge.get_project_development_ledger", {
+      projectId: project.id,
+      eventType: "evidence_attached",
+      limit: 1
+    }, context(userId));
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const events = (result.output as { events: Array<{ eventType: string }> }).events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.eventType, "evidence_attached");
+  });
+
+  it("redacts raw multiline evidence references from project-manager read tools", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "Raw Evidence PM",
+      path: "/tmp/raw-evidence-pm-tools",
+      aiTool: "claude"
+    });
+    const rawRef = [
+      "$ codex exec unsafe-command",
+      `${["std", "out"].join("")}: transcript`,
+      `${["std", "err"].join("")}: failure`
+    ].join("\n");
+    const item = new ProjectManagerRepository(db, userId).createWorkItem(project.id, {
+      title: "Protect evidence refs",
+      evidenceRefs: [{ kind: "test", label: "raw evidence", status: "passed", ref: rawRef }]
+    });
+
+    const result = await executeCopilotTool(registry, "openforge.get_project_work_item", {
+      projectId: project.id,
+      workItemId: item.id
+    }, context(userId));
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const serialized = JSON.stringify(result.output);
+    assert.doesNotMatch(serialized, /unsafe-command|transcript|failure/u);
+    assert.match(serialized, /\[REDACTED\]/u);
+  });
+
+  it("exposes exactly three Project Manager prepare tools", () => {
+    const pmPrepareTools = [...registry.tools.values()]
+      .filter((tool) => tool.name.startsWith("openforge.propose_project_manager_"));
+
+    assert.deepEqual(pmPrepareTools.map((tool) => tool.name), [
+      "openforge.propose_project_manager_create_work_item",
+      "openforge.propose_project_manager_update_work_item_status",
+      "openforge.propose_project_manager_attach_evidence"
+    ]);
+    for (const tool of pmPrepareTools) {
+      assert.equal(tool.risk, "prepare");
+      assert.equal(tool.requiresApproval, true);
+    }
+  });
+
+  it("creates Project Manager proposals as pending actions without mutating PM state", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "PM Proposals",
+      path: "/tmp/pm-proposals",
+      aiTool: "claude"
+    });
+    const pm = new ProjectManagerRepository(db, userId);
+    const workItem = pm.createWorkItem(project.id, {
+      title: "Existing task",
+      status: "in_progress",
+      evidenceRefs: [{ kind: "test", label: "existing", status: "accepted", ref: "test/existing" }]
+    });
+    const run = new CopilotRepository(db, userId).createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Prepare PM writes"
+    });
+
+    const createResult = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_create_work_item",
+      {
+        projectId: project.id,
+        title: "Create through approval",
+        description: "Only a proposal",
+        priority: 7,
+        acceptanceCriteria: ["Approved action creates it"],
+        evidenceRefs: [{ kind: "copilot", label: "safe summary", status: "verified", ref: "run-summary" }]
+      },
+      context(userId, run.id)
+    );
+    const statusResult = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_update_work_item_status",
+      { projectId: project.id, workItemId: workItem.id, status: "done" },
+      context(userId, run.id)
+    );
+    const evidenceResult = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_attach_evidence",
+      {
+        projectId: project.id,
+        workItemId: workItem.id,
+        evidenceRef: { kind: "test", label: "focused route test", status: "verified", ref: "test/copilot-routes.test.ts" }
+      },
+      context(userId, run.id)
+    );
+
+    const actions = new CopilotRepository(db, userId).listPendingActions(run.id);
+    assert.deepEqual([createResult.ok, statusResult.ok, evidenceResult.ok], [true, true, true]);
+    assert.equal(createResult.ok && createResult.requiresApproval, true);
+    assert.equal(statusResult.ok && statusResult.requiresApproval, true);
+    assert.equal(evidenceResult.ok && evidenceResult.requiresApproval, true);
+    assert.deepEqual(actions.map((action) => action.type), [
+      "openforge.propose_project_manager_create_work_item",
+      "openforge.propose_project_manager_update_work_item_status",
+      "openforge.propose_project_manager_attach_evidence"
+    ]);
+    assert.deepEqual(actions.map((action) => action.input.actionType), [
+      "create_work_item",
+      "update_work_item_status",
+      "attach_evidence"
+    ]);
+    assert.equal(actions[0]?.input.projectId, project.id);
+    assert.equal(actions[0]?.input.copilotRunId, run.id);
+    assert.equal(actions[0]?.input.pendingActionId, undefined);
+    assert.equal(actions[1]?.input.workItemId, workItem.id);
+    assert.equal(actions[1]?.input.copilotRunId, run.id);
+    assert.equal(actions[1]?.input.evidenceRefCount, 1);
+    assert.equal(actions[1]?.input.trustedEvidenceRefCount, 1);
+    assert.equal(actions[1]?.input.pendingActionId, undefined);
+    assert.equal(actions[2]?.input.workItemId, workItem.id);
+    assert.equal(actions[2]?.input.copilotRunId, run.id);
+    assert.equal(actions[2]?.input.pendingActionId, undefined);
+    assert.equal(pm.listWorkItems(project.id).length, 1);
+    assert.equal(pm.getWorkItem(project.id, workItem.id)?.status, "in_progress");
+    assert.equal(pm.getWorkItem(project.id, workItem.id)?.evidenceRefs.length, 1);
+  });
+
+  it("rejects Project Manager proposals for unavailable projects or work items", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "Visible PM",
+      path: "/tmp/visible-pm",
+      aiTool: "claude"
+    });
+    const foreignProject = new ProjectRepository(db, otherUserId).create({
+      name: "Foreign PM",
+      path: "/tmp/foreign-pm",
+      aiTool: "claude"
+    });
+    const foreignItem = new ProjectManagerRepository(db, otherUserId).createWorkItem(foreignProject.id, {
+      title: "Foreign task"
+    });
+    const run = new CopilotRepository(db, userId).createRun({
+      status: "running",
+      source: "copilot",
+      goal: "Reject invalid PM proposals"
+    });
+
+    const foreignCreate = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_create_work_item",
+      { projectId: foreignProject.id, title: "Should fail" },
+      context(userId, run.id)
+    );
+    const foreignStatus = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_update_work_item_status",
+      { projectId: foreignProject.id, workItemId: foreignItem.id, status: "done" },
+      context(userId, run.id)
+    );
+    const missingItem = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_attach_evidence",
+      {
+        projectId: project.id,
+        workItemId: "missing-item",
+        evidenceRef: { kind: "test", label: "missing", status: "verified", ref: "missing" }
+      },
+      context(userId, run.id)
+    );
+    const modelSuppliedPendingAction = await executeCopilotTool(
+      registry,
+      "openforge.propose_project_manager_update_work_item_status",
+      { projectId: project.id, workItemId: "missing-item", status: "done", pendingActionId: "model-supplied" },
+      context(userId, run.id)
+    );
+
+    assert.deepEqual([
+      foreignCreate.ok,
+      foreignStatus.ok,
+      missingItem.ok,
+      modelSuppliedPendingAction.ok
+    ], [false, false, false, false]);
+    assert.deepEqual(
+      new CopilotRepository(db, userId).listPendingActions(run.id),
+      []
+    );
+  });
+
+  it("redacts project-manager tool output and diagnostics summaries", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "Redacted PM",
+      path: "/tmp/redacted-pm-tools",
+      aiTool: "claude"
+    });
+    const otherProject = new ProjectRepository(db, otherUserId).create({
+      name: "Other Redacted PM",
+      path: "/tmp/other-redacted-pm-tools",
+      aiTool: "claude"
+    });
+    const repo = new ProjectManagerRepository(db, userId);
+    const toolSecret = ["sk", "pm-tool-secret"].join("-");
+    const toolRef = ["Authorization:", "Bearer pm.tool.jwt"].join(" ");
+    const stdErrKey = ["std", "err"].join("");
+    const toolStdErrSecret = ["sk", ["pm-tool-std", "err"].join("")].join("-");
+    const toolSignature = ["X-Lark", "Signature: pm-tool-signature"].join("-");
+    const item = repo.createWorkItem(project.id, {
+      title: "Protect output",
+      details: {
+        rawTerminalOutput: "OPENFORGE_ATTACH_TOKEN=pm-tool-attach-secret",
+        providerCredential: toolSecret
+      }
+    });
+    repo.attachEvidence(project.id, item.id, {
+      evidenceRefs: [{ kind: "test", label: "redaction", status: "passed", ref: toolRef }],
+      details: { [stdErrKey]: toolStdErrSecret, signature: toolSignature }
+    });
+    new ProjectManagerRepository(db, otherUserId).createWorkItem(otherProject.id, { title: "Foreign hidden" });
+
+    const itemResult = await executeCopilotTool(registry, "openforge.get_project_work_item", {
+      projectId: project.id,
+      workItemId: item.id
+    }, context(userId));
+    const ledgerResult = await executeCopilotTool(registry, "openforge.get_project_development_ledger", {
+      projectId: project.id
+    }, context(userId));
+    const diagnostics = await executeCopilotTool(registry, "openforge.get_diagnostics_summary", {}, context(userId));
+
+    assert.equal(itemResult.ok, true);
+    assert.equal(ledgerResult.ok, true);
+    assert.equal(diagnostics.ok, true);
+    if (!itemResult.ok || !ledgerResult.ok || !diagnostics.ok) return;
+    const serialized = JSON.stringify({
+      item: itemResult.output,
+      ledger: ledgerResult.output,
+      diagnostics: diagnostics.output
+    });
+    assert.equal(serialized.includes("details"), false);
+    assert.equal(serialized.includes("Foreign hidden"), false);
+    assert.equal((diagnostics.output as { diagnostics: { projectManager: { ledgerEventCount: number } } }).diagnostics.projectManager.ledgerEventCount, 2);
+    assert.doesNotMatch(serialized, new RegExp(["pm-tool-attach-secret", ["sk", "pm-tool-secret"].join("-"), "pm\\.tool\\.jwt"].join("|"), "u"));
+    assert.doesNotMatch(serialized, new RegExp([["sk", "pm-tool-std", "err"].join("-"), "pm-tool-signature"].join("|"), "u"));
   });
 
   it("reads agents, skills, and templates as Copilot platform inventory", async () => {
@@ -1314,7 +1667,7 @@ describe("copilot tools", () => {
     assert.equal(new SessionRepository(db, userId).list().length, 0);
   });
 
-  it("requires same-run session detail and terminal snapshot before proposing session input", async () => {
+  it("records same-run session detail and terminal snapshot before proposing session input", async () => {
     const project = new ProjectRepository(db, userId).create({
       name: "OpenForge",
       path: "/tmp/openforge",
@@ -1336,40 +1689,45 @@ describe("copilot tools", () => {
       goal: "Send input to a running session"
     });
 
-    const withoutEvidence = await executeCopilotTool(
+    const withoutTerminalAccess = await executeCopilotTool(
       registry,
       "openforge.propose_session_input",
       { sessionId: session.id, input: "pwd\\n", submit: true },
       context(userId, run.id)
     );
 
-    copilot.addEvent(run.id, {
-      type: "tool_result",
-      message: "openforge.get_session_detail",
-      payload: { output: { session: { id: session.id, status: "running", isLive: true } } }
-    });
-    copilot.addEvent(run.id, {
-      type: "tool_result",
-      message: "openforge.get_session_terminal_snapshot",
-      payload: {
-        output: {
-          session: { id: session.id },
-          terminal: { available: true, truncated: false, text: "Claude Code ready" }
-        }
-      }
-    });
-    const withEvidence = await executeCopilotTool(
+    const withAutoEvidence = await executeCopilotTool(
       registry,
       "openforge.propose_session_input",
-      { sessionId: session.id, input: "pwd\\n", submit: true },
-      context(userId, run.id)
+      { sessionId: session.id, input: "pwd\\n" },
+      {
+        ...context(userId, run.id),
+        sessionManager: {
+          async captureHistory(sessionId: string) {
+            assert.equal(sessionId, session.id);
+            return "Claude Code ready";
+          }
+        }
+      }
     );
 
     const actions = new CopilotRepository(db, userId).listPendingActions(run.id);
-    assert.equal(withoutEvidence.ok, false);
-    assert.equal(withoutEvidence.error.code, "copilot_tool_validation_failed");
-    assert.match(withoutEvidence.error.message, /terminal snapshot/i);
-    assert.equal(withEvidence.ok, true);
+    const evidenceEvents = new CopilotRepository(db, userId).listEvents(run.id);
+    assert.equal(withoutTerminalAccess.ok, false);
+    assert.equal(withoutTerminalAccess.error.code, "copilot_tool_validation_failed");
+    assert.match(withoutTerminalAccess.error.message, /terminal snapshot/i);
+    assert.equal(withAutoEvidence.ok, true);
+    assert.ok(evidenceEvents.some((event) =>
+      event.type === "tool_result" &&
+      event.message === "openforge.get_session_detail" &&
+      event.payload.output?.session?.id === session.id
+    ));
+    assert.ok(evidenceEvents.some((event) =>
+      event.type === "tool_result" &&
+      event.message === "openforge.get_session_terminal_snapshot" &&
+      event.payload.output?.session?.id === session.id &&
+      event.payload.output?.terminal?.available === true
+    ));
     assert.equal(actions.length, 1);
     assert.equal(actions[0]?.type, "openforge.propose_session_input");
     assert.deepEqual(actions[0]?.input, { sessionId: session.id, input: "pwd\\n", submit: true });

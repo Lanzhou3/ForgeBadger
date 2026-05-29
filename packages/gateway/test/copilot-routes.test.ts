@@ -16,6 +16,7 @@ import { ActivityRepository } from "../src/db/repositories/activity-repository.j
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
+import { ProjectManagerRepository } from "../src/db/repositories/project-manager-repository.js";
 import { AgentRepository } from "../src/db/repositories/agent-repository.js";
 import { PluginRepository } from "../src/db/repositories/plugin-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
@@ -70,6 +71,8 @@ describe("copilot routes", () => {
   let sentSessionInputs: Array<{ sessionId: string; data: string }>;
   let createdSessionInputs: Array<{ userId: string; sessionId: string; cwd: string; command: string }>;
   let capturedSessionIds: string[];
+  let terminalHistoryOutputs: string[];
+  let sessionInputTrackingDelaysMs: number[];
   let runtimeSessionSnapshots: Array<{ id: string; status: string; tmuxName: string }> | null;
   let stoppedSessionInputs: Array<{ sessionId: string; tmuxName?: string; userId?: string }>;
   let providerModelFetchInputs: Array<{ baseUrl: string; apiKey?: string; modelsUrl?: string; timeoutMs?: number }>;
@@ -97,6 +100,8 @@ describe("copilot routes", () => {
     sentSessionInputs = [];
     createdSessionInputs = [];
     capturedSessionIds = [];
+    terminalHistoryOutputs = [];
+    sessionInputTrackingDelaysMs = [];
     runtimeSessionSnapshots = null;
     stoppedSessionInputs = [];
     providerModelFetchInputs = [];
@@ -158,7 +163,7 @@ describe("copilot routes", () => {
         },
         async captureHistory(sessionId: string) {
           capturedSessionIds.push(sessionId);
-          return "Claude Code output:\nCurrent task is complete.\n";
+          return terminalHistoryOutputs.shift() ?? "Claude Code output:\nCurrent task is complete.\n";
         },
         listSessions() {
           if (!runtimeSessionSnapshots) {
@@ -219,7 +224,8 @@ describe("copilot routes", () => {
           }
         };
       },
-      adapterCommandRunner
+      adapterCommandRunner,
+      sessionInputTrackingDelaysMs
     }));
   });
 
@@ -643,6 +649,54 @@ describe("copilot routes", () => {
     assert.equal(deletedMessage.status, 200);
     assert.equal(deletedMessage.body.data.message.deletedAt !== null, true);
     assert.deepEqual(messagesAfterDelete.body.data.messages.map((message: { role: string }) => message.role), ["assistant"]);
+  });
+
+  it("includes recent conversation context when replying to follow-up messages", async () => {
+    createOpenAiProvider();
+    const repo = new CopilotRepository(db, userId);
+    const conversation = repo.createConversation({
+      title: "Frontend review",
+      source: "copilot"
+    });
+    repo.createConversationMessage(conversation.id, {
+      role: "user",
+      content: "看下当前aether-glass项目的会话是否正常活跃？最新的操作记录是什么"
+    });
+    repo.createConversationMessage(conversation.id, {
+      role: "assistant",
+      content: "最新操作是 Claude Code 完成了 aether-glass 前端全量代码审查，发现 CRITICAL：XSS-vulnerable token storage；HIGH：WebSocket 内存泄漏风险。"
+    });
+    modelEventResponses = [
+      [{
+        type: "tool_call_requested",
+        id: "tool-call-dashboard",
+        name: "openforge.get_dashboard_summary",
+        input: {}
+      }],
+      [{
+        type: "assistant_message",
+        text: "严重问题是 XSS-vulnerable token storage 和 WebSocket 内存泄漏风险。"
+      }]
+    ];
+
+    const sent = await makeRequest(app, "POST", `/api/v1/copilot/conversations/${conversation.id}/messages`, {
+      prompt: "有哪些严重问题？",
+      source: "copilot"
+    }, authHeaders());
+
+    const run = repo.getRun(sent.body.data.run.id as string);
+    assert.equal(sent.status, 201);
+    assert.equal(sent.body.code, 0);
+    assert.equal(run?.goal, "有哪些严重问题？");
+    assert.equal(calls.length, 2);
+    assert.match(calls[0]?.input ?? "", /Conversation context/);
+    assert.match(calls[0]?.input ?? "", /aether-glass 前端全量代码审查/);
+    assert.match(calls[0]?.input ?? "", /XSS-vulnerable token storage/);
+    assert.match(calls[0]?.input ?? "", /Current user request:\n有哪些严重问题？/);
+    assert.match(calls[1]?.input ?? "", /Conversation context/);
+    assert.match(calls[1]?.input ?? "", /WebSocket 内存泄漏风险/);
+    assert.match(calls[1]?.input ?? "", /Original user request:\n有哪些严重问题？/);
+    assert.match(sent.body.data.messages.at(-1)?.content ?? "", /XSS-vulnerable token storage/);
   });
 
   it("does not let conversation replies confuse active projects with running sessions", async () => {
@@ -1324,6 +1378,44 @@ describe("copilot routes", () => {
     assert.equal(calls.length, 0);
   });
 
+  it("recovers a stale approval wait before creating a new Copilot run", async () => {
+    const repo = new CopilotRepository(db, userId);
+    const existing = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Stale approval run"
+    });
+    const action = repo.createPendingAction(existing.id, {
+      type: "openforge.propose_adapter_refresh",
+      input: { adapter: "codex" }
+    });
+    const staleUpdatedAt = Date.now() - (25 * 60 * 60 * 1000);
+    db.prepare("UPDATE copilot_runs SET updated_at = ? WHERE id = ? AND user_id = ?").run(
+      staleUpdatedAt,
+      existing.id,
+      userId
+    );
+    db.prepare("UPDATE copilot_pending_actions SET updated_at = ? WHERE id = ? AND user_id = ?").run(
+      staleUpdatedAt,
+      action.id,
+      userId
+    );
+    createOpenAiProvider();
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Start after stale approval",
+      source: "copilot"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.notEqual(res.body.data.run.id, existing.id);
+    assert.equal(repo.getRun(existing.id)?.status, "cancelled");
+    assert.equal(repo.getRun(existing.id)?.errorCode, "copilot_stale_approval_recovered");
+    assert.equal(repo.getPendingAction(action.id)?.status, "rejected");
+    assert.deepEqual(repo.getPendingAction(action.id)?.result, { reason: "stale_approval_recovered" });
+  });
+
   it("injects bounded active memory recall for Copilot page runs", async () => {
     createOpenAiProvider();
     new CopilotMemoryRepository(db, userId).createEntry({
@@ -1512,6 +1604,54 @@ describe("copilot routes", () => {
     assert.equal(res.body.data.pendingActions[0].input.input, "pwd");
     assert.equal(res.body.data.pendingActions[0].input.submit, true);
     assert.deepEqual(capturedSessionIds, [session.id]);
+  });
+
+  it("auto-gathers session evidence when proposing session input directly", async () => {
+    createOpenAiProvider();
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const session = sessionRepo.create({
+      projectId: project.id,
+      name: "Claude Code",
+      aiTool: "claude",
+      workingDir: "/tmp/openforge",
+      tmuxSession: "of-user123-session_direct"
+    });
+    sessionRepo.update(session.id, { status: "running" });
+    modelEvents = [{
+      type: "tool_call_requested",
+      id: "tool-call-input",
+      name: "openforge.propose_session_input",
+      input: {
+        sessionId: session.id,
+        input: "pwd",
+        submit: true
+      }
+    }];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Send pwd to Claude Code",
+      source: "copilot"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.run.status, "waiting_for_approval");
+    assert.equal(res.body.data.pendingActions.length, 1);
+    assert.equal(res.body.data.pendingActions[0].type, "openforge.propose_session_input");
+    assert.equal(res.body.data.pendingActions[0].input.sessionId, session.id);
+    assert.deepEqual(capturedSessionIds, [session.id]);
+    const storedEvents = new CopilotRepository(db, userId).listEvents(res.body.data.run.id);
+    assert.ok(storedEvents.some((event) =>
+      event.type === "tool_result" && event.message === "openforge.get_session_detail"
+    ));
+    assert.ok(storedEvents.some((event) =>
+      event.type === "tool_result" && event.message === "openforge.get_session_terminal_snapshot"
+    ));
   });
 
   it("keeps session-stop tool runs waiting for approval", async () => {
@@ -1751,6 +1891,34 @@ describe("copilot routes", () => {
     assert.equal(toolResultDetails.toolName, "openforge.get_dashboard_summary");
     assert.equal(toolResultDetails.toolCallId, "tool-call-1");
     assert.equal(typeof toolResultDetails.output?.stats?.projects, "number");
+  });
+
+  it("does not stop long read-tool runs at a fixed event budget", async () => {
+    createOpenAiProvider();
+    modelEventResponses = [
+      Array.from({ length: 20 }, (_, index) => ({
+        type: "tool_call_requested" as const,
+        id: `tool-call-${index + 1}`,
+        name: "openforge.get_dashboard_summary",
+        input: {}
+      })),
+      [{ type: "assistant_message", text: "Finished after checking the requested context." }]
+    ];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Summarize session state, recent activity, and adapter availability",
+      source: "dashboard"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.run.status, "completed");
+    assert.equal(res.body.data.run.stepCount, 41);
+    assert.equal(
+      res.body.data.events.filter((event: { type: string }) => event.type === "tool_result").length,
+      20
+    );
+    assert.equal(res.body.data.events.at(-1)?.message, "Finished after checking the requested context.");
   });
 
   it("fails closed when a read tool output exceeds the Copilot safety limit", async () => {
@@ -2038,7 +2206,7 @@ describe("copilot routes", () => {
         name: "openforge.list_sessions",
         input: {}
       }],
-      [{ type: "assistant_message", text: "OpenForge has one running Claude session." }]
+      [{ type: "assistant_message", text: "OpenForge has one running Claude session: Main session." }]
     ];
 
     const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
@@ -2062,7 +2230,7 @@ describe("copilot routes", () => {
     assert.ok(Array.isArray(calls[1]?.tools));
     assert.ok(Array.isArray(calls[2]?.tools));
     assert.match(calls[2]?.input ?? "", /openforge\.list_sessions/);
-    assert.match(res.body.data.events.at(-1)?.message ?? "", /OpenForge 有 1 个正在运行的会话/);
+    assert.match(res.body.data.events.at(-1)?.message ?? "", /OpenForge has one running Claude session/);
     assert.match(res.body.data.events.at(-1)?.message ?? "", /Main session/);
   });
 
@@ -2292,6 +2460,78 @@ describe("copilot routes", () => {
     assert.doesNotMatch(JSON.stringify(res.body), /说明存在活跃会话/);
     assert.match(res.body.data.events.at(-1)?.message ?? "", /aether-glass 没有正在运行的会话/);
     assert.match(res.body.data.events.at(-1)?.message ?? "", /项目状态 active 只表示项目记录可用/);
+  });
+
+  it("keeps model summaries for live sessions with terminal progress evidence", async () => {
+    createOpenAiProvider();
+    const project = new ProjectRepository(db, userId).create({
+      name: "aether-glass",
+      path: "/tmp/aether-glass",
+      aiTool: "claude"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const createdSession = sessionRepo.create({
+      projectId: project.id,
+      name: "aether-glass",
+      aiTool: "claude",
+      workingDir: "/tmp/aether-glass",
+      tmuxSession: "of-aether-glass"
+    });
+    const session = sessionRepo.updateStatus(createdSession.id, "running") ?? createdSession;
+    new ActivityRepository(db, userId).create({
+      projectId: project.id,
+      sessionId: session.id,
+      type: "session_terminal_review",
+      status: "success",
+      message: "Claude Code completed frontend review"
+    });
+    terminalHistoryOutputs = [
+      "Claude Code review progress:\nFound 18 frontend findings.\nRecap: review completed.\n"
+    ];
+    modelEventResponses = [
+      [
+        {
+          type: "tool_call_requested",
+          id: "tool-call-projects",
+          name: "openforge.list_projects",
+          input: {}
+        },
+        {
+          type: "tool_call_requested",
+          id: "tool-call-sessions",
+          name: "openforge.list_sessions",
+          input: {}
+        },
+        {
+          type: "tool_call_requested",
+          id: "tool-call-activity",
+          name: "openforge.get_recent_activity",
+          input: { limit: 5 }
+        },
+        {
+          type: "tool_call_requested",
+          id: "tool-call-terminal",
+          name: "openforge.get_session_terminal_snapshot",
+          input: { sessionId: session.id, maxBytes: 512 }
+        }
+      ],
+      [{
+        type: "assistant_message",
+        text: "aether-glass 有 1 个正在运行的会话。最新 Claude Code 进度显示 frontend review 已完成，并汇总了 18 个发现。"
+      }]
+    ];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "看下当前aether-glass项目的会话是否正常活跃？最新的操作记录是什么",
+      source: "copilot"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.run.status, "completed");
+    assert.match(res.body.data.events.at(-1)?.message ?? "", /frontend review 已完成/);
+    assert.match(res.body.data.events.at(-1)?.message ?? "", /18 个发现/);
+    assert.doesNotMatch(res.body.data.events.at(-1)?.message ?? "", /^aether-glass 有 1 个正在运行的会话。$/u);
   });
 
   it("lets Copilot inspect bounded terminal output before answering session questions", async () => {
@@ -3388,6 +3628,360 @@ describe("copilot routes", () => {
     assert.equal(existsSync(path.join(projectPath, ".claude", "settings.json")), true);
   });
 
+  it("approves Project Manager actions from stored payloads with safe trace details", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "PM Approval Project",
+      path: "/tmp/pm-approval-project",
+      aiTool: "claude"
+    });
+    const pm = new ProjectManagerRepository(db, userId);
+    const statusItem = pm.createWorkItem(project.id, {
+      title: "Move to done",
+      status: "in_progress",
+      evidenceRefs: [{ kind: "test", label: "route proof", status: "accepted", ref: "test/copilot-routes.test.ts" }]
+    });
+    const evidenceItem = pm.createWorkItem(project.id, {
+      title: "Attach proof",
+      status: "in_progress"
+    });
+    const createAction = createPendingAction(userId, "openforge.propose_project_manager_create_work_item", {
+      actionType: "create_work_item",
+      projectId: project.id,
+      title: "Stored work item title",
+      description: "Stored bounded description",
+      status: "todo",
+      priority: 5,
+      acceptanceCriteria: ["Stored acceptance criterion"],
+      evidenceRefs: [{ kind: "copilot", label: "safe run summary", status: "verified", ref: "run-summary-1" }],
+      copilotRunId: "stored-run-create"
+    });
+    const statusAction = createPendingAction(userId, "openforge.propose_project_manager_update_work_item_status", {
+      actionType: "update_work_item_status",
+      projectId: project.id,
+      workItemId: statusItem.id,
+      status: "done",
+      evidenceRefCount: 1,
+      trustedEvidenceRefCount: 1,
+      copilotRunId: "stored-run-status"
+    }, createAction.runId);
+    const evidenceAction = createPendingAction(userId, "openforge.propose_project_manager_attach_evidence", {
+      actionType: "attach_evidence",
+      projectId: project.id,
+      workItemId: evidenceItem.id,
+      evidenceRef: { kind: "test", label: "attached proof", status: "verified", ref: "test/copilot-routes.test.ts" },
+      copilotRunId: "stored-run-evidence"
+    }, createAction.runId);
+    const browserReplacementPayload = {
+      title: "Browser replacement title",
+      status: "cancelled",
+      rawPrompt: "raw prompt must not be stored",
+      terminalOutput: "terminal transcript must not be stored",
+      providerPayload: "provider payload must not be stored",
+      secret: "sk-route-secret",
+      fullDiff: "diff --git a/file b/file",
+      fullExecutionSummary: "full execution summary must not be stored"
+    };
+
+    const createRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${createAction.runId}/pending-actions/${createAction.actionId}/approve`,
+      browserReplacementPayload,
+      authHeaders()
+    );
+    const statusRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${statusAction.runId}/pending-actions/${statusAction.actionId}/approve`,
+      browserReplacementPayload,
+      authHeaders()
+    );
+    const evidenceRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${evidenceAction.runId}/pending-actions/${evidenceAction.actionId}/approve`,
+      browserReplacementPayload,
+      authHeaders()
+    );
+
+    const repo = new CopilotRepository(db, userId);
+    const createdItem = pm.listWorkItems(project.id).find((item) => item.title === "Stored work item title");
+    const updatedStatusItem = pm.getWorkItem(project.id, statusItem.id);
+    const updatedEvidenceItem = pm.getWorkItem(project.id, evidenceItem.id);
+    const ledgerDetails = pm.listLedgerEvents(project.id, { limit: 20 }).map((event) => event.details);
+    const auditDetails = new AuditLogRepository(db, userId).list({
+      action: "copilot.pending_action.approve",
+      resourceType: "copilot_run",
+      resourceId: createAction.runId,
+      limit: 10
+    }).map((log) => JSON.parse(log.details));
+    const serializedSafePayload = JSON.stringify({
+      createResult: createRes.body.data.action.result,
+      statusResult: statusRes.body.data.action.result,
+      evidenceResult: evidenceRes.body.data.action.result,
+      ledgerDetails,
+      auditDetails
+    });
+
+    assert.equal(createRes.status, 200);
+    assert.equal(statusRes.status, 200);
+    assert.equal(evidenceRes.status, 200);
+    assert.equal(createRes.body.data.action.status, "approved");
+    assert.equal(statusRes.body.data.action.status, "approved");
+    assert.equal(evidenceRes.body.data.action.status, "approved");
+    assert.equal(createdItem?.title, "Stored work item title");
+    assert.equal(updatedStatusItem?.status, "done");
+    assert.equal(updatedEvidenceItem?.evidenceRefs.at(-1)?.pendingActionId, evidenceAction.actionId);
+    assert.equal(updatedEvidenceItem?.evidenceRefs.at(-1)?.copilotRunId, "stored-run-evidence");
+    assert.equal(createRes.body.data.action.result.projectManager.actionType, "create_work_item");
+    assert.equal(createRes.body.data.action.result.projectManager.pendingActionId, createAction.actionId);
+    assert.equal(createRes.body.data.action.result.projectManager.workItemId, createdItem?.id);
+    assert.equal(statusRes.body.data.action.result.projectManager.trustedEvidenceRefCount, 1);
+    assert.equal(evidenceRes.body.data.action.result.projectManager.evidenceRefCount, 1);
+    assert.ok(ledgerDetails.some((details) =>
+      details.pendingActionId === createAction.actionId &&
+      details.actionType === "create_work_item" &&
+      details.approvalStatus === "approved" &&
+      details.executionStatus === "succeeded"
+    ));
+    assert.ok(ledgerDetails.some((details) =>
+      details.pendingActionId === statusAction.actionId &&
+      details.actionType === "update_work_item_status" &&
+      details.targetId === statusItem.id
+    ));
+    assert.ok(ledgerDetails.some((details) =>
+      details.pendingActionId === evidenceAction.actionId &&
+      details.actionType === "attach_evidence" &&
+      details.targetId === evidenceItem.id
+    ));
+    assert.equal(repo.getPendingAction(createAction.actionId)?.input.title, "Stored work item title");
+    assert.doesNotMatch(serializedSafePayload, /Browser replacement title|raw prompt|terminal transcript|provider payload|sk-route-secret|diff --git|full execution summary/u);
+  });
+
+  it("fails invalid or unauthorized Project Manager approvals as terminal failed actions", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "PM Invalid Approval Project",
+      path: "/tmp/pm-invalid-approval-project",
+      aiTool: "claude"
+    });
+    const foreignProject = new ProjectRepository(db, otherUserId).create({
+      name: "Foreign PM Approval Project",
+      path: "/tmp/foreign-pm-approval-project",
+      aiTool: "claude"
+    });
+    const foreignItem = new ProjectManagerRepository(db, otherUserId).createWorkItem(foreignProject.id, {
+      title: "Foreign item"
+    });
+    const invalidCreate = createPendingAction(userId, "openforge.propose_project_manager_create_work_item", {
+      actionType: "create_work_item",
+      projectId: project.id,
+      copilotRunId: "run-invalid"
+    });
+    const foreignCreate = createPendingAction(userId, "openforge.propose_project_manager_create_work_item", {
+      actionType: "create_work_item",
+      projectId: foreignProject.id,
+      title: "Should not cross tenant",
+      copilotRunId: "run-foreign"
+    }, invalidCreate.runId);
+    const foreignWorkItem = createPendingAction(userId, "openforge.propose_project_manager_attach_evidence", {
+      actionType: "attach_evidence",
+      projectId: project.id,
+      workItemId: foreignItem.id,
+      evidenceRef: { kind: "test", label: "foreign", status: "verified", ref: "foreign" },
+      copilotRunId: "run-foreign-item"
+    }, invalidCreate.runId);
+
+    const invalidRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${invalidCreate.runId}/pending-actions/${invalidCreate.actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+    const foreignCreateRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${foreignCreate.runId}/pending-actions/${foreignCreate.actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+    const foreignWorkItemRes = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${foreignWorkItem.runId}/pending-actions/${foreignWorkItem.actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const repo = new CopilotRepository(db, userId);
+    assert.equal(invalidRes.status, 400);
+    assert.equal(foreignCreateRes.status, 400);
+    assert.equal(foreignWorkItemRes.status, 400);
+    assert.equal(invalidRes.body.details.code, "project_manager_action_invalid");
+    assert.equal(foreignCreateRes.body.details.code, "project_manager_action_not_available");
+    assert.equal(foreignWorkItemRes.body.details.code, "project_manager_action_not_available");
+    for (const actionId of [invalidCreate.actionId, foreignCreate.actionId, foreignWorkItem.actionId]) {
+      const action = repo.getPendingAction(actionId);
+      assert.equal(action?.status, "failed");
+      assert.equal(action?.result?.details && (action.result.details as { code?: string }).code, action?.result?.error && (action.result.error as { code?: string }).code);
+    }
+    assert.equal(new ProjectManagerRepository(db, userId).listWorkItems(project.id).length, 0);
+    assert.equal(new ProjectManagerRepository(db, otherUserId).listWorkItems(foreignProject.id).length, 1);
+  });
+
+  it("keeps duplicate Project Manager approvals single-execution", async () => {
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_project_manager_create_work_item", {
+      actionType: "create_work_item",
+      projectId: "project-id",
+      title: "Race",
+      copilotRunId: "run-race"
+    });
+    const release = deferred<void>();
+    let approverCalls = 0;
+    const raceApp = express();
+    raceApp.locals.jwtSecret = secret;
+    raceApp.use(express.json());
+    raceApp.use("/api/v1/copilot", createCopilotRoutes({
+      db,
+      masterKey,
+      pendingActionApprover: async () => {
+        approverCalls += 1;
+        await release.promise;
+        return { projectManager: { actionType: "create_work_item" }, executed: true };
+      }
+    }));
+    const server = http.createServer(raceApp);
+    const baseUrl = await listen(server);
+    try {
+      const first = fetch(`${baseUrl}/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`, {
+        method: "POST",
+        headers: authHeaders()
+      });
+      await waitFor(() => approverCalls > 0);
+      const duplicate = fetch(`${baseUrl}/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`, {
+        method: "POST",
+        headers: authHeaders()
+      });
+      release.resolve();
+
+      const responses = await Promise.all([first, duplicate]);
+      const statuses = responses.map((response) => response.status).sort();
+      const bodies = await Promise.all(responses.map((response) => response.json()));
+
+      assert.deepEqual(statuses, [200, 409]);
+      assert.equal(approverCalls, 1);
+      assert.ok(bodies.some((body) => body.details?.code === "copilot_pending_action_not_pending"));
+      assert.equal(new CopilotRepository(db, userId).getPendingAction(actionId)?.status, "approved");
+    } finally {
+      release.resolve();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("marks Project Manager execution errors failed without restoring pending", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "PM Failed Approval Project",
+      path: "/tmp/pm-failed-approval-project",
+      aiTool: "claude"
+    });
+    const item = new ProjectManagerRepository(db, userId).createWorkItem(project.id, {
+      title: "Invalid transition",
+      status: "todo"
+    });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_project_manager_update_work_item_status", {
+      actionType: "update_work_item_status",
+      projectId: project.id,
+      workItemId: item.id,
+      status: "ready_for_review",
+      copilotRunId: "run-failed-transition"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.details.code, "project_manager_action_failed");
+    assert.equal(action?.status, "failed");
+    assert.equal(action?.result?.details && (action.result.details as { code?: string }).code, "project_manager_action_failed");
+    assert.equal(new ProjectManagerRepository(db, userId).getWorkItem(project.id, item.id)?.status, "todo");
+  });
+
+  it("rejects Copilot-origin done without existing accepted or verified evidence", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "PM Trusted Evidence Project",
+      path: "/tmp/pm-trusted-evidence-project",
+      aiTool: "claude"
+    });
+    const item = new ProjectManagerRepository(db, userId).createWorkItem(project.id, {
+      title: "Needs trusted proof",
+      status: "in_progress",
+      evidenceRefs: [{ kind: "test", label: "draft proof", status: "draft", ref: "draft-proof" }]
+    });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_project_manager_update_work_item_status", {
+      actionType: "update_work_item_status",
+      projectId: project.id,
+      workItemId: item.id,
+      status: "done",
+      copilotRunId: "run-untrusted-evidence"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    const latestItem = new ProjectManagerRepository(db, userId).getWorkItem(project.id, item.id);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.details.code, "project_manager_trusted_evidence_required");
+    assert.equal(action?.status, "failed");
+    assert.equal(latestItem?.status, "in_progress");
+    assert.deepEqual(latestItem?.evidenceRefs.map((ref) => ref.status), ["draft"]);
+  });
+
+  it("marks thrown Project Manager approval errors failed instead of pending", async () => {
+    const failureApp = express();
+    failureApp.locals.jwtSecret = secret;
+    failureApp.use(express.json());
+    failureApp.use("/api/v1/copilot", createCopilotRoutes({
+      db,
+      masterKey,
+      pendingActionApprover: async () => {
+        throw new Error("project manager execution crashed");
+      }
+    }));
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_project_manager_attach_evidence", {
+      actionType: "attach_evidence",
+      projectId: "project",
+      workItemId: "item",
+      evidenceRef: { kind: "test", label: "proof", status: "verified", ref: "proof" },
+      copilotRunId: "run-thrown-error"
+    });
+
+    const res = await makeRequest(
+      failureApp,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
+    assert.equal(res.status, 500);
+    assert.equal(res.body.details.code, "project_manager_action_failed");
+    assert.equal(action?.status, "failed");
+    assert.equal(action?.result?.details && (action.result.details as { code?: string }).code, "project_manager_action_failed");
+  });
+
   it("approves session-input actions by sending input to the running terminal session", async () => {
     const project = new ProjectRepository(db, userId).create({
       name: "OpenForge",
@@ -3431,6 +4025,85 @@ describe("copilot routes", () => {
       /Current task is complete/
     );
     assert.deepEqual(sentSessionInputs, [{ sessionId: session.id, data: "pwd\n" }]);
+  });
+
+  it("submits approved session-input actions by default when submit is omitted", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const session = sessionRepo.create({
+      projectId: project.id,
+      name: "Claude Code",
+      aiTool: "claude",
+      workingDir: "/tmp/openforge",
+      tmuxSession: "of-user123-session_submit_default"
+    });
+    sessionRepo.update(session.id, { status: "running" });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_session_input", {
+      sessionId: session.id,
+      input: "pwd"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.action.result.submitted, true);
+    assert.deepEqual(sentSessionInputs, [{ sessionId: session.id, data: "pwd\n" }]);
+  });
+
+  it("tracks approved session input until terminal output stabilizes", async () => {
+    sessionInputTrackingDelaysMs.push(1, 1, 1);
+    terminalHistoryOutputs = [
+      "Before command\n",
+      "Before command\nReview running...\n",
+      "Before command\nReview complete.\n",
+      "Before command\nReview complete.\n"
+    ];
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const session = sessionRepo.create({
+      projectId: project.id,
+      name: "Claude Code",
+      aiTool: "claude",
+      workingDir: "/tmp/openforge",
+      tmuxSession: "of-user123-session_tracking"
+    });
+    sessionRepo.update(session.id, { status: "running" });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_session_input", {
+      sessionId: session.id,
+      input: "review frontend"
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.action.result.terminal.available, true);
+    assert.match(res.body.data.action.result.terminal.text, /Review complete/);
+    assert.equal(res.body.data.action.result.terminal.tracking.status, "stable");
+    assert.equal(res.body.data.action.result.terminal.tracking.samples, 3);
+    assert.deepEqual(capturedSessionIds, [session.id, session.id, session.id, session.id]);
+    assert.deepEqual(sentSessionInputs, [{ sessionId: session.id, data: "review frontend\n" }]);
   });
 
   it("approves session-input actions for OpenCode and Codex running terminal sessions", async () => {
@@ -3613,6 +4286,80 @@ describe("copilot routes", () => {
     assert.match(calls[0]?.input ?? "", /Current task is complete/);
     assert.equal(assistant?.content, "已发送到会话，并根据最新终端输出确认任务已完成。");
     assert.deepEqual(runActivity?.events?.map((event) => event.type), ["pending_action_approved"]);
+  });
+
+  it("instructs the model not to claim terminal completion when session-input tracking times out", async () => {
+    const providerId = createOpenAiProvider();
+    const model = new ModelProviderRepository(db, userId, masterKey).listModelProfiles(providerId)[0];
+    assert.ok(model);
+    sessionInputTrackingDelaysMs.push(1);
+    terminalHistoryOutputs = [
+      "Before command\n",
+      "Before command\nReview still running step 1\n",
+      "Before command\nReview still running step 2\n"
+    ];
+    modelEventResponses = [[{
+      type: "assistant_message",
+      text: "已发送到会话，终端仍可能继续运行。"
+    }]];
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge",
+      aiTool: "claude"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const session = sessionRepo.create({
+      projectId: project.id,
+      name: "Claude Code",
+      aiTool: "claude",
+      workingDir: "/tmp/openforge",
+      tmuxSession: "of-user123-session_tracking_timeout"
+    });
+    sessionRepo.update(session.id, { status: "running" });
+    const repo = new CopilotRepository(db, userId);
+    const conversation = repo.createConversation({
+      title: "Drive session",
+      source: "session",
+      sourceRefId: session.id
+    });
+    const run = repo.createRun({
+      status: "waiting_for_approval",
+      providerProfileId: providerId,
+      modelProfileId: model.id,
+      source: "session",
+      sourceRefId: session.id,
+      goal: "让 Claude Code review 前端代码"
+    });
+    repo.createConversationMessage(conversation.id, {
+      role: "user",
+      content: "让 Claude Code review 前端代码",
+      runId: run.id
+    });
+    const action = repo.createPendingAction(run.id, {
+      type: "openforge.propose_session_input",
+      input: {
+        sessionId: session.id,
+        input: "review frontend",
+        submit: true
+      }
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${run.id}/pending-actions/${action.id}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.run.status, "completed");
+    assert.equal(res.body.data.action.result.terminal.tracking.status, "changed_timeout");
+    assert.match(calls[0]?.input ?? "", /"status": "changed_timeout"/);
+    assert.match(
+      calls[0]?.instructions ?? "",
+      /do not claim the terminal work is complete/i
+    );
   });
 
   it("approves session-stop actions by stopping the running terminal session", async () => {

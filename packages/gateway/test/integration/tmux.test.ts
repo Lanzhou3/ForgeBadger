@@ -59,9 +59,10 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
   it("recovers indexed tmux sessions and kills unindexed OpenForge sessions", async () => {
     const tmux = createTmuxClient();
     const store = new MemoryRecoveryStore();
+    const tmuxPrefix = `of-recovery-${process.pid}-`;
     const knownSessionId = `sessionknown${process.pid}`;
-    const orphanName = `of-user123-sessionorphan${process.pid}`;
-    const manager = new InMemorySessionManager(tmux, store);
+    const orphanName = `${tmuxPrefix}user123-sessionorphan${process.pid}`;
+    const manager = new InMemorySessionManager(tmux, store, undefined, { tmuxPrefix });
 
     await manager.createSession({
       userId: "user123",
@@ -76,7 +77,7 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
       env: {}
     });
 
-    const restartedManager = new InMemorySessionManager(tmux, store);
+    const restartedManager = new InMemorySessionManager(tmux, store, undefined, { tmuxPrefix });
     const result = await restartedManager.recoverOpenForgeSessions({
       userId: "user123",
       cwd: tmpdir()

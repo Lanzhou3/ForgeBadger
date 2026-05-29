@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
@@ -178,7 +179,10 @@ describe("FeishuIntegrationRepository", () => {
       emergencyDisabled: false,
       identityMode: "unknown",
       allowedChatIds: [],
-      commandPrefix: "/openforge"
+      commandPrefix: "/openforge",
+      publicWebhookId: null,
+      publicWebhookEnabled: false,
+      webhookConfiguredAt: null
     });
 
     ownerRepo.upsertConfig({ emergencyDisabled: true });
@@ -229,7 +233,10 @@ describe("FeishuIntegrationRepository", () => {
     ] as Array<{ name: string }>;
 
     assert.equal(rows.length > 0, true);
-    assert.equal(rows.some((row) => /secret|token|credential|cookie|password/i.test(row.name)), false);
+    const sensitiveColumns = rows
+      .map((row) => row.name)
+      .filter((name) => /secret|token|credential|cookie|password/i.test(name));
+    assert.deepEqual(sensitiveColumns, ["verification_token_encrypted"]);
   });
 });
 
@@ -284,7 +291,10 @@ describe("Feishu integration routes", () => {
       emergencyDisabled: false,
       identityMode: "unknown",
       allowedChatIds: [],
-      commandPrefix: "/openforge"
+      commandPrefix: "/openforge",
+      publicWebhookId: null,
+      publicWebhookEnabled: false,
+      webhookConfiguredAt: null
     });
 
     const updateRes = await makeRequest(app, "PATCH", "/api/v1/integrations/feishu/config", {
@@ -717,6 +727,268 @@ describe("Feishu integration routes", () => {
     assert.equal(modelCallCount, 1);
     assert.equal(new CopilotRepository(db, user.id).listRuns().length, 1);
   });
+
+  it("rejects unknown or disabled public webhook ids before creating a Copilot run", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-disabled@example.com", "hash");
+    const repo = seedFeishuPublicWebhookPolicy(db, user.id, {
+      publicWebhookId: "public-disabled",
+      publicWebhookEnabled: false
+    });
+    assert.equal(repo.publicWebhookId, "public-disabled");
+    const app = createTestApp(db);
+    const event = publicMessageEvent({
+      text: "status api_key=sk-public-webhook-secret",
+      messageId: "om_disabled",
+      eventId: "ev_disabled"
+    });
+
+    const unknown = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-missing", event, {
+      ...signedFeishuHeaders(event)
+    });
+    const disabled = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-disabled", event, {
+      ...signedFeishuHeaders(event)
+    });
+
+    assert.equal(unknown.status, 404);
+    assert.equal(disabled.status, 403);
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+    assert.equal(JSON.stringify(unknown.body).includes("sk-public-webhook-secret"), false);
+    assert.equal(JSON.stringify(disabled.body).includes("sk-public-webhook-secret"), false);
+  });
+
+  it("handles public url_verification without Copilot side effects", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-challenge@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", {
+      type: "url_verification",
+      token: "verify-token",
+      challenge: "challenge-value"
+    });
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { challenge: "challenge-value" });
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+  });
+
+  it("rejects unsigned and stale public webhook events without creating Copilot runs", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-auth-fail@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    const app = createTestApp(db);
+    const event = publicMessageEvent({
+      text: "status api_key=sk-public-webhook-secret",
+      messageId: "om_auth_fail",
+      eventId: "ev_auth_fail"
+    });
+
+    const unsigned = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", event);
+    const staleTimestamp = `${Math.floor(Date.now() / 1000) - 600}`;
+    const stale = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", event, {
+      ...signedFeishuHeaders(event, { timestamp: staleTimestamp })
+    });
+
+    assert.equal(unsigned.status, 401);
+    assert.equal(stale.status, 401);
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+    assert.equal(JSON.stringify(unsigned.body).includes("sk-public-webhook-secret"), false);
+    assert.equal(JSON.stringify(stale.body).includes("sk-public-webhook-secret"), false);
+  });
+
+  it("rejects encrypted public webhook payloads without creating Copilot runs", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-encrypted@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    const app = createTestApp(db);
+    const encryptedEvent = { encrypt: "ciphertext" };
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      "/api/v1/integrations/feishu/webhook/public-test",
+      encryptedEvent,
+      signedFeishuHeaders(encryptedEvent)
+    );
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.msg, "feishu_webhook_encrypted_payload_unsupported");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+  });
+
+  it("rejects signed public webhook events with invalid tokens without creating Copilot runs", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-token-mismatch@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    const app = createTestApp(db);
+    const event = publicMessageEvent({
+      text: "status api_key=sk-public-webhook-secret",
+      messageId: "om_token_mismatch",
+      eventId: "ev_token_mismatch"
+    });
+    (event.header as Record<string, unknown>).token = "wrong-token";
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", event, {
+      ...signedFeishuHeaders(event)
+    });
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.msg, "feishu_webhook_token_invalid");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+    assert.equal(JSON.stringify(res.body).includes("sk-public-webhook-secret"), false);
+  });
+
+  it("rejects public webhook messages outside the chat allowlist without creating Copilot runs", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-chat-denied@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    const app = createTestApp(db);
+    const event = publicMessageEvent({
+      text: "status api_key=sk-public-webhook-secret",
+      chatId: "oc_denied",
+      messageId: "om_chat_denied",
+      eventId: "ev_chat_denied"
+    });
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", event, {
+      ...signedFeishuHeaders(event)
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.msg, "ignored");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+    assert.equal(JSON.stringify(res.body).includes("sk-public-webhook-secret"), false);
+
+    const reject = new AuditLogRepository(db, user.id).list({ action: "feishu.webhook.reject" })[0];
+    const details = JSON.parse(reject?.details ?? "{}") as Record<string, unknown>;
+    assert.equal(details.reasonCode, "feishu_chat_not_allowed");
+    assert.equal(JSON.stringify(details).includes("sk-public-webhook-secret"), false);
+  });
+
+  it("creates one Feishu-sourced Copilot run for a valid signed public webhook message", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-valid@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    seedCopilotProvider(db, user.id);
+    const modelRequests: CopilotModelRequest[] = [];
+    const app = createTestApp(db, {
+      masterKey: secret,
+      modelClientFactory: () => ({
+        async createResponse(request: CopilotModelRequest) {
+          modelRequests.push(request);
+          return [{ type: "assistant_message", text: "Public webhook accepted." }];
+        }
+      })
+    });
+    const event = publicMessageEvent({
+      text: "status api_key=sk-public-webhook-secret",
+      messageId: "om_public_valid",
+      eventId: "ev_public_valid"
+    });
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", event, {
+      ...signedFeishuHeaders(event)
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.msg, "ok");
+    assert.equal(res.body.code, undefined);
+    assert.equal(JSON.stringify(res.body).includes("sk-public-webhook-secret"), false);
+    const runs = new CopilotRepository(db, user.id).listRuns();
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].source, "feishu");
+    assert.equal(runs[0].goal.includes("sk-public-webhook-secret"), false);
+    assert.equal(modelRequests.length, 1);
+    assert.equal(modelRequests[0].input.includes("sk-public-webhook-secret"), false);
+  });
+
+  it("does not create duplicate public webhook runs for replayed event ids", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-replay@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    seedCopilotProvider(db, user.id);
+    const app = createTestApp(db, {
+      masterKey: secret,
+      modelClientFactory: () => ({
+        async createResponse() {
+          return [{ type: "assistant_message", text: "ok" }];
+        }
+      })
+    });
+    const event = publicMessageEvent({
+      text: "status",
+      messageId: "om_public_replay",
+      eventId: "ev_public_replay"
+    });
+    const headers = signedFeishuHeaders(event);
+
+    const first = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", event, headers);
+    const second = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", event, headers);
+
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(second.body.msg, "replayed");
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 1);
+  });
+
+  it("rate-limits public webhook commands with persistent chat and mapped-user windows", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-rate-limit@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    seedCopilotProvider(db, user.id);
+    let modelCallCount = 0;
+    const app = createTestApp(db, {
+      masterKey: secret,
+      publicWebhookRateLimit: { max: 1, windowMs: 60_000 },
+      modelClientFactory: () => ({
+        async createResponse() {
+          modelCallCount += 1;
+          return [{ type: "assistant_message", text: "ok" }];
+        }
+      })
+    });
+    const firstEvent = publicMessageEvent({ text: "first", messageId: "om_public_rate_1", eventId: "ev_public_rate_1" });
+    const secondEvent = publicMessageEvent({ text: "second", messageId: "om_public_rate_2", eventId: "ev_public_rate_2" });
+
+    const first = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", firstEvent, signedFeishuHeaders(firstEvent));
+    const second = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", secondEvent, signedFeishuHeaders(secondEvent));
+
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(second.body.msg, "ignored");
+    assert.equal(modelCallCount, 1);
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 1);
+  });
+
+  it("does not approve pending actions from public webhook free-form approval text", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("public-freeform-approval@example.com", "hash");
+    seedFeishuPublicWebhookPolicy(db, user.id);
+    const repo = new CopilotRepository(db, user.id);
+    const run = repo.createRun({
+      status: "waiting_for_approval",
+      source: "copilot",
+      goal: "Approve a pending action"
+    });
+    const action = repo.createPendingAction(run.id, {
+      type: "openforge.propose_session_input",
+      input: { sessionId: "session-1", input: "continue" }
+    });
+    const app = createTestApp(db);
+    const event = publicMessageEvent({
+      text: `/approve ${action.id}`,
+      messageId: "om_public_approve",
+      eventId: "ev_public_approve"
+    });
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/webhook/public-test", event, signedFeishuHeaders(event));
+
+    assert.equal(res.status, 200);
+    assert.equal(repo.getPendingAction(action.id)?.status, "pending");
+    assert.equal(repo.listRuns().length, 1);
+  });
 });
 
 function createTestDb(): Database {
@@ -736,9 +1008,14 @@ type TestFeishuRouteOptions = Parameters<typeof createFeishuIntegrationRoutes>[0
 function createTestApp(db: Database, routeOptions: TestFeishuRouteOptions = {}): express.Express {
   const app = express();
   app.locals.jwtSecret = secret;
-  app.use(express.json());
+  app.use(express.json({
+    verify: (req, _res, buffer) => {
+      (req as { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+    }
+  }));
   app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
     db,
+    masterKey: secret,
     getStatus: async () => ({
       available: true,
       version: "lark-cli 1.2.3",
@@ -761,6 +1038,72 @@ function seedFeishuInboundPolicy(db: Database, userId: string): void {
   repo.replaceUserMappings([
     { feishuUserId: "ou_allowed", openforgeUserId: userId, displayName: "Allowed User" }
   ]);
+}
+
+function seedFeishuPublicWebhookPolicy(
+  db: Database,
+  userId: string,
+  options: {
+    publicWebhookId?: string;
+    publicWebhookEnabled?: boolean;
+    verificationToken?: string;
+    eventEncryptKey?: string;
+  } = {}
+) {
+  seedFeishuInboundPolicy(db, userId);
+  return new FeishuIntegrationRepository(db, userId, secret).configurePublicWebhook({
+    publicWebhookId: options.publicWebhookId ?? "public-test",
+    publicWebhookEnabled: options.publicWebhookEnabled ?? true,
+    verificationToken: options.verificationToken ?? "verify-token",
+    eventEncryptKey: options.eventEncryptKey ?? "encrypt-key"
+  });
+}
+
+function publicMessageEvent(input: {
+  text: string;
+  messageId: string;
+  eventId: string;
+  chatId?: string;
+  feishuUserId?: string;
+}): Record<string, unknown> {
+  return {
+    schema: "2.0",
+    header: {
+      event_id: input.eventId,
+      event_type: "im.message.receive_v1",
+      token: "verify-token"
+    },
+    event: {
+      sender: {
+        sender_id: {
+          open_id: input.feishuUserId ?? "ou_allowed"
+        }
+      },
+      message: {
+        message_id: input.messageId,
+        chat_id: input.chatId ?? "oc_allowed",
+        message_type: "text",
+        content: JSON.stringify({ text: input.text })
+      }
+    }
+  };
+}
+
+function signedFeishuHeaders(
+  body: unknown,
+  options: { timestamp?: string; nonce?: string; eventEncryptKey?: string } = {}
+): Record<string, string> {
+  const timestamp = options.timestamp ?? `${Math.floor(Date.now() / 1000)}`;
+  const nonce = options.nonce ?? "nonce-public-test";
+  const rawBody = JSON.stringify(body);
+  const signature = createHash("sha256")
+    .update(`${timestamp}${nonce}${options.eventEncryptKey ?? "encrypt-key"}${rawBody}`, "utf8")
+    .digest("hex");
+  return {
+    "X-Lark-Request-Timestamp": timestamp,
+    "X-Lark-Request-Nonce": nonce,
+    "X-Lark-Signature": signature
+  };
 }
 
 function seedCopilotProvider(db: Database, userId: string): void {

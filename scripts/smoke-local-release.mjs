@@ -53,7 +53,7 @@ export function buildSmokeCommandPlan(env = buildSmokeEnvironment()) {
   return {
     environment: redactSmokeEnvironment(env),
     gateway: "pnpm --dir packages/gateway dev",
-    web: "pnpm --dir packages/web exec next dev --hostname 127.0.0.1 --port 48732",
+    web: "pnpm --dir packages/web dev",
     cleanup: [
       "Stop Gateway and Web processes",
       "Remove the disposable OPENFORGE_DB_PATH",

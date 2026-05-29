@@ -10,6 +10,7 @@ import { createAdminUserRoutes } from "./admin-users.js";
 import { createAuditLogRoutes } from "./audit-logs.js";
 import { createCatalogRoutes } from "./catalog.js";
 import { createProjectRoutes } from "./projects.js";
+import { createProjectManagerRoutes } from "./project-manager.js";
 import { createSessionRoutes, createGateASessionRoutes } from "./sessions.js";
 import { createTemplateRoutes } from "./templates.js";
 import { createUsageRoutes } from "./usage.js";
@@ -50,6 +51,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     deps.eventBus,
     deps.adapterCommandRunner
   ));
+  app.use("/api/v1/projects", createProjectManagerRoutes(deps.db));
   app.use("/api/v1/projects", createProjectRoutes(deps.db, deps.sessionManager, deps.eventBus));
   app.use("/api/v1/sessions", createSessionRoutes(
     deps.db,

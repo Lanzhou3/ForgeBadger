@@ -70,7 +70,14 @@ export function createServer(deps: ServerDeps): express.Express {
     next();
   });
 
-  app.use(express.json());
+  app.use(express.json({
+    verify: (request, _response, buffer) => {
+      const pathname = (request as express.Request).originalUrl ?? request.url ?? "";
+      if (pathname.startsWith("/api/v1/integrations/feishu/webhook/")) {
+        (request as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+      }
+    }
+  }));
 
   mountRoutes(app, deps);
   app.use(errorHandler);

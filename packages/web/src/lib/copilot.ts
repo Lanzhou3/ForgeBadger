@@ -65,6 +65,9 @@ const pendingActionLabels: Record<string, string> = {
   "openforge.propose_feishu_doc_update": "Feishu doc update",
   "openforge.propose_feishu_task_create": "Feishu task create",
   "openforge.propose_feishu_task_update": "Feishu task update",
+  "openforge.propose_project_manager_create_work_item": "Create work item",
+  "openforge.propose_project_manager_update_work_item_status": "Update work item status",
+  "openforge.propose_project_manager_attach_evidence": "Attach evidence",
 };
 
 const pendingActionLabelKeys: Record<string, TranslationKey> = {
@@ -99,6 +102,10 @@ const pendingActionLabelKeys: Record<string, TranslationKey> = {
   "openforge.propose_feishu_doc_update": "copilot.pendingAction.feishuDocUpdate",
   "openforge.propose_feishu_task_create": "copilot.pendingAction.feishuTaskCreate",
   "openforge.propose_feishu_task_update": "copilot.pendingAction.feishuTaskUpdate",
+  "openforge.propose_project_manager_create_work_item": "copilot.pendingAction.projectManagerCreateWorkItem",
+  "openforge.propose_project_manager_update_work_item_status":
+    "copilot.pendingAction.projectManagerUpdateWorkItemStatus",
+  "openforge.propose_project_manager_attach_evidence": "copilot.pendingAction.projectManagerAttachEvidence",
 };
 
 const errorMessageKeys: Record<string, TranslationKey> = {
@@ -178,6 +185,8 @@ const errorMessageKeys: Record<string, TranslationKey> = {
   copilot_model_provider_apply_unavailable: "copilot.error.modelProviderApplyUnavailable",
   copilot_model_provider_apply_failed: "copilot.error.modelProviderApplyFailed",
   copilot_troubleshooting_steps_invalid: "copilot.error.troubleshootingStepsInvalid",
+  project_manager_action_failed: "copilot.error.projectManagerActionFailed",
+  project_manager_trusted_evidence_required: "copilot.error.projectManagerTrustedEvidenceRequired",
 };
 
 export interface ResolveCopilotRunSelectionInput {
@@ -193,14 +202,28 @@ export interface FindCurrentLiveCopilotRunInput<T extends { id?: string; status:
 }
 
 export interface CopilotPendingActionSummaryInput {
+  id?: string;
+  runId?: string;
   type: string;
   input?: Record<string, unknown>;
   result?: Record<string, unknown> | null;
 }
 
+export interface CopilotProjectManagerAnchor {
+  labelKey: TranslationKey;
+  href: string;
+  projectId: string;
+  workItemId?: string;
+}
+
 export interface CopilotPendingActionSummary {
   detail: string;
   preview?: string;
+  markers?: string[];
+  riskCue?: string;
+  riskCueKey?: TranslationKey;
+  messageKey?: TranslationKey;
+  anchor?: CopilotProjectManagerAnchor;
 }
 
 export interface CopilotEventResultSummaryInput {
@@ -432,12 +455,16 @@ export function readCopilotTerminalSnapshotText(payload: Record<string, unknown>
   const result = readRecord(payload?.result);
   const terminal = readRecord(output?.terminal) ?? readRecord(result?.terminal);
   if (!terminal || terminal.available !== true) return "";
-  return readString(terminal, "text") ?? "";
+  return stripTerminalControlSequences(readString(terminal, "text") ?? "");
 }
 
 export function getCopilotPendingActionSummary(
   action: CopilotPendingActionSummaryInput
 ): CopilotPendingActionSummary | null {
+  if (isProjectManagerPendingActionType(action.type)) {
+    const failureSummary = summarizeProjectManagerFailure(action, readRecord(action.result));
+    if (failureSummary) return failureSummary;
+  }
   const payload = action.input ?? action.result ?? {};
   switch (action.type) {
     case "openforge.propose_memory_write":
@@ -508,6 +535,12 @@ export function getCopilotPendingActionSummary(
       return summarizeFeishuTaskUpdate(payload);
     case "openforge.propose_troubleshooting_steps":
       return summarizeTroubleshootingSteps(payload);
+    case "openforge.propose_project_manager_create_work_item":
+      return summarizeProjectManagerCreateWorkItem(action, payload);
+    case "openforge.propose_project_manager_update_work_item_status":
+      return summarizeProjectManagerUpdateWorkItemStatus(action, payload);
+    case "openforge.propose_project_manager_attach_evidence":
+      return summarizeProjectManagerAttachEvidence(action, payload);
     default:
       return null;
   }
@@ -580,9 +613,31 @@ export function getCopilotEventResultSummary(
       return summarizeFeishuActionResult(result);
     case "openforge.propose_troubleshooting_steps":
       return summarizeTroubleshootingStepsResult(result);
+    case "openforge.propose_project_manager_create_work_item":
+    case "openforge.propose_project_manager_update_work_item_status":
+    case "openforge.propose_project_manager_attach_evidence":
+      return summarizeProjectManagerResult(result);
     default:
       return null;
   }
+}
+
+export function getCopilotProjectManagerAnchor(input: {
+  projectId?: string | null;
+  workItemId?: string | null;
+}): CopilotProjectManagerAnchor | null {
+  const projectId = normalizeOptionalText(input.projectId);
+  if (!projectId) return null;
+  const workItemId = normalizeOptionalText(input.workItemId);
+  const query = workItemId
+    ? `tab=project-manager&workItemId=${encodeURIComponent(workItemId)}`
+    : "tab=project-manager";
+  const anchor = {
+    labelKey: "copilot.projectManager.view" as TranslationKey,
+    href: `/projects/${encodeURIComponent(projectId)}?${query}`,
+    projectId,
+  };
+  return workItemId ? { ...anchor, workItemId } : anchor;
 }
 
 export function resolveCopilotRunSelection(input: ResolveCopilotRunSelectionInput): string | null {
@@ -592,6 +647,24 @@ export function resolveCopilotRunSelection(input: ResolveCopilotRunSelectionInpu
   const liveRun = input.runs.find((run) => typeof run.status === "string" && isCopilotRunLive(run.status));
   if (liveRun) return liveRun.id;
   return input.runs[0]?.id ?? null;
+}
+
+export function resolveCopilotConversationSelection(input: {
+  selectedConversationId: string | null;
+  conversations: Array<{ id: string }>;
+  draftConversationActive?: boolean;
+  preservedConversationIds?: string[];
+}): string | null {
+  if (input.draftConversationActive) return input.selectedConversationId;
+  const conversationIds = new Set(input.conversations.map((conversation) => conversation.id));
+  if (input.selectedConversationId && conversationIds.has(input.selectedConversationId)) {
+    return input.selectedConversationId;
+  }
+  const preservedConversationIds = new Set(input.preservedConversationIds ?? []);
+  if (input.selectedConversationId && preservedConversationIds.has(input.selectedConversationId)) {
+    return input.selectedConversationId;
+  }
+  return input.conversations[0]?.id ?? null;
 }
 
 export function isCopilotRunLive(status: string): boolean {
@@ -621,6 +694,11 @@ export function shouldKeepCopilotActiveRunState(
   if (maxSequence(current.events) > maxSequence(next.events)) return true;
   if (maxUpdatedAt(current.pendingActions) > maxUpdatedAt(next.pendingActions)) return true;
   return isTerminalCopilotRunStatus(current.run.status) && !isTerminalCopilotRunStatus(next.run.status);
+}
+
+export function shouldResetCopilotActiveRunForNewMessage(current: CopilotActiveRunSnapshot | null): boolean {
+  if (!current) return false;
+  return isTerminalCopilotRunStatus(current.run.status);
 }
 
 export function getCopilotRunPollDelayMs(attempt: number): number {
@@ -747,6 +825,15 @@ export function getCopilotProviderReadiness(
     credentialReadyProviderCount: credentialReadyProviders.length,
     readyProviderCount: readyProviders.length,
   };
+}
+
+export function getCopilotProviderReadinessMessageKey(
+  readiness: CopilotProviderReadiness | null | undefined
+): TranslationKey {
+  if (!readiness || readiness.code === "ready") return "copilot.providerSetupRequired";
+  if (readiness.code === "no_compatible_provider") return "copilot.providerReadiness.noCompatibleProvider";
+  if (readiness.code === "missing_active_credential") return "copilot.providerReadiness.missingActiveCredential";
+  return "copilot.providerReadiness.missingActiveModel";
 }
 
 export function buildCopilotLaunchHref(input: CopilotLaunchHrefInput): string {
@@ -895,12 +982,8 @@ function summarizeProjectConfigSync(payload: Record<string, unknown>): CopilotPe
 }
 
 function summarizeSessionInput(payload: Record<string, unknown>): CopilotPendingActionSummary {
-  const detail = joinPresent([
-    readString(payload, "sessionId") ?? "session",
-    payload.submit === true ? "submit" : "input",
-  ]);
   return {
-    detail,
+    detail: payload.submit === true ? "Send terminal input" : "Prepare terminal input",
     preview: previewText(readString(payload, "input")),
   };
 }
@@ -1242,11 +1325,12 @@ function summarizeSessionCreateResult(payload: Record<string, unknown>): Copilot
 function summarizeSessionInputResult(payload: Record<string, unknown>): CopilotPendingActionSummary {
   const bytes = readNumber(payload, "bytes");
   const terminalPreview = readTerminalResultPreview(payload);
+  const trackingStatus = readTerminalTrackingStatus(payload);
+  const detail = isTerminalTrackingTimeout(trackingStatus)
+    ? "Terminal input approved; latest output may still be running"
+    : payload.submitted === true ? "Terminal input approved" : "Terminal input sent";
   return {
-    detail: joinPresent([
-      readString(payload, "sessionId") ?? "session",
-      payload.submitted === true ? "submitted" : "input sent",
-    ]),
+    detail,
     preview: terminalPreview ?? (bytes > 0 ? `${bytes} bytes sent` : undefined),
   };
 }
@@ -1449,6 +1533,264 @@ function summarizeTroubleshootingSteps(payload: Record<string, unknown>): Copilo
   };
 }
 
+const projectManagerRiskCue = "Approval writes Project Manager state through Gateway.";
+const projectManagerRiskCueKey = "copilot.projectManager.riskGatewayWrite" as TranslationKey;
+
+function summarizeProjectManagerCreateWorkItem(
+  action: CopilotPendingActionSummaryInput,
+  payload: Record<string, unknown>
+): CopilotPendingActionSummary {
+  const projectId = readString(payload, "projectId") ?? "project";
+  const title = readString(payload, "title") ?? "work item";
+  const evidenceCount = Array.isArray(payload.evidenceRefs) ? payload.evidenceRefs.length : 0;
+  const fields = projectManagerFields([
+    ["title", true],
+    ["status", Boolean(readString(payload, "status"))],
+    ["priority", typeof payload.priority === "number"],
+    ["acceptance criteria", Array.isArray(payload.acceptanceCriteria) && payload.acceptanceCriteria.length > 0],
+    ["evidence refs", evidenceCount > 0],
+  ]);
+  const anchor = getCopilotProjectManagerAnchor({ projectId });
+  return withProjectManagerApprovalMetadata({
+    detail: `Create work item / project ${projectId} / title ${title}`,
+    preview: `Fields: ${fields} / Evidence refs: ${evidenceCount}`,
+    markers: [
+      "Action: create_work_item",
+      `Project: ${projectId}`,
+      `Fields: ${fields}`,
+      `Evidence refs: ${evidenceCount}`,
+      projectManagerTraceMarker(action, payload, `project ${projectId}`, evidenceCount),
+    ],
+    ...(anchor ? { anchor } : {}),
+  });
+}
+
+function summarizeProjectManagerUpdateWorkItemStatus(
+  action: CopilotPendingActionSummaryInput,
+  payload: Record<string, unknown>
+): CopilotPendingActionSummary {
+  const projectId = readString(payload, "projectId") ?? "project";
+  const workItemId = readString(payload, "workItemId") ?? "work item";
+  const status = readString(payload, "status") ?? "status";
+  const evidenceCount = readNumber(payload, "evidenceRefCount");
+  const trustedEvidenceCount = readOptionalNumber(payload, "trustedEvidenceRefCount");
+  const trustedEvidenceMarker = status === "done" && trustedEvidenceCount !== undefined
+    ? `Trusted evidence: ${trustedEvidenceCount}`
+    : null;
+  const trustedEvidenceMissing = status === "done" &&
+    (trustedEvidenceCount === 0 || (trustedEvidenceCount === undefined && evidenceCount === 0));
+  const anchor = getCopilotProjectManagerAnchor({ projectId, workItemId });
+  const summary = withProjectManagerApprovalMetadata({
+    detail: `Update work item status / work item ${workItemId} / status ${status}`,
+    preview: joinPresent([
+      "Fields: status",
+      `Evidence refs: ${evidenceCount}`,
+      trustedEvidenceMissing ? "Trusted evidence required" : trustedEvidenceMarker,
+    ]),
+    markers: [
+      "Action: update_work_item_status",
+      `Project: ${projectId}`,
+      `Work item: ${workItemId}`,
+      "Fields: status",
+      `Evidence refs: ${evidenceCount}`,
+      trustedEvidenceMissing ? null : trustedEvidenceMarker,
+      projectManagerTraceMarker(action, payload, `work item ${workItemId}`, evidenceCount),
+    ].filter((marker): marker is string => Boolean(marker)),
+    ...(anchor ? { anchor } : {}),
+  });
+  return trustedEvidenceMissing
+    ? { ...summary, messageKey: "copilot.error.projectManagerTrustedEvidenceRequired" }
+    : summary;
+}
+
+function summarizeProjectManagerAttachEvidence(
+  action: CopilotPendingActionSummaryInput,
+  payload: Record<string, unknown>
+): CopilotPendingActionSummary {
+  const projectId = readString(payload, "projectId") ?? "project";
+  const workItemId = readString(payload, "workItemId") ?? "work item";
+  const evidence = readRecord(payload.evidenceRef);
+  const evidenceText = projectManagerEvidenceText(evidence);
+  const evidenceTitle = [
+    readString(evidence ?? {}, "kind") ?? "evidence",
+    readString(evidence ?? {}, "label"),
+  ].filter((item): item is string => Boolean(item)).join(" ");
+  const anchor = getCopilotProjectManagerAnchor({ projectId, workItemId });
+  return withProjectManagerApprovalMetadata({
+    detail: `Attach evidence / work item ${workItemId} / ${evidenceTitle}`,
+    preview: "Fields: evidence ref / Evidence refs: 1",
+    markers: [
+      "Action: attach_evidence",
+      `Project: ${projectId}`,
+      `Work item: ${workItemId}`,
+      "Fields: evidence ref",
+      "Evidence refs: 1",
+      `Evidence: ${evidenceText}`,
+      projectManagerTraceMarker(action, payload, `work item ${workItemId}`, 1),
+    ],
+    ...(anchor ? { anchor } : {}),
+  });
+}
+
+function summarizeProjectManagerResult(payload: Record<string, unknown>): CopilotPendingActionSummary | null {
+  const marker = readRecord(payload.projectManager);
+  if (!marker) return null;
+  const actionType = readString(marker, "actionType") ?? "project_manager_action";
+  const projectId = readString(marker, "projectId");
+  const workItemId = readString(marker, "workItemId") ?? readString(marker, "targetId") ?? "work item";
+  const evidenceCount = readNumber(marker, "evidenceRefCount");
+  const approvalStatus = readString(marker, "approvalStatus") ?? "approved";
+  const executionStatus = readString(marker, "executionStatus") ?? (payload.executed === true ? "succeeded" : "unknown");
+  const trustedEvidenceCount = readOptionalNumber(marker, "trustedEvidenceRefCount");
+  const anchor = getCopilotProjectManagerAnchor({ projectId, workItemId });
+  const summary: CopilotPendingActionSummary = {
+    detail: `${actionType} / work item ${workItemId} / ${executionStatus}`,
+    preview: joinPresent([
+      readString(marker, "status") ? `Status: ${readString(marker, "status")}` : null,
+      `Evidence refs: ${evidenceCount}`,
+      typeof trustedEvidenceCount === "number" ? `Trusted evidence: ${trustedEvidenceCount}` : null,
+    ]),
+    markers: projectManagerResultMarkers({
+      actionType,
+      projectId,
+      workItemId,
+      evidenceCount,
+      approvalStatus,
+      executionStatus,
+      trace: projectManagerTraceMarkerFromRecord(marker, `work item ${workItemId}`, evidenceCount),
+      ...(typeof trustedEvidenceCount === "number" ? { trustedEvidenceCount } : {}),
+    }),
+  };
+  return anchor ? { ...summary, anchor } : summary;
+}
+
+function summarizeProjectManagerFailure(
+  action: CopilotPendingActionSummaryInput,
+  result: Record<string, unknown> | null
+): CopilotPendingActionSummary | null {
+  const error = readRecord(result?.error);
+  const marker = readRecord(result?.projectManager);
+  const code = error ? readString(error, "code") : null;
+  const messageKey = projectManagerFailureMessageKey(code);
+  if (!messageKey || !marker) return null;
+  const actionType = readString(marker, "actionType") ?? projectManagerSemanticActionType(action.type);
+  const projectId = readString(marker, "projectId");
+  const workItemId = readString(marker, "workItemId") ?? readString(marker, "targetId");
+  const evidenceCount = readNumber(marker, "evidenceRefCount");
+  const target = workItemId ? `work item ${workItemId}` : projectId ? `project ${projectId}` : "Project Manager";
+  const markers = [
+    actionType ? `Action: ${actionType}` : null,
+    projectId ? `Project: ${projectId}` : null,
+    workItemId ? `Work item: ${workItemId}` : null,
+    `Approval: ${readString(marker, "approvalStatus") ?? "failed"}`,
+    `Execution: ${readString(marker, "executionStatus") ?? "failed"}`,
+    projectManagerTraceMarkerFromRecord(marker, target, evidenceCount),
+  ].filter((item): item is string => Boolean(item));
+  const anchor = getCopilotProjectManagerAnchor({ projectId, workItemId }) ?? undefined;
+  return {
+    detail: `${getCopilotPendingActionLabel(action.type)} / failed`,
+    preview: projectManagerFailurePreview(messageKey),
+    markers,
+    messageKey,
+    ...(anchor ? { anchor } : {}),
+  };
+}
+
+function withProjectManagerApprovalMetadata(input: CopilotPendingActionSummary): CopilotPendingActionSummary {
+  return {
+    ...input,
+    riskCue: projectManagerRiskCue,
+    riskCueKey: projectManagerRiskCueKey,
+  };
+}
+
+function projectManagerFields(fields: Array<[string, boolean]>): string {
+  const present = fields.filter(([, enabled]) => enabled).map(([field]) => field);
+  return present.length > 0 ? present.join(", ") : "none";
+}
+
+function projectManagerEvidenceText(evidence: Record<string, unknown> | null): string {
+  return joinPresent([
+    readString(evidence ?? {}, "kind") ?? "evidence",
+    readString(evidence ?? {}, "label"),
+    readString(evidence ?? {}, "status"),
+    readString(evidence ?? {}, "ref"),
+    readString(evidence ?? {}, "path"),
+    readString(evidence ?? {}, "sessionId"),
+  ]);
+}
+
+function projectManagerTraceMarker(
+  action: CopilotPendingActionSummaryInput,
+  payload: Record<string, unknown>,
+  target: string,
+  evidenceCount: number
+): string {
+  const runId = readString(payload, "copilotRunId") ?? action.runId ?? "unknown";
+  const actionId = readString(payload, "pendingActionId") ?? action.id ?? "unknown";
+  return `Trace: Copilot run ${runId} -> pending action ${actionId} -> target ${target} -> evidence refs ${evidenceCount}`;
+}
+
+function projectManagerTraceMarkerFromRecord(
+  marker: Record<string, unknown>,
+  target: string,
+  evidenceCount: number
+): string {
+  const runId = readString(marker, "copilotRunId") ?? "unknown";
+  const actionId = readString(marker, "pendingActionId") ?? "unknown";
+  return `Trace: Copilot run ${runId} -> pending action ${actionId} -> target ${target} -> evidence refs ${evidenceCount}`;
+}
+
+function projectManagerResultMarkers(input: {
+  actionType: string;
+  projectId: string | null;
+  workItemId: string;
+  evidenceCount: number;
+  trustedEvidenceCount?: number;
+  approvalStatus: string;
+  executionStatus: string;
+  trace: string;
+}): string[] {
+  return [
+    `Action: ${input.actionType}`,
+    input.projectId ? `Project: ${input.projectId}` : null,
+    `Work item: ${input.workItemId}`,
+    `Evidence refs: ${input.evidenceCount}`,
+    typeof input.trustedEvidenceCount === "number" ? `Trusted evidence: ${input.trustedEvidenceCount}` : null,
+    `Approval: ${input.approvalStatus}`,
+    `Execution: ${input.executionStatus}`,
+    input.trace,
+  ].filter((item): item is string => Boolean(item));
+}
+
+function projectManagerFailureMessageKey(code: string | null): TranslationKey | null {
+  if (code === "project_manager_trusted_evidence_required") {
+    return "copilot.error.projectManagerTrustedEvidenceRequired";
+  }
+  if (code === "project_manager_action_failed") return "copilot.error.projectManagerActionFailed";
+  return null;
+}
+
+function projectManagerFailurePreview(key: TranslationKey): string {
+  if (key === "copilot.error.projectManagerTrustedEvidenceRequired") {
+    return "Trusted evidence is required before Copilot can mark this done.";
+  }
+  return "Project Manager action failed. Create a new proposal before retrying.";
+}
+
+function isProjectManagerPendingActionType(type: string): boolean {
+  return type === "openforge.propose_project_manager_create_work_item" ||
+    type === "openforge.propose_project_manager_update_work_item_status" ||
+    type === "openforge.propose_project_manager_attach_evidence";
+}
+
+function projectManagerSemanticActionType(type: string): string | null {
+  if (type === "openforge.propose_project_manager_create_work_item") return "create_work_item";
+  if (type === "openforge.propose_project_manager_update_work_item_status") return "update_work_item_status";
+  if (type === "openforge.propose_project_manager_attach_evidence") return "attach_evidence";
+  return null;
+}
+
 function readString(payload: Record<string, unknown>, key: string): string | null {
   const value = payload[key];
   if (typeof value !== "string") return null;
@@ -1479,6 +1821,11 @@ function readNumber(payload: Record<string, unknown>, key: string): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function readOptionalNumber(payload: Record<string, unknown>, key: string): number | undefined {
+  const value = payload[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function readBoolean(payload: Record<string, unknown>, key: string): boolean {
   return payload[key] === true;
 }
@@ -1486,7 +1833,17 @@ function readBoolean(payload: Record<string, unknown>, key: string): boolean {
 function readTerminalResultPreview(payload: Record<string, unknown>): string | undefined {
   const terminal = readRecord(payload.terminal);
   if (!terminal || terminal.available !== true) return undefined;
-  return previewText(readString(terminal, "text"));
+  return previewText(stripTerminalControlSequences(readString(terminal, "text") ?? ""));
+}
+
+function readTerminalTrackingStatus(payload: Record<string, unknown>): string | null {
+  const terminal = readRecord(payload.terminal);
+  const tracking = readRecord(terminal?.tracking);
+  return tracking ? readString(tracking, "status") : null;
+}
+
+function isTerminalTrackingTimeout(status: string | null): boolean {
+  return status === "changed_timeout" || status === "unchanged_timeout";
 }
 
 function readChangedFiles(payload: Record<string, unknown>): string[] {
@@ -1515,6 +1872,14 @@ function previewText(value: string | null, maxLength = 140): string | undefined 
   if (!normalized) return undefined;
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+export function stripTerminalControlSequences(text: string): string {
+  return text
+    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/gu, "")
+    .replace(/\[(?:\d{1,3}(?:;\d{1,3})*)?[A-Za-z]/gu, "")
+    .replace(/(^|\s)(?:\d{1,3};)*\d{1,3}m(?=\s|$)/gu, "$1")
+    .replace(/\r/gu, "");
 }
 
 function searchableCopilotProviderText(provider: CopilotProviderChoice): string {

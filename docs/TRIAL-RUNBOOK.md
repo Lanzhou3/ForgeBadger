@@ -8,6 +8,82 @@ browser terminal path, collect diagnostics, and submit feedback. Prefer the
 GitHub issue form `OpenForge first-user trial feedback` when filing feedback;
 use `docs/TRIAL-FEEDBACK.md` as the offline copy/paste template.
 
+To start from a local Markdown draft, run:
+
+```bash
+pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md
+```
+
+The draft pre-fills bounded environment metadata only. It is not submitted,
+not reviewed, and not gate-clearing evidence until a user completes it, reviews
+redaction, and links or attaches it through the feedback path.
+
+Before a completed Markdown packet is used for maintainer triage, run:
+
+```bash
+pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
+```
+
+Passing audit means ready for human triage only. It does not automatically
+clear `FIRST-USER-FEEDBACK`.
+
+If feedback was filed through the GitHub issue form, a maintainer can audit
+the issue body directly:
+
+```bash
+pnpm trial:feedback-issue-audit -- --issue=<number>
+```
+
+This command reads the issue through GitHub CLI, converts the issue-form body
+to the same packet shape, and applies the packet audit. It is read-only and
+does not comment on the issue, attach artifacts, or clear any external gate.
+
+To discover and audit all non-tracker GitHub `trial-feedback` issue candidates
+in one read-only pass, run:
+
+```bash
+pnpm trial:feedback-issues-audit
+```
+
+This skips the known routing tracker issues, audits candidate feedback issues
+through the same single-issue path, and reports which issues are ready for
+maintainer triage. It does not collect feedback, comment on issues, or clear
+`FIRST-USER-FEEDBACK`.
+
+Before editing the trial runbook, checklist, feedback template, or GitHub issue
+form, run:
+
+```bash
+pnpm trial:intake-validate
+```
+
+This checks the trial intake materials stay aligned. It does not collect
+evidence, submit feedback, or clear any external gate.
+
+Before a maintainer starts a real trial collection round, optionally verify the
+GitHub follow-up routes:
+
+```bash
+pnpm trial:issue-routes-validate
+```
+
+This requires GitHub CLI access to `Lanzhou3/OpenForge` and checks that issue
+#3, #4, and #5 still exist, are open, and match their expected routing labels.
+It does not create or update GitHub issues and does not clear any external
+gate.
+
+To run the local intake, issue-route, and gate-registry preflights together,
+use:
+
+```bash
+pnpm trial:readiness-validate
+```
+
+This command is also read-only. Passing readiness means the trial materials,
+route issues, and gate registry are aligned for a real collection round. It
+does not collect feedback, submit issues, attach artifacts, or clear any
+external gate.
+
 The primary path is the npm/CLI startup. Source startup is a fallback for local
 debugging and contribution.
 
@@ -145,8 +221,13 @@ pnpm --dir packages/gateway dev
 In another terminal, start Web:
 
 ```bash
-pnpm --dir packages/web exec next dev --hostname 127.0.0.1 --port 48732
+pnpm --dir packages/web dev
 ```
+
+The source fallback dev scripts load repository root `.env` values while
+preserving environment variables that are already set in the shell. This lets
+operators run an isolated trial by prefixing a specific variable, for example
+`OPENFORGE_DB_PATH=/tmp/openforge-trial/openforge.db pnpm --dir packages/gateway dev`.
 
 Open:
 
@@ -212,22 +293,24 @@ Collect diagnostics before changing local state after a failure.
 Diagnostics export is local-only and authenticated. Diagnostics are not
 uploaded automatically.
 
-Export diagnostics from the local Gateway after logging in:
+First-user path:
 
-```bash
-curl --noproxy '*' -fsS \
-  -H "authorization: Bearer <token>" \
-  http://127.0.0.1:48731/api/v1/diagnostics/export
-```
+1. Log in to the Web console.
+2. Open Settings.
+3. Click **Export diagnostics JSON**.
+4. Attach the downloaded redacted diagnostics file to the issue or handoff note
+   after reviewing it.
 
-For a local trial, get `<token>` from the logged-in browser session:
+Maintainer-only fallback:
 
-1. Open browser developer tools for the OpenForge Web console.
-2. Open Application or Storage.
-3. Read Local Storage for the Web origin.
-4. Use the `openforge.token` value only in the local curl command.
-
-Do not paste the token into feedback, screenshots, shared logs, or issues.
+- If the Web export cannot be used, a maintainer may collect diagnostics
+  through the authenticated local API using their own existing authenticated
+  environment.
+- Do not ask first users to retrieve browser auth tokens from developer tools.
+- Do not paste tokens, API keys, passwords, JWTs, attach tokens, private keys,
+  project secrets, provider payloads, Feishu bodies, local databases, `.env`
+  files, private AI CLI config, or raw terminal transcripts into feedback,
+  screenshots, shared logs, or issues.
 
 Recommended feedback attachments:
 
@@ -241,6 +324,53 @@ Recommended feedback attachments:
 - Claude Code version.
 - Screenshots when they make the failure easier to understand.
 
+Optional draft helper:
+
+```bash
+pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md
+```
+
+Review and complete the draft before sharing. It intentionally leaves
+diagnostics, reproduction steps, expected behavior, actual behavior, severity,
+owner, disposition, and redaction review as human-filled fields.
+
+After completing and redacting a Markdown packet, run:
+
+```bash
+pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
+```
+
+After filing feedback through the GitHub issue form, a maintainer can run:
+
+```bash
+pnpm trial:feedback-issue-audit -- --issue=<number>
+```
+
+To scan GitHub `trial-feedback` issue candidates and skip route trackers, run:
+
+```bash
+pnpm trial:feedback-issues-audit
+```
+
+After editing trial intake materials, run:
+
+```bash
+pnpm trial:intake-validate
+```
+
+If routing feedback to the existing GitHub follow-up issues, a maintainer can
+rerun:
+
+```bash
+pnpm trial:issue-routes-validate
+```
+
+Before a real collection round, a maintainer can run all preflight validators:
+
+```bash
+pnpm trial:readiness-validate
+```
+
 Do not upload secrets, API keys, plaintext credentials, local private keys, or
 private project source unless you intentionally choose to share them.
 
@@ -252,7 +382,7 @@ For npm/CLI startup, stop the foreground `openforge start` process with
 For source fallback, stop both foreground dev processes with `Ctrl-C`:
 
 - `pnpm --dir packages/gateway dev`
-- `pnpm --dir packages/web exec next dev --hostname 127.0.0.1 --port 48732`
+- `pnpm --dir packages/web dev`
 
 OpenForge sessions are tmux-backed. Stopping Gateway or Web should not kill a
 running CLI session by itself.

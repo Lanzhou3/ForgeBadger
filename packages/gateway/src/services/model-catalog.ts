@@ -211,10 +211,17 @@ const providerCatalog: ProviderCatalogPreset[] = [
     openaiBaseUrl: "https://coding.dashscope.aliyuncs.com/v1",
     envName: "DASHSCOPE_API_KEY",
     defaultModels: [
-      model("qwen3.5-coder", "Qwen3.5 Coder", ["chat", "code", "reasoning"], 256000),
-      model("qwen3.5-plus", "Qwen3.5 Plus", ["chat", "code", "reasoning"], 256000)
+      model("qwen3.6-plus", "Qwen3.6 Plus", ["chat", "code", "reasoning"], 256000),
+      model("qwen3-coder-plus", "Qwen3 Coder Plus", ["chat", "code", "reasoning"], 256000),
+      model("qwen3-coder-next", "Qwen3 Coder Next", ["chat", "code", "reasoning"], 256000),
+      model("qwen3.5-plus", "Qwen3.5 Plus", ["chat", "code", "reasoning"], 256000),
+      model("qwen3-max-2026-01-23", "Qwen3 Max 2026-01-23", ["chat", "code", "reasoning"], 256000),
+      model("kimi-k2.5", "Kimi K2.5", ["chat", "code", "reasoning"], 256000),
+      model("glm-5", "GLM-5", ["chat", "code", "reasoning"], 256000),
+      model("MiniMax-M2.5", "MiniMax M2.5", ["chat", "code", "reasoning"], 256000),
+      model("glm-4.7", "GLM-4.7", ["chat", "code", "reasoning"], 256000)
     ],
-    smallFastModel: "qwen3.5-coder"
+    smallFastModel: "qwen3-coder-plus"
   }),
   providerProduct({
     id: "qwen-coding-plan-intl",
@@ -227,10 +234,12 @@ const providerCatalog: ProviderCatalogPreset[] = [
     openaiBaseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1",
     envName: "DASHSCOPE_API_KEY",
     defaultModels: [
-      model("qwen3.5-coder", "Qwen3.5 Coder", ["chat", "code", "reasoning"], 256000),
+      model("qwen3.6-plus", "Qwen3.6 Plus", ["chat", "code", "reasoning"], 256000),
+      model("qwen3-coder-plus", "Qwen3 Coder Plus", ["chat", "code", "reasoning"], 256000),
+      model("qwen3-coder-next", "Qwen3 Coder Next", ["chat", "code", "reasoning"], 256000),
       model("qwen3.5-plus", "Qwen3.5 Plus", ["chat", "code", "reasoning"], 256000)
     ],
-    smallFastModel: "qwen3.5-coder"
+    smallFastModel: "qwen3-coder-plus"
   }),
   providerProduct({
     id: "qwen-token-plan-cn",

@@ -8,6 +8,7 @@ import { ArrowLeft, Square, Activity, History, Maximize2, Minimize2, Sparkles } 
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
 import { notifySessionTabsChanged, SessionTabs } from "@/components/session-tabs";
 import { TerminalView } from "@/components/terminal-view";
 import { connectSession, getSession, listActivities, stopSession, type SessionActivity } from "@/lib/api";
@@ -145,11 +146,23 @@ export default function TerminalPage() {
             <p className="mt-2 text-sm text-muted-foreground">
               {errorMessage}. {t("sessions.returnToList")}
             </p>
-            <Button asChild variant="outline" size="sm" className="mt-4">
-              <Link href="/sessions">
-                {t("sessions.backToSessions")}
-              </Link>
-            </Button>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button asChild variant="outline" size="sm">
+                <Link href="/sessions">
+                  {t("sessions.backToSessions")}
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/settings">
+                  {t("sessions.openSettings")}
+                </Link>
+              </Button>
+              <Button asChild variant="ghost" size="sm">
+                <Link href={sessionCopilotHref}>
+                  {t("sessions.askCopilotRecovery")}
+                </Link>
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -229,7 +242,12 @@ export default function TerminalPage() {
             attachToken={attachToken}
           />
         </div>
-        {!focusMode && <ActivityPanel activities={activityData?.activities ?? []} />}
+        {!focusMode && (
+          <SessionSidePanel
+            projectId={session?.projectId}
+            activities={activityData?.activities ?? []}
+          />
+        )}
       </div>
     </div>
   );
@@ -269,11 +287,30 @@ function SessionFallbackHeader({
   );
 }
 
+function SessionSidePanel({
+  projectId,
+  activities,
+}: {
+  projectId?: string;
+  activities: SessionActivity[];
+}) {
+  return (
+    <aside className="hidden min-h-0 overflow-auto border-t border-border bg-background/95 p-3 lg:block lg:border-l lg:border-t-0">
+      <div className="space-y-3">
+        {projectId ? (
+          <WorkspaceContextPanel projectId={projectId} />
+        ) : null}
+        <ActivityPanel activities={activities} />
+      </div>
+    </aside>
+  );
+}
+
 function ActivityPanel({ activities }: { activities: SessionActivity[] }) {
   const { t } = useLanguage();
 
   return (
-    <aside className="hidden min-h-0 overflow-auto border-t border-border bg-background/95 p-3 lg:block lg:border-l lg:border-t-0">
+    <div>
       <div className="mb-3 flex items-center gap-2 text-sm font-medium">
         <Activity className="size-4 text-muted-foreground" />
         {t("sessions.activity")}
@@ -297,7 +334,7 @@ function ActivityPanel({ activities }: { activities: SessionActivity[] }) {
           ))}
         </div>
       )}
-    </aside>
+    </div>
   );
 }
 

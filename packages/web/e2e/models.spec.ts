@@ -99,19 +99,186 @@ test("Models provider add dialog saves credential, syncs models, and previews Co
   await expect(page.getByRole("button", { name: "Apply config" })).toBeEnabled();
 });
 
+test("Models provider readiness shows healthy remote model evidence and Codex identity", async ({ page }) => {
+  const requests = await mockModelsApis(page, {
+    configuredProviders: [providerProfile()],
+    configuredModels: [modelProfile()],
+    configuredCredentials: [credentialSummary()],
+  });
+
+  await page.goto("/models");
+
+  await expect(page.getByText("Codex subscription account")).toBeVisible();
+  await expect(page.getByText("Provider apply disabled")).toBeVisible();
+  await expect(page.getByText("chatgpt_subscription_sdk")).toBeVisible();
+  await page.getByRole("button", { name: "Check readiness" }).click();
+
+  expect(requests.readiness).toEqual({
+    adapter: "claude",
+    modelProfileId: "model-1",
+    credentialId: "credential-1",
+    includeRemoteCheck: true,
+    timeoutMs: 5000,
+  });
+  const healthCard = page.getByTestId("provider-health-card");
+  await expect(healthCard.getByText("Provider health")).toBeVisible();
+  await expect(healthCard.getByText("ready", { exact: true }).first()).toBeVisible();
+  await expect(healthCard.getByText("Remote model list", { exact: true })).toBeVisible();
+  await expect(healthCard.getByText("passed", { exact: true })).toBeVisible();
+  await expect(healthCard.getByText("provider-01-model")).toBeVisible();
+  await expect(page.getByText(/test-minimax-token|sk-/)).toHaveCount(0);
+});
+
+test("Models provider readiness shows actionable remote failures", async ({ page }) => {
+  await mockModelsApis(page, {
+    configuredProviders: [providerProfile()],
+    configuredModels: [modelProfile()],
+    configuredCredentials: [credentialSummary()],
+    readiness: {
+      status: "needs_attention",
+      code: "remote_validation_failed",
+      checkedAt: "2026-05-29T02:00:00.000Z",
+      provider: {
+        id: "provider-profile-1",
+        name: "Provider 01",
+        providerKey: "provider-01",
+        apiFormat: "openai-compatible",
+        authType: "api_key",
+      },
+      selection: {
+        adapter: "claude",
+        modelProfileId: "model-1",
+        modelId: "provider-01-model",
+        credentialId: "credential-1",
+      },
+      checks: {
+        provider: "ready",
+        adapter: "supported",
+        model: "selected",
+        credential: "ready",
+        remoteModelList: "failed",
+      },
+      remote: {
+        checked: true,
+        errorCode: "invalid_credential",
+        error: "HTTP 401: unauthorized",
+      },
+      steps: ["Check that the selected credential is active and belongs to this provider."],
+    },
+  });
+
+  await page.goto("/models");
+  await page.getByRole("button", { name: "Check readiness" }).click();
+
+  const healthCard = page.getByTestId("provider-health-card");
+  await expect(healthCard.getByText("needs_attention", { exact: true })).toBeVisible();
+  await expect(healthCard.getByText("remote_validation_failed", { exact: true })).toBeVisible();
+  await expect(healthCard.getByText("invalid_credential")).toBeVisible();
+  await expect(healthCard.getByText("Check that the selected credential is active and belongs to this provider.")).toBeVisible();
+  await expect(page.getByText(/sk-|test-minimax-token/)).toHaveCount(0);
+});
+
+test("Models provider readiness distinguishes remote recovery categories", async ({ page }) => {
+  const readinessQueue = [
+    readinessFixture({
+      code: "remote_validation_failed",
+      remoteModelList: "failed",
+      remote: {
+        checked: true,
+        errorCode: "timeout",
+        error: "Request timed out",
+      },
+      steps: ["Retry with a longer timeout or check network connectivity to the provider endpoint."],
+    }),
+    readinessFixture({
+      code: "remote_validation_failed",
+      remoteModelList: "failed",
+      remote: {
+        checked: true,
+        errorCode: "provider_outage",
+        error: "HTTP 503: unavailable",
+      },
+      steps: ["Retry later or check the provider status page."],
+    }),
+    readinessFixture({
+      code: "remote_validation_failed",
+      remoteModelList: "failed",
+      remote: {
+        checked: true,
+        errorCode: "endpoint_or_network_failure",
+        error: "fetch failed",
+      },
+      steps: ["Check the provider endpoint, network access, and model-list support."],
+    }),
+    readinessFixture({
+      code: "remote_model_missing",
+      remoteModelList: "missing_model",
+      remote: {
+        checked: true,
+        modelCount: 2,
+      },
+      steps: ["The provider model list did not include provider-01-model. Sync models or choose a model ID returned by the provider."],
+    }),
+  ];
+  await mockModelsApis(page, {
+    configuredProviders: [providerProfile()],
+    configuredModels: [modelProfile()],
+    configuredCredentials: [credentialSummary()],
+    readiness: readinessQueue,
+  });
+
+  await page.goto("/models");
+  const healthCard = page.getByTestId("provider-health-card");
+
+  for (const expectation of [
+    {
+      code: "remote_validation_failed",
+      marker: "Error category: timeout",
+      step: "Retry with a longer timeout or check network connectivity to the provider endpoint.",
+    },
+    {
+      code: "remote_validation_failed",
+      marker: "Error category: provider_outage",
+      step: "Retry later or check the provider status page.",
+    },
+    {
+      code: "remote_validation_failed",
+      marker: "Error category: endpoint_or_network_failure",
+      step: "Check the provider endpoint, network access, and model-list support.",
+    },
+    {
+      code: "remote_model_missing",
+      marker: "missing_model",
+      step: "The provider model list did not include provider-01-model. Sync models or choose a model ID returned by the provider.",
+    },
+  ]) {
+    await page.getByRole("button", { name: "Check readiness" }).click();
+    await expect(healthCard.getByText(expectation.code, { exact: true })).toBeVisible();
+    await expect(healthCard.getByText(expectation.marker)).toBeVisible();
+    await expect(healthCard.getByText(expectation.step)).toBeVisible();
+    await expect(page.getByText(/sk-|test-minimax-token|Bearer/)).toHaveCount(0);
+  }
+});
+
 async function mockModelsApis(
   page: Page,
-  overrides: { configuredProviders?: Array<Record<string, unknown>> } = {}
+  overrides: {
+    configuredProviders?: Array<Record<string, unknown>>;
+    configuredModels?: Array<Record<string, unknown>>;
+    configuredCredentials?: Array<Record<string, unknown>>;
+    readiness?: Record<string, unknown> | Array<Record<string, unknown>>;
+  } = {}
 ) {
   const requests: {
     providerCreate?: unknown;
     credentialCreate?: unknown;
     syncModels?: unknown;
     previewApply?: unknown;
+    readiness?: unknown;
   } = {};
   let configuredProviders = overrides.configuredProviders ?? [];
-  let configuredModels: Array<Record<string, unknown>> = [];
-  let configuredCredentials: Array<Record<string, unknown>> = [];
+  let configuredModels: Array<Record<string, unknown>> = overrides.configuredModels ?? [];
+  let configuredCredentials: Array<Record<string, unknown>> = overrides.configuredCredentials ?? [];
 
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -180,23 +347,7 @@ async function mockModelsApis(
     if (url.pathname === "/api/v1/model-providers") {
       if (method === "POST") {
         requests.providerCreate = route.request().postDataJSON();
-        configuredProviders = [
-          {
-            id: "provider-profile-1",
-            providerKey: "provider-01",
-            name: "Provider 01",
-            baseUrl: "https://provider-01.example.com/anthropic",
-            authType: "api_key",
-            apiFormat: "openai-compatible",
-            supportedAdapters: ["claude", "opencode"],
-            opencodeNpm: "@ai-sdk/openai-compatible",
-            anthropicBaseUrl: "https://provider-01.example.com/anthropic",
-            openaiBaseUrl: "https://provider-01.example.com/v1",
-            region: "global",
-            productType: "payg_api",
-            status: "active",
-          },
-        ];
+        configuredProviders = [providerProfile()];
         await route.fulfill({
           json: envelope({
             provider: configuredProviders[0],
@@ -217,42 +368,83 @@ async function mockModelsApis(
 
     if (url.pathname === "/api/v1/model-providers/provider-profile-1/credentials" && method === "POST") {
       requests.credentialCreate = route.request().postDataJSON();
-      configuredCredentials = [
-        {
-          id: "credential-1",
-          providerProfileId: "provider-profile-1",
-          label: "Minimax subscription",
-          status: "active",
-          secretPreview: "sk-...test",
-        },
-      ];
+      configuredCredentials = [credentialSummary()];
       await route.fulfill({ json: envelope({ credential: configuredCredentials[0] }) });
       return;
     }
 
     if (url.pathname === "/api/v1/model-providers/provider-profile-1/models/sync" && method === "POST") {
       requests.syncModels = route.request().postDataJSON();
-      configuredModels = [
-        {
-          id: "model-1",
-          providerProfileId: "provider-profile-1",
-          providerKey: "provider-01",
-          providerName: "Provider 01",
-          baseUrl: "https://provider-01.example.com/anthropic",
-          anthropicBaseUrl: "https://provider-01.example.com/anthropic",
-          openaiBaseUrl: "https://provider-01.example.com/v1",
-          name: "Provider 01 Model",
-          modelId: "provider-01-model",
-          capabilities: ["chat", "code"],
-          status: "active",
-          isDefault: true,
-        },
-      ];
+      configuredModels = [modelProfile()];
       await route.fulfill({
         json: envelope({
           fetchedCount: 1,
           createdCount: 1,
           models: configuredModels,
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/model-providers/provider-profile-1/readiness" && method === "POST") {
+      requests.readiness = route.request().postDataJSON();
+      const readiness = Array.isArray(overrides.readiness)
+        ? overrides.readiness.shift()
+        : overrides.readiness;
+      await route.fulfill({
+        json: envelope({
+          readiness: readiness ?? {
+            status: "ready",
+            code: "ready",
+            checkedAt: "2026-05-29T02:00:00.000Z",
+            provider: {
+              id: "provider-profile-1",
+              name: "Provider 01",
+              providerKey: "provider-01",
+              apiFormat: "openai-compatible",
+              authType: "api_key",
+            },
+            selection: {
+              adapter: "claude",
+              modelProfileId: "model-1",
+              modelId: "provider-01-model",
+              credentialId: "credential-1",
+            },
+            checks: {
+              provider: "ready",
+              adapter: "supported",
+              model: "selected",
+              credential: "ready",
+              remoteModelList: "passed",
+            },
+            remote: {
+              checked: true,
+              modelCount: 2,
+              matchedModelId: "provider-01-model",
+            },
+            steps: [],
+          },
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/codex/subscription/status") {
+      await route.fulfill({
+        json: envelope({
+          status: {
+            providerApplyEnabled: false,
+            identitySource: "chatgpt_subscription_sdk",
+            connectionState: "connected",
+            accountLabel: "Codex signed in",
+            canUseAppServerIdentity: true,
+            sdk: {
+              packageName: "@openai/codex-sdk",
+              installed: true,
+              docsUrl: "https://developers.openai.com/codex/sdk",
+              appServerDocsUrl: "https://developers.openai.com/codex",
+            },
+          },
         }),
       });
       return;
@@ -281,7 +473,13 @@ async function mockModelsApis(
       return;
     }
 
-    await route.fulfill({ json: envelope({}) });
+    await route.fulfill({
+      status: 404,
+      json: {
+        code: 1,
+        message: `Unhandled mocked API route: ${method} ${url.pathname}`,
+      },
+    });
   });
 
   return requests;
@@ -289,4 +487,84 @@ async function mockModelsApis(
 
 function envelope(data: unknown) {
   return { code: 0, data, message: "" };
+}
+
+function providerProfile() {
+  return {
+    id: "provider-profile-1",
+    providerKey: "provider-01",
+    name: "Provider 01",
+    baseUrl: "https://provider-01.example.com/anthropic",
+    authType: "api_key",
+    apiFormat: "openai-compatible",
+    supportedAdapters: ["claude", "opencode"],
+    opencodeNpm: "@ai-sdk/openai-compatible",
+    anthropicBaseUrl: "https://provider-01.example.com/anthropic",
+    openaiBaseUrl: "https://provider-01.example.com/v1",
+    region: "global",
+    productType: "payg_api",
+    status: "active",
+  };
+}
+
+function readinessFixture(overrides: {
+  code: string;
+  remoteModelList: string;
+  remote: Record<string, unknown>;
+  steps: string[];
+}) {
+  return {
+    status: "needs_attention",
+    code: overrides.code,
+    checkedAt: "2026-05-29T02:00:00.000Z",
+    provider: {
+      id: "provider-profile-1",
+      name: "Provider 01",
+      providerKey: "provider-01",
+      apiFormat: "openai-compatible",
+      authType: "api_key",
+    },
+    selection: {
+      adapter: "claude",
+      modelProfileId: "model-1",
+      modelId: "provider-01-model",
+      credentialId: "credential-1",
+    },
+    checks: {
+      provider: "ready",
+      adapter: "supported",
+      model: "selected",
+      credential: "ready",
+      remoteModelList: overrides.remoteModelList,
+    },
+    remote: overrides.remote,
+    steps: overrides.steps,
+  };
+}
+
+function modelProfile() {
+  return {
+    id: "model-1",
+    providerProfileId: "provider-profile-1",
+    providerKey: "provider-01",
+    providerName: "Provider 01",
+    baseUrl: "https://provider-01.example.com/anthropic",
+    anthropicBaseUrl: "https://provider-01.example.com/anthropic",
+    openaiBaseUrl: "https://provider-01.example.com/v1",
+    name: "Provider 01 Model",
+    modelId: "provider-01-model",
+    capabilities: ["chat", "code"],
+    status: "active",
+    isDefault: true,
+  };
+}
+
+function credentialSummary() {
+  return {
+    id: "credential-1",
+    providerProfileId: "provider-profile-1",
+    label: "Minimax subscription",
+    status: "active",
+    secretPreview: "redacted-test",
+  };
 }

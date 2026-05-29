@@ -6,6 +6,13 @@
 > Decision: ready for beta follow-up with physical Windows/WSL evidence still
 > recorded as a platform caveat
 
+## Current status
+
+Phase 1 terminal and tmux gate status is now tracked in
+`docs/reports/phase-1-terminal-gate-evidence-2026-05-19.md`. This preserves the
+original 2026-05-10 Windows/WSL caveat while separating CI `mvp1-smoke`,
+release/manual `gate-d-smoke`, and explicit `RUN_TMUX_TESTS` evidence.
+
 ## What Changed
 
 - Added a checked-in GitHub Actions workflow at `.github/workflows/ci.yml` and

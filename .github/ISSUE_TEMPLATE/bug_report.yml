@@ -1,0 +1,112 @@
+name: OpenForge bug report
+description: Report a reproducible local-first OpenForge bug with redacted diagnostics.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for local OpenForge bugs. Do not paste API keys, passwords, JWTs, attach tokens, browser auth tokens, private keys, provider request/response bodies, Feishu event bodies, terminal transcripts, `.env` files, SQLite databases, or private AI CLI config.
+        Security-sensitive reports should follow `SECURITY.md` instead of using a public issue.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Gateway API
+        - Web console
+        - terminal/tmux
+        - project setup/import
+        - provider/model readiness
+        - Copilot/pending actions
+        - Project Manager traceability
+        - Feishu integration
+        - Codex app-server prototype
+        - documentation
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include local runtime details only. Redact paths if needed.
+      value: |
+        OpenForge commit/version:
+        OS:
+        WSL distribution/version, if applicable:
+        Browser:
+        node --version:
+        pnpm --version:
+        tmux -V:
+        claude --version, if checked:
+        opencode --version, if checked:
+        codex --version, if checked:
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: List exact local steps using disposable projects, credentials, and databases when possible.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Summarize the visible behavior. Do not paste raw terminal transcripts or provider payloads.
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Include bounded OpenForge diagnostics, status codes, route names, readiness status/code, and screenshots only after reviewing for secrets.
+      value: |
+        Gateway route/status:
+        Browser console/network summary:
+        Provider readiness status/code, if relevant:
+        Diagnostics export summary:
+    validations:
+      required: false
+
+  - type: dropdown
+    id: caveat
+    attributes:
+      label: Caveat category
+      description: Pick one if the report depends on external evidence.
+      options:
+        - none
+        - live-provider credential unavailable
+        - physical Windows/WSL host unavailable
+        - Feishu developer-console callback unavailable
+        - first-user feedback packet
+        - other external dependency
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I reviewed this issue and removed secrets, tokens, provider payloads, Feishu bodies, raw terminal transcripts, local databases, and private config.
+          required: true
