@@ -44,7 +44,7 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
-    command: `NEXT_PUBLIC_GATEWAY_URL=${gatewayUrl} pnpm dev --hostname ${webHost} --port ${webPort}`,
+    command: `OPENFORGE_WEB_HOST=${webHost} OPENFORGE_WEB_PORT=${webPort} NEXT_PUBLIC_GATEWAY_URL=${gatewayUrl} pnpm dev`,
     url: webUrl,
     reuseExistingServer: !process.env.CI,
   },
