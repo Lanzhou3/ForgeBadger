@@ -7,7 +7,7 @@
 - ✅ **v1.2 Project Manager Web Workflow** — Phases 9-11, shipped 2026-05-22.
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
-- 🟡 **v1.5 First-User Trial Operations** — Phase 35 README trial-entrypoint guard complete; real trial packet collection pending.
+- 🟡 **v1.5 First-User Trial Operations** — Phase 36 Copilot evidence packet audit guard complete; real trial packet collection pending.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -429,6 +429,36 @@ Plans:
    checklist, troubleshooting, feedback template, or GitHub issue-form link.
 4. `FIRST-USER-FEEDBACK` remains `Caveat`.
 5. The guard does not collect evidence, submit issues, attach artifacts, or
+   clear external gates.
+
+### Phase 36: Copilot Evidence Packet Audit Guard
+
+**Goal:** Ensure completed first-user feedback packets cannot enter maintainer
+triage without required Copilot smoke and boundary evidence.
+
+**Requirements:** COPILOTAUDIT-01, COPILOTAUDIT-02, COPILOTAUDIT-03,
+COPILOTAUDITSAFE-01, PLAN-36-01, PLAN-36-02, PLAN-36-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 36-01-PLAN.md — Copilot evidence packet audit coverage, issue adapter
+  mapping, intake prompt guard, draft sync, source-of-truth updates, and
+  gate-preserving verification.
+
+**Success criteria:**
+
+1. `pnpm trial:feedback-audit -- <packet.md>` rejects completed-looking
+   Markdown packets missing Copilot prompt, read-tool, pending-action,
+   memory-write, provider, or terminal-boundary evidence fields.
+2. `pnpm trial:feedback-issue-audit -- --issue=<number>` maps GitHub issue-form
+   Copilot evidence into the same packet audit shape.
+3. `pnpm trial:intake-validate` fails if Markdown or GitHub issue-form intake
+   materials drop required Copilot evidence prompts.
+4. Generated feedback drafts include all prompts required by packet audit.
+5. `FIRST-USER-FEEDBACK` remains `Caveat`.
+6. The guard does not collect evidence, submit issues, attach artifacts, or
    clear external gates.
 
 ## Archived Milestones

@@ -170,7 +170,10 @@ ${extractExpectedActual(reproduction, "Actual")}
 - pnpm smoke:copilot-provider result: ${fieldValue(copilot, "pnpm smoke:copilot-provider result")}
 - Provider smoke skip or failure reason: ${fieldValue(copilot, "Provider smoke skip or failure reason")}
 - Copilot provider with active model configured: ${fieldValue(copilot, "Provider with active model configured")}
+- Copilot prompt used: ${fieldValue(copilot, "Prompt used")}
+- Copilot read-tool evidence observed: ${fieldValue(copilot, "Read-tool evidence observed")}
 - Copilot pending-action approve/reject result: ${fieldValue(copilot, "Pending-action approve/reject result")}
+- Copilot memory write proposal tested: ${fieldValue(copilot, "Memory write proposal tested")}
 - Confirmed no terminal/shell/Codex turn input in Copilot: ${fieldValue(copilot, "Confirmed no terminal/shell/Codex turn input in Copilot")}
 - Terminal attach result: ${fieldValue(coreTrial, "Browser terminal attach")}
 - Terminal input/output result summary, no raw transcript: ${fieldValue(coreTrial, "Input/output")}
@@ -203,7 +206,7 @@ function parseIssueFormSections(body) {
 
 function fieldValue(source, label) {
   const escaped = escapeRegex(label);
-  const value = String(source ?? "").match(new RegExp(`^${escaped}:\\s*(.+?)\\s*$`, "im"))?.[1]?.trim();
+  const value = String(source ?? "").match(new RegExp(`^${escaped}:[ \\t]*(.+?)[ \\t]*$`, "im"))?.[1]?.trim();
   return value ?? "";
 }
 
@@ -215,7 +218,7 @@ function numberedSteps(source) {
 }
 
 function extractExpectedActual(source, label) {
-  const match = String(source ?? "").match(new RegExp(`^${escapeRegex(label)}:\\s*(.+?)\\s*$`, "im"));
+  const match = String(source ?? "").match(new RegExp(`^${escapeRegex(label)}:[ \\t]*(.+?)[ \\t]*$`, "im"));
   return match?.[1]?.trim() ?? "";
 }
 

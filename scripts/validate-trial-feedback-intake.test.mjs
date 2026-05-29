@@ -36,8 +36,8 @@ describe("validateTrialFeedbackIntake", () => {
     const githubIssueForm = buildIssueFormFixture()
       .replace("        - blocked", "        - blocked externally")
       .replace(
-        "id: copilot\n    validations:\n      required: true",
-        "id: copilot\n    validations:\n      required: false"
+        "        Confirmed no terminal/shell/Codex turn input in Copilot:\n    validations:\n      required: true",
+        "        Confirmed no terminal/shell/Codex turn input in Copilot:\n    validations:\n      required: false"
       );
     const markdownTemplate = buildMarkdownTemplateFixture();
 
@@ -198,6 +198,24 @@ describe("validateTrialFeedbackIntake", () => {
       /root README.*\.github\/ISSUE_TEMPLATE\/openforge-trial-feedback\.yml/
     );
   });
+
+  it("rejects intake materials that omit Copilot evidence prompts", () => {
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm: buildIssueFormFixture().replace("Prompt used:", "Prompt:"),
+      markdownTemplate: buildMarkdownTemplateFixture().replace(
+        "Copilot prompt used:",
+        "Copilot prompt:"
+      ),
+      trialRunbook: buildTrialRunbookFixture(),
+      trialChecklist: buildTrialChecklistFixture(),
+      openSourceReadiness: buildFirstUserEntrypointFixture(),
+      supportDiagnostics: buildFirstUserEntrypointFixture()
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /GitHub issue form.*Prompt used:/);
+    assert.match(result.errors.join("\n"), /Markdown trial feedback template.*Copilot prompt used:/);
+  });
 });
 
 function buildIssueFormFixture() {
@@ -216,6 +234,17 @@ function buildIssueFormFixture() {
       for (const option of REQUIRED_GITHUB_OPTIONS[field]) {
         body.push(`        - ${option}`);
       }
+    } else if (field === "copilot") {
+      body.push("    attributes:");
+      body.push("      value: |");
+      body.push("        pnpm smoke:copilot-provider result:");
+      body.push("        Provider smoke skip or failure reason:");
+      body.push("        Provider with active model configured:");
+      body.push("        Prompt used:");
+      body.push("        Read-tool evidence observed:");
+      body.push("        Pending-action approve/reject result:");
+      body.push("        Memory write proposal tested:");
+      body.push("        Confirmed no terminal/shell/Codex turn input in Copilot:");
     } else if (field === "safety") {
       body.push("    attributes:");
       body.push("      options:");
@@ -247,6 +276,11 @@ function buildMarkdownTemplateFixture() {
   for (const phrase of REQUIRED_MARKDOWN_PHRASES) {
     body.push(phrase);
   }
+  body.push("`pnpm smoke:copilot-provider` result:");
+  body.push("Provider smoke skip or failure reason:");
+  body.push("Copilot prompt used:");
+  body.push("Copilot read-tool evidence observed:");
+  body.push("Copilot memory write proposal tested:");
   return `${body.join("\n")}\n`;
 }
 

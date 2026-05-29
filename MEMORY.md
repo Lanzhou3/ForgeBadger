@@ -104,6 +104,10 @@
   `scripts/validate-trial-feedback-intake.mjs` so root/localized README trial
   entrypoints must preserve the runbook, checklist, troubleshooting, feedback
   template, and GitHub issue-form links.
+- Phase 36 updated the feedback packet and issue audits so completed-looking
+  first-user feedback must include Copilot smoke/provider, prompt, read-tool,
+  pending-action, memory-write, and terminal-boundary evidence before
+  maintainer triage.
 - Phase A local-first release closure is accepted by repository reports:
   `docs/reports/browser-terminal-smoke-2026-05-06.md`,
   `docs/reports/claude-permission-smoke-2026-05-07.md`, and

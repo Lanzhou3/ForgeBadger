@@ -41,6 +41,16 @@ const REQUIRED_FIELDS = [
   { label: "Next action or no-action rationale" },
   { label: "Caveat status", disallow: /none\s*\/\s*pass with caveats\s*\/\s*blocked/i },
   { label: "Terminal attach result" },
+  { label: "pnpm smoke:copilot-provider result", disallow: /passed\s*\/\s*skipped\s*\/\s*failed/i },
+  {
+    label: "Copilot provider with active model configured",
+    disallow: /yes\s*\/\s*no\s*\/\s*skipped/i
+  },
+  { label: "Copilot prompt used" },
+  { label: "Copilot read-tool evidence observed" },
+  { label: "Copilot pending-action approve/reject result" },
+  { label: "Copilot memory write proposal tested", disallow: /yes\s*\/\s*no\s*\/\s*skipped/i },
+  { label: "Confirmed no terminal/shell/Codex turn input in Copilot", requiredValue: /^yes$/i },
   { label: "Terminal input/output result summary, no raw transcript" },
   { label: "Terminal resize result" },
   { label: "Refresh/reconnect result" },
@@ -157,8 +167,8 @@ export function parseAuditCliArgs(args) {
 function findFieldValue(source, label) {
   const escaped = escapeRegex(label);
   const patterns = [
-    new RegExp(`^-\\s+${escaped}:\\s*(.+?)\\s*$`, "im"),
-    new RegExp(`^${escaped}:\\s*(.+?)\\s*$`, "im")
+    new RegExp(`^-\\s+${escaped}:[ \\t]*(.+?)[ \\t]*$`, "im"),
+    new RegExp(`^${escaped}:[ \\t]*(.+?)[ \\t]*$`, "im")
   ];
   for (const pattern of patterns) {
     const value = source.match(pattern)?.[1]?.trim();

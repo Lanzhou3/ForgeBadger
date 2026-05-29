@@ -35,7 +35,7 @@ describe("trial feedback GitHub issue audit", () => {
     assert.equal(result.readyForHumanTriage, false);
     assert.equal(result.gateClearingEvidence, false);
     assert.match(result.errors.join("\n"), /must keep label: trial-feedback/);
-    assert.match(result.errors.join("\n"), /Redaction review completed must be yes/);
+    assert.match(result.errors.join("\n"), /Missing required field value: Redaction review completed/);
   });
 
   it("rejects the known first-user feedback tracker even if its body looks complete", async () => {
@@ -63,6 +63,23 @@ describe("trial feedback GitHub issue audit", () => {
 
     assert.equal(result.ok, false);
     assert.match(result.errors.join("\n"), /secret-like content/);
+  });
+
+  it("rejects issue bodies that omit required Copilot evidence fields", async () => {
+    const body = buildCompletedIssueBody()
+      .replace("Prompt used: diagnose session readiness\n", "")
+      .replace("Read-tool evidence observed: project and session status\n", "")
+      .replace("Memory write proposal tested: skipped\n", "");
+    const result = await auditTrialFeedbackIssue({
+      issueNumber: 42,
+      fetchIssue: async () => buildIssue({ body })
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.readyForHumanTriage, false);
+    assert.match(result.errors.join("\n"), /Copilot prompt used/);
+    assert.match(result.errors.join("\n"), /Copilot read-tool evidence observed/);
+    assert.match(result.errors.join("\n"), /Copilot memory write proposal tested/);
   });
 
   it("forwards repository and issue number to the live fetcher", async () => {

@@ -27,6 +27,7 @@ describe("trial feedback draft generator", () => {
     assert.match(draft, /OpenForge version or commit: abc1234/);
     assert.match(draft, /Startup path: source fallback/);
     assert.match(draft, /Gateway URL: http:\/\/127\.0\.0\.1:48731/);
+    assert.match(draft, /Copilot memory write proposal tested: yes \/ no \/ skipped/);
     assert.match(draft, /`LIVE-PROVIDER`: Caveat/);
     assert.match(draft, /`FIRST-USER-FEEDBACK`: Caveat until this packet is completed, redacted, and linked/);
     assert.match(draft, /Redaction review completed: no/);

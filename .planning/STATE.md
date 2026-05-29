@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: First-User Trial Operations
 status: phase_complete
-stopped_at: Phase 35 README trial-entrypoint guard complete; real first-user packet collection pending
-last_updated: 2026-05-29T07:50:43+08:00
+stopped_at: Phase 36 Copilot evidence packet audit guard complete; real first-user packet collection pending
+last_updated: 2026-05-29T07:59:08+08:00
 last_activity: 2026-05-29
 progress:
-  total_phases: 15
-  completed_phases: 15
-  total_plans: 15
-  completed_plans: 15
+  total_phases: 16
+  completed_phases: 16
+  total_plans: 16
+  completed_plans: 16
   percent: 100
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** Phase 35 protected root/localized README trial entrypoints from dropping feedback collection paths. The next concrete step is collecting a real first-user trial packet through the validated runbook, checklist, template, issue form, draft helper, readiness preflight, packet or issue audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
+**Current focus:** Phase 36 protected completed-feedback audit paths from accepting packets that omit required Copilot smoke and boundary evidence. The next concrete step is collecting a real first-user trial packet through the validated runbook, checklist, template, issue form, draft helper, readiness preflight, packet or issue audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
 
 ## Current Position
 
-Phase: 35. README Trial Entrypoint Guard
-Plan: 35-01 complete
+Phase: 36. Copilot Evidence Packet Audit Guard
+Plan: 36-01 complete
 Status: Phase Complete
 Last activity: 2026-05-29
 
@@ -34,7 +34,7 @@ Last activity: 2026-05-29
 
 **Velocity:**
 
-- Total plans completed: 59
+- Total plans completed: 60
 - Average duration: n/a
 - Total execution time: n/a
 
@@ -77,6 +77,7 @@ Last activity: 2026-05-29
 | 33. External Gate Issue Audit Rerun Guard | 1/1 | - | - |
 | 34. First-User Entrypoint Audit Route Guard | 1/1 | - | - |
 | 35. README Trial Entrypoint Guard | 1/1 | - | - |
+| 36. Copilot Evidence Packet Audit Guard | 1/1 | - | - |
 
 ## Accumulated Context
 
@@ -115,6 +116,7 @@ Recent decisions affecting current work:
 - [Phase 33]: `pnpm evidence:gates-validate` now requires `pnpm trial:feedback-issue-audit` in the `FIRST-USER-FEEDBACK` rerun path alongside the Markdown packet audit. External gates remain unchanged.
 - [Phase 34]: `pnpm trial:intake-validate` now validates `docs/OPEN-SOURCE-READINESS.md` and `docs/SUPPORT-DIAGNOSTICS.md` preserve both feedback audit routes before maintainer triage. External gates remain unchanged.
 - [Phase 35]: `pnpm trial:intake-validate` now validates `README.md`, `docs/README.zh-CN.md`, and `docs/README.zh-TW.md` preserve the runbook, checklist, troubleshooting, feedback template, and GitHub issue-form links. External gates remain unchanged.
+- [Phase 36]: `pnpm trial:feedback-audit` and `pnpm trial:feedback-issue-audit` now reject missing Copilot smoke/provider, prompt, read-tool, pending-action, memory-write, and terminal-boundary evidence before maintainer triage. External gates remain unchanged.
 
 ### Pending Todos
 
@@ -153,8 +155,8 @@ Next steps:
 
 ## Session Continuity
 
-Last session: 2026-05-29T07:50:43+08:00
-Stopped at: Phase 35 README trial-entrypoint guard complete; real first-user packet collection pending
+Last session: 2026-05-29T07:59:08+08:00
+Stopped at: Phase 36 Copilot evidence packet audit guard complete; real first-user packet collection pending
 Resume file: None
 
 ## Operator Next Steps

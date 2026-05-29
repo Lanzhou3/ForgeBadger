@@ -49,6 +49,9 @@
 - [x] **TRIALOPS-07**: Root and localized README trial entrypoints must expose
   both first-user feedback collection paths: Markdown packet template and
   GitHub issue form.
+- [x] **TRIALOPS-08**: Completed first-user feedback must include Copilot
+  smoke/provider, prompt, read-tool, pending-action, memory-write, and
+  terminal-boundary evidence before maintainer triage.
 
 ### Evidence Safety
 
@@ -425,6 +428,30 @@
   coverage, aggregate readiness validation, docs references, and unchanged
   external gate states.
 
+### Copilot Evidence Packet Audit Guard
+
+- [x] **COPILOTAUDIT-01**: Markdown feedback packet audit must reject
+  completed-looking packets missing Copilot smoke/provider, prompt, read-tool,
+  pending-action, memory-write, or terminal-boundary evidence.
+- [x] **COPILOTAUDIT-02**: GitHub issue-form feedback audit must map Copilot
+  issue fields into the Markdown packet shape before applying the packet audit.
+- [x] **COPILOTAUDIT-03**: Trial intake validation and generated drafts must
+  preserve the Copilot evidence prompts required by packet audit.
+- [x] **COPILOTAUDITSAFE-01**: Copilot evidence audit must remain structural
+  and triage-readiness only; it must not collect evidence, submit issues,
+  attach artifacts, or clear any external evidence gate.
+
+### Phase 36 Planning Closure
+
+- [x] **PLAN-36-01**: Phase 36 has context, plan, report, and summary artifacts
+  under the active planning tree and docs report path.
+- [x] **PLAN-36-02**: Active roadmap, requirements, milestone, project, state,
+  decisions, and memory docs reflect the Copilot evidence packet audit guard
+  while keeping real first-user packet collection pending.
+- [x] **PLAN-36-03**: Phase 36 verification proves red/green packet and issue
+  audit coverage, intake validation, aggregate readiness validation, docs
+  references, and unchanged external gate states.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -448,6 +475,7 @@
 | TRIALOPS-05 | Phase 21 | Complete |
 | TRIALOPS-06 | Phase 21 | Complete |
 | TRIALOPS-07 | Phase 35 | Complete |
+| TRIALOPS-08 | Phase 36 | Complete |
 | TRIALSAFE-01 | Phase 21 | Complete |
 | TRIALSAFE-02 | Phase 21 | Complete |
 | TRIALSAFE-03 | Phase 21 | Complete |
@@ -552,11 +580,18 @@
 | PLAN-35-01 | Phase 35 | Complete |
 | PLAN-35-02 | Phase 35 | Complete |
 | PLAN-35-03 | Phase 35 | Complete |
+| COPILOTAUDIT-01 | Phase 36 | Complete |
+| COPILOTAUDIT-02 | Phase 36 | Complete |
+| COPILOTAUDIT-03 | Phase 36 | Complete |
+| COPILOTAUDITSAFE-01 | Phase 36 | Complete |
+| PLAN-36-01 | Phase 36 | Complete |
+| PLAN-36-02 | Phase 36 | Complete |
+| PLAN-36-03 | Phase 36 | Complete |
 
 **Coverage:**
-- v1.5 requirements: 111 total
-- Mapped to phases: 111
+- v1.5 requirements: 119 total
+- Mapped to phases: 119
 - Unmapped: 0
 
 ---
-*Requirements updated: 2026-05-29 after Phase 35 README Trial Entrypoint Guard.*
+*Requirements updated: 2026-05-29 after Phase 36 Copilot Evidence Packet Audit Guard.*

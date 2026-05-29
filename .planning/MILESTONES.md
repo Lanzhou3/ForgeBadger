@@ -2,7 +2,7 @@
 
 ## v1.5 First-User Trial Operations (Active: 2026-05-29)
 
-**Phases planned:** 15 phases, 15 plans
+**Phases planned:** 16 phases, 16 plans
 
 **Goal:**
 
@@ -26,6 +26,7 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - [x] Phase 33: External Gate Issue Audit Rerun Guard — 1/1 plans complete.
 - [x] Phase 34: First-User Entrypoint Audit Route Guard — 1/1 plans complete.
 - [x] Phase 35: README Trial Entrypoint Guard — 1/1 plans complete.
+- [x] Phase 36: Copilot Evidence Packet Audit Guard — 1/1 plans complete.
 
 **Acceptance boundary:**
 
@@ -67,6 +68,9 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 - README trial-entrypoint validation keeps root/localized README trial links
   aligned with both feedback collection paths, but it is not a substitute for a
   completed, redacted, linked first-user packet.
+- Copilot evidence packet audit validation prevents incomplete Copilot feedback
+  from entering maintainer triage, but it is not a substitute for a completed,
+  redacted, linked first-user packet or maintainer gate-clearance judgment.
 
 ---
 

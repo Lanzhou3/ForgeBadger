@@ -203,6 +203,28 @@ export const REQUIRED_MARKDOWN_PHRASES = [
   "Web log summary, no raw log attachment:"
 ];
 
+export const REQUIRED_GITHUB_COPILOT_PROMPTS = [
+  "pnpm smoke:copilot-provider result:",
+  "Provider smoke skip or failure reason:",
+  "Provider with active model configured:",
+  "Prompt used:",
+  "Read-tool evidence observed:",
+  "Pending-action approve/reject result:",
+  "Memory write proposal tested:",
+  "Confirmed no terminal/shell/Codex turn input in Copilot:"
+];
+
+export const REQUIRED_MARKDOWN_COPILOT_PROMPTS = [
+  "`pnpm smoke:copilot-provider` result:",
+  "Provider smoke skip or failure reason:",
+  "Copilot provider with active model configured:",
+  "Copilot prompt used:",
+  "Copilot read-tool evidence observed:",
+  "Copilot pending-action approve/reject result:",
+  "Copilot memory write proposal tested:",
+  "Confirmed no terminal/shell/Codex turn input in Copilot:"
+];
+
 const UNSAFE_INTAKE_PATTERNS = [
   /\b(?:attach|upload|submit|paste)\s+raw\b/i,
   /\bpaste\s+(?:your\s+)?(?:api\s+key|password|jwt|token|private\s+key)\b/i,
@@ -383,6 +405,15 @@ function validateGithubIssueForm(source, errors) {
       errors.push(`GitHub issue form safety language is missing: ${phrase}`);
     }
   }
+
+  const copilotBlock = fieldBlocks.get("copilot");
+  if (copilotBlock !== undefined) {
+    for (const phrase of REQUIRED_GITHUB_COPILOT_PROMPTS) {
+      if (!copilotBlock.includes(phrase)) {
+        errors.push(`GitHub issue form Copilot evidence prompt is missing: ${phrase}`);
+      }
+    }
+  }
 }
 
 function extractIssueFormFieldBlocks(source) {
@@ -449,7 +480,11 @@ function validateMarkdownTemplate(source, errors) {
     }
   }
 
-  for (const phrase of [...REQUIRED_MARKDOWN_PHRASES, ...REQUIRED_SAFETY_PHRASES.markdown]) {
+  for (const phrase of [
+    ...REQUIRED_MARKDOWN_PHRASES,
+    ...REQUIRED_MARKDOWN_COPILOT_PROMPTS,
+    ...REQUIRED_SAFETY_PHRASES.markdown
+  ]) {
     if (!source.includes(phrase)) {
       errors.push(`Markdown trial feedback template is missing required language: ${phrase}`);
     }

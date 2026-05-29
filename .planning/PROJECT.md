@@ -4,7 +4,7 @@
 
 OpenForge is a local-first AI programming IDE control platform for developers who run AI CLI tools such as Claude Code, OpenCode, and Codex on their own machine or development host. The product combines a Gateway service and a Web console for project setup, config injection, session management, terminal access, provider/model management, Copilot assistance, Feishu collaboration entry points, diagnostics, and release evidence.
 
-The current product stage is v1.5 First-User Trial Operations. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix. v1.5 turns that evidence posture into an operator-run first-user trial loop, completed an operator dry-run on the current host, fixed the source fallback env override support gap found by that dry-run, added machine validation for the trial feedback intake contract, removed browser-token fallback guidance from the first-user runbook, added a local feedback draft helper, added a local packet audit that keeps incomplete or unsafe Markdown packets out of maintainer triage, added a gate registry drift guard, extended the intake validator to keep the first-user checklist aligned with runbook/template/issue-form/audit/gate instructions, added a read-only GitHub issue route preflight for follow-up issues #3, #4, and #5, added a readiness preflight bundle that runs the trial intake, issue-route, and gate-registry checks together, added a read-only GitHub issue-form feedback audit path, protected that issue-audit path in the external evidence gate registry, guarded first-user/support entrypoint docs against dropping audit-route guidance, and guarded root/localized README trial entrypoints against dropping feedback collection paths.
+The current product stage is v1.5 First-User Trial Operations. v1.0 Post-Beta Trust Closure was archived on 2026-05-20; v1.1 completed on 2026-05-21 with a first-user readiness packet that preserves unresolved external evidence as explicit caveats rather than broadening runtime scope; v1.2 shipped on 2026-05-22 with the Project Manager Web workflow; v1.3 shipped on 2026-05-29 with Copilot-linked execution traceability, board-level project management, terminal workspace context, provider setup clarity, and open-source readiness; v1.4 shipped on 2026-05-29 with a canonical external evidence registry and closeout matrix. v1.5 turns that evidence posture into an operator-run first-user trial loop, completed an operator dry-run on the current host, fixed the source fallback env override support gap found by that dry-run, added machine validation for the trial feedback intake contract, removed browser-token fallback guidance from the first-user runbook, added a local feedback draft helper, added a local packet audit that keeps incomplete or unsafe Markdown packets out of maintainer triage, added a gate registry drift guard, extended the intake validator to keep the first-user checklist aligned with runbook/template/issue-form/audit/gate instructions, added a read-only GitHub issue route preflight for follow-up issues #3, #4, and #5, added a readiness preflight bundle that runs the trial intake, issue-route, and gate-registry checks together, added a read-only GitHub issue-form feedback audit path, protected that issue-audit path in the external evidence gate registry, guarded first-user/support entrypoint docs against dropping audit-route guidance, guarded root/localized README trial entrypoints against dropping feedback collection paths, and hardened feedback packet audit so missing Copilot evidence cannot enter maintainer triage.
 
 ## Current Milestone
 
@@ -16,7 +16,7 @@ drift guard. The trial checklist is now covered by the same intake validation
 loop, the existing GitHub follow-up issue routes have a read-only preflight
 command, and maintainers can run a combined readiness preflight before a real
 collection round. GitHub issue-form feedback can now be audited directly before
-triage, the external gate registry now preserves that route, support/open-source entrypoints now keep both audit routes visible, and root/localized README trial entrypoints now keep both feedback collection paths visible. The remaining work is real first-user trial packet collection and
+triage, the external gate registry now preserves that route, support/open-source entrypoints now keep both audit routes visible, root/localized README trial entrypoints now keep both feedback collection paths visible, and completed-feedback audits now require Copilot evidence fields before triage. The remaining work is real first-user trial packet collection and
 maintainer triage.
 
 **Last shipped:** v1.4 External Evidence Closure on 2026-05-29.
@@ -96,6 +96,9 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
   routes before maintainer triage.
 - [x] v1.5 root and localized README trial entrypoints preserve the runbook,
   checklist, troubleshooting, feedback template, and GitHub issue-form links.
+- [x] v1.5 completed-feedback audits reject missing Copilot smoke/provider,
+  prompt, read-tool, pending-action, memory-write, and terminal-boundary
+  evidence before maintainer triage.
 
 ### Active
 
@@ -121,6 +124,8 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
   diagnostics entrypoints for feedback audit-route drift.
 - [x] v1.5 trial intake validation covers root and localized README trial
   entrypoints for collection-path drift.
+- [x] v1.5 trial intake validation covers Copilot evidence prompts in Markdown
+  and GitHub issue-form feedback paths.
 
 ### Out of Scope
 
@@ -208,6 +213,10 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
   `docs/README.zh-CN.md`, and `docs/README.zh-TW.md` so README trial
   entrypoints preserve the runbook, checklist, troubleshooting, feedback
   template, and GitHub issue-form links before real collection.
+- Phase 36 extended `pnpm trial:feedback-audit` and
+  `pnpm trial:feedback-issue-audit` so completed-looking feedback missing
+  Copilot smoke/provider, prompt, read-tool, pending-action, memory-write, or
+  terminal-boundary evidence is rejected before maintainer triage.
 - Root `MEMORY.md` remains the project progress memory for non-GSD sessions.
 
 ## Constraints
@@ -253,6 +262,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 | Protect issue audit gate rerun path | The canonical external gate registry must not drift away from the new issue-form audit route | Good - Phase 33 adds validator coverage for the issue audit command |
 | Guard first-user entrypoint audit routes | Public/support first-user entrypoints must not route feedback around the audit commands | Good - Phase 34 extends trial intake validation to open-source readiness and support diagnostics |
 | Guard README trial entrypoints | The public README is the outermost trial entrypoint and must expose both feedback collection paths | Good - Phase 35 extends trial intake validation to root/localized README trial links |
+| Guard Copilot evidence packet audit | Completed first-user feedback must include Copilot smoke and boundary evidence before maintainer triage | Good - Phase 36 extends packet and issue audit coverage |
 
 ## Evolution
 
@@ -272,4 +282,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-29 after completing Phase 35 README Trial Entrypoint Guard.*
+*Last updated: 2026-05-29 after completing Phase 36 Copilot Evidence Packet Audit Guard.*

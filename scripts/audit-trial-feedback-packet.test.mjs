@@ -69,6 +69,20 @@ describe("trial feedback packet audit", () => {
     assert.match(result.errors.join("\n"), /Export path used still contains placeholder options/);
   });
 
+  it("rejects packets that omit required Copilot evidence fields", () => {
+    const packet = buildCompletedPacket()
+      .replace("- Copilot prompt used: diagnose session readiness\n", "")
+      .replace("- Copilot read-tool evidence observed: project and session status\n", "")
+      .replace("- Copilot memory write proposal tested: skipped\n", "");
+    const result = auditTrialFeedbackPacket(packet);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.readyForHumanTriage, false);
+    assert.match(result.errors.join("\n"), /Copilot prompt used/);
+    assert.match(result.errors.join("\n"), /Copilot read-tool evidence observed/);
+    assert.match(result.errors.join("\n"), /Copilot memory write proposal tested/);
+  });
+
   it("parses packet path and json flag", () => {
     assert.deepEqual(parseAuditCliArgs(["--", "/tmp/packet.md", "--json"]), {
       packetPath: "/tmp/packet.md",
@@ -139,6 +153,11 @@ The trial completed with a caveat: no physical Windows/WSL host was available.
 - pnpm smoke:copilot-provider result: skipped
 - Provider smoke skip or failure reason: missing_provider_credential
 - Copilot provider with active model configured: skipped
+- Copilot prompt used: diagnose session readiness
+- Copilot read-tool evidence observed: project and session status
+- Copilot pending-action approve/reject result: skipped
+- Copilot memory write proposal tested: skipped
+- Confirmed no terminal/shell/Codex turn input in Copilot: yes
 - Terminal attach result: passed
 - Terminal input/output result summary, no raw transcript: passed with harmless prompt
 - Terminal resize result: passed

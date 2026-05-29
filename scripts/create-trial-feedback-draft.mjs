@@ -78,6 +78,7 @@ Review and redact this draft before attaching diagnostics, screenshots, or writt
 - Copilot prompt used:
 - Copilot read-tool evidence observed:
 - Copilot pending-action approve/reject result:
+- Copilot memory write proposal tested: yes / no / skipped
 - Confirmed no terminal/shell/Codex turn input in Copilot: yes / no
 - Screenshots or written observations, redacted:
 - Terminal attach result:
