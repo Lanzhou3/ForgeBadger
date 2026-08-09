@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -19,6 +20,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import {
   Table,
   TableBody,
@@ -31,10 +33,17 @@ import {
   getDependencies,
   listSessions,
   getDashboardSummary,
+  getConfigCompliance,
+  listProjects,
+  discoverAdapters,
 } from "@/lib/api";
+import { buildActivationReadiness } from "@/lib/activation-readiness";
 import { buildCopilotLaunchHref } from "@/lib/copilot";
 import { normalizeSessionStatus } from "@/lib/session-status";
-import { getTerminalRuntimeRemediation } from "@/lib/terminal-runtime";
+import {
+  getTerminalRuntimeRemediation,
+  getTerminalRuntimeSetupGuidance,
+} from "@/lib/terminal-runtime";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function DashboardPage() {
@@ -47,23 +56,45 @@ export default function DashboardPage() {
     queryKey: ["sessions"],
     queryFn: listSessions,
   });
+  const projectsQuery = useQuery({
+    queryKey: ["projects"],
+    queryFn: listProjects,
+  });
   const dependenciesQuery = useQuery({
     queryKey: ["dependencies"],
     queryFn: getDependencies,
   });
+  const adaptersQuery = useQuery({
+    queryKey: ["adapters", "discovery"],
+    queryFn: discoverAdapters,
+  });
+  const firstProjectId = projectsQuery.data?.projects[0]?.id;
+  const configComplianceQuery = useQuery({
+    queryKey: ["project-config-compliance", firstProjectId],
+    queryFn: () => getConfigCompliance(firstProjectId ?? ""),
+    enabled: Boolean(firstProjectId),
+    retry: false,
+  });
 
   const sessionsData = sessionsQuery.data;
+  const projects = projectsQuery.data?.projects ?? [];
+  const firstProject = projects[0];
   const dashboard = dashboardQuery.data;
   const dashboardStats = dashboard?.stats;
   const dashboardHealth = dashboard?.health;
   const terminalRuntime = dependenciesQuery.data?.terminalRuntime;
   const terminalRemediation = getTerminalRuntimeRemediation(terminalRuntime?.mode);
+  const terminalSetupGuidance = getTerminalRuntimeSetupGuidance(
+    terminalRuntime?.mode,
+    terminalRuntime?.supported
+  );
   const dependenciesHealthy = dependenciesQuery.isSuccess && terminalRuntime?.supported === true;
   const dependenciesDetail = dependenciesQuery.isLoading
     ? t("dashboard.dependenciesHealthLoading")
     : dependenciesQuery.isError || !terminalRuntime
       ? t("dashboard.dependenciesHealthUnavailable")
       : t(terminalRemediation.detailKey);
+  const showRuntimeCommands = !dependenciesQuery.isLoading && terminalSetupGuidance.blocked;
   const dashboardCopilotHref = buildCopilotLaunchHref({
     source: "dashboard",
   });
@@ -100,6 +131,26 @@ export default function DashboardPage() {
   ];
 
   const recentSessions = (sessionsData?.sessions ?? []).slice(0, 5);
+  const projectCount = dashboardStats?.projects ?? projects.length;
+  const sessionCount = dashboardStats?.sessions ?? sessionsData?.sessions.length ?? 0;
+  const activationReadiness = buildActivationReadiness({
+    terminalRuntime,
+    dependenciesLoading: dependenciesQuery.isLoading,
+    dependenciesError: dependenciesQuery.isError,
+    adapters: adaptersQuery.data?.adapters ?? [],
+    adaptersLoading: adaptersQuery.isLoading,
+    adaptersError: adaptersQuery.isError,
+    modelsHealthy: dashboardHealth?.models.healthy,
+    modelsLoading: dashboardQuery.isLoading,
+    modelsError: dashboardQuery.isError,
+    projectCount,
+    projectConfigCompliant: configComplianceQuery.data?.compliance.status === "compliant",
+    projectConfigLoading: Boolean(firstProjectId) && configComplianceQuery.isLoading,
+    projectConfigError: Boolean(firstProjectId) && configComplianceQuery.isError,
+    sessionCount,
+    firstProjectId: firstProject?.id,
+  });
+  const showFirstRunReadiness = !activationReadiness.complete;
   const healthCards = [
     {
       label: t("dashboard.gatewayHealth"),
@@ -199,6 +250,54 @@ export default function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      {showFirstRunReadiness && (
+        <Card className="border-primary/30 bg-muted/20">
+          <CardHeader>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">{t("dashboard.firstRunTitle")}</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t("dashboard.firstRunDescription")}
+                </p>
+              </div>
+              <Badge variant={activationReadiness.complete ? "secondary" : "outline"}>
+                {activationReadiness.complete
+                  ? t("dashboard.firstRunReady")
+                  : t("dashboard.firstRunBlocked")}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+              {activationReadiness.steps.map((step) => (
+                <FirstRunStep
+                  key={step.id}
+                  label={t(step.labelKey)}
+                  done={step.done}
+                  detail={t(step.detailKey)}
+                >
+                  {step.id === "runtime" && showRuntimeCommands && (
+                    <RuntimeSetupCommands guidance={terminalSetupGuidance} />
+                  )}
+                </FirstRunStep>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild size="sm">
+                <Link href={activationReadiness.primaryAction.href}>
+                  {t(activationReadiness.primaryAction.labelKey)}
+                </Link>
+              </Button>
+              {activationReadiness.secondaryActions.map((action) => (
+                <Button key={action.href} asChild size="sm" variant="outline">
+                  <Link href={action.href}>{t(action.labelKey)}</Link>
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="space-y-3">
         <h2 className="text-lg font-semibold">{t("dashboard.health")}</h2>
@@ -302,6 +401,33 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+    </div>
+  );
+}
+
+function FirstRunStep({
+  label,
+  detail,
+  done,
+  children,
+}: {
+  label: string;
+  detail: string;
+  done: boolean;
+  children?: ReactNode;
+}) {
+  const { t } = useLanguage();
+
+  return (
+    <div className="min-w-0 rounded-md border border-border bg-background/70 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-medium">{label}</div>
+        <Badge variant={done ? "secondary" : "destructive"}>
+          {done ? t("dashboard.firstRunReady") : t("dashboard.firstRunBlocked")}
+        </Badge>
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">{detail}</p>
+      {children && <div className="mt-3">{children}</div>}
     </div>
   );
 }

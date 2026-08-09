@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Bell, Cpu, Download, FlaskConical, Globe2, KeyRound, MessageSquare, RefreshCw, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import {
   Card,
   CardContent,
@@ -26,6 +27,7 @@ import {
 import {
   discoverAdapters,
   exportDiagnostics,
+  getDependencies,
   getFeishuIntegrationStatus,
   listAuditLogs,
   type AdapterDiscovery,
@@ -33,6 +35,7 @@ import {
   type LocalDiagnosticsExport
 } from "@/lib/api";
 import type { Language, TranslationKey } from "@/lib/i18n";
+import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 
 const languageOptions = [
   { code: "zh-CN", label: "简体中文" },
@@ -42,6 +45,7 @@ const languageOptions = [
 
 export default function SettingsPage() {
   const { language, setLanguage, t } = useLanguage();
+  const queryClient = useQueryClient();
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(false);
   const [browserNotificationPermission, setBrowserNotificationPermission] =
     useState<BrowserNotificationPermission>("unsupported");
@@ -49,11 +53,22 @@ export default function SettingsPage() {
   const {
     data: adapterData,
     isLoading: adaptersLoading,
+    isFetching: adaptersFetching,
     isError: adaptersError,
     refetch: refetchAdapters,
   } = useQuery({
-    queryKey: ["adapter-discovery"],
+    queryKey: ["adapters", "discovery"],
     queryFn: discoverAdapters,
+  });
+  const {
+    data: dependenciesData,
+    isLoading: dependenciesLoading,
+    isFetching: dependenciesFetching,
+    isError: dependenciesError,
+    refetch: refetchDependencies,
+  } = useQuery({
+    queryKey: ["dependencies"],
+    queryFn: getDependencies,
   });
   const {
     data: feishuStatus,
@@ -101,6 +116,19 @@ export default function SettingsPage() {
       setDiagnosticsState("error");
     }
   }
+
+  async function handleDependencyRefresh() {
+    await Promise.all([refetchDependencies(), refetchAdapters()]);
+    await queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+  }
+
+  const terminalRuntime = dependenciesData?.terminalRuntime;
+  const terminalSetupGuidance = getTerminalRuntimeSetupGuidance(
+    terminalRuntime?.mode,
+    terminalRuntime?.supported
+  );
+  const tmuxDependency = dependenciesData?.dependencies.find((dependency) => dependency.name === "tmux");
+  const discoveryRefreshing = adaptersFetching || dependenciesFetching;
 
   return (
     <div className="p-6 space-y-4">
@@ -178,15 +206,74 @@ export default function SettingsPage() {
 
           <Card>
             <CardHeader>
-              <div className="flex items-center gap-2">
-                <Cpu className="size-4 text-muted-foreground" />
-                <CardTitle>{t("settings.adapters")}</CardTitle>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Cpu className="size-4 text-muted-foreground" />
+                    <CardTitle>{t("settings.adapters")}</CardTitle>
+                  </div>
+                  <CardDescription className="mt-2">
+                    {t("settings.adaptersDescription")}
+                  </CardDescription>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleDependencyRefresh()}
+                  disabled={discoveryRefreshing}
+                >
+                  <RefreshCw className={`mr-2 size-3.5 ${discoveryRefreshing ? "animate-spin" : ""}`} />
+                  {discoveryRefreshing ? t("settings.discoveryRefreshing") : t("settings.discoveryRefresh")}
+                </Button>
               </div>
-              <CardDescription>
-                {t("settings.adaptersDescription")}
-              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              {dependenciesLoading ? (
+                <p className="text-sm text-muted-foreground">
+                  {t("settings.dependenciesLoading")}
+                </p>
+              ) : dependenciesError ? (
+                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 size-4 text-destructive" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-destructive">
+                        {t("settings.dependenciesLoadFailed")}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t("settings.discoveryLoadFailedDescription")}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium">{t("settings.terminalRuntimeReadiness")}</div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {t(terminalSetupGuidance.descriptionKey)}
+                      </p>
+                      {(tmuxDependency?.version || tmuxDependency?.error) && (
+                        <p className="mt-2 break-all font-mono text-xs text-muted-foreground">
+                          {tmuxDependency.version ?? tmuxDependency.error}
+                        </p>
+                      )}
+                    </div>
+                    <Badge variant={terminalSetupGuidance.blocked ? "destructive" : "secondary"}>
+                      {terminalSetupGuidance.blocked
+                        ? t("settings.launchBlocked")
+                        : t("settings.launchReady")}
+                    </Badge>
+                  </div>
+                  {terminalSetupGuidance.blocked && (
+                    <div className="mt-3">
+                      <RuntimeSetupCommands guidance={terminalSetupGuidance} />
+                    </div>
+                  )}
+                </div>
+              )}
               {adaptersLoading ? (
                 <p className="text-sm text-muted-foreground">
                   {t("settings.discoveryLoading")}

@@ -73,6 +73,14 @@ export type ProjectManagerWorkItemStatus =
   | "done"
   | "cancelled";
 
+export type ProjectManagerTaskPacketQueueStatus =
+  | "planned"
+  | "running"
+  | "waiting_for_review"
+  | "blocked"
+  | "completed"
+  | "cancelled";
+
 export interface ProjectManagerWorkItem {
   id: string;
   projectId: string;
@@ -86,6 +94,42 @@ export interface ProjectManagerWorkItem {
   feishuRefCount: number;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface ProjectManagerTaskPacket {
+  id: string;
+  projectId: string;
+  workItemId: string;
+  workItemStatus: ProjectManagerWorkItemStatus;
+  queueStatus: ProjectManagerTaskPacketQueueStatus;
+  title: string;
+  updatedAt: number;
+  prompt: string;
+  acceptanceCriteria: string[];
+  expectedVerification: string[];
+  evidenceRequirements: string[];
+  runtime: {
+    adapter: string;
+    templateId: string;
+  };
+  sessionLink: {
+    sessionId: string;
+    status: string;
+    aiTool: string;
+    href: string;
+  } | null;
+  blockedReason: "no_linked_session" | "linked_session_not_running" | null;
+}
+
+export interface ProjectManagerStarterPack {
+  id: string;
+  name: string;
+  description: string;
+  recommendedAdapter: "claude" | "opencode" | "codex";
+  promptFrame: string;
+  acceptanceChecklist: string[];
+  verificationGuidance: string[];
+  evidenceFields: string[];
 }
 
 export interface ProjectManagerWorkItemInput {
@@ -1831,6 +1875,82 @@ export async function deleteProjectManagerWorkItem(
   }) as Promise<{ workItem: ProjectManagerWorkItem }>;
 }
 
+export async function listProjectManagerTaskPackets(
+  projectId: string,
+  params: { limit?: number } = {}
+): Promise<{ taskPackets: ProjectManagerTaskPacket[] }> {
+  const searchParams = new URLSearchParams();
+  if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return fetchJson(projectManagerPath(projectId, `/task-packets${query ? `?${query}` : ""}`)) as Promise<{
+    taskPackets: ProjectManagerTaskPacket[];
+  }>;
+}
+
+export async function getProjectManagerTaskPacket(
+  projectId: string,
+  workItemId: string
+): Promise<{ taskPacket: ProjectManagerTaskPacket }> {
+  return fetchJson(projectManagerPath(
+    projectId,
+    `/work-items/${encodeURIComponent(workItemId)}/task-packet`
+  )) as Promise<{ taskPacket: ProjectManagerTaskPacket }>;
+}
+
+export async function listProjectManagerStarterPacks(
+  projectId: string
+): Promise<{ starterPacks: ProjectManagerStarterPack[] }> {
+  return fetchJson(projectManagerPath(projectId, "/starter-packs")) as Promise<{
+    starterPacks: ProjectManagerStarterPack[];
+  }>;
+}
+
+export async function createProjectManagerStarterPackTaskPacket(
+  projectId: string,
+  packId: string
+): Promise<{
+  pack: ProjectManagerStarterPack;
+  workItem: ProjectManagerWorkItem;
+  taskPacket: ProjectManagerTaskPacket;
+}> {
+  return fetchJson(projectManagerPath(
+    projectId,
+    `/starter-packs/${encodeURIComponent(packId)}/task-packet`
+  ), {
+    method: "POST",
+  }) as Promise<{
+    pack: ProjectManagerStarterPack;
+    workItem: ProjectManagerWorkItem;
+    taskPacket: ProjectManagerTaskPacket;
+  }>;
+}
+
+export async function linkProjectManagerTaskPacketSession(
+  projectId: string,
+  workItemId: string,
+  input: { sessionId: string }
+): Promise<{ taskPacket: ProjectManagerTaskPacket }> {
+  return fetchJson(projectManagerPath(
+    projectId,
+    `/work-items/${encodeURIComponent(workItemId)}/task-packet/session-link`
+  ), {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ taskPacket: ProjectManagerTaskPacket }>;
+}
+
+export async function startProjectManagerTaskPacket(
+  projectId: string,
+  workItemId: string
+): Promise<{ taskPacket: ProjectManagerTaskPacket; session: Session }> {
+  return fetchJson(projectManagerPath(
+    projectId,
+    `/work-items/${encodeURIComponent(workItemId)}/task-packet/start`
+  ), {
+    method: "POST",
+  }) as Promise<{ taskPacket: ProjectManagerTaskPacket; session: Session }>;
+}
+
 export async function listProjectManagerLedger(
   projectId: string,
   params: { eventType?: ProjectManagerLedgerEventType; limit?: number } = {}
@@ -2327,8 +2447,9 @@ export interface ImportProjectInput {
 
 export interface ProjectWithConfigResult {
   project: Project;
-  configStatus: "applied" | "failed" | "skipped";
+  configStatus: "applied" | "needs_review" | "failed" | "skipped";
   configError?: string;
+  configSummary?: ConfigSyncSummary;
 }
 
 export type ImportProjectWithConfigResult = ProjectWithConfigResult;
@@ -2349,7 +2470,7 @@ export async function importProjectWithConfig(
   input: ImportProjectInput
 ): Promise<ImportProjectWithConfigResult> {
   const { project } = await importProject(input);
-  return { project, configStatus: "skipped" };
+  return configureCreatedProject(project, input);
 }
 
 export async function createProjectWithConfig(
@@ -2359,10 +2480,54 @@ export async function createProjectWithConfig(
     aiTool?: RuntimeAdapterId;
     description?: string;
     templateId?: string;
+    skipConfigGeneration?: boolean;
   }
 ): Promise<ProjectWithConfigResult> {
   const { project } = await createProject(input);
-  return { project, configStatus: "skipped" };
+  return configureCreatedProject(project, input);
+}
+
+async function configureCreatedProject(
+  project: Project,
+  input: Pick<ImportProjectInput, "aiTool" | "skipConfigGeneration" | "templateId">
+): Promise<ProjectWithConfigResult> {
+  if (input.skipConfigGeneration) return { project, configStatus: "skipped" };
+
+  const templateId = input.templateId ?? project.templateId ?? defaultTemplateForAiTool(input.aiTool ?? project.aiTool);
+  try {
+    const preview = await previewConfigSync(project.id, templateId);
+    if (configSyncRequiresReview(preview.summary)) {
+      return {
+        project,
+        configStatus: "needs_review",
+        configError: "Configuration has modified or unsafe files requiring an explicit decision.",
+        configSummary: preview.summary,
+      };
+    }
+    if (preview.summary.missingFiles.length === 0) {
+      return { project, configStatus: "skipped", configSummary: preview.summary };
+    }
+
+    // Only a conflict-free, missing-file plan may write during creation/import.
+    const applied = await applyConfigSync(project.id, {}, templateId);
+    return {
+      project,
+      configStatus: applied.result.writtenFiles.length > 0 ? "applied" : "skipped",
+      configSummary: applied.summary,
+    };
+  } catch (error) {
+    return {
+      project,
+      configStatus: "failed",
+      configError: error instanceof Error ? error.message : "Config generation failed",
+    };
+  }
+}
+
+function configSyncRequiresReview(summary: ConfigSyncSummary): boolean {
+  return summary.modifiedFiles.length > 0
+    || summary.unsafeFiles.length > 0
+    || summary.requiresDecision.length > 0;
 }
 
 // Templates

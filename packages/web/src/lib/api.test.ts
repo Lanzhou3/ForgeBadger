@@ -139,6 +139,16 @@ type ProjectManagerApiClient = {
   batchUpdateProjectManagerWorkItemStatuses: (projectId: string, input: unknown) => Promise<unknown>;
   attachProjectManagerWorkItemEvidence: (projectId: string, workItemId: string, input: unknown) => Promise<unknown>;
   deleteProjectManagerWorkItem: (projectId: string, workItemId: string, input: unknown) => Promise<unknown>;
+  listProjectManagerTaskPackets: (projectId: string, params?: unknown) => Promise<unknown>;
+  getProjectManagerTaskPacket: (projectId: string, workItemId: string) => Promise<unknown>;
+  listProjectManagerStarterPacks: (projectId: string) => Promise<unknown>;
+  createProjectManagerStarterPackTaskPacket: (projectId: string, packId: string) => Promise<unknown>;
+  linkProjectManagerTaskPacketSession: (
+    projectId: string,
+    workItemId: string,
+    input: { sessionId: string }
+  ) => Promise<unknown>;
+  startProjectManagerTaskPacket: (projectId: string, workItemId: string) => Promise<unknown>;
   listProjectManagerLedger: (projectId: string, params?: unknown) => Promise<unknown>;
 };
 
@@ -1235,6 +1245,55 @@ describe("api client", () => {
     ]);
   });
 
+  it("loads and links project-manager task packets through REST", async () => {
+    await projectManagerApi.listProjectManagerTaskPackets("project/1", { limit: 20 });
+    await projectManagerApi.getProjectManagerTaskPacket("project/1", "work/item-1");
+    await projectManagerApi.linkProjectManagerTaskPacketSession("project/1", "work/item-1", {
+      sessionId: "session/1",
+    });
+    await projectManagerApi.startProjectManagerTaskPacket("project/1", "work/item-1");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/task-packets?limit=20",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/task-packet",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/task-packet/session-link",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ sessionId: "session/1" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/task-packet/start",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("loads Project Manager starter packs and creates pack-backed task packets", async () => {
+    await projectManagerApi.listProjectManagerStarterPacks("project/1");
+    await projectManagerApi.createProjectManagerStarterPackTaskPacket("project/1", "code-review");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/starter-packs",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/starter-packs/code-review/task-packet",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
   it("preserves Gateway error details for project-manager API calls", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1557,7 +1616,7 @@ describe("api client", () => {
     );
   });
 
-  it("imports project records without CLI fields or automatic config generation", async () => {
+  it("imports a project, previews config, and applies only missing files", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: () =>
@@ -1574,14 +1633,46 @@ describe("api client", () => {
         }),
     } as Response);
 
+    vi.mocked(fetch).mockImplementationOnce(() => mockEnvelope({
+      plan: { dryRun: true, files: [{ relativePath: ".claude/CLAUDE.md", sha256: "abc" }] },
+      conflicts: [],
+      summary: {
+        templateId: "builtin-claude-code",
+        totalFiles: 1,
+        missingFiles: [".claude/CLAUDE.md"],
+        identicalFiles: [],
+        modifiedFiles: [],
+        unsafeFiles: [],
+        requiresDecision: [],
+      },
+    }));
+    vi.mocked(fetch).mockImplementationOnce(() => mockEnvelope({
+      result: {
+        writtenFiles: [".claude/CLAUDE.md"],
+        skippedFiles: [],
+        backupPath: "/tmp/backup",
+        conflicts: [],
+        rollbackAvailable: false,
+      },
+      summary: {
+        templateId: "builtin-claude-code",
+        totalFiles: 1,
+        missingFiles: [".claude/CLAUDE.md"],
+        identicalFiles: [],
+        modifiedFiles: [],
+        unsafeFiles: [],
+        requiresDecision: [],
+      },
+    }));
+
     const result = await importProjectWithConfig({
       path: "/tmp/existing",
       name: "Existing",
     });
 
     expect(result.project.id).toBe("project-1");
-    expect(result.configStatus).toBe("skipped");
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(result.configStatus).toBe("applied");
+    expect(fetch).toHaveBeenCalledTimes(3);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       "http://127.0.0.1:48731/api/v1/projects/import",
@@ -1595,7 +1686,7 @@ describe("api client", () => {
     );
   });
 
-  it("creates project records without CLI fields or automatic config generation", async () => {
+  it("returns needs_review after project creation when config is modified or unsafe", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -1612,13 +1703,28 @@ describe("api client", () => {
           }),
       } as Response);
 
+    vi.mocked(fetch).mockImplementationOnce(() => mockEnvelope({
+      plan: { dryRun: true, files: [{ relativePath: "AGENTS.md", sha256: "abc" }] },
+      conflicts: [{ relativePath: "AGENTS.md", conflictType: "modified", allowedActions: ["skip", "overwrite"] }],
+      summary: {
+        templateId: "builtin-codex",
+        totalFiles: 1,
+        missingFiles: [],
+        identicalFiles: [],
+        modifiedFiles: ["AGENTS.md"],
+        unsafeFiles: [],
+        requiresDecision: ["AGENTS.md"],
+      },
+    }));
+
     const result = await createProjectWithConfig({
       path: "/tmp/runtime-agnostic",
       name: "Runtime Agnostic Project",
+      aiTool: "codex",
     });
 
-    expect(result.configStatus).toBe("skipped");
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(result.configStatus).toBe("needs_review");
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       "http://127.0.0.1:48731/api/v1/projects",
@@ -1627,7 +1733,16 @@ describe("api client", () => {
         body: JSON.stringify({
           path: "/tmp/runtime-agnostic",
           name: "Runtime Agnostic Project",
+          aiTool: "codex",
         }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/projects/project-3/config/sync/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ credentialMode: "host_environment", templateId: "builtin-codex" }),
       })
     );
   });

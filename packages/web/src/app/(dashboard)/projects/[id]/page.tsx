@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProjectManagerPanel } from "@/components/projects/ProjectManagerPanel";
+import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -29,6 +30,7 @@ import {
   getGlobalAiConfig,
   getProjectAiConfig,
   getConfigCompliance,
+  getDependencies,
   discoverAdapters,
   listSessions,
   createSession,
@@ -75,6 +77,7 @@ import { useLanguage } from "@/hooks/use-language";
 import { buildCopilotLaunchHref } from "@/lib/copilot";
 import { activityFiltersForProject } from "@/lib/snapshot-filters";
 import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highlight";
+import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 
 const builtinTemplateOptions = [
@@ -175,6 +178,11 @@ export default function ProjectDetailPage() {
   const { data: adapterDiscoveryData, isLoading: adapterDiscoveryLoading } = useQuery({
     queryKey: ["adapters", "discovery"],
     queryFn: discoverAdapters,
+  });
+
+  const { data: dependenciesData, isLoading: dependenciesLoading } = useQuery({
+    queryKey: ["dependencies"],
+    queryFn: getDependencies,
   });
 
   const { data: projectAiConfigData, isLoading: projectAiConfigLoading } = useQuery({
@@ -324,6 +332,11 @@ export default function ProjectDetailPage() {
   const apiKeys = apiKeysData?.apiKeys ?? [];
   const templates = templatesData?.templates ?? [];
   const runtimeAdapters = adapterDiscoveryData?.adapters ?? [];
+  const terminalRuntime = dependenciesData?.terminalRuntime;
+  const terminalSetupGuidance = getTerminalRuntimeSetupGuidance(
+    terminalRuntime?.mode,
+    terminalRuntime?.supported
+  );
   const launchableRuntimeAdapters = useMemo(
     () => runtimeAdapters.filter(isAdapterLaunchable),
     [runtimeAdapters]
@@ -341,7 +354,7 @@ export default function ProjectDetailPage() {
     !selectedRuntimeAdapter ||
     !selectedRuntimeLaunchable ||
     (selectedCredentialNeedsKey && !selectedApiKeyId);
-  const configNeedsReview = searchParams.get("configStatus") === "failed";
+  const configNeedsReview = ["failed", "needs_review"].includes(searchParams.get("configStatus") ?? "");
   const projectManagerWorkItemId = normalizeSearchParam(searchParams.get("workItemId"));
   const selectedModel = models.find((model) => model.id === selectedModelId);
   const runningSessionCount = projectSessions.filter((session) => session.status === "running").length;
@@ -597,11 +610,18 @@ export default function ProjectDetailPage() {
                   <div className="space-y-2">
                     <p className="flex items-center gap-1 text-xs text-destructive">
                       <AlertTriangle className="size-3.5" />
-                      {t("projects.noLaunchableRuntimeCli")}
+                      {!dependenciesLoading && terminalSetupGuidance.blocked
+                        ? t(terminalSetupGuidance.titleKey)
+                        : t("projects.noLaunchableRuntimeCli")}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {t("projects.runtimeCliRecoveryDescription")}
+                      {!dependenciesLoading && terminalSetupGuidance.blocked
+                        ? t(terminalSetupGuidance.descriptionKey)
+                        : t("projects.runtimeCliRecoveryDescription")}
                     </p>
+                    {!dependenciesLoading && terminalSetupGuidance.blocked && (
+                      <RuntimeSetupCommands guidance={terminalSetupGuidance} />
+                    )}
                     <div className="flex flex-wrap gap-2">
                       <Button asChild variant="outline" size="sm">
                         <Link href="/settings">{t("projects.openSettings")}</Link>

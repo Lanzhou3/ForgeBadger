@@ -7,6 +7,7 @@ const gatewayUrl =
   process.env.NEXT_PUBLIC_GATEWAY_URL ??
   process.env.OPENFORGE_GATEWAY_URL ??
   "http://127.0.0.1:48731";
+const chromiumExecutablePath = process.env.OPENFORGE_PLAYWRIGHT_CHROMIUM_PATH;
 const noProxy = mergeNoProxy(process.env.NO_PROXY ?? process.env.no_proxy, [
   "127.0.0.1",
   "localhost",
@@ -39,6 +40,9 @@ export default defineConfig({
   use: {
     baseURL: webUrl,
     trace: "on-first-retry",
+    // Release hosts may provide a preinstalled browser when Playwright's
+    // versioned cache is unavailable or intentionally managed out of band.
+    ...(chromiumExecutablePath ? { launchOptions: { executablePath: chromiumExecutablePath } } : {}),
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },

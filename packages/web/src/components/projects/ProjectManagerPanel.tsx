@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -10,6 +10,7 @@ import {
   Eye,
   History,
   LayoutDashboard,
+  ListChecks,
   Pencil,
   Plus,
   RefreshCw,
@@ -59,9 +60,14 @@ import {
   deleteProjectManagerWorkItem,
   GatewayApiError,
   getProjectManagerGoal,
+  getProjectManagerTaskPacket,
+  linkProjectManagerTaskPacketSession,
   listProjectManagerLedger,
+  listProjectManagerTaskPackets,
+  listSessions,
   listProjectManagerWorkItems,
   createProjectManagerWorkItem,
+  startProjectManagerTaskPacket,
   updateProjectManagerGoal,
   updateProjectManagerWorkItem,
   updateProjectManagerWorkItemStatus,
@@ -73,12 +79,23 @@ import {
   type ProjectManagerWorkItemInput,
   type ProjectManagerWorkItemUpdateInput,
   type ProjectManagerGoalInput,
+  type ProjectManagerTaskPacket,
+  type ProjectManagerTaskPacketQueueStatus,
   type ProjectManagerWorkItem,
   type ProjectManagerWorkItemStatusInput,
   type ProjectManagerWorkItemStatus,
+  type Session,
 } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import {
+  taskPacketCanStart,
+  taskPacketBlockedReasonKey,
+  groupTaskPacketsByQueueStatus,
+  TASK_PACKET_QUEUE_STATUSES,
+  taskPacketSelectableSessions,
+  taskPacketSessionOptionLabel,
+} from "./project-manager-task-packet";
 
 interface ProjectManagerPanelProps {
   projectId: string;
@@ -96,7 +113,7 @@ interface GoalDraft {
 }
 
 type WorkItemStatusFilter = ProjectManagerWorkItemStatus | "all";
-type WorkItemViewMode = "board" | "table";
+type WorkItemViewMode = "board" | "table" | "queue";
 type EvidenceReferenceType = "custom" | "file_path" | "terminal_snapshot" | "session";
 
 interface WorkItemDraft {
@@ -202,6 +219,9 @@ export function ProjectManagerPanel({
   const [deleteWorkItemError, setDeleteWorkItemError] = useState<string | null>(null);
   const [evidenceDraft, setEvidenceDraft] = useState<EvidenceDraft>(() => createEvidenceDraft());
   const [evidenceAttachError, setEvidenceAttachError] = useState<string | null>(null);
+  const [taskPacketSessionId, setTaskPacketSessionId] = useState("");
+  const [taskPacketLinkError, setTaskPacketLinkError] = useState<string | null>(null);
+  const [taskPacketStartError, setTaskPacketStartError] = useState<string | null>(null);
   const [ledgerFilter, setLedgerFilter] = useState<LedgerFilter>("all");
   const [ledgerLimit, setLedgerLimit] = useState(LEDGER_PAGE_SIZE);
   const [statusMutationError, setStatusMutationError] = useState<string | null>(null);
@@ -227,10 +247,31 @@ export function ProjectManagerPanel({
     retry: false,
   });
 
+  const taskPacketsQuery = useQuery({
+    queryKey: ["project-manager", projectId, "task-packets", { limit: WORK_ITEM_LIMIT }],
+    queryFn: () => listProjectManagerTaskPackets(projectId, { limit: WORK_ITEM_LIMIT }),
+    enabled: canLoad,
+    retry: false,
+  });
+
   const ledgerQuery = useQuery({
     queryKey: ["project-manager", projectId, "ledger", { limit: ledgerLimit }],
     queryFn: () => listProjectManagerLedger(projectId, { limit: ledgerLimit }),
     enabled: canLoad,
+    retry: false,
+  });
+
+  const taskPacketQuery = useQuery({
+    queryKey: ["project-manager", projectId, "work-item", selectedWorkItemId, "task-packet"],
+    queryFn: () => getProjectManagerTaskPacket(projectId, selectedWorkItemId ?? ""),
+    enabled: canLoad && !!selectedWorkItemId,
+    retry: false,
+  });
+
+  const sessionsQuery = useQuery({
+    queryKey: ["sessions", { projectId }],
+    queryFn: () => listSessions({ projectId }),
+    enabled: canLoad && !!selectedWorkItemId,
     retry: false,
   });
 
@@ -244,6 +285,7 @@ export function ProjectManagerPanel({
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "goal"] }),
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
     ]);
   };
@@ -276,6 +318,7 @@ export function ProjectManagerPanel({
       updateWorkItemsCache((items) => [...items.filter((item) => item.id !== workItem.id), workItem]);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
       ]);
     },
@@ -294,6 +337,7 @@ export function ProjectManagerPanel({
       updateWorkItemsCache((items) => items.map((item) => item.id === workItem.id ? workItem : item));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
       ]);
     },
@@ -313,6 +357,7 @@ export function ProjectManagerPanel({
       updateWorkItemsCache((items) => items.filter((item) => item.id !== workItem.id));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
       ]);
     },
@@ -332,6 +377,7 @@ export function ProjectManagerPanel({
       updateWorkItemsCache((items) => items.map((item) => updatedById.get(item.id) ?? item));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
       ]);
     },
@@ -350,6 +396,7 @@ export function ProjectManagerPanel({
       setDoneReasonError(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
       ]);
     },
@@ -366,6 +413,7 @@ export function ProjectManagerPanel({
       setEvidenceDraft(createEvidenceDraft());
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
       ]);
     },
@@ -374,15 +422,60 @@ export function ProjectManagerPanel({
     },
   });
 
+  const taskPacketLinkMutation = useMutation({
+    mutationFn: ({ sessionId, workItemId }: { sessionId: string; workItemId: string }) =>
+      linkProjectManagerTaskPacketSession(projectId, workItemId, { sessionId }),
+    onSuccess: ({ taskPacket }) => {
+      setTaskPacketLinkError(null);
+      setTaskPacketSessionId(taskPacket.sessionLink?.sessionId ?? "");
+      queryClient.setQueryData<{ taskPacket: ProjectManagerTaskPacket }>(
+        ["project-manager", projectId, "work-item", taskPacket.workItemId, "task-packet"],
+        { taskPacket }
+      );
+      void queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] });
+    },
+    onError: (error) => {
+      setTaskPacketLinkError(projectManagerMutationMessage(error, t("projects.projectManagerTaskPacketLinkError")));
+    },
+  });
+
+  const taskPacketStartMutation = useMutation({
+    mutationFn: ({ workItemId }: { workItemId: string }) =>
+      startProjectManagerTaskPacket(projectId, workItemId),
+    onSuccess: ({ taskPacket, session }) => {
+      setTaskPacketStartError(null);
+      setTaskPacketLinkError(null);
+      setTaskPacketSessionId(taskPacket.sessionLink?.sessionId ?? "");
+      queryClient.setQueryData<{ taskPacket: ProjectManagerTaskPacket }>(
+        ["project-manager", projectId, "work-item", taskPacket.workItemId, "task-packet"],
+        { taskPacket }
+      );
+      queryClient.setQueryData<{ sessions: Session[] }>(
+        ["sessions", { projectId }],
+        (current) => current ? {
+          sessions: [...current.sessions.filter((existing) => existing.id !== session.id), session],
+        } : current
+      );
+      void queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions", { projectId }] });
+    },
+    onError: (error) => {
+      setTaskPacketStartError(projectManagerMutationMessage(error, t("projects.projectManagerTaskPacketStartError")));
+    },
+  });
+
   const firstError = goalQuery.error ?? workItemsQuery.error;
   const isNotFoundError = firstError instanceof GatewayApiError && firstError.status === 404;
   const isLoading = goalQuery.isLoading || workItemsQuery.isLoading;
-  const isRefreshing = goalQuery.isFetching || workItemsQuery.isFetching || ledgerQuery.isFetching;
+  const isRefreshing = goalQuery.isFetching || workItemsQuery.isFetching || taskPacketsQuery.isFetching || ledgerQuery.isFetching;
   const workItems = workItemsQuery.data?.workItems ?? [];
+  const taskPackets = taskPacketsQuery.data?.taskPackets ?? [];
   const tableWorkItems = filterWorkItemsForTable(workItems, workItemStatusFilter);
   const ledgerEvents = ledgerQuery.data?.events ?? [];
   const filteredLedgerEvents = filterLedgerEvents(ledgerEvents, ledgerFilter);
   const selectedWorkItem = workItems.find((item) => item.id === selectedWorkItemId) ?? null;
+  const taskPacket = taskPacketQuery.data?.taskPacket ?? null;
+  const taskPacketSessions = taskPacketSelectableSessions(sessionsQuery.data?.sessions ?? []);
   const editingWorkItem = workItems.find((item) => item.id === editingWorkItemId) ?? null;
   const deletingWorkItem = workItems.find((item) => item.id === deletingWorkItemId) ?? null;
   const selectedBoardWorkItems = selectedBoardWorkItemIds
@@ -409,7 +502,14 @@ export function ProjectManagerPanel({
   useEffect(() => {
     setEvidenceAttachError(null);
     setEvidenceDraft(createEvidenceDraft());
+    setTaskPacketLinkError(null);
+    setTaskPacketStartError(null);
+    setTaskPacketSessionId("");
   }, [selectedWorkItemId]);
+
+  useEffect(() => {
+    setTaskPacketSessionId(taskPacket?.sessionLink?.sessionId ?? "");
+  }, [taskPacket?.sessionLink?.sessionId]);
 
   useEffect(() => {
     if (pendingDoneWorkItemId) {
@@ -425,6 +525,7 @@ export function ProjectManagerPanel({
     if (!canLoad) return;
     void goalQuery.refetch();
     void workItemsQuery.refetch();
+    void taskPacketsQuery.refetch();
     void ledgerQuery.refetch();
   };
 
@@ -579,6 +680,24 @@ export function ProjectManagerPanel({
     evidenceMutation.mutate({ workItemId: selectedWorkItem.id, reference });
   };
 
+  const linkTaskPacketSession = () => {
+    if (!selectedWorkItem) return;
+    const sessionId = taskPacketSessionId.trim();
+    if (!sessionId) {
+      setTaskPacketLinkError(t("projects.projectManagerTaskPacketSessionRequired"));
+      return;
+    }
+
+    setTaskPacketLinkError(null);
+    taskPacketLinkMutation.mutate({ workItemId: selectedWorkItem.id, sessionId });
+  };
+
+  const startTaskPacket = () => {
+    if (!selectedWorkItem) return;
+    setTaskPacketStartError(null);
+    taskPacketStartMutation.mutate({ workItemId: selectedWorkItem.id });
+  };
+
   const requestStatusChange = (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => {
     setStatusMutationError(null);
     if (nextStatus === "done" && item.evidenceRefCount === 0) {
@@ -676,6 +795,9 @@ export function ProjectManagerPanel({
             highlightedWorkItemId={requestedWorkItemId}
             t={t}
             tableWorkItems={tableWorkItems}
+            taskPackets={taskPackets}
+            taskPacketsError={taskPacketsQuery.error}
+            taskPacketsFetching={taskPacketsQuery.isFetching}
             workItems={workItems}
           />
           <ProjectManagerLedgerCard
@@ -697,6 +819,9 @@ export function ProjectManagerPanel({
         evidenceDraft={evidenceDraft}
         evidenceError={evidenceAttachError}
         isEvidenceSaving={evidenceMutation.isPending}
+        isTaskPacketLinking={taskPacketLinkMutation.isPending}
+        isTaskPacketLoading={taskPacketQuery.isLoading || sessionsQuery.isLoading}
+        isTaskPacketStarting={taskPacketStartMutation.isPending}
         item={selectedWorkItem}
         ledgerEvents={ledgerEvents}
         onAttachEvidence={attachEvidence}
@@ -705,9 +830,18 @@ export function ProjectManagerPanel({
           if (!open) setSelectedWorkItemId(null);
         }}
         onStatusChange={requestStatusChange}
+        onTaskPacketSessionChange={setTaskPacketSessionId}
+        onTaskPacketSessionLink={linkTaskPacketSession}
+        onTaskPacketStart={startTaskPacket}
         open={!!selectedWorkItem}
         statusMutationPending={statusMutation.isPending}
         t={t}
+        taskPacket={taskPacket}
+        taskPacketError={taskPacketQuery.error}
+        taskPacketLinkError={taskPacketLinkError}
+        taskPacketStartError={taskPacketStartError}
+        taskPacketSessionId={taskPacketSessionId}
+        taskPacketSessions={taskPacketSessions}
       />
       <CreateWorkItemDialog
         draft={workItemDraft}
@@ -948,6 +1082,9 @@ function ProjectManagerWorkItemsCard({
   statusFilter,
   statusMutationPending,
   tableWorkItems,
+  taskPackets,
+  taskPacketsError,
+  taskPacketsFetching,
   viewMode,
   workItems,
   t,
@@ -974,6 +1111,9 @@ function ProjectManagerWorkItemsCard({
   statusFilter: WorkItemStatusFilter;
   statusMutationPending: boolean;
   tableWorkItems: ProjectManagerWorkItem[];
+  taskPackets: ProjectManagerTaskPacket[];
+  taskPacketsError: unknown;
+  taskPacketsFetching: boolean;
   viewMode: WorkItemViewMode;
   workItems: ProjectManagerWorkItem[];
   t: Translate;
@@ -1009,6 +1149,15 @@ function ProjectManagerWorkItemsCard({
             >
               <Table2 className="mr-2 size-4" />
               {t("projects.projectManagerTable")}
+            </Button>
+            <Button
+              size="sm"
+              variant={viewMode === "queue" ? "default" : "ghost"}
+              aria-pressed={viewMode === "queue"}
+              onClick={() => onViewModeChange("queue")}
+            >
+              <ListChecks className="mr-2 size-4" />
+              {t("projects.projectManagerTaskQueue")}
             </Button>
           </div>
           <div className="flex items-center gap-2">
@@ -1076,7 +1225,7 @@ function ProjectManagerWorkItemsCard({
             t={t}
             workItems={workItems}
           />
-        ) : (
+        ) : viewMode === "table" ? (
           tableWorkItems.length === 0 ? (
             <EmptyState
               title={t("projects.projectManagerFilterEmptyTitle")}
@@ -1092,6 +1241,16 @@ function ProjectManagerWorkItemsCard({
               workItems={tableWorkItems}
             />
           )
+        ) : (
+          <ProjectManagerTaskQueue
+            error={taskPacketsError}
+            highlightedWorkItemId={highlightedWorkItemId}
+            isFetching={taskPacketsFetching}
+            onViewDetails={onViewDetails}
+            t={t}
+            taskPackets={taskPackets}
+            workItems={workItems}
+          />
         )}
       </CardContent>
     </Card>
@@ -1384,32 +1543,222 @@ function ProjectManagerWorkItemTable({
   );
 }
 
+function ProjectManagerTaskQueue({
+  error,
+  highlightedWorkItemId,
+  isFetching,
+  onViewDetails,
+  taskPackets,
+  t,
+  workItems,
+}: {
+  error: unknown;
+  highlightedWorkItemId?: string | null;
+  isFetching: boolean;
+  onViewDetails: (item: ProjectManagerWorkItem) => void;
+  taskPackets: ProjectManagerTaskPacket[];
+  t: Translate;
+  workItems: ProjectManagerWorkItem[];
+}) {
+  const workItemById = useMemo(
+    () => new Map(workItems.map((item) => [item.id, item])),
+    [workItems]
+  );
+  const groupedTaskPackets = useMemo(
+    () => groupTaskPacketsByQueueStatus(taskPackets),
+    [taskPackets]
+  );
+
+  if (error) {
+    return (
+      <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        {t("projects.projectManagerTaskQueueLoadError")}
+      </p>
+    );
+  }
+
+  if (isFetching && taskPackets.length === 0) {
+    return (
+      <div className="rounded-md border border-border/70 px-3 py-6 text-center text-sm text-muted-foreground">
+        {t("projects.projectManagerTaskQueueLoading")}
+      </div>
+    );
+  }
+
+  if (taskPackets.length === 0) {
+    return (
+      <EmptyState
+        title={t("projects.projectManagerTaskQueueEmptyTitle")}
+        body={t("projects.projectManagerTaskQueueEmptyBody")}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3" data-testid="project-manager-task-queue">
+      {isFetching && (
+        <p className="text-xs text-muted-foreground">{t("projects.projectManagerTaskQueueLoading")}</p>
+      )}
+      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+        {TASK_PACKET_QUEUE_STATUSES.map((queueStatus) => {
+          const columnPackets = groupedTaskPackets[queueStatus];
+          return (
+            <section
+              key={queueStatus}
+              className="min-h-56 rounded-md border border-border/70 bg-background/40"
+              data-testid={`project-manager-task-queue-column-${queueStatus}`}
+            >
+              <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <Badge variant={taskPacketQueueBadgeVariant(queueStatus)}>
+                    {taskPacketQueueStatusLabel(queueStatus, t)}
+                  </Badge>
+                  <span className="font-mono text-xs text-muted-foreground tabular-nums">
+                    {columnPackets.length}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 p-2">
+                {columnPackets.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-border/70 px-3 py-6 text-center text-xs text-muted-foreground">
+                    {t("projects.projectManagerTaskQueueEmptyColumn")}
+                  </div>
+                ) : (
+                  columnPackets.map((taskPacket) => (
+                    <ProjectManagerTaskQueueCard
+                      key={taskPacket.id}
+                      highlighted={taskPacket.workItemId === highlightedWorkItemId}
+                      onViewDetails={onViewDetails}
+                      t={t}
+                      taskPacket={taskPacket}
+                      workItem={workItemById.get(taskPacket.workItemId) ?? null}
+                    />
+                  ))
+                )}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ProjectManagerTaskQueueCard({
+  highlighted,
+  onViewDetails,
+  taskPacket,
+  t,
+  workItem,
+}: {
+  highlighted: boolean;
+  onViewDetails: (item: ProjectManagerWorkItem) => void;
+  taskPacket: ProjectManagerTaskPacket;
+  t: Translate;
+  workItem: ProjectManagerWorkItem | null;
+}) {
+  return (
+    <article
+      className={cn(
+        "rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs",
+        highlighted && "border-primary/60 bg-primary/5"
+      )}
+      data-testid={`project-manager-task-queue-card-${taskPacket.workItemId}`}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={statusBadgeVariant(taskPacket.workItemStatus)}>
+          {statusLabel(taskPacket.workItemStatus, t)}
+        </Badge>
+        <Badge variant="outline">{taskPacket.runtime.adapter}</Badge>
+        <Badge variant="outline">{taskPacket.runtime.templateId}</Badge>
+      </div>
+      <h3 className="mt-2 break-words text-sm font-medium leading-5">{taskPacket.title}</h3>
+      <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+        <LedgerDatum
+          label={t("projects.projectManagerAcceptanceCriteria")}
+          value={taskPacket.acceptanceCriteria.length}
+        />
+        <LedgerDatum
+          label={t("projects.projectManagerTaskPacketExpectedVerification")}
+          value={taskPacket.expectedVerification.length}
+        />
+      </div>
+      <div className="mt-3 rounded-md border border-border/50 bg-background/40 px-2 py-2">
+        <div className="text-xs text-muted-foreground">{t("projects.projectManagerTaskPacketLinkedSession")}</div>
+        <div className="mt-1 break-all font-mono text-xs">
+          {taskPacket.sessionLink
+            ? `${taskPacket.sessionLink.sessionId} / ${taskPacket.sessionLink.status}`
+            : t("projects.projectManagerTaskPacketBlockedNoSession")}
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">{formatTimestamp(taskPacket.updatedAt)}</span>
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={!workItem}
+          onClick={() => {
+            if (workItem) onViewDetails(workItem);
+          }}
+        >
+          <Eye className="mr-1 size-3" />
+          {t("projects.projectManagerViewDetails")}
+        </Button>
+      </div>
+    </article>
+  );
+}
+
 function ProjectManagerWorkItemDetailSheet({
   evidenceDraft,
   evidenceError,
   isEvidenceSaving,
+  isTaskPacketLinking,
+  isTaskPacketLoading,
+  isTaskPacketStarting,
   item,
   ledgerEvents,
   onAttachEvidence,
   onEvidenceDraftChange,
   onOpenChange,
   onStatusChange,
+  onTaskPacketSessionChange,
+  onTaskPacketSessionLink,
+  onTaskPacketStart,
   open,
   statusMutationPending,
   t,
+  taskPacket,
+  taskPacketError,
+  taskPacketLinkError,
+  taskPacketStartError,
+  taskPacketSessionId,
+  taskPacketSessions,
 }: {
   evidenceDraft: EvidenceDraft;
   evidenceError: string | null;
   isEvidenceSaving: boolean;
+  isTaskPacketLinking: boolean;
+  isTaskPacketLoading: boolean;
+  isTaskPacketStarting: boolean;
   item: ProjectManagerWorkItem | null;
   ledgerEvents: ProjectManagerLedgerEvent[];
   onAttachEvidence: () => void;
   onEvidenceDraftChange: (draft: EvidenceDraft) => void;
   onOpenChange: (open: boolean) => void;
   onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
+  onTaskPacketSessionChange: (sessionId: string) => void;
+  onTaskPacketSessionLink: () => void;
+  onTaskPacketStart: () => void;
   open: boolean;
   statusMutationPending: boolean;
   t: Translate;
+  taskPacket: ProjectManagerTaskPacket | null;
+  taskPacketError: unknown;
+  taskPacketLinkError: string | null;
+  taskPacketStartError: string | null;
+  taskPacketSessionId: string;
+  taskPacketSessions: Session[];
 }) {
   const traceMarkers = item ? workItemCopilotTraceMarkers(item, ledgerEvents) : [];
 
@@ -1459,6 +1808,21 @@ function ProjectManagerWorkItemDetailSheet({
                 <span className="text-muted-foreground">-</span>
               )}
             </DetailField>
+            <ProjectManagerTaskPacketSection
+              error={taskPacketError}
+              isLinking={isTaskPacketLinking}
+              isLoading={isTaskPacketLoading}
+              onSessionChange={onTaskPacketSessionChange}
+              onSessionLink={onTaskPacketSessionLink}
+              onStart={onTaskPacketStart}
+              selectedSessionId={taskPacketSessionId}
+              sessions={taskPacketSessions}
+              t={t}
+              taskPacket={taskPacket}
+              linkError={taskPacketLinkError}
+              startError={taskPacketStartError}
+              isStarting={isTaskPacketStarting}
+            />
             <DetailField label={t("projects.projectManagerEvidenceRefs")}>
               {item.evidenceRefs.length > 0 ? (
                 <ul className="space-y-2">
@@ -1596,6 +1960,164 @@ function ProjectManagerWorkItemDetailSheet({
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+function ProjectManagerTaskPacketSection({
+  error,
+  isLinking,
+  isLoading,
+  isStarting,
+  linkError,
+  onSessionChange,
+  onSessionLink,
+  onStart,
+  selectedSessionId,
+  sessions,
+  startError,
+  t,
+  taskPacket,
+}: {
+  error: unknown;
+  isLinking: boolean;
+  isLoading: boolean;
+  isStarting: boolean;
+  linkError: string | null;
+  onSessionChange: (sessionId: string) => void;
+  onSessionLink: () => void;
+  onStart: () => void;
+  selectedSessionId: string;
+  sessions: Session[];
+  startError: string | null;
+  t: Translate;
+  taskPacket: ProjectManagerTaskPacket | null;
+}) {
+  const selectedSessionAvailable = sessions.some((session) => session.id === selectedSessionId);
+  const canLinkSession = selectedSessionId.length > 0 && selectedSessionAvailable && !isLinking;
+  const canStartTask = taskPacketCanStart(taskPacket, isStarting);
+
+  return (
+    <fieldset className="space-y-3 rounded-md border border-border/70 p-3" data-testid="project-manager-task-packet">
+      <legend className="flex items-center gap-2 px-1 text-sm font-medium">
+        <ClipboardList className="size-4" />
+        {t("projects.projectManagerTaskPacket")}
+      </legend>
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">{t("projects.projectManagerLoading")}</p>
+      ) : error ? (
+        <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {projectManagerMutationMessage(error, t("projects.projectManagerTaskPacketLoadError"))}
+        </p>
+      ) : taskPacket ? (
+        <div className="space-y-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <LedgerDatum label={t("projects.projectManagerTaskPacketRuntimeAdapter")} value={taskPacket.runtime.adapter} />
+            <LedgerDatum label={t("projects.projectManagerTaskPacketRuntimeTemplate")} value={taskPacket.runtime.templateId} />
+            <LedgerDatum
+              label={t("projects.projectManagerTaskPacketStatus")}
+              value={t(taskPacketBlockedReasonKey(taskPacket.blockedReason))}
+            />
+            <LedgerDatum
+              label={t("projects.projectManagerTaskPacketLinkedSession")}
+              value={taskPacket.sessionLink?.sessionId ?? "-"}
+            />
+          </div>
+          <DetailField label={t("projects.projectManagerTaskPacketPrompt")}>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border/70 bg-muted/20 p-3 text-xs leading-5">
+              {taskPacket.prompt}
+            </pre>
+          </DetailField>
+          <TaskPacketList
+            emptyLabel="-"
+            label={t("projects.projectManagerAcceptanceCriteria")}
+            values={taskPacket.acceptanceCriteria}
+          />
+          <TaskPacketList
+            emptyLabel="-"
+            label={t("projects.projectManagerTaskPacketExpectedVerification")}
+            values={taskPacket.expectedVerification}
+          />
+          <TaskPacketList
+            emptyLabel="-"
+            label={t("projects.projectManagerTaskPacketEvidenceRequirements")}
+            values={taskPacket.evidenceRequirements}
+          />
+          {taskPacket.sessionLink && (
+            <a
+              className="inline-flex text-xs font-medium text-primary hover:underline"
+              href={taskPacket.sessionLink.href}
+            >
+              {t("projects.projectManagerTaskPacketOpenSession")}
+            </a>
+          )}
+          {!taskPacket.sessionLink && (
+            <Button size="sm" className="w-fit" onClick={onStart} disabled={!canStartTask}>
+              {isStarting
+                ? t("projects.projectManagerTaskPacketStarting")
+                : t("projects.projectManagerTaskPacketStart")}
+            </Button>
+          )}
+          {startError && (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {startError}
+            </p>
+          )}
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <select
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
+              value={selectedSessionId}
+              disabled={isLinking || sessions.length === 0}
+              onChange={(event) => onSessionChange(event.target.value)}
+            >
+              <option value="">
+                {sessions.length > 0
+                  ? t("projects.projectManagerTaskPacketSelectSession")
+                  : t("projects.projectManagerTaskPacketNoSessions")}
+              </option>
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {taskPacketSessionOptionLabel(session)}
+                </option>
+              ))}
+            </select>
+            <Button size="sm" onClick={onSessionLink} disabled={!canLinkSession}>
+              {t("projects.projectManagerTaskPacketLinkSession")}
+            </Button>
+          </div>
+          {linkError && (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {linkError}
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">{t("projects.projectManagerTaskPacketUnavailable")}</p>
+      )}
+    </fieldset>
+  );
+}
+
+function TaskPacketList({
+  emptyLabel,
+  label,
+  values,
+}: {
+  emptyLabel: string;
+  label: string;
+  values: string[];
+}) {
+  return (
+    <DetailField label={label}>
+      {values.length > 0 ? (
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          {values.map((value) => (
+            <li key={value} className="break-words">{value}</li>
+          ))}
+        </ul>
+      ) : (
+        <span className="text-muted-foreground">{emptyLabel}</span>
+      )}
+    </DetailField>
   );
 }
 
@@ -2588,6 +3110,13 @@ function statusBadgeVariant(status: ProjectManagerWorkItemStatus | string) {
   return "outline";
 }
 
+function taskPacketQueueBadgeVariant(status: ProjectManagerTaskPacketQueueStatus) {
+  if (status === "completed") return "default";
+  if (status === "blocked") return "destructive";
+  if (status === "running" || status === "waiting_for_review") return "secondary";
+  return "outline";
+}
+
 function ledgerEventBadgeVariant(eventType: ProjectManagerLedgerEventType) {
   if (eventType === "blocker_recorded") return "destructive" as const;
   if (eventType === "evidence_attached" || eventType === "manual_completion_recorded") return "secondary" as const;
@@ -2606,6 +3135,18 @@ function statusLabel(status: ProjectManagerWorkItemStatus | string, t: Translate
     active: "projects.projectManagerStatusActive",
   };
   return t(labels[status] ?? "projects.projectManagerStatusUnknown");
+}
+
+function taskPacketQueueStatusLabel(status: ProjectManagerTaskPacketQueueStatus, t: Translate) {
+  const labels: Record<ProjectManagerTaskPacketQueueStatus, TranslationKey> = {
+    planned: "projects.projectManagerTaskQueuePlanned",
+    running: "projects.projectManagerTaskQueueRunning",
+    waiting_for_review: "projects.projectManagerTaskQueueWaitingForReview",
+    blocked: "projects.projectManagerTaskQueueBlocked",
+    completed: "projects.projectManagerTaskQueueCompleted",
+    cancelled: "projects.projectManagerTaskQueueCancelled",
+  };
+  return t(labels[status]);
 }
 
 function eventLabel(eventType: ProjectManagerLedgerEventType, t: Translate) {

@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Play, RotateCcw, Search, Square, TerminalSquare, Trash2 } from "lucide-react";
+import { AlertTriangle, FolderOpen, Play, Plus, RotateCcw, Search, Square, TerminalSquare, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import {
   Table,
   TableBody,
@@ -17,10 +18,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
-import { deleteSession, listSessions, startSession, stopSession } from "@/lib/api";
+import { deleteSession, getDependencies, listProjects, listSessions, startSession, stopSession } from "@/lib/api";
 import { notifySessionTabsChanged } from "@/components/session-tabs";
 import { pruneSessionTabs, sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
 import { normalizeSessionStatus, sessionMatchesStatusFilter } from "@/lib/session-status";
+import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function SessionsPage() {
@@ -31,6 +33,14 @@ export default function SessionsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["sessions"],
     queryFn: listSessions,
+  });
+  const { data: projectsData } = useQuery({
+    queryKey: ["projects"],
+    queryFn: listProjects,
+  });
+  const { data: dependenciesData, isLoading: dependenciesLoading } = useQuery({
+    queryKey: ["dependencies"],
+    queryFn: getDependencies,
   });
 
   const refreshSessions = () => {
@@ -51,6 +61,15 @@ export default function SessionsPage() {
   });
 
   const sessions = data?.sessions ?? [];
+  const projects = projectsData?.projects ?? [];
+  const firstProject = projects[0];
+  const newSessionHref = firstProject ? `/projects/${firstProject.id}` : "/projects/new";
+  const terminalRuntime = dependenciesData?.terminalRuntime;
+  const terminalSetupGuidance = getTerminalRuntimeSetupGuidance(
+    terminalRuntime?.mode,
+    terminalRuntime?.supported
+  );
+  const runtimeBlocked = !dependenciesLoading && terminalSetupGuidance.blocked;
   useEffect(() => {
     if (!data) {
       return;
@@ -96,11 +115,19 @@ export default function SessionsPage() {
 
   return (
     <div className="p-6 space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold">{t("sessions.title")}</h1>
-        <p className="mt-1 text-muted-foreground">
-          {t("sessions.subtitle")}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">{t("sessions.title")}</h1>
+          <p className="mt-1 text-muted-foreground">
+            {t("sessions.subtitle")}
+          </p>
+        </div>
+        <Button asChild>
+          <Link href={newSessionHref}>
+            <Plus className="mr-2 size-4" />
+            {firstProject ? t("projects.newSession") : t("sessions.createProject")}
+          </Link>
+        </Button>
       </div>
 
       {isLoading ? (
@@ -111,12 +138,52 @@ export default function SessionsPage() {
         </Card>
       ) : sessions.length === 0 ? (
         <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <TerminalSquare className="size-10 text-muted-foreground" />
-            <h3 className="mt-4 text-lg font-medium">{t("sessions.emptyTitle")}</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("sessions.emptyDescription")}
-            </p>
+          <CardContent className="flex flex-col items-center justify-center gap-4 py-12 text-center">
+            {runtimeBlocked ? (
+              <AlertTriangle className="size-10 text-destructive" />
+            ) : (
+              <TerminalSquare className="size-10 text-muted-foreground" />
+            )}
+            <div className="space-y-1">
+              <h3 className="text-lg font-medium">
+                {runtimeBlocked ? t(terminalSetupGuidance.titleKey) : t("sessions.emptyTitle")}
+              </h3>
+              <p className="mx-auto max-w-2xl text-sm text-muted-foreground">
+                {runtimeBlocked
+                  ? t("sessions.runtimeBlockedDescription")
+                  : t("sessions.emptyReadyDescription")}
+              </p>
+              {runtimeBlocked && (
+                <p className="mx-auto max-w-2xl text-sm text-muted-foreground">
+                  {t(terminalSetupGuidance.descriptionKey)}
+                </p>
+              )}
+            </div>
+            {runtimeBlocked && (
+              <div className="w-full max-w-3xl text-left">
+                <RuntimeSetupCommands guidance={terminalSetupGuidance} />
+              </div>
+            )}
+            <div className="flex flex-wrap justify-center gap-2">
+              {runtimeBlocked && (
+                <Button asChild variant="outline">
+                  <Link href="/settings">
+                    <AlertTriangle className="mr-2 size-4" />
+                    {t("sessions.openSettings")}
+                  </Link>
+                </Button>
+              )}
+              <Button asChild>
+                <Link href={newSessionHref}>
+                  {firstProject ? (
+                    <FolderOpen className="mr-2 size-4" />
+                  ) : (
+                    <Plus className="mr-2 size-4" />
+                  )}
+                  {firstProject ? t("sessions.createFromProject") : t("sessions.createProject")}
+                </Link>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : (

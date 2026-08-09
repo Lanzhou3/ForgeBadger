@@ -68,8 +68,8 @@ export function TerminalView({
     }
 
     const socket = new WebSocket(
-      terminalWebSocketUrl(sessionId, { authToken, attachToken }),
-      terminalWebSocketProtocols(authToken)
+      terminalWebSocketUrl(sessionId),
+      terminalWebSocketProtocols(authToken, attachToken)
     );
     socketRef.current = socket;
 

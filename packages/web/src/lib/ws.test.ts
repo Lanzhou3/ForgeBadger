@@ -8,23 +8,17 @@ import {
 } from "./ws";
 
 describe("terminalWebSocketUrl", () => {
-  it("puts attachToken in query params and omits authToken from URL", () => {
-    const url = terminalWebSocketUrl(
-      "session-1",
-      { authToken: "jwt-token", attachToken: "attach-token" },
-      "http://127.0.0.1:3000"
-    );
+  it("omits both tokens from the URL query string", () => {
+    const url = terminalWebSocketUrl("session-1", "http://127.0.0.1:3000");
 
-    expect(url).toBe(
-      "ws://127.0.0.1:3000/ws/terminal/session-1?attachToken=attach-token"
-    );
+    expect(url).toBe("ws://127.0.0.1:3000/ws/terminal/session-1");
   });
 });
 
 describe("terminalWebSocketProtocols", () => {
-  it("returns openforge-terminal protocol with auth token", () => {
-    const protocols = terminalWebSocketProtocols("jwt-token");
-    expect(protocols).toEqual(["openforge-terminal", "jwt-token"]);
+  it("carries the attach token in the subprotocol header alongside the auth token", () => {
+    const protocols = terminalWebSocketProtocols("jwt-token", "attach-token");
+    expect(protocols).toEqual(["openforge-terminal", "jwt-token", "attach-token"]);
   });
 });
 
