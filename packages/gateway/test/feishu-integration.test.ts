@@ -15,6 +15,7 @@ import { CopilotRepository } from "../src/db/repositories/copilot-repository.js"
 import { FeishuIntegrationRepository } from "../src/db/repositories/feishu-integration-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
+import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { UserRepository, type User } from "../src/db/repositories/user-repository.js";
 import {
   getFeishuCliStatus,
@@ -687,6 +688,94 @@ describe("Feishu integration routes", () => {
     assert.equal(second.status, 409);
     assert.equal(second.body.details.code, "feishu_message_replayed");
     assert.equal(new CopilotRepository(db, user.id).listRuns().length, 1);
+  });
+
+  it("routes bot long-connection events to bounded reply plans without Copilot", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("bot-ws-route@example.com", "hash");
+    seedFeishuInboundPolicy(db, user.id);
+    const project = new ProjectRepository(db, user.id).create({
+      name: "Bot WS Project",
+      path: "/tmp/openforge-bot-ws-route",
+      aiTool: "claude"
+    });
+    new SessionRepository(db, user.id).create({
+      projectId: project.id,
+      name: "Bot WS Session",
+      aiTool: "claude",
+      workingDir: project.path,
+      attachToken: "attach-token-secret",
+      tmuxSession: "of-secret-tmux"
+    });
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/bot-websocket/events", {
+      event: publicMessageEvent({
+        text: "/openforge sessions",
+        messageId: "om_bot_ws_sessions",
+        eventId: "ev_bot_ws_sessions"
+      })
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+    const serialized = JSON.stringify(res.body);
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.route, "sessions");
+    assert.equal(res.body.data.replyPlan.receiveId, "oc_allowed");
+    assert.match(res.body.data.replyPlan.text, /Bot WS Session/u);
+    assert.equal(serialized.includes("attach-token-secret"), false);
+    assert.equal(serialized.includes("of-secret-tmux"), false);
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+  });
+
+  it("rejects bot long-connection terminal input events without creating Copilot runs", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("bot-ws-terminal@example.com", "hash");
+    seedFeishuInboundPolicy(db, user.id);
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/bot-websocket/events", {
+      event: publicMessageEvent({
+        text: "/openforge terminal session-1 continue token=sk-bot-ws-secret",
+        messageId: "om_bot_ws_terminal",
+        eventId: "ev_bot_ws_terminal"
+      })
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 403);
+    assert.equal(res.body.details.code, "feishu_terminal_input_rejected");
+    assert.equal(JSON.stringify(res.body).includes("sk-bot-ws-secret"), false);
+    assert.equal(new CopilotRepository(db, user.id).listRuns().length, 0);
+  });
+
+  it("records bot long-connection reconnect events through an authenticated smoke path", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("bot-ws-reconnect@example.com", "hash");
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+
+    const res = await makeRequest(app, "POST", "/api/v1/integrations/feishu/bot-websocket/connection-events", {
+      state: "reconnected",
+      connectionId: "ws-route-1",
+      attempt: 2,
+      reason: "socket closed with app_secret=hidden"
+    }, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.equal(res.body.data.connection.state, "reconnected");
+    assert.equal(res.body.data.connection.publicCallbackRequired, false);
+    const audit = new AuditLogRepository(db, user.id).list({ action: "feishu.bot_ws.connection" });
+    assert.equal(audit.length, 1);
+    assert.equal(JSON.stringify(audit).includes("hidden"), false);
   });
 
   it("rate-limits inbound commands per allowed Feishu chat without calling Copilot", async () => {

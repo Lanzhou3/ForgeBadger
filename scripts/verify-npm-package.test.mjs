@@ -62,15 +62,36 @@ describe("verifyNpmPackage", () => {
     assert.equal(result.ok, false);
     assert.match(result.errors.join("\n"), /\.next\/BUILD_ID/);
   });
+
+  it("rejects Web framework dependencies that are bundled in the standalone runtime", async () => {
+    const root = await createPackageTree({
+      packageJson: {
+        dependencies: {
+          next: "^16.0.0",
+          react: "^19.0.0",
+          "react-dom": "^19.0.0"
+        }
+      }
+    });
+
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /forbidden runtime dependency: next/);
+    assert.match(result.errors.join("\n"), /forbidden runtime dependency: react/);
+    assert.match(result.errors.join("\n"), /forbidden runtime dependency: react-dom/);
+  });
 });
 
 async function createPackageTree(options = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "openforge-npm-verify-"));
+  const packageJson = {
+    files: ["dist", "README.md", "LICENSE", "docs/README.zh-CN.md", "docs/README.zh-TW.md", "package.json"],
+    ...options.packageJson
+  };
   await writeFile(
     path.join(root, "package.json"),
-    `${JSON.stringify({
-      files: ["dist", "README.md", "LICENSE", "docs/README.zh-CN.md", "docs/README.zh-TW.md", "package.json"]
-    })}\n`
+    `${JSON.stringify(packageJson)}\n`
   );
   await writeFile(path.join(root, "README.md"), "# OpenForge\n");
   await writeFile(path.join(root, "LICENSE"), "MIT\n");

@@ -37,8 +37,11 @@ const forbiddenFilePatterns = [
   /\.log$/
 ];
 
+const forbiddenRuntimeDependencies = new Set(["next", "react", "react-dom"]);
+
 export async function verifyNpmPackage(options = {}) {
   const cliPackageRoot = path.resolve(options.cliPackageRoot ?? "packages/cli");
+  const packageJson = readPackageJson(cliPackageRoot);
   const errors = [];
 
   for (const artifact of required) {
@@ -55,6 +58,7 @@ export async function verifyNpmPackage(options = {}) {
   if (!hasAllowedFilesWhitelist(cliPackageRoot)) {
     errors.push("packages/cli/package.json files whitelist does not match npm package artifacts");
   }
+  verifyForbiddenRuntimeDependencies(packageJson, errors);
 
   return { ok: errors.length === 0, errors };
 }
@@ -125,8 +129,7 @@ function isForbiddenArtifact(name) {
 }
 
 function hasAllowedFilesWhitelist(cliPackageRoot) {
-  const packageJsonPath = path.join(cliPackageRoot, "package.json");
-  const packageJson = JSON.parse(existsSync(packageJsonPath) && lstatSync(packageJsonPath).isFile() ? readFileSync(packageJsonPath, "utf8") : "{}");
+  const packageJson = readPackageJson(cliPackageRoot);
   const expected = [
     "dist",
     "README.md",
@@ -136,6 +139,25 @@ function hasAllowedFilesWhitelist(cliPackageRoot) {
     "package.json"
   ];
   return hasSameStringItems(packageJson.files, expected);
+}
+
+function readPackageJson(cliPackageRoot) {
+  const packageJsonPath = path.join(cliPackageRoot, "package.json");
+  return JSON.parse(existsSync(packageJsonPath) && lstatSync(packageJsonPath).isFile() ? readFileSync(packageJsonPath, "utf8") : "{}");
+}
+
+function verifyForbiddenRuntimeDependencies(packageJson, errors) {
+  for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+    const dependencies = packageJson[field];
+    if (!dependencies || typeof dependencies !== "object" || Array.isArray(dependencies)) {
+      continue;
+    }
+    for (const dependencyName of Object.keys(dependencies)) {
+      if (forbiddenRuntimeDependencies.has(dependencyName)) {
+        errors.push(`forbidden runtime dependency: ${dependencyName}`);
+      }
+    }
+  }
 }
 
 function hasSameStringItems(actual, expected) {

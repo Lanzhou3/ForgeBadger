@@ -6,6 +6,13 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  DEFAULT_COMMAND_TIMEOUT_MS,
+  DEFAULT_NPM_INSTALL_TIMEOUT_MS,
+  buildNpmInstallArgs,
+  readPositiveIntegerEnv,
+  runCommand
+} from "./smoke-npm-package-runner.mjs";
 
 const workspaceRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const smokeRoot = await mkdtemp(path.join(tmpdir(), "openforge-npm-smoke-"));
@@ -14,13 +21,23 @@ const npmPrefix = path.join(smokeRoot, "npm-prefix");
 const npmCache = path.join(smokeRoot, "npm-cache");
 const stateDir = path.join(smokeRoot, "state");
 const tmuxPrefix = `of-smoke-${process.pid}-`;
+const commandTimeoutMs = readPositiveIntegerEnv(
+  process.env,
+  "OPENFORGE_NPM_SMOKE_COMMAND_TIMEOUT_MS",
+  DEFAULT_COMMAND_TIMEOUT_MS
+);
+const npmInstallTimeoutMs = readPositiveIntegerEnv(
+  process.env,
+  "OPENFORGE_NPM_SMOKE_INSTALL_TIMEOUT_MS",
+  DEFAULT_NPM_INSTALL_TIMEOUT_MS
+);
 
 try {
   console.log(`OpenForge npm smoke root: ${smokeRoot}`);
 
   await mkdir(packDir, { recursive: true });
-  run("pnpm", ["--dir", workspaceRoot, "build:npm"]);
-  run("pnpm", [
+  runStep("build npm package artifacts", "pnpm", ["--dir", workspaceRoot, "build:npm"]);
+  runStep("pack npm tarball", "pnpm", [
     "--dir",
     workspaceRoot,
     "--filter",
@@ -33,25 +50,20 @@ try {
   const tarball = await findPackedTarball(packDir);
   console.log(`Packed tarball: ${tarball}`);
 
-  run("npm", [
-    "install",
-    "--prefix",
+  runStep("install packed tarball", "npm", buildNpmInstallArgs({
     npmPrefix,
-    "--cache",
     npmCache,
-    "--ignore-scripts=false",
-    "--no-audit",
-    "--no-fund",
     tarball
-  ]);
+  }), { timeoutMs: npmInstallTimeoutMs });
 
   const openforgeBin = resolveOpenForgeBin(npmPrefix);
-  run(openforgeBin, ["doctor"], {
+  runStep("run installed openforge doctor", openforgeBin, ["doctor"], {
     env: {
       OPENFORGE_STATE_DIR: stateDir,
       OPENFORGE_TMUX_PREFIX: tmuxPrefix
     }
   });
+  console.log("[smoke:npm] start installed services and run API smoke");
   await runStartSmoke(openforgeBin);
 } finally {
   cleanupTmuxSessions();
@@ -60,51 +72,23 @@ try {
   }
 }
 
+function runStep(label, command, args, options = {}) {
+  console.log(`[smoke:npm] ${label}`);
+  return run(command, args, { ...options, label });
+}
+
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
+  return runCommand(command, args, {
     cwd: options.cwd ?? workspaceRoot,
     env: {
       ...process.env,
       npm_config_update_notifier: "false",
       ...options.env
     },
-    encoding: "utf8",
-    shell: false
+    label: options.label,
+    printOutput: options.printOutput,
+    timeoutMs: options.timeoutMs ?? commandTimeoutMs
   });
-
-  if (result.status !== 0 || result.signal) {
-    process.stderr.write(`\nCommand failed: ${command} ${args.join(" ")}\n`);
-    if (typeof result.status === "number") {
-      process.stderr.write(`Exit status: ${result.status}\n`);
-    }
-    if (result.signal) {
-      process.stderr.write(`Signal: ${result.signal}\n`);
-    }
-    if (result.stdout) {
-      process.stderr.write("\nstdout:\n");
-      process.stderr.write(result.stdout);
-      if (!result.stdout.endsWith("\n")) {
-        process.stderr.write("\n");
-      }
-    }
-    if (result.stderr) {
-      process.stderr.write("\nstderr:\n");
-      process.stderr.write(result.stderr);
-      if (!result.stderr.endsWith("\n")) {
-        process.stderr.write("\n");
-      }
-    }
-    throw new Error(`${command} ${args.join(" ")} failed`);
-  }
-
-  if (options.printOutput !== false && result.stdout) {
-    process.stdout.write(result.stdout);
-  }
-  if (options.printOutput !== false && result.stderr) {
-    process.stderr.write(result.stderr);
-  }
-
-  return result;
 }
 
 async function findPackedTarball(directory) {

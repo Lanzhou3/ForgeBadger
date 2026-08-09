@@ -24,6 +24,11 @@ import {
   type FeishuCliStatus
 } from "../services/integrations/feishu-cli.js";
 import {
+  normalizeFeishuBotLongConnectionEvent,
+  recordFeishuBotConnectionEvent,
+  routeFeishuBotCommand
+} from "../services/integrations/feishu-bot-bridge.js";
+import {
   CopilotOrchestrator,
   type CopilotOrchestratorOptions
 } from "../services/copilot/orchestrator.js";
@@ -51,6 +56,18 @@ const inboundFeishuCommandSchema = z.object({
   text: z.string().trim().min(1).max(8_000),
   messageId: z.string().trim().min(1).max(128).optional(),
   projectId: z.string().trim().min(1).max(128).optional()
+}).strict();
+
+const botWebSocketEventSchema = z.object({
+  event: z.unknown()
+}).strict();
+
+const botWebSocketConnectionEventSchema = z.object({
+  state: z.enum(["connected", "reconnecting", "reconnected", "disconnected"]),
+  connectionId: z.string().trim().min(1).max(128).optional(),
+  attempt: z.number().int().min(0).max(1000).optional(),
+  eventSubscription: z.literal("im.message.receive_v1").optional(),
+  reason: z.string().trim().min(1).max(512).optional()
 }).strict();
 
 type InboundFeishuCommand = z.infer<typeof inboundFeishuCommandSchema>;
@@ -387,6 +404,85 @@ export function createFeishuIntegrationRoutes(
     }
   });
 
+  router.post("/bot-websocket/events", (req, res) => {
+    const db = requireRepo(options.db, res);
+    if (!db) return;
+    const parseResult = botWebSocketEventSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({
+        code: 1,
+        message: "Invalid Feishu bot WebSocket event",
+        details: { code: "feishu_bot_ws_invalid_payload" }
+      });
+      return;
+    }
+
+    const command = normalizeFeishuBotLongConnectionEvent(parseResult.data.event);
+    if (!command) {
+      res.status(400).json({
+        code: 1,
+        message: "Unsupported Feishu bot WebSocket event",
+        details: { code: "feishu_bot_ws_unsupported_event" }
+      });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const result = routeFeishuBotCommand({ db, userId, command, ipAddress: req.ip });
+    if (!result.ok) {
+      res.status(statusForBotWebSocketReject(result.reasonCode)).json({
+        code: 1,
+        message: "Feishu bot WebSocket event rejected",
+        details: { code: result.reasonCode },
+        ...(result.reply ? { data: { replyPlan: result.reply } } : {})
+      });
+      return;
+    }
+
+    res.json({
+      code: 0,
+      data: {
+        route: result.route,
+        replyPlan: result.reply
+      },
+      message: ""
+    });
+  });
+
+  router.post("/bot-websocket/connection-events", (req, res) => {
+    const db = requireRepo(options.db, res);
+    if (!db) return;
+    const parseResult = botWebSocketConnectionEventSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({
+        code: 1,
+        message: "Invalid Feishu bot WebSocket connection event",
+        details: { code: "feishu_bot_ws_connection_invalid_payload" }
+      });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    recordFeishuBotConnectionEvent(db, userId, {
+      ...parseResult.data,
+      ipAddress: req.ip
+    });
+
+    res.json({
+      code: 0,
+      data: {
+        connection: {
+          state: parseResult.data.state,
+          connectionId: parseResult.data.connectionId ?? null,
+          attempt: parseResult.data.attempt ?? null,
+          eventSubscription: parseResult.data.eventSubscription ?? "im.message.receive_v1",
+          publicCallbackRequired: false
+        }
+      },
+      message: ""
+    });
+  });
+
   router.post("/inbound", async (req, res) => {
     const db = requireRepo(options.db, res);
     if (!db) return;
@@ -673,6 +769,23 @@ function safeEqualHex(actual: string, expected: string): boolean {
   const actualBuffer = Buffer.from(actual, "hex");
   const expectedBuffer = Buffer.from(expected, "hex");
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function statusForBotWebSocketReject(reasonCode: string): number {
+  if (reasonCode === "feishu_bot_event_replayed") return 409;
+  if (reasonCode === "feishu_command_prefix_required" || reasonCode === "feishu_command_unsupported") return 400;
+  if (reasonCode === "feishu_terminal_input_rejected") return 403;
+  if (
+    reasonCode === "feishu_integration_disabled" ||
+    reasonCode === "feishu_integration_emergency_disabled" ||
+    reasonCode === "feishu_identity_mode_required" ||
+    reasonCode === "feishu_chat_allowlist_required" ||
+    reasonCode === "feishu_chat_not_allowed" ||
+    reasonCode === "feishu_user_not_mapped"
+  ) {
+    return 403;
+  }
+  return 400;
 }
 
 function sendPublicWebhookError(res: Response, status: number, code: string): void {

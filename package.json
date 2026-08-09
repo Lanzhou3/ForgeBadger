@@ -8,10 +8,14 @@
     "build": "pnpm -r build",
     "build:npm": "node scripts/build-npm-package.mjs",
     "dev": "pnpm -r --parallel dev",
+    "evidence:feishu-bot-live-audit": "node scripts/audit-feishu-bot-live-report.mjs",
+    "evidence:feishu-bot-live-report": "node scripts/create-feishu-bot-live-evidence-report.mjs",
     "evidence:gates-validate": "node scripts/validate-external-evidence-gates.mjs",
     "openforge": "pnpm --filter @openforge/gateway openforge",
     "pack:npm": "pnpm --filter openforge pack --dry-run",
     "smoke:copilot-provider": "pnpm --dir packages/gateway exec tsx ../../scripts/smoke-copilot-provider.ts",
+    "smoke:feishu-bot-live": "node scripts/smoke-feishu-bot-live.mjs",
+    "smoke:feishu-bot-websocket": "node scripts/smoke-feishu-bot-websocket.mjs",
     "smoke:feishu-public-webhook": "pnpm --dir packages/gateway exec tsx ../../scripts/prepare-feishu-public-webhook.ts",
     "smoke:codex-app-server": "node scripts/smoke-codex-app-server.mjs",
     "smoke:npm": "node scripts/smoke-npm-package.mjs",
@@ -30,5 +34,8 @@
     "node": ">=20.0.0",
     "pnpm": ">=9.0.0"
   },
-  "packageManager": "pnpm@10.33.2"
+  "packageManager": "pnpm@10.33.2",
+  "devDependencies": {
+    "@larksuiteoapi/node-sdk": "^1.66.1"
+  }
 }
