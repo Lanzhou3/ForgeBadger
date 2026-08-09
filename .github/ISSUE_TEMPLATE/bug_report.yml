@@ -97,7 +97,7 @@ body:
         - none
         - live-provider credential unavailable
         - physical Windows/WSL host unavailable
-        - Feishu developer-console callback unavailable
+        - Feishu bot long-connection evidence unavailable
         - first-user feedback packet
         - other external dependency
     validations:

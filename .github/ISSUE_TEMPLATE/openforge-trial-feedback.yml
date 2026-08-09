@@ -183,7 +183,7 @@ body:
       value: |
         Owner:
         Disposition: gate-clearing evidence / preserved caveat / preserved blocker / product defect / docs or support gap / no action
-        Follow-up route: issue #3 LIVE-PROVIDER / issue #4 WINDOWS-WSL / issue #5 FIRST-USER-FEEDBACK / Feishu callback evidence report / new issue / next phase / no action
+        Follow-up route: issue #3 LIVE-PROVIDER / issue #4 WINDOWS-WSL / issue #5 FIRST-USER-FEEDBACK / FEISHU-BOT-WS evidence / new issue / next phase / no action
         Next action or no-action rationale:
         Evidence needed to move to pass:
     validations:

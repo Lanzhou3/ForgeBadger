@@ -110,6 +110,8 @@ export const REQUIRED_RUNBOOK_PHRASES = [
 export const REQUIRED_CHECKLIST_PHRASES = [
   "Use this checklist as the first-user trial entry point.",
   "docs/EXTERNAL-EVIDENCE-GATES.md",
+  "`FEISHU-BOT-WS`",
+  "Feishu Bot Long-Connection Smoke",
   "`pnpm trial:intake-validate`",
   "`pnpm trial:issue-routes-validate`",
   "`pnpm trial:readiness-validate`",
@@ -117,6 +119,9 @@ export const REQUIRED_CHECKLIST_PHRASES = [
   "`pnpm trial:feedback-issue-audit -- --issue=<number>`",
   "`pnpm trial:feedback-issues-audit`",
   "`pnpm evidence:gates-validate`",
+  "--output <report.json>",
+  "`pnpm evidence:feishu-bot-live-audit -- <report.json>`",
+  "`pnpm evidence:feishu-bot-live-report -- --report <report.json> --output <report.md>`",
   "`FIRST-USER-FEEDBACK`",
   "Templates and empty issue forms do not count as completed feedback.",
   "Follow-up route, phase, or issue:",
@@ -172,6 +177,7 @@ export const REQUIRED_CAVEAT_OWNER_PHRASES = [
   "Owner:",
   "Disposition:",
   "Follow-up route:",
+  "FEISHU-BOT-WS evidence",
   "Next action or no-action rationale:",
   "Evidence needed to move to pass:"
 ];
@@ -188,6 +194,7 @@ export const REQUIRED_MARKDOWN_PHRASES = [
   "Owner:",
   "Disposition:",
   "Follow-up route:",
+  "FEISHU-BOT-WS evidence",
   "Next action or no-action rationale:",
   "Caveat status:",
   "Redaction review completed:",

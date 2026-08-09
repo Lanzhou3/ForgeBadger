@@ -7,11 +7,14 @@ Scope: post-v1.4 milestone direction and operating design
 ## Context
 
 v1.4 closed the external evidence milestone truthfully. It did not make live
-provider, physical Windows/WSL, Feishu developer-console callback, or completed
-first-user feedback claims pass without real artifacts. That leaves OpenForge
-in a cautious local-first trial posture: the product has a strong local AI CLI
-control-plane wedge, but first-user evidence collection still depends on an
-operator running the right trial steps and filing redacted results.
+provider, physical Windows/WSL, Feishu public webhook callback, or completed
+first-user feedback claims pass without real artifacts. The current primary
+Feishu gate is bot long-connection/WebSocket evidence (`FEISHU-BOT-WS`), with
+public webhook verification kept as optional compatibility evidence. That
+leaves OpenForge in a cautious local-first trial posture: the product has a
+strong local AI CLI control-plane wedge, but first-user evidence collection
+still depends on an operator running the right trial steps and filing redacted
+results.
 
 v1.5 therefore focuses on trial operations rather than new runtime capability.
 The goal is to turn the existing evidence registry, trial checklist, diagnostics

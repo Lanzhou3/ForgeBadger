@@ -11,7 +11,7 @@ sensitive terminal output.
   `docs/TRIAL-FEEDBACK.md` or the GitHub issue form
   `OpenForge first-user trial feedback`.
 - Check `docs/EXTERNAL-EVIDENCE-GATES.md` before reclassifying live-provider,
-  Windows/WSL, Feishu callback, or first-user feedback evidence.
+  Windows/WSL, Feishu bot long-connection, or first-user feedback evidence.
 - Prefer the Web Settings diagnostics export. The local API is
   `GET /api/v1/diagnostics/export`; it is authenticated, tenant scoped,
   local-only, and redacted.
@@ -20,8 +20,8 @@ sensitive terminal output.
 - Share summaries, counts, statuses, sanitized error names, public metadata, and
   file paths. Do not share raw secrets or full payload bodies.
 - Keep `Caveat` statuses visible when the missing evidence depends on external
-  credentials, physical Windows/WSL hosts, public HTTPS routing, or Feishu
-  developer-console access.
+  credentials, physical Windows/WSL hosts, Feishu bot/developer-console access,
+  or a real first-user packet.
 
 ## Project Manager Failures
 
@@ -221,19 +221,36 @@ Redact:
 
 ## Feishu Failures
 
-Canonical gate: `docs/EXTERNAL-EVIDENCE-GATES.md` gate `FEISHU-CALLBACK`.
+Canonical gate: `docs/EXTERNAL-EVIDENCE-GATES.md` gate `FEISHU-BOT-WS`.
 
 Run or request:
 
 ```bash
 lark-cli auth status --verify
 lark-cli doctor
-pnpm smoke:feishu-public-webhook
-pnpm --dir packages/gateway test test/feishu-integration.test.ts test/copilot-routes.test.ts
+pnpm --dir packages/gateway test test/feishu-bot-bridge.test.ts test/feishu-integration.test.ts test/copilot-routes.test.ts
+pnpm smoke:feishu-bot-websocket
+pnpm smoke:feishu-bot-live -- --require-gate-evidence --output <report.json>
+pnpm evidence:feishu-bot-live-audit -- <report.json>
+pnpm evidence:feishu-bot-live-report -- --report <report.json> --output <report.md>
 ```
 
-For the real callback gate, verify in the Feishu developer console that the
-event subscription URL reaches:
+For the primary Feishu gate, configure the self-built Feishu bot to receive
+events through persistent connection/WebSocket mode, subscribe to
+`im.message.receive_v1`, set `OPENFORGE_GATEWAY_URL`, `OPENFORGE_TOKEN`,
+`FEISHU_APP_ID`, and `FEISHU_APP_SECRET`, then start
+`pnpm smoke:feishu-bot-live -- --require-gate-evidence --output <report.json>`.
+Send one allowed bounded command such as `/openforge status`, then send a
+terminal-control probe such as `/openforge terminal session-1 continue`, and
+force a reconnect or restart observation before saving the redacted JSON
+report. Run
+`pnpm evidence:feishu-bot-live-audit -- <report.json>` before maintainer gate
+review, then generate
+`pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
+<report.md>` for the maintainer evidence packet.
+
+If a deployment intentionally uses public webhook compatibility mode, verify in
+the Feishu developer console that the event subscription URL reaches:
 
 ```text
 https://<public-host>/api/v1/integrations/feishu/webhook/<publicWebhookId>
@@ -242,24 +259,53 @@ https://<public-host>/api/v1/integrations/feishu/webhook/<publicWebhookId>
 Collect these redacted artifacts:
 
 - `lark-cli auth status --verify` summary and `lark-cli doctor` summary;
-- sanitized `pnpm smoke:feishu-public-webhook` output: enabled state, identity
-  mode, allowed chat count, mapping count, public id shape, and callback path;
-- developer-console URL verification status and timestamp;
-- Gateway audit status or safe event marker for the callback;
+- Feishu bot persistent-connection mode and subscribed event summary;
+- authenticated Gateway bot-websocket smoke output from
+  `pnpm smoke:feishu-bot-websocket`, including
+  `/api/v1/integrations/feishu/bot-websocket/events` and
+  `/api/v1/integrations/feishu/bot-websocket/connection-events`, showing the
+  normalized event id, route, reply plan or rejection code, and reconnect
+  state;
+- sanitized real SDK long-connection smoke output from
+  `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output
+  <report.json>`, including connected/reconnecting/reconnected state, event
+  name, allowed DM or group path, redacted receive/reply marker, and
+  terminal-input rejection marker;
+- audit output from `pnpm evidence:feishu-bot-live-audit -- <report.json>`
+  showing `readyForHumanReview=true` and `gateClearingEvidence=false`;
+- generated Markdown maintainer review report from
+  `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
+  <report.md>`;
+- optional public webhook compatibility output, if that topology is under test:
+  enabled state, identity mode, allowed chat count, mapping count, public id
+  shape, callback path, and developer-console URL verification status;
+- Gateway audit status or safe event marker for the Feishu message;
 - automated regression summary from
-  `pnpm --dir packages/gateway test test/feishu-integration.test.ts test/copilot-routes.test.ts`;
+  `pnpm --dir packages/gateway test test/feishu-bot-bridge.test.ts test/feishu-integration.test.ts test/copilot-routes.test.ts`;
 - owner and next action.
 
 Classify:
 
-- `lark-cli` preflight and long-running event consumption are not real
-  developer-console callback evidence.
-- Simulated signed Gateway requests are local regression evidence, not Feishu
-  developer-console proof.
-- The real callback remains `Blocked` until a public HTTPS URL routes to
-  Gateway and Feishu developer-console URL verification hits the public webhook
-  route.
-- v1.1 public webhook support is local or single Gateway with SQLite-backed
+- `lark-cli` preflight proves CLI availability only; it does not prove the bot
+  long-connection receive/reply path.
+- Simulated signed Gateway requests and `pnpm smoke:feishu-bot-websocket` are
+  authenticated local Gateway regression evidence, not Feishu long-connection
+  evidence by themselves.
+- `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output
+  <report.json>` is the real SDK long-connection collection command. It still
+  leaves the gate as `Caveat` if the run does not include real receive, bounded
+  reply, reconnect, and terminal rejection evidence.
+- `pnpm evidence:feishu-bot-live-audit -- <report.json>` validates a saved
+  live report for completeness and redaction before maintainer review. The
+  audit is not itself gate-clearing evidence.
+- `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
+  <report.md>` formats an audited saved report for maintainer review. The
+  Markdown report is not itself gate-clearing evidence.
+- The Feishu gate remains `Caveat` until a real bot persistent-connection run
+  records receive, routing, reply or pending-action, and reconnect evidence.
+- Public webhook URL verification is optional compatibility evidence. It is not
+  required for the primary local-first Feishu bot gate.
+- Public webhook support is local or single Gateway with SQLite-backed
   replay/rate storage. Multi-instance public exposure requires shared replay
   and shared rate-limit stores before enablement.
 - Top-level encrypted Feishu payloads fail closed with
@@ -276,14 +322,16 @@ Escalate when:
 - multi-instance public webhook exposure is enabled without shared replay and
   shared rate-limit stores;
 - encrypted Feishu app mode is enabled without decrypt support and tests;
-- callback evidence includes raw signatures, verification token values, event
-  encryption keys, app secrets, raw callback body, or private chat content.
+- Feishu evidence includes raw WebSocket frames, raw signatures, verification
+  token values, event encryption keys, app secrets, raw callback body, or
+  private chat content.
 
 Redact:
 
 - Feishu app secrets;
 - verification token values;
 - event encryption keys;
+- raw WebSocket frames;
 - raw signatures;
 - raw callback body;
 - private chat content;
@@ -330,8 +378,10 @@ Route to maintainer/operator when the issue is missing external evidence:
 
 - no disposable live provider credential or explicit model id;
 - no physical Windows/WSL host;
-- no public HTTPS Gateway URL;
-- no Feishu developer-console URL verification action;
+- no Feishu bot long-connection/WebSocket operator access;
+- no real `im.message.receive_v1` receive/reply/reconnect evidence;
+- no public HTTPS Gateway URL or Feishu developer-console URL verification
+  action, when the optional public webhook compatibility path is under test;
 - no completed first-user feedback packet. Use `docs/TRIAL-FEEDBACK.md` or
   `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml`, then run
   `pnpm trial:feedback-audit -- <packet.md>` for Markdown packets or

@@ -64,7 +64,7 @@ Review and redact this draft before attaching diagnostics, screenshots, or writt
 - Mapped requirement: UX-01 / UX-02 / UX-03 / UX-04 / UX-05 / UX-06 / UX-07 / REL-*
 - Owner:
 - Disposition: gate-clearing evidence / preserved caveat / preserved blocker / product defect / docs or support gap / no action
-- Follow-up route: issue #3 LIVE-PROVIDER / issue #4 WINDOWS-WSL / issue #5 FIRST-USER-FEEDBACK / Feishu callback evidence report / new issue / next phase / no action
+- Follow-up route: issue #3 LIVE-PROVIDER / issue #4 WINDOWS-WSL / issue #5 FIRST-USER-FEEDBACK / FEISHU-BOT-WS evidence / new issue / next phase / no action
 - Next action or no-action rationale:
 - Caveat status: none / pass with caveats / blocked
 
@@ -93,7 +93,7 @@ Review and redact this draft before attaching diagnostics, screenshots, or writt
 
 - \`LIVE-PROVIDER\`: Caveat until disposable provider credential/model smoke evidence is linked.
 - \`WINDOWS-WSL\`: Caveat until physical Windows/WSL terminal evidence is linked.
-- \`FEISHU-CALLBACK\`: Blocked until public HTTPS Gateway routing and Feishu console URL verification are available.
+- \`FEISHU-BOT-WS\`: Caveat until Feishu bot long-connection receive/reply/reconnect evidence is linked. Public webhook URL verification is optional compatibility evidence.
 - \`FIRST-USER-FEEDBACK\`: Caveat until this packet is completed, redacted, and linked.
 
 ## Bounded Support Notes

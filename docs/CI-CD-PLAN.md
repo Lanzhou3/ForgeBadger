@@ -12,7 +12,7 @@ terminal.
 
 ```bash
 pnpm install --frozen-lockfile
-node --test scripts/validate-external-evidence-gates.test.mjs scripts/validate-trial-issue-routes.test.mjs scripts/validate-trial-readiness.test.mjs scripts/audit-trial-feedback-packet.test.mjs scripts/audit-trial-feedback-issue.test.mjs scripts/create-trial-feedback-draft.test.mjs scripts/validate-trial-feedback-intake.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
+node --test scripts/validate-external-evidence-gates.test.mjs scripts/validate-trial-issue-routes.test.mjs scripts/validate-trial-readiness.test.mjs scripts/audit-trial-feedback-packet.test.mjs scripts/audit-trial-feedback-issue.test.mjs scripts/audit-trial-feedback-issues.test.mjs scripts/audit-feishu-bot-live-report.test.mjs scripts/create-feishu-bot-live-evidence-report.test.mjs scripts/create-trial-feedback-draft.test.mjs scripts/validate-trial-feedback-intake.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-codex-app-server.test.mjs scripts/smoke-feishu-bot-websocket.test.mjs scripts/smoke-feishu-bot-live.test.mjs scripts/smoke-local-release.test.mjs scripts/smoke-npm-package-runner.test.mjs scripts/verify-npm-package.test.mjs
 pnpm trial:intake-validate
 pnpm evidence:gates-validate
 pnpm -r typecheck
@@ -26,9 +26,11 @@ Acceptance:
 
 - Script-level smoke harness tests pass, including the external evidence gate
   validator, trial issue-route preflight contract, trial readiness bundle,
-  trial feedback packet audit, GitHub issue feedback audit, draft generator,
-  intake contract validator, tokenless runbook diagnostics contract validator,
-  and trial checklist consistency guard.
+  trial feedback packet audit, GitHub issue feedback audit, Feishu live report
+  audit and Markdown report generator, draft generator, intake contract
+  validator, tokenless runbook diagnostics contract validator, Feishu bot
+  WebSocket Gateway fixture smoke helper, npm package smoke runner guard,
+  npm package artifact verifier, and trial checklist consistency guard.
 - `pnpm trial:intake-validate` and `pnpm evidence:gates-validate` pass before
   trial material or external gate registry changes are accepted.
 - TypeScript emits no type errors.
@@ -88,7 +90,17 @@ Acceptance:
 - `pnpm smoke:npm` builds the npm package, packs a tarball into a temporary
   directory, installs that tarball with `npm --prefix` into a temporary prefix,
   sets `OPENFORGE_STATE_DIR` to temporary state, and runs `openforge doctor`
-  from the installed package.
+  from the installed package. The smoke runner bounds child commands with
+  `OPENFORGE_NPM_SMOKE_COMMAND_TIMEOUT_MS` and bounds the tarball install with
+  `OPENFORGE_NPM_SMOKE_INSTALL_TIMEOUT_MS`. The smoke install uses
+  `--omit=peer --legacy-peer-deps` because OpenForge does not require optional
+  peer packages from dependencies such as Drizzle ORM to validate package
+  install/startup behavior. It also sets explicit npm fetch retry and timeout
+  options so transient registry resets fail less often and still produce a
+  bounded diagnostic when the network remains unavailable.
+- The `openforge` package ships the Next standalone Web runtime under `dist/`;
+  do not add `next`, `react`, or `react-dom` as top-level runtime dependencies
+  of the CLI package unless the standalone packaging strategy changes.
 
 Known skip:
 
@@ -194,8 +206,7 @@ The Phase 8 first-user readiness handoff is
 `docs/TRIAL-CHECKLIST.md` as the runnable trial path and
 `docs/SUPPORT-DIAGNOSTICS.md` as the support triage packet. CI and local
 automation remain evidence inputs; they do not replace manual/live evidence for
-live provider, physical Windows/WSL, or Feishu developer-console callback
-status.
+live provider, physical Windows/WSL, or Feishu bot long-connection status.
 
 Treat these as separate gates:
 
@@ -206,20 +217,30 @@ Treat these as separate gates:
   by Ubuntu CI or current-host Linux evidence.
 - Feishu automated route and authority regression:
   `pnpm --dir packages/gateway test test/feishu-integration.test.ts test/copilot-routes.test.ts`.
-- Feishu manual/live developer-console callback: configure the Feishu event
-  subscription URL to
-  `https://<public-host>/api/v1/integrations/feishu/webhook/<publicWebhookId>`
-  and run URL verification in the Feishu developer console. CI cannot replace
-  this gate.
+- Feishu manual/live bot long connection: configure a self-built Feishu bot for
+  persistent connection/WebSocket event delivery, subscribe to
+  `im.message.receive_v1`, run
+  `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output
+  <report.json>`, audit the saved report with
+  `pnpm evidence:feishu-bot-live-audit -- <report.json>`, generate the
+  maintainer report with
+  `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
+  <report.md>`, and record sanitized receive/reply/reconnect evidence. CI
+  cannot replace this gate. Public webhook URL verification is an optional
+  compatibility path for deployments that deliberately expose Gateway.
 
 Do not mark the physical Windows/WSL row `Pass` unless the real WSL checklist
 is completed. Do not mark the live provider row `Pass` unless a disposable live
 provider credential and explicit model id produce a successful redacted smoke
-result. Do not mark the Feishu developer-console callback row `Pass` unless a
-real console callback reached the Gateway public webhook route. Current v1.1
-public webhook support is single Gateway with SQLite replay/rate storage;
-multi-instance public exposure requires shared replay and shared rate-limit
-stores first. Top-level encrypted Feishu payloads must fail closed with
+result. Do not mark the Feishu bot row `Pass` unless a real persistent
+connection/WebSocket run received `im.message.receive_v1`, routed through
+OpenForge policy, produced a bounded reply or pending action, and recorded
+reconnect behavior. The real SDK smoke command also requires a terminal-input
+rejection observation before it emits `gateClearingEvidence=true`; the report
+audit only makes that report ready for human review and does not clear the gate
+by itself. Current public webhook compatibility support is single Gateway with
+SQLite replay/rate storage; multi-instance public exposure requires shared
+replay and shared rate-limit stores first. Top-level encrypted Feishu payloads must fail closed with
 `feishu_webhook_encrypted_payload_unsupported`.
 
 ## 2. Security Gates

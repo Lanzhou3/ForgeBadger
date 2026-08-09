@@ -1,0 +1,83 @@
+{
+  "ok": true,
+  "mode": "real_feishu_bot_long_connection",
+  "gateClearingEvidence": true,
+  "publicCallbackRequired": false,
+  "gatewayUrl": "http://127.0.0.1:48731",
+  "eventSubscription": "im.message.receive_v1",
+  "durationMs": 600000,
+  "maxEvents": 3,
+  "sendReplies": true,
+  "requireReconnect": true,
+  "counts": {
+    "connected": 1,
+    "reconnecting": 1,
+    "reconnected": 1,
+    "receivedEvents": 3,
+    "acceptedEvents": 2,
+    "terminalInputRejections": 1,
+    "replySent": 3,
+    "replyFailures": 0
+  },
+  "checks": [
+    {
+      "name": "connection_connected",
+      "httpStatus": 200,
+      "ok": true,
+      "state": "connected"
+    },
+    {
+      "name": "receive_route",
+      "httpStatus": 200,
+      "ok": true,
+      "route": "status",
+      "replyPreview": "OpenForge status\nProjects: 0\nSessions: 0 (0 running)\nOpen tasks: 0\nFeishu route: bot long connection; public callback is optional compatibility evidence."
+    },
+    {
+      "name": "bounded_reply_sent",
+      "ok": true,
+      "msgType": "text",
+      "receiveIdType": "chat_id"
+    },
+    {
+      "name": "terminal_input_rejected",
+      "httpStatus": 403,
+      "ok": true,
+      "rejectionCode": "feishu_terminal_input_rejected",
+      "replyPreview": "OpenForge rejected terminal input from Feishu. Use bounded commands such as /openforge status, /openforge sessions, or /openforge task <id>.",
+      "errorCode": "feishu_terminal_input_rejected"
+    },
+    {
+      "name": "rejection_reply_sent",
+      "ok": true,
+      "msgType": "text",
+      "receiveIdType": "chat_id"
+    },
+    {
+      "name": "connection_reconnecting",
+      "httpStatus": 200,
+      "ok": true,
+      "state": "reconnecting"
+    },
+    {
+      "name": "connection_reconnected",
+      "httpStatus": 200,
+      "ok": true,
+      "state": "reconnected"
+    },
+    {
+      "name": "receive_route",
+      "httpStatus": 200,
+      "ok": true,
+      "route": "status",
+      "replyPreview": "OpenForge status\nProjects: 0\nSessions: 0 (0 running)\nOpen tasks: 0\nFeishu route: bot long connection; public callback is optional compatibility evidence."
+    },
+    {
+      "name": "bounded_reply_sent",
+      "ok": true,
+      "msgType": "text",
+      "receiveIdType": "chat_id"
+    }
+  ],
+  "caveat": "This report contains real receive, bounded reply, reconnect, and terminal-rejection evidence; review redaction before moving FEISHU-BOT-WS."
+}

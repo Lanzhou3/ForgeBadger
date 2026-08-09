@@ -51,6 +51,29 @@ describe("validateTrialFeedbackIntake", () => {
     assert.match(result.errors.join("\n"), /copilot.*required: true/);
   });
 
+  it("rejects trial intake drift back to the old Feishu callback evidence route", () => {
+    const githubIssueForm = buildIssueFormFixture().replace(
+      "FEISHU-BOT-WS evidence",
+      "Feishu callback evidence report"
+    );
+    const markdownTemplate = buildMarkdownTemplateFixture().replace(
+      "FEISHU-BOT-WS evidence",
+      "Feishu callback evidence report"
+    );
+    const trialChecklist = buildTrialChecklistFixture().replace("`FEISHU-BOT-WS`", "`FEISHU-CALLBACK`");
+
+    const result = validateTrialFeedbackIntake({
+      githubIssueForm,
+      markdownTemplate,
+      trialRunbook: buildTrialRunbookFixture(),
+      trialChecklist
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /FEISHU-BOT-WS evidence/);
+    assert.match(result.errors.join("\n"), /trial checklist.*`FEISHU-BOT-WS`/);
+  });
+
   it("rejects GitHub field type drift", () => {
     const githubIssueForm = buildIssueFormFixture().replace(
       "- type: checkboxes\n    id: safety",
@@ -148,6 +171,8 @@ describe("validateTrialFeedbackIntake", () => {
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:feedback-issue-audit/);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm trial:feedback-issues-audit/);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm evidence:gates-validate/);
+    assert.match(result.errors.join("\n"), /trial checklist.*pnpm evidence:feishu-bot-live-audit/);
+    assert.match(result.errors.join("\n"), /trial checklist.*pnpm evidence:feishu-bot-live-report/);
     assert.match(result.errors.join("\n"), /trial checklist.*browser developer tools/);
     assert.match(result.errors.join("\n"), /trial checklist.*openforge\.token/);
   });
@@ -328,6 +353,11 @@ function buildTrialChecklistFixture() {
     "`pnpm trial:feedback-issue-audit -- --issue=<number>`",
     "`pnpm trial:feedback-issues-audit`",
     "`pnpm evidence:gates-validate`",
+    "--output <report.json>",
+    "`pnpm evidence:feishu-bot-live-audit -- <report.json>`",
+    "`pnpm evidence:feishu-bot-live-report -- --report <report.json> --output <report.md>`",
+    "`FEISHU-BOT-WS`",
+    "Feishu Bot Long-Connection Smoke",
     "`FIRST-USER-FEEDBACK`",
     "Templates and empty issue forms do not count as completed feedback.",
     "Follow-up route, phase, or issue:",

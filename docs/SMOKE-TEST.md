@@ -13,8 +13,8 @@ the live-provider caveat without disposable live provider evidence.
 Phase 8 first-user readiness handoff is
 `docs/reports/v1.1-readiness-closeout-2026-05-21.md`; use it with
 `docs/TRIAL-CHECKLIST.md` and `docs/SUPPORT-DIAGNOSTICS.md` when routing trial
-support. The matrix remains the detailed manual/live gate source for live
-provider, physical Windows/WSL, and Feishu developer-console callback evidence.
+  support. The matrix remains the detailed manual/live gate source for live
+  provider, physical Windows/WSL, and Feishu bot long-connection evidence.
 
 Run this checklist before asking a user to try the local console, or when a
 broader maintainer acceptance pass is needed. Use a disposable project
@@ -224,9 +224,16 @@ Web smoke. It cannot replace these manual checks:
 - real browser terminal attach, input/output, resize, refresh, and reconnect;
 - real Claude Code permission prompt behavior;
 - live Copilot prompt behavior against a disposable provider credential;
-- real Feishu developer-console URL verification against
-  `POST /api/v1/integrations/feishu/webhook/:publicId`; automated signed-route
-  regressions and `lark-cli` long-running event consumers are preflight only;
+- real Feishu bot long-connection/WebSocket receive, routing, reply or
+  pending-action, and reconnect behavior; automated signed-route regressions,
+  `pnpm smoke:feishu-bot-websocket`, authenticated `/bot-websocket/*` smoke
+  paths, and `lark-cli` preflight alone do not clear the gate. Use
+  `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output
+  <report.json>` with a real self-built Feishu bot, OpenForge token, and
+  operator-induced reconnect to collect gate-clearing evidence, then run
+  `pnpm evidence:feishu-bot-live-audit -- <report.json>` and
+  `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
+  <report.md>` before maintainer review;
 - physical Windows native versus WSL behavior;
 - local operator review that diagnostics and logs do not contain secrets.
 

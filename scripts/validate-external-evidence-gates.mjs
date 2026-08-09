@@ -25,12 +25,25 @@ export const EXPECTED_EXTERNAL_GATES = [
     targetPhrases: ["v1.4-external-evidence-closeout", "issue #4"]
   },
   {
-    id: "FEISHU-CALLBACK",
-    currentState: "Blocked",
-    ownerPhrase: "public HTTPS Gateway route",
-    clearingPhrase: "Feishu developer-console URL verification",
-    rerunPhrases: ["public HTTPS routing", "Feishu console URL verification"],
-    targetPhrases: ["phase-19-feishu-public-callback-evidence"]
+    id: "FEISHU-BOT-WS",
+    currentState: "Caveat",
+    ownerPhrase: "Feishu bot long-connection access",
+    clearingPhrase: "Feishu bot WebSocket or persistent connection",
+    rerunPhrases: [
+      "persistent connection event subscription",
+      "im.message.receive_v1",
+      "pnpm smoke:feishu-bot-websocket",
+      "pnpm smoke:feishu-bot-live -- --require-gate-evidence",
+      "--output <report.json>",
+      "pnpm evidence:feishu-bot-live-audit -- <report.json>",
+      "pnpm evidence:feishu-bot-live-report -- --report <report.json> --output <report.md>",
+      "Public webhook URL verification is optional compatibility evidence"
+    ],
+    targetPhrases: [
+      "phase-41-feishu-bot-live-evidence-2026-06-14.json",
+      "phase-41-feishu-bot-live-evidence-2026-06-14.md",
+      "phase-19-feishu-public-callback-evidence"
+    ]
   },
   {
     id: "FIRST-USER-FEEDBACK",

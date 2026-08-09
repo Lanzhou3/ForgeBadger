@@ -140,7 +140,7 @@ Maintainer-only fallback:
 - Mapped requirement: UX-01 / UX-02 / UX-03 / UX-04 / UX-05 / UX-06 / UX-07 / REL-*
 - Owner:
 - Disposition: gate-clearing evidence / preserved caveat / preserved blocker / product defect / docs or support gap / no action
-- Follow-up route: issue #3 LIVE-PROVIDER / issue #4 WINDOWS-WSL / issue #5 FIRST-USER-FEEDBACK / Feishu callback evidence report / new issue / next phase / no action
+- Follow-up route: issue #3 LIVE-PROVIDER / issue #4 WINDOWS-WSL / issue #5 FIRST-USER-FEEDBACK / FEISHU-BOT-WS evidence / new issue / next phase / no action
 - Next action or no-action rationale:
 - Caveat status: none / pass with caveats / blocked
 
