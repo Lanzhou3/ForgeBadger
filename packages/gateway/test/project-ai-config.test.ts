@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -122,6 +122,7 @@ describe("project AI config routes", () => {
     await writeFile(path.join(rootPath, "AGENTS.md"), "# Existing Agents\n", "utf8");
     await writeFile(path.join(rootPath, "opencode.json"), "{\"instructions\":[\"AGENTS.md\"]}\n", "utf8");
     await writeFile(path.join(rootPath, ".opencode", "agents", "reviewer.md"), "# Reviewer\n", "utf8");
+    const canonicalRootPath = await realpath(rootPath);
     const projectId = await importProject(token, {
       name: "OpenCode Project",
       path: rootPath,
@@ -135,7 +136,7 @@ describe("project AI config routes", () => {
 
     assert.equal(res.status, 200, JSON.stringify(body));
     assert.equal(body.data?.adapter, "opencode");
-    assert.equal(body.data?.projectRoot, rootPath);
+    assert.equal(body.data?.projectRoot, canonicalRootPath);
     assert.ok(body.data?.forms.some((form) => form.filePath === "opencode.json"));
     assert.ok(body.data?.forms.some((form) => form.fields.some((field) => field.key === "model")));
     assertFile(body, "AGENTS.md", true, "# Existing Agents\n");
@@ -149,6 +150,7 @@ describe("project AI config routes", () => {
     const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-scan-config-"));
     await writeFile(path.join(rootPath, "CLAUDE.md"), "# Existing Claude\n", "utf8");
     await writeFile(path.join(rootPath, "AGENTS.md"), "# Existing Agents\n", "utf8");
+    const canonicalRootPath = await realpath(rootPath);
 
     const res = await fetch(`${baseUrl}/api/v1/projects/scan`, {
       method: "POST",
@@ -161,7 +163,7 @@ describe("project AI config routes", () => {
     const body = (await res.json()) as ScanResponseBody;
 
     assert.equal(res.status, 200, JSON.stringify(body));
-    assert.equal(body.data?.path, rootPath);
+    assert.equal(body.data?.path, canonicalRootPath);
     assert.deepEqual(body.data?.instructionFiles, ["AGENTS.md", "CLAUDE.md"]);
   });
 

@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import http from "node:http";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -3509,16 +3509,17 @@ describe("copilot routes", () => {
       authHeaders()
     );
 
+    const canonicalProjectPath = realpathSync(projectPath);
     const projects = new ProjectRepository(db, userId).list();
     assert.equal(res.status, 200);
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.action.status, "approved");
     assert.equal(res.body.data.action.result.executed, true);
     assert.equal(res.body.data.action.result.project.name, "Copilot Created Project");
-    assert.equal(res.body.data.action.result.project.path, projectPath);
+    assert.equal(res.body.data.action.result.project.path, canonicalProjectPath);
     assert.equal(res.body.data.action.result.project.aiTool, "claude");
     assert.equal(projects.length, 1);
-    assert.equal(projects[0]?.path, projectPath);
+    assert.equal(projects[0]?.path, canonicalProjectPath);
     assert.equal(projects[0]?.description, "Created through approval");
     assert.equal(existsSync(projectPath), true);
   });
@@ -3542,17 +3543,18 @@ describe("copilot routes", () => {
       authHeaders()
     );
 
+    const canonicalProjectPath = realpathSync(projectPath);
     const projects = new ProjectRepository(db, userId).list();
     assert.equal(res.status, 200);
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.action.status, "approved");
     assert.equal(res.body.data.action.result.executed, true);
     assert.equal(res.body.data.action.result.project.name, "Imported Project");
-    assert.equal(res.body.data.action.result.project.path, projectPath);
+    assert.equal(res.body.data.action.result.project.path, canonicalProjectPath);
     assert.equal(res.body.data.action.result.project.aiTool, "opencode");
     assert.equal(res.body.data.action.result.project.isImported, true);
     assert.equal(projects.length, 1);
-    assert.equal(projects[0]?.path, projectPath);
+    assert.equal(projects[0]?.path, canonicalProjectPath);
     assert.equal(projects[0]?.isImported, true);
   });
 

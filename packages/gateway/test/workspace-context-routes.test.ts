@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -111,6 +111,7 @@ describe("workspace context routes", () => {
     await mkdir(path.join(rootPath, "src"), { recursive: true });
     await writeFile(path.join(rootPath, "README.md"), "# Workspace\n", "utf8");
     await writeFile(path.join(rootPath, "src", "index.ts"), "export const value = 1;\n", "utf8");
+    const canonicalRootPath = await realpath(rootPath);
     const projectId = await importProject(token, rootPath);
 
     const treeRes = await fetch(
@@ -123,7 +124,7 @@ describe("workspace context routes", () => {
     assert.equal(treeBody.code, 0);
     assert.equal(treeBody.message, "");
     assert.equal(treeBody.data?.projectId, projectId);
-    assert.equal(treeBody.data?.rootPath, rootPath);
+    assert.equal(treeBody.data?.rootPath, canonicalRootPath);
     assert.equal(treeBody.data?.path, "");
     assert.equal(treeBody.data?.truncated, false);
     const readme = treeBody.data?.entries.find((entry) => entry.path === "README.md");

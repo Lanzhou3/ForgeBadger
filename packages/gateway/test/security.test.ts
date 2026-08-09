@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { before, after, describe, it } from "node:test";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,6 +53,12 @@ const mockTmuxClient = {
   },
   async capturePane() {
     return "";
+  },
+  async hasSession() {
+    return true;
+  },
+  async showEnvironment() {
+    return {};
   },
   async listSessions() {
     return [];
@@ -567,7 +573,7 @@ describe("security hardening", () => {
     const pluginFlagIndex = args.indexOf("--plugin-dir");
     assert.notEqual(pluginFlagIndex, -1);
     const pluginDir = args[pluginFlagIndex + 1];
-    assert.equal(pluginDir, path.join(rootPath, ".openforge", "claude-plugins", "claude-safe-edits"));
+    assert.equal(pluginDir, path.join(await realpath(rootPath), ".openforge", "claude-plugins", "claude-safe-edits"));
     assert.equal(mockTmuxCreates.at(-1)?.command, "claude");
     assert.equal(args.includes("-lc"), false);
     const manifest = JSON.parse(

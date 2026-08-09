@@ -4,7 +4,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 import { verifyJwt } from "../auth/index.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
-import { extractWsAuthToken } from "./auth.js";
+import { extractWsAuthToken, extractWsAttachToken } from "./auth.js";
 import { WebSocketConnectionLimits } from "./connection-limits.js";
 
 const DEFAULT_MAX_MESSAGE_BYTES = 1024 * 1024;
@@ -168,7 +168,29 @@ export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void
       return;
     }
 
-    const sessionId = decodeURIComponent(match[1] ?? "");
+    // Whitelist the raw (still percent-encoded) sessionId segment BEFORE any
+    // decoding. Rejects malformed percent-encoding (e.g. %zz, %E0%A4%A) and any
+    // injected path characters, so decodeURIComponent can never throw on hostile
+    // input (an uncaught URIError here would crash the whole Gateway process).
+    const rawSessionId = match[1] ?? "";
+    if (!/^[0-9a-zA-Z-]+$/.test(rawSessionId)) {
+      socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+      socket.destroy();
+      console.error(`[terminal-ws] rejected malformed terminal path segment: ${rawSessionId}`);
+      return;
+    }
+
+    let sessionId: string;
+    try {
+      sessionId = decodeURIComponent(rawSessionId);
+    } catch {
+      // Defensive: whitelist above already excludes '%', but keep the process alive.
+      socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+      socket.destroy();
+      console.error(`[terminal-ws] failed to decode terminal session id: ${rawSessionId}`);
+      return;
+    }
+
     const authToken = extractWsAuthToken(request.headers, TERMINAL_WS_AUTH_PROTOCOL);
     if (!authToken) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
@@ -185,21 +207,25 @@ export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void
       return;
     }
 
-    const attachToken = url.searchParams.get("attachToken") ?? "";
+    const attachToken = extractWsAttachToken(request.headers, TERMINAL_WS_AUTH_PROTOCOL) ?? "";
     const terminalAccessRequest: TerminalAccessRequest = {
       authTokenUserId: userId,
       attachToken
     };
-    const sessionSocket = registry.getSocket(sessionId);
-    if (sessionSocket) {
-      limits.release(sessionSocket as unknown as WebSocket);
-    }
+    const previousSocket = registry.getSocket(sessionId);
 
     wss.handleUpgrade(request, socket, head, (ws) => {
       const acquire = limits.tryAcquire(ws, userId);
       if (!acquire.accepted) {
         ws.close(1008, `WebSocket connection limit exceeded: ${acquire.reason}`);
         return;
+      }
+
+      // Only after the new connection has acquired its quota, release the
+      // previous socket's quota (keeps the replacement window bounded and never
+      // double-counts a live connection).
+      if (previousSocket) {
+        limits.release(previousSocket as unknown as WebSocket);
       }
 
       void handleTerminalSocket(
@@ -341,6 +367,9 @@ async function handleTerminalSocket(
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "terminal_exit", payload: { code: exitCode } }));
     }
+    // The attach pty exited: correct the session state based on whether the
+    // underlying tmux session is still alive (detached) or gone (exited).
+    void sessionManager.reconcileSessionStatus(sessionId);
   });
 
   const heartbeat = new TerminalHeartbeat({
@@ -359,6 +388,7 @@ async function handleTerminalSocket(
     }
     ws.ping();
   }, TERMINAL_HEARTBEAT_INTERVAL_MS);
+  heartbeatInterval.unref?.();
 
   ws.on("error", () => {
     releaseResources();

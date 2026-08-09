@@ -10,6 +10,14 @@ import { CatalogRepository } from "../src/db/repositories/catalog-repository.js"
 import { SkillRepository, UserRepository } from "../src/db/repositories/index.js";
 import { fetchRemoteCatalogManifest, refreshRemoteCatalog } from "../src/services/catalog-sync.js";
 
+// Allow `https://example.test/...` and similar RFC-6761 hostnames to pass the
+// outbound host blocklist. Production traffic goes through Node's real DNS,
+// which validates the public IP before each fetch. 8.8.8.8 is a public
+// non-private address so the blocklist does not reject it.
+function allowTestResolver() {
+  return async () => [{ address: "8.8.8.8", family: 4 }];
+}
+
 function createTestDb(): Database {
   const db = new Database(":memory:");
   db.pragma("journal_mode = WAL");
@@ -56,7 +64,8 @@ describe("remote catalog sync", () => {
       sourceId: "clawhub",
       label: "ClawHub",
       url: "https://example.test/catalog.json",
-      fetcher: async () => response(manifest)
+      fetcher: async () => response(manifest),
+      resolveHost: allowTestResolver()
     });
 
     const repo = new CatalogRepository(db, user.id);
@@ -75,7 +84,8 @@ describe("remote catalog sync", () => {
       () =>
         fetchRemoteCatalogManifest("https://example.test/large.json", {
           maxBytes: 8,
-          fetcher: async () => response("{\"skills\":[]}")
+          fetcher: async () => response("{\"skills\":[]}"),
+          resolveHost: allowTestResolver()
         }),
       /Manifest exceeds size limit/
     );
@@ -109,7 +119,8 @@ describe("remote catalog sync", () => {
       sourceId: "clawhub",
       label: "ClawHub",
       url: "https://example.test/templates.json",
-      fetcher: async () => response(manifest)
+      fetcher: async () => response(manifest),
+      resolveHost: allowTestResolver()
     });
 
     const item = result.items[0];

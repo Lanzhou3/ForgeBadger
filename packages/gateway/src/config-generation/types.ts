@@ -38,6 +38,13 @@ export interface WriteResult {
   skippedFiles: string[];
   backupPath: string;
   conflicts: ConflictReport[];
+  /**
+   * Final outcome of the write: `applied` for full success, `rolled_back`
+   * when a write failed and rollback succeeded, `rollback_failed` when the
+   * rollback itself failed and the project may be in a partial state.
+   */
+  outcome: "applied" | "rolled_back" | "rollback_failed";
+  failedFiles: string[];
   rollbackAvailable: boolean;
   rollbackResult?: RollbackResult;
 }

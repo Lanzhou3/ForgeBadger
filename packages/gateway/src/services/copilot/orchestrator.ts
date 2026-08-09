@@ -594,9 +594,15 @@ function toModelRequest(
     input: contextBlocks.length > 0
       ? [...contextBlocks, "", conversationContext ? requestBlock : ["User request:", prompt].join("\n")].join("\n")
       : requestBlock,
-    tools: toModelToolDefinitions(toolRegistry),
+    ...(modelSupportsTools(selection) ? { tools: toModelToolDefinitions(toolRegistry) } : {}),
     maxOutputTokens: 1024
   };
+}
+
+function modelSupportsTools(selection: CopilotProviderSelection): boolean {
+  if (selection.model.capabilities.includes("toolcall")) return true;
+  if (selection.provider.providerKey.startsWith("xiaomi-mimo")) return false;
+  return true;
 }
 
 function buildCopilotInstructions(extra: string[] = []): string {
@@ -886,7 +892,7 @@ function readBooleanField(record: Record<string, unknown>, key: string): boolean
 }
 
 function toToolResultModelRequest(
-  selection: Pick<CopilotProviderSelection, "model">,
+  selection: CopilotProviderSelection,
   originalPrompt: string,
   conversationContext: string | null,
   toolResults: Array<{
@@ -915,7 +921,7 @@ function toToolResultModelRequest(
       "",
       "Write a concise, actionable answer for the user."
     ].join("\n"),
-    tools: toModelToolDefinitions(toolRegistry),
+    ...(modelSupportsTools(selection) ? { tools: toModelToolDefinitions(toolRegistry) } : {}),
     maxOutputTokens: 1024
   };
 }

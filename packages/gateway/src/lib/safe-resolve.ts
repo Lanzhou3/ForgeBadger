@@ -4,6 +4,7 @@ import { dirname, isAbsolute, resolve, sep } from "node:path";
 const DENIED_ROOTS = new Set([
   "/",
   "/etc",
+  "/private/etc",
   "/proc",
   "/sys",
   "/dev",

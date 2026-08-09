@@ -22,10 +22,12 @@ describe("model catalog", () => {
     const kimiCode = catalog.find((provider) => provider.id === "kimi-code");
     const qwenCodingCn = catalog.find((provider) => provider.id === "qwen-coding-plan-cn");
     const minimaxGlobal = catalog.find((provider) => provider.id === "minimax-global");
+    const xiaomiMimoTokenCn = catalog.find((provider) => provider.id === "xiaomi-mimo-token-plan-cn");
 
     assert.ok(kimiCode);
     assert.ok(qwenCodingCn);
     assert.ok(minimaxGlobal);
+    assert.ok(xiaomiMimoTokenCn);
     assert.equal(catalog.some((provider) => /\((?:Claude Code|OpenCode)\)|for (?:Claude Code|OpenCode)/iu.test(provider.name)), false);
     assert.ok(catalog.every((provider) => provider.source === "verified"));
     assert.deepEqual(kimiCode.supportedAdapters, ["claude", "opencode"]);
@@ -52,6 +54,12 @@ describe("model catalog", () => {
     assert.equal(qwenCodingCn.claude?.defaultSmallFastModel, "qwen3-coder-plus");
     assert.equal(minimaxGlobal.endpoints.anthropic?.baseUrl, "https://api.minimax.io/anthropic");
     assert.equal(minimaxGlobal.endpoints.openai?.baseUrl, "https://api.minimax.io/v1");
+    assert.equal(xiaomiMimoTokenCn.region, "cn");
+    assert.equal(xiaomiMimoTokenCn.productType, "token_plan");
+    assert.equal(xiaomiMimoTokenCn.endpoints.anthropic?.baseUrl, "https://token-plan-cn.xiaomimimo.com/anthropic");
+    assert.equal(xiaomiMimoTokenCn.endpoints.openai?.baseUrl, "https://token-plan-cn.xiaomimimo.com/v1");
+    assert.ok(xiaomiMimoTokenCn.defaultModels.some((model) => model.modelId === "mimo-v2.5-pro"));
+    assert.ok(xiaomiMimoTokenCn.defaultModels.every((model) => !model.capabilities.includes("toolcall")));
   });
 
   it("loads verified providers before models.dev providers", async () => {

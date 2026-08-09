@@ -146,4 +146,48 @@ describe("checkModelEndpoint", () => {
     assert.equal(result.healthy, false);
     assert.equal(result.error, "Unable to resolve endpoint host");
   });
+
+  it("blocks IPv4-mapped IPv6 (::ffff:7f00:1 => 127.0.0.1)", async () => {
+    const result = await checkModelEndpoint({
+      endpoint: "https://[::ffff:7f00:1]/",
+      timeoutMs: 100,
+      fetchImpl: async () => new Response("ok", { status: 200 }),
+      resolveHost: publicHostResolver
+    });
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Private or loopback network addresses are not allowed");
+  });
+
+  it("blocks NAT64 prefix (64:ff9b::7f00:1 => 127.0.0.1)", async () => {
+    const result = await checkModelEndpoint({
+      endpoint: "https://[64:ff9b::7f00:1]/",
+      timeoutMs: 100,
+      fetchImpl: async () => new Response("ok", { status: 200 }),
+      resolveHost: publicHostResolver
+    });
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Private or loopback network addresses are not allowed");
+  });
+
+  it("blocks IPv4-mapped cloud metadata (::ffff:a9fe:a9fe => 169.254.169.254)", async () => {
+    const result = await checkModelEndpoint({
+      endpoint: "https://[::ffff:a9fe:a9fe]/",
+      timeoutMs: 100,
+      fetchImpl: async () => new Response("ok", { status: 200 }),
+      resolveHost: publicHostResolver
+    });
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Private or loopback network addresses are not allowed");
+  });
+
+  it("allows a public IPv6 address", async () => {
+    const result = await checkModelEndpoint({
+      endpoint: "https://[2606:4700:4700::1111]/",
+      timeoutMs: 100,
+      fetchImpl: async () => new Response("ok", { status: 200 }),
+      resolveHost: publicHostResolver
+    });
+    assert.equal(result.healthy, true);
+    assert.equal(result.statusCode, 200);
+  });
 });

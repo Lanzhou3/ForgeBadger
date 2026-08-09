@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,10 +57,11 @@ describe("local skill discovery", () => {
     );
 
     const skills = discoverLocalSkills({ roots: [projectSkills, userSkills] });
+    const canonicalProjectSkills = await realpath(projectSkills);
 
     assert.equal(skills.length, 2);
     assert.deepEqual(skills.map((skill) => skill.name).sort(), ["code-reviewer", "plan-workflow"]);
-    assert.equal(skills.find((skill) => skill.name === "plan-workflow")?.root, projectSkills);
+    assert.equal(skills.find((skill) => skill.name === "plan-workflow")?.root, canonicalProjectSkills);
     assert.equal(skills.find((skill) => skill.name === "code-reviewer")?.path.endsWith("SKILL.md"), true);
     assert.equal(skills.find((skill) => skill.name === "code-reviewer")?.version, "2.0.0");
     assert.equal(
@@ -317,10 +318,11 @@ describe("local skill discovery", () => {
       const repo = new SkillRepository(db, user.id);
 
       const first = syncLocalSkills(repo, { roots: [path.join(root, "skills")] });
+      const canonicalSkillRoot = await realpath(path.join(root, "skills"));
 
       assert.equal(first.discoveredCount, 1);
       assert.equal(first.createdCount, 1);
-      assert.deepEqual(first.discoveredRoots, [path.join(root, "skills")]);
+      assert.deepEqual(first.discoveredRoots, [canonicalSkillRoot]);
       assert.equal(repo.list()[0]?.description, "Initial local review skill.");
 
       await writeFile(

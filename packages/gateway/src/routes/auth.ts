@@ -6,6 +6,8 @@ import { signJwt } from "../auth/jwt.js";
 import { authenticate } from "../auth/middleware.js";
 import type { AuthenticatedRequest } from "../auth/middleware.js";
 import type { User, UserRepository } from "../db/repositories/user-repository.js";
+import { createRateLimiter } from "../middleware/rate-limit.js";
+import { redactSensitiveErrorMessage } from "../lib/redaction.js";
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -22,7 +24,11 @@ const invalidCredentialsResponse = { code: 1, message: "Invalid credentials" };
 export function createAuthRouter(userRepository: UserRepository, jwtSecret: string): Router {
   const router = Router();
 
-  router.post("/register", async (req, res) => {
+  // Rate-limit credential-bearing endpoints by remote address: brute force
+  // and credential-stuffing protection for login/register, and unbounded
+  // account-creation for register. Generous enough for test suites and CI.
+  const authLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 5000 });
+  router.post("/register", authLimiter, async (req, res) => {
     const parseResult = registerSchema.safeParse(req.body);
     if (!parseResult.success) {
       res.status(400).json({ code: 1, message: "Invalid input" });
@@ -51,12 +57,12 @@ export function createAuthRouter(userRepository: UserRepository, jwtSecret: stri
     } catch (error) {
       res.status(500).json({
         code: 1,
-        message: error instanceof Error ? error.message : "Registration failed"
+        message: error instanceof Error ? redactSensitiveErrorMessage(error.message) : "Registration failed"
       });
     }
   });
 
-  router.post("/login", async (req, res) => {
+  router.post("/login", authLimiter, async (req, res) => {
     const parseResult = loginSchema.safeParse(req.body);
     if (!parseResult.success) {
       res.status(400).json({ code: 1, message: "Invalid input" });

@@ -33,7 +33,7 @@ export async function startupGateway(options: {
   // 5. Create session manager
   const sessionManager = new InMemorySessionManager(
     options.tmuxClient ?? createTmuxClient(),
-    createDbSessionRecoveryStore(db),
+    createDbSessionRecoveryStore(db, options.env.OPENFORGE_MASTER_KEY),
     eventBus,
     { tmuxPrefix: options.env.OPENFORGE_TMUX_PREFIX }
   );

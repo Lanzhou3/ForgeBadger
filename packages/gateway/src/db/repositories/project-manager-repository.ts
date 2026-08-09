@@ -440,7 +440,7 @@ export class ProjectManagerRepository {
       throw new Error("Marking done requires evidence references or a manual completion reason");
     }
 
-    const details = normalizeDetails(input.details ?? {});
+    const details = mergeWorkItemDetails(existing.details, input.details);
     const eventType = statusLedgerEventType(existing.status, nextStatus, hasManualReason);
     const eventDetails = mergeLedgerDetails({
       fromStatus: existing.status,
@@ -487,7 +487,7 @@ export class ProjectManagerRepository {
       if (nextStatus === "done" && evidenceRefs.length === 0 && !hasManualReason) {
         throw new Error("Marking done requires evidence references or a manual completion reason");
       }
-      const details = normalizeDetails(update.details ?? {});
+      const details = mergeWorkItemDetails(existing.details, update.details);
       return {
         existing,
         nextStatus,
@@ -576,7 +576,7 @@ export class ProjectManagerRepository {
     if (nextEvidenceRefs.length === existing.evidenceRefs.length) {
       throw new Error("Evidence references are required");
     }
-    const details = normalizeDetails(input.details ?? {});
+    const details = mergeWorkItemDetails(existing.details, input.details);
     const eventDetails = mergeLedgerDetails({
       evidenceRefCount: nextEvidenceRefs.length
     }, details);
@@ -840,6 +840,35 @@ function normalizeDetails(value: unknown): Record<string, unknown> {
   const normalized = normalizeDetailValue(value, "", 0);
   if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return {};
   return normalized as Record<string, unknown>;
+}
+
+/**
+ * Merge incoming details into the existing stored details (deep shallow-merge
+ * one level) so a status change or evidence attach never wipes out existing
+ * fields such as `taskPacket.sessionId`. The stored `taskPacket` is treated as
+ * an opaque value and preserved wholesale unless explicitly replaced.
+ */
+function mergeWorkItemDetails(
+  existing: Record<string, unknown>,
+  incoming: unknown
+): Record<string, unknown> {
+  const normalizedIncoming = normalizeDetails(incoming);
+  const merged: Record<string, unknown> = { ...existing };
+  for (const [key, value] of Object.entries(normalizedIncoming)) {
+    // Preserve the stored taskPacket (e.g. its sessionId link) when the caller
+    // only patches unrelated fields.
+    if (key === "taskPacket" && typeof merged.taskPacket === "object" && merged.taskPacket !== null) {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        merged.taskPacket = {
+          ...(merged.taskPacket as Record<string, unknown>),
+          ...(value as Record<string, unknown>)
+        };
+        continue;
+      }
+    }
+    merged[key] = value;
+  }
+  return merged;
 }
 
 function normalizeDetailValue(value: unknown, key: string, depth: number): unknown {

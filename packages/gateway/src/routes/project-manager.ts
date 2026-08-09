@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -9,10 +10,13 @@ import {
   type ProjectManagerEvidenceRef,
   type ProjectManagerGoal,
   type ProjectManagerLedgerEvent,
-  type ProjectManagerWorkItem
+  type ProjectManagerWorkItem,
+  type ProjectManagerWorkItemStatus
 } from "../db/repositories/project-manager-repository.js";
-import { ProjectRepository } from "../db/repositories/project-repository.js";
+import { ProjectRepository, type Project } from "../db/repositories/project-repository.js";
+import { SessionRepository, type Session } from "../db/repositories/session-repository.js";
 import type { Database } from "../db/types.js";
+import { getStarterTaskPack, listStarterTaskPacks, type StarterTaskPack } from "../services/starter-task-packs.js";
 
 const statusSchema = z.enum(PROJECT_MANAGER_WORK_ITEM_STATUSES);
 const eventTypeSchema = z.enum(PROJECT_MANAGER_LEDGER_EVENT_TYPES);
@@ -78,8 +82,16 @@ const evidenceBodySchema = z.object({
   evidenceRefs: z.array(evidenceRefSchema).min(1).max(20)
 }).strict();
 
+const taskPacketSessionLinkBodySchema = z.object({
+  sessionId: z.string().min(1).max(128)
+}).strict();
+
 const workItemsQuerySchema = z.object({
   status: statusSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional()
+}).strict();
+
+const taskPacketsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional()
 }).strict();
 
@@ -98,6 +110,39 @@ interface ProjectManagerLedgerTrace {
   approvalStatus?: string;
   executionStatus?: string;
 }
+
+interface ProjectManagerTaskPacket {
+  id: string;
+  projectId: string;
+  workItemId: string;
+  workItemStatus: ProjectManagerWorkItemStatus;
+  queueStatus: ProjectManagerTaskPacketQueueStatus;
+  title: string;
+  updatedAt: number;
+  prompt: string;
+  acceptanceCriteria: string[];
+  expectedVerification: string[];
+  evidenceRequirements: string[];
+  runtime: {
+    adapter: string;
+    templateId: string;
+  };
+  sessionLink: {
+    sessionId: string;
+    status: string;
+    aiTool: string;
+    href: string;
+  } | null;
+  blockedReason: "no_linked_session" | "linked_session_not_running" | null;
+}
+
+type ProjectManagerTaskPacketQueueStatus =
+  | "planned"
+  | "running"
+  | "waiting_for_review"
+  | "blocked"
+  | "completed"
+  | "cancelled";
 
 export function createProjectManagerRoutes(db: Database): Router {
   const router = Router({ mergeParams: true });
@@ -155,6 +200,54 @@ export function createProjectManagerRoutes(db: Database): Router {
     }
   });
 
+  router.get("/:projectId/project-manager/task-packets", (req, res) => {
+    const parse = taskPacketsQuerySchema.safeParse(req.query ?? {});
+    if (!parse.success) return sendInvalidInput(res);
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const workItems = new ProjectManagerRepository(db, userId).listWorkItems(project.id, {
+      ...(parse.data.limit !== undefined ? { limit: parse.data.limit } : {})
+    });
+    const taskPackets = workItems.map((workItem) => buildTaskPacket({
+      project,
+      workItem,
+      session: resolveTaskPacketSession(db, userId, project.id, workItem)
+    }));
+    res.json({ code: 0, data: { taskPackets }, message: "" });
+  });
+
+  router.get("/:projectId/project-manager/starter-packs", (req, res) => {
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    res.json({ code: 0, data: { starterPacks: listStarterTaskPacks().map(toStarterPackDto) }, message: "" });
+  });
+
+  router.post("/:projectId/project-manager/starter-packs/:packId/task-packet", (req, res) => {
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const pack = getStarterTaskPack(req.params.packId);
+    if (!pack) return sendStarterPackNotFound(res);
+    try {
+      const repo = new ProjectManagerRepository(db, userId);
+      const workItem = repo.createWorkItem(project.id, createStarterPackWorkItemInput(pack));
+      const taskPacket = buildTaskPacket({ project, workItem });
+      res.status(201).json({
+        code: 0,
+        data: {
+          pack: toStarterPackDto(pack),
+          workItem: toWorkItemDto(workItem),
+          taskPacket
+        },
+        message: ""
+      });
+    } catch (error) {
+      sendMutationError(res, error, "Starter pack task packet creation failed");
+    }
+  });
+
   router.post("/:projectId/project-manager/work-items/batch/status", (req, res) => {
     const parse = batchStatusBodySchema.safeParse(req.body ?? {});
     if (!parse.success) return sendInvalidInput(res);
@@ -178,6 +271,84 @@ export function createProjectManagerRoutes(db: Database): Router {
     const workItem = new ProjectManagerRepository(db, userId).getWorkItem(project.id, req.params.workItemId);
     if (!workItem) return sendWorkItemNotFound(res);
     res.json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
+  });
+
+  router.get("/:projectId/project-manager/work-items/:workItemId/task-packet", (req, res) => {
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const workItem = new ProjectManagerRepository(db, userId).getWorkItem(project.id, req.params.workItemId);
+    if (!workItem) return sendWorkItemNotFound(res);
+    const packet = buildTaskPacket({
+      project,
+      workItem,
+      session: resolveTaskPacketSession(db, userId, project.id, workItem)
+    });
+    res.json({ code: 0, data: { taskPacket: packet }, message: "" });
+  });
+
+  router.post("/:projectId/project-manager/work-items/:workItemId/task-packet/session-link", (req, res) => {
+    const parse = taskPacketSessionLinkBodySchema.safeParse(req.body ?? {});
+    if (!parse.success) return sendInvalidInput(res);
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const repo = new ProjectManagerRepository(db, userId);
+    const workItem = repo.getWorkItem(project.id, req.params.workItemId);
+    if (!workItem) return sendWorkItemNotFound(res);
+    const session = new SessionRepository(db, userId).getById(parse.data.sessionId);
+    if (!session || session.projectId !== project.id) return sendSessionNotFound(res);
+    try {
+      const updated = repo.updateWorkItem(project.id, workItem.id, {
+        details: withTaskPacketSessionLink(workItem.details, session, project)
+      });
+      const packet = buildTaskPacket({ project, workItem: updated, session });
+      res.json({ code: 0, data: { taskPacket: packet }, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Task packet session link failed");
+    }
+  });
+
+  router.post("/:projectId/project-manager/work-items/:workItemId/task-packet/start", (req, res) => {
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const repo = new ProjectManagerRepository(db, userId);
+    const workItem = repo.getWorkItem(project.id, req.params.workItemId);
+    if (!workItem) return sendWorkItemNotFound(res);
+
+    const sessionRepo = new SessionRepository(db, userId);
+    const existingSession = resolveTaskPacketSession(db, userId, project.id, workItem);
+    if (existingSession) {
+      const packet = buildTaskPacket({ project, workItem, session: existingSession });
+      res.json({
+        code: 0,
+        data: { taskPacket: packet, session: toTaskPacketSessionDto(existingSession) },
+        message: ""
+      });
+      return;
+    }
+
+    try {
+      const session = sessionRepo.create({
+        projectId: project.id,
+        name: createTaskPacketSessionName(workItem.title),
+        aiTool: project.aiTool,
+        workingDir: project.path,
+        credentialMode: "host_environment"
+      });
+      const updated = repo.updateWorkItem(project.id, workItem.id, {
+        details: withTaskPacketSessionLink(workItem.details, session, project, createTaskPacketContext(workItem, project))
+      });
+      const packet = buildTaskPacket({ project, workItem: updated, session });
+      res.status(201).json({
+        code: 0,
+        data: { taskPacket: packet, session: toTaskPacketSessionDto(session) },
+        message: ""
+      });
+    } catch (error) {
+      sendMutationError(res, error, "Task packet start failed");
+    }
   });
 
   router.patch("/:projectId/project-manager/work-items/:workItemId", (req, res) => {
@@ -302,6 +473,215 @@ function toWorkItemDto(workItem: ProjectManagerWorkItem) {
   };
 }
 
+function toStarterPackDto(pack: StarterTaskPack) {
+  return {
+    id: pack.id,
+    name: pack.name,
+    description: pack.description,
+    recommendedAdapter: pack.recommendedAdapter,
+    promptFrame: pack.promptFrame,
+    acceptanceChecklist: pack.acceptanceChecklist,
+    verificationGuidance: pack.verificationGuidance,
+    evidenceFields: pack.evidenceFields
+  };
+}
+
+function createStarterPackWorkItemInput(pack: StarterTaskPack) {
+  return {
+    title: pack.name,
+    description: pack.promptFrame,
+    status: "todo" as const,
+    acceptanceCriteria: pack.acceptanceChecklist,
+    details: {
+      taskPacket: {
+        starterPackId: pack.id,
+        starterPackName: pack.name,
+        recommendedAdapter: pack.recommendedAdapter,
+        promptFrame: pack.promptFrame,
+        expectedVerification: pack.verificationGuidance,
+        evidenceRequirements: pack.evidenceFields
+      }
+    }
+  };
+}
+
+function buildTaskPacket(input: {
+  project: Project;
+  workItem: ProjectManagerWorkItem;
+  session?: Session | null;
+}): ProjectManagerTaskPacket {
+  const taskPacketDetails = readTaskPacketDetails(input.workItem.details);
+  const promptFrame = readStringValue(taskPacketDetails.promptFrame);
+  const expectedVerification = readStringArray(taskPacketDetails.expectedVerification);
+  const evidenceRequirements = readStringArray(taskPacketDetails.evidenceRequirements);
+  const session = input.session ?? null;
+  return {
+    id: `${input.workItem.id}:task-packet`,
+    projectId: input.project.id,
+    workItemId: input.workItem.id,
+    workItemStatus: input.workItem.status,
+    queueStatus: queueStatusForWorkItem(input.workItem.status),
+    title: input.workItem.title,
+    updatedAt: input.workItem.updatedAt,
+    prompt: buildTaskPacketPrompt({
+      project: input.project,
+      workItem: input.workItem,
+      promptFrame,
+      expectedVerification,
+      evidenceRequirements
+    }),
+    acceptanceCriteria: input.workItem.acceptanceCriteria,
+    expectedVerification,
+    evidenceRequirements,
+    runtime: {
+      adapter: input.project.aiTool,
+      templateId: input.project.templateId ?? defaultTemplateIdForAiTool(input.project.aiTool)
+    },
+    sessionLink: session ? {
+      sessionId: session.id,
+      status: session.status,
+      aiTool: session.aiTool,
+      href: `/sessions/${encodeURIComponent(session.id)}`
+    } : null,
+    blockedReason: session ? (isActiveSessionStatus(session.status) ? null : "linked_session_not_running") : "no_linked_session"
+  };
+}
+
+function queueStatusForWorkItem(status: ProjectManagerWorkItemStatus): ProjectManagerTaskPacketQueueStatus {
+  if (status === "todo") return "planned";
+  if (status === "in_progress") return "running";
+  if (status === "ready_for_review") return "waiting_for_review";
+  if (status === "blocked") return "blocked";
+  if (status === "done") return "completed";
+  return "cancelled";
+}
+
+function buildTaskPacketPrompt(input: {
+  project: Project;
+  workItem: ProjectManagerWorkItem;
+  promptFrame: string | undefined;
+  expectedVerification: string[];
+  evidenceRequirements: string[];
+}): string {
+  const lines = [
+    `Task: ${input.workItem.title}`,
+    `Project: ${input.project.name}`,
+    `Runtime CLI: ${input.project.aiTool}`
+  ];
+  if (input.workItem.description) {
+    lines.push("", "Context:", input.workItem.description);
+  }
+  if (input.promptFrame) {
+    lines.push("", "Starter pack prompt frame:", input.promptFrame);
+  }
+  appendList(lines, "Acceptance criteria:", input.workItem.acceptanceCriteria);
+  appendList(lines, "Expected verification:", input.expectedVerification);
+  appendList(lines, "Evidence requirements:", input.evidenceRequirements);
+  return lines.join("\n");
+}
+
+function appendList(lines: string[], heading: string, values: string[]): void {
+  if (values.length === 0) return;
+  lines.push("", heading);
+  for (const value of values) {
+    lines.push(`- ${value}`);
+  }
+}
+
+function resolveTaskPacketSession(
+  db: Database,
+  userId: string,
+  projectId: string,
+  workItem: ProjectManagerWorkItem
+): Session | null {
+  const taskPacketDetails = readTaskPacketDetails(workItem.details);
+  if (typeof taskPacketDetails.sessionId !== "string" || taskPacketDetails.sessionId.trim().length === 0) {
+    return null;
+  }
+  const session = new SessionRepository(db, userId).getById(taskPacketDetails.sessionId.trim());
+  return session?.projectId === projectId ? session : null;
+}
+
+function withTaskPacketSessionLink(
+  details: Record<string, unknown>,
+  session: Session,
+  project: Project,
+  context: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    ...details,
+    taskPacket: {
+      ...readTaskPacketDetails(details),
+      sessionId: session.id,
+      sessionStatus: session.status,
+      adapter: session.aiTool,
+      templateId: project.templateId ?? defaultTemplateIdForAiTool(project.aiTool),
+      linkedAt: new Date().toISOString(),
+      ...context
+    }
+  };
+}
+
+function createTaskPacketSessionName(title: string): string {
+  const normalized = title.trim() || "Task";
+  return `Task: ${normalized}`.slice(0, 256);
+}
+
+function createTaskPacketContext(workItem: ProjectManagerWorkItem, project: Project): Record<string, unknown> {
+  const packet = buildTaskPacket({ project, workItem });
+  return {
+    contextStatus: "ready_for_operator",
+    contextRef: `/api/v1/projects/${encodeURIComponent(project.id)}/project-manager/work-items/${encodeURIComponent(workItem.id)}/task-packet`,
+    promptDigest: createHash("sha256").update(packet.prompt).digest("hex"),
+    acceptanceCriteriaCount: packet.acceptanceCriteria.length,
+    expectedVerificationCount: packet.expectedVerification.length,
+    evidenceRequirementCount: packet.evidenceRequirements.length
+  };
+}
+
+function toTaskPacketSessionDto(session: Session) {
+  return {
+    id: session.id,
+    name: session.name,
+    projectId: session.projectId,
+    status: session.status,
+    aiTool: session.aiTool,
+    modelId: session.modelId,
+    credentialMode: session.credentialMode,
+    apiKeyId: session.apiKeyId
+  };
+}
+
+function readTaskPacketDetails(details: Record<string, unknown>): Record<string, unknown> {
+  const raw = details.taskPacket;
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0 && item.length <= 512)
+    .slice(0, 20);
+}
+
+function readStringValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= 512 ? normalized : undefined;
+}
+
+function isActiveSessionStatus(status: string): boolean {
+  return status === "running" || status === "detached";
+}
+
+function defaultTemplateIdForAiTool(aiTool: string | null | undefined): string {
+  if (aiTool === "opencode") return "builtin-opencode";
+  if (aiTool === "codex") return "builtin-codex";
+  return "builtin-claude-code";
+}
+
 function toLedgerEventDto(event: ProjectManagerLedgerEvent) {
   const trace = toLedgerTraceDto(event.details);
   return {
@@ -368,6 +748,14 @@ function sendProjectNotFound(res: { status(code: number): { json(body: unknown):
 
 function sendWorkItemNotFound(res: { status(code: number): { json(body: unknown): void } }): void {
   res.status(404).json({ code: 1, message: "Work item not found" });
+}
+
+function sendSessionNotFound(res: { status(code: number): { json(body: unknown): void } }): void {
+  res.status(404).json({ code: 1, message: "Session not found" });
+}
+
+function sendStarterPackNotFound(res: { status(code: number): { json(body: unknown): void } }): void {
+  res.status(404).json({ code: 1, message: "Starter pack not found" });
 }
 
 function sendInvalidInput(res: { status(code: number): { json(body: unknown): void } }): void {

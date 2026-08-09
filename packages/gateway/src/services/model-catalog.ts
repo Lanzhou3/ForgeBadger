@@ -318,6 +318,75 @@ const providerCatalog: ProviderCatalogPreset[] = [
       model("glm-4.5-air", "GLM-4.5 Air", ["chat", "code"], 128000)
     ],
     smallFastModel: "glm-4.5-air"
+  }),
+  providerProduct({
+    id: "xiaomi-mimo-api",
+    name: "Xiaomi MiMo API",
+    description: "Xiaomi MiMo pay-as-you-go API with OpenAI and Anthropic-compatible endpoints.",
+    region: "global",
+    productType: "payg_api",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://api.xiaomimimo.com/anthropic",
+    openaiBaseUrl: "https://api.xiaomimimo.com/v1",
+    envName: "MIMO_API_KEY",
+    supportsTools: false,
+    defaultModels: [
+      model("mimo-v2.5-pro", "MiMo V2.5 Pro", ["chat", "code", "reasoning"], 1000000),
+      model("mimo-v2", "MiMo V2", ["chat", "code"], 1000000),
+      model("mimo-v2.5-flash", "MiMo V2.5 Flash", ["chat", "code"], 1000000)
+    ],
+    smallFastModel: "mimo-v2.5-flash"
+  }),
+  providerProduct({
+    id: "xiaomi-mimo-token-plan-cn",
+    name: "Xiaomi MiMo Token Plan 中国大陆",
+    description: "Xiaomi MiMo Token Plan endpoint for mainland China.",
+    region: "cn",
+    productType: "token_plan",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic",
+    openaiBaseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+    envName: "MIMO_API_KEY",
+    supportsTools: false,
+    defaultModels: [
+      model("mimo-v2.5-pro", "MiMo V2.5 Pro", ["chat", "code", "reasoning"], 1000000),
+      model("mimo-v2.5-flash", "MiMo V2.5 Flash", ["chat", "code"], 1000000)
+    ],
+    smallFastModel: "mimo-v2.5-flash"
+  }),
+  providerProduct({
+    id: "xiaomi-mimo-token-plan-sgp",
+    name: "Xiaomi MiMo Token Plan Singapore",
+    description: "Xiaomi MiMo Token Plan endpoint for Singapore.",
+    region: "sgp",
+    productType: "token_plan",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://token-plan-sgp.xiaomimimo.com/anthropic",
+    openaiBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+    envName: "MIMO_API_KEY",
+    supportsTools: false,
+    defaultModels: [
+      model("mimo-v2.5-pro", "MiMo V2.5 Pro", ["chat", "code", "reasoning"], 1000000),
+      model("mimo-v2.5-flash", "MiMo V2.5 Flash", ["chat", "code"], 1000000)
+    ],
+    smallFastModel: "mimo-v2.5-flash"
+  }),
+  providerProduct({
+    id: "xiaomi-mimo-token-plan-ams",
+    name: "Xiaomi MiMo Token Plan Europe",
+    description: "Xiaomi MiMo Token Plan endpoint for Amsterdam/Europe.",
+    region: "eu",
+    productType: "token_plan",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://token-plan-ams.xiaomimimo.com/anthropic",
+    openaiBaseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+    envName: "MIMO_API_KEY",
+    supportsTools: false,
+    defaultModels: [
+      model("mimo-v2.5-pro", "MiMo V2.5 Pro", ["chat", "code", "reasoning"], 1000000),
+      model("mimo-v2.5-flash", "MiMo V2.5 Flash", ["chat", "code"], 1000000)
+    ],
+    smallFastModel: "mimo-v2.5-flash"
   })
 ];
 
@@ -437,6 +506,7 @@ function providerProduct(input: {
   authType?: ProviderAuthType;
   defaultModels: ProviderModelPreset[];
   smallFastModel: string;
+  supportsTools?: boolean;
 }): ProviderCatalogPreset {
   const authType = input.authType ?? "api_key";
   const baseUrl = input.anthropicBaseUrl ?? input.openaiBaseUrl ?? "";
@@ -444,6 +514,12 @@ function providerProduct(input: {
     ...(input.anthropicBaseUrl ? { anthropic: { baseUrl: input.anthropicBaseUrl } } : {}),
     ...(input.openaiBaseUrl ? { openai: { baseUrl: input.openaiBaseUrl } } : {})
   };
+  const supportsTools = input.supportsTools ?? true;
+  const defaultModels = input.defaultModels.map((preset) =>
+    supportsTools && !preset.capabilities.includes("toolcall")
+      ? { ...preset, capabilities: [...preset.capabilities, "toolcall"] }
+      : preset
+  );
   return {
     id: input.id,
     name: input.name,
@@ -457,7 +533,7 @@ function providerProduct(input: {
     modelSource: "static",
     source: "verified",
     endpoints,
-    defaultModels: input.defaultModels,
+    defaultModels,
     env: {
       [claudeEnv.baseUrl]: "Claude Code API endpoint",
       ...(authType === "none" ? {} : { [claudeEnv.authToken]: `${input.name} API key` }),

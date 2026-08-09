@@ -51,9 +51,11 @@ export interface CreateCatalogItemInput {
 }
 
 export class CatalogRepository {
-  private drizzle;
+  private readonly drizzle;
+  private readonly db: Database;
 
   constructor(db: Database, private readonly userId: string) {
+    this.db = db;
     this.drizzle = drizzle(db);
   }
 
@@ -128,26 +130,32 @@ export class CatalogRepository {
   }
 
   replaceItems(sourceId: string, items: CreateCatalogItemInput[]): CatalogItem[] {
-    this.drizzle
-      .delete(catalogItems)
-      .where(and(eq(catalogItems.userId, this.userId), eq(catalogItems.sourceId, sourceId)))
-      .run();
-
-    return items.map((item) =>
+    // Delete-then-insert must be atomic: if the insert fails mid-way, the
+    // catalog keeps its previous complete state instead of being left half
+    // empty (a partial refresh would break installs that resolve by id).
+    const run = this.db.transaction(() => {
       this.drizzle
-        .insert(catalogItems)
-        .values({
-          userId: this.userId,
-          sourceId,
-          itemType: item.itemType,
-          externalId: item.externalId,
-          name: item.name,
-          description: item.description ?? null,
-          version: item.version ?? null,
-          metadata: item.metadata === undefined ? null : JSON.stringify(item.metadata)
-        })
-        .returning()
-        .get() as CatalogItem
-    );
+        .delete(catalogItems)
+        .where(and(eq(catalogItems.userId, this.userId), eq(catalogItems.sourceId, sourceId)))
+        .run();
+
+      return items.map((item) =>
+        this.drizzle
+          .insert(catalogItems)
+          .values({
+            userId: this.userId,
+            sourceId,
+            itemType: item.itemType,
+            externalId: item.externalId,
+            name: item.name,
+            description: item.description ?? null,
+            version: item.version ?? null,
+            metadata: item.metadata === undefined ? null : JSON.stringify(item.metadata)
+          })
+          .returning()
+          .get() as CatalogItem
+      );
+    });
+    return run();
   }
 }

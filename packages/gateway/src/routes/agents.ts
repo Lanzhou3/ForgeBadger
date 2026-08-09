@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { isForeignKeyError } from "../lib/db-errors.js";
 import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
@@ -113,7 +114,19 @@ export function createAgentRoutes(db: Database): Router {
       res.status(404).json({ code: 1, message: "Agent not found" });
       return;
     }
-    repo.delete(req.params.id);
+    try {
+      repo.delete(req.params.id);
+    } catch (error) {
+      if (isForeignKeyError(error)) {
+        res.status(409).json({
+          code: 1,
+          message: "Agent is still referenced by a session and cannot be deleted"
+        });
+        return;
+      }
+      res.status(500).json({ code: 1, message: "Failed to delete agent" });
+      return;
+    }
     res.json({
       code: 0,
       data: {},

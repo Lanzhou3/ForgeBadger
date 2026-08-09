@@ -48,6 +48,19 @@ export function createAdminUserRoutes(db: Database): Router {
     }
 
     const repo = new UserRepository(db);
+    const target = repo.findById(req.params.id);
+    if (!target) {
+      res.status(404).json({ code: 1, message: "User not found" });
+      return;
+    }
+
+    // Preserve the last active admin invariant: never allow a change that would
+    // demote or disable the only remaining active administrator.
+    if (wouldRemoveAdminAccess(target, parseResult.data) && countActiveAdmins(repo) <= 1) {
+      res.status(409).json({ code: 1, message: "Cannot remove the last active administrator" });
+      return;
+    }
+
     const user = repo.update(req.params.id, parseResult.data);
     if (!user) {
       res.status(404).json({ code: 1, message: "User not found" });
@@ -66,6 +79,22 @@ export function createAdminUserRoutes(db: Database): Router {
 
 function wouldRemoveOwnAdminAccess(input: z.infer<typeof updateUserSchema>): boolean {
   return input.role === "user" || input.status === "disabled";
+}
+
+function wouldRemoveAdminAccess(
+  user: User,
+  input: z.infer<typeof updateUserSchema>
+): boolean {
+  if (user.role !== "admin" || user.status !== "active") {
+    return false;
+  }
+  return input.role === "user" || input.status === "disabled";
+}
+
+function countActiveAdmins(repo: UserRepository): number {
+  return repo
+    .list()
+    .filter((user) => user.role === "admin" && user.status === "active").length;
 }
 
 function toAdminUserPayload(user: User) {

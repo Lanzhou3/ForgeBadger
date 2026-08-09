@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { beforeEach, describe, it } from "node:test";
@@ -98,6 +98,8 @@ describe("Gate D auth and project API contracts", () => {
     });
     const createdRoot = await mkdtemp(path.join(tmpdir(), "openforge-created-project-"));
     const importedRoot = await mkdtemp(path.join(tmpdir(), "openforge-imported-project-"));
+    const canonicalCreatedRoot = await realpath(createdRoot);
+    const canonicalImportedRoot = await realpath(importedRoot);
 
     const created = await api.createProject(alpha.body.data.user.id, {
       name: "Created Project",
@@ -105,7 +107,7 @@ describe("Gate D auth and project API contracts", () => {
     });
     assert.equal(created.status, 201);
     assert.equal(created.body.data.project.name, "Created Project");
-    assert.equal(created.body.data.project.rootPath, createdRoot);
+    assert.equal(created.body.data.project.rootPath, canonicalCreatedRoot);
 
     const imported = await api.importProject(alpha.body.data.user.id, {
       name: "Imported Project",
@@ -113,6 +115,7 @@ describe("Gate D auth and project API contracts", () => {
     });
     assert.equal(imported.status, 201);
     assert.equal(imported.body.data.project.name, "Imported Project");
+    assert.equal(imported.body.data.project.rootPath, canonicalImportedRoot);
 
     const alphaProjects = await api.listProjects(alpha.body.data.user.id);
     assert.deepEqual(
@@ -138,7 +141,7 @@ describe("Gate D auth and project API contracts", () => {
     });
 
     assert.equal(created.status, 201);
-    assert.equal(created.body.data.project.rootPath, rootPath);
+    assert.equal(created.body.data.project.rootPath, await realpath(rootPath));
     assert.equal(created.body.data.project.source, "created");
     assert.equal((await stat(rootPath)).isDirectory(), true);
   });
@@ -218,7 +221,7 @@ describe("Gate D auth and project API contracts", () => {
     assert.equal(created.status, 201);
     assert.equal(created.body.data.session.status, "running");
     assert.equal(launched[0].launchPlan.command, "claude");
-    assert.equal(launched[0].launchPlan.cwd, rootPath);
+    assert.equal(launched[0].launchPlan.cwd, await realpath(rootPath));
 
     const sessions = await api.listSessions(user.body.data.user.id);
     assert.deepEqual(sessions.body.data.sessions.map((session) => session.id), [

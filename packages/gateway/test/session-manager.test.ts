@@ -284,6 +284,134 @@ describe("InMemorySessionManager", () => {
     assert.equal(session.attachToken, "existing-live-token");
     assert.equal(store.entries[0]?.attachToken, "existing-live-token");
   });
+
+  it("serializes per-session lifecycle operations via runExclusive", async () => {
+    const order: string[] = [];
+    const manager = new InMemorySessionManager(fakeTmux([]), new MemoryRecoveryStore([]));
+
+    await Promise.all([
+      manager.runExclusive("s1", async () => {
+        order.push("a:start");
+        await new Promise((r) => setTimeout(r, 20));
+        order.push("a:end");
+      }),
+      manager.runExclusive("s1", async () => {
+        order.push("b:start");
+        order.push("b:end");
+      }),
+      manager.runExclusive("s2", async () => {
+        order.push("c:start");
+        order.push("c:end");
+      })
+    ]);
+
+    // Same-session calls serialize: a fully completes before b starts.
+    const aEnd = order.indexOf("a:end");
+    const bStart = order.indexOf("b:start");
+    assert.ok(aEnd >= 0 && bStart >= 0, "expected both a:end and b:start events");
+    assert.ok(aEnd < bStart, `s1 calls must serialize; got order=${order.join(",")}`);
+    // Different session is independent and may run interleaved.
+    assert.ok(order.includes("c:start") && order.includes("c:end"));
+  });
+
+  it("clears the per-session lock entry once the chain settles", async () => {
+    const manager = new InMemorySessionManager(fakeTmux([]), new MemoryRecoveryStore([]));
+    await manager.runExclusive("s1", async () => undefined);
+    // Internal map should not retain a stale promise after success.
+    assert.equal(
+      (manager as unknown as { sessionLocks: Map<string, Promise<unknown>> }).sessionLocks.has("s1"),
+      false
+    );
+  });
+
+  it("stopSession removes the in-memory entry even when the recovery store throws", async () => {
+    class ThrowingRecoveryStore extends MemoryRecoveryStore {
+      async removeSession(): Promise<void> {
+        throw new Error("db unavailable");
+      }
+    }
+    const manager = new InMemorySessionManager(fakeTmux([]), new ThrowingRecoveryStore([]));
+    await manager.createSession({
+      userId: "u1",
+      sessionId: "s-err",
+      launchPlan: launchPlan()
+    });
+
+    await assert.rejects(
+      manager.stopSession("s-err"),
+      /db unavailable/
+    );
+    // The in-memory entry MUST be cleared even when DB cleanup fails.
+    assert.equal(manager.getSession("s-err"), undefined);
+  });
+
+  it("reconcileSessionStatus marks exited when the tmux session has disappeared and syncs DB", async () => {
+    const store = new MemoryRecoveryStore([{
+      id: "s-dead",
+      userId: "u1",
+      attachToken: "tok",
+      tmuxName: "of-u1-s-dead",
+      launchPlan: launchPlan(),
+      createdAt: new Date().toISOString()
+    }]);
+    const manager = new InMemorySessionManager(
+      {
+        async createSession() {},
+        async killSession() {},
+        async capturePane() { return ""; },
+        async listSessions() { return []; },
+        async hasSession() { return false; },
+        async showEnvironment() { return {}; }
+      },
+      store
+    );
+    await manager.createSession({
+      userId: "u1",
+      sessionId: "s-dead",
+      launchPlan: launchPlan()
+    });
+
+    const exited = await manager.reconcileSessionStatus("s-dead");
+    assert.equal(exited?.status, "exited");
+    // Memory entry cleaned up.
+    assert.equal(manager.getSession("s-dead"), undefined);
+    // Recovery store updated (entry removed).
+    assert.equal(store.entries.find((entry) => entry.id === "s-dead"), undefined);
+  });
+
+  it("reconcileSessionStatus marks detached (not exited) when tmux is still alive", async () => {
+    const emitted: Array<{ newStatus?: string }> = [];
+    const manager = new InMemorySessionManager(
+      {
+        async createSession() {},
+        async killSession() {},
+        async capturePane() { return ""; },
+        async listSessions() { return ["of-u1-s-det"]; },
+        async hasSession() { return true; },
+        async showEnvironment() { return {}; }
+      },
+      new MemoryRecoveryStore([]),
+      {
+        emitEvent(event) {
+          emitted.push(event as unknown as { newStatus?: string });
+        },
+        on() { return () => undefined; },
+        off() {}
+      } as unknown as Parameters<typeof InMemorySessionManager>[2]
+    );
+    await manager.createSession({
+      userId: "u1",
+      sessionId: "s-det",
+      launchPlan: launchPlan()
+    });
+
+    const reconciled = await manager.reconcileSessionStatus("s-det");
+    assert.equal(reconciled?.status, "detached");
+    assert.ok(
+      emitted.some((event) => event.newStatus === "detached"),
+      "expected a single session_status_changed event with newStatus=detached"
+    );
+  });
 });
 
 function fakeTmux(calls: string[]): TmuxClient {
@@ -299,6 +427,12 @@ function fakeTmux(calls: string[]): TmuxClient {
     },
     async listSessions() {
       return [];
+    },
+    async hasSession() {
+      return true;
+    },
+    async showEnvironment() {
+      return {};
     }
   };
 }

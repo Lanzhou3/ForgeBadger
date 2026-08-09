@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
+import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
   ModelProviderRepository,
   type ModelProfile,
@@ -98,6 +99,13 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
   const fetchProviderModels = options.fetchProviderModels ?? fetchProviderModelsFromEndpoint;
   const loadProviderCatalog = options.loadProviderCatalog ?? loadProviderCatalogFromSource;
   router.use(authenticate);
+
+  // Rate-limit network-probing endpoints (they trigger real outbound requests
+  // to provider endpoints, so a stolen JWT must not be usable to spray them).
+  const probeLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 30 });
+  router.use("/:id/test", probeLimiter);
+  router.use("/:id/readiness", probeLimiter);
+  router.use("/:id/models/sync", probeLimiter);
 
   router.get("/catalog", async (_req, res) => {
     const providers = await loadProviderCatalog();

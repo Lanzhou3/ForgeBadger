@@ -13,6 +13,8 @@ export interface TmuxClient {
   killSession(name: string): Promise<void>;
   capturePane(name: string): Promise<string>;
   listSessions(): Promise<string[]>;
+  hasSession(name: string): Promise<boolean>;
+  showEnvironment?(name: string): Promise<Record<string, string>>;
   resizeWindow?(name: string, cols: number, rows: number): Promise<void>;
   sendInput?(name: string, data: string): Promise<void>;
 }
@@ -53,6 +55,23 @@ export function createTmuxClient(): TmuxClient {
         .split("\n")
         .map((line) => line.trim())
         .filter(Boolean);
+    },
+
+    async hasSession(name) {
+      const sessions = await this.listSessions();
+      return sessions.includes(name);
+    },
+
+    async showEnvironment(name) {
+      const output = await runTmux(["show-environment", "-t", name], { ignoreFailure: true });
+      const env: Record<string, string> = {};
+      for (const line of output.split("\n")) {
+        const eq = line.indexOf("=");
+        if (eq > 0) {
+          env[line.slice(0, eq)] = line.slice(eq + 1);
+        }
+      }
+      return env;
     },
 
     async resizeWindow(name, cols, rows) {

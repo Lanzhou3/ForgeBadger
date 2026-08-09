@@ -71,4 +71,82 @@ describe("DbSessionRecoveryStore", () => {
     assert.deepEqual(await store.listSessions(), []);
     assert.equal(repo.getById(session.id)?.tmuxSession, null);
   });
+
+  it("encrypts the attach token at rest when a master key is configured", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("encrypted@example.com", "hash");
+    const project = new ProjectRepository(db, user.id).create({
+      name: "Encrypted Project",
+      path: "/tmp/encrypted-project",
+      aiTool: "claude"
+    });
+    const repo = new SessionRepository(db, user.id);
+    const session = repo.create({
+      projectId: project.id,
+      name: "Encrypted",
+      aiTool: "claude",
+      workingDir: project.path,
+      attachToken: "plaintext-token",
+      tmuxSession: "of-enc-session",
+      credentialMode: "host_environment"
+    });
+
+    const masterKey = "a".repeat(64); // 64 hex chars
+    const store = createDbSessionRecoveryStore(db, masterKey);
+
+    await store.upsertSession({
+      id: session.id,
+      userId: user.id,
+      attachToken: "secret-attach-token",
+      tmuxName: "of-enc-session",
+      launchPlan: {
+        command: "claude",
+        args: [],
+        cwd: project.path,
+        env: { OPENFORGE_SESSION_ID: session.id },
+        secretEnvNames: [],
+        credentialMode: "host_environment"
+      },
+      createdAt: new Date().toISOString()
+    });
+
+    // DB must NOT hold the plaintext.
+    const row = db.prepare("SELECT attach_token FROM sessions WHERE id = ?").get(session.id) as {
+      attach_token: string;
+    };
+    assert.ok(!row.attach_token.includes("secret-attach-token"), "DB must not store plaintext attach token");
+    assert.ok(row.attach_token.startsWith("enc:"), "encrypted token should carry the enc: prefix");
+
+    // Reading back decrypts to the original.
+    const listed = await store.listSessions();
+    assert.equal(listed[0]?.attachToken, "secret-attach-token");
+
+    db.close();
+  });
+
+  it("reads legacy plaintext attach tokens without a master key", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("legacy@example.com", "hash");
+    const project = new ProjectRepository(db, user.id).create({
+      name: "Legacy Project",
+      path: "/tmp/legacy-project",
+      aiTool: "claude"
+    });
+    const repo = new SessionRepository(db, user.id);
+    repo.create({
+      projectId: project.id,
+      name: "Legacy",
+      aiTool: "claude",
+      workingDir: project.path,
+      attachToken: "legacy-plaintext",
+      tmuxSession: "of-legacy-session",
+      credentialMode: "host_environment"
+    });
+
+    const store = createDbSessionRecoveryStore(db);
+    const listed = await store.listSessions();
+    assert.equal(listed[0]?.attachToken, "legacy-plaintext");
+
+    db.close();
+  });
 });

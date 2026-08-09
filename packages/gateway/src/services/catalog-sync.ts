@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises";
 import { z } from "zod";
 
 import {
@@ -8,6 +9,7 @@ import {
   type CreateCatalogItemInput
 } from "../db/repositories/catalog-repository.js";
 import type { Database } from "../db/types.js";
+import { validateOutboundHost } from "./network-policy.js";
 
 const manifestSchema = z.object({
   skills: z.array(z.object({
@@ -50,10 +52,16 @@ export type CatalogFetcher = (
   init?: RequestInit
 ) => Promise<Pick<Response, "ok" | "status" | "text">>;
 
+export type CatalogHostResolver = (
+  hostname: string,
+  options: { all: true }
+) => Promise<Array<{ address: string; family: number }>>;
+
 export interface FetchRemoteCatalogOptions {
   fetcher?: CatalogFetcher | undefined;
   timeoutMs?: number | undefined;
   maxBytes?: number | undefined;
+  resolveHost?: CatalogHostResolver | undefined;
 }
 
 export interface RefreshRemoteCatalogInput extends FetchRemoteCatalogOptions {
@@ -74,25 +82,62 @@ export async function fetchRemoteCatalogManifest(
   url: string,
   options: FetchRemoteCatalogOptions = {}
 ): Promise<z.infer<typeof manifestSchema>> {
-  validateCatalogUrl(url);
+  const resolveHost = options.resolveHost ?? lookup;
+  const validationError = await validateCatalogUrl(url, resolveHost);
+  if (validationError) {
+    throw new Error(validationError);
+  }
   const timeoutMs = Math.min(Math.max(options.timeoutMs ?? 5000, 100), 30000);
   const maxBytes = Math.min(Math.max(options.maxBytes ?? 256 * 1024, 1), 1024 * 1024);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const fetcher = options.fetcher ?? fetch;
-    const response = await fetcher(url, { signal: controller.signal });
-    if (!response.ok) {
-      throw new Error(`Catalog fetch failed with status ${response.status}`);
-    }
-    const text = await response.text();
-    if (Buffer.byteLength(text, "utf8") > maxBytes) {
+    // Manually follow redirects so each Location can be re-validated against
+    // the outbound host blocklist. Native `redirect: "follow"` would skip the
+    // check and let an open redirect pivot to an internal address.
+    const finalText = await fetchWithManualRedirects(fetcher, url, controller.signal, 5, resolveHost);
+    if (Buffer.byteLength(finalText, "utf8") > maxBytes) {
       throw new Error("Manifest exceeds size limit");
     }
-    return manifestSchema.parse(JSON.parse(text));
+    return manifestSchema.parse(JSON.parse(finalText));
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchWithManualRedirects(
+  fetcher: CatalogFetcher,
+  initialUrl: string,
+  signal: AbortSignal,
+  maxHops: number,
+  resolveHost: CatalogHostResolver
+): Promise<string> {
+  let current = initialUrl;
+  for (let hop = 0; hop <= maxHops; hop += 1) {
+    const validationError = await validateCatalogUrl(current, resolveHost);
+    if (validationError) {
+      throw new Error(validationError);
+    }
+    const response = await fetcher(current, {
+      signal,
+      redirect: "manual"
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const headers = (response as Response & { headers: { get(name: string): string | null } }).headers;
+      const location = headers.get("location") ?? "";
+      if (!location) {
+        throw new Error(`Catalog redirect ${response.status} without Location`);
+      }
+      current = new URL(location, current).toString();
+      continue;
+    }
+    if (!response.ok) {
+      throw new Error(`Catalog fetch failed with status ${response.status}`);
+    }
+    return response.text();
+  }
+  throw new Error("Catalog redirect chain exceeded maximum hops");
 }
 
 export async function refreshRemoteCatalog(
@@ -191,9 +236,18 @@ function starterSkillContent(name: string, description?: string): string {
   ].join("\n");
 }
 
-function validateCatalogUrl(url: string): void {
-  const parsed = new URL(url);
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error("Catalog URL must use HTTP or HTTPS");
+function validateCatalogUrl(
+  url: string,
+  resolveHost: CatalogHostResolver
+): Promise<string | undefined> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return Promise.resolve("Invalid catalog URL");
   }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return Promise.resolve("Catalog URL must use HTTP or HTTPS");
+  }
+  return validateOutboundHost(parsed.hostname, resolveHost);
 }

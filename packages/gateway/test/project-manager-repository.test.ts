@@ -446,4 +446,31 @@ describe("ProjectManagerRepository", () => {
     assert.doesNotMatch(stored, /dangerously-skip-permissions|secret output/u);
     assert.match(stored, /\[REDACTED\]/u);
   });
+
+  it("preserves the linked taskPacket sessionId across a status change", () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const item = repo.createWorkItem(projectId, {
+      title: "Linked task",
+      details: {
+        taskPacket: {
+          workItemId: "wi-1",
+          projectId,
+          runtime: { adapter: "claude", templateId: "builtin-claude-code" },
+          sessionId: "session-link-123"
+        },
+        note: "initial"
+      }
+    });
+
+    // Status change that only patches unrelated details must not wipe the
+    // linked session id.
+    const updated = repo.updateWorkItemStatus(projectId, item.id, {
+      status: "in_progress",
+      details: { note: "moving along" }
+    });
+
+    const details = updated.details as { taskPacket?: { sessionId?: string }; note?: string };
+    assert.equal(details.taskPacket?.sessionId, "session-link-123", "sessionId must survive a status change");
+    assert.equal(details.note, "moving along");
+  });
 });

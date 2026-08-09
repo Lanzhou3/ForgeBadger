@@ -100,6 +100,7 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
       if (now - client.lastPongAt > EVENTS_HEARTBEAT_TIMEOUT_MS) {
         ws.close(4001, "heartbeat timeout");
         clients.delete(ws);
+        limits.release(ws);
         continue;
       }
       ws.ping();

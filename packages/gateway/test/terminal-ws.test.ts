@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -394,7 +395,10 @@ describe("terminal websocket authentication", () => {
     });
 
     assert.equal(result.code, 4404);
-    await new Promise<void>((resolve) => app.server.close(resolve));
+    await new Promise<void>((resolve) => {
+      app.server.closeAllConnections?.();
+      app.server.close(() => resolve());
+    });
     db.close();
   });
 });

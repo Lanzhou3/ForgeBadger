@@ -12,6 +12,7 @@ import { signJwt } from "../src/auth/jwt.js";
 import { AuditLogRepository } from "../src/db/repositories/audit-log-repository.js";
 import { ProjectManagerRepository } from "../src/db/repositories/project-manager-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
+import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { UserRepository, type User } from "../src/db/repositories/user-repository.js";
 import { createProjectManagerRoutes } from "../src/routes/project-manager.js";
 
@@ -88,6 +89,256 @@ describe("project-manager routes", () => {
     assert.equal(status.body.data.workItem.status, "in_progress");
     assert.equal(evidence.body.data.workItem.evidenceRefCount, 1);
     assert.equal(ledger.body.data.events.length, 4);
+  });
+
+  it("returns a bounded task packet derived from a work item without raw details", async () => {
+    const item = new ProjectManagerRepository(db, owner.id).createWorkItem(projectId, {
+      title: "Fix launch readiness",
+      description: "Make the dashboard show blockers before terminal launch.",
+      acceptanceCriteria: ["Runtime blockers are visible", "CLI adapters are checked"],
+      details: {
+        rawTerminalOutput: "$ claude unsafe",
+        taskPacket: {
+          expectedVerification: ["pnpm --dir packages/web typecheck"],
+          evidenceRequirements: ["typecheck output", "browser smoke"]
+        }
+      }
+    });
+
+    const response = await request("GET", `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/task-packet`);
+    const serialized = JSON.stringify(response.body);
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.code, 0);
+    assert.equal(response.body.data.taskPacket.workItemId, item.id);
+    assert.equal(response.body.data.taskPacket.projectId, projectId);
+    assert.equal(response.body.data.taskPacket.runtime.adapter, "claude");
+    assert.equal(response.body.data.taskPacket.runtime.templateId, "builtin-claude-code");
+    assert.match(response.body.data.taskPacket.prompt, /Fix launch readiness/u);
+    assert.deepEqual(response.body.data.taskPacket.acceptanceCriteria, [
+      "Runtime blockers are visible",
+      "CLI adapters are checked"
+    ]);
+    assert.deepEqual(response.body.data.taskPacket.expectedVerification, [
+      "pnpm --dir packages/web typecheck"
+    ]);
+    assert.deepEqual(response.body.data.taskPacket.evidenceRequirements, [
+      "typecheck output",
+      "browser smoke"
+    ]);
+    assert.equal(response.body.data.taskPacket.sessionLink, null);
+    assert.equal(response.body.data.taskPacket.blockedReason, "no_linked_session");
+    assert.doesNotMatch(serialized, /unsafe|rawTerminalOutput|details/u);
+  });
+
+  it("lists task packets as a work queue without raw details", async () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const planned = repo.createWorkItem(projectId, {
+      title: "Plan task",
+      status: "todo",
+      acceptanceCriteria: ["planned queue"],
+      details: { rawTerminalOutput: "$ unsafe" }
+    });
+    const running = repo.createWorkItem(projectId, {
+      title: "Run task",
+      status: "in_progress",
+      acceptanceCriteria: ["running queue"]
+    });
+    const waiting = repo.createWorkItem(projectId, {
+      title: "Review task",
+      status: "ready_for_review",
+      acceptanceCriteria: ["review queue"]
+    });
+    const blocked = repo.createWorkItem(projectId, {
+      title: "Blocked task",
+      status: "blocked",
+      acceptanceCriteria: ["blocked queue"]
+    });
+    const completed = repo.createWorkItem(projectId, {
+      title: "Done task",
+      status: "done",
+      acceptanceCriteria: ["completed queue"]
+    });
+
+    const response = await request("GET", `/api/v1/projects/${projectId}/project-manager/task-packets?limit=10`);
+    const packets = response.body.data.taskPackets as Array<{
+      workItemId: string;
+      workItemStatus: string;
+      queueStatus: string;
+      title: string;
+    }>;
+    const byId = new Map(packets.map((packet) => [packet.workItemId, packet]));
+    const serialized = JSON.stringify(response.body);
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.code, 0);
+    assert.equal(packets.length, 5);
+    assert.equal(byId.get(planned.id)?.queueStatus, "planned");
+    assert.equal(byId.get(running.id)?.queueStatus, "running");
+    assert.equal(byId.get(waiting.id)?.queueStatus, "waiting_for_review");
+    assert.equal(byId.get(blocked.id)?.queueStatus, "blocked");
+    assert.equal(byId.get(completed.id)?.queueStatus, "completed");
+    assert.equal(byId.get(planned.id)?.workItemStatus, "todo");
+    assert.doesNotMatch(serialized, /unsafe|rawTerminalOutput|details/u);
+  });
+
+  it("links exactly one same-project session to a task packet and rejects cross-project sessions", async () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const item = repo.createWorkItem(projectId, {
+      title: "Run task from work item",
+      acceptanceCriteria: ["session is linked once"]
+    });
+    const sessionRepo = new SessionRepository(db, owner.id);
+    const session = sessionRepo.create({
+      projectId,
+      name: "Run task from work item",
+      aiTool: "claude",
+      workingDir: "/tmp/openforge-route-pm",
+      credentialMode: "host_environment"
+    });
+    sessionRepo.update(session.id, { status: "running", tmuxSession: "of-task-packet" });
+    const otherProjectId = new ProjectRepository(db, owner.id).create({
+      name: "Other project",
+      path: "/tmp/openforge-other-task-packet",
+      aiTool: "claude"
+    }).id;
+    const crossProjectSession = sessionRepo.create({
+      projectId: otherProjectId,
+      name: "Wrong project",
+      aiTool: "claude",
+      workingDir: "/tmp/openforge-other-task-packet",
+      credentialMode: "host_environment"
+    });
+
+    const rejected = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/task-packet/session-link`, {
+      sessionId: crossProjectSession.id
+    });
+    const linked = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/task-packet/session-link`, {
+      sessionId: session.id
+    });
+    const relinked = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/task-packet/session-link`, {
+      sessionId: session.id
+    });
+    const detail = await request("GET", `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/task-packet`);
+
+    assert.equal(rejected.status, 404);
+    assert.deepEqual(rejected.body, { code: 1, message: "Session not found" });
+    assert.equal(linked.status, 200);
+    assert.equal(linked.body.code, 0);
+    assert.equal(linked.body.data.taskPacket.sessionLink.sessionId, session.id);
+    assert.equal(linked.body.data.taskPacket.sessionLink.status, "running");
+    assert.equal(linked.body.data.taskPacket.blockedReason, null);
+    assert.equal(relinked.status, 200);
+    assert.equal(detail.body.data.taskPacket.sessionLink.sessionId, session.id);
+    const stored = repo.getWorkItem(projectId, item.id);
+    assert.equal((stored?.details.taskPacket as { sessionId?: string } | undefined)?.sessionId, session.id);
+  });
+
+  it("starts a task packet by creating one idle session without storing the prompt", async () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const item = repo.createWorkItem(projectId, {
+      title: "Fix task launch",
+      description: "Prepare a safe operator handoff for this task.",
+      acceptanceCriteria: ["one session is created", "prompt is derived on read"],
+      details: {
+        taskPacket: {
+          expectedVerification: ["pnpm --dir packages/gateway test"],
+          evidenceRequirements: ["route test output"]
+        }
+      }
+    });
+
+    const started = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/task-packet/start`);
+    const repeated = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/task-packet/start`);
+    const sessions = new SessionRepository(db, owner.id).listByProject(projectId);
+    const stored = repo.getWorkItem(projectId, item.id);
+    const serializedDetails = JSON.stringify(stored?.details ?? {});
+
+    assert.equal(started.status, 201);
+    assert.equal(started.body.code, 0);
+    assert.equal(started.body.data.session.projectId, projectId);
+    assert.equal(started.body.data.session.name, "Task: Fix task launch");
+    assert.equal(started.body.data.session.status, "idle");
+    assert.equal(started.body.data.session.attachToken, undefined);
+    assert.equal(started.body.data.taskPacket.sessionLink.sessionId, started.body.data.session.id);
+    assert.equal(started.body.data.taskPacket.sessionLink.status, "idle");
+    assert.equal(started.body.data.taskPacket.blockedReason, "linked_session_not_running");
+    assert.equal(repeated.status, 200);
+    assert.equal(repeated.body.data.session.id, started.body.data.session.id);
+    assert.equal(sessions.length, 1);
+    assert.equal((stored?.details.taskPacket as { sessionId?: string } | undefined)?.sessionId, started.body.data.session.id);
+    assert.match(serializedDetails, /promptDigest/u);
+    assert.doesNotMatch(serializedDetails, /Prepare a safe operator handoff|Acceptance criteria/u);
+  });
+
+  it("lists built-in starter packs with bounded task packet guidance", async () => {
+    const response = await request("GET", `/api/v1/projects/${projectId}/project-manager/starter-packs`);
+    const packs = response.body.data.starterPacks as Array<{
+      id: string;
+      recommendedAdapter: string;
+      promptFrame: string;
+      acceptanceChecklist: string[];
+      verificationGuidance: string[];
+      evidenceFields: string[];
+    }>;
+    const serialized = JSON.stringify(response.body);
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.code, 0);
+    assert.deepEqual(packs.map((pack) => pack.id), [
+      "code-review",
+      "bugfix",
+      "docs-sync",
+      "test-generation",
+      "release-notes",
+      "first-user-evidence"
+    ]);
+    for (const pack of packs) {
+      assert.equal(pack.recommendedAdapter.length > 0, true);
+      assert.equal(pack.promptFrame.length > 0, true);
+      assert.equal(pack.acceptanceChecklist.length > 0, true);
+      assert.equal(pack.verificationGuidance.length > 0, true);
+      assert.equal(pack.evidenceFields.length > 0, true);
+    }
+    assert.doesNotMatch(serialized, /api[_-]?key|secret|authorization|attachToken|rawTerminal|terminal transcript/iu);
+  });
+
+  it("creates task packets from starter packs through existing work items", async () => {
+    const packIds = ["code-review", "bugfix", "docs-sync"];
+    const created = [];
+
+    for (const packId of packIds) {
+      const response = await request(
+        "POST",
+        `/api/v1/projects/${projectId}/project-manager/starter-packs/${packId}/task-packet`
+      );
+      created.push(response);
+    }
+
+    const sessions = new SessionRepository(db, owner.id).listByProject(projectId);
+    const workItems = new ProjectManagerRepository(db, owner.id).listWorkItems(projectId, { limit: 10 });
+    const serialized = JSON.stringify(created.map((response) => response.body));
+
+    for (const response of created) {
+      assert.equal(response.status, 201);
+      assert.equal(response.body.code, 0);
+      assert.equal(response.body.data.pack.id.length > 0, true);
+      assert.equal(response.body.data.workItem.status, "todo");
+      assert.equal(response.body.data.taskPacket.workItemId, response.body.data.workItem.id);
+      assert.equal(response.body.data.taskPacket.blockedReason, "no_linked_session");
+      assert.deepEqual(
+        response.body.data.taskPacket.expectedVerification,
+        response.body.data.pack.verificationGuidance
+      );
+      assert.deepEqual(
+        response.body.data.taskPacket.evidenceRequirements,
+        response.body.data.pack.evidenceFields
+      );
+      assert.match(response.body.data.taskPacket.prompt, new RegExp(response.body.data.pack.promptFrame.slice(0, 24), "u"));
+    }
+    assert.equal(sessions.length, 0);
+    assert.equal(workItems.length, 3);
+    assert.doesNotMatch(serialized, /api[_-]?key|secret|authorization|attachToken|rawTerminal|terminal transcript/iu);
   });
 
   it("returns 404 for missing or cross-tenant projects without leaking ownership", async () => {

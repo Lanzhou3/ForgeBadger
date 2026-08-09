@@ -20,6 +20,7 @@ import { ApiKeyRepository } from "../db/repositories/api-key-repository.js";
 import { PluginRepository } from "../db/repositories/plugin-repository.js";
 import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
+import { SessionConflictError } from "../services/session-manager.js";
 import type { OpenForgeEventBus } from "../services/event-bus.js";
 import type { CredentialMode } from "../config-generation/types.js";
 import { recordActivity } from "../services/activity-events.js";
@@ -274,7 +275,9 @@ export function createSessionRoutes(
     }
 
     const liveSession = sessionManager.getSession(session.id);
-    const attachToken = liveSession?.attachToken ?? session.attachToken;
+    // Prefer the live in-memory attach token (plaintext). The DB column now
+    // holds the token encrypted at rest, so never surface it directly.
+    const attachToken = liveSession?.attachToken ?? "";
     const tmuxName = liveSession?.tmuxName ?? session.tmuxSession ?? undefined;
     if (!attachToken || !tmuxName) {
       res.status(409).json({ code: 1, message: "Session is not connectable" });
@@ -302,85 +305,83 @@ export function createSessionRoutes(
       res.status(404).json({ code: 1, message: "Session not found" });
       return;
     }
-    if (dbSession.status === "running") {
-      res.status(409).json({ code: 1, message: "Session already running" });
-      return;
-    }
-
-    const adapter = normalizeAdapter(dbSession.aiTool);
-    if (!adapter) {
-      res.status(400).json({ code: 1, message: "Unsupported session adapter" });
-      return;
-    }
-    const credentialBoundary = validateCodexTerminalCredentialBoundary({
-      adapter,
-      credentialMode: dbSession.credentialMode,
-      ...(dbSession.apiKeyId ? { apiKeyId: dbSession.apiKeyId } : {}),
-      ...(dbSession.modelId ? { modelId: dbSession.modelId } : {})
-    });
-    if (!credentialBoundary.ok) {
-      res.status(400).json({ code: 1, message: credentialBoundary.message });
-      return;
-    }
-    const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner);
-    if (!launchStatus.launchEnabled) {
-      res.status(409).json({
-        code: 1,
-        message: `${launchStatus.label} is not available for launch`,
-        details: {
-          adapter: launchStatus.id,
-          command: launchStatus.command,
-          status: launchStatus.status,
-          error: launchStatus.error
-        }
-      });
-      return;
-    }
 
     try {
-      const pluginDirs = await prepareClaudeLaunchExtras(db, userId, adapter, dbSession.workingDir, dbSession.id);
-      const launchPlan = createLaunchPlan({
-        db,
-        userId,
-        masterKey,
-        adapter,
-        projectRoot: dbSession.workingDir,
-        sessionId: dbSession.id,
-        credentialMode: dbSession.credentialMode,
-        ...(dbSession.apiKeyId ? { apiKeyId: dbSession.apiKeyId } : {}),
-        ...(dbSession.modelId ? { modelId: dbSession.modelId } : {}),
-        ...(pluginDirs.length > 0 ? { pluginDirs } : {})
-      });
-      const attachToken = randomUUID();
-      sessionRepo.update(dbSession.id, { attachToken });
-      const session = await sessionManager.createSession({
-        userId,
-        sessionId: dbSession.id,
-        launchPlan,
-        attachToken
-      });
+      const updated = await sessionManager.runExclusive(req.params.id, async () => {
+        // Re-check state inside the mutex (memory + DB), not just DB, to catch
+        // concurrent starts. Conflict → 409 with a stable code.
+        const live = sessionManager.getSession(req.params.id);
+        const fresh = sessionRepo.getById(req.params.id);
+        if (live?.status === "running" || fresh?.status === "running") {
+          throw new SessionConflictError("Session already running");
+        }
 
-      const oldStatus = dbSession.status;
-      const updated = sessionRepo.update(dbSession.id, {
-        status: "running",
-        attachToken: session.attachToken,
-        tmuxSession: session.tmuxName,
-        lastActive: new Date()
-      });
-      recordSessionActivity(db, eventBus, userId, updated ?? dbSession, "session_started", "success", `Session ${dbSession.name} started`);
-      recordSessionSnapshot({
-        db,
-        userId,
-        session: updated ?? dbSession,
-        metadata: { reason: "session_started" }
-      });
+        const adapter = normalizeAdapter(dbSession.aiTool);
+        if (!adapter) {
+          const err = new Error("Unsupported session adapter");
+          (err as Error & { httpStatus?: number }).httpStatus = 400;
+          throw err;
+        }
+        const credentialBoundary = validateCodexTerminalCredentialBoundary({
+          adapter,
+          credentialMode: dbSession.credentialMode,
+          ...(dbSession.apiKeyId ? { apiKeyId: dbSession.apiKeyId } : {}),
+          ...(dbSession.modelId ? { modelId: dbSession.modelId } : {})
+        });
+        if (!credentialBoundary.ok) {
+          const err = new Error(credentialBoundary.message);
+          (err as Error & { httpStatus?: number }).httpStatus = 400;
+          throw err;
+        }
+        const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner);
+        if (!launchStatus.launchEnabled) {
+          const err = new Error(`${launchStatus.label} is not available for launch`);
+          (err as Error & { httpStatus?: number }).httpStatus = 409;
+          (err as Error & { details?: unknown }).details = {
+            adapter: launchStatus.id,
+            command: launchStatus.command,
+            status: launchStatus.status,
+            error: launchStatus.error
+          };
+          throw err;
+        }
 
-      eventBus?.emitEvent({
-        type: "session_status_changed",
-        userId,
-        sessionId: dbSession.id,
-        oldStatus,
-        newStatus: "running"
+        const pluginDirs = await prepareClaudeLaunchExtras(db, userId, adapter, dbSession.workingDir, dbSession.id);
+        const launchPlan = createLaunchPlan({
+          db,
+          userId,
+          masterKey,
+          adapter,
+          projectRoot: dbSession.workingDir,
+          sessionId: dbSession.id,
+          credentialMode: dbSession.credentialMode,
+          ...(dbSession.apiKeyId ? { apiKeyId: dbSession.apiKeyId } : {}),
+          ...(dbSession.modelId ? { modelId: dbSession.modelId } : {}),
+          ...(pluginDirs.length > 0 ? { pluginDirs } : {})
+        });
+        const attachToken = randomUUID();
+        sessionRepo.update(dbSession.id, { attachToken });
+        const session = await sessionManager.createSession({
+          userId,
+          sessionId: dbSession.id,
+          launchPlan,
+          attachToken
+        });
+
+        const updatedSession = sessionRepo.update(dbSession.id, {
+          status: "running",
+          attachToken: session.attachToken,
+          tmuxSession: session.tmuxName,
+          lastActive: new Date()
+        });
+        recordSessionActivity(db, eventBus, userId, updatedSession ?? dbSession, "session_started", "success", `Session ${dbSession.name} started`);
+        recordSessionSnapshot({
+          db,
+          userId,
+          session: updatedSession ?? dbSession,
+          metadata: { reason: "session_started" }
+        });
+        return updatedSession ?? dbSession;
       });
 
       res.json({
@@ -390,6 +391,11 @@ export function createSessionRoutes(
       });
     } catch (error) {
       const oldStatus = dbSession.status;
+      if (error instanceof SessionConflictError) {
+        res.status(409).json({ code: 1, message: error.message });
+        return;
+      }
+      const httpStatus = (error as Error & { httpStatus?: number }).httpStatus ?? 400;
       sessionRepo.update(dbSession.id, {
         status: "error",
         attachToken: "",
@@ -411,9 +417,12 @@ export function createSessionRoutes(
         oldStatus,
         newStatus: "error"
       });
-      res.status(400).json({
+      res.status(httpStatus).json({
         code: 1,
-        message: error instanceof Error ? error.message : "Failed to start session"
+        message: error instanceof Error ? error.message : "Failed to start session",
+        ...((error as Error & { details?: unknown }).details
+          ? { details: (error as Error & { details?: unknown }).details }
+          : {})
       });
     }
   });
@@ -426,29 +435,25 @@ export function createSessionRoutes(
       res.status(404).json({ code: 1, message: "Session not found" });
       return;
     }
-    if (dbSession.status !== "running") {
-      res.status(409).json({ code: 1, message: "Session is not running" });
-      return;
-    }
 
     try {
-      await sessionManager.stopSession(dbSession.id, dbSession.tmuxSession ?? undefined, userId);
+      const updated = await sessionManager.runExclusive(req.params.id, async () => {
+        const live = sessionManager.getSession(req.params.id);
+        const tmuxName = live?.tmuxName ?? dbSession.tmuxSession ?? undefined;
+        if (!live && !tmuxName) {
+          throw new SessionConflictError("Session is not running");
+        }
+        const oldStatus = live?.status ?? dbSession.status;
+        await sessionManager.stopSession(req.params.id, tmuxName, userId);
 
-      const oldStatus = dbSession.status;
-      const updated = sessionRepo.update(dbSession.id, {
-        status: "stopped",
-        attachToken: "",
-        tmuxSession: null,
-        lastActive: new Date()
-      });
-      recordSessionActivity(db, eventBus, userId, updated ?? dbSession, "session_stopped", "success", `Session ${dbSession.name} stopped`);
-
-      eventBus?.emitEvent({
-        type: "session_status_changed",
-        userId,
-        sessionId: dbSession.id,
-        oldStatus,
-        newStatus: "stopped"
+        const updatedSession = sessionRepo.update(dbSession.id, {
+          status: "exited",
+          attachToken: "",
+          tmuxSession: null,
+          lastActive: new Date()
+        });
+        recordSessionActivity(db, eventBus, userId, updatedSession ?? dbSession, "session_stopped", "success", `Session ${dbSession.name} stopped`);
+        return updatedSession ?? dbSession;
       });
 
       res.json({
@@ -458,6 +463,10 @@ export function createSessionRoutes(
       });
     } catch (error) {
       const oldStatus = dbSession.status;
+      if (error instanceof SessionConflictError) {
+        res.status(409).json({ code: 1, message: error.message });
+        return;
+      }
       sessionRepo.update(dbSession.id, {
         status: "error",
         errorMessage: error instanceof Error ? error.message : String(error)
@@ -536,12 +545,23 @@ export function createSessionRoutes(
       return;
     }
 
-    if (dbSession.status === "running") {
-      try {
-        await sessionManager.stopSession(dbSession.id, dbSession.tmuxSession ?? undefined, userId);
-      } catch {
-        // Deleting the database row should still be possible if the tmux pane is already gone.
-      }
+    try {
+      await sessionManager.runExclusive(req.params.id, async () => {
+        // Stop any still-live tmux session regardless of DB status, so a
+        // delete does not leave an orphan when the DB says idle/stopped but a
+        // tmux session is actually alive.
+        const live = sessionManager.getSession(req.params.id);
+        const tmuxName = live?.tmuxName ?? dbSession.tmuxSession ?? undefined;
+        if (live || tmuxName) {
+          try {
+            await sessionManager.stopSession(req.params.id, tmuxName, userId);
+          } catch {
+            // Deleting the row should still be possible if the tmux pane is gone.
+          }
+        }
+      });
+    } catch (error) {
+      console.error(`[sessions] delete exclusive section failed for ${req.params.id}`, error);
     }
 
     recordSessionActivity(db, eventBus, userId, dbSession, "session_deleted", "warning", `Session ${dbSession.name} deleted`);

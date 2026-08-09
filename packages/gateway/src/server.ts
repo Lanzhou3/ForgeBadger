@@ -54,6 +54,7 @@ export interface GatewayAppOptions {
 export function createServer(deps: ServerDeps): express.Express {
   const app = express();
   app.locals.jwtSecret = deps.jwtSecret;
+  app.locals.db = deps.db;
 
   app.use((request, response, next) => {
     const origin = request.headers.origin;

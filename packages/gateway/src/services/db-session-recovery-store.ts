@@ -1,5 +1,6 @@
 import type { LaunchPlan } from "../adapters/claude.js";
 import type { CredentialMode } from "../config-generation/types.js";
+import { decryptSecret, encryptSecret } from "../crypto/secret-box.js";
 import type { Database } from "../db/types.js";
 import type { SessionRecoveryStore, StoredSession } from "./session-manager.js";
 
@@ -14,12 +15,20 @@ interface SessionRecoveryRow {
   created_at: number | string | null;
 }
 
-export function createDbSessionRecoveryStore(db: Database): SessionRecoveryStore {
-  return new DbSessionRecoveryStore(db);
+const ENCRYPTED_PREFIX = "enc:";
+
+export function createDbSessionRecoveryStore(
+  db: Database,
+  masterKey?: string
+): SessionRecoveryStore {
+  return new DbSessionRecoveryStore(db, masterKey);
 }
 
 class DbSessionRecoveryStore implements SessionRecoveryStore {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly masterKey?: string
+  ) {}
 
   async listSessions(): Promise<StoredSession[]> {
     const rows = this.db
@@ -38,28 +47,40 @@ class DbSessionRecoveryStore implements SessionRecoveryStore {
         launchPlan: buildRecoveredLaunchPlan(row),
         createdAt: toIsoString(row.created_at)
       };
-      if (row.attach_token) {
-        session.attachToken = row.attach_token;
+      const attachToken = this.decryptAttachToken(row.attach_token);
+      if (attachToken) {
+        session.attachToken = attachToken;
       }
       return session;
     });
   }
 
   async upsertSession(session: StoredSession): Promise<void> {
-    this.db
+    const storedToken = session.attachToken
+      ? this.encryptAttachToken(session.attachToken)
+      : "";
+    const result = this.db
       .prepare(
         `UPDATE sessions
          SET attach_token = ?, tmux_session = ?, status = ?, updated_at = ?
          WHERE id = ? AND user_id = ?`
       )
       .run(
-        session.attachToken ?? "",
+        storedToken,
         session.tmuxName,
         "running",
         Date.now(),
         session.id,
         session.userId
       );
+    if (result.changes === 0) {
+      // No row to update (e.g. a Gate-A session never created a DB row). A
+      // silent no-op would leave the session unrecoverable across restarts, so
+      // surface a warning instead.
+      console.warn(
+        `[db-session-recovery-store] upsertSession matched no row for ${session.id}; session may not survive a restart`
+      );
+    }
   }
 
   async removeSession(id: string, userId: string): Promise<void> {
@@ -70,6 +91,40 @@ class DbSessionRecoveryStore implements SessionRecoveryStore {
          WHERE id = ? AND user_id = ?`
       )
       .run("exited", Date.now(), id, userId);
+  }
+
+  private encryptAttachToken(token: string): string {
+    if (!this.masterKey) {
+      return token;
+    }
+    const encrypted = encryptSecret(token, { key: this.masterKey });
+    return `${ENCRYPTED_PREFIX}${encrypted.algorithm}.${encrypted.iv}.${encrypted.ciphertext}.${encrypted.authTag}`;
+  }
+
+  private decryptAttachToken(stored: string | null): string | undefined {
+    if (!stored) {
+      return undefined;
+    }
+    if (!stored.startsWith(ENCRYPTED_PREFIX)) {
+      // Legacy plaintext row — keep working, migration re-encrypts on next write.
+      return stored;
+    }
+    if (!this.masterKey) {
+      return undefined;
+    }
+    const body = stored.slice(ENCRYPTED_PREFIX.length);
+    const [algorithm, iv, ciphertext, authTag] = body.split(".");
+    if (!algorithm || !iv || !ciphertext || !authTag) {
+      return undefined;
+    }
+    try {
+      return decryptSecret(
+        { algorithm: algorithm as "aes-256-gcm", iv, ciphertext, authTag },
+        { key: this.masterKey }
+      );
+    } catch {
+      return undefined;
+    }
   }
 }
 

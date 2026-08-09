@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
@@ -20,15 +20,17 @@ import { SessionRepository } from "../db/repositories/session-repository.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
 import { AgentRepository } from "../db/repositories/agent-repository.js";
 import { ProjectSkillRepository } from "../db/repositories/project-skill-repository.js";
+import { SkillRepository } from "../db/repositories/skill-repository.js";
 import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
 import type { OpenForgeEventBus } from "../services/event-bus.js";
-import type { CredentialMode } from "../config-generation/types.js";
+import type { CredentialMode, WriteResult } from "../config-generation/types.js";
 import { buildProjectConfigFiles } from "../services/project-config-files.js";
 import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } from "../services/project-ai-config.js";
 import { listWorkspaceTree, readWorkspaceFile } from "../services/workspace-context.js";
 import { recordActivity } from "../services/activity-events.js";
 import { createDefaultAgentPack } from "../services/default-agent-pack.js";
+import { syncLocalSkills } from "../services/local-skills.js";
 
 const aiToolSchema = z.enum(["claude", "opencode", "codex"]);
 
@@ -85,6 +87,8 @@ const defaultTemplateIdsByAiTool: Record<z.infer<typeof aiToolSchema>, string> =
   codex: "builtin-codex"
 };
 const rootInstructionFileNames = ["AGENT.md", "AGENTS.md", "CLAUDE.md"] as const;
+
+type ProjectConfigSkillSync = (repo: Pick<SkillRepository, "create" | "getByName" | "update">) => unknown;
 
 export function createProjectRoutes(
   db: Database,
@@ -319,6 +323,12 @@ export function createProjectRoutes(
       }
     }
     repo.delete(req.params.id);
+    new AuditLogRepository(db, userId).create({
+      action: "project.delete",
+      resourceType: "project",
+      resourceId: project.id,
+      details: { name: project.name, path: project.path }
+    });
     res.json({
       code: 0,
       data: {},
@@ -398,24 +408,28 @@ export function createProjectRoutes(
         plan,
         decisions === undefined ? {} : { decisions }
       );
+      const activityStatus = result.outcome === "applied" ? "success" : result.outcome === "rolled_back" ? "warning" : "error";
       recordActivity({
         db,
         eventBus,
         userId,
         projectId: project.id,
         type: "config_write",
-        status: "success",
+        status: activityStatus,
         message: `Config written for ${project.name}`,
         metadata: {
           templateId,
           writtenFiles: result.writtenFiles,
-          skippedFiles: result.skippedFiles
+          skippedFiles: result.skippedFiles,
+          outcome: result.outcome,
+          failedFiles: result.failedFiles
         }
       });
-      res.json({
-        code: 0,
+      const outcomeResponse = configWriteOutcomeResponse(result.outcome);
+      res.status(outcomeResponse.status).json({
+        code: outcomeResponse.code,
         data: { result },
-        message: ""
+        message: outcomeResponse.message
       });
     } catch (error) {
       if (error instanceof ConfigWriteError) {
@@ -505,18 +519,21 @@ export function createProjectRoutes(
         parseResult.data.decisions === undefined ? {} : { decisions: parseResult.data.decisions }
       );
       const summary = buildConfigSyncSummary(plan, result.conflicts);
+      const outcomeResponse = configWriteOutcomeResponse(result.outcome);
       recordActivity({
         db,
         eventBus,
         userId,
         projectId: project.id,
         type: "config_sync",
-        status: "success",
+        status: result.outcome === "applied" ? "success" : result.outcome === "rolled_back" ? "warning" : "error",
         message: `Config synced for ${project.name}`,
         metadata: {
           templateId,
           writtenFiles: result.writtenFiles,
-          skippedFiles: result.skippedFiles
+          skippedFiles: result.skippedFiles,
+          outcome: result.outcome,
+          failedFiles: result.failedFiles
         }
       });
       new AuditLogRepository(db, userId).create({
@@ -528,15 +545,17 @@ export function createProjectRoutes(
           writtenFiles: result.writtenFiles.length,
           skippedFiles: result.skippedFiles.length,
           conflicts: result.conflicts.length,
-          decisionRequired: summary.requiresDecision.length
+          decisionRequired: summary.requiresDecision.length,
+          outcome: result.outcome,
+          failedFiles: result.failedFiles.length
         },
         ipAddress: req.ip
       });
 
-      res.json({
-        code: 0,
+      res.status(outcomeResponse.status).json({
+        code: outcomeResponse.code,
         data: { result, summary },
-        message: ""
+        message: outcomeResponse.message
       });
     } catch (error) {
       if (error instanceof ConfigWriteError) {
@@ -820,9 +839,9 @@ export function createProjectRoutes(
 }
 
 export async function prepareCreatedProjectRoot(projectRoot: string): Promise<string> {
-  const targetRoot = resolve(projectRoot.trim());
+  let targetRoot = resolve(projectRoot.trim());
   if (!existsSync(targetRoot)) {
-    validateNearestExistingParent(targetRoot);
+    targetRoot = validateNearestExistingParent(targetRoot);
     await mkdir(targetRoot, { recursive: true });
   }
   const rootPath = validateProjectRoot(targetRoot);
@@ -859,7 +878,7 @@ export async function prepareImportedProjectRoot(projectRoot: string): Promise<s
   return rootPath;
 }
 
-function validateNearestExistingParent(targetRoot: string): void {
+function validateNearestExistingParent(targetRoot: string): string {
   let current = dirname(targetRoot);
   while (!existsSync(current)) {
     const parent = dirname(current);
@@ -869,10 +888,12 @@ function validateNearestExistingParent(targetRoot: string): void {
     current = parent;
   }
   const parentRoot = validateProjectRoot(current);
+  const canonicalTargetRoot = resolve(parentRoot, relative(current, targetRoot));
   const parentWithSeparator = parentRoot.endsWith(sep) ? parentRoot : `${parentRoot}${sep}`;
-  if (targetRoot !== parentRoot && !targetRoot.startsWith(parentWithSeparator)) {
+  if (canonicalTargetRoot !== parentRoot && !canonicalTargetRoot.startsWith(parentWithSeparator)) {
     throw new Error("Project root escapes approved parent directory");
   }
+  return canonicalTargetRoot;
 }
 
 async function assertDirectory(pathname: string, message: string): Promise<void> {
@@ -888,7 +909,8 @@ export async function buildProjectConfigRenderPlan(
   projectId: string,
   templateId: string,
   credentialMode: CredentialMode,
-  dryRun: boolean
+  dryRun: boolean,
+  options: { syncSkills?: ProjectConfigSkillSync } = {}
 ) {
   const projectRepo = new ProjectRepository(db, userId);
   const project = projectRepo.getById(projectId);
@@ -904,6 +926,8 @@ export async function buildProjectConfigRenderPlan(
 
   const agentRepo = new AgentRepository(db, userId);
   const skillRepo = new ProjectSkillRepository(db, userId);
+  // A plan must include the same locally discovered Skills as later compliance checks.
+  (options.syncSkills ?? syncLocalSkills)(new SkillRepository(db, userId));
 
   return createRenderPlan({
     projectId: project.id,
@@ -988,6 +1012,20 @@ export function buildConfigSyncSummary(
     unsafeFiles,
     requiresDecision: [...modifiedFiles, ...unsafeFiles]
   };
+}
+
+export function configWriteOutcomeResponse(outcome: WriteResult["outcome"]): {
+  status: 200 | 409 | 500;
+  code: 0 | 1;
+  message: string;
+} {
+  if (outcome === "applied") {
+    return { status: 200, code: 0, message: "" };
+  }
+  if (outcome === "rolled_back") {
+    return { status: 409, code: 1, message: "Config write rolled_back" };
+  }
+  return { status: 500, code: 1, message: "Config write rollback_failed" };
 }
 
 function buildConfigComplianceSummary(

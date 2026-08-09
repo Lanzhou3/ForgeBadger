@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { hashSync, compareSync } from "bcryptjs";
 import { existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 
 import { createClaudeLaunchPlan } from "../adapters/claude.js";
 import {
@@ -293,9 +293,9 @@ export function createMvp0Api(options: Mvp0ApiOptions) {
 }
 
 async function prepareCreatedProjectRoot(projectRoot: string): Promise<string> {
-  const targetRoot = resolve(projectRoot.trim());
+  let targetRoot = resolve(projectRoot.trim());
   if (!existsSync(targetRoot)) {
-    validateNearestExistingParent(targetRoot);
+    targetRoot = validateNearestExistingParent(targetRoot);
     await mkdir(targetRoot, { recursive: true });
   }
 
@@ -315,7 +315,7 @@ async function prepareImportedProjectRoot(projectRoot: string): Promise<string> 
   return rootPath;
 }
 
-function validateNearestExistingParent(targetRoot: string): void {
+function validateNearestExistingParent(targetRoot: string): string {
   let current = dirname(targetRoot);
   while (!existsSync(current)) {
     const parent = dirname(current);
@@ -326,10 +326,12 @@ function validateNearestExistingParent(targetRoot: string): void {
   }
 
   const parentRoot = validateProjectRoot(current);
+  const canonicalTargetRoot = resolve(parentRoot, relative(current, targetRoot));
   const parentWithSeparator = parentRoot.endsWith(sep) ? parentRoot : `${parentRoot}${sep}`;
-  if (targetRoot !== parentRoot && !targetRoot.startsWith(parentWithSeparator)) {
+  if (canonicalTargetRoot !== parentRoot && !canonicalTargetRoot.startsWith(parentWithSeparator)) {
     throw new Error("Project root escapes approved parent directory");
   }
+  return canonicalTargetRoot;
 }
 
 async function assertDirectory(pathname: string, message: string): Promise<void> {

@@ -4,6 +4,8 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { ApiKeyRepository, type ApiKey } from "../db/repositories/api-key-repository.js";
 import type { Database } from "../db/types.js";
+import { redactSensitiveErrorMessage } from "../lib/redaction.js";
+import { createRateLimiter } from "../middleware/rate-limit.js";
 
 const createApiKeySchema = z.object({
   provider: z.string().min(1),
@@ -19,6 +21,10 @@ export function createApiKeyRoutes(db: Database, masterKey: string): Router {
   const router = Router();
   router.use(authenticate);
 
+  // Rate-limit secret-mutating operations per user so a stolen JWT cannot be
+  // used to rotate keys / mint new credentials at high frequency.
+  const secretLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 20 });
+
   router.get("/", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const repo = new ApiKeyRepository(db, userId, masterKey);
@@ -30,7 +36,7 @@ export function createApiKeyRoutes(db: Database, masterKey: string): Router {
     });
   });
 
-  router.post("/", (req, res) => {
+  router.post("/", secretLimiter, (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const parseResult = createApiKeySchema.safeParse(req.body ?? {});
     if (!parseResult.success) {
@@ -50,12 +56,12 @@ export function createApiKeyRoutes(db: Database, masterKey: string): Router {
     } catch (error) {
       res.status(400).json({
         code: 1,
-        message: error instanceof Error ? error.message : "Failed to create API key"
+        message: error instanceof Error ? redactSensitiveErrorMessage(error.message) : "Failed to create API key"
       });
     }
   });
 
-  router.post("/:id/rotate", (req, res) => {
+  router.post("/:id/rotate", secretLimiter, (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const parseResult = rotateApiKeySchema.safeParse(req.body ?? {});
     if (!parseResult.success) {
@@ -65,7 +71,7 @@ export function createApiKeyRoutes(db: Database, masterKey: string): Router {
 
     try {
       const repo = new ApiKeyRepository(db, userId, masterKey);
-      const apiKey = repo.rotate(req.params.id, parseResult.data.plaintextKey);
+      const apiKey = repo.rotate(req.params.id as string, parseResult.data.plaintextKey);
       if (!apiKey) {
         res.status(404).json({ code: 1, message: "API key not found" });
         return;
@@ -79,7 +85,7 @@ export function createApiKeyRoutes(db: Database, masterKey: string): Router {
     } catch (error) {
       res.status(400).json({
         code: 1,
-        message: error instanceof Error ? error.message : "Failed to rotate API key"
+        message: error instanceof Error ? redactSensitiveErrorMessage(error.message) : "Failed to rotate API key"
       });
     }
   });
@@ -87,7 +93,7 @@ export function createApiKeyRoutes(db: Database, masterKey: string): Router {
   router.delete("/:id", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const repo = new ApiKeyRepository(db, userId, masterKey);
-    const deleted = repo.delete(req.params.id);
+    const deleted = repo.delete(req.params.id as string);
     if (!deleted) {
       res.status(404).json({ code: 1, message: "API key not found" });
       return;

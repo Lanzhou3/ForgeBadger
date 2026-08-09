@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, realpath } from "node:fs/promises";
 import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -188,7 +188,7 @@ describe("session adapter decoupling", () => {
     assert.equal(sessionRes.status, 201);
     assert.equal(sessionData.data.session.aiTool, "codex");
     assert.equal(tmuxCreates.at(-1)?.command, "codex");
-    assert.equal(tmuxCreates.at(-1)?.cwd, rootPath);
+    assert.equal(tmuxCreates.at(-1)?.cwd, await realpath(rootPath));
   });
 
   it("rejects provider credentials and model overrides for Codex terminal sessions", async () => {
@@ -268,7 +268,8 @@ describe("session adapter decoupling", () => {
     const providerRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
       method: "POST",
       headers: jsonAuthHeaders(token),
-      body: JSON.stringify({ catalogId: "deepseek" })
+      // Catalog IDs are stable API keys; display names remain separately user-facing.
+      body: JSON.stringify({ catalogId: "deepseek-api" })
     });
     const providerData = await providerRes.json() as ProviderResponseBody;
     assert.equal(providerRes.status, 201);
@@ -308,8 +309,8 @@ describe("session adapter decoupling", () => {
     assert.equal(sessionRes.status, 201);
     assert.equal(sessionData.data.session.aiTool, "opencode");
     assert.equal(tmuxCreates.at(-1)?.command, "opencode");
-    assert.deepEqual(tmuxCreates.at(-1)?.args, ["--model", "deepseek/deepseek-chat"]);
-    assert.equal(tmuxCreates.at(-1)?.env.DEEPSEEK_API_KEY, "provider-secret");
+    assert.deepEqual(tmuxCreates.at(-1)?.args, ["--model", "deepseek-api/deepseek-chat"]);
+    assert.equal(tmuxCreates.at(-1)?.env.DEEPSEEK_API_API_KEY, "provider-secret");
   });
 });
 

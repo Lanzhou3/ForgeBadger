@@ -1,4 +1,5 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 
 import { safeResolve } from "../lib/safe-resolve.js";
@@ -100,15 +101,20 @@ export async function writeConfigPlan(
       skippedFiles,
       backupPath,
       conflicts,
+      outcome: "applied",
+      failedFiles: [],
       rollbackAvailable: appliedWrites.length > 0
     };
-  } catch {
+  } catch (error) {
     const rollbackResult = await rollbackAppliedWrites(appliedWrites, options);
+    const outcome = rollbackResult.success ? "rolled_back" : "rollback_failed";
     return {
       writtenFiles,
       skippedFiles,
       backupPath,
       conflicts,
+      outcome,
+      failedFiles: appliedWrites.map((applied) => applied.relativePath),
       rollbackAvailable: false,
       rollbackResult
     };
@@ -117,7 +123,9 @@ export async function writeConfigPlan(
 
 function buildBackupPath(plan: RenderPlan, backupRoot?: string): string {
   const root = backupRoot ?? join(plan.targetRoot, ".openforge", "backups", "config-writes");
-  return join(root, `${plan.projectId}-${plan.templateId}-${Date.now()}`);
+  // Use crypto.randomUUID so two writes triggered in the same millisecond do
+  // not collide on the backup directory name.
+  return join(root, `${plan.projectId}-${plan.templateId}-${Date.now()}-${randomUUID()}`);
 }
 
 async function writeBackupFile(

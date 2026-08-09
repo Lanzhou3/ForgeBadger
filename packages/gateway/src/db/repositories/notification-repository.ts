@@ -66,7 +66,13 @@ export class NotificationRepository {
   }
 
   unreadCount(): number {
-    return this.list(500).filter((notification) => !notification.isRead).length;
+    // Count in SQL so the result is exact regardless of list truncation (the
+    // previous `list(500).filter(...)` returned a wrong value once unread
+    // notifications exceeded the 500-row cap).
+    const result = this.db
+      .prepare("SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND is_read = 0")
+      .get(this.userId) as { count: number };
+    return result.count;
   }
 
   markRead(id: string): Notification | undefined {

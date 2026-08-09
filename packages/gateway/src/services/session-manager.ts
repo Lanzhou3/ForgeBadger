@@ -6,6 +6,13 @@ import type { OpenForgeEventBus } from "./event-bus.js";
 
 export type SessionStatus = "pending" | "running" | "detached" | "exited" | "error";
 
+export class SessionConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SessionConflictError";
+  }
+}
+
 export interface GateASession {
   id: string;
   userId: string;
@@ -71,6 +78,8 @@ class EmptyRecoveryStore implements SessionRecoveryStore {
 export class InMemorySessionManager {
   private readonly sessions = new Map<string, GateASession>();
   private readonly tmuxPrefix: string;
+  private readonly sessionLocks = new Map<string, Promise<unknown>>();
+  private correctionInterval: ReturnType<typeof setInterval> | undefined;
 
   constructor(
     private readonly tmux: TmuxClient,
@@ -79,6 +88,31 @@ export class InMemorySessionManager {
     options: SessionManagerOptions = {}
   ) {
     this.tmuxPrefix = normalizeTmuxPrefix(options.tmuxPrefix);
+  }
+
+  /**
+   * Serialize per-session lifecycle operations (create/start/stop/delete) using
+   * a promise chain. Concurrent calls for the same sessionId run in arrival
+   * order; conflicting operations detect the conflict inside `fn` and throw.
+   */
+  async runExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.sessionLocks.get(sessionId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => fn());
+    // Keep a never-rejecting tail in the map so the chain continues across errors.
+    const tail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    this.sessionLocks.set(sessionId, tail);
+    try {
+      return await run;
+    } finally {
+      if (this.sessionLocks.get(sessionId) === tail) {
+        this.sessionLocks.delete(sessionId);
+      }
+    }
   }
 
   async createSession(input: CreateSessionInput): Promise<GateASession> {
@@ -135,6 +169,22 @@ export class InMemorySessionManager {
       throw new Error(`tmux session not found: ${input.tmuxName}`);
     }
 
+    // Verify the tmux session belongs to this OpenForge session before adopting
+    // it, so snapshot/restore cannot attach to a session owned by another
+    // session id or a stale attach token (hook auth break).
+    if (this.tmux.showEnvironment) {
+      const env = await this.tmux.showEnvironment(input.tmuxName);
+      const storedSessionId = env.OPENFORGE_SESSION_ID;
+      if (storedSessionId && storedSessionId !== input.sessionId) {
+        throw new Error(`tmux session belongs to another OpenForge session: ${storedSessionId}`);
+      }
+      const storedToken = env.OPENFORGE_ATTACH_TOKEN;
+      const requestedToken = input.attachToken ?? "";
+      if (storedToken && requestedToken && storedToken !== requestedToken) {
+        throw new Error("tmux session attach token mismatch");
+      }
+    }
+
     const now = new Date().toISOString();
     const session: GateASession = {
       id: input.sessionId,
@@ -169,10 +219,21 @@ export class InMemorySessionManager {
     }
 
     if (session) {
-      await this.tmux.killSession(session.tmuxName);
-      await this.recoveryStore.removeSession(id, session.userId);
+      let failure: unknown;
+      try {
+        await this.tmux.killSession(session.tmuxName);
+        await this.recoveryStore.removeSession(id, session.userId);
+      } catch (error) {
+        failure = error;
+      }
+      // Always drop the in-memory entry (finally semantics) even if DB cleanup
+      // failed, so a DB failure cannot leave a memory zombie.
       const stopped = this.updateSession(id, { status: "exited" });
       this.sessions.delete(id);
+      if (failure) {
+        console.error(`[session-manager] stopSession cleanup failed for ${id}`, failure);
+        throw failure;
+      }
       return stopped;
     }
 
@@ -181,6 +242,69 @@ export class InMemorySessionManager {
       await this.recoveryStore.removeSession(id, userId);
     }
     return fallbackStoppedSession(id, tmuxName as string, userId);
+  }
+
+  /**
+   * Reconcile a single session's status against the live tmux state. If the
+   * backing tmux session is gone, mark it exited and sync the DB; if it is
+   * still alive (a detached terminal), mark it detached. Emits at most one
+   * session_status_changed via updateSession.
+   */
+  async reconcileSessionStatus(id: string): Promise<GateASession | undefined> {
+    const session = this.sessions.get(id);
+    if (!session) {
+      return undefined;
+    }
+    if (session.status === "exited" || session.status === "error") {
+      return session;
+    }
+
+    const alive = await this.tmux.hasSession(session.tmuxName);
+    if (!alive) {
+      const exited = this.updateSession(id, { status: "exited" });
+      try {
+        await this.recoveryStore.removeSession(id, session.userId);
+      } catch (error) {
+        console.error(`[session-manager] reconcile DB sync failed for ${id}`, error);
+      }
+      // Drop the in-memory entry on death so subsequent operations see the
+      // session as truly exited, matching stopSession semantics.
+      this.sessions.delete(id);
+      return exited;
+    }
+
+    if (session.status === "running") {
+      return this.updateSession(id, { status: "detached" });
+    }
+    return session;
+  }
+
+  /**
+   * Low-frequency correction scan (optional). Marks any in-memory session whose
+   * backing tmux session has disappeared as exited, and syncs the DB. Returns a
+   * teardown function to stop the timer.
+   */
+  startStatusCorrectionScan(intervalMs = 30_000): () => void {
+    if (this.correctionInterval) {
+      clearInterval(this.correctionInterval);
+    }
+    const run = () => {
+      for (const session of this.sessions.values()) {
+        if (session.status === "running" || session.status === "detached") {
+          void this.reconcileSessionStatus(session.id).catch((error) => {
+            console.error(`[session-manager] status correction failed for ${session.id}`, error);
+          });
+        }
+      }
+    };
+    this.correctionInterval = setInterval(run, intervalMs);
+    this.correctionInterval.unref?.();
+    return () => {
+      if (this.correctionInterval) {
+        clearInterval(this.correctionInterval);
+        this.correctionInterval = undefined;
+      }
+    };
   }
 
   async captureHistory(id: string): Promise<string> {
