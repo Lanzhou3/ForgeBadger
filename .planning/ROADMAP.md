@@ -8,6 +8,7 @@
 - ✅ **v1.3 AI-Native Project Execution Traceability** — Phases 12-16, shipped 2026-05-29.
 - ✅ **v1.4 External Evidence Closure** — Phases 17-20, shipped 2026-05-29.
 - 🟡 **v1.5 First-User Trial Operations** — Operations-tooling closeout recorded in `docs/reports/v1.5-first-user-trial-operations-closeout-2026-05-29.md`; real trial packet collection pending.
+- 🔜 **v1.6 Competitive Differentiation Loop** — Competitor-informed candidate milestone in `docs/COMPETITIVE-DIFFERENTIATION-PLAN.md`; start only after v1.5 evidence is collected or explicitly reprioritized.
 
 ## Current Milestone: v1.5 First-User Trial Operations
 
@@ -21,8 +22,9 @@ workers, autonomous remote execution, Feishu execution authority, or Codex Web
 prompt/turn product workflow.
 
 **Entry condition:** v1.4 is complete with `LIVE-PROVIDER`, `WINDOWS-WSL`, and
-`FIRST-USER-FEEDBACK` preserved as `Caveat`, and `FEISHU-CALLBACK` preserved as
-`Blocked`.
+`FIRST-USER-FEEDBACK` preserved as `Caveat`, plus a historical
+`FEISHU-CALLBACK=Blocked` public webhook baseline. The current Feishu registry
+gate is `FEISHU-BOT-WS=Caveat`.
 
 ### Phase 21: First-User Trial Operations
 
@@ -50,8 +52,8 @@ Plans:
 3. Trial outcomes route to `docs/EXTERNAL-EVIDENCE-GATES.md`,
    `docs/TRIAL-FEEDBACK.md`, the GitHub feedback issue template, and the
    existing follow-up issue/report destinations.
-4. `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and
-   `FIRST-USER-FEEDBACK` keep their v1.4 states unless a real required
+4. `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-BOT-WS`, and
+   `FIRST-USER-FEEDBACK` keep their registry states unless a real required
    artifact exists.
 5. Phase 21 introduces no runtime expansion, no raw evidence storage, and no
    request for secrets, raw provider payloads, raw Feishu bodies, or raw
@@ -240,7 +242,7 @@ Plans:
 
 1. A local command validates all required external gate rows.
 2. Current gate states remain `LIVE-PROVIDER=Caveat`,
-   `WINDOWS-WSL=Caveat`, `FEISHU-CALLBACK=Blocked`, and
+   `WINDOWS-WSL=Caveat`, `FEISHU-BOT-WS=Caveat`, and
    `FIRST-USER-FEEDBACK=Caveat`.
 3. Rerun paths keep the concrete live-provider smoke command and
    first-user feedback packet audit command visible.
@@ -492,6 +494,248 @@ Plans:
 6. The current live candidate scan confirms no completed non-tracker feedback
    issue exists yet, so `FIRST-USER-FEEDBACK` remains `Caveat`.
 
+## Candidate Next Milestone: v1.6 Competitive Differentiation Loop
+
+**Planning source:** `docs/COMPETITIVE-DIFFERENTIATION-PLAN.md`
+
+**Goal:** Turn OpenForge from a broad management console into a differentiated
+local-first AI CLI operations cockpit with a fast first-value path, task
+packets, reviewable handoff evidence, and Feishu long-connection collaboration.
+
+**Product thesis:** OpenForge should not compete as another AI editor or hosted
+autonomous developer. Its defensible wedge is supervising existing AI CLIs from
+a browser while preserving local tmux sessions, approval boundaries, and
+bounded evidence.
+
+**Scope rule:** v1.6 may improve activation, task/session continuity,
+handoff/evidence, Feishu bot long-connection collaboration, and starter packs.
+It does not introduce hosted cloud workers, unrestricted Feishu terminal input,
+raw terminal storage in SQLite, or Codex Web prompt/turn product workflow.
+
+**Entry condition:** Prefer collecting a real v1.5 first-user trial packet
+first. If the user explicitly reprioritizes toward product differentiation,
+Phase 38 may start while all existing external gate caveats remain preserved.
+
+### Phase 38: First-Value Activation Loop
+
+**Goal:** Reduce setup friction so a prepared developer can reach a running
+local AI CLI session in under 10 minutes.
+
+**Requirements:** ACTIVATION-01, ACTIVATION-02, ACTIVATION-03,
+ACTIVATIONSAFE-01, PLAN-38-01, PLAN-38-02, PLAN-38-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 38-01-PLAN.md — dashboard first-value path, runtime readiness surfacing,
+  create/import-to-session flow, and launch-blocker verification.
+
+Progress:
+
+- 2026-06-14: Added the Web first-value activation loop: Dashboard now shows a
+  compact readiness path for terminal runtime, CLI adapter, model provider,
+  project, template selection, and first session. Runtime blockers surface
+  copyable tmux/WSL setup commands in Dashboard, Settings, Project detail, and
+  Sessions empty states. The flow links to existing Settings, Models,
+  create/import project, and Project detail launch paths without adding Gateway
+  launch authority, terminal input, or external gate changes.
+
+**Success criteria:**
+
+1. Dashboard provides a single "start here" path through runtime readiness,
+   project create/import, template selection, and session launch.
+2. tmux, CLI adapter, provider/model, and project blockers are visible before
+   the user reaches the terminal.
+3. Every blocker has a concrete next action or copyable setup command.
+4. Session launch still uses Gateway/tmux architecture and preserves tenant
+   isolation.
+5. The phase does not clear `WINDOWS-WSL`, `LIVE-PROVIDER`,
+   `FEISHU-BOT-WS`, or `FIRST-USER-FEEDBACK` gates.
+
+### Phase 39: Task Packet And Work Queue
+
+**Goal:** Convert Project Manager work items into launchable AI CLI task
+packets with acceptance criteria and evidence expectations.
+
+**Requirements:** TASKPACKET-01, TASKPACKET-02, TASKPACKET-03,
+TASKPACKETSAFE-01, PLAN-39-01, PLAN-39-02, PLAN-39-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 39-01-PLAN.md — task packet model, work queue UI/API, session linking,
+  and approval-bound context injection.
+
+Progress:
+
+- 2026-06-13: Added tenant-scoped task packet read/link API, Web API client,
+  Project Manager detail-sheet task packet preview, and same-project active
+  session linking UI. Remaining scope: start-task session creation/context
+  injection and a full work queue view.
+- 2026-06-13: Added `task-packet/start` as a safe operator handoff slice: it
+  creates or reuses one idle same-project session, links the task packet, and
+  stores only bounded context metadata without starting tmux or writing
+  terminal input. Remaining scope: full work queue view and richer handoff
+  surfacing on the session page.
+- 2026-06-14: Added tenant-scoped `task-packets` list API and Web Work Queue
+  view that groups bounded task packets by derived queue status, surfaces
+  runtime/session markers, and opens the existing work-item detail handoff.
+  Remaining scope: richer handoff surfacing on the session page.
+- 2026-06-14: Added Session detail task packet handoff surfacing for linked
+  sessions: the side panel reads bounded task-packet data, shows the prompt,
+  acceptance criteria, expected verification, evidence requirements, and links
+  back to the Project Manager work item without writing terminal input or
+  storing terminal scrollback. Phase 39 implementation scope is complete.
+
+**Success criteria:**
+
+1. A task packet captures project, CLI adapter, template or agent, prompt,
+   acceptance criteria, expected verification, and evidence requirements.
+2. A user can start a bugfix, review, or docs task from a work item without
+   manually rebuilding context.
+3. Running task packets link to exactly one active session or a recorded
+   blocked reason.
+4. Task packet context injection follows existing session/terminal safety
+   boundaries and does not add autonomous host execution authority.
+5. Task packet data remains tenant-scoped.
+
+### Phase 40: Session Handoff And Evidence Pack
+
+**Goal:** Make local AI CLI session outcomes reviewable without storing raw
+terminal history in SQLite.
+
+**Requirements:** HANDOFF-01, HANDOFF-02, HANDOFF-03, HANDOFFSAFE-01,
+PLAN-40-01, PLAN-40-02, PLAN-40-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 40-01-PLAN.md — bounded handoff summary, redacted Markdown export,
+  evidence-pack audit, and review workflow wiring.
+
+Progress:
+
+- 2026-06-14: Added Session detail Markdown handoff/evidence pack generation
+  from the linked task packet, session runtime metadata, operator notes,
+  verification notes, and open review items. The Web-only export audit blocks
+  obvious secrets, placeholders, and raw terminal dumps, and the generated
+  packet states that terminal scrollback stays tmux-backed and does not clear
+  external evidence gates.
+
+**Success criteria:**
+
+1. A session can produce a bounded handoff summary with task prompt, runtime
+   metadata, project/session links, operator notes, verification notes, and
+   open review items.
+2. Markdown export is redaction-aware and suitable for GitHub or Feishu
+   follow-up.
+3. The export/audit path rejects obvious secrets, placeholders, and raw
+   terminal dumps.
+4. Terminal history remains tmux-backed and is not stored in SQLite.
+5. Handoff packets do not automatically clear external evidence gates.
+
+### Phase 41: Feishu Long-Connection Collaboration Bridge
+
+**Goal:** Provide a Feishu team entrypoint through bot long connection without
+requiring a public callback URL.
+
+**Requirements:** FEISHUWS-01, FEISHUWS-02, FEISHUWS-03, FEISHUWSSAFE-01,
+PLAN-41-01, PLAN-41-02, PLAN-41-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [ ] 41-01-PLAN.md — Feishu long-connection receive path, bounded command
+  routing, pending-action replies, reconnect evidence, and gate-safe docs.
+
+Progress:
+
+- 2026-06-14: Added the Gateway Feishu bot long-connection bridge foundation:
+  SDK-style `im.message.receive_v1` event normalization, authenticated
+  `/bot-websocket/events` route, bounded `/openforge status`, `/openforge
+  sessions`, and `/openforge task <id>` reply plans, terminal-input rejection,
+  duplicate-message audit guard, and `/bot-websocket/connection-events`
+  reconnect evidence recording. Remaining scope: real Feishu bot
+  long-connection run and evidence report before `FEISHU-BOT-WS` can move out
+  of `Caveat`.
+- 2026-06-14: Added `pnpm smoke:feishu-bot-websocket` as an authenticated
+  Gateway fixture smoke harness for receive routing, terminal-input rejection,
+  and connected/reconnecting/reconnected lifecycle evidence. The script emits
+  `gateClearingEvidence=false`, is covered by CI script tests, and is now
+  required in the `FEISHU-BOT-WS` rerun path. Remaining scope is still a real
+  Feishu bot persistent-connection run and evidence report.
+- 2026-06-14: Added `pnpm smoke:feishu-bot-live` using the official
+  `@larksuiteoapi/node-sdk` long-connection client. The runner forwards real
+  `im.message.receive_v1` events through Gateway policy, sends only bounded
+  `replyPlan` text replies, records SDK connection lifecycle callbacks, and
+  emits `gateClearingEvidence=true` only when receive, bounded reply,
+  reconnect, and terminal-input rejection evidence are present. It can save the
+  redacted report with `--output <report.json>`. Remaining scope is a real
+  operator run and redacted evidence report.
+- 2026-06-14: Added `pnpm evidence:feishu-bot-live-audit -- <report.json>` as
+  a saved-report guard for real SDK live evidence. It requires complete live
+  evidence and rejects obvious secret-like or raw Feishu identifier content,
+  while keeping audit output `gateClearingEvidence=false`.
+- 2026-06-14: Added
+  `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
+  <report.md>` as a Markdown maintainer-review report generator for
+  audit-passing live JSON evidence. The report remains caveat-preserving and
+  does not clear `FEISHU-BOT-WS` without maintainer review and registry update.
+
+**Success criteria:**
+
+1. A real Feishu bot long-connection run records receive, OpenForge policy
+   routing, bounded reply or pending action, and reconnect behavior.
+2. Supported commands are bounded status/task/session queries such as
+   `/openforge status`, `/openforge sessions`, and `/openforge task <id>`.
+3. Free-form terminal input from Feishu remains rejected.
+4. Public webhook callback verification remains optional compatibility
+   evidence, not a required launch path.
+5. `FEISHU-BOT-WS` remains `Caveat` until the real evidence registry
+   requirements are satisfied.
+
+### Phase 42: Starter Packs And Distribution Loop
+
+**Goal:** Make repeatable AI development work immediately useful through
+built-in task packs and open-source onboarding copy.
+
+**Requirements:** PACKS-01, PACKS-02, PACKS-03, PACKSSAFE-01,
+PLAN-42-01, PLAN-42-02, PLAN-42-03
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 42-01-PLAN.md — review, bugfix, docs sync, test generation, release note,
+  and first-user evidence task packs plus onboarding positioning.
+
+Progress:
+
+- 2026-06-14: Added the built-in starter pack catalog and Project Manager
+  routes for review, bugfix, docs sync, test generation, release notes, and
+  first-user evidence packs. Packs create normal tenant-scoped work items and
+  derived task packets with bounded prompt frames, acceptance checklists,
+  verification guidance, and evidence fields. Web typed API client support and
+  open-source onboarding copy were updated. No session is started, no terminal
+  input is written, no provider secrets are requested, and external evidence
+  caveats remain unchanged.
+
+**Success criteria:**
+
+1. Built-in packs define recommended CLI adapter, prompt frame, acceptance
+   checklist, verification guidance, and evidence fields.
+2. At least three packs create task packets and handoff exports end to end.
+3. Open-source onboarding explains the local-first control-plane positioning
+   without claiming to replace AI editors or hosted agents.
+4. Packs do not introduce provider secrets, unapproved terminal input, or raw
+   transcript collection.
+5. Starter packs exercise existing template/skill/agent boundaries instead of
+   adding a parallel workflow system.
+
 ## Archived Milestones
 
 <details>
@@ -616,12 +860,21 @@ Full archive:
 | 32. Trial Feedback Issue Audit | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 33. External Gate Issue Audit Rerun Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
 | 34. First-User Entrypoint Audit Route Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 35. README Trial Entrypoint Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 36. Copilot Evidence Packet Audit Guard | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 37. Trial Feedback Candidate Issue Audit | v1.5 | 1/1 | Complete | 2026-05-29 |
+| 38. First-Value Activation Loop | v1.6 | 1/1 | Complete | 2026-06-14 |
+| 39. Task Packet And Work Queue | v1.6 | 1/1 | Complete | 2026-06-14 |
+| 40. Session Handoff And Evidence Pack | v1.6 | 1/1 | Complete | 2026-06-14 |
+| 41. Feishu Long-Connection Collaboration Bridge | v1.6 | 0/1 | In Progress (Caveat) | - |
+| 42. Starter Packs And Distribution Loop | v1.6 | 1/1 | Complete | 2026-06-14 |
 
 ## Backlog
 
 Deferred outside v1.5 unless reprioritized:
 
 - Project-manager global dashboard and advanced analytics.
+- Full AI editor replacement or hosted autonomous developer positioning.
 - SSH/remote execution runtime implementation from the Phase 5 architecture package.
 - Encrypted Feishu payload support if a real Feishu app requires encrypted events.
 - Shared replay/rate store implementation for multi-instance public Feishu webhook deployment.

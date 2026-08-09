@@ -1,6 +1,41 @@
 # Milestones
 
-## v1.5 First-User Trial Operations (Active: 2026-05-29)
+## v1.6 Competitive Differentiation Loop (Active: 2026-06-14)
+
+**Phases planned:** 5 phases, 5 plans
+
+**Goal:**
+
+Turn OpenForge from a broad management console into a differentiated
+local-first AI CLI operations cockpit with a fast first-value path, task
+packets, reviewable handoff evidence, and Feishu long-connection collaboration.
+
+**Current phases:**
+
+- [x] Phase 38: First-Value Activation Loop — 1/1 plans complete.
+- [x] Phase 39: Task Packet And Work Queue — 1/1 plans complete.
+- [x] Phase 40: Session Handoff And Evidence Pack — 1/1 plans complete.
+- [ ] Phase 41: Feishu Long-Connection Collaboration Bridge — bridge, live
+  runner, audit, and candidate evidence are present; explicit maintainer
+  acceptance is still required before `FEISHU-BOT-WS` can leave `Caveat`.
+- [x] Phase 42: Starter Packs And Distribution Loop — 1/1 plans complete.
+
+**Acceptance boundary:**
+
+- Preserve the Gateway/tmux terminal architecture and tenant isolation.
+- Do not add hosted workers, unrestricted Feishu terminal input, raw terminal
+  storage in SQLite, or Codex Web prompt/turn product workflow.
+- `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-BOT-WS`, and
+  `FIRST-USER-FEEDBACK` keep their
+  registry states until the required real artifacts in
+  `docs/EXTERNAL-EVIDENCE-GATES.md` are explicitly accepted.
+
+**What's next:** review the Phase 41 candidate evidence, then close the remaining
+external gates with their required accepted artifacts.
+
+---
+
+## v1.5 First-User Trial Operations (Operations tooling complete: 2026-05-29; evidence pending)
 
 **Phases planned:** 17 phases, 17 plans
 
@@ -33,8 +68,8 @@ with redacted evidence routing, feedback triage, and truthful gate decisions.
 
 - No new runtime authority, remote execution, hosted collaboration, Codex Web
   turn workflow, or Feishu execution authority.
-- `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and
-  `FIRST-USER-FEEDBACK` keep their v1.4 states until the required artifacts in
+- `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-BOT-WS`, and
+  `FIRST-USER-FEEDBACK` keep their registry states until the required artifacts in
   `docs/EXTERNAL-EVIDENCE-GATES.md` exist.
 - Operator dry-run evidence can improve the collection loop, but it is not a
   substitute for a completed first-user packet.

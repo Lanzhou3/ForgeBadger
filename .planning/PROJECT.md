@@ -105,7 +105,7 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
 - [x] v1.5 selects First-User Trial Operations as the next milestone without expanding runtime authority.
 - [x] v1.5 defines a minimum first-user trial packet with affected surface, severity, owner, disposition, environment, reproduction, diagnostics status, follow-up route, and redaction review.
 - [x] v1.5 routes trial outcomes through the existing external evidence registry, trial feedback docs, GitHub issue template, and follow-up issue/report destinations.
-- [x] v1.5 preserves `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and `FIRST-USER-FEEDBACK` states until registry-required artifacts exist.
+- [x] v1.5 preserves `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-BOT-WS`, and `FIRST-USER-FEEDBACK` states until registry-required artifacts exist.
 - [x] v1.5 keeps first-user guidance secret-safe and avoids raw evidence blob storage.
 - [x] v1.5 operator dry-run records current-host dependency/startup/provider-smoke evidence without pretending it is first-user feedback.
 - [x] v1.5 source fallback scripts preserve command-prefix env overrides while still loading repository root `.env`.
@@ -151,6 +151,10 @@ Developers can reliably control and recover local AI CLI coding sessions from a 
   registry and should not be silently reclassified during v1.5.
 - Phase 18 reran `pnpm smoke:copilot-provider`; no disposable provider credential was available, so `LIVE-PROVIDER` remains `Caveat` with `missing_provider_credential`.
 - Phase 19 reran Feishu CLI preflight, `pnpm smoke:feishu-public-webhook`, Feishu/Copilot regression, and Gateway typecheck. Bot CLI preflight and local regression passed, but `FEISHU-CALLBACK` remains `Blocked` because no public HTTPS Gateway route, operator webhook setup environment, or Feishu developer-console URL verification action was available.
+- Current Feishu evidence should target `FEISHU-BOT-WS=Caveat`: a real bot
+  long-connection/WebSocket run with `im.message.receive_v1`, policy routing,
+  bounded reply or pending action, and reconnect evidence. Public webhook URL
+  verification is optional compatibility evidence.
 - Phase 20 closed v1.4 with `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`; `WINDOWS-WSL` and `FIRST-USER-FEEDBACK` remain `Caveat` because no real WSL host or completed feedback packet was available.
 - v1.5 selected First-User Trial Operations. Phase 21 defined the trial packet,
   evidence routing, and verification loop; updated feedback intake docs; and

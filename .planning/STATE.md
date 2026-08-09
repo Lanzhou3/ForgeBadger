@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.5
-milestone_name: First-User Trial Operations
-status: phase_complete
-stopped_at: Phase 37 trial feedback candidate issue audit complete; real first-user packet collection pending
-last_updated: 2026-05-29T08:22:14+08:00
-last_activity: 2026-05-29
+milestone: v1.6
+milestone_name: Competitive Differentiation Loop
+status: in_progress
+stopped_at: Phase 38/39/40/42 complete; Phase 41 Gateway fixture smoke, official SDK live runner, saved-report audit, and Markdown report generator added; real Feishu bot long-connection evidence pending
+last_updated: 2026-06-14T14:03:57+08:00
+last_activity: 2026-06-14
 progress:
-  total_phases: 17
-  completed_phases: 17
-  total_plans: 17
-  completed_plans: 17
-  percent: 100
+  total_phases: 5
+  completed_phases: 4
+  total_plans: 5
+  completed_plans: 4
+  percent: 80
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-29)
 
 **Core value:** Developers can reliably control and recover local AI CLI coding sessions from a browser while release claims stay backed by concrete, redacted external evidence.
-**Current focus:** Phase 37 added a read-only GitHub `trial-feedback` candidate audit that skips route trackers and audits non-tracker candidates before maintainer triage. The next concrete step is collecting a real first-user trial packet through the validated runbook, checklist, template, issue form, draft helper, readiness preflight, packet or issue audit helper, candidate audit helper, and gate validator while preserving v1.4 external gate states until real artifacts exist.
+**Current focus:** The user explicitly reprioritized product differentiation. Phase 38/39/40/42 now provide first-value activation, Project Manager task packets and work queue, session handoff/evidence pack export, and starter packs. Phase 41 has a Gateway fixture smoke command, official SDK live runner, saved-report audit, and Markdown maintainer report generator for bot-websocket receive, terminal rejection, bounded reply, reconnect, and redaction evidence collection, but still needs a real Feishu bot long-connection run before `FEISHU-BOT-WS` can move out of `Caveat`; v1.5 first-user feedback collection also remains pending.
 
 ## Current Position
 
-Phase: 37. Trial Feedback Candidate Issue Audit
-Plan: 37-01 complete
-Status: Phase Complete
-Last activity: 2026-05-29
+Phase: 41. Feishu Long-Connection Collaboration Bridge
+Plan: 41-01 planned with local bridge foundation, Gateway fixture smoke, official SDK live runner, saved-report audit, and Markdown report generator present; real Feishu evidence pending
+Status: In Progress / Caveat-preserving
+Last activity: 2026-06-14
 
 ## Performance Metrics
 
@@ -97,9 +97,10 @@ Recent decisions affecting current work:
 - [Phase 15]: Gateway model-provider readiness is a structured, tenant-scoped contract with actionable codes and Codex subscription-managed isolation.
 - [Phase 16]: Open-source readiness is complete with MIT rationale, root contribution/security entry points, safe GitHub issue routing, and caveat-preserving closeout.
 - [Milestone v1.4]: External evidence closure must create a single evidence gate registry before any preserved caveat can be reclassified as `Pass`.
-- [Phase 17]: `docs/EXTERNAL-EVIDENCE-GATES.md` is the canonical registry for `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and `FIRST-USER-FEEDBACK`; mocked tests, docs, and empty templates do not clear those gates.
+- [Phase 17]: `docs/EXTERNAL-EVIDENCE-GATES.md` is the canonical registry for `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-BOT-WS`, and `FIRST-USER-FEEDBACK`; mocked tests, docs, and empty templates do not clear those gates.
 - [Phase 18]: `pnpm smoke:copilot-provider` rerun produced redacted skipped JSON with `missing_provider_credential`; `LIVE-PROVIDER` remains `Caveat`, not `Pass`.
 - [Phase 19]: Feishu CLI bot preflight and endpoint checks passed, and Feishu/Copilot boundary regression passed 183 tests, but `FEISHU-CALLBACK` remains `Blocked` because no public HTTPS Gateway route, operator webhook setup environment, or Feishu developer-console URL verification action was available.
+- [2026-06-13]: The current primary Feishu gate is `FEISHU-BOT-WS=Caveat`, requiring real bot long-connection/WebSocket receive, routing, reply or pending-action, and reconnect evidence. Public webhook URL verification remains optional compatibility evidence and historical baseline only.
 - [Phase 20]: v1.4 closeout records current host as Linux `not_wsl`, keeps `WINDOWS-WSL` as `Caveat`, keeps `FIRST-USER-FEEDBACK` as `Caveat` because no completed feedback packet is attached, and publishes `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`.
 - [Milestone v1.5]: First-user trial operations is the next milestone. It operationalizes real trial evidence and feedback collection before remote/runtime expansion.
 - [Phase 21]: The minimum first-user trial packet must capture affected surface, severity, owner, disposition or next action, environment summary, reproduction detail, diagnostics status, follow-up route or no-action rationale, and redaction review. Phase 21 also updates `docs/TRIAL-FEEDBACK.md` and the GitHub issue template to remove first-user browser-token fallback and replace raw log/output requests with bounded summaries.
@@ -133,7 +134,15 @@ Next steps:
 - Run `pnpm trial:feedback-issues-audit` to discover non-tracker GitHub feedback candidates before maintainer triage.
 - Run `pnpm evidence:gates-validate` before changing any external gate registry state.
 - Use the v1.5 trial-operations loop for the next real first-user trial packet.
-- Prepare Feishu developer-console callback evidence only when public HTTPS Gateway routing is available.
+- Collect Feishu bot long-connection evidence when operator Feishu bot access is
+  available by running
+  `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output <report.json>`.
+  Audit the saved report with
+  `pnpm evidence:feishu-bot-live-audit -- <report.json>` and generate the
+  maintainer packet with
+  `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
+  <report.md>`. Public webhook callback verification is optional compatibility
+  evidence only.
 - Collect physical Windows/WSL and first-user feedback evidence when those external environments/users are available.
 - Rerun live provider evidence only after a disposable provider credential and explicit model id are available.
 
@@ -142,7 +151,11 @@ Next steps:
 - Live Copilot provider evidence remains `Caveat` until a disposable provider credential and explicit model id are available; Phase 18 produced a safe skipped result, not a live pass.
 - Physical Windows/WSL evidence remains `Caveat` until a real Windows/WSL host completes the terminal checklist.
 - Completed first-user feedback remains `Caveat` until attached and mapped.
-- Public Feishu webhook live exposure still needs real developer-console HTTP callback verification; Phase 19 records usable bot CLI preflight and passing local regression, but the missing public HTTPS URL, webhook setup environment, and Feishu console URL verification action remain blockers.
+- Feishu bot evidence remains `Caveat` until a real long-connection/WebSocket
+  run records `im.message.receive_v1` receive, OpenForge policy routing, bounded
+  reply or pending action, terminal-input rejection, and reconnect behavior.
+  Missing public HTTPS webhook routing blocks only the optional public callback
+  compatibility path.
 - Remote execution remains architecture-only until a separate implementation milestone is planned.
 - `upload_img/` remains unrelated untracked local data and must stay out of commits unless the user explicitly says otherwise.
 

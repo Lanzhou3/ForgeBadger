@@ -1,6 +1,6 @@
 # OpenForge Project Memory
 
-> Updated: 2026-05-29
+> Updated: 2026-06-13
 
 ## Current Stage
 
@@ -10,9 +10,9 @@
   context, provider readiness UX, and the open-source readiness packet.
 - v1.4 External Evidence Closure is complete and archived under
   `.planning/milestones/v1.4-*`. It converted the remaining live-provider,
-  physical Windows/WSL, Feishu developer-console callback, and first-user
-  feedback caveats into a canonical evidence gate registry plus real redacted
-  artifacts or precise blockers. Phase 17 created the registry; Phase 18 reran
+  physical Windows/WSL, Feishu public webhook callback, and first-user feedback
+  caveats into a canonical evidence gate registry plus real redacted artifacts
+  or precise blockers. Phase 17 created the registry; Phase 18 reran
   `pnpm smoke:copilot-provider` and recorded `LIVE-PROVIDER` as `Caveat` with
   `missing_provider_credential`; Phase 19 reran Feishu CLI preflight,
   `pnpm smoke:feishu-public-webhook`, Feishu/Copilot regression, and Gateway
@@ -66,8 +66,10 @@
   `scripts/validate-external-evidence-gates.test.mjs`, and
   `pnpm evidence:gates-validate`. The validator keeps
   `LIVE-PROVIDER=Caveat`, `WINDOWS-WSL=Caveat`,
-  `FEISHU-CALLBACK=Blocked`, and `FIRST-USER-FEEDBACK=Caveat` unless a future
+  `FEISHU-BOT-WS=Caveat`, and `FIRST-USER-FEEDBACK=Caveat` unless a future
   reviewed change updates the validator with linked real artifact evidence.
+  The historical public webhook callback evidence remains a compatibility
+  baseline, not the primary Feishu gate.
 - Phase 29 extended `scripts/validate-trial-feedback-intake.mjs` to validate
   `docs/TRIAL-CHECKLIST.md`, added `pnpm trial:intake-validate`, and wired CI
   to run both trial intake and external gate validators. The checklist now
@@ -234,10 +236,11 @@
    disposition or next action, environment summary, reproduction detail,
    diagnostics status, follow-up route or no-action rationale, and redaction
    review.
-2. Keep `FEISHU-CALLBACK` `Blocked` until public HTTPS Gateway routing,
-   operator webhook setup environment, and Feishu developer-console URL
-   verification are available. Phase 19 proved bot CLI preflight and local
-   regression only; those do not clear the real callback gate.
+2. Keep `FEISHU-BOT-WS` as `Caveat` until a real Feishu bot long-connection or
+   WebSocket run receives `im.message.receive_v1`, routes through OpenForge
+   policy, records a bounded reply or pending action, and proves reconnect
+   behavior. Public webhook URL verification is optional compatibility evidence,
+   not the primary local-first Feishu gate.
 3. Keep `WINDOWS-WSL` as `Caveat` until a real Windows/WSL host completes the
    terminal checklist. Phase 20 recorded the current host as Linux `not_wsl`,
    which is not physical WSL evidence.

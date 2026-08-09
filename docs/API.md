@@ -140,7 +140,13 @@ Authenticated REST endpoints are mounted under the project-scoped prefix
 - `GET /api/v1/projects/:projectId/project-manager/work-items`
 - `POST /api/v1/projects/:projectId/project-manager/work-items`
 - `POST /api/v1/projects/:projectId/project-manager/work-items/batch/status`
+- `GET /api/v1/projects/:projectId/project-manager/task-packets`
+- `GET /api/v1/projects/:projectId/project-manager/starter-packs`
+- `POST /api/v1/projects/:projectId/project-manager/starter-packs/:packId/task-packet`
 - `GET /api/v1/projects/:projectId/project-manager/work-items/:workItemId`
+- `GET /api/v1/projects/:projectId/project-manager/work-items/:workItemId/task-packet`
+- `POST /api/v1/projects/:projectId/project-manager/work-items/:workItemId/task-packet/session-link`
+- `POST /api/v1/projects/:projectId/project-manager/work-items/:workItemId/task-packet/start`
 - `PATCH /api/v1/projects/:projectId/project-manager/work-items/:workItemId`
 - `PATCH /api/v1/projects/:projectId/project-manager/work-items/:workItemId/status`
 - `POST /api/v1/projects/:projectId/project-manager/work-items/:workItemId/evidence`
@@ -172,6 +178,62 @@ Inputs are zod validated at the Gateway boundary. Invalid `projectId`,
 `workItemId`, pagination, status, evidence, or goal payloads return `400` with
 the error envelope. Missing or cross-tenant projects and work items return
 `404` without leaking whether another tenant owns the resource.
+
+Task packet endpoints derive a bounded operator handoff from a work item:
+project id/name, CLI adapter, template id, prompt, acceptance criteria,
+expected verification, evidence requirements, a single linked session marker,
+and a blocked reason when no running/detached session is linked. The prompt is
+derived on read from safe Project Manager fields; the route must not expose or
+persist raw work-item `details`, raw terminal output, provider payloads, Feishu
+message bodies, attach tokens, API keys, or secret-like values.
+
+`GET /task-packets` returns the bounded task packet list for the work queue.
+Each packet includes the original work item status, a derived queue status
+(`planned`, `running`, `waiting_for_review`, `blocked`, `completed`, or
+`cancelled`), updated timestamp, runtime metadata, session link marker,
+blocked reason, and the same bounded prompt/criteria/verification/evidence
+fields as the single-packet endpoint. It does not expose raw work-item
+`details` or unbounded evidence bodies.
+
+`GET /starter-packs` returns the built-in pack catalog for repeatable AI CLI
+work. The current catalog includes code review, bugfix, docs sync, test
+generation, release notes, and first-user evidence. Each pack includes a
+recommended CLI adapter, prompt frame, acceptance checklist, verification
+guidance, and evidence fields.
+
+`POST /starter-packs/:packId/task-packet` creates a normal Project Manager work
+item from the selected pack and returns the pack, created work item, and
+derived task packet. It stores only bounded pack metadata under
+`details.taskPacket`, such as pack id, recommended adapter, prompt frame,
+verification guidance, and evidence field names. It does not start a session,
+write terminal input, collect provider secrets, store raw terminal output, or
+create a parallel workflow outside Project Manager.
+
+`POST /task-packet/session-link` links exactly one same-project session to the
+task packet. Cross-project, cross-tenant, or missing sessions return `404`.
+`POST /task-packet/start` creates one `idle` task session when no linked session
+exists, stores only bounded context metadata such as a context reference,
+prompt digest, counts, adapter/template, and session id in the work-item
+details, and returns the derived task packet plus the created session. It does
+not start tmux, write terminal input, inject secrets, or grant autonomous host
+execution authority; the operator still starts/connects the session through
+the existing session lifecycle.
+
+The Web session detail page may read `GET /task-packets` for the session's
+project and display the task packet linked to the current session as a manual
+handoff panel: prompt, acceptance criteria, expected verification, evidence
+requirements, runtime metadata, linked session marker, and a link back to the
+Project Manager work item. This display remains read-only and must not write
+the prompt into terminal input, capture terminal scrollback, or expand the
+session execution authority.
+
+The same session detail page can build a local Markdown handoff/evidence pack
+from bounded task-packet fields, session runtime metadata, operator notes,
+verification notes, and open review items. This is a Web-only manual export
+surface, not a Gateway persistence route: it must not upload the packet,
+store terminal history, write terminal input, or clear external evidence
+gates. Before showing Markdown, the audit blocks empty required notes,
+obvious secret-like values, placeholder text, and raw terminal dump patterns.
 
 Copilot can explain project-manager state through these read-only tools:
 
@@ -325,6 +387,8 @@ they do not execute Feishu writes.
 - `PATCH /api/v1/integrations/feishu/config`
 - `GET /api/v1/integrations/feishu/user-mappings`
 - `PUT /api/v1/integrations/feishu/user-mappings`
+- `POST /api/v1/integrations/feishu/bot-websocket/events`
+- `POST /api/v1/integrations/feishu/bot-websocket/connection-events`
 - `POST /api/v1/integrations/feishu/inbound`
 - `POST /api/v1/integrations/feishu/webhook/:publicId`
 
@@ -339,6 +403,51 @@ These endpoints do not execute Feishu writes, accept model-generated command
 strings, send terminal input, approve actions from Feishu text, or start
 unattended development loops. Outbound Feishu writes are only available through
 Copilot prepare tools plus explicit OpenForge pending-action approval.
+
+`POST /api/v1/integrations/feishu/bot-websocket/events` is the authenticated
+Gateway-side receive path for a local Feishu bot long-connection worker. It
+accepts the SDK-style `im.message.receive_v1` event object, normalizes only text
+messages, applies the tenant Feishu policy, and returns a bounded `replyPlan`
+for commands such as `/openforge status`, `/openforge sessions`, and
+`/openforge task <id>`. The reply plan uses `receiveIdType=chat_id` and
+contains only safe status/session/task summaries; it does not include attach
+tokens, tmux names, raw work-item details, raw event bodies, or terminal
+scrollback. Free-form terminal control such as `/openforge terminal`,
+`/openforge input`, shell commands, or approval text is rejected and audited.
+
+`POST /api/v1/integrations/feishu/bot-websocket/connection-events` records
+sanitized local long-connection lifecycle evidence such as
+`connected`, `reconnecting`, and `reconnected`. It is intended for the
+Gateway-side worker or smoke harness to attach reconnect evidence to the
+`FEISHU-BOT-WS` gate. It records `publicCallbackRequired=false` and does not
+mark the external gate as passing by itself.
+
+`pnpm smoke:feishu-bot-websocket` exercises these two authenticated Gateway
+fixture paths and emits `gateClearingEvidence=false`. It is useful before a real
+Feishu bot persistent-connection run, but it does not replace real Feishu
+receive/reply/reconnect evidence.
+
+`pnpm smoke:feishu-bot-live -- --require-gate-evidence --output
+<report.json>` starts the official `@larksuiteoapi/node-sdk` long-connection
+client with `FEISHU_APP_ID`/`FEISHU_APP_SECRET`, forwards real
+`im.message.receive_v1` events through the authenticated Gateway receive path,
+sends only bounded `replyPlan` text replies through the SDK, and writes a
+redacted 0600 JSON report while still printing JSON to stdout. The report is
+gate-clearing only when it includes real receive, bounded reply, reconnect, and
+terminal-input rejection evidence.
+
+`pnpm evidence:feishu-bot-live-audit -- <report.json>` validates a saved live
+smoke report for mode, event subscription, real receive, bounded reply,
+reconnect, terminal-input rejection, all-ok checks, and obvious secret-like or
+raw Feishu identifier content. It returns `readyForHumanReview=true` only for a
+complete redacted report and always emits `gateClearingEvidence=false` because
+the audit is not itself an external event.
+
+`pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
+<report.md>` formats an audit-passing saved report into a Markdown maintainer
+review artifact. The generated report preserves `FEISHU-BOT-WS=Caveat` until a
+maintainer links the real external evidence and updates the registry.
+
 The inbound endpoint is an authenticated OpenForge test adapter, not a public
 Feishu webhook. The public callback contract below uses a separate route and
 auth boundary. Event listener consumption, approval links, direct terminal
@@ -354,10 +463,12 @@ Public webhook handling is disabled by default and remains inert until a tenant
 explicitly enables it and stores the required encrypted verification token and
 encrypted event encrypt key for that integration.
 
-For v1.1 release evidence, Feishu developer-console URL verification is a
-manual/live gate. Local signed-route tests and `lark-cli` event consumers are
-automated or CLI preflight evidence only; they do not replace a real
-developer-console HTTP callback to this route.
+For current release evidence, the primary Feishu gate is the bot
+long-connection/WebSocket path recorded in `docs/EXTERNAL-EVIDENCE-GATES.md`.
+This public webhook route is a compatibility path for deployments that
+deliberately expose Gateway over HTTPS. Local signed-route tests and `lark-cli`
+preflight are regression evidence only; public developer-console URL
+verification does not replace primary bot receive/reply/reconnect evidence.
 
 Ordinary public webhook events must include
 `X-Lark-Request-Timestamp`, `X-Lark-Request-Nonce`, and `X-Lark-Signature`.

@@ -4,22 +4,24 @@ This file provides repository instructions for AI coding agents working in OpenF
 
 ## Project Snapshot
 
-OpenForge is an AI programming IDE control platform. It provides a Web console for managing AI CLI instances such as Claude Code, OpenCode, and Codex, including project scaffolding, configuration injection, session management, terminal access, model management, Agent management, Skill management, and template management.
+OpenForge is an AI programming IDE control platform. It provides a local-first Web console for managing AI CLI instances (Claude Code, OpenCode, Codex): project scaffolding, configuration injection, session management, terminal access, model management, Agent/Skill/template management — plus an in-product AI Copilot, a guarded Codex app-server prototype, a Project Manager board, and a Feishu bridge.
 
-Current product phase: post-beta beta evidence closure / first-user readiness. Follow `docs/DEVELOPMENT-PLAN.md` and `.planning/ROADMAP.md` for sequencing and milestones.
+Current phase: post-beta external-evidence closure and first-user trial operations. Phase state lives in `MEMORY.md` and `.planning/`; sequencing in `docs/DEVELOPMENT-PLAN.md` and `.planning/ROADMAP.md`.
 
 ## Source Of Truth
 
 Read these documents before making non-trivial changes:
 
 - `CLAUDE.md` - project overview, commands, architecture decisions, workflow rules
+- `MEMORY.md` - current phase tracker, accepted evidence, next-work list (keep it updated)
 - `.claude/CLAUDE.md` - Harness Engineering workflow and role boundaries
 - `.claude/rules/*.md` - security, backend, frontend, API, and testing rules
 - `.claude/skills/*.md` - plan, review, verify, and commit workflows
 - `.claude/agents/*.md` - role-specific agent responsibilities
 - `docs/PRD-v1.1-MVP.md` - product scope and P0/P1/P2 priorities
-- `docs/TECH-ARCHITECTURE.md` - architecture, APIs, data model, terminal design, ADRs
-- `docs/DEVELOPMENT-PLAN.md` - 26-day MVP schedule and module breakdown
+- `docs/TECH-ARCHITECTURE.md` - architecture, data model, terminal design, ADRs
+- `docs/API.md` - API surface reference
+- `docs/DEVELOPMENT-PLAN.md` - MVP schedule and module breakdown
 - `docs/TEST-PLAN.md` - TDD strategy and test coverage requirements
 - `docs/UI-DESIGN.md` - UI information architecture and visual design rules
 
@@ -31,7 +33,7 @@ If documents conflict, use this priority:
 4. `.claude/rules/*.md`
 5. Other `docs/*.md`
 
-OpenForge APIs must use the project envelope from `CLAUDE.md`, `.claude/rules/api.md`, and architecture docs:
+OpenForge APIs must use the project envelope:
 
 ```json
 { "code": 0, "data": {}, "message": "" }
@@ -40,34 +42,63 @@ OpenForge APIs must use the project envelope from `CLAUDE.md`, `.claude/rules/ap
 
 ## Tech Stack
 
-- Monorepo package manager: `pnpm`
-- Frontend: Next.js App Router, TypeScript, shadcn/ui, Tailwind CSS, xterm.js, TanStack Query, zod, lucide-react
-- Gateway: Node.js 20+, Express, TypeScript, `ws`, `node-pty`, `tmux`
-- Database: SQLite via `better-sqlite3`, Drizzle ORM and `drizzle-kit`
-- Auth: JWT via `jsonwebtoken`, passwords via `bcrypt`
-- Encryption: AES-256-GCM for API key storage
-- Tests: `node:test` for backend, Vitest for frontend, Playwright for E2E
+- Monorepo: pnpm workspace (`packages/*`), Node >= 20 (CI runs 22), pnpm pinned via `packageManager` (10.x)
+- Gateway: Express, TypeScript ESM, `ws`, `node-pty`, `tmux`, SQLite (`better-sqlite3`), Drizzle ORM + `drizzle-kit`
+- Web: Next.js 16 App Router, React 19, shadcn/ui, Tailwind CSS, xterm.js, TanStack Query, zod
+- Auth: JWT (`jsonwebtoken`) + `bcryptjs`; API keys encrypted with AES-256-GCM
+- Tests: `node:test` (backend), Vitest (frontend), Playwright (E2E)
 
 ## Common Commands
 
 ```bash
 pnpm install
+pnpm -r typecheck    # all packages (web typecheck runs `next typegen` first)
 pnpm -r build
-pnpm -r dev
-pnpm -r test
-
-cd packages/gateway
-npx drizzle-kit generate
-npx drizzle-kit migrate
-npx tsx src/index.ts
-pnpm test
-
-cd packages/web
-pnpm dev
-pnpm vitest run
+pnpm -r test         # runs each package's test script; does NOT cover scripts/*.test.mjs
+pnpm -r dev          # gateway + web in parallel
 ```
 
-Use narrower commands when possible. Do not claim completion without running the relevant verification command or clearly stating why it could not be run.
+Gateway (`packages/gateway`):
+
+```bash
+pnpm --dir packages/gateway test                        # all backend tests (node --test)
+pnpm --dir packages/gateway test test/<file>.test.ts    # single test file
+RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test       # enable real-tmux integration tests
+pnpm --dir packages/gateway exec drizzle-kit generate   # schema change -> new migration
+pnpm --dir packages/gateway dev                         # tsx watch
+```
+
+Web (`packages/web`):
+
+```bash
+pnpm --dir packages/web test <path/to/test>             # single vitest test
+pnpm --dir packages/web dev
+```
+
+E2E (Playwright, `packages/web/e2e/*.spec.ts`) — the Gateway must already be running; Playwright's `webServer` only starts Next:
+
+```bash
+pnpm --dir packages/gateway exec tsx src/index.ts &      # gateway on OPENFORGE_PORT
+pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium
+```
+
+Root script harness (`scripts/*.mjs`) — has its own tests, NOT covered by `pnpm -r test`; CI runs them explicitly:
+
+```bash
+node --test scripts/<file>.test.mjs
+pnpm evidence:gates-validate    # external evidence gate registry drift guard
+pnpm trial:intake-validate      # trial runbook/checklist contract guard
+```
+
+Published CLI pipeline (`packages/cli`, npm package `openforge` with `doctor`/`init`/`start`): `pnpm build:npm` -> `pnpm verify:npm` -> `pnpm smoke:npm`.
+
+Do not claim completion without running the relevant verification command or clearly stating why it could not be run.
+
+## Environment And Ports
+
+- All dev/build/start scripts run through `scripts/run-with-root-env.mjs`, which loads the gitignored root `.env` and lets command-prefix env vars override it.
+- The Gateway zod-validates env (`src/config/env.ts`) and refuses to start without `OPENFORGE_MASTER_KEY` and `OPENFORGE_JWT_SECRET`.
+- Ports: Gateway default `3000`; web dev server default `48732`; the web SPA's default gateway URL is `http://127.0.0.1:48731`. Set `OPENFORGE_PORT=48731` (CI and root `.env` convention) or export `NEXT_PUBLIC_GATEWAY_URL`, otherwise web cannot reach the Gateway.
 
 ## Architecture Rules
 
@@ -105,46 +136,36 @@ Required terminal decisions:
 
 ## Repository Structure
 
-Expected layout:
-
 ```text
 packages/
-  gateway/
+  gateway/                       Express + WebSocket + node-pty + tmux + Drizzle
     src/
-      index.ts
-      server.ts
-      routes/
-      websocket/
-      services/
-      adapters/
-      db/
-      middleware/
-  web/
-    src/
-      app/
-      components/
-      hooks/
-      lib/
-docs/
-.claude/
+      index.ts, server.ts        entrypoints
+      routes/                    REST /api/v1 handlers
+      websocket/                 /ws/terminal/:sessionId, /ws/events
+      services/                  business logic: session-manager, tmux, startup,
+                                 adapter-discovery, catalog, codex-app-server,
+                                 copilot/, integrations/
+      adapters/                  AI CLI launch plans
+      config/                    zod env schema (env.ts)
+      config-generation/         template rendering / config writing
+      auth/, crypto/, secrets/   JWT, AES-256-GCM, API key store
+      db/                        schema, migrations, repositories
+      runtime/                   start-gateway
+      middleware/                auth, error handling, validation
+      cli/                       `pnpm openforge` init bootstrap
+  web/                           Next.js 16 App Router SPA
+    src/app, components, hooks, lib
+    e2e/                         Playwright specs
+  cli/                           published npm package `openforge`; bundles the Gateway
+scripts/                         root harness scripts + their own *.test.mjs
+templates/                       bundled claude-code-best-practice template
+docs/  .claude/  .planning/
 ```
 
-Gateway ownership:
+Gateway ownership: API routes and handlers, services and business logic, repositories/schema/migrations, WebSocket hub and terminal proxy, CLI adapters, backend tests.
 
-- API routes and handlers
-- Services and business logic
-- Repositories, schema, migrations
-- WebSocket hub and terminal proxy
-- CLI adapters
-- Backend tests
-
-Web ownership:
-
-- Next.js pages and layouts
-- React components
-- Hooks, stores, API client, WebSocket client
-- Frontend tests
-- Styling and responsive behavior
+Web ownership: Next.js pages and layouts, React components, hooks, stores, API client, WebSocket client, frontend tests, styling.
 
 Keep backend and frontend changes separated unless the task explicitly requires a full-stack change.
 
@@ -191,25 +212,17 @@ Do not blur ownership boundaries to save time. If a task grows across boundaries
 
 ## Security Rules
 
-Hardcoded secrets are forbidden:
+Hardcoded secrets are forbidden: API keys and tokens, database passwords, JWT secrets, encryption keys, third-party credentials, private keys or certificates. Use environment variables and validate them with zod or equivalent.
 
-- API keys and tokens
-- Database passwords
-- JWT secrets
-- Encryption keys
-- Third-party credentials
-- Private keys or certificates
+Sensitive environment variables (validated in `packages/gateway/src/config/env.ts`):
 
-Use environment variables and validate them with zod or equivalent.
-
-Sensitive environment variables:
-
-- `OPENFORGE_MASTER_KEY` - required, preferred 64-character hex key for AES-256-GCM; legacy 32-byte strings are still accepted
-- `OPENFORGE_JWT_SECRET` - required
+- `OPENFORGE_MASTER_KEY` - required; 64 hex chars preferred, legacy 32-byte strings accepted
+- `OPENFORGE_JWT_SECRET` - required, min 32 chars
 - `OPENFORGE_PORT` - optional, default `3000`
+- `OPENFORGE_HOST` - optional, default `127.0.0.1`
+- `OPENFORGE_STATE_DIR` - optional, default `~/.openforge`
 - `OPENFORGE_DB_PATH` - optional, default `~/.openforge/openforge.db`
-- `OPENFORGE_LOG_LEVEL` - optional
-- `OPENFORGE_TMUX_PREFIX` - optional, default `of-`
+- `OPENFORGE_TMUX_PREFIX` - optional, default `of-`, must match `^[a-zA-Z0-9_-]+$`
 
 Input validation is mandatory at all boundaries:
 
@@ -229,21 +242,15 @@ Never log passwords, tokens, API keys, decrypted secrets, or plaintext credentia
 - API layer performs auth, validation, and routing only.
 - Service layer owns business logic.
 - Repository layer owns data access and tenant filtering.
-- All business tables must be scoped by `user_id`.
-- Repository classes should automatically apply `WHERE user_id = ?`.
-- Async operations must have meaningful error handling and contextual logging.
-- Use structured logs with fields such as `userId`, `action`, `duration`, and `timestamp`, without sensitive data.
+- All business tables must be scoped by `user_id`; repositories automatically apply `WHERE user_id = ?`.
+- Async operations must have meaningful error handling and contextual logging (fields like `userId`, `action`, `duration`, `timestamp`, without sensitive data).
 - Do not concatenate shell commands or SQL with user input.
 
-AI CLI adapter interface must preserve these concepts:
+AI CLI adapter interface (`src/adapters/`):
 
-- `getLaunchCommand(projectPath, options)`
-- `generateConfig(project, template)`
-- `scanProject(projectPath)`
-- `formatAgentConfig(agent)`
-- `formatSkillInjection(skill)`
-
-MVP implements Claude Code first. OpenCode and Codex are P1 unless the current task says otherwise.
+- `createAdapterLaunchPlan(input)` returns a `LaunchPlan` (`{ command, args, cwd, env, secretEnvNames, credentialMode }`); `AdapterId = "claude" | "opencode" | "codex"`.
+- Session launch must be gated by `adapter-discovery` (available + launch-enabled + terminal support) before creating tmux-backed sessions.
+- Claude is the fully implemented adapter; opencode/codex have basic launch plans. The Codex app-server control plane is a guarded prototype: `/turn` is default-403 unless the Gateway starts with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`, and Web must not expose prompt/turn input.
 
 ## Frontend Standards
 
@@ -257,40 +264,23 @@ Use the UI direction from `docs/UI-DESIGN.md`:
 
 React conventions:
 
-- Component names use PascalCase.
-- Component files use `ComponentName.tsx`.
-- Prefer `interface Props` before the component.
-- Hooks must start with `use`, have one responsibility, include complete dependency arrays, and clean up side effects.
-- Use React Query or equivalent for server state.
-- Handle loading, empty, and error states.
+- Component names use PascalCase; files use `ComponentName.tsx`; prefer `interface Props` before the component.
+- Hooks start with `use`, have one responsibility, complete dependency arrays, and clean up side effects.
+- Use React Query or equivalent for server state; handle loading, empty, and error states.
 - Lists must have stable keys; virtualize large lists when needed.
 - Use Tailwind CSS or local component styles; avoid inline styles unless unavoidable.
 - Use shadcn/ui and lucide-react where appropriate.
 
 Navigation should follow the documented information architecture:
 
-- `/` dashboard
-- `/projects`
-- `/projects/new`
-- `/projects/import`
-- `/projects/:id`
-- `/sessions`
-- `/sessions/:id`
-- `/agents`
-- `/skills`
-- `/templates`
-- `/models`
-- `/settings`
+- `/` dashboard, `/projects`, `/projects/new`, `/projects/import`, `/projects/:id`
+- `/sessions`, `/sessions/:id`, `/agents`, `/skills`, `/templates`, `/models`, `/settings`
 
 ## API And WebSocket Standards
 
 REST:
 
-- `GET` for idempotent queries
-- `POST` for create/action
-- `PUT` for full update
-- `PATCH` for partial update
-- `DELETE` for idempotent delete
+- `GET` for idempotent queries, `POST` for create/action, `PUT` for full update, `PATCH` for partial update, `DELETE` for idempotent delete
 - JWT Bearer auth via `Authorization: Bearer <token>`
 
 WebSocket message format:
@@ -309,10 +299,7 @@ Terminal messages:
 - Server to client: `{ type: "terminal_output", payload: { data: "..." } }`
 - Resize: `{ type: "terminal_resize", payload: { cols: 120, rows: 40 } }`
 
-Heartbeat:
-
-- 30 second ping/pong
-- 90 second timeout disconnect
+Heartbeat: 30 second ping/pong, 90 second timeout disconnect.
 
 Connection safety:
 
@@ -323,9 +310,7 @@ Connection safety:
 
 ## Testing Standards
 
-Use `docs/TEST-PLAN.md` as the test source of truth.
-
-Test structure should follow Arrange, Act, Assert:
+Use `docs/TEST-PLAN.md` as the test source of truth. Test structure follows Arrange, Act, Assert:
 
 ```ts
 describe("module", () => {
@@ -348,22 +333,16 @@ Coverage targets:
 
 Mocking rules:
 
-- Mock external dependencies for unit tests.
-- Do not mock internal implementation to make tests pass.
-- Integration tests for `tmux` and `node-pty` should use real `tmux` and real pty where the test plan requires it.
+- Mock external dependencies for unit tests; do not mock internal implementation to make tests pass.
+- tmux/node-pty integration tests use real `tmux` (they skip unless `RUN_TMUX_TESTS=1`).
 - Use in-memory SQLite for database integration tests where appropriate.
 
 Important security and correctness cases to cover:
 
-- JWT `alg:none` rejection
-- Multi-tenant isolation
-- SQL injection attempts
-- Path traversal including encoded Unicode variants
-- Symlink escape prevention
-- XSS escaping for Skill/template content
-- API key encryption at rest
-- WebSocket flood/rate/message-size limits
-- Terminal output ordering
+- JWT `alg:none` rejection, multi-tenant isolation, SQL injection attempts
+- Path traversal including encoded Unicode variants, symlink escape prevention
+- XSS escaping for Skill/template content, API key encryption at rest
+- WebSocket flood/rate/message-size limits, terminal output ordering
 
 ## Product Scope Priorities
 
@@ -374,8 +353,7 @@ P0 MVP includes:
 - Project creation/import and config generation
 - Claude Code template support
 - Session dashboard, session creation, terminal, session status
-- Agent list and basic creation
-- Skill list and enable/disable
+- Agent list and basic creation, Skill list and enable/disable
 - Template list and editing
 - Model list, model switching, model creation, API key management
 
@@ -389,26 +367,20 @@ Commit format:
 <type>: <description>
 ```
 
-Allowed types:
-
-- `feat`
-- `fix`
-- `refactor`
-- `perf`
-- `docs`
-- `test`
-- `chore`
-- `ci`
+Allowed types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `chore`, `ci`.
 
 Rules:
 
-- One logical change per commit.
-- Commit title should be under 50 Chinese characters or an equivalently short English sentence.
-- Explain why in the body when needed.
+- One logical change per commit; title under 50 Chinese characters or an equivalently short English sentence; explain why in the body when needed.
 - Before committing, review `git diff --staged` and recent history.
-- Run relevant lint, build, and tests before commit, or state exactly what was not run.
+- Run typecheck, relevant tests, and build before commit, or state exactly what was not run. (No lint script exists.)
 
-Documentation must be updated when behavior, architecture, workflow, or phase status changes. Session handoff information belongs in `CLAUDE.md` and related docs such as `docs/CHANGELOG.md` or `docs/PLAN.md` if present.
+Repository gotchas:
+
+- `.gitignore` ignores most of `docs/` and `.claude/`; only whitelisted files are tracked. A new file under `docs/` will not be committed without adding a `!docs/...` exception. `opencode.json`, `AGENTS.local.md`, `AGENTS.override.md`, and `.codex/` are ignored as local-override conventions.
+- Some doc files are machine-validated (trial runbook/checklist, external evidence gate registry). Editing them can break CI: rerun `pnpm evidence:gates-validate`, `pnpm trial:intake-validate`, and the matching `node --test scripts/<name>.test.mjs`.
+
+Documentation must be updated when behavior, architecture, workflow, or phase status changes. Phase/state changes belong in `MEMORY.md` and `.planning/`; handoff notes belong in `CLAUDE.md`.
 
 ## Hard Red Lines
 

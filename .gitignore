@@ -70,12 +70,15 @@ docs/reports/*
 !docs/reports/phase-36-copilot-evidence-packet-audit-guard-2026-05-29.md
 !docs/reports/phase-37-trial-feedback-candidate-issue-audit-2026-05-29.md
 !docs/reports/v1.5-first-user-trial-operations-closeout-2026-05-29.md
+!docs/reports/phase-41-feishu-bot-live-evidence-2026-06-14.json
+!docs/reports/phase-41-feishu-bot-live-evidence-2026-06-14.md
 !docs/EXTERNAL-EVIDENCE-GATES.md
 !docs/OPEN-SOURCE-READINESS.md
 !docs/README.zh-CN.md
 !docs/README.zh-TW.md
 !docs/API.md
 !docs/CI-CD-PLAN.md
+!docs/COMPETITIVE-DIFFERENTIATION-PLAN.md
 !docs/DEVELOPMENT-PLAN.md
 !docs/frontend-redesign-requirements.md
 !docs/PRD-v1.1-MVP.md
@@ -113,3 +116,8 @@ AGENTS.local.md
 AGENTS.override.md
 opencode.json
 opencode.jsonc
+.goal/
+
+# Local macOS metadata and generated CodeGraph indexes are never repository inputs.
+.DS_Store
+.codegraph/

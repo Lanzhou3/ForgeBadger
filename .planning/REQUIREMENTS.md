@@ -11,7 +11,7 @@
 - `docs/EXTERNAL-EVIDENCE-GATES.md` is the canonical registry for external gate
   states and clearing conditions.
 - OpenForge is suitable for cautious local-first trial, but live provider,
-  physical Windows/WSL, Feishu developer-console callback, and completed
+  physical Windows/WSL, Feishu bot long-connection, and completed
   first-user feedback evidence still require real external artifacts.
 - The next product risk is operational: first users and maintainers need a
   clear, secret-safe loop for running the trial, filing feedback, and deciding
@@ -44,8 +44,8 @@
   explicit no-action rationale.
 - [x] **TRIALOPS-06**: Trial routes must preserve links to issue #3
   (`LIVE-PROVIDER`), issue #4 (`WINDOWS-WSL`), issue #5
-  (`FIRST-USER-FEEDBACK`), and the Feishu callback evidence report or a future
-  public-callback artifact.
+  (`FIRST-USER-FEEDBACK`), and `FEISHU-BOT-WS` evidence or an optional public
+  callback compatibility artifact.
 - [x] **TRIALOPS-07**: Root and localized README trial entrypoints must expose
   both first-user feedback collection paths: Markdown packet template and
   GitHub issue form.
@@ -58,8 +58,8 @@
 
 ### Evidence Safety
 
-- [x] **TRIALSAFE-01**: `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and
-  `FIRST-USER-FEEDBACK` keep their v1.4 states unless
+- [x] **TRIALSAFE-01**: `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-BOT-WS`, and
+  `FIRST-USER-FEEDBACK` keep their registry states unless
   `docs/EXTERNAL-EVIDENCE-GATES.md` clearing conditions are satisfied.
 - [x] **TRIALSAFE-02**: First-user trial guidance must not ask users to paste
   API keys, JWTs, attach tokens, raw terminal transcripts, raw provider
@@ -236,11 +236,11 @@
 
 - [x] **GATEGUARD-01**: A local command must validate that
   `docs/EXTERNAL-EVIDENCE-GATES.md` contains all required external gate rows:
-  `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-CALLBACK`, and
+  `LIVE-PROVIDER`, `WINDOWS-WSL`, `FEISHU-BOT-WS`, and
   `FIRST-USER-FEEDBACK`.
 - [x] **GATEGUARD-02**: The validator must reject accidental current-state
   drift from `LIVE-PROVIDER=Caveat`, `WINDOWS-WSL=Caveat`,
-  `FEISHU-CALLBACK=Blocked`, and `FIRST-USER-FEEDBACK=Caveat`.
+  `FEISHU-BOT-WS=Caveat`, and `FIRST-USER-FEEDBACK=Caveat`.
 - [x] **GATEGUARD-03**: The validator and registry must preserve concrete
   rerun and target anchors, including `pnpm smoke:copilot-provider` for
   `LIVE-PROVIDER` and `pnpm trial:feedback-audit` for
