@@ -33,6 +33,7 @@ import {
   findSessionTaskPacket,
   sessionTaskPacketProjectManagerHref,
 } from "@/components/sessions/session-task-packet";
+import { SessionNotificationBell } from "@/components/sessions/session-notification-bell";
 import {
   auditSessionHandoffExportInput,
   buildSessionHandoffMarkdown,
@@ -243,6 +244,7 @@ export default function TerminalPage() {
           <Badge variant="outline" className="text-xs">
             {session?.aiTool ?? "Claude"}
           </Badge>
+          <SessionNotificationBell />
           <Button asChild variant="ghost" size="sm">
             <Link href={`/history?sessionId=${id}`}>
               <History className="mr-2 size-3" />
@@ -327,16 +329,19 @@ function SessionFallbackHeader({
         </Button>
         <span className="truncate text-sm font-medium">Session {sessionId}</span>
       </div>
-      <Button asChild variant="ghost" size="sm">
-        <Link
-          href={copilotHref}
-          aria-label={t("copilot.askCopilot")}
-          title={t("copilot.askCopilot")}
-        >
-          <Sparkles className="size-3 sm:mr-2" />
-          <span className="hidden sm:inline">{t("copilot.askCopilot")}</span>
-        </Link>
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <SessionNotificationBell />
+        <Button asChild variant="ghost" size="sm">
+          <Link
+            href={copilotHref}
+            aria-label={t("copilot.askCopilot")}
+            title={t("copilot.askCopilot")}
+          >
+            <Sparkles className="size-3 sm:mr-2" />
+            <span className="hidden sm:inline">{t("copilot.askCopilot")}</span>
+          </Link>
+        </Button>
+      </div>
     </div>
   );
 }

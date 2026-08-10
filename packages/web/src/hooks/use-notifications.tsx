@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 
 import { getToken } from "@/lib/auth";
 import {
@@ -19,7 +20,11 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
 } from "@/lib/api";
-import { showBrowserNotification } from "@/lib/browser-notifications";
+import {
+  shouldTriggerBrowserNotification,
+  showBrowserNotification,
+} from "@/lib/browser-notifications";
+import { showNotificationToast } from "@/lib/notification-toast";
 import {
   createNotificationFromEvent,
   mergeNotifications,
@@ -54,6 +59,7 @@ const codexAppServerActivityTypes = new Set([
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { t } = useLanguage();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [notifications, setNotifications] = useState<StoredNotification[]>([]);
   const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -75,6 +81,20 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       // The real-time stream can still populate notifications if the initial fetch fails.
     }
   }, []);
+
+  const markRead = useCallback(
+    (id: string) => {
+      updateNotifications((current) =>
+        current.map((notification) =>
+          notification.id === id ? { ...notification, read: true } : notification
+        )
+      );
+      void markNotificationRead(id).catch(() => {
+        void reloadNotifications();
+      });
+    },
+    [reloadNotifications, updateNotifications]
+  );
 
   useEffect(() => {
     if (!user) {
@@ -114,6 +134,15 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         if (notification) {
           updateNotifications((current) => mergeNotifications(current, notification));
           showBrowserNotification(t(notification.titleKey), notification, message);
+          if (shouldTriggerBrowserNotification(message, notification)) {
+            showNotificationToast(t(notification.titleKey), notification, message, {
+              onOpen: () => {
+                markRead(notification.id);
+                router.push(notification.href);
+              },
+              openLabel: t("notifications.openSession"),
+            });
+          }
         }
         scheduleEventQueryInvalidation(invalidationTimerRef, queryClient, message);
       } catch {
@@ -128,22 +157,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         invalidationTimerRef.current = null;
       }
     };
-  }, [queryClient, t, updateNotifications, user]);
+  }, [markRead, queryClient, router, t, updateNotifications, user]);
 
   const value = useMemo<NotificationContextValue>(
     () => ({
       notifications,
       unreadCount: notifications.filter((notification) => !notification.read).length,
-      markRead: (id) => {
-        updateNotifications((current) =>
-          current.map((notification) =>
-            notification.id === id ? { ...notification, read: true } : notification
-          )
-        );
-        void markNotificationRead(id).catch(() => {
-          void reloadNotifications();
-        });
-      },
+      markRead,
       markAllRead: () => {
         updateNotifications((current) =>
           current.map((notification) => ({ ...notification, read: true }))
@@ -159,7 +179,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         });
       },
     }),
-    [notifications, reloadNotifications, updateNotifications]
+    [markRead, notifications, reloadNotifications, updateNotifications]
   );
 
   return (
