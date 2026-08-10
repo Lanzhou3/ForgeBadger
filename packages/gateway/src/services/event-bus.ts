@@ -35,6 +35,7 @@ export interface ClaudeNotificationEvent {
   hookEventName: string;
   notificationType: string;
   message: string;
+  adapter?: string | undefined;
   title?: string | undefined;
   toolName?: string | undefined;
   notificationId?: string | undefined;

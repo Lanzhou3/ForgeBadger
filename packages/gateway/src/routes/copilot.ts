@@ -66,7 +66,7 @@ import { recordSessionSnapshot } from "../services/session-snapshots.js";
 import {
   createLaunchPlan,
   normalizeAdapter,
-  prepareClaudeLaunchExtras,
+  prepareAdapterLaunchExtras,
   validateCodexTerminalCredentialBoundary
 } from "./sessions.js";
 import {
@@ -2140,7 +2140,7 @@ async function approveCopilotSessionCreateDraft(
   });
 
   try {
-    const pluginDirs = await prepareClaudeLaunchExtras(options.db, userId, adapter, project.path, dbSession.id);
+    const pluginDirs = await prepareAdapterLaunchExtras(options.db, userId, adapter, project.path, dbSession.id);
     const launchPlan = createLaunchPlan({
       db: options.db,
       userId,
@@ -2645,7 +2645,7 @@ async function approveCopilotSessionStart(
   }
 
   try {
-    const pluginDirs = await prepareClaudeLaunchExtras(options.db, userId, adapter, session.workingDir, session.id);
+    const pluginDirs = await prepareAdapterLaunchExtras(options.db, userId, adapter, session.workingDir, session.id);
     const launchPlan = createLaunchPlan({
       db: options.db,
       userId,

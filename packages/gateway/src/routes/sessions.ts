@@ -27,6 +27,7 @@ import { recordActivity } from "../services/activity-events.js";
 import { recordSessionSnapshot } from "../services/session-snapshots.js";
 import { ensureClaudeNotificationSettings } from "../services/claude-notification-settings.js";
 import { materializeClaudePluginPackages } from "../services/claude-plugin-packages.js";
+import { ensureOpenForgeOpenCodePlugin } from "../services/opencode-notification-settings.js";
 
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
@@ -165,7 +166,7 @@ export function createSessionRoutes(
     });
 
     try {
-      const pluginDirs = await prepareClaudeLaunchExtras(db, userId, adapter, project.path, dbSession.id);
+      const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, project.path, dbSession.id);
       const launchPlan = createLaunchPlan({
         db,
         userId,
@@ -346,7 +347,7 @@ export function createSessionRoutes(
           throw err;
         }
 
-        const pluginDirs = await prepareClaudeLaunchExtras(db, userId, adapter, dbSession.workingDir, dbSession.id);
+        const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, dbSession.workingDir, dbSession.id);
         const launchPlan = createLaunchPlan({
           db,
           userId,
@@ -692,13 +693,17 @@ function resolveStoredCredential(input: LaunchPlanInput): { envName: string; sec
   throw new Error("API key is required for stored credentials");
 }
 
-export async function prepareClaudeLaunchExtras(
+export async function prepareAdapterLaunchExtras(
   db: Database,
   userId: string,
   adapter: AdapterId,
   projectRoot: string,
   sessionId: string
 ): Promise<string[]> {
+  if (adapter === "opencode") {
+    await ensureOpenForgeOpenCodePlugin(projectRoot);
+    return [];
+  }
   if (adapter !== "claude") {
     return [];
   }

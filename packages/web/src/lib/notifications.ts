@@ -54,7 +54,9 @@ export function createNotificationFromEvent(
   const titleKey =
     event.type === "claude_notification" &&
     getString(event.payload, "notification_type") === "permission_prompt"
-      ? "notifications.claudePermissionRequest"
+      ? getString(event.payload, "adapter") === "opencode"
+        ? "notifications.opencodePermissionRequest"
+        : "notifications.claudePermissionRequest"
       : notificationTitleKeys[event.type];
 
   return {

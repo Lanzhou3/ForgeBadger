@@ -31,6 +31,9 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "notifications.title")).toBe("通知");
     expect(getTranslation("zh-TW", "notifications.title")).toBe("通知");
     expect(getTranslation("en", "notifications.title")).toBe("Notifications");
+    expect(getTranslation("zh-CN", "notifications.opencodePermissionRequest")).toBe("OpenCode 权限申请");
+    expect(getTranslation("zh-TW", "notifications.opencodePermissionRequest")).toBe("OpenCode 權限申請");
+    expect(getTranslation("en", "notifications.opencodePermissionRequest")).toBe("OpenCode permission request");
     expect(getTranslation("zh-CN", "plugins.explanationTitle")).toBe("插件 Tab 是什么");
     expect(getTranslation("en", "plugins.materializationNote")).toContain("--plugin-dir");
     expect(getTranslation("zh-CN", "nav.members")).toBe("成员");

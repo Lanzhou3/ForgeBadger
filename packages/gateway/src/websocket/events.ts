@@ -151,6 +151,7 @@ function buildPayload(event: OpenForgeEvent): Record<string, unknown> {
         hook_event_name: event.hookEventName,
         notification_type: event.notificationType,
         message: event.message,
+        adapter: event.adapter ?? "claude",
         ...(event.title ? { title: event.title } : {}),
         ...(event.toolName ? { tool_name: event.toolName } : {}),
         ...notificationMeta

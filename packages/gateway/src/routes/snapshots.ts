@@ -11,7 +11,7 @@ import { recordSessionSnapshot } from "../services/session-snapshots.js";
 import {
   createLaunchPlan,
   normalizeAdapter,
-  prepareClaudeLaunchExtras
+  prepareAdapterLaunchExtras
 } from "./sessions.js";
 import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
@@ -148,7 +148,7 @@ async function restoreSnapshot(input: RestoreSnapshotInput): Promise<{
       ...(nextAgentId !== undefined ? { agentId: nextAgentId } : {})
     });
   }
-  const pluginDirs = await prepareClaudeLaunchExtras(
+  const pluginDirs = await prepareAdapterLaunchExtras(
     input.db,
     input.userId,
     adapter,

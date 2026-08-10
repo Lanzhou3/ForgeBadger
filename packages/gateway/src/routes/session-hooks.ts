@@ -145,6 +145,7 @@ export function handleClaudeNotificationHook(
     ? "permission_denied"
     : "permission_prompt";
 
+  const adapter = parsed.event.adapter as string | undefined;
   eventBus.emitEvent({
     type: "claude_notification",
     userId: session.userId,
@@ -152,6 +153,7 @@ export function handleClaudeNotificationHook(
     hookEventName,
     notificationType,
     message,
+    adapter: adapter ?? "claude",
     ...(parsed.event.title ? { title: parsed.event.title } : {}),
     ...(toolName ? { toolName } : {})
   });
@@ -169,6 +171,7 @@ export function handleClaudeNotificationHook(
     metadata: {
       hookEventName,
       notificationType,
+      adapter: adapter ?? "claude",
       ...(toolName ? { toolName } : {})
     }
   });

@@ -59,6 +59,71 @@ describe("notifications", () => {
     });
   });
 
+  it("uses the OpenCode title for an OpenCode permission notification", () => {
+    const notification = createNotificationFromEvent(
+      {
+        type: "claude_notification",
+        payload: {
+          session_id: "session-3",
+          notification_id: "notification-3",
+          notification_type: "permission_prompt",
+          adapter: "opencode",
+          message: "OpenCode needs your permission to edit a file",
+          tool_name: "Edit",
+        },
+      },
+      "2026-04-30T12:02:00.000Z"
+    );
+
+    expect(notification).toMatchObject({
+      titleKey: "notifications.opencodePermissionRequest",
+      message: "Edit: OpenCode needs your permission to edit a file",
+    });
+  });
+
+  it("falls back to the Claude title when adapter is claude or missing", () => {
+    const withClaude = createNotificationFromEvent({
+      type: "claude_notification",
+      payload: {
+        session_id: "session-4",
+        notification_type: "permission_prompt",
+        adapter: "claude",
+        message: "Claude needs permission",
+      },
+    });
+    const withMissingAdapter = createNotificationFromEvent({
+      type: "claude_notification",
+      payload: {
+        session_id: "session-5",
+        notification_type: "permission_prompt",
+        message: "Claude needs permission",
+      },
+    });
+
+    expect(withClaude).toMatchObject({
+      titleKey: "notifications.claudePermissionRequest",
+    });
+    expect(withMissingAdapter).toMatchObject({
+      titleKey: "notifications.claudePermissionRequest",
+    });
+  });
+
+  it("keeps the generic Claude notification title for non-permission OpenCode notifications", () => {
+    const notification = createNotificationFromEvent({
+      type: "claude_notification",
+      payload: {
+        session_id: "session-6",
+        notification_type: "status",
+        adapter: "opencode",
+        message: "OpenCode is idle",
+      },
+    });
+
+    expect(notification).toMatchObject({
+      titleKey: "notifications.claudeNotification",
+    });
+  });
+
   it("ignores malformed Gateway events", () => {
     expect(createNotificationFromEvent({ type: "unknown", payload: {} })).toBeNull();
     expect(createNotificationFromEvent({ type: "session_deleted", payload: {} })).toBeNull();

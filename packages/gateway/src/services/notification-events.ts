@@ -89,9 +89,12 @@ export function notificationInputFromEvent(event: OpenForgeEvent): CreateNotific
         }
       };
     case "claude_notification": {
+      const adapter = event.adapter ?? "claude";
       const titleKey =
         event.notificationType === "permission_prompt"
-          ? "notifications.claudePermissionRequest"
+          ? adapter === "opencode"
+            ? "notifications.opencodePermissionRequest"
+            : "notifications.claudePermissionRequest"
           : "notifications.claudeNotification";
       const message = event.toolName ? `${event.toolName}: ${event.message}` : event.message;
       return {
@@ -105,6 +108,7 @@ export function notificationInputFromEvent(event: OpenForgeEvent): CreateNotific
           hook_event_name: event.hookEventName,
           notification_type: event.notificationType,
           message: event.message,
+          adapter,
           ...(event.title ? { title: event.title } : {}),
           ...(event.toolName ? { tool_name: event.toolName } : {})
         }
