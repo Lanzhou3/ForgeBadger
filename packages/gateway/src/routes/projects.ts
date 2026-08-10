@@ -18,19 +18,19 @@ import { ProjectRepository } from "../db/repositories/project-repository.js";
 import { ProjectAgentSequenceRepository } from "../db/repositories/project-agent-sequence-repository.js";
 import { SessionRepository } from "../db/repositories/session-repository.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
-import { AgentRepository } from "../db/repositories/agent-repository.js";
-import { ProjectSkillRepository } from "../db/repositories/project-skill-repository.js";
-import { SkillRepository } from "../db/repositories/skill-repository.js";
 import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
 import type { OpenForgeEventBus } from "../services/event-bus.js";
 import type { CredentialMode, WriteResult } from "../config-generation/types.js";
-import { buildProjectConfigFiles } from "../services/project-config-files.js";
 import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } from "../services/project-ai-config.js";
 import { listWorkspaceTree, readWorkspaceFile } from "../services/workspace-context.js";
 import { recordActivity } from "../services/activity-events.js";
 import { createDefaultAgentPack } from "../services/default-agent-pack.js";
-import { syncLocalSkills } from "../services/local-skills.js";
+import { buildConfigSyncSummary, buildProjectConfigRenderPlan } from "../services/project-config-render.js";
+export {
+  buildConfigSyncSummary,
+  buildProjectConfigRenderPlan
+} from "../services/project-config-render.js";
 
 const aiToolSchema = z.enum(["claude", "opencode", "codex"]);
 
@@ -87,8 +87,6 @@ const defaultTemplateIdsByAiTool: Record<z.infer<typeof aiToolSchema>, string> =
   codex: "builtin-codex"
 };
 const rootInstructionFileNames = ["AGENT.md", "AGENTS.md", "CLAUDE.md"] as const;
-
-type ProjectConfigSkillSync = (repo: Pick<SkillRepository, "create" | "getByName" | "update">) => unknown;
 
 export function createProjectRoutes(
   db: Database,
@@ -903,115 +901,8 @@ async function assertDirectory(pathname: string, message: string): Promise<void>
   }
 }
 
-export async function buildProjectConfigRenderPlan(
-  db: Database,
-  userId: string,
-  projectId: string,
-  templateId: string,
-  credentialMode: CredentialMode,
-  dryRun: boolean,
-  options: { syncSkills?: ProjectConfigSkillSync } = {}
-) {
-  const projectRepo = new ProjectRepository(db, userId);
-  const project = projectRepo.getById(projectId);
-  if (!project) {
-    throw new Error("Project not found");
-  }
-
-  const templateRepo = new TemplateRepository(db, userId);
-  const template = templateRepo.getById(templateId);
-  if (!template || !template.files) {
-    throw new Error("Template not found");
-  }
-
-  const agentRepo = new AgentRepository(db, userId);
-  const skillRepo = new ProjectSkillRepository(db, userId);
-  // A plan must include the same locally discovered Skills as later compliance checks.
-  (options.syncSkills ?? syncLocalSkills)(new SkillRepository(db, userId));
-
-  return createRenderPlan({
-    projectId: project.id,
-    targetRoot: project.path,
-    templateId: template.id,
-    variables: {
-      projectName: project.name,
-      projectRoot: project.path,
-      gatewayUrl: getGatewayUrl()
-    },
-    templateFiles: buildProjectConfigFiles({
-      adapter: aiToolSchema.parse(project.aiTool),
-      templateFiles: normalizeTemplateFilesForProject(project, template.files.map((file) => ({
-        id: String(file.id),
-        relativePath: file.filePath,
-        content: file.content
-      }))),
-      agents: agentRepo.list().filter((agent) => agent.projectId === project.id),
-      skills: skillRepo.listByProject(project.id)
-    }),
-    credentialMode,
-    dryRun
-  });
-}
-
-function normalizeTemplateFilesForProject(
-  project: { aiTool: string; isImported: boolean; path: string },
-  files: Array<{ id: string; relativePath: string; content: string }>
-): Array<{ id: string; relativePath: string; content: string }> {
-  if (project.aiTool !== "claude" || !project.isImported) {
-    return files;
-  }
-
-  const hasRootClaude = existsSync(resolve(project.path, "CLAUDE.md"));
-  return files.flatMap((file) => {
-    if (file.relativePath === ".claude/settings.json") {
-      return [];
-    }
-    if (file.relativePath === ".claude/CLAUDE.md" && hasRootClaude) {
-      return [{ ...file, relativePath: "CLAUDE.md" }];
-    }
-    return [file];
-  });
-}
-
 function listRootInstructionFiles(projectRoot: string): string[] {
   return rootInstructionFileNames.filter((fileName) => existsSync(resolve(projectRoot, fileName)));
-}
-
-function getGatewayUrl(): string {
-  return (
-    process.env.OPENFORGE_GATEWAY_URL ||
-    process.env.NEXT_PUBLIC_GATEWAY_URL ||
-    `http://${process.env.OPENFORGE_HOST || "127.0.0.1"}:${process.env.OPENFORGE_PORT || "3000"}`
-  );
-}
-
-export function buildConfigSyncSummary(
-  plan: ReturnType<typeof createRenderPlan>,
-  conflicts: Awaited<ReturnType<typeof detectConfigConflicts>>
-) {
-  const conflictByPath = new Map(conflicts.map((conflict) => [conflict.relativePath, conflict]));
-  const missingFiles = plan.files
-    .filter((file) => !conflictByPath.has(file.relativePath))
-    .map((file) => file.relativePath);
-  const identicalFiles = conflicts
-    .filter((conflict) => conflict.conflictType === "exists")
-    .map((conflict) => conflict.relativePath);
-  const modifiedFiles = conflicts
-    .filter((conflict) => conflict.conflictType === "modified")
-    .map((conflict) => conflict.relativePath);
-  const unsafeFiles = conflicts
-    .filter((conflict) => conflict.conflictType === "unsafe_path")
-    .map((conflict) => conflict.relativePath);
-
-  return {
-    templateId: plan.templateId,
-    totalFiles: plan.files.length,
-    missingFiles,
-    identicalFiles,
-    modifiedFiles,
-    unsafeFiles,
-    requiresDecision: [...modifiedFiles, ...unsafeFiles]
-  };
 }
 
 export function configWriteOutcomeResponse(outcome: WriteResult["outcome"]): {

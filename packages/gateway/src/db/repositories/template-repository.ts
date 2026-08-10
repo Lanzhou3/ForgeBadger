@@ -758,18 +758,21 @@ function isBuiltInTemplateId(id: string): boolean {
 
 export class TemplateRepository {
   private drizzle;
+  private db: Database;
 
   constructor(db: Database, private userId: string) {
     this.drizzle = drizzle(db);
+    this.db = db;
   }
 
   listBuiltIn(): Template[] {
     this.ensureBuiltInTemplates();
-    return this.drizzle
+    const rows = this.drizzle
       .select()
       .from(templates)
       .where(eq(templates.isBuiltin, true))
       .all() as Template[];
+    return this.attachUsageCounts(rows);
   }
 
   getBuiltInClaude(): Template {
@@ -782,12 +785,12 @@ export class TemplateRepository {
     if (!result) {
       throw new Error("Built-in Claude template not found");
     }
-    return result;
+    return this.attachUsageCounts([result])[0]!;
   }
 
   list(): Template[] {
     const readableVisibility = this.readableVisibility();
-    return this.drizzle
+    const rows = this.drizzle
       .select()
       .from(templates)
       .where(
@@ -797,6 +800,7 @@ export class TemplateRepository {
         )
       )
       .all() as Template[];
+    return this.attachUsageCounts(rows);
   }
 
   create(input: CreateTemplateInput): Template {
@@ -998,7 +1002,7 @@ export class TemplateRepository {
       .where(eq(templateFiles.templateId, id))
       .all() as TemplateFile[];
 
-    return { ...template, files };
+    return { ...this.attachUsageCounts([template])[0]!, files };
   }
 
   updateFile(templateId: string, filePath: string, content: string): TemplateFile | undefined {
@@ -1093,6 +1097,24 @@ export class TemplateRepository {
     for (const definition of builtInTemplateDefinitions()) {
       this.ensureBuiltInTemplate(definition.template, definition.files);
     }
+  }
+
+  private attachUsageCounts(rows: Template[]): Template[] {
+    if (rows.length === 0) return rows;
+    const placeholders = rows.map(() => "?").join(", ");
+    const counts = (this.db
+      .prepare(
+        `SELECT template_id AS templateId, COUNT(*) AS count FROM projects WHERE user_id = ? AND template_id IN (${placeholders}) GROUP BY template_id`
+      )
+      .all(this.userId, ...rows.map((row) => row.id)) as Array<{ templateId: string; count: number }>)
+      .reduce((map, row) => {
+        map.set(row.templateId, row.count);
+        return map;
+      }, new Map<string, number>());
+    return rows.map((row) => ({
+      ...row,
+      usageCount: counts.get(row.id) ?? 0
+    }));
   }
 
   private ensureBuiltInTemplate(

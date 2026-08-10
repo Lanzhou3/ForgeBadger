@@ -5,6 +5,13 @@ import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
 import { extractProjectTemplateFiles } from "../services/template-from-project.js";
+import type { OpenForgeEventBus } from "../services/event-bus.js";
+import {
+  applyTemplateSync,
+  buildTemplateUsage,
+  previewTemplateSync,
+  TemplateSyncError
+} from "../services/template-sync.js";
 import type { Database } from "../db/types.js";
 
 const templateFileSchema = z.object({
@@ -57,7 +64,30 @@ const fromProjectCreateSchema = fromProjectPreviewSchema.extend({
   visibility: z.enum(["private", "shared", "admin"]).optional()
 });
 
-export function createTemplateRoutes(db: Database): Router {
+const templateUsageQuerySchema = z.object({
+  projectIds: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((value) => {
+      if (value === undefined) {
+        return undefined;
+      }
+      return typeof value === "string"
+        ? value.split(",").map((part) => part.trim()).filter(Boolean)
+        : value;
+    })
+    .pipe(z.array(z.string().min(1)).max(20).optional())
+});
+
+const templateSyncSchema = z.object({
+  projectIds: z.array(z.string().min(1)).min(1).max(20).optional(),
+  credentialMode: z.enum(["host_environment", "stored_encrypted_key"]).optional(),
+  decisions: z
+    .record(z.string().min(1), z.record(z.string().min(1), z.enum(["skip", "overwrite"])))
+    .optional()
+});
+
+export function createTemplateRoutes(db: Database, eventBus?: OpenForgeEventBus): Router {
   const router = Router();
   router.use(authenticate);
 
@@ -395,6 +425,84 @@ export function createTemplateRoutes(db: Database): Router {
       data: {},
       message: ""
     });
+  });
+
+  router.get("/:id/usage", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = templateUsageQuerySchema.safeParse(req.query ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    try {
+      const usage = await buildTemplateUsage(db, userId, req.params.id, parseResult.data.projectIds);
+      res.json({
+        code: 0,
+        data: usage,
+        message: ""
+      });
+    } catch (error) {
+      res.status(error instanceof TemplateSyncError ? error.status : 400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Failed to load template usage"
+      });
+    }
+  });
+
+  router.post("/:id/sync/preview", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = templateSyncSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    try {
+      const preview = await previewTemplateSync(db, userId, req.params.id, {
+        ...(parseResult.data.projectIds !== undefined ? { projectIds: parseResult.data.projectIds } : {}),
+        ...(parseResult.data.credentialMode !== undefined ? { credentialMode: parseResult.data.credentialMode } : {})
+      });
+      res.json({
+        code: 0,
+        data: preview,
+        message: ""
+      });
+    } catch (error) {
+      res.status(error instanceof TemplateSyncError ? error.status : 400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Failed to preview template sync"
+      });
+    }
+  });
+
+  router.post("/:id/sync/apply", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = templateSyncSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    try {
+      const result = await applyTemplateSync(db, userId, req.params.id, {
+        ...(parseResult.data.projectIds !== undefined ? { projectIds: parseResult.data.projectIds } : {}),
+        ...(parseResult.data.credentialMode !== undefined ? { credentialMode: parseResult.data.credentialMode } : {}),
+        ...(parseResult.data.decisions !== undefined ? { decisions: parseResult.data.decisions } : {}),
+        ...(eventBus !== undefined ? { eventBus } : {}),
+        ...(req.ip !== undefined ? { ipAddress: req.ip } : {})
+      });
+      res.json({
+        code: 0,
+        data: result,
+        message: ""
+      });
+    } catch (error) {
+      res.status(error instanceof TemplateSyncError ? error.status : 400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Failed to sync template"
+      });
+    }
   });
 
   return router;

@@ -61,7 +61,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     deps.adapterCommandRunner
   ));
   app.use("/api/v1/gate-a/sessions", createGateASessionRoutes(deps.sessionManager));
-  app.use("/api/v1/templates", createTemplateRoutes(deps.db));
+  app.use("/api/v1/templates", createTemplateRoutes(deps.db, deps.eventBus));
   app.use("/api/v1/usage", createUsageRoutes(deps.db));
   app.use("/api/v1/models", createModelRoutes(deps.db));
   app.use("/api/v1/model-providers", createModelProviderRoutes(deps.db, deps.masterKey));
