@@ -39,6 +39,7 @@ import {
   type VisibilityFilter,
 } from "@/lib/visibility";
 import { useLanguage } from "@/hooks/use-language";
+import { TemplateSyncPanel } from "@/components/templates/TemplateSyncPanel";
 
 const defaultFilePath = "CLAUDE.md";
 const defaultTemplateContent = [
@@ -645,6 +646,7 @@ export default function TemplatesPage() {
               </div>
             ) : (
               <div className="space-y-4">
+                <TemplateSyncPanel templateId={selectedTemplate.id} />
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="space-y-2">
                     <Label htmlFor="template-name">{t("common.name")}</Label>

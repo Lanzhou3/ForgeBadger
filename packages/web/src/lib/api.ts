@@ -2915,3 +2915,99 @@ export async function applyConfigSync(
     })
   }) as Promise<ConfigSyncWriteResult>;
 }
+
+// Template usage and batch config sync (template-centric)
+export type TemplateProjectConfigStatus = "compliant" | "stale" | "missing";
+
+export interface TemplateUsageProject {
+  id: string;
+  name: string;
+  path: string;
+  aiTool: string | null;
+  isImported: boolean;
+  configStatus: TemplateProjectConfigStatus;
+}
+
+export interface TemplateUsage {
+  templateId: string;
+  usageCount: number;
+  projects: TemplateUsageProject[];
+}
+
+export interface TemplateSyncProjectPreview {
+  projectId: string;
+  projectName: string;
+  conflicts: ConfigConflict[];
+  summary: ConfigSyncSummary;
+}
+
+export interface TemplateSyncPreview {
+  templateId: string;
+  projects: TemplateSyncProjectPreview[];
+}
+
+export interface TemplateSyncWriteOutcome {
+  outcome: "applied" | "rolled_back" | "rollback_failed";
+  writtenFiles: string[];
+  skippedFiles: string[];
+  failedFiles: string[];
+  conflicts: ConfigConflict[];
+}
+
+export interface TemplateSyncProjectResult {
+  projectId: string;
+  projectName: string;
+  result?: TemplateSyncWriteOutcome;
+  summary?: ConfigSyncSummary;
+  error?: string;
+}
+
+export interface TemplateSyncApplyResult {
+  templateId: string;
+  projects: TemplateSyncProjectResult[];
+}
+
+export async function getTemplateUsage(
+  templateId: string,
+  options: { projectIds?: string[] } = {}
+): Promise<TemplateUsage> {
+  const searchParams = new URLSearchParams();
+  if (options.projectIds && options.projectIds.length > 0) {
+    searchParams.set("projectIds", options.projectIds.join(","));
+  }
+  const query = searchParams.toString();
+  return fetchJson(
+    `/api/v1/templates/${encodeURIComponent(templateId)}/usage${query ? `?${query}` : ""}`
+  ) as Promise<TemplateUsage>;
+}
+
+export async function previewTemplateSync(
+  templateId: string,
+  options: { projectIds?: string[]; credentialMode?: CredentialMode } = {}
+): Promise<TemplateSyncPreview> {
+  return fetchJson(`/api/v1/templates/${encodeURIComponent(templateId)}/sync/preview`, {
+    method: "POST",
+    body: JSON.stringify({
+      ...(options.projectIds ? { projectIds: options.projectIds } : {}),
+      ...(options.credentialMode ? { credentialMode: options.credentialMode } : {})
+    })
+  }) as Promise<TemplateSyncPreview>;
+}
+
+export async function applyTemplateSync(
+  templateId: string,
+  options: {
+    projectIds?: string[];
+    decisions?: Record<string, Record<string, "skip" | "overwrite">>;
+    credentialMode?: CredentialMode;
+  } = {}
+): Promise<TemplateSyncApplyResult> {
+  return fetchJson(`/api/v1/templates/${encodeURIComponent(templateId)}/sync/apply`, {
+    method: "POST",
+    body: JSON.stringify({
+      ...(options.projectIds ? { projectIds: options.projectIds } : {}),
+      ...(options.decisions && Object.keys(options.decisions).length > 0 ? { decisions: options.decisions } : {}),
+      ...(options.credentialMode ? { credentialMode: options.credentialMode } : {})
+    })
+  }) as Promise<TemplateSyncApplyResult>;
+}
