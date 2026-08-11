@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProjectManagerPanel } from "@/components/projects/ProjectManagerPanel";
+import { ConfigSyncPanel, type ConfigSyncPanelHandle } from "@/components/projects/ConfigSyncPanel";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
 import { Label } from "@/components/ui/label";
@@ -29,7 +30,6 @@ import {
   getProjectAgentSequence,
   getGlobalAiConfig,
   getProjectAiConfig,
-  getConfigCompliance,
   getDependencies,
   discoverAdapters,
   listSessions,
@@ -39,25 +39,16 @@ import {
   listAgents,
   listActivities,
   deleteProject,
-  listApiKeys,
-  listModels,
   listProjectSkills,
   listSkills,
   listTemplates,
-  applyConfigSync,
-  previewConfigSync,
   setProjectSkill,
   updateAgent,
   updateProjectAiConfigFile,
   updateProjectAgentSequence,
   chooseDefaultRuntimeAdapter,
-  defaultConfigConflictDecisions,
   defaultTemplateForAiTool,
   isAdapterLaunchable,
-  type ConfigConflict,
-  type ConfigDecision,
-  type ConfigComplianceReport,
-  type CredentialMode,
   type RuntimeAdapterId,
   type Agent,
   type AiConfigFile,
@@ -84,6 +75,7 @@ const builtinTemplateOptions = [
   { id: "builtin-claude-code", name: "Claude Code" },
   { id: "builtin-opencode", name: "OpenCode" },
   { id: "builtin-codex", name: "Codex CLI" },
+  { id: "builtin-kimi", name: "Kimi Code" },
 ];
 
 const PROJECT_DETAIL_TABS = [
@@ -108,17 +100,14 @@ export default function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState<ProjectDetailTab>(() =>
     readProjectDetailTab(searchParams.get("tab")) ?? "sessions"
   );
-  const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState("builtin-claude-code");
   const [selectedRuntimeAdapter, setSelectedRuntimeAdapter] = useState<RuntimeAdapterId | "">("");
-  const [credentialMode, setCredentialMode] = useState<CredentialMode>("host_environment");
-  const [selectedApiKeyId, setSelectedApiKeyId] = useState("");
-  const [configConflicts, setConfigConflicts] = useState<ConfigConflict[]>([]);
-  const [configDecisions, setConfigDecisions] = useState<Record<string, ConfigDecision>>({});
   const [selectedConfigPath, setSelectedConfigPath] = useState("");
   const [configDraft, setConfigDraft] = useState("");
   const [agentSequenceIds, setAgentSequenceIds] = useState<string[]>([]);
   const [activityAgentId, setActivityAgentId] = useState("");
+  const [syncPending, setSyncPending] = useState({ preview: false, compliance: false });
+  const configSyncRef = useRef<ConfigSyncPanelHandle>(null);
 
   const { data: projectData, isLoading: projectLoading } = useQuery({
     queryKey: ["project", id],
@@ -160,16 +149,6 @@ export default function ProjectDetailPage() {
     enabled: !!id,
   });
 
-  const { data: modelsData } = useQuery({
-    queryKey: ["models"],
-    queryFn: listModels,
-  });
-
-  const { data: apiKeysData } = useQuery({
-    queryKey: ["api-keys"],
-    queryFn: listApiKeys,
-  });
-
   const { data: templatesData } = useQuery({
     queryKey: ["templates"],
     queryFn: listTemplates,
@@ -196,31 +175,6 @@ export default function ProjectDetailPage() {
     queryFn: () => getGlobalAiConfig(id),
     enabled: !!id,
   });
-  const previewConfigMutation = useMutation({
-    mutationFn: () => previewConfigSync(id, selectedTemplateId, credentialMode),
-    onSuccess: (preview) => {
-      setConfigConflicts(preview.conflicts ?? []);
-      setConfigDecisions(defaultConfigConflictDecisions(preview.conflicts ?? []));
-    },
-  });
-
-  const applyConfigMutation = useMutation({
-    mutationFn: () => {
-      return applyConfigSync(id, configDecisions, selectedTemplateId, credentialMode);
-    },
-    onSuccess: () => {
-      setConfigConflicts([]);
-      setConfigDecisions({});
-      queryClient.invalidateQueries({ queryKey: ["activities"] });
-    },
-  });
-
-  const complianceMutation = useMutation<ConfigComplianceReport>({
-    mutationFn: () => getConfigCompliance(id, {
-      templateId: selectedTemplateId,
-      credentialMode,
-    }),
-  });
 
   const createSessionMutation = useMutation({
     mutationFn: () => {
@@ -229,12 +183,8 @@ export default function ProjectDetailPage() {
       }
       return createSession({
         projectId: id,
-        credentialMode,
+        credentialMode: "host_environment",
         aiTool: selectedRuntimeAdapter,
-        ...(selectedModelId ? { modelId: selectedModelId } : {}),
-        ...(credentialMode === "stored_encrypted_key" && selectedApiKeyId
-          ? { apiKeyId: selectedApiKeyId }
-          : {}),
       });
     },
     onSuccess: () => {
@@ -328,8 +278,6 @@ export default function ProjectDetailPage() {
     () => new Set(projectSkills.filter((skill) => skill.isEnabled).map((skill) => skill.skillId)),
     [projectSkills]
   );
-  const models = modelsData?.models ?? [];
-  const apiKeys = apiKeysData?.apiKeys ?? [];
   const templates = templatesData?.templates ?? [];
   const runtimeAdapters = adapterDiscoveryData?.adapters ?? [];
   const terminalRuntime = dependenciesData?.terminalRuntime;
@@ -346,25 +294,15 @@ export default function ProjectDetailPage() {
   const projectAiConfig = projectAiConfigData;
   const globalAiConfig = globalAiConfigData;
   const selectedConfigFile = projectAiConfig?.files.find((file) => file.relativePath === selectedConfigPath);
-  const defaultModel = models.find((model) => model.isDefault);
-  const selectedCredentialNeedsKey = credentialMode === "stored_encrypted_key";
   const cannotCreateSession =
     createSessionMutation.isPending ||
     adapterDiscoveryLoading ||
     !selectedRuntimeAdapter ||
-    !selectedRuntimeLaunchable ||
-    (selectedCredentialNeedsKey && !selectedApiKeyId);
+    !selectedRuntimeLaunchable;
   const configNeedsReview = ["failed", "needs_review"].includes(searchParams.get("configStatus") ?? "");
   const projectManagerWorkItemId = normalizeSearchParam(searchParams.get("workItemId"));
-  const selectedModel = models.find((model) => model.id === selectedModelId);
   const runningSessionCount = projectSessions.filter((session) => session.status === "running").length;
   const enabledSkillCount = enabledSkillIds.size;
-
-  useEffect(() => {
-    if (!selectedModelId && defaultModel) {
-      setSelectedModelId(defaultModel.id);
-    }
-  }, [defaultModel, selectedModelId]);
 
   useEffect(() => {
     const nextTab = readProjectDetailTab(searchParams.get("tab"));
@@ -400,12 +338,6 @@ export default function ProjectDetailPage() {
     const nextAdapter = chooseDefaultRuntimeAdapter(adapterDiscoveryData.adapters, selectedRuntimeAdapter);
     setSelectedRuntimeAdapter((current) => current === (nextAdapter ?? "") ? current : (nextAdapter ?? ""));
   }, [adapterDiscoveryData?.adapters, selectedRuntimeAdapter]);
-
-  useEffect(() => {
-    if (credentialMode === "stored_encrypted_key" && !selectedApiKeyId && apiKeys[0]) {
-      setSelectedApiKeyId((current) => current || apiKeys[0]?.id || "");
-    }
-  }, [apiKeys, credentialMode, selectedApiKeyId]);
 
   useEffect(() => {
     const projectAgentIds = new Set(projectAgents.map((agent) => agent.id));
@@ -511,22 +443,22 @@ export default function ProjectDetailPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => complianceMutation.mutate()}
-                        disabled={complianceMutation.isPending}
+                        onClick={() => configSyncRef.current?.checkCompliance()}
+                        disabled={syncPending.compliance}
                       >
                         <ShieldCheck className="mr-2 size-4" />
-                        {complianceMutation.isPending ? t("projects.checkingCompliance") : t("projects.checkCompliance")}
+                        {syncPending.compliance ? t("projects.checkingCompliance") : t("projects.checkCompliance")}
                       </Button>
                     </div>
                     <Button
                       variant="outline"
                       size="sm"
                       className="justify-start"
-                      onClick={() => previewConfigMutation.mutate()}
-                      disabled={previewConfigMutation.isPending}
+                      onClick={() => configSyncRef.current?.preview()}
+                      disabled={syncPending.preview}
                     >
                       <FileCode2 className="mr-2 size-4" />
-                      {previewConfigMutation.isPending ? t("projects.generating") : t("projects.previewConfig")}
+                      {syncPending.preview ? t("projects.generating") : t("projects.previewConfig")}
                     </Button>
                     <Button
                       variant="ghost"
@@ -560,11 +492,11 @@ export default function ProjectDetailPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => previewConfigMutation.mutate()}
-                  disabled={previewConfigMutation.isPending}
+                  onClick={() => configSyncRef.current?.preview()}
+                  disabled={syncPending.preview}
                 >
                   <FileCode2 className="mr-2 size-4" />
-                  {previewConfigMutation.isPending
+                  {syncPending.preview
                     ? t("projects.generating")
                     : t("projects.reviewConfig")}
                 </Button>
@@ -576,7 +508,7 @@ export default function ProjectDetailPage() {
             <CardHeader>
               <CardTitle className="text-base">{t("projects.launchOptions")}</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-4">
+            <CardContent className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="runtime-adapter">{t("projects.runtimeCli")}</Label>
                 <select
@@ -637,6 +569,14 @@ export default function ProjectDetailPage() {
                   </p>
                 )}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t("projects.configTemplate")}</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="config-template">{t("projects.configTemplate")}</Label>
                 <select
@@ -645,8 +585,6 @@ export default function ProjectDetailPage() {
                   value={selectedTemplateId}
                   onChange={(event) => {
                     setSelectedTemplateId(event.target.value);
-                    setConfigConflicts([]);
-                    setConfigDecisions({});
                   }}
                 >
                   {builtinTemplateOptions.map((template) => (
@@ -664,241 +602,16 @@ export default function ProjectDetailPage() {
                   {t("projects.configTemplateDescription")}
                 </p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="session-model">{t("projects.model")}</Label>
-                <select
-                  id="session-model"
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  value={selectedModelId}
-                  onChange={(event) => setSelectedModelId(event.target.value)}
-                >
-                  <option value="">{t("projects.noModel")}</option>
-                  {models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name}{model.isDefault ? ` (${t("models.default")})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="credential-mode">{t("projects.authenticationMethod")}</Label>
-                <select
-                  id="credential-mode"
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  value={credentialMode}
-                  onChange={(event) => setCredentialMode(event.target.value as CredentialMode)}
-                >
-                  <option value="host_environment">{t("projects.hostEnvironment")}</option>
-                  <option value="stored_encrypted_key">{t("projects.storedCredential")}</option>
-                </select>
-                <p className="text-xs text-muted-foreground">
-                  {credentialMode === "host_environment"
-                    ? t("projects.hostEnvironmentDescription")
-                    : t("projects.storedCredentialDescription")}
-                </p>
-              </div>
-              {credentialMode === "stored_encrypted_key" && (
-                <div className="space-y-2">
-                  <Label htmlFor="session-api-key">{t("projects.apiKey")}</Label>
-                  <select
-                    id="session-api-key"
-                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                    value={selectedApiKeyId}
-                    onChange={(event) => setSelectedApiKeyId(event.target.value)}
-                  >
-                    <option value="">{t("projects.noApiKey")}</option>
-                    {apiKeys.map((apiKey) => (
-                      <option key={apiKey.id} value={apiKey.id}>
-                        {apiKey.label ?? apiKey.provider}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
             </CardContent>
           </Card>
 
-          {(previewConfigMutation.data || configConflicts.length > 0) && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">{t("projects.configPreview")}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="space-y-1 text-sm text-muted-foreground">
-                  <div>{t("projects.previewFiles")}: {previewConfigMutation.data?.plan.files.length ?? 0}</div>
-                  <p>{t("projects.configPreviewDescription")}</p>
-                </div>
-                {configConflicts.length > 0 ? (
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">{t("projects.conflicts")}</div>
-                    <ul className="space-y-1 text-sm text-muted-foreground">
-                      {configConflicts.map((conflict) => (
-                        <li
-                          key={conflict.relativePath}
-                          className="flex flex-col gap-2 rounded-md border border-border bg-background p-3 md:flex-row md:items-center md:justify-between"
-                        >
-                          <div className="min-w-0 flex-1 space-y-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-mono text-xs text-foreground">{conflict.relativePath}</span>
-                              <Badge variant={conflict.conflictType === "modified" ? "destructive" : "secondary"}>
-                                {conflict.conflictType}
-                              </Badge>
-                            </div>
-                            <div className="flex flex-wrap gap-3 text-xs">
-                              {conflict.existingSha256 && (
-                                <span>{t("projects.existingHash")}: {shortHash(conflict.existingSha256)}</span>
-                              )}
-                              {conflict.incomingSha256 && (
-                                <span>{t("projects.incomingHash")}: {shortHash(conflict.incomingSha256)}</span>
-                              )}
-                            </div>
-                            {conflict.diffPreview && conflict.diffPreview.length > 0 && (
-                              <div className="overflow-hidden rounded-md border border-border bg-muted/40">
-                                {conflict.diffPreview.map((line) => (
-                                  <div key={line.line} className="grid gap-0 border-b border-border/60 last:border-b-0 md:grid-cols-[72px_1fr_1fr]">
-                                    <div className="bg-background/70 px-2 py-1 font-mono text-[11px] text-muted-foreground">L{line.line}</div>
-                                    <div className="min-w-0 border-border px-2 py-1 font-mono text-[11px] text-destructive md:border-l">
-                                      <span className="mr-1 select-none">-</span>{line.existing}
-                                    </div>
-                                    <div className="min-w-0 border-border px-2 py-1 font-mono text-[11px] text-emerald-600 md:border-l dark:text-emerald-400">
-                                      <span className="mr-1 select-none">+</span>{line.incoming}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          {conflict.allowedActions.length > 0 ? (
-                            <select
-                              className="h-8 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                              value={configDecisions[conflict.relativePath] ?? "skip"}
-                              onChange={(event) =>
-                                setConfigDecisions((current) => ({
-                                  ...current,
-                                  [conflict.relativePath]: event.target.value as ConfigDecision,
-                                }))
-                              }
-                              aria-label={`${t("projects.conflictDecision")} ${conflict.relativePath}`}
-                            >
-                              {conflict.allowedActions.map((action) => (
-                                <option key={action} value={action}>
-                                  {action === "overwrite"
-                                    ? t("projects.overwrite")
-                                    : t("projects.skip")}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <Badge variant="destructive">{t("projects.blocked")}</Badge>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">{t("projects.noConflicts")}</div>
-                )}
-                <Button
-                  onClick={() => applyConfigMutation.mutate()}
-                  disabled={
-                    applyConfigMutation.isPending ||
-                    configConflicts.some((conflict) => conflict.allowedActions.length === 0)
-                  }
-                >
-                  <FileCode2 className="mr-2 size-4" />
-                  {applyConfigMutation.isPending ? t("projects.generating") : t("projects.applyConfig")}
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-
-          {complianceMutation.data && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between gap-3 text-base">
-                  <span>{t("projects.configCompliance")}</span>
-                  <Badge
-                    variant={
-                      complianceMutation.data.compliance.status === "compliant"
-                        ? "default"
-                        : "secondary"
-                    }
-                  >
-                    {complianceMutation.data.compliance.status === "compliant"
-                      ? t("projects.compliant")
-                      : t("projects.needsAttention")}
-                  </Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-2 text-sm md:grid-cols-5">
-                  <ComplianceMetric
-                    label={t("projects.totalFiles")}
-                    value={complianceMutation.data.compliance.totalFiles}
-                  />
-                  <ComplianceMetric
-                    label={t("projects.missingFiles")}
-                    value={complianceMutation.data.compliance.missingFiles.length}
-                  />
-                  <ComplianceMetric
-                    label={t("projects.identicalFiles")}
-                    value={complianceMutation.data.compliance.identicalFiles.length}
-                  />
-                  <ComplianceMetric
-                    label={t("projects.staleFiles")}
-                    value={complianceMutation.data.compliance.staleFiles.length}
-                  />
-                  <ComplianceMetric
-                    label={t("projects.unsafeFiles")}
-                    value={complianceMutation.data.compliance.unsafeFiles.length}
-                  />
-                </div>
-                {complianceMutation.data.compliance.requiresDecision.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">{t("projects.requiresDecision")}</div>
-                    <ul className="space-y-1 text-sm text-muted-foreground">
-                      {complianceMutation.data.compliance.requiresDecision.map((relativePath) => (
-                        <li key={relativePath}>{relativePath}</li>
-                      ))}
-                    </ul>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => previewConfigMutation.mutate()}
-                      disabled={previewConfigMutation.isPending}
-                    >
-                      <FileCode2 className="mr-2 size-4" />
-                      {t("projects.reviewConfig")}
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {previewConfigMutation.isError && (
-            <p className="text-sm text-destructive">
-              {previewConfigMutation.error instanceof Error
-                ? previewConfigMutation.error.message
-                : t("projects.failedGenerateConfig")}
-            </p>
-          )}
-
-          {complianceMutation.isError && (
-            <p className="text-sm text-destructive">
-              {complianceMutation.error instanceof Error
-                ? complianceMutation.error.message
-                : t("projects.failedCompliance")}
-            </p>
-          )}
-
-          {applyConfigMutation.isError && (
-            <p className="text-sm text-destructive">
-              {applyConfigMutation.error instanceof Error
-                ? applyConfigMutation.error.message
-                : t("projects.failedGenerateConfig")}
-            </p>
-          )}
+          <ConfigSyncPanel
+            ref={configSyncRef}
+            projectId={id}
+            templateId={selectedTemplateId}
+            credentialMode="host_environment"
+            onPendingChange={setSyncPending}
+          />
 
           {createSessionMutation.isError && (
             <p className="text-sm text-destructive">
@@ -1239,10 +952,6 @@ export default function ProjectDetailPage() {
       )}
     </div>
   );
-}
-
-function shortHash(value: string): string {
-  return value.slice(0, 10);
 }
 
 function ProjectStat({ label, value }: { label: string; value: number }) {
@@ -1765,15 +1474,6 @@ function ProjectActivityFilter({
         </option>
       ))}
     </select>
-  );
-}
-
-function ComplianceMetric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md border border-border bg-muted/30 p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold">{value}</div>
-    </div>
   );
 }
 

@@ -43,6 +43,7 @@ export const navItems = [
   { labelKey: "nav.plugins", href: "/plugins", icon: Puzzle },
   { labelKey: "nav.templates", href: "/templates", icon: FileCode2 },
   { labelKey: "nav.models", href: "/models", icon: Brain },
+  { labelKey: "nav.cliConfig", href: "/cli-config", icon: FileCode2 },
   { labelKey: "nav.usage", href: "/usage", icon: BarChart3 },
   { labelKey: "nav.history", href: "/history", icon: History },
   { labelKey: "nav.members", href: "/members", icon: UsersRound, adminOnly: true },

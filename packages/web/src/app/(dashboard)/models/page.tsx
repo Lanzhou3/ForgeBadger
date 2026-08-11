@@ -17,6 +17,8 @@ import {
   ServerCog,
   ShieldCheck,
   Trash2,
+  TriangleAlert,
+  X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -51,13 +53,16 @@ import {
   deleteProviderModel,
   deleteModelProvider,
   getCodexSubscriptionStatus,
+  listAgents,
   listModelProviders,
   listProviderCatalog,
+  listSessions,
   previewProviderApply,
   rotateProviderCredential,
   setDefaultProviderModel,
   syncProviderModels,
   updateProviderModel,
+  type Agent,
   type CodexSubscriptionStatus,
   type ModelProviderReadiness,
   type ModelProfile,
@@ -67,6 +72,7 @@ import {
   type ProviderCredentialSummary,
   type ProviderProfile,
   type ProviderSupportedAdapter,
+  type Session,
 } from "@/lib/api";
 import {
   buildConfiguredProviderMap,
@@ -95,6 +101,24 @@ interface ModelForm {
   modelId: string;
   capabilities: string;
 }
+
+interface NamedReference {
+  id: string;
+  name: string;
+  status: string;
+}
+
+interface ModelReferenceInfo {
+  sessions: NamedReference[];
+  agents: NamedReference[];
+}
+
+type DeleteTarget =
+  | { kind: "provider"; providerId: string }
+  | { kind: "model"; modelId: string }
+  | { kind: "credential"; credentialId: string };
+
+const emptyModelReferences: ModelReferenceInfo = { sessions: [], agents: [] };
 
 const emptyCustomProvider: CustomProviderForm = {
   name: "",
@@ -135,6 +159,7 @@ export default function ModelsPage() {
   const [catalogConfiguredFilter, setCatalogConfiguredFilter] = useState<ProviderCatalogConfiguredFilter>("all");
   const [pendingPreset, setPendingPreset] = useState<ProviderCatalogPreset | null>(null);
   const [setupCredentialForm, setSetupCredentialForm] = useState<CredentialForm>(emptyCredential);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const providerQuery = useQuery({
     queryKey: ["model-providers"],
@@ -148,10 +173,50 @@ export default function ModelsPage() {
     queryKey: ["codex-subscription-status"],
     queryFn: getCodexSubscriptionStatus,
   });
+  // 引用检测：会话与代理选择模型后会产生外键引用，删除前需先切换模型。
+  const sessionsQuery = useQuery({
+    queryKey: ["model-page-sessions"],
+    queryFn: listSessions,
+    staleTime: 30_000,
+  });
+  const agentsQuery = useQuery({
+    queryKey: ["model-page-agents"],
+    queryFn: listAgents,
+    staleTime: 30_000,
+  });
   const providers = providerQuery.data?.providers ?? [];
   const models = providerQuery.data?.models ?? [];
   const credentials = providerQuery.data?.credentials ?? [];
   const catalog = catalogQuery.data?.providers ?? [];
+  // model_profiles id 与 legacy models id 相同（mirrorLegacy），会话/代理的
+  // modelId 直接按模型 profile id 匹配即可。
+  const modelReferences = useMemo(() => {
+    const map = new Map<string, ModelReferenceInfo>();
+    for (const model of models) map.set(model.id, { sessions: [], agents: [] });
+    for (const session of sessionsQuery.data?.sessions ?? []) {
+      if (!session.modelId) continue;
+      const info = map.get(session.modelId);
+      if (info) {
+        info.sessions.push({
+          id: session.id,
+          name: session.name ?? session.tmuxName ?? session.id,
+          status: session.status,
+        });
+      }
+    }
+    for (const agent of agentsQuery.data?.agents ?? []) {
+      if (!agent.modelId) continue;
+      const info = map.get(agent.modelId);
+      if (info) {
+        info.agents.push({
+          id: agent.id,
+          name: agent.name,
+          status: agent.status ?? "active",
+        });
+      }
+    }
+    return map;
+  }, [models, sessionsQuery.data, agentsQuery.data]);
   const filteredProviders = useMemo(() => {
     const query = providerQueryText.trim().toLowerCase();
     if (!query) return providers;
@@ -203,6 +268,42 @@ export default function ModelsPage() {
     () => providerCredentials.find((credential) => credential.id === selectedCredentialId),
     [providerCredentials, selectedCredentialId]
   );
+  const modelCountsByProvider = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const model of models) {
+      counts.set(model.providerProfileId, (counts.get(model.providerProfileId) ?? 0) + 1);
+    }
+    return counts;
+  }, [models]);
+  const deleteTargetReferences = useMemo<ModelReferenceInfo>(() => {
+    if (!deleteTarget) return emptyModelReferences;
+    if (deleteTarget.kind === "model") {
+      return modelReferences.get(deleteTarget.modelId) ?? emptyModelReferences;
+    }
+    if (deleteTarget.kind === "credential") return emptyModelReferences;
+    const targetModels = models.filter((model) => model.providerProfileId === deleteTarget.providerId);
+    const sessions: NamedReference[] = [];
+    const agents: NamedReference[] = [];
+    const seenSessions = new Set<string>();
+    const seenAgents = new Set<string>();
+    for (const model of targetModels) {
+      const refs = modelReferences.get(model.id);
+      if (!refs) continue;
+      for (const ref of refs.sessions) {
+        if (!seenSessions.has(ref.id)) {
+          seenSessions.add(ref.id);
+          sessions.push(ref);
+        }
+      }
+      for (const ref of refs.agents) {
+        if (!seenAgents.has(ref.id)) {
+          seenAgents.add(ref.id);
+          agents.push(ref);
+        }
+      }
+    }
+    return { sessions, agents };
+  }, [deleteTarget, models, modelReferences]);
 
   useEffect(() => {
     setSelectedModelId((current) =>
@@ -293,6 +394,7 @@ export default function ModelsPage() {
   const deleteProviderMutation = useMutation({
     mutationFn: (providerId: string) => deleteModelProvider(providerId),
     onSuccess: async (_result, providerId) => {
+      setDeleteTarget(null);
       const nextProviderId = providers.find((provider) => provider.id !== providerId)?.id || "";
       setSelectedProviderId(nextProviderId);
       setSelectedModelId("");
@@ -336,6 +438,7 @@ export default function ModelsPage() {
   const deleteCredentialMutation = useMutation({
     mutationFn: (credentialId: string) => deleteProviderCredential(selectedProviderId, credentialId),
     onSuccess: async (_result, credentialId) => {
+      setDeleteTarget(null);
       const nextCredentialId = providerCredentials.find((credential) => credential.id !== credentialId)?.id || "";
       setSelectedCredentialId(nextCredentialId);
       setCredentialForm(emptyCredential);
@@ -384,6 +487,7 @@ export default function ModelsPage() {
   const deleteModelMutation = useMutation({
     mutationFn: (modelId: string) => deleteProviderModel(selectedProviderId, modelId),
     onSuccess: async (_result, modelId) => {
+      setDeleteTarget(null);
       const nextModelId = providerModels.find((model) => model.id !== modelId)?.id || "";
       setSelectedModelId(nextModelId);
       setModelForm(nextModelId ? modelForm : emptyModel);
@@ -400,6 +504,26 @@ export default function ModelsPage() {
       await refreshProviders();
     },
   });
+
+  function openDeleteDialog(target: DeleteTarget) {
+    setDeleteTarget(target);
+  }
+
+  function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    if (deleteTarget.kind === "provider") {
+      deleteProviderMutation.mutate(deleteTarget.providerId);
+    } else if (deleteTarget.kind === "model") {
+      deleteModelMutation.mutate(deleteTarget.modelId);
+    } else {
+      deleteCredentialMutation.mutate(deleteTarget.credentialId);
+    }
+  }
+
+  const anyDeletePending =
+    deleteProviderMutation.isPending ||
+    deleteModelMutation.isPending ||
+    deleteCredentialMutation.isPending;
 
   const syncModelsMutation = useMutation({
     mutationFn: () => {
@@ -519,14 +643,25 @@ export default function ModelsPage() {
 
       {notice && (
         <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-          <CheckCircle2 className="size-4" />
-          {notice}
+          <CheckCircle2 className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1">{notice}</span>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="size-6 shrink-0 text-current"
+            aria-label={t("common.close")}
+            onClick={() => setNotice(null)}
+          >
+            <X className="size-4" />
+          </Button>
         </div>
       )}
 
       {currentError instanceof Error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {currentError.message}
+        <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+          <span className="min-w-0 flex-1">{currentError.message}</span>
         </div>
       )}
 
@@ -534,17 +669,14 @@ export default function ModelsPage() {
         <ProviderColumn
           providers={filteredProviders}
           providerCount={providers.length}
+          modelCounts={modelCountsByProvider}
           queryText={providerQueryText}
           selectedProviderId={selectedProviderId}
           isLoading={providerQuery.isLoading || catalogQuery.isLoading}
           isDeleting={deleteProviderMutation.isPending}
           onQueryTextChange={setProviderQueryText}
           onSelectProvider={setSelectedProviderId}
-          onDeleteProvider={(providerId) => {
-            if (window.confirm(t("models.deleteProviderConfirm"))) {
-              deleteProviderMutation.mutate(providerId);
-            }
-          }}
+          onDeleteProvider={(providerId) => openDeleteDialog({ kind: "provider", providerId })}
           t={t}
         />
 
@@ -591,11 +723,7 @@ export default function ModelsPage() {
                   modelCount={providerModels.length}
                   credentialCount={providerCredentials.length}
                   isDeleting={deleteProviderMutation.isPending}
-                  onDelete={() => {
-                    if (window.confirm(t("models.deleteProviderConfirm"))) {
-                      deleteProviderMutation.mutate(selectedProvider.id);
-                    }
-                  }}
+                  onDelete={() => openDeleteDialog({ kind: "provider", providerId: selectedProvider.id })}
                   t={t}
                 />
               ) : (
@@ -690,11 +818,7 @@ export default function ModelsPage() {
                 credentials={providerCredentials}
                 selectedCredentialId={selectedCredentialId}
                 onSelectCredential={setSelectedCredentialId}
-                onDeleteCredential={(credentialId) => {
-                  if (window.confirm(t("models.deleteCredentialConfirm"))) {
-                    deleteCredentialMutation.mutate(credentialId);
-                  }
-                }}
+                onDeleteCredential={(credentialId) => openDeleteDialog({ kind: "credential", credentialId })}
                 isDeleting={deleteCredentialMutation.isPending}
                 t={t}
               />
@@ -772,14 +896,11 @@ export default function ModelsPage() {
               </div>
               <ModelProfileTable
                 models={providerModels}
+                references={modelReferences}
                 selectedModelId={selectedModelId}
                 onSelectModel={setSelectedModelId}
                 onSetDefault={(modelId) => setDefaultModelMutation.mutate(modelId)}
-                onDeleteModel={(modelId) => {
-                  if (window.confirm(t("models.deleteModelConfirm"))) {
-                    deleteModelMutation.mutate(modelId);
-                  }
-                }}
+                onDeleteModel={(modelId) => openDeleteDialog({ kind: "model", modelId })}
                 isSettingDefault={setDefaultModelMutation.isPending}
                 isDeleting={deleteModelMutation.isPending}
                 t={t}
@@ -838,6 +959,18 @@ export default function ModelsPage() {
         onSubmit={submitPresetSetup}
         t={t}
       />
+      <DeleteConfirmDialog
+        target={deleteTarget}
+        references={deleteTargetReferences}
+        isDeleting={anyDeletePending}
+        onOpenChange={(open) => {
+          if (!open && !anyDeletePending) {
+            setDeleteTarget(null);
+          }
+        }}
+        onConfirm={handleConfirmDelete}
+        t={t}
+      />
     </div>
   );
 }
@@ -845,6 +978,7 @@ export default function ModelsPage() {
 interface ProviderColumnProps {
   providers: ProviderProfile[];
   providerCount: number;
+  modelCounts: Map<string, number>;
   queryText: string;
   selectedProviderId: string;
   isLoading: boolean;
@@ -858,6 +992,7 @@ interface ProviderColumnProps {
 function ProviderColumn({
   providers,
   providerCount,
+  modelCounts,
   queryText,
   selectedProviderId,
   isLoading,
@@ -910,7 +1045,16 @@ function ProviderColumn({
                   className="min-w-0 flex-1 text-left"
                   onClick={() => onSelectProvider(provider.id)}
                 >
-                  <span className="block font-medium">{provider.name}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate font-medium">{provider.name}</span>
+                    <Badge
+                      variant="outline"
+                      title={t("models.modelsWorkspace")}
+                      className="shrink-0 text-[10px]"
+                    >
+                      {modelCounts.get(provider.id) ?? 0} {t("models.modelUnit")}
+                    </Badge>
+                  </span>
                   <span className="block truncate text-xs text-muted-foreground">{provider.baseUrl ?? provider.providerKey}</span>
                 </button>
                 <Button
@@ -1233,6 +1377,151 @@ function ProviderSetupDialog({
   );
 }
 
+function DeleteConfirmDialog({
+  target,
+  references,
+  isDeleting,
+  onOpenChange,
+  onConfirm,
+  t,
+}: {
+  target: DeleteTarget | null;
+  references: ModelReferenceInfo;
+  isDeleting: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+  t: (key: any) => string;
+}) {
+  const blocked = references.sessions.length > 0 || references.agents.length > 0;
+  const title =
+    target?.kind === "model"
+      ? t("models.deleteModelTitle")
+      : target?.kind === "credential"
+        ? t("models.deleteCredentialTitle")
+        : t("models.deleteProviderTitle");
+  const description =
+    target?.kind === "model"
+      ? t("models.deleteModelWarning")
+      : target?.kind === "credential"
+        ? t("models.deleteCredentialConfirm")
+        : t("models.deleteProviderWarning");
+  return (
+    <Dialog
+      open={target !== null}
+      onOpenChange={(open) => {
+        if (!open && !isDeleting) onOpenChange(false);
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            {blocked ? (
+              <TriangleAlert className="size-5 shrink-0 text-amber-500" />
+            ) : (
+              <Trash2 className="size-5 shrink-0 text-destructive" />
+            )}
+            {blocked ? t("models.deleteBlockedTitle") : title}
+          </DialogTitle>
+          <DialogDescription>{blocked ? t("models.deleteBlockedReferenceHint") : description}</DialogDescription>
+        </DialogHeader>
+
+        {blocked ? (
+          <div className="space-y-3">
+            <div className="max-h-56 space-y-2 overflow-y-auto rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+              {references.sessions.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <Layers3 className="size-3.5" />
+                    {t("models.referencedSessions")}（{references.sessions.length}）
+                  </div>
+                  {references.sessions.slice(0, 12).map((item) => (
+                    <ReferenceRow
+                      key={item.id}
+                      name={item.name}
+                      status={item.status}
+                      kindLabel={t("models.referencedSessions")}
+                      href={`/sessions/${item.id}`}
+                      linkLabel={t("models.viewSession")}
+                    />
+                  ))}
+                </div>
+              )}
+              {references.agents.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <Layers3 className="size-3.5" />
+                    {t("models.referencedAgents")}（{references.agents.length}）
+                  </div>
+                  {references.agents.slice(0, 12).map((item) => (
+                    <ReferenceRow
+                      key={item.id}
+                      name={item.name}
+                      status={item.status}
+                      kindLabel={t("models.referencedAgents")}
+                      href="/agents"
+                      linkLabel={t("models.viewAgents")}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">{t("models.deleteBlockedHint")}</p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
+            <CheckCircle2 className="size-4 shrink-0" />
+            {t("models.referencesSafe")}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={isDeleting} onClick={() => onOpenChange(false)}>
+            {t("common.cancel")}
+          </Button>
+          <Button type="button" variant="destructive" disabled={blocked || isDeleting} onClick={onConfirm}>
+            <Trash2 className="size-4" />
+            {isDeleting ? t("models.deleting") : t("common.delete")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ReferenceRow({
+  name,
+  status,
+  kindLabel,
+  href,
+  linkLabel,
+}: {
+  name: string;
+  status: string;
+  kindLabel: string;
+  href: string;
+  linkLabel: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1.5 text-sm">
+      <div className="flex min-w-0 items-center gap-2">
+        <Badge variant="secondary" className="shrink-0">{kindLabel}</Badge>
+        <span className="truncate font-medium">{name}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">{status}</span>
+      </div>
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(event) => event.stopPropagation()}
+        className="inline-flex shrink-0 items-center gap-1 text-xs text-primary hover:underline"
+      >
+        {linkLabel}
+        <ExternalLink className="size-3" />
+      </a>
+    </div>
+  );
+}
+
 function adapterLabel(adapter: ProviderSupportedAdapter | ProviderApplyAdapter): string {
   if (adapter === "claude") return "Claude Code";
   if (adapter === "opencode") return "OpenCode";
@@ -1521,8 +1810,9 @@ function CredentialTable({ credentials, selectedCredentialId, onSelectCredential
   );
 }
 
-function ModelProfileTable({ models, selectedModelId, onSelectModel, onSetDefault, onDeleteModel, isSettingDefault, isDeleting, t }: {
+function ModelProfileTable({ models, references, selectedModelId, onSelectModel, onSetDefault, onDeleteModel, isSettingDefault, isDeleting, t }: {
   models: ModelProfile[];
+  references: Map<string, ModelReferenceInfo>;
   selectedModelId: string;
   onSelectModel: (modelId: string) => void;
   onSetDefault: (modelId: string) => void;
@@ -1543,14 +1833,29 @@ function ModelProfileTable({ models, selectedModelId, onSelectModel, onSetDefaul
         </TableRow>
       </TableHeader>
       <TableBody>
-        {models.map((model) => (
+        {models.map((model) => {
+          const refs = references.get(model.id);
+          const referenceCount = (refs?.sessions.length ?? 0) + (refs?.agents.length ?? 0);
+          return (
           <TableRow
             key={model.id}
             className={model.id === selectedModelId ? "bg-muted/50" : ""}
             onClick={() => onSelectModel(model.id)}
           >
             <TableCell className="font-medium">
-              {model.name} {model.isDefault && <Badge className="ml-2">{t("models.default")}</Badge>}
+              <span className="flex flex-wrap items-center gap-1">
+                <span className="truncate">{model.name}</span>
+                {model.isDefault && <Badge className="ml-1 shrink-0">{t("models.default")}</Badge>}
+                {referenceCount > 0 && (
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 border-amber-500/40 text-amber-600 dark:text-amber-400"
+                    title={t("models.deleteBlockedReferenceHint")}
+                  >
+                    {t("models.referencedModelBadge").replace("{count}", String(referenceCount))}
+                  </Badge>
+                )}
+              </span>
             </TableCell>
             <TableCell className="font-mono text-xs">{model.modelId}</TableCell>
             <TableCell>
@@ -1583,7 +1888,7 @@ function ModelProfileTable({ models, selectedModelId, onSelectModel, onSetDefaul
                   variant="ghost"
                   className="size-8 text-muted-foreground hover:text-destructive"
                   disabled={isDeleting}
-                  title={t("models.deleteModel")}
+                  title={referenceCount > 0 ? t("models.deleteBlockedTitle") : t("models.deleteModel")}
                   aria-label={t("models.deleteModel")}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -1595,7 +1900,8 @@ function ModelProfileTable({ models, selectedModelId, onSelectModel, onSetDefaul
               </div>
             </TableCell>
           </TableRow>
-        ))}
+          );
+        })}
       </TableBody>
     </Table>
   );

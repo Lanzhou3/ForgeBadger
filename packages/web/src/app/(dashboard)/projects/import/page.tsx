@@ -37,7 +37,7 @@ type PathValues = z.infer<typeof pathSchema>;
 
 const confirmSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  aiTool: z.enum(["claude", "opencode", "codex"]),
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]),
   templateId: z.string().min(1, "Template is required"),
 });
 
@@ -274,6 +274,7 @@ export default function ImportProjectPage() {
                           <option value="claude">Claude Code</option>
                           <option value="opencode">OpenCode</option>
                           <option value="codex">Codex CLI</option>
+                          <option value="kimi">Kimi Code</option>
                         </select>
                       </FormControl>
                       <FormMessage />

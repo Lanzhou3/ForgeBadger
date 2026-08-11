@@ -125,7 +125,7 @@ export interface ProjectManagerStarterPack {
   id: string;
   name: string;
   description: string;
-  recommendedAdapter: "claude" | "opencode" | "codex";
+  recommendedAdapter: "claude" | "opencode" | "codex" | "kimi";
   promptFrame: string;
   acceptanceChecklist: string[];
   verificationGuidance: string[];
@@ -269,21 +269,6 @@ export interface TemplateVersion extends TemplatePackage {
   templateId: string;
   action: string;
   createdAt: string;
-}
-
-export interface TemplateFromProjectInput {
-  projectId: string;
-  name: string;
-  description?: string;
-  version?: string;
-  visibility?: "private" | "shared" | "admin";
-  filePaths?: string[];
-}
-
-export interface TemplateFromProjectPreview {
-  project: Pick<Project, "id" | "name" | "path">;
-  files: Array<TemplateFile & { sizeBytes: number }>;
-  totalBytes: number;
 }
 
 export interface Session {
@@ -1048,7 +1033,7 @@ export interface AiConfigForm {
 }
 
 export interface AiConfigSnapshot {
-  adapter: "claude" | "opencode" | "codex" | string;
+  adapter: "claude" | "opencode" | "codex" | "kimi" | string;
   projectRoot: string;
   files: AiConfigFile[];
   forms: AiConfigForm[];
@@ -1123,7 +1108,7 @@ export interface UsageRate {
 }
 
 export interface AdapterDiscovery {
-  id: "claude" | "opencode" | "codex";
+  id: "claude" | "opencode" | "codex" | "kimi";
   label: string;
   command: string;
   supportLevel: "supported" | "prototype";
@@ -1667,6 +1652,7 @@ export async function createGateASession(cwd: string): Promise<GateASession> {
 export function defaultTemplateForAiTool(aiTool?: string | null): string {
   if (aiTool === "opencode") return "builtin-opencode";
   if (aiTool === "codex") return "builtin-codex";
+  if (aiTool === "kimi") return "builtin-kimi";
   return "builtin-claude-code";
 }
 
@@ -1725,6 +1711,142 @@ export async function getProjectAiConfig(id: string): Promise<AiConfigSnapshot> 
 export async function getGlobalAiConfig(id: string): Promise<AiConfigSnapshot> {
   return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/ai-config/global`) as Promise<AiConfigSnapshot>;
 }
+
+// CLI global config (per-CLI config files such as ~/.kimi-code/config.toml)
+export interface CliConfigFileEntry {
+  relativePath: string;
+  fileType: string;
+  exists: boolean;
+  content: string;
+  redacted: boolean;
+  sizeBytes: number;
+}
+
+export interface CliProviderEntry {
+  id: string;
+  name: string;
+  protocol: string;
+  baseUrl: string;
+  hasApiKey: boolean;
+  envKey?: string;
+  isActive: boolean;
+}
+
+export interface CliModelEntry {
+  alias: string;
+  provider: string;
+  modelId: string;
+}
+
+export interface CliConfigSnapshot {
+  adapter: RuntimeAdapterId;
+  configRoot: string;
+  configFile: string;
+  files: CliConfigFileEntry[];
+  providers: CliProviderEntry[];
+  models: CliModelEntry[];
+  defaultModel: string;
+}
+
+export interface CliProviderInput {
+  name?: string;
+  protocol?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  envKey?: string;
+}
+
+function cliConfigPath(adapter: string, suffix = ""): string {
+  return `/api/v1/cli-config/${encodeURIComponent(adapter)}${suffix}`;
+}
+
+export async function getCliConfig(adapter: RuntimeAdapterId): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter));
+  return snapshot;
+}
+
+export async function getCliConfigFile(
+  adapter: RuntimeAdapterId,
+  path: string,
+  reveal: boolean
+): Promise<CliConfigFileEntry> {
+  const searchParams = new URLSearchParams({ path });
+  if (reveal) searchParams.set("reveal", "1");
+  const { file } = await fetchJson<{ file: CliConfigFileEntry }>(
+    `${cliConfigPath(adapter, "/file")}?${searchParams.toString()}`
+  );
+  return file;
+}
+
+export async function writeCliConfigFile(
+  adapter: RuntimeAdapterId,
+  path: string,
+  content: string
+): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter, "/file"), {
+    method: "PUT",
+    body: JSON.stringify({ path, content }),
+  });
+  return snapshot;
+}
+
+export async function upsertCliProvider(
+  adapter: RuntimeAdapterId,
+  providerId: string,
+  input: CliProviderInput
+): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
+    cliConfigPath(adapter, `/providers/${encodeURIComponent(providerId)}`),
+    { method: "PUT", body: JSON.stringify(input) }
+  );
+  return snapshot;
+}
+
+export async function removeCliProvider(
+  adapter: RuntimeAdapterId,
+  providerId: string
+): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
+    cliConfigPath(adapter, `/providers/${encodeURIComponent(providerId)}`),
+    { method: "DELETE" }
+  );
+  return snapshot;
+}
+
+export async function upsertCliModel(
+  adapter: RuntimeAdapterId,
+  input: { alias: string; provider: string; modelId: string }
+): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter, "/models"), {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+  return snapshot;
+}
+
+export async function removeCliModel(
+  adapter: RuntimeAdapterId,
+  alias: string
+): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter, "/models"), {
+    method: "DELETE",
+    body: JSON.stringify({ alias }),
+  });
+  return snapshot;
+}
+
+export async function setCliDefaultModel(
+  adapter: RuntimeAdapterId,
+  model: string,
+  providerId?: string
+): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
+    cliConfigPath(adapter, "/default-model"),
+    { method: "PUT", body: JSON.stringify(providerId ? { model, providerId } : { model }) }
+  );
+  return snapshot;
+}
+
 
 export async function getProjectWorkspaceTree(
   id: string,
@@ -2541,28 +2663,6 @@ export async function getTemplate(id: string): Promise<{ template: Template }> {
 
 export async function createTemplate(data: TemplateInput): Promise<{ template: Template }> {
   return fetchJson("/api/v1/templates", {
-    method: "POST",
-    body: JSON.stringify(data),
-  }) as Promise<{ template: Template }>;
-}
-
-export async function previewTemplateFromProject(
-  projectId: string,
-  filePaths?: string[]
-): Promise<TemplateFromProjectPreview> {
-  return fetchJson("/api/v1/templates/from-project/preview", {
-    method: "POST",
-    body: JSON.stringify({
-      projectId,
-      ...(filePaths && filePaths.length > 0 ? { filePaths } : {}),
-    }),
-  }) as Promise<TemplateFromProjectPreview>;
-}
-
-export async function createTemplateFromProject(
-  data: TemplateFromProjectInput
-): Promise<{ template: Template }> {
-  return fetchJson("/api/v1/templates/from-project", {
     method: "POST",
     body: JSON.stringify(data),
   }) as Promise<{ template: Template }>;

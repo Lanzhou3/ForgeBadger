@@ -14,7 +14,6 @@ import {
   createCopilotConversation,
   createCopilotConversationMessage,
   createCopilotRun,
-  createTemplateFromProject,
   createSkill,
   createModel,
   createTemplate,
@@ -97,7 +96,6 @@ import {
   previewConfig,
   previewConfigSync,
   previewSkillSource,
-  previewTemplateFromProject,
   rotateApiKey,
   rejectCopilotPendingAction,
   markAllNotificationsRead,
@@ -1579,40 +1577,6 @@ describe("api client", () => {
       7,
       "http://127.0.0.1:48731/api/v1/templates/template-1/versions",
       expect.objectContaining({ headers: expect.any(Object) })
-    );
-  });
-
-  it("creates templates from existing project config through REST", async () => {
-    await previewTemplateFromProject("project-1");
-    await createTemplateFromProject({
-      projectId: "project-1",
-      name: "Extracted",
-      description: "From project config",
-      version: "1.0.0",
-      filePaths: [".claude/CLAUDE.md"],
-    });
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:48731/api/v1/templates/from-project/preview",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ projectId: "project-1" }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/templates/from-project",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          projectId: "project-1",
-          name: "Extracted",
-          description: "From project config",
-          version: "1.0.0",
-          filePaths: [".claude/CLAUDE.md"],
-        }),
-      })
     );
   });
 

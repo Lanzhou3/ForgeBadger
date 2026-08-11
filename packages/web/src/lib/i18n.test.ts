@@ -69,6 +69,13 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "models.deleteProviderInlineLabel")).toBe("删除服务商");
     expect(getTranslation("zh-TW", "models.deleteProviderConfirm")).toContain("供應商");
     expect(getTranslation("en", "models.codexOfficialDocs")).toContain("OpenAI Codex docs");
+    expect(getTranslation("zh-CN", "models.deleteBlockedTitle")).toBe("暂时无法删除");
+    expect(getTranslation("zh-TW", "models.deleteBlockedTitle")).toBe("暫時無法刪除");
+    expect(getTranslation("en", "models.deleteBlockedTitle")).toBe("Cannot delete yet");
+    expect(getTranslation("zh-CN", "models.referencesSafe")).toContain("安全删除");
+    expect(getTranslation("zh-TW", "models.referencedSessions")).toBe("會話");
+    expect(getTranslation("en", "models.referencedSessions")).toBe("Sessions");
+    expect(getTranslation("en", "models.referencedModelBadge")).toContain("{count}");
     expect(getTranslation("zh-CN", "codexAppServer.title")).toBe("Codex 后台任务");
     expect(getTranslation("zh-CN", "codexAppServer.capabilityState")).toBe("能力状态");
     expect(getTranslation("zh-CN", "codexAppServer.recentActivity")).toBe("最近活动");

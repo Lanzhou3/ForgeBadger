@@ -30,7 +30,7 @@ const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
   path: z.string().min(1, "Path is required"),
   description: z.string().optional(),
-  aiTool: z.enum(["claude", "opencode", "codex"]),
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]),
   templateId: z.string().min(1, "Template is required"),
 });
 
@@ -132,6 +132,7 @@ export default function NewProjectPage() {
                         <option value="claude">Claude Code</option>
                         <option value="opencode">OpenCode</option>
                         <option value="codex">Codex CLI</option>
+                        <option value="kimi">Kimi Code</option>
                       </select>
                     </FormControl>
                     <FormMessage />

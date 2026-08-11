@@ -2,7 +2,7 @@
 
 import { type FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Download, Eye, FileCode2, PackagePlus, Plus, RotateCcw, Save, Trash2, Upload } from "lucide-react";
+import { ChevronDown, Copy, Download, FileCode2, PackagePlus, Plus, RotateCcw, Save, Trash2, Upload } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,18 +12,14 @@ import { Label } from "@/components/ui/label";
 import {
   cloneTemplate,
   createTemplate,
-  createTemplateFromProject,
   deleteTemplate,
   exportTemplate,
   getTemplate,
   importTemplate,
   installCatalogTemplate,
   listCatalogItems,
-  listProjects,
   listTemplates,
   listTemplateVersions,
-  previewTemplateFromProject,
-  type TemplateFromProjectPreview,
   restoreTemplateVersion,
   type TemplatePackage,
   updateTemplate,
@@ -51,11 +47,6 @@ const defaultTemplateContent = [
   "",
 ].join("\n");
 
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  return `${(bytes / 1024).toFixed(1)} KB`;
-}
-
 export default function TemplatesPage() {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -70,10 +61,7 @@ export default function TemplatesPage() {
   const [editContent, setEditContent] = useState(defaultTemplateContent);
   const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>("all");
   const [templatePackageText, setTemplatePackageText] = useState("");
-  const [sourceProjectId, setSourceProjectId] = useState("");
-  const [sourceTemplateName, setSourceTemplateName] = useState("");
-  const [sourceTemplateDescription, setSourceTemplateDescription] = useState("");
-  const [sourcePreview, setSourcePreview] = useState<TemplateFromProjectPreview | null>(null);
+  const [catalogExpanded, setCatalogExpanded] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
@@ -83,12 +71,6 @@ export default function TemplatesPage() {
 
   const templates = data?.templates ?? [];
   const filteredTemplates = filterByVisibility(templates, visibilityFilter);
-  const { data: projectsData, isLoading: projectsLoading } = useQuery({
-    queryKey: ["projects"],
-    queryFn: listProjects,
-  });
-  const projects = projectsData?.projects ?? [];
-  const sourceProject = projects.find((project) => project.id === sourceProjectId);
   const { data: catalogItemsData } = useQuery({
     queryKey: ["catalog-items"],
     queryFn: listCatalogItems,
@@ -194,48 +176,6 @@ export default function TemplatesPage() {
     },
   });
 
-  const previewFromProjectMutation = useMutation({
-    mutationFn: () => {
-      if (!sourceProjectId) {
-        throw new Error("Project is required");
-      }
-      return previewTemplateFromProject(sourceProjectId);
-    },
-    onSuccess: (preview) => {
-      setNotice(null);
-      setSourcePreview(preview);
-      if (!sourceTemplateName.trim()) {
-        setSourceTemplateName(`${preview.project.name} Template`);
-      }
-    },
-  });
-
-  const createFromProjectMutation = useMutation({
-    mutationFn: () => {
-      if (!sourceProjectId) {
-        throw new Error("Project is required");
-      }
-      if (!sourcePreview || sourcePreview.project.id !== sourceProjectId) {
-        throw new Error("Preview is required");
-      }
-      return createTemplateFromProject({
-        projectId: sourceProjectId,
-        name: sourceTemplateName.trim() || `${sourceProject?.name ?? "Project"} Template`,
-        ...(sourceTemplateDescription.trim() ? { description: sourceTemplateDescription.trim() } : {}),
-        filePaths: sourcePreview.files.map((file) => file.filePath),
-      });
-    },
-    onSuccess: async ({ template }) => {
-      setNotice(t("templates.createdFromProject"));
-      setSelectedTemplateId(template.id);
-      setEditName(template.name);
-      setEditDescription(template.description ?? "");
-      setEditVisibility(normalizeVisibility(template.visibility));
-      setSourcePreview(null);
-      await queryClient.invalidateQueries({ queryKey: ["templates"] });
-    },
-  });
-
   const installCatalogMutation = useMutation({
     mutationFn: installCatalogTemplate,
     onSuccess: async ({ template }) => {
@@ -279,15 +219,6 @@ export default function TemplatesPage() {
     setNotice(null);
   }
 
-  function selectSourceProject(projectId: string) {
-    setSourceProjectId(projectId);
-    setSourcePreview(null);
-    const project = projects.find((current) => current.id === projectId);
-    if (project && !sourceTemplateName.trim()) {
-      setSourceTemplateName(`${project.name} Template`);
-    }
-  }
-
   function syncSelectedFile() {
     const file = selectedDetails?.template.files?.find((current) => current.filePath === editFilePath)
       ?? selectedDetails?.template.files?.[0];
@@ -303,8 +234,6 @@ export default function TemplatesPage() {
     deleteMutation.error ??
     exportMutation.error ??
     importMutation.error ??
-    previewFromProjectMutation.error ??
-    createFromProjectMutation.error ??
     installCatalogMutation.error ??
     restoreMutation.error;
 
@@ -378,112 +307,26 @@ export default function TemplatesPage() {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Eye className="size-4" />
-                {t("templates.createFromProject")}
-              </CardTitle>
-              <CardDescription>{t("templates.createFromProjectDescription")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-2">
-                <Label htmlFor="source-project">{t("templates.sourceProject")}</Label>
-                <select
-                  id="source-project"
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  value={sourceProjectId}
-                  disabled={projectsLoading}
-                  onChange={(event) => selectSourceProject(event.target.value)}
-                >
-                  <option value="">{t("templates.sourceProjectPlaceholder")}</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="source-template-name">{t("templates.sourceTemplateName")}</Label>
-                <Input
-                  id="source-template-name"
-                  value={sourceTemplateName}
-                  onChange={(event) => setSourceTemplateName(event.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="source-template-description">{t("templates.sourceTemplateDescription")}</Label>
-                <Input
-                  id="source-template-description"
-                  value={sourceTemplateDescription}
-                  onChange={(event) => setSourceTemplateDescription(event.target.value)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!sourceProjectId || previewFromProjectMutation.isPending}
-                  onClick={() => previewFromProjectMutation.mutate()}
-                >
-                  <Eye className="size-4" />
-                  {previewFromProjectMutation.isPending
-                    ? t("templates.previewing")
-                    : t("templates.previewExtracted")}
-                </Button>
-                <Button
-                  type="button"
-                  disabled={
-                    !sourceProjectId ||
-                    !sourcePreview ||
-                    sourcePreview.project.id !== sourceProjectId ||
-                    sourcePreview.files.length === 0 ||
-                    createFromProjectMutation.isPending
-                  }
-                  onClick={() => createFromProjectMutation.mutate()}
-                >
-                  <PackagePlus className="size-4" />
-                  {createFromProjectMutation.isPending
-                    ? t("templates.creatingFromProject")
-                    : t("templates.createFromProjectAction")}
-                </Button>
-              </div>
-              {sourcePreview && (
-                <div className="rounded-md border bg-background p-3 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{t("templates.extractedFiles")}</span>
-                    <Badge variant="outline">{formatBytes(sourcePreview.totalBytes)}</Badge>
-                  </div>
-                  {sourcePreview.files.length === 0 ? (
-                    <p className="mt-3 text-xs text-muted-foreground">{t("templates.noExtractedFiles")}</p>
-                  ) : (
-                    <div className="mt-3 max-h-40 space-y-2 overflow-auto pr-1">
-                      {sourcePreview.files.map((file) => (
-                        <div
-                          key={file.filePath}
-                          className="flex items-center justify-between gap-2 rounded-md border px-2 py-1 text-xs"
-                        >
-                          <span className="truncate font-mono">{file.filePath}</span>
-                          <span className="shrink-0 text-muted-foreground">{formatBytes(file.sizeBytes)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-2 px-6 pt-6 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              onClick={() => setCatalogExpanded((current) => !current)}
+              aria-expanded={catalogExpanded}
+              aria-label={t("templates.catalogInstall")}
+            >
+              <div className="flex items-center gap-2">
                 <PackagePlus className="size-4" />
-                {t("templates.catalogInstall")}
-              </CardTitle>
-              <CardDescription>{t("templates.catalogInstallDescription")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {catalogTemplates.length === 0 ? (
+                <span className="text-base font-semibold">{t("templates.catalogInstall")}</span>
+              </div>
+              <ChevronDown
+                className={`size-4 shrink-0 text-muted-foreground transition-transform ${
+                  catalogExpanded ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+            <CardContent className="space-y-2 pt-4">
+              <p className="text-sm text-muted-foreground">{t("templates.catalogInstallDescription")}</p>
+              {catalogExpanded && (catalogTemplates.length === 0 ? (
                 <div className="py-6 text-center text-sm text-muted-foreground">
                   {t("templates.catalogEmpty")}
                 </div>
@@ -515,7 +358,7 @@ export default function TemplatesPage() {
                     )}
                   </div>
                 ))
-              )}
+              ))}
             </CardContent>
           </Card>
 
