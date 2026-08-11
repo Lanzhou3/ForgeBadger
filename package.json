@@ -13,6 +13,7 @@
     "evidence:gates-validate": "node scripts/validate-external-evidence-gates.mjs",
     "openforge": "pnpm --filter @openforge/gateway openforge",
     "pack:npm": "pnpm --filter openforge pack --dry-run",
+    "postinstall": "node scripts/fix-node-pty-helper.mjs",
     "smoke:copilot-provider": "pnpm --dir packages/gateway exec tsx ../../scripts/smoke-copilot-provider.ts",
     "smoke:feishu-bot-live": "node scripts/smoke-feishu-bot-live.mjs",
     "smoke:feishu-bot-websocket": "node scripts/smoke-feishu-bot-websocket.mjs",
