@@ -4,7 +4,7 @@
 > 作者：毕方 🏗️
 > 状态：已确认（盘古拍板）
 > 评审前置：基于 PRD-v1.1-MVP.md + PRD-REVIEW-v1.1.md
-> 2026-04-26 补充：MVP-0 执行以 Claude Code 本地控制闭环和风险 Gate 为优先，详见 `docs/superpowers/specs/2026-04-26-mvp-scope-risk-gates-design.md`。
+> 2026-04-26 补充：MVP-0 执行以 Claude Code 本地控制闭环和风险 Gate 为优先，分层与风险 Gate 规则见下文「零点五、MVP-0 架构契约」与 `docs/PRD-v1.1-MVP.md` 的「零、MVP-0 硬范围」。
 
 ---
 

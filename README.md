@@ -190,7 +190,6 @@ prototype intentionally keeps prompt/turn input disabled for beta feedback.
 - [External evidence gates](docs/EXTERNAL-EVIDENCE-GATES.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
-- [Security notes](docs/SECURITY.md)
 - [Smoke test guide](docs/SMOKE-TEST.md)
 - [Release plan](docs/RELEASE-PLAN.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)

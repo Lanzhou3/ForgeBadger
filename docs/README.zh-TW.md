@@ -165,7 +165,7 @@ Codex Background Tasks 的發布驗收還需要在已安裝 Codex CLI 的主機�
 - [產品需求](PRD-v1.1-MVP.md)
 - [開發計畫](DEVELOPMENT-PLAN.md)
 - [API 參考](API.md)
-- [安全說明](SECURITY.md)
+- [安全說明](../SECURITY.md)
 - [冒煙測試指南](SMOKE-TEST.md)
 - [發布計畫](RELEASE-PLAN.md)
 - [疑難排解](TROUBLESHOOTING.md)

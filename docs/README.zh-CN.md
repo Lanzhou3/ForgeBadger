@@ -165,7 +165,7 @@ Codex Background Tasks 的发布验收还需要在已安装 Codex CLI 的主机�
 - [产品需求](PRD-v1.1-MVP.md)
 - [开发计划](DEVELOPMENT-PLAN.md)
 - [API 参考](API.md)
-- [安全说明](SECURITY.md)
+- [安全说明](../SECURITY.md)
 - [冒烟测试指南](SMOKE-TEST.md)
 - [发布计划](RELEASE-PLAN.md)
 - [故障排查](TROUBLESHOOTING.md)

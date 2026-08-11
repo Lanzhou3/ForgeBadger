@@ -2,7 +2,7 @@
 
 > 版本：v1.1 (MVP 收窄版) | 2026-04-23
 > 状态：架构已确认（Gateway + Web 控制台），等待开发排期
-> 2026-04-26 补充：首轮交付按 MVP-0/MVP-1 分层执行，详见 `docs/superpowers/specs/2026-04-26-mvp-scope-risk-gates-design.md`。
+> 2026-04-26 补充：首轮交付按 MVP-0/MVP-1 分层执行，详见 `docs/TECH-ARCHITECTURE.md` 的「零点五、MVP-0 架构契约」。
 
 ---
 

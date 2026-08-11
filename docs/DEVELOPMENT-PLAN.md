@@ -3,15 +3,16 @@
 > 版本：v1.1 | 2026-04-24
 > 修订人：朱雀 🛠️（基于三方评审结论 + 盘古拍板）
 > 制定人：毕方 🏗️
-> 状态：local-first MVP 已进入 beta feedback ready；Phase A/Phase B 验收证据已闭合，真实 Windows/WSL 验收仍保留平台 caveat
+> 状态：26 天 MVP 计划已执行完毕并进入长期维护；local-first MVP 已进入 beta feedback ready；Phase A/Phase B 验收证据已闭合，真实 Windows/WSL 验收仍保留平台 caveat
+> 归档说明：本文档中的历史补充日志可能引用当时拆分下达的任务清单文档（`docs/MVP-*-TASKS.md`）与早期阶段报告，这些文档已随对应里程碑完成归档/清理，不再单独保留；各里程碑的执行记录见 `.planning/milestones/`，当前状态见 `MEMORY.md` 与 `.planning/STATE.md`。
 > 基于文档：PRD-v1.1-MVP.md + PRD-REVIEW-v1.1.md + TECH-ARCHITECTURE.md
-> 2026-04-26 补充：执行时以 `docs/superpowers/specs/2026-04-26-mvp-scope-risk-gates-design.md` 的 MVP-0/MVP-1 分层和风险 Gate 为准。
-> 2026-04-29 补充：MVP-0 Gate D 已通过，验收证据见 `docs/reports/gate-d-mvp0-acceptance-2026-04-29.md`；MVP-1 任务列表见 `docs/MVP-1-TASKS.md`。
+> 2026-04-26 补充：执行时以 `docs/TECH-ARCHITECTURE.md` 的「零点五、MVP-0 架构契约」中 MVP-0/MVP-1 分层和风险 Gate 为准。
+> 2026-04-29 补充：MVP-0 Gate D 已通过，验收证据链条见 `docs/reports/post-beta-release-gates-2026-05-10.md`；MVP-1 任务列表见 `docs/MVP-1-TASKS.md`。
 > 2026-04-30 补充：MVP-2 任务列表见 `docs/MVP-2-TASKS.md`，通知中心、模板导入导出/版本历史、模型预设/分组、外部端点健康检查、Skill 来源管理、Claude Code 插件管理、OpenCode/Codex adapter 发现原型已完成。
 > 2026-05-02 补充：MVP-3 任务列表见 `docs/MVP-3-TASKS.md`；服务端通知持久化、跨设备同步、浏览器通知、Agent/Session 活动流和受门控的 Claude/OpenCode/Codex 多适配器启动已完成，下一步进入远程 Skill/插件市场、会话历史快照和使用统计。
 > 2026-05-02 补充：MVP-4 任务列表见 `docs/MVP-4-TASKS.md`；Claude Code 本地 Skill/插件命令发现与显式重扫、默认模板、权限通知 HTTP hook、插件物化、模板同步、角色可见性和审计可见性已完成。MVP-5 任务列表见 `docs/MVP-5-TASKS.md`；管理员成员/角色管理、Agent 快速创建模板、Skill 快速创建模板、项目配置合规报告、模板市场安装、CLI init 原型和 Agent 编排原型已完成。MVP-6 任务列表见 `docs/MVP-6-TASKS.md`；会话历史/快照 UI、使用统计 UI、远程 Skill/插件安装、共享治理 UI、终端效率、发布计划、CI/CD 计划、smoke checklist 和完成度审计已完成。MVP-6 审计发现的补齐项已进入并关闭于 `docs/MVP-7-TASKS.md`。发布相关文档见 `docs/RELEASE-PLAN.md`、`docs/CI-CD-PLAN.md`、`docs/SMOKE-TEST.md`。
 > 2026-05-02 补充：MVP-7 任务列表见 `docs/MVP-7-TASKS.md`；项目脚手架补齐、从项目创建模板、直接 Skill 来源安装加固、快照恢复与 Agent 活动过滤、local-first 角色模型 ADR、checked-in CI workflow、API/route smoke 与完成度审计重跑已完成。历史审计曾要求补真实浏览器终端与真实 Claude Code 权限提示 smoke；该缺口已在 2026-05-07 Phase A 验收中闭合。托管协作、云部署、计费、托管市场、自主远程执行、更完整插件 executable/MCP/LSP 执行能力均需另行架构评审。
-> 2026-05-05 补充：后续三周迭代已拆分为 `docs/MVP-8-TASKS.md`、`docs/MVP-9-TASKS.md`、`docs/MVP-10-TASKS.md`。MVP-8 聚焦浏览器终端与真实 Claude 权限提示验收证据、smoke harness 和回归门；MVP-9 在完成 MVP-8 release smoke 后推进 Codex app-server guarded control-plane prototype；MVP-10 聚焦 local-first release candidate、beta 反馈和最终验收。当前回归记录见 `docs/reports/regression-2026-05-05.md`。
+> 2026-05-05 补充：后续三周迭代已拆分为 `docs/MVP-8-TASKS.md`、`docs/MVP-9-TASKS.md`、`docs/MVP-10-TASKS.md`。MVP-8 聚焦浏览器终端与真实 Claude 权限提示验收证据、smoke harness 和回归门；MVP-9 在完成 MVP-8 release smoke 后推进 Codex app-server guarded control-plane prototype；MVP-10 聚焦 local-first release candidate、beta 反馈和最终验收。当前回归记录见 `docs/reports/regression-2026-05-06.md`。
 > 2026-05-06 补充：MVP-8 至 MVP-10 的代码与文档迭代已完成到 user-test ready 状态。新增 repeatable local smoke harness、Codex app-server Gateway 原型、local diagnostics export、npm package build/verify/smoke 记录和 release risk register。最新回归见 `docs/reports/regression-2026-05-06.md`，release-candidate 决策见 `docs/reports/release-candidate-2026-05-06.md`；真实浏览器终端与真实 Claude 权限提示 smoke 进入用户测试清单。
 > 2026-05-07 补充：Phase A release evidence 已由真实浏览器终端 smoke 和真实 Claude Code 权限提示 smoke 闭合；Phase B Codex app-server 进入 Gateway 协议集成推进，已补 `initialize`/`thread`/`turn` 路由、managed client、malformed frame 处理、notification activity normalization、Web guarded control-plane surface 和 turn rate limit。当前项目进度记忆见根目录 `MEMORY.md`。
 > 2026-05-10 补充：Phase B Codex Background Tasks 已作为 observable control-plane prototype 接受 beta feedback，Web 仍不开放 prompt/turn 输入，`/turn` 默认 403 且仅作为 feature-flag prototype。Provider SSOT 与 Codex subscription boundary 已完成回归，Windows/tmux/WSL 指引已落地；真实 Windows/WSL 主机 smoke 仍为平台 caveat。下一阶段 Phase C 聚焦首次试用、依赖失败态、诊断反馈、CI/release gate 自动化和平台验收闭环，不扩大 Codex turn 输入范围。

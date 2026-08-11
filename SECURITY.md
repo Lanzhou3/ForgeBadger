@@ -55,7 +55,7 @@ evidence fields instead.
 
 ## Security Model
 
-The detailed security model is in `docs/SECURITY.md`. Key invariants:
+This document describes the security model. Key invariants:
 
 - Gateway and Web stay separate.
 - Gateway owns filesystem, credential, WebSocket, and terminal-process

@@ -77,8 +77,8 @@ local users with role/status metadata. `PATCH` accepts:
 
 `role` is `admin` or `user`; `status` is `active` or `disabled`. Admins cannot
 demote or disable their own account. PRD-mentioned `editor` and `readonly`
-roles are intentionally out of scope for the local-first MVP; see
-`docs/ADR/ADR-005-local-role-model.md`.
+roles are intentionally out of scope for the local-first MVP; see the role
+model decision in `docs/TECH-ARCHITECTURE.md`（二、数据模型设计,`users` 表结构与注释）。
 
 ### Dashboard
 
@@ -1233,9 +1233,15 @@ timeout used by the check.
 - `GET /api/v1/model-providers`
 - `POST /api/v1/model-providers`
 - `PATCH /api/v1/model-providers/:id`
-- `DELETE /api/v1/model-providers/:id`
+- `DELETE /api/v1/model-providers/:id` — returns `409` when any of the
+  provider's models are still referenced by a session, agent, or default-model
+  setting; the provider and its models are left untouched in that case.
 - `GET /api/v1/model-providers/:id/models`
 - `POST /api/v1/model-providers/:id/models`
+- `PATCH /api/v1/model-providers/:id/models/:modelId`
+- `DELETE /api/v1/model-providers/:id/models/:modelId` — returns `409` when the
+  model profile is still referenced by a session, agent, or default-model
+  setting; the model row itself is left untouched in that case.
 - `POST /api/v1/model-providers/:id/models/sync`
 - `POST /api/v1/model-providers/:id/readiness`
 - `POST /api/v1/model-providers/:id/preview-apply`
@@ -1379,8 +1385,6 @@ The selected mode must be recorded on session launch. Silent fallback is forbidd
 - `GET /api/v1/templates/builtins`
 - `GET /api/v1/templates/:id`
 - `POST /api/v1/templates`
-- `POST /api/v1/templates/from-project/preview`
-- `POST /api/v1/templates/from-project`
 - `POST /api/v1/templates/:id/clone`
 - `PUT /api/v1/templates/:id`
 - `PUT /api/v1/templates/:id/files/*`
@@ -1388,6 +1392,9 @@ The selected mode must be recorded on session launch. Silent fallback is forbidd
 - `POST /api/v1/templates/import`
 - `GET /api/v1/templates/:id/versions`
 - `POST /api/v1/templates/:id/versions/:versionId/restore`
+- `GET /api/v1/templates/:id/usage`
+- `POST /api/v1/templates/:id/sync/preview`
+- `POST /api/v1/templates/:id/sync/apply`
 - `DELETE /api/v1/templates/:id`
 
 Built-in templates are read-only. Clone creates a tenant-owned custom template
@@ -1400,11 +1407,20 @@ and deletion remain owner-scoped.
 Version restore is owner-scoped, rejects built-in templates, snapshots the
 current custom template state as `template.restore`, then replaces metadata and
 files from the selected history record.
-Project-to-template extraction is owner-scoped through the selected project. It
-scans only `.claude`, `.opencode`, and `.codex` under the approved project root,
-rejects symlink/path escapes, and enforces file count plus content-size limits.
-The preview endpoint returns extracted files and total bytes; the create
-endpoint persists the accepted file set as a tenant-owned custom template.
+`usageCount` on template responses is derived in real time from the tenant's
+projects referencing the template (`COUNT(projects WHERE template_id)`) rather
+than a stored counter.
+`GET /api/v1/templates/:id/usage` returns the projects using a template with a
+per-project config status: `compliant`, `stale` (files differ from the
+template), or `missing` (no generated files).
+`POST /api/v1/templates/:id/sync/preview` dry-runs rendering the template for
+one or more projects (optional `projectIds`, max 20) and reports missing,
+identical, modified, and unsafe files per project without writing to disk.
+`POST /api/v1/templates/:id/sync/apply` writes the template files into the
+selected projects, applying per-project `decisions` (`skip`/`overwrite`) for
+conflicting paths; each project is applied independently and failures are
+reported per project. Results are recorded in the audit log and a
+`template.config_sync` activity.
 
 ### Agents
 
@@ -1565,10 +1581,11 @@ id, and bounded result details under `resourceType=copilot_run`.
 - `DELETE /api/v1/notifications`
 
 Notifications are tenant-scoped and persisted in SQLite. Gateway stores session
-lifecycle events and accepted Claude Code hook notifications before broadcasting
-them on `/ws/events`. The Web console uses these APIs to hydrate notification
-history after reload, persist read state, mark all notifications read, and clear
-the current user's notification list.
+lifecycle events and accepted AI CLI hook notifications (Claude Code HTTP hooks
+and the OpenCode permission-notify plugin) before broadcasting them on
+`/ws/events`. The Web console uses these APIs to hydrate notification history
+after reload, persist read state, mark all notifications read, and clear the
+current user's notification list.
 
 The built-in Claude Code template writes `.claude/settings.json` hooks for
 `PermissionRequest`, `PermissionDenied`, and `Notification(permission_prompt)`.
@@ -1638,12 +1655,18 @@ provider token billing accuracy from this endpoint.
 - `POST /api/v1/session-hooks/claude-notification`
 - `POST /api/v1/session-hooks/claude-notification/:sessionId`
 
-This unauthenticated endpoint is for OpenForge-generated Claude Code hooks. It
-requires `X-OpenForge-Session-Token` to match the session attach token and
-accepts either legacy `{ sessionId, event }` payloads or raw Claude Code hook
-JSON sent by Claude Code HTTP hooks. The session id may be supplied in the path
-or `X-OpenForge-Session-Id`. Accepted hook payloads emit a user-scoped
-`claude_notification` event on `/ws/events`.
+This unauthenticated endpoint is for OpenForge-generated AI CLI hooks: Claude
+Code HTTP hooks and the OpenCode permission-notify plugin
+(`.opencode/plugins/openforge-permission-notify.js`, materialized by the
+Gateway on OpenCode session create/restart). It requires
+`X-OpenForge-Session-Token` to match the session attach token and accepts
+either legacy `{ sessionId, event }` payloads or raw Claude Code hook JSON sent
+by Claude Code HTTP hooks / the OpenCode plugin. The session id may be supplied
+in the path or `X-OpenForge-Session-Id`. The payload may carry an optional
+`adapter` field (`"claude"` by default; the OpenCode plugin sends
+`adapter: "opencode"`) which brands the resulting notification title on the
+Web. Accepted hook payloads emit a user-scoped `claude_notification` event on
+`/ws/events`.
 
 ## 4. WebSocket Contract
 
