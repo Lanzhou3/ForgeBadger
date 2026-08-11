@@ -120,14 +120,16 @@ function skillConfigPath(name: string, adapter: AdapterId): string {
   return `${adapterConfigRoot(adapter)}/skills/${slug}/SKILL.md`;
 }
 
-function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" {
+function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" | ".kimi-code" {
   if (adapter === "opencode") return ".opencode";
   if (adapter === "codex") return ".codex";
+  if (adapter === "kimi") return ".kimi-code";
   return ".claude";
 }
 
 function adaptInstructionContent(content: string, adapter: AdapterId): string {
-  const adapterLabel = adapter === "opencode" ? "OpenCode" : "Codex";
+  const adapterLabel =
+    adapter === "opencode" ? "OpenCode" : adapter === "kimi" ? "Kimi Code" : "Codex";
   return content
     .replaceAll("CLAUDE.md", "AGENTS.md")
     .replaceAll("Claude Code", adapterLabel)

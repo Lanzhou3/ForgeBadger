@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { createRateLimiter } from "../middleware/rate-limit.js";
+import { isForeignKeyError } from "../lib/db-errors.js";
 import {
   ModelProviderRepository,
   type ModelProfile,
@@ -170,9 +171,21 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
   });
 
   router.delete("/:id", (req, res) => {
-    const deleted = repoFor(db, masterKey, req).deleteProviderProfile(req.params.id);
-    if (!deleted) {
-      res.status(404).json({ code: 1, message: "Provider not found" });
+    try {
+      const deleted = repoFor(db, masterKey, req).deleteProviderProfile(req.params.id);
+      if (!deleted) {
+        res.status(404).json({ code: 1, message: "Provider not found" });
+        return;
+      }
+    } catch (error) {
+      if (isForeignKeyError(error)) {
+        res.status(409).json({
+          code: 1,
+          message: "Provider models are still referenced by a session or agent and cannot be deleted"
+        });
+        return;
+      }
+      res.status(500).json({ code: 1, message: "Failed to delete provider" });
       return;
     }
     res.json({ code: 0, data: {}, message: "" });
@@ -340,7 +353,19 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       res.status(400).json({ code: 1, message: "Model does not belong to the selected provider" });
       return;
     }
-    repo.deleteModelProfile(model.id);
+    try {
+      repo.deleteModelProfile(model.id);
+    } catch (error) {
+      if (isForeignKeyError(error)) {
+        res.status(409).json({
+          code: 1,
+          message: "Model is still referenced by a session or agent and cannot be deleted"
+        });
+        return;
+      }
+      res.status(500).json({ code: 1, message: "Failed to delete model" });
+      return;
+    }
     res.json({ code: 0, data: {}, message: "" });
   });
 

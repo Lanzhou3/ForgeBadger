@@ -44,6 +44,15 @@ export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPl
         secretEnvNames: input.secretEnvNames ?? [],
         credentialMode: input.credentialMode
       };
+    case "kimi":
+      return {
+        command: "kimi",
+        args: modelArgs(input.adapter, input.model),
+        cwd: input.projectRoot,
+        env: input.env ?? {},
+        secretEnvNames: input.secretEnvNames ?? [],
+        credentialMode: input.credentialMode
+      };
   }
 }
 

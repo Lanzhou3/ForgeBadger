@@ -68,9 +68,10 @@ export interface TemplateVersionSnapshot extends TemplatePackage {
 }
 
 const BUILTIN_CLAUDE_TEMPLATE_ID = "builtin-claude-code";
-const BUILTIN_CLAUDE_TEMPLATE_VERSION = "2.1.0";
+const BUILTIN_CLAUDE_TEMPLATE_VERSION = "2.2.0";
 const BUILTIN_OPENCODE_TEMPLATE_ID = "builtin-opencode";
 const BUILTIN_CODEX_TEMPLATE_ID = "builtin-codex";
+const BUILTIN_KIMI_TEMPLATE_ID = "builtin-kimi";
 const BUILTIN_ADAPTER_TEMPLATE_VERSION = "1.0.0";
 
 function builtInClaudeTemplate(): typeof templates.$inferInsert {
@@ -174,18 +175,6 @@ function builtInClaudeFiles(): Array<typeof templateFiles.$inferInsert> {
       content: builtInPlanMd(),
       fileType: "markdown"
     },
-    {
-      templateId: BUILTIN_CLAUDE_TEMPLATE_ID,
-      filePath: "CHANGELOG.md",
-      content: builtInChangelogMd(),
-      fileType: "markdown"
-    },
-    {
-      templateId: BUILTIN_CLAUDE_TEMPLATE_ID,
-      filePath: "CONTRIBUTING.md",
-      content: builtInContributingMd(),
-      fileType: "markdown"
-    }
   ];
 }
 
@@ -287,6 +276,43 @@ function builtInCodexFiles(): Array<typeof templateFiles.$inferInsert> {
   ];
 }
 
+function builtInKimiTemplate(): typeof templates.$inferInsert {
+  return {
+    id: BUILTIN_KIMI_TEMPLATE_ID,
+    userId: null,
+    name: "Kimi Code",
+    description: "Built-in Kimi Code template with AGENTS.md and review agents",
+    version: BUILTIN_ADAPTER_TEMPLATE_VERSION,
+    isBuiltin: true,
+    visibility: "shared",
+    usageCount: 0,
+    status: "active"
+  };
+}
+
+function builtInKimiFiles(): Array<typeof templateFiles.$inferInsert> {
+  return [
+    {
+      templateId: BUILTIN_KIMI_TEMPLATE_ID,
+      filePath: "AGENTS.md",
+      content: builtInAdapterAgentsMd("Kimi Code"),
+      fileType: "markdown"
+    },
+    {
+      templateId: BUILTIN_KIMI_TEMPLATE_ID,
+      filePath: ".kimi-code/agents/code-reviewer.md",
+      content: builtInAdapterAgentMd("code-reviewer", "Review changes as a read-only reviewer. Prioritize correctness, security, tenant isolation, and test gaps.", false),
+      fileType: "markdown"
+    },
+    {
+      templateId: BUILTIN_KIMI_TEMPLATE_ID,
+      filePath: ".kimi-code/agents/planner.md",
+      content: builtInAdapterAgentMd("planner", "Create a concrete implementation plan with validation gates and rollback notes.", false),
+      fileType: "markdown"
+    }
+  ];
+}
+
 function builtInClaudeMd(): string {
   return [
     "# {{projectName}}",
@@ -297,33 +323,12 @@ function builtInClaudeMd(): string {
     "",
     "- Project root: `{{projectRoot}}`",
     "- Treat this file as shared project memory, not a scratchpad.",
-    "- CLAUDE.md is startup context, not an enforcement layer. Use settings for hard permission policy.",
     "- Keep it concise, concrete, and easy to verify. Target fewer than 200 lines per memory file.",
-      "- Put narrow or file-specific rules in `.claude/rules/` instead of growing this root file indefinitely.",
-    "- Use `@path/to/file.md` imports only for stable, high-value context that should load at session start.",
-    "- Run `/init` to let Claude propose project-specific memory improvements; set `CLAUDE_CODE_NEW_INIT=1` when you want the newer multi-phase setup for memory, Skills, and hooks.",
-    "",
-    "## What Belongs In This File",
-    "",
-    "- Keep commands Claude cannot reliably infer: install, typecheck, test, build, dev server, migration, and release commands.",
-    "- Keep project-specific architecture decisions, non-obvious constraints, safety boundaries, and repository etiquette.",
-    "- Keep coding and testing conventions that differ from common defaults.",
-    "- Keep durable gotchas that caused repeated mistakes or came from code review feedback.",
-    "- Keep environment quirks such as required variables, local ports, or tool versions when they affect normal work.",
-    "",
-    "## What To Move Elsewhere",
-    "",
-    "- Use Skills for multi-step procedures, repeatable workflows, long checklists, or task-specific playbooks.",
-    "- Use `.claude/rules/` for modular always-on or path-scoped policy that should stay separate from project memory.",
-    "- Use `@docs/...` imports for stable reference documents instead of pasting long API or product documentation here.",
-    "- Use `CLAUDE.local.md` or `@~/.claude/...` imports for personal paths, sandbox URLs, and private preferences.",
-    "- Remove anything Claude can discover by reading code, package manifests, or short project docs.",
+    "- Put narrow or file-specific rules in `.claude/rules/` instead of growing this root file indefinitely.",
     "",
     "## Instruction Priority",
     "",
-    "- Follow direct user instructions first.",
-    "- Then follow repository instructions in root `CLAUDE.md` and `.claude/rules/`.",
-    "- Then follow narrower path-scoped rules and task-specific Skills when they apply.",
+    "- Follow direct user instructions first, then this file and `.claude/rules/`.",
     "- If instructions conflict, pause and ask instead of guessing.",
     "",
     "## Common Commands",
@@ -342,92 +347,20 @@ function builtInClaudeMd(): string {
     "- Give Claude a way to verify every meaningful change: focused tests, typechecks, screenshots, command output, or explicit acceptance criteria.",
     "- Explore first, then plan, then code for multi-file or cross-module changes.",
     "- For a narrow bugfix, reproduce the symptom and patch the smallest responsible unit.",
-    "- Ask for concrete acceptance criteria when the task changes behavior or UI.",
     "- Prefer one focused change per commit; keep unrelated cleanup out of the diff.",
     "- When the user provides screenshots, logs, or failing commands, treat them as primary evidence.",
-    "- Manage context aggressively: stop broad reading once enough evidence exists, and move rarely used details into Skills or imported docs.",
-    "",
-    "## Context Management",
-    "",
-    "- Start by reading the smallest set of files that can answer the question.",
-    "- Prefer `rg` and targeted file reads over broad directory scans.",
-    "- Keep long command output out of the conversation unless the user asks for it.",
-    "- Move repeatable multi-step procedures into Skills, not always-loaded project memory.",
-    "- Use `/memory` when a durable project instruction should be edited during a Claude Code session.",
-    "- Use `/memory` to verify which CLAUDE.md, CLAUDE.local.md, rules, and auto-memory files actually loaded.",
-    "- Store large reference material in imported files or Skills; keep this memory useful at session start.",
-    "- Use `CLAUDE.local.md` for private per-worktree preferences and add it to `.gitignore`.",
-    "- Prefer `@~/.claude/<file>.md` imports for personal instructions that must follow you across worktrees.",
     "",
     "## Permissions And Safety",
     "",
     "- Use `/permissions` or project settings for durable allow/deny rules; do not rely on prose instructions for enforcement.",
     "- Use hooks for deterministic checks that must happen every time, such as formatting, audit capture, or notification forwarding.",
-    "- Use plugin packages when the same Skills, hooks, subagents, MCP servers, or LSP settings should travel together across projects.",
     "- Keep shared `.claude/settings.json` free of personal tokens, absolute local paths, and machine-specific URLs.",
-    "- Use `.claude/settings.local.json` for OpenForge session hooks and other machine-local runtime configuration.",
-    "- Official Claude Code references: memory (`https://code.claude.com/docs/en/memory`), settings (`https://code.claude.com/docs/en/settings`), hooks (`https://code.claude.com/docs/en/hooks`), best practices (`https://code.claude.com/docs/en/best-practices`).",
-    "",
-    "## Instruction Loading",
-    "",
-    "- Root `CLAUDE.md` is the shared project memory file Claude Code reads at startup.",
-    "- Claude loads ancestor `CLAUDE.md` and `CLAUDE.local.md` files from filesystem root down to the launch directory; closer instructions are read later.",
-    "- `CLAUDE.local.md` loads beside `CLAUDE.md`, is appended after the shared file at the same level, and must stay gitignored.",
-    "- Subdirectory `CLAUDE.md` and `CLAUDE.local.md` files load on demand when Claude reads files in those directories.",
-    "- If this repository also has `AGENTS.md`, keep one source of truth and import it from CLAUDE.md when appropriate.",
-    "- `.claude/settings.local.json` is local machine configuration and should not contain shared policy.",
-    "- Use `.claude/rules/*.md` for modular policy; rules without `paths` frontmatter load every session, while path-scoped rules load when Claude works with matching files.",
-    "- Use `.claude/skills/<skill-name>/SKILL.md` for repeatable workflows that should load only on demand or when Claude decides they are relevant.",
-    "- Use `.claude/commands/*.md` for legacy/custom slash commands; Claude Code now treats commands and Skills as the same invocation surface.",
-    "- Prefer concise Skill frontmatter: `name` when needed, a strong `description`, and optional invocation or version metadata.",
-    "- If Claude is launched with `--add-dir`, set `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` only when extra directory memory should load.",
-    "- If unrelated parent memories are being loaded in a monorepo, configure `claudeMdExcludes` in local settings.",
-    "",
-    "## Auto Memory",
-    "",
-    "- Auto Memory is machine-local and may store reusable project notes outside the repository.",
-    "- Claude loads only the first 200 lines or 25KB of auto-memory `MEMORY.md`; keep it as a concise index and move detailed notes into topic files.",
-    "- Use `/memory` to audit or edit auto memory. Disable it with `autoMemoryEnabled: false` or `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` only when local policy requires it.",
-    "",
-    "## AGENTS.md Compatibility",
-    "",
-    "- Claude Code reads `CLAUDE.md`; other coding agents may read `AGENTS.md`.",
-    "- When a repo already standardizes on `AGENTS.md`, prefer a small CLAUDE.md bridge such as `@AGENTS.md` plus Claude-specific notes.",
-    "- Do not duplicate large instruction sets across both files unless there is a clear ownership reason.",
-    "",
-    "## Skills And Rules",
-    "",
-    "- Project Skills live at `.claude/skills/<skill-name>/SKILL.md` with concise frontmatter and task-specific instructions.",
-    "- Keep this file for facts that should load every session; move repeatable procedures into Skills so they load only when relevant.",
-    "- Project rules live under `.claude/rules/`; use one topic per file and `paths:` frontmatter for file-specific guidance.",
-    "- User Skills live under `~/.claude/skills` or the directory pointed to by `CLAUDE_CONFIG_DIR`; user rules live under `~/.claude/rules`.",
-    "- Skill precedence is enterprise, then personal, then project. Plugin Skills use `plugin-name:skill-name` namespaces.",
-    "- Claude Code watches existing Skill directories for live edits; if a top-level Skill directory did not exist at session start, restart Claude Code.",
-    "- User commands may live under `~/.claude/commands`; plugin commands may live under a plugin root `commands/` directory.",
-    "- Plugin-provided Skills and commands are namespaced by plugin and may be loaded through `--plugin-dir`, the Claude plugin cache, or installed marketplaces.",
-    "- If a Skill or rule conflicts with direct user instructions or repository policy, stop and clarify.",
-    "",
-    "## Subagents MCP And Plugins",
-    "",
-    "- Use subagents for isolated investigation, review, or long context reads that would pollute the main conversation.",
-    "- Use MCP when Claude needs external systems such as GitHub, issue trackers, databases, browsers, or design tools.",
-    "- Use plugins to package reusable Skills, hooks, subagents, MCP/LSP configuration, and default settings across projects.",
-    "- Prefer a plugin over copy-pasting the same Skill/hook bundle into many repositories.",
-    "",
-    "## Claude Code Hooks And Notifications",
-    "",
-    "- OpenForge writes hooks into `.claude/settings.local.json` at session launch.",
-    "- `PermissionRequest`, `PermissionDenied`, and `Notification(permission_prompt)` use HTTP hooks that POST Claude Code's hook JSON directly to OpenForge with env-backed headers.",
-    "- Permission requests should appear in the OpenForge notification center and link back to the session terminal.",
-    "- If notifications do not appear, check that `OPENFORGE_SESSION_ID`, `OPENFORGE_ATTACH_TOKEN`, and `OPENFORGE_GATEWAY_URL` are present in the launched tmux environment.",
-    "- Use Claude Code `/hooks` inside the terminal to inspect which project, local, user, and plugin hooks are active.",
-    "- Keep project-shared `.claude/settings.json` free of machine-local tokens or absolute hook URLs.",
+    "- Official Claude Code references: https://code.claude.com/docs/en (memory, settings, hooks, best practices).",
     "",
     "## Repository Orientation",
     "",
     "- Check for existing `CLAUDE.md`, `AGENTS.md`, README, package manifests, and test configuration before changing code.",
     "- Follow the repository's established package manager, formatter, import style, and naming conventions.",
-    "- Prefer narrow reads and targeted diffs. Avoid broad rewrites unless the task explicitly requires them.",
     "- For generated configuration, preserve user-owned files and require explicit conflict decisions before overwriting.",
     "",
     "## Architecture",
@@ -445,7 +378,6 @@ function builtInClaudeMd(): string {
     "- Use tenant-scoped repository methods for user-owned records.",
     "- Resolve filesystem paths through safe project-root checks before reading or writing.",
     "- Never log secrets, API keys, decrypted credentials, tokens, or private environment values.",
-    "- Avoid broad refactors while fixing focused behavior.",
     "",
     "## Development Workflow",
     "",
@@ -477,12 +409,12 @@ function builtInClaudeMd(): string {
     "- Treat generated configuration, Skill content, Agent prompts, and template imports as untrusted text.",
     "- Reject path traversal, symlink escapes, and writes outside the approved project root.",
     "",
-    "## Claude Code Notes",
+    "## Claude Code Hooks And Notifications",
     "",
-    "- Project rules may live under `.claude/rules/`; keep topic-specific rules there instead of growing this file indefinitely.",
-    "- Skills may live under `.claude/skills/`; invoke them only when relevant to the task.",
-    "- OpenForge installs notification hooks in `.claude/settings.json` or `.claude/settings.local.json` so permission prompts and relevant Claude Code notifications can appear in the Web console.",
-    "- OpenForge may pass enabled Claude plugins through `claude --plugin-dir`; plugin Skills are reusable, versioned workflow extensions.",
+    "- OpenForge writes hooks into `.claude/settings.json` or `.claude/settings.local.json` at session launch.",
+    "- `PermissionRequest`, `PermissionDenied`, and `Notification(permission_prompt)` use HTTP hooks that POST Claude Code's hook JSON directly to OpenForge with env-backed headers.",
+    "- If notifications do not appear, check that `OPENFORGE_SESSION_ID`, `OPENFORGE_ATTACH_TOKEN`, and `OPENFORGE_GATEWAY_URL` are present in the launched tmux environment.",
+    "- Use Claude Code `/hooks` inside the terminal to inspect which project, local, user, and plugin hooks are active.",
     "",
     "## When To Update This File",
     "",
@@ -578,33 +510,13 @@ function builtInPlanMd(): string {
   ].join("\n");
 }
 
-function builtInChangelogMd(): string {
-  return [
-    "# Changelog",
-    "",
-    "All notable project changes can be recorded here.",
-    "",
-    "## Unreleased",
-    "",
-    "- Initial OpenForge scaffold.",
-    ""
-  ].join("\n");
-}
-
-function builtInContributingMd(): string {
-  return [
-    "# Contributing",
-    "",
-    "- Follow the repository instructions in root `CLAUDE.md` and `.claude/rules/`.",
-    "- Keep changes scoped and include relevant verification evidence.",
-    "- Do not commit secrets, generated credentials, database files, or local-only settings.",
-    "- Prefer small, reviewable changes over broad rewrites.",
-    ""
-  ].join("\n");
-}
-
-function builtInAdapterAgentsMd(adapterName: "OpenCode" | "Codex"): string {
-  const configFile = adapterName === "OpenCode" ? "opencode.json" : ".codex/config.toml";
+function builtInAdapterAgentsMd(adapterName: "OpenCode" | "Codex" | "Kimi Code"): string {
+  const configFile =
+    adapterName === "OpenCode"
+      ? "opencode.json"
+      : adapterName === "Kimi Code"
+        ? ".kimi-code/mcp.json"
+        : ".codex/config.toml";
   return [
     "# {{projectName}}",
     "",
@@ -746,14 +658,16 @@ function builtInTemplateDefinitions(): Array<{
   return [
     { template: builtInClaudeTemplate(), files: builtInClaudeFiles() },
     { template: builtInOpenCodeTemplate(), files: builtInOpenCodeFiles() },
-    { template: builtInCodexTemplate(), files: builtInCodexFiles() }
+    { template: builtInCodexTemplate(), files: builtInCodexFiles() },
+    { template: builtInKimiTemplate(), files: builtInKimiFiles() }
   ];
 }
 
 function isBuiltInTemplateId(id: string): boolean {
   return id === BUILTIN_CLAUDE_TEMPLATE_ID ||
     id === BUILTIN_OPENCODE_TEMPLATE_ID ||
-    id === BUILTIN_CODEX_TEMPLATE_ID;
+    id === BUILTIN_CODEX_TEMPLATE_ID ||
+    id === BUILTIN_KIMI_TEMPLATE_ID;
 }
 
 export class TemplateRepository {

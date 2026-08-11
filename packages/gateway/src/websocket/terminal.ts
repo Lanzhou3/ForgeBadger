@@ -1,5 +1,7 @@
 import type { IPty } from "node-pty";
 import type { Server } from "node:http";
+import { spawnSync } from "node:child_process";
+import { readdirSync } from "node:fs";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 import { verifyJwt } from "../auth/index.js";
@@ -324,10 +326,16 @@ async function handleTerminalSocket(
       env: buildTmuxAttachEnv(process.env)
     });
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const probe = probeTmuxForDiagnostics(process.env);
+    console.error(
+      `[terminal-ws] attach failed for session ${sessionId} (tmux=${session.tmuxName}, cwd=${session.launchPlan.cwd}) detail=${detail} ${probe}`,
+      error
+    );
     ws.send(
       JSON.stringify({
         type: "terminal_error",
-        payload: { message: "Terminal attach failed" }
+        payload: { message: `Terminal attach failed: ${detail} (${probe})` }
       })
     );
     ws.close(1011, "pty attach failed");
@@ -445,6 +453,35 @@ export function buildTmuxAttachEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     ...env,
     TMUX: ""
   };
+}
+
+/**
+ * Failure-path diagnostics for node-pty spawn errors. node-pty reports only
+ * "posix_spawnp failed" without the underlying errno, so probe with
+ * node:child_process (same env) to tell apart ENOENT/PATH problems, E2BIG
+ * (oversized env) and resource exhaustion via the open-fd count.
+ */
+export function probeTmuxForDiagnostics(env: NodeJS.ProcessEnv): string {
+  const probe = spawnSync("tmux", ["-V"], {
+    env: buildTmuxAttachEnv(env),
+    encoding: "utf8",
+    timeout: 3000
+  });
+  let tmuxProbe: string;
+  if (probe.error || probe.status !== 0) {
+    tmuxProbe = `tmux probe failed: ${probe.error?.message ?? `exit ${probe.status ?? "unknown"}`}`;
+  } else {
+    tmuxProbe = `tmux reachable (${probe.stdout.trim() || "unknown version"})`;
+  }
+  return `${tmuxProbe}; open fds=${countOpenFds()}`;
+}
+
+function countOpenFds(): number {
+  try {
+    return readdirSync("/dev/fd").length;
+  } catch {
+    return -1;
+  }
 }
 
 export class TerminalInputRateLimiter {

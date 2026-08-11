@@ -5,7 +5,7 @@ import {
   type TerminalRuntimeStatus
 } from "../lib/dependency-check.js";
 
-export type AdapterId = "claude" | "opencode" | "codex";
+export type AdapterId = "claude" | "opencode" | "codex" | "kimi";
 export type AdapterRuntimeMode = "terminal" | "app-server-stdio" | "app-server-websocket";
 
 export interface AdapterDefinition {
@@ -56,6 +56,16 @@ const adapterDefinitions: AdapterDefinition[] = [
     launchEnabled: true,
     configDir: ".codex",
     runtimeModes: ["terminal", "app-server-stdio", "app-server-websocket"]
+  },
+  {
+    id: "kimi",
+    label: "Kimi Code",
+    command: "kimi",
+    versionArgs: ["--version"],
+    supportLevel: "supported",
+    launchEnabled: true,
+    configDir: ".kimi-code",
+    runtimeModes: ["terminal"]
   }
 ];
 

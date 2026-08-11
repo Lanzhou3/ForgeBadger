@@ -32,7 +32,7 @@ export {
   buildProjectConfigRenderPlan
 } from "../services/project-config-render.js";
 
-const aiToolSchema = z.enum(["claude", "opencode", "codex"]);
+const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
 
 const createProjectSchema = z.object({
   name: z.string().min(1),
@@ -84,7 +84,8 @@ const legacyProjectConfigHint = "claude";
 const defaultTemplateIdsByAiTool: Record<z.infer<typeof aiToolSchema>, string> = {
   claude: defaultTemplateId,
   opencode: "builtin-opencode",
-  codex: "builtin-codex"
+  codex: "builtin-codex",
+  kimi: "builtin-kimi"
 };
 const rootInstructionFileNames = ["AGENT.md", "AGENTS.md", "CLAUDE.md"] as const;
 

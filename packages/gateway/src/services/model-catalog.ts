@@ -275,7 +275,7 @@ const providerCatalog: ProviderCatalogPreset[] = [
   }),
   providerProduct({
     id: "minimax-global",
-    name: "MiniMax M2.7 国际版",
+    name: "MiniMax 国际版",
     description: "MiniMax international API endpoint for coding tools.",
     region: "global",
     productType: "payg_api",
@@ -284,13 +284,13 @@ const providerCatalog: ProviderCatalogPreset[] = [
     openaiBaseUrl: "https://api.minimax.io/v1",
     envName: "MINIMAX_API_KEY",
     defaultModels: [
-      model("MiniMax-M2.7", "MiniMax M2.7", ["chat", "code", "reasoning"], 200000)
+      model("MiniMax-M3", "MiniMax M3", ["chat", "code", "reasoning", "vision"], 1000000)
     ],
-    smallFastModel: "MiniMax-M2.7"
+    smallFastModel: "MiniMax-M3"
   }),
   providerProduct({
     id: "minimax-cn",
-    name: "MiniMax M2.7 中国大陆",
+    name: "MiniMax 中国大陆",
     description: "MiniMax mainland China API endpoint for coding tools.",
     region: "cn",
     productType: "payg_api",
@@ -299,9 +299,9 @@ const providerCatalog: ProviderCatalogPreset[] = [
     openaiBaseUrl: "https://api.minimaxi.com/v1",
     envName: "MINIMAX_API_KEY",
     defaultModels: [
-      model("MiniMax-M2.7", "MiniMax M2.7", ["chat", "code", "reasoning"], 200000)
+      model("MiniMax-M3", "MiniMax M3", ["chat", "code", "reasoning", "vision"], 1000000)
     ],
-    smallFastModel: "MiniMax-M2.7"
+    smallFastModel: "MiniMax-M3"
   }),
   providerProduct({
     id: "zai-coding-plan",
@@ -387,6 +387,217 @@ const providerCatalog: ProviderCatalogPreset[] = [
       model("mimo-v2.5-flash", "MiMo V2.5 Flash", ["chat", "code"], 1000000)
     ],
     smallFastModel: "mimo-v2.5-flash"
+  }),
+  providerProduct({
+    id: "kimi-api",
+    name: "Kimi API",
+    description: "Moonshot AI Kimi pay-as-you-go endpoint with Anthropic and OpenAI-compatible APIs.",
+    region: "cn",
+    productType: "payg_api",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://api.moonshot.cn/anthropic",
+    openaiBaseUrl: "https://api.moonshot.cn/v1",
+    envName: "KIMI_API_KEY",
+    modelsUrl: "https://api.moonshot.cn/v1/models",
+    defaultModels: [
+      model("kimi-k2.7-code", "Kimi K2.7 Code", ["chat", "code", "reasoning"], 128000),
+      model("kimi-k2.5", "Kimi K2.5", ["chat", "code"], 128000)
+    ],
+    smallFastModel: "kimi-k2.5"
+  }),
+  providerProduct({
+    id: "zai-glm-api",
+    name: "Z.AI GLM API",
+    description: "Z.AI GLM pay-as-you-go endpoint with Anthropic and OpenAI-compatible APIs.",
+    region: "global",
+    productType: "payg_api",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://api.z.ai/api/anthropic",
+    openaiBaseUrl: "https://api.z.ai/api/paas/v4",
+    envName: "ZAI_API_KEY",
+    modelsUrl: "https://api.z.ai/api/paas/v4/models",
+    defaultModels: [
+      model("glm-5.1", "GLM-5.1", ["chat", "code", "reasoning"], 128000),
+      model("glm-4.5-air", "GLM-4.5 Air", ["chat", "code"], 128000)
+    ],
+    smallFastModel: "glm-4.5-air"
+  }),
+  providerProduct({
+    id: "baidu-qianfan-coding-plan",
+    name: "Baidu Qianfan Coding Plan",
+    description: "Baidu Qianfan Coding Plan endpoint for AI coding tools.",
+    region: "cn",
+    productType: "coding_plan",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://qianfan.baidubce.com/anthropic/coding",
+    openaiBaseUrl: "https://qianfan.baidubce.com/v2",
+    envName: "QIANFAN_API_KEY",
+    modelsUrl: "https://qianfan.baidubce.com/v2/models",
+    defaultModels: [
+      model("qianfan-code-latest", "Qianfan Code Latest", ["chat", "code", "reasoning"], 128000)
+    ],
+    smallFastModel: "qianfan-code-latest"
+  }),
+  providerProduct({
+    id: "stepfun-coding-plan-cn",
+    name: "StepFun Coding Plan 中国大陆",
+    description: "StepFun coding plan endpoint for mainland China.",
+    region: "cn",
+    productType: "coding_plan",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://api.stepfun.com/step_plan",
+    openaiBaseUrl: "https://api.stepfun.com/v1",
+    envName: "STEPFUN_API_KEY",
+    modelsUrl: "https://api.stepfun.com/v1/models",
+    defaultModels: [
+      model("step-3.5-flash-2603", "Step 3.5 Flash 2603", ["chat", "code"], 128000)
+    ],
+    smallFastModel: "step-3.5-flash-2603"
+  }),
+  providerProduct({
+    id: "stepfun-coding-plan-intl",
+    name: "StepFun Coding Plan 国际版",
+    description: "StepFun coding plan international endpoint.",
+    region: "intl",
+    productType: "coding_plan",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://api.stepfun.ai/step_plan",
+    openaiBaseUrl: "https://api.stepfun.ai/v1",
+    envName: "STEPFUN_API_KEY",
+    modelsUrl: "https://api.stepfun.ai/v1/models",
+    defaultModels: [
+      model("step-3.5-flash-2603", "Step 3.5 Flash 2603", ["chat", "code"], 128000)
+    ],
+    smallFastModel: "step-3.5-flash-2603"
+  }),
+  providerProduct({
+    id: "modelscope-api",
+    name: "ModelScope API",
+    description: "ModelScope inference endpoint with Anthropic and OpenAI-compatible APIs.",
+    region: "cn",
+    productType: "payg_api",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://api-inference.modelscope.cn",
+    openaiBaseUrl: "https://api-inference.modelscope.cn/v1",
+    envName: "MODELSCOPE_API_KEY",
+    modelsUrl: "https://api-inference.modelscope.cn/v1/models",
+    defaultModels: [
+      model("ZhipuAI/GLM-5.1", "GLM-5.1", ["chat", "code", "reasoning"], 128000)
+    ],
+    smallFastModel: "ZhipuAI/GLM-5.1"
+  }),
+  providerProduct({
+    id: "siliconflow-api",
+    name: "SiliconFlow 硅基流动",
+    description: "SiliconFlow model API platform with Anthropic and OpenAI-compatible endpoints.",
+    region: "cn",
+    productType: "payg_api",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://api.siliconflow.cn",
+    openaiBaseUrl: "https://api.siliconflow.cn/v1",
+    envName: "SILICONFLOW_API_KEY",
+    modelsUrl: "https://api.siliconflow.cn/v1/models",
+    defaultModels: [
+      model("Pro/MiniMaxAI/MiniMax-M2.7", "MiniMax M2.7 Pro", ["chat", "code", "reasoning"], 200000),
+      model("deepseek-ai/DeepSeek-V3.2", "DeepSeek V3.2", ["chat", "code", "reasoning"], 128000)
+    ],
+    smallFastModel: "deepseek-ai/DeepSeek-V3.2"
+  }),
+  providerProduct({
+    id: "siliconflow-intl",
+    name: "SiliconFlow 国际版",
+    description: "SiliconFlow international endpoint.",
+    region: "intl",
+    productType: "payg_api",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://api.siliconflow.com",
+    openaiBaseUrl: "https://api.siliconflow.com/v1",
+    envName: "SILICONFLOW_API_KEY",
+    modelsUrl: "https://api.siliconflow.com/v1/models",
+    defaultModels: [
+      model("MiniMaxAI/MiniMax-M2.7", "MiniMax M2.7", ["chat", "code", "reasoning"], 200000),
+      model("deepseek-ai/DeepSeek-V3.2", "DeepSeek V3.2", ["chat", "code", "reasoning"], 128000)
+    ],
+    smallFastModel: "deepseek-ai/DeepSeek-V3.2"
+  }),
+  providerProduct({
+    id: "volcengine-agent-plan-cn",
+    name: "火山引擎 Agent Plan 中国大陆",
+    description: "Volcengine Ark Agent Plan endpoint for mainland China.",
+    region: "cn",
+    productType: "coding_plan",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://ark.cn-beijing.volces.com/api/coding",
+    openaiBaseUrl: "https://ark.cn-beijing.volces.com/api/coding/v1",
+    envName: "ARK_API_KEY",
+    modelsUrl: "https://ark.cn-beijing.volces.com/api/coding/v1/models",
+    defaultModels: [
+      model("ark-code-latest", "Ark Code Latest", ["chat", "code", "reasoning"], 128000)
+    ],
+    smallFastModel: "ark-code-latest"
+  }),
+  providerProduct({
+    id: "volcengine-agent-plan-intl",
+    name: "火山引擎 Agent Plan 国际版",
+    description: "Volcengine BytePlus Agent Plan endpoint for international users.",
+    region: "intl-sg",
+    productType: "coding_plan",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://ark.ap-southeast.bytepluses.com/api/coding",
+    openaiBaseUrl: "https://ark.ap-southeast.bytepluses.com/api/coding/v1",
+    envName: "ARK_API_KEY",
+    modelsUrl: "https://ark.ap-southeast.bytepluses.com/api/coding/v1/models",
+    defaultModels: [
+      model("ark-code-latest", "Ark Code Latest", ["chat", "code", "reasoning"], 128000)
+    ],
+    smallFastModel: "ark-code-latest"
+  }),
+  providerProduct({
+    id: "volcengine-ark-api-cn",
+    name: "火山方舟豆包 API 中国大陆",
+    description: "Volcengine Ark Doubao Seed pay-as-you-go endpoint for mainland China.",
+    region: "cn",
+    productType: "payg_api",
+    apiFormat: "openai-compatible",
+    openaiBaseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    envName: "ARK_API_KEY",
+    modelsUrl: "https://ark.cn-beijing.volces.com/api/v3/models",
+    defaultModels: [
+      model("doubao-seed-2-1-pro-260628", "Doubao Seed 2.1 Pro", ["chat", "code", "reasoning"], 128000)
+    ],
+    smallFastModel: "doubao-seed-2-1-pro-260628"
+  }),
+  providerProduct({
+    id: "openrouter-api",
+    name: "OpenRouter",
+    description: "OpenRouter model routing platform with Anthropic and OpenAI-compatible endpoints.",
+    region: "global",
+    productType: "payg_api",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://openrouter.ai/api",
+    openaiBaseUrl: "https://openrouter.ai/api/v1",
+    envName: "OPENROUTER_API_KEY",
+    modelsUrl: "https://openrouter.ai/api/v1/models",
+    defaultModels: [
+      model("anthropic/claude-haiku-4.5", "Claude Haiku 4.5", ["chat", "code"], 200000),
+      model("anthropic/claude-sonnet-5", "Claude Sonnet 5", ["chat", "code", "reasoning"], 200000)
+    ],
+    smallFastModel: "anthropic/claude-haiku-4.5"
+  }),
+  providerProduct({
+    id: "novita-api",
+    name: "Novita AI",
+    description: "Novita AI model platform with Anthropic and OpenAI-compatible endpoints.",
+    region: "global",
+    productType: "payg_api",
+    apiFormat: "openai-compatible",
+    anthropicBaseUrl: "https://api.novita.ai/anthropic",
+    openaiBaseUrl: "https://api.novita.ai/v1",
+    envName: "NOVITA_API_KEY",
+    defaultModels: [
+      model("zai-org/glm-5.1", "GLM-5.1", ["chat", "code", "reasoning"], 128000)
+    ],
+    smallFastModel: "zai-org/glm-5.1"
   })
 ];
 
@@ -507,6 +718,10 @@ function providerProduct(input: {
   defaultModels: ProviderModelPreset[];
   smallFastModel: string;
   supportsTools?: boolean;
+  /** OpenAI-compatible GET /models endpoint. When set, the preset becomes
+   *  dynamic: "sync models" fetches the provider's live model list from this
+   *  URL instead of only seeding the built-in default models. */
+  modelsUrl?: string;
 }): ProviderCatalogPreset {
   const authType = input.authType ?? "api_key";
   const baseUrl = input.anthropicBaseUrl ?? input.openaiBaseUrl ?? "";
@@ -530,9 +745,10 @@ function providerProduct(input: {
     authType,
     apiFormat: input.apiFormat,
     supportedAdapters: ["claude", "opencode"],
-    modelSource: "static",
+    modelSource: input.modelsUrl ? "dynamic" : "static",
     source: "verified",
     endpoints,
+    ...(input.modelsUrl ? { modelFetch: { strategy: "openai-compatible", modelsUrl: input.modelsUrl } } : {}),
     defaultModels,
     env: {
       [claudeEnv.baseUrl]: "Claude Code API endpoint",

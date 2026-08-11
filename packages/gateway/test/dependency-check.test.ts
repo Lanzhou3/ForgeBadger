@@ -117,6 +117,9 @@ describe("checkOpenForgeDependencies", () => {
     assert.equal(claude?.available, false);
     assert.equal(opencode?.required, false);
     assert.equal(codex?.required, false);
+    const kimi = result.find((item) => item.name === "kimi");
+    assert.equal(kimi?.required, false);
+    assert.equal(kimi?.available, false);
   });
 
   it("checks the OpenForge runtime command list in order", async () => {
@@ -135,7 +138,8 @@ describe("checkOpenForgeDependencies", () => {
       { command: "tmux", args: ["-V"] },
       { command: "claude", args: ["--version"] },
       { command: "opencode", args: ["--version"] },
-      { command: "codex", args: ["--version"] }
+      { command: "codex", args: ["--version"] },
+      { command: "kimi", args: ["--version"] }
     ]);
   });
 });

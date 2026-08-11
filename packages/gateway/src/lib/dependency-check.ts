@@ -49,7 +49,8 @@ const OPENFORGE_DEPENDENCY_CHECKS: DependencyCheck[] = [
   { command: "tmux", args: ["-V"], required: true },
   { command: "claude", args: ["--version"], required: false },
   { command: "opencode", args: ["--version"], required: false },
-  { command: "codex", args: ["--version"], required: false }
+  { command: "codex", args: ["--version"], required: false },
+  { command: "kimi", args: ["--version"], required: false }
 ];
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 3000;

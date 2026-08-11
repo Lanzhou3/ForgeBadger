@@ -38,6 +38,21 @@ describe("multi-adapter launch plans", () => {
     assert.deepEqual(plan.secretEnvNames, []);
   });
 
+  it("creates a Kimi Code launch plan without model override args", () => {
+    const plan = createAdapterLaunchPlan({
+      adapter: "kimi",
+      projectRoot: "/workspace/app",
+      credentialMode: "host_environment",
+      model: { provider: "kimi", modelId: "kimi-k2.5" }
+    });
+
+    assert.equal(plan.command, "kimi");
+    assert.deepEqual(plan.args, []);
+    assert.equal(plan.cwd, "/workspace/app");
+    assert.deepEqual(plan.secretEnvNames, []);
+    assert.equal("shell" in plan, false);
+  });
+
   it("keeps provider-prefixed OpenCode model IDs unchanged", () => {
     assert.equal(formatAdapterModelId("opencode", "anthropic", "anthropic/claude-sonnet-4-5"), "anthropic/claude-sonnet-4-5");
   });

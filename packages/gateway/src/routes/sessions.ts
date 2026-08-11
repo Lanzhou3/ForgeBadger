@@ -32,7 +32,7 @@ import { ensureOpenForgeOpenCodePlugin } from "../services/opencode-notification
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
   credentialMode: z.enum(["host_environment", "stored_encrypted_key"]),
-  aiTool: z.enum(["claude", "opencode", "codex"]).optional(),
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional(),
   apiKeyId: z.string().min(1).optional(),
   modelId: z.string().min(1).optional()
 }).superRefine((value, ctx) => {
@@ -103,7 +103,7 @@ export function createSessionRoutes(
       res.status(400).json({ code: 1, message: "Unsupported project adapter" });
       return;
     }
-    const credentialBoundary = validateCodexTerminalCredentialBoundary({
+    const credentialBoundary = validateSelfManagedAdapterCredentialBoundary({
       adapter,
       credentialMode,
       apiKeyId,
@@ -323,7 +323,7 @@ export function createSessionRoutes(
           (err as Error & { httpStatus?: number }).httpStatus = 400;
           throw err;
         }
-        const credentialBoundary = validateCodexTerminalCredentialBoundary({
+        const credentialBoundary = validateSelfManagedAdapterCredentialBoundary({
           adapter,
           credentialMode: dbSession.credentialMode,
           ...(dbSession.apiKeyId ? { apiKeyId: dbSession.apiKeyId } : {}),
@@ -620,7 +620,7 @@ export interface LaunchPlanInput {
 }
 
 export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
-  const credentialBoundary = validateCodexTerminalCredentialBoundary(input);
+  const credentialBoundary = validateSelfManagedAdapterCredentialBoundary(input);
   if (!credentialBoundary.ok) {
     throw new Error(credentialBoundary.message);
   }
@@ -721,19 +721,19 @@ export function normalizeAdapter(value: string): AdapterId | undefined {
   return isAdapterId(value) ? value : undefined;
 }
 
-export function validateCodexTerminalCredentialBoundary(input: {
+export function validateSelfManagedAdapterCredentialBoundary(input: {
   adapter: AdapterId;
   credentialMode: CredentialMode;
   apiKeyId?: string | undefined;
   modelId?: string | undefined;
 }): { ok: true } | { ok: false; message: string } {
   if (
-    input.adapter === "codex" &&
+    (input.adapter === "codex" || input.adapter === "kimi") &&
     (input.credentialMode !== "host_environment" || input.apiKeyId || input.modelId)
   ) {
     return {
       ok: false,
-      message: "Codex sessions are subscription-managed; provider credentials and model overrides are not supported"
+      message: `${input.adapter === "kimi" ? "Kimi Code" : "Codex"} sessions are subscription-managed; provider credentials and model overrides are not supported`
     };
   }
   return { ok: true };

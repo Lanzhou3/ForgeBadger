@@ -439,22 +439,23 @@ describe("db repositories", () => {
   });
 
   describe("TemplateRepository", () => {
-    it("lists built-in templates for Claude Code, OpenCode, and Codex", () => {
+    it("lists built-in templates for Claude Code, OpenCode, Codex, and Kimi Code", () => {
       const user = userRepo.create("tmpl-user@example.com", "hash");
       const repo = new TemplateRepository(db, user.id);
 
       const builtIns = repo.listBuiltIn();
       assert.deepEqual(
         builtIns.map((template) => template.id).sort(),
-        ["builtin-claude-code", "builtin-codex", "builtin-opencode"]
+        ["builtin-claude-code", "builtin-codex", "builtin-kimi", "builtin-opencode"]
       );
       assert.ok(builtIns.some((t) => t.name === "Claude Code"));
       assert.ok(builtIns.some((t) => t.name === "OpenCode"));
       assert.ok(builtIns.some((t) => t.name === "Codex"));
+      assert.ok(builtIns.some((t) => t.name === "Kimi Code"));
 
       const claude = repo.getBuiltInClaude();
       assert.equal(claude.name, "Claude Code");
-      assert.equal(claude.version, "2.1.0");
+      assert.equal(claude.version, "2.2.0");
     });
 
     it("returns built-in template with files", () => {
@@ -469,8 +470,8 @@ describe("db repositories", () => {
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/settings.json"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === "WORKFLOW.md"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === "PLAN.md"));
-      assert.ok(withFiles!.files!.some((f) => f.filePath === "CHANGELOG.md"));
-      assert.ok(withFiles!.files!.some((f) => f.filePath === "CONTRIBUTING.md"));
+      assert.equal(withFiles!.files!.some((f) => f.filePath === "CHANGELOG.md"), false);
+      assert.equal(withFiles!.files!.some((f) => f.filePath === "CONTRIBUTING.md"), false);
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/rules/security.md"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/rules/api.md"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/rules/backend.md"));
@@ -479,27 +480,28 @@ describe("db repositories", () => {
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/hooks/openforge-guard.mjs"));
       assert.equal(withFiles!.files!.some((f) => f.filePath === ".claude/hooks/openforge-notification.mjs"), false);
       const claudeMd = withFiles!.files!.find((f) => f.filePath === "CLAUDE.md")?.content ?? "";
+      assert.ok(claudeMd.split("\n").length <= 200);
       assert.match(claudeMd, /Common Commands/);
       assert.match(claudeMd, /Architecture/);
-      assert.match(claudeMd, /Context Management/);
-      assert.match(claudeMd, /Skills And Rules/);
       assert.match(claudeMd, /Verification Contract/);
-      assert.match(claudeMd, /Instruction Loading/);
-      assert.match(claudeMd, /AGENTS\.md Compatibility/);
       assert.match(claudeMd, /Claude Code Hooks And Notifications/);
-      assert.match(claudeMd, /code\.claude\.com\/docs\/en\/best-practices/);
-      assert.match(claudeMd, /What Belongs In This File/);
-      assert.match(claudeMd, /What To Move Elsewhere/);
-      assert.match(claudeMd, /Use Skills for multi-step procedures/);
-      assert.match(claudeMd, /CLAUDE\.local\.md/);
-      assert.match(claudeMd, /Auto Memory/);
-      assert.match(claudeMd, /\/hooks/);
       assert.match(claudeMd, /Operating Pattern/);
       assert.match(claudeMd, /Permissions And Safety/);
-      assert.match(claudeMd, /Subagents MCP And Plugins/);
-      assert.match(claudeMd, /\.claude\/skills\/<skill-name>\/SKILL\.md/);
-      assert.match(claudeMd, /CLAUDE_CONFIG_DIR/);
+      assert.match(claudeMd, /Repository Orientation/);
+      assert.match(claudeMd, /Coding Standards/);
+      assert.match(claudeMd, /Review And Handoff/);
+      assert.match(claudeMd, /\/hooks/);
+      assert.match(claudeMd, /code\.claude\.com\/docs\/en/);
+      assert.match(claudeMd, /Security Boundaries/);
       assert.match(claudeMd, /When To Update This File/);
+      assert.equal(claudeMd.includes("Auto Memory"), false);
+      assert.equal(claudeMd.includes("Instruction Loading"), false);
+      assert.equal(claudeMd.includes("What Belongs In This File"), false);
+      assert.equal(claudeMd.includes("What To Move Elsewhere"), false);
+      assert.equal(claudeMd.includes("CLAUDE.local.md"), false);
+      assert.equal(claudeMd.includes("Context Management"), false);
+      assert.equal(claudeMd.includes("Skills And Rules"), false);
+      assert.equal(claudeMd.includes("AGENTS.md Compatibility"), false);
       const settings = JSON.parse(
         withFiles!.files!.find((f) => f.filePath === ".claude/settings.json")?.content ?? "{}"
       );
@@ -539,8 +541,8 @@ describe("db repositories", () => {
       const refreshed = repo.getById("builtin-claude-code");
       const claudeMd = refreshed?.files?.find((file) => file.filePath === "CLAUDE.md")?.content ?? "";
 
-      assert.equal(refreshed?.version, "2.1.0");
-      assert.match(claudeMd, /Context Management/);
+      assert.equal(refreshed?.version, "2.2.0");
+      assert.match(claudeMd, /Verification Contract/);
       assert.match(claudeMd, /Operating Pattern/);
       assert.equal(
         refreshed?.files?.some((file) => file.filePath === ".claude/hooks/openforge-notification.mjs"),

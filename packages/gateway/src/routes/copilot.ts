@@ -67,7 +67,7 @@ import {
   createLaunchPlan,
   normalizeAdapter,
   prepareAdapterLaunchExtras,
-  validateCodexTerminalCredentialBoundary
+  validateSelfManagedAdapterCredentialBoundary
 } from "./sessions.js";
 import {
   buildConfigSyncSummary,
@@ -139,7 +139,7 @@ const createConversationMessageSchema = z.object({
 });
 const sessionCreateApprovalSchema = z.object({
   projectId: z.string().min(1),
-  aiTool: z.enum(["claude", "opencode", "codex"]),
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]),
   name: z.string().min(1).optional()
 }).strict();
 const projectCreateApprovalSchema = z.object({
@@ -147,7 +147,7 @@ const projectCreateApprovalSchema = z.object({
   path: z.string().min(1),
   description: z.string().min(1).optional(),
   techStack: z.string().min(1).optional(),
-  aiTool: z.enum(["claude", "opencode", "codex"]).optional(),
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional(),
   templateId: z.string().min(1).optional()
 }).strict();
 const projectImportApprovalSchema = z.object({
@@ -155,7 +155,7 @@ const projectImportApprovalSchema = z.object({
   path: z.string().min(1),
   description: z.string().min(1).optional(),
   techStack: z.string().min(1).optional(),
-  aiTool: z.enum(["claude", "opencode", "codex"]).optional(),
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional(),
   templateId: z.string().min(1).optional()
 }).strict();
 const projectDeleteApprovalSchema = z.object({
@@ -2627,7 +2627,7 @@ async function approveCopilotSessionStart(
       "Copilot session start adapter is not supported"
     );
   }
-  const credentialBoundary = validateCodexTerminalCredentialBoundary({
+  const credentialBoundary = validateSelfManagedAdapterCredentialBoundary({
     adapter,
     credentialMode: session.credentialMode,
     ...(session.apiKeyId ? { apiKeyId: session.apiKeyId } : {}),

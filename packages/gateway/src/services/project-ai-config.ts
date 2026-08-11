@@ -48,7 +48,7 @@ const allowedRootFiles = new Set([
   "opencode.jsonc"
 ]);
 
-const allowedConfigRoots = [".claude", ".opencode", ".codex"];
+const allowedConfigRoots = [".claude", ".opencode", ".codex", ".kimi-code"];
 
 export async function readProjectAiConfig(
   projectRoot: string,
@@ -150,6 +150,15 @@ function candidateFilesForAdapter(adapter: AdapterId): string[] {
       ".opencode/agents/code-reviewer.md",
       ".opencode/commands/review.md",
       ".opencode/commands/verify.md"
+    ];
+  }
+  if (adapter === "kimi") {
+    return [
+      "AGENTS.md",
+      ".kimi-code/AGENTS.md",
+      ".kimi-code/mcp.json",
+      ".kimi-code/agents/code-reviewer.md",
+      ".kimi-code/agents/planner.md"
     ];
   }
   return [
@@ -292,6 +301,9 @@ function globalConfigRoot(adapter: AdapterId): string {
     return process.env.OPENCODE_CONFIG_DIR?.trim() ||
       path.join(process.env.XDG_CONFIG_HOME?.trim() || path.join(homedir(), ".config"), "opencode");
   }
+  if (adapter === "kimi") {
+    return process.env.KIMI_CODE_HOME?.trim() || path.join(homedir(), ".kimi-code");
+  }
   return process.env.CODEX_HOME?.trim() || path.join(homedir(), ".codex");
 }
 
@@ -301,6 +313,9 @@ function candidateGlobalFilesForAdapter(adapter: AdapterId): string[] {
   }
   if (adapter === "opencode") {
     return ["AGENTS.md", "opencode.json", "opencode.jsonc"];
+  }
+  if (adapter === "kimi") {
+    return ["AGENTS.md", "config.toml", "mcp.json"];
   }
   return ["AGENTS.md", "AGENTS.override.md", "config.toml"];
 }
@@ -341,6 +356,17 @@ function formsForAdapter(adapter: AdapterId): AiConfigForm[] {
       {
         filePath: "AGENTS.md",
         title: "OpenCode Instructions",
+        fields: [
+          { key: "content", label: "Instructions", inputType: "textarea", path: "$content" }
+        ]
+      }
+    ];
+  }
+  if (adapter === "kimi") {
+    return [
+      {
+        filePath: "AGENTS.md",
+        title: "Kimi Code Instructions",
         fields: [
           { key: "content", label: "Instructions", inputType: "textarea", path: "$content" }
         ]

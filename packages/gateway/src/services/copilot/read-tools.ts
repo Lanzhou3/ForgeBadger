@@ -97,7 +97,7 @@ const sessionTerminalSnapshotInput = z.object({
 }).strict();
 const proposeSessionCreateInput = z.object({
   projectId: z.string().min(1).nullable().optional(),
-  aiTool: z.enum(["claude", "opencode", "codex"]),
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]),
   name: z.string().min(1).optional()
 }).strict();
 const proposeProjectCreateInput = z.object({
@@ -105,7 +105,7 @@ const proposeProjectCreateInput = z.object({
   path: z.string().min(1),
   description: z.string().min(1).optional(),
   techStack: z.string().min(1).optional(),
-  aiTool: z.enum(["claude", "opencode", "codex"]).optional(),
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional(),
   templateId: z.string().min(1).optional()
 }).strict();
 const proposeProjectImportInput = z.object({
@@ -113,7 +113,7 @@ const proposeProjectImportInput = z.object({
   path: z.string().min(1),
   description: z.string().min(1).optional(),
   techStack: z.string().min(1).optional(),
-  aiTool: z.enum(["claude", "opencode", "codex"]).optional(),
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional(),
   templateId: z.string().min(1).optional()
 }).strict();
 const proposeProjectDeleteInput = z.object({

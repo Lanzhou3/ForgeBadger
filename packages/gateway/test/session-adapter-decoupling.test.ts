@@ -261,6 +261,76 @@ describe("session adapter decoupling", () => {
     assert.equal(tmuxCreates.length, beforeCreateCount);
   });
 
+  it("rejects provider credentials and model overrides for Kimi Code terminal sessions", async () => {
+    const beforeCreateCount = tmuxCreates.length;
+    const token = await register("adapter-kimi-provider-boundary@example.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-kimi-provider-boundary-"));
+
+    const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        name: "Kimi Provider Boundary",
+        path: rootPath,
+        aiTool: "kimi"
+      })
+    });
+    const projectData = await projectRes.json() as ProjectResponseBody;
+    assert.equal(projectRes.status, 201);
+
+    const modelRes = await fetch(`${baseUrl}/api/v1/models`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        name: "Kimi K2.5",
+        provider: "kimi",
+        modelId: "kimi-k2.5"
+      })
+    });
+    const modelData = await modelRes.json() as { data: { model: { id: string } } };
+    assert.equal(modelRes.status, 201);
+
+    const keyRes = await fetch(`${baseUrl}/api/v1/api-keys`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        provider: "kimi",
+        name: "Kimi",
+        plaintextKey: "secret"
+      })
+    });
+    const keyData = await keyRes.json() as { data: { apiKey: { id: string } } };
+    assert.equal(keyRes.status, 201);
+
+    const storedCredentialRes = await fetch(`${baseUrl}/api/v1/sessions`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        projectId: projectData.data.project.id,
+        credentialMode: "stored_encrypted_key",
+        aiTool: "kimi",
+        apiKeyId: keyData.data.apiKey.id,
+        modelId: modelData.data.model.id
+      })
+    });
+    const modelOverrideRes = await fetch(`${baseUrl}/api/v1/sessions`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        projectId: projectData.data.project.id,
+        credentialMode: "host_environment",
+        aiTool: "kimi",
+        modelId: modelData.data.model.id
+      })
+    });
+
+    assert.equal(storedCredentialRes.status, 400);
+    assert.match((await storedCredentialRes.json()).message, /subscription-managed/i);
+    assert.equal(modelOverrideRes.status, 400);
+    assert.match((await modelOverrideRes.json()).message, /subscription-managed/i);
+    assert.equal(tmuxCreates.length, beforeCreateCount);
+  });
+
   it("launches provider-backed OpenCode sessions without a legacy api key id", async () => {
     const token = await register("adapter-provider-credential@example.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-provider-session-"));

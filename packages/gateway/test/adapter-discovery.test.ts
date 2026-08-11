@@ -5,7 +5,7 @@ import { discoverAdapters, listAdapterDefinitions } from "../src/services/adapte
 import type { CommandRunner } from "../src/lib/dependency-check.js";
 
 describe("adapter discovery", () => {
-  it("lists Claude, OpenCode, and Codex as supported adapters", () => {
+  it("lists Claude, OpenCode, Codex, and Kimi Code as supported adapters", () => {
     const definitions = listAdapterDefinitions();
     assert.equal(definitions.find((adapter) => adapter.id === "claude")?.supportLevel, "supported");
     assert.equal(definitions.find((adapter) => adapter.id === "opencode")?.supportLevel, "supported");
@@ -15,6 +15,12 @@ describe("adapter discovery", () => {
       "app-server-stdio",
       "app-server-websocket"
     ]);
+    const kimi = definitions.find((adapter) => adapter.id === "kimi");
+    assert.equal(kimi?.supportLevel, "supported");
+    assert.equal(kimi?.label, "Kimi Code");
+    assert.equal(kimi?.command, "kimi");
+    assert.equal(kimi?.configDir, ".kimi-code");
+    assert.deepEqual(kimi?.runtimeModes, ["terminal"]);
   });
 
   it("enables launch only when the supported adapter command is available", async () => {

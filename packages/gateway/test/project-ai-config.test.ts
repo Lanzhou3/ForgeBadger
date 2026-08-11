@@ -45,7 +45,7 @@ interface AiConfigResponseBody {
   code: number;
   message?: string;
   data?: {
-    adapter: "claude" | "opencode" | "codex";
+    adapter: "claude" | "opencode" | "codex" | "kimi";
     projectRoot: string;
     files: Array<{
       relativePath: string;
@@ -143,6 +143,32 @@ describe("project AI config routes", () => {
     assertFile(body, "opencode.json", true, "{\"instructions\":[\"AGENTS.md\"]}\n");
     assertFile(body, ".opencode/agents/reviewer.md", true, "# Reviewer\n");
     assertFile(body, ".opencode/commands/review.md", false, "");
+  });
+
+  it("returns project-level config files for a Kimi Code project", async () => {
+    const token = await register("ai-config-kimi-reader@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-kimi-read-"));
+    await mkdir(path.join(rootPath, ".kimi-code", "agents"), { recursive: true });
+    await writeFile(path.join(rootPath, "AGENTS.md"), "# Existing Kimi Agents\n", "utf8");
+    await writeFile(path.join(rootPath, ".kimi-code", "mcp.json"), "{}\n", "utf8");
+    await writeFile(path.join(rootPath, ".kimi-code", "agents", "reviewer.md"), "# Reviewer\n", "utf8");
+    const projectId = await importProject(token, {
+      name: "Kimi Project",
+      path: rootPath,
+      aiTool: "kimi"
+    });
+
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = (await res.json()) as AiConfigResponseBody;
+
+    assert.equal(res.status, 200, JSON.stringify(body));
+    assert.equal(body.data?.adapter, "kimi");
+    assert.ok(body.data?.forms.some((form) => form.filePath === "AGENTS.md"));
+    assertFile(body, "AGENTS.md", true, "# Existing Kimi Agents\n");
+    assertFile(body, ".kimi-code/mcp.json", true, "{}\n");
+    assertFile(body, ".kimi-code/agents/reviewer.md", true, "# Reviewer\n");
   });
 
   it("reports existing root instruction files when scanning an import directory", async () => {
@@ -364,6 +390,46 @@ describe("project AI config routes", () => {
     }
   });
 
+  it("returns redacted read-only Kimi Code global config from KIMI_CODE_HOME", async () => {
+    const token = await register("ai-config-kimi-global@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-kimi-global-project-"));
+    const kimiHome = await mkdtemp(path.join(tmpdir(), "openforge-kimi-home-"));
+    await writeFile(path.join(kimiHome, "AGENTS.md"), "# Personal Kimi\n", "utf8");
+    await writeFile(
+      path.join(kimiHome, "config.toml"),
+      "default_model = \"kimi-code/kimi-k2.5\"\napi_key = \"sk-secret-value\"\n",
+      "utf8"
+    );
+    const projectId = await importProject(token, {
+      name: "Kimi Global Config Project",
+      path: rootPath,
+      aiTool: "kimi"
+    });
+    const previousKimiHome = process.env.KIMI_CODE_HOME;
+    process.env.KIMI_CODE_HOME = kimiHome;
+
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config/global`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const body = (await res.json()) as AiConfigResponseBody;
+
+      assert.equal(res.status, 200, JSON.stringify(body));
+      assert.equal(body.data?.adapter, "kimi");
+      assertFile(body, "AGENTS.md", true, "# Personal Kimi\n", "global");
+      const configFile = assertFile(body, "config.toml", true, undefined, "global");
+      assert.equal(configFile.editable, false);
+      assert.match(configFile.content, /REDACTED/);
+      assert.doesNotMatch(configFile.content, /sk-secret-value/);
+    } finally {
+      if (previousKimiHome === undefined) {
+        delete process.env.KIMI_CODE_HOME;
+      } else {
+        process.env.KIMI_CODE_HOME = previousKimiHome;
+      }
+    }
+  });
+
   async function register(email: string): Promise<string> {
     const res = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: "POST",
@@ -377,7 +443,7 @@ describe("project AI config routes", () => {
 
   async function importProject(
     token: string,
-    input: { name: string; path: string; aiTool: "claude" | "opencode" | "codex" }
+    input: { name: string; path: string; aiTool: "claude" | "opencode" | "codex" | "kimi" }
   ): Promise<string> {
     const res = await fetch(`${baseUrl}/api/v1/projects/import`, {
       method: "POST",

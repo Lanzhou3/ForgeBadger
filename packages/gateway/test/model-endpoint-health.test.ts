@@ -133,6 +133,21 @@ describe("checkModelEndpoint", () => {
     assert.equal(result.error, "Private or loopback network addresses are not allowed");
   });
 
+  it("allows proxy fake-ip addresses (198.18.0.0/15) so Surge/Clash-style proxies keep working", async () => {
+    const result = await checkModelEndpoint({
+      endpoint: "https://api.provider.test/v1/models",
+      timeoutMs: 100,
+      fetchImpl: async () => new Response("ok", { status: 200 }),
+      resolveHost: async (hostname) => {
+        assert.equal(hostname, "api.provider.test");
+        return [{ address: "198.18.0.123", family: 4 }];
+      }
+    });
+
+    assert.equal(result.healthy, true);
+    assert.equal(result.error, undefined);
+  });
+
   it("returns a helpful error when host cannot be resolved", async () => {
     const result = await checkModelEndpoint({
       endpoint: "https://unknown.local",

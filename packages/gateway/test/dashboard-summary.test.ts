@@ -46,7 +46,7 @@ describe("getDashboardSummary", () => {
       skills: 0,
       models: 0,
       apiKeys: 0,
-      templates: 3
+      templates: 4
     });
     assert.equal(summary.health.gateway.healthy, true);
     assert.equal(summary.health.database.healthy, true);

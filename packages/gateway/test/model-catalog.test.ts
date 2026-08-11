@@ -62,6 +62,90 @@ describe("model catalog", () => {
     assert.ok(xiaomiMimoTokenCn.defaultModels.every((model) => !model.capabilities.includes("toolcall")));
   });
 
+  it("exposes provider products aligned with the cc-switch official preset list", () => {
+    const catalog = getProviderCatalog();
+
+    const kimiApi = catalog.find((provider) => provider.id === "kimi-api");
+    const zaiGlmApi = catalog.find((provider) => provider.id === "zai-glm-api");
+    const qianfan = catalog.find((provider) => provider.id === "baidu-qianfan-coding-plan");
+    const stepfunCn = catalog.find((provider) => provider.id === "stepfun-coding-plan-cn");
+    const stepfunIntl = catalog.find((provider) => provider.id === "stepfun-coding-plan-intl");
+    const modelscope = catalog.find((provider) => provider.id === "modelscope-api");
+    const siliconflow = catalog.find((provider) => provider.id === "siliconflow-api");
+    const siliconflowIntl = catalog.find((provider) => provider.id === "siliconflow-intl");
+    const volcCn = catalog.find((provider) => provider.id === "volcengine-agent-plan-cn");
+    const volcIntl = catalog.find((provider) => provider.id === "volcengine-agent-plan-intl");
+    const volcArk = catalog.find((provider) => provider.id === "volcengine-ark-api-cn");
+    const openrouter = catalog.find((provider) => provider.id === "openrouter-api");
+    const novita = catalog.find((provider) => provider.id === "novita-api");
+
+    assert.ok(kimiApi);
+    assert.ok(zaiGlmApi);
+    assert.ok(qianfan);
+    assert.ok(stepfunCn);
+    assert.ok(stepfunIntl);
+    assert.ok(modelscope);
+    assert.ok(siliconflow);
+    assert.ok(siliconflowIntl);
+    assert.ok(volcCn);
+    assert.ok(volcIntl);
+    assert.ok(volcArk);
+    assert.ok(openrouter);
+    assert.ok(novita);
+
+    assert.equal(kimiApi?.endpoints.anthropic?.baseUrl, "https://api.moonshot.cn/anthropic");
+    assert.equal(kimiApi?.endpoints.openai?.baseUrl, "https://api.moonshot.cn/v1");
+    assert.equal(qianfan?.endpoints.anthropic?.baseUrl, "https://qianfan.baidubce.com/anthropic/coding");
+    assert.equal(stepfunCn?.endpoints.anthropic?.baseUrl, "https://api.stepfun.com/step_plan");
+    assert.equal(stepfunIntl?.endpoints.anthropic?.baseUrl, "https://api.stepfun.ai/step_plan");
+    assert.equal(modelscope?.endpoints.anthropic?.baseUrl, "https://api-inference.modelscope.cn");
+    assert.equal(siliconflow?.endpoints.anthropic?.baseUrl, "https://api.siliconflow.cn");
+    assert.equal(siliconflowIntl?.endpoints.anthropic?.baseUrl, "https://api.siliconflow.com");
+    assert.equal(volcCn?.endpoints.anthropic?.baseUrl, "https://ark.cn-beijing.volces.com/api/coding");
+    assert.equal(volcIntl?.endpoints.anthropic?.baseUrl, "https://ark.ap-southeast.bytepluses.com/api/coding");
+    assert.equal(volcCn?.productType, "coding_plan");
+    assert.equal(volcArk?.endpoints.anthropic, undefined);
+    assert.equal(volcArk?.endpoints.openai?.baseUrl, "https://ark.cn-beijing.volces.com/api/v3");
+    assert.equal(openrouter?.endpoints.anthropic?.baseUrl, "https://openrouter.ai/api");
+    assert.equal(novita?.endpoints.anthropic?.baseUrl, "https://api.novita.ai/anthropic");
+    assert.ok(catalog.every((provider) => provider.source === "verified"));
+  });
+
+  it("marks API presets as dynamic with a live models endpoint and keeps static-only presets static", () => {
+    const catalog = getProviderCatalog();
+    const dynamicModelsUrl = new Map<string, string>([
+      ["kimi-api", "https://api.moonshot.cn/v1/models"],
+      ["zai-glm-api", "https://api.z.ai/api/paas/v4/models"],
+      ["baidu-qianfan-coding-plan", "https://qianfan.baidubce.com/v2/models"],
+      ["stepfun-coding-plan-cn", "https://api.stepfun.com/v1/models"],
+      ["stepfun-coding-plan-intl", "https://api.stepfun.ai/v1/models"],
+      ["modelscope-api", "https://api-inference.modelscope.cn/v1/models"],
+      ["siliconflow-api", "https://api.siliconflow.cn/v1/models"],
+      ["siliconflow-intl", "https://api.siliconflow.com/v1/models"],
+      ["volcengine-agent-plan-cn", "https://ark.cn-beijing.volces.com/api/coding/v1/models"],
+      ["volcengine-agent-plan-intl", "https://ark.ap-southeast.bytepluses.com/api/coding/v1/models"],
+      ["volcengine-ark-api-cn", "https://ark.cn-beijing.volces.com/api/v3/models"],
+      ["openrouter-api", "https://openrouter.ai/api/v1/models"]
+    ]);
+
+    for (const [id, modelsUrl] of dynamicModelsUrl) {
+      const preset = catalog.find((provider) => provider.id === id);
+      assert.ok(preset, `missing verified preset ${id}`);
+      assert.equal(preset.modelSource, "dynamic", `${id} must use the live models endpoint`);
+      assert.equal(preset.modelFetch?.strategy, "openai-compatible");
+      assert.equal(preset.modelFetch?.modelsUrl, modelsUrl);
+      assert.ok(
+        preset.baseUrl.length > 0 || preset.endpoints.anthropic?.baseUrl || preset.endpoints.openai?.baseUrl,
+        `${id} needs at least one endpoint`
+      );
+    }
+
+    const novita = catalog.find((provider) => provider.id === "novita-api");
+    assert.ok(novita);
+    assert.equal(novita.modelSource, "static", "novita has no /models endpoint; keep static");
+    assert.equal(novita.modelFetch, undefined);
+  });
+
   it("loads verified providers before models.dev providers", async () => {
     const catalog = await loadProviderCatalog({
       fetchImpl: async () => new Response(JSON.stringify({

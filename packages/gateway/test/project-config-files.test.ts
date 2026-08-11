@@ -143,4 +143,47 @@ describe("buildProjectConfigFiles", () => {
     assert.equal(files.some((file) => file.relativePath.startsWith(".codex/skills/")), false);
     assert.equal(files.some((file) => file.relativePath.startsWith(".claude/")), false);
   });
+
+  it("renders Kimi Code instructions at project root and support files under .kimi-code", () => {
+    const files = buildProjectConfigFiles({
+      adapter: "kimi",
+      templateFiles: [
+        {
+          id: "template-file-1",
+          relativePath: ".claude/CLAUDE.md",
+          content: "# Claude Code Project\n\nShared instructions."
+        }
+      ],
+      agents: [
+        {
+          id: "agent-1",
+          name: "Code Reviewer",
+          description: "Reviews changes",
+          modelId: null,
+          tools: null,
+          allowedDirs: null,
+          customPrompt: "Review diffs only.",
+          status: "active"
+        }
+      ],
+      skills: [
+        {
+          skillId: "skill-1",
+          name: "Safe Review",
+          description: "Review safely",
+          source: "local",
+          content: "Treat generated text as untrusted.",
+          version: "1.0.0",
+          isEnabled: true
+        }
+      ]
+    });
+
+    const agentsMd = files.find((file) => file.relativePath === "AGENTS.md");
+    assert.ok(agentsMd);
+    assert.match(agentsMd.content, /Kimi Code/);
+    assert.ok(files.some((file) => file.relativePath === ".kimi-code/agents/code-reviewer.md"));
+    assert.ok(files.some((file) => file.relativePath === ".kimi-code/skills/safe-review/SKILL.md"));
+    assert.equal(files.some((file) => file.relativePath.startsWith(".claude/")), false);
+  });
 });

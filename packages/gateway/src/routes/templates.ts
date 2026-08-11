@@ -3,8 +3,6 @@ import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
-import { ProjectRepository } from "../db/repositories/project-repository.js";
-import { extractProjectTemplateFiles } from "../services/template-from-project.js";
 import type { OpenForgeEventBus } from "../services/event-bus.js";
 import {
   applyTemplateSync,
@@ -50,18 +48,6 @@ const templatePackageSchema = z.object({
 
 const importTemplateSchema = z.object({
   templatePackage: templatePackageSchema
-});
-
-const fromProjectPreviewSchema = z.object({
-  projectId: z.string().min(1),
-  filePaths: z.array(z.string().min(1)).optional()
-});
-
-const fromProjectCreateSchema = fromProjectPreviewSchema.extend({
-  name: z.string().min(1),
-  description: z.string().optional(),
-  version: z.string().optional(),
-  visibility: z.enum(["private", "shared", "admin"]).optional()
 });
 
 const templateUsageQuerySchema = z.object({
@@ -129,85 +115,6 @@ export function createTemplateRoutes(db: Database, eventBus?: OpenForgeEventBus)
       data: { template },
       message: ""
     });
-  });
-
-  router.post("/from-project/preview", async (req, res) => {
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const parseResult = fromProjectPreviewSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({ code: 1, message: "Invalid input" });
-      return;
-    }
-
-    const project = new ProjectRepository(db, userId).getById(parseResult.data.projectId);
-    if (!project) {
-      res.status(404).json({ code: 1, message: "Project not found" });
-      return;
-    }
-
-    try {
-      const files = await extractProjectTemplateFiles(project.path, {
-        filePaths: parseResult.data.filePaths
-      });
-      res.json({
-        code: 0,
-        data: {
-          project: { id: project.id, name: project.name, path: project.path },
-          files,
-          totalBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0)
-        },
-        message: ""
-      });
-    } catch (error) {
-      res.status(400).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "Failed to extract project config"
-      });
-    }
-  });
-
-  router.post("/from-project", async (req, res) => {
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const parseResult = fromProjectCreateSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({ code: 1, message: "Invalid input" });
-      return;
-    }
-
-    const project = new ProjectRepository(db, userId).getById(parseResult.data.projectId);
-    if (!project) {
-      res.status(404).json({ code: 1, message: "Project not found" });
-      return;
-    }
-
-    try {
-      const files = await extractProjectTemplateFiles(project.path, {
-        filePaths: parseResult.data.filePaths
-      });
-      const repo = new TemplateRepository(db, userId);
-      const template = repo.create({
-        name: parseResult.data.name,
-        description: parseResult.data.description,
-        version: parseResult.data.version,
-        visibility: parseResult.data.visibility,
-        files: files.map((file) => ({
-          filePath: file.filePath,
-          content: file.content,
-          fileType: file.fileType
-        }))
-      });
-
-      res.status(201).json({
-        code: 0,
-        data: { template: repo.getById(template.id) ?? template },
-        message: ""
-      });
-    } catch (error) {
-      res.status(400).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "Failed to create template from project"
-      });
-    }
   });
 
   router.post("/:id/clone", (req, res) => {

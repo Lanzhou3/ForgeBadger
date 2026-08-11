@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { beforeEach, describe, it } from "node:test";
 
 import { signJwt } from "../src/auth/jwt.js";
+import { AgentRepository } from "../src/db/repositories/agent-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createModelProviderRoutes } from "../src/routes/model-providers.js";
 import { createModelRoutes } from "../src/routes/models.js";
@@ -98,6 +99,7 @@ const testProviderCatalog: ProviderCatalogPreset[] = [
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
+  db.pragma("foreign_keys = ON");
   const drizzleDb = drizzle(db);
   const migrationsFolder = path.join(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -111,10 +113,12 @@ describe("model provider routes", () => {
   let app: express.Express;
   let db: Database.Database;
   let token: string;
+  let userId: string;
 
   beforeEach(() => {
     db = createTestDb();
     const user = new UserRepository(db).create("provider-routes@example.com", "hash");
+    userId = user.id;
     token = signJwt({ userId: user.id, email: user.email }, secret);
     app = express();
     app.locals.jwtSecret = secret;
@@ -822,6 +826,64 @@ describe("model provider routes", () => {
     assert.equal(listed.body.data.models.some((model: { id: string }) => model.id === modelA.body.data.model.id), false);
     assert.equal(legacyModels.body.data.models.some((model: { id: string }) => model.id === modelA.body.data.model.id), false);
     assert.equal(legacyModels.body.data.models.find((model: { id: string }) => model.id === modelB.body.data.model.id)?.isDefault, true);
+  });
+
+  it("rejects deleting a provider model that is still referenced by an agent", async () => {
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+    const providerId = created.body.data.provider.id;
+    const model = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "DeepSeek Chat",
+      modelId: "deepseek-chat"
+    }, authHeaders());
+    const agentRepo = new AgentRepository(db, userId);
+    agentRepo.create({ name: "Reference Agent", modelId: model.body.data.model.id });
+
+    const deleted = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}/models/${model.body.data.model.id}`, undefined, authHeaders());
+    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
+
+    assert.equal(deleted.status, 409);
+    assert.equal(deleted.body.code, 1);
+    assert.match(deleted.body.message, /referenced/i);
+    assert.equal(
+      listed.body.data.models.some((item: { id: string }) => item.id === model.body.data.model.id),
+      true
+    );
+
+    agentRepo.delete(agentRepo.list()[0].id);
+    const deletedAfterDereference = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}/models/${model.body.data.model.id}`, undefined, authHeaders());
+    assert.equal(deletedAfterDereference.status, 200);
+    assert.equal(deletedAfterDereference.body.code, 0);
+  });
+
+  it("rejects deleting a provider whose models are still referenced by an agent", async () => {
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+    const providerId = created.body.data.provider.id;
+    const model = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "DeepSeek Chat",
+      modelId: "deepseek-chat"
+    }, authHeaders());
+    const agentRepo = new AgentRepository(db, userId);
+    agentRepo.create({ name: "Reference Agent", modelId: model.body.data.model.id });
+
+    const deleted = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}`, undefined, authHeaders());
+    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
+
+    assert.equal(deleted.status, 409);
+    assert.equal(deleted.body.code, 1);
+    assert.match(deleted.body.message, /referenced/i);
+    assert.equal(
+      listed.body.data.providers.some((item: { id: string }) => item.id === providerId),
+      true
+    );
+
+    agentRepo.delete(agentRepo.list()[0].id);
+    const deletedAfterDereference = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}`, undefined, authHeaders());
+    assert.equal(deletedAfterDereference.status, 200);
+    assert.equal(deletedAfterDereference.body.code, 0);
   });
 
   it("deletes and rotates credentials only within the selected provider", async () => {

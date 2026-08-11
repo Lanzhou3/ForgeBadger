@@ -13,7 +13,7 @@ import type { Database } from "../db/types.js";
 import { buildProjectConfigFiles } from "./project-config-files.js";
 import { syncLocalSkills } from "./local-skills.js";
 
-const aiToolSchema = z.enum(["claude", "opencode", "codex"]);
+const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
 
 export type ProjectConfigSkillSync = (repo: Pick<SkillRepository, "create" | "getByName" | "update">) => unknown;
 

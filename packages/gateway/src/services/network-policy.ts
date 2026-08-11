@@ -115,7 +115,11 @@ export function isBlockedIPv4(address: string): boolean {
   if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 carrier-grade NAT
   if (a === 192 && b === 0 && c === 0) return true; // 192.0.0.0/24 IETF protocol assignments
   if (a === 192 && b === 0 && c === 2) return true; // 192.0.2.0/24 TEST-NET-1
-  if (a === 198 && b === 18) return true; // 198.18.0.0/15 benchmarking
+  // NOTE: 198.18.0.0/15 (RFC 2544 benchmarking) is intentionally NOT blocked.
+  // Surge/Clash-style proxies in fake-ip mode answer every DNS query with an
+  // address from this range, so blocking it breaks all outbound requests for
+  // proxied users. The range is not routable on the public internet and does
+  // not overlap real private networks, so allowing it adds no SSRF vector.
   if (a === 198 && b === 51 && c === 100) return true; // 198.51.100.0/24 TEST-NET-2
   if (a === 203 && b === 0 && c === 113) return true; // 203.0.113.0/24 TEST-NET-3
   if (a >= 224) return true; // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved
