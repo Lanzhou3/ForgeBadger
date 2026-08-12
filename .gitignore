@@ -49,6 +49,7 @@ docs/*
 .codex/
 .opencode
 .opencode/
+.kimi-code/
 .claude/settings.local.json
 .claude/.credentials.json
 CLAUDE.local.md
@@ -57,6 +58,11 @@ AGENTS.override.md
 opencode.json
 opencode.jsonc
 .goal/
+
+# Local browser captures and one-off runtime probes.
+.playwright-mcp/
+packages/gateway/*probe.mjs
+packages/web/*probe.mjs
 
 # Local macOS metadata and generated CodeGraph indexes are never repository inputs.
 .DS_Store
