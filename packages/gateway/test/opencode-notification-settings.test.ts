@@ -42,6 +42,10 @@ describe("OpenCode notification settings", () => {
     assert.match(content, /OPENFORGE_GATEWAY_URL/);
     assert.match(content, /OPENFORGE_SESSION_ID/);
     assert.match(content, /permission\.asked/);
+    assert.match(content, /session\.idle/);
+    assert.match(content, /session\.error/);
+    assert.match(content, /task_completed/);
+    assert.match(content, /task_failed/);
     assert.match(content, /export const OpenForgePermissionNotify/);
     assert.match(content, /adapter: "opencode"/);
     assert.match(content, /"x-openforge-session-token"/);

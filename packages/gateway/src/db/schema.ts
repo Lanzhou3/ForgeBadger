@@ -526,31 +526,6 @@ export const catalogItems = sqliteTable(
   })
 );
 
-export const plugins = sqliteTable(
-  "plugins",
-  {
-    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    pluginId: text("plugin_id").notNull(),
-    status: text("status").notNull().default("disabled"),
-    name: text("name"),
-    description: text("description"),
-    version: text("version"),
-    adapter: text("adapter"),
-    category: text("category"),
-    configPath: text("config_path"),
-    skillsJson: text("skills_json"),
-    installSource: text("install_source"),
-    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-  },
-  (table) => ({
-    idx_plugins_user_plugin: uniqueIndex("idx_plugins_user_plugin").on(table.userId, table.pluginId)
-  })
-);
-
 export const notifications = sqliteTable(
   "notifications",
   {
@@ -602,6 +577,210 @@ export const sessions = sqliteTable(
   (table) => ({
     idx_sessions_user_project: index("idx_sessions_user_project").on(table.userId, table.projectId),
     idx_sessions_status: index("idx_sessions_status").on(table.status)
+  })
+);
+
+// Project Manager execution state is persisted separately from chat runs and human-readable ledger events.
+export const projectManagerTaskAttempts = sqliteTable(
+  "project_manager_task_attempts",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    workItemId: text("work_item_id")
+      .notNull()
+      .references(() => projectManagerWorkItems.id, { onDelete: "cascade" }),
+    attemptNumber: integer("attempt_number").notNull(),
+    desiredState: text("desired_state").notNull().default("prepared"),
+    observedState: text("observed_state").notNull().default("prepared"),
+    inputVersion: integer("input_version").notNull().default(1),
+    inputDigest: text("input_digest").notNull(),
+    // Non-terminal attempts set a stable slot; terminal transitions clear it so history can accumulate.
+    activeSlot: text("active_slot"),
+    failureCode: text("failure_code"),
+    failureMessage: text("failure_message"),
+    reconcileCount: integer("reconcile_count").notNull().default(0),
+    decisionCount: integer("decision_count").notNull().default(0),
+    followUpCount: integer("follow_up_count").notNull().default(0),
+    retryCount: integer("retry_count").notNull().default(0),
+    deadlineAt: integer("deadline_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+    completedAt: integer("completed_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idx_project_manager_task_attempts_work_item_number: uniqueIndex(
+      "idx_project_manager_task_attempts_work_item_number"
+    ).on(table.userId, table.workItemId, table.attemptNumber),
+    idx_project_manager_task_attempts_user_active: uniqueIndex(
+      "idx_project_manager_task_attempts_user_active"
+    ).on(table.userId, table.activeSlot)
+  })
+);
+
+export const projectManagerSessionAssignments = sqliteTable(
+  "project_manager_session_assignments",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    workItemId: text("work_item_id")
+      .notNull()
+      .references(() => projectManagerWorkItems.id, { onDelete: "cascade" }),
+    attemptId: text("attempt_id")
+      .notNull()
+      .references(() => projectManagerTaskAttempts.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    adapter: text("adapter").notNull(),
+    capabilitiesJson: text("capabilities_json").notNull().default("{}"),
+    leaseToken: text("lease_token").notNull(),
+    leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp" }).notNull(),
+    // Active slots enforce one project assignment and one owner per session without partial indexes.
+    activeSlot: text("active_slot"),
+    releasedReason: text("released_reason"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+    releasedAt: integer("released_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idx_project_manager_session_assignments_attempt: index(
+      "idx_project_manager_session_assignments_attempt"
+    ).on(table.userId, table.attemptId),
+    idx_project_manager_session_assignments_project_active: uniqueIndex(
+      "idx_project_manager_session_assignments_project_active"
+    ).on(table.userId, table.projectId, table.activeSlot),
+    idx_project_manager_session_assignments_session_active: uniqueIndex(
+      "idx_project_manager_session_assignments_session_active"
+    ).on(table.userId, table.sessionId, table.activeSlot)
+  })
+);
+
+export const projectManagerCommands = sqliteTable(
+  "project_manager_commands",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    workItemId: text("work_item_id")
+      .notNull()
+      .references(() => projectManagerWorkItems.id, { onDelete: "cascade" }),
+    attemptId: text("attempt_id")
+      .notNull()
+      .references(() => projectManagerTaskAttempts.id, { onDelete: "cascade" }),
+    assignmentId: text("assignment_id").references(() => projectManagerSessionAssignments.id, { onDelete: "set null" }),
+    approvalId: text("approval_id").references(() => copilotPendingActions.id, { onDelete: "set null" }),
+    commandType: text("command_type").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    payloadDigest: text("payload_digest").notNull(),
+    status: text("status").notNull().default("pending"),
+    resultJson: text("result_json"),
+    failureCode: text("failure_code"),
+    failureMessage: text("failure_message"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+    completedAt: integer("completed_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idx_project_manager_commands_idempotency: uniqueIndex(
+      "idx_project_manager_commands_idempotency"
+    ).on(table.userId, table.attemptId, table.idempotencyKey),
+    idx_project_manager_commands_attempt_created: index(
+      "idx_project_manager_commands_attempt_created"
+    ).on(table.userId, table.attemptId, table.createdAt)
+  })
+);
+
+export const projectManagerAcceptanceResults = sqliteTable(
+  "project_manager_acceptance_results",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    workItemId: text("work_item_id")
+      .notNull()
+      .references(() => projectManagerWorkItems.id, { onDelete: "cascade" }),
+    attemptId: text("attempt_id")
+      .notNull()
+      .references(() => projectManagerTaskAttempts.id, { onDelete: "cascade" }),
+    verdict: text("verdict").notNull(),
+    criteriaJson: text("criteria_json").notNull().default("[]"),
+    verificationJson: text("verification_json").notNull().default("[]"),
+    evidenceRefsJson: text("evidence_refs_json").notNull().default("[]"),
+    policyJson: text("policy_json").notNull().default("{}"),
+    summary: text("summary"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_project_manager_acceptance_attempt: index("idx_project_manager_acceptance_attempt").on(
+      table.userId,
+      table.attemptId,
+      table.createdAt
+    )
+  })
+);
+
+export const projectManagerWakeups = sqliteTable(
+  "project_manager_wakeups",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    workItemId: text("work_item_id")
+      .notNull()
+      .references(() => projectManagerWorkItems.id, { onDelete: "cascade" }),
+    attemptId: text("attempt_id")
+      .notNull()
+      .references(() => projectManagerTaskAttempts.id, { onDelete: "cascade" }),
+    reasonClass: text("reason_class").notNull(),
+    status: text("status").notNull().default("pending"),
+    // Pending/claimed rows retain a slot; completion clears it so the same reason can wake again later.
+    activeSlot: text("active_slot"),
+    notBefore: integer("not_before", { mode: "timestamp" }).notNull(),
+    claimToken: text("claim_token"),
+    claimExpiresAt: integer("claim_expires_at", { mode: "timestamp" }),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastErrorCode: text("last_error_code"),
+    lastErrorMessage: text("last_error_message"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+    completedAt: integer("completed_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idx_project_manager_wakeups_pending: uniqueIndex("idx_project_manager_wakeups_pending").on(
+      table.userId,
+      table.attemptId,
+      table.reasonClass,
+      table.activeSlot
+    ),
+    idx_project_manager_wakeups_attempt_due: index("idx_project_manager_wakeups_attempt_due").on(
+      table.userId,
+      table.attemptId,
+      table.status,
+      table.notBefore
+    )
   })
 );
 
@@ -796,5 +975,63 @@ export const auditLogs = sqliteTable(
   (table) => ({
     idx_audit_logs_user: index("idx_audit_logs_user").on(table.userId),
     idx_audit_logs_resource: index("idx_audit_logs_resource").on(table.resourceType, table.resourceId)
+  })
+);
+
+export const tokenUsageRecords = sqliteTable(
+  "token_usage_records",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    adapter: text("adapter").notNull(),
+    sessionId: text("session_id"),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    projectPath: text("project_path").notNull().default(""),
+    modelId: text("model_id"),
+    requestId: text("request_id").notNull(),
+    occurredAt: integer("occurred_at", { mode: "timestamp" }).notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    reasoningTokens: integer("reasoning_tokens").notNull().default(0),
+    sourceFile: text("source_file").notNull(),
+    watermark: text("watermark").notNull().default(""),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date())
+  },
+  (table) => ({
+    idx_token_usage_user_adapter_request: uniqueIndex("idx_token_usage_user_adapter_request").on(
+      table.userId,
+      table.adapter,
+      table.requestId
+    ),
+    idx_token_usage_user_adapter_occurred: index("idx_token_usage_user_adapter_occurred").on(
+      table.userId,
+      table.adapter,
+      table.occurredAt
+    ),
+    idx_token_usage_user_project_occurred: index("idx_token_usage_user_project_occurred").on(
+      table.userId,
+      table.projectPath,
+      table.occurredAt
+    )
+  })
+);
+
+export const usageSyncCursors = sqliteTable(
+  "usage_sync_cursors",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    adapter: text("adapter").notNull(),
+    watermark: text("watermark").notNull().default(""),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_usage_sync_cursors_user_adapter: uniqueIndex("idx_usage_sync_cursors_user_adapter").on(table.userId, table.adapter)
   })
 );

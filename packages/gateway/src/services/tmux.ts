@@ -10,6 +10,7 @@ export interface TmuxCreateOptions {
 
 export interface TmuxClient {
   createSession(options: TmuxCreateOptions): Promise<void>;
+  configureSession?(name: string): Promise<void>;
   killSession(name: string): Promise<void>;
   capturePane(name: string): Promise<string>;
   listSessions(): Promise<string[]>;
@@ -20,6 +21,13 @@ export interface TmuxClient {
 }
 
 export function createTmuxClient(): TmuxClient {
+  async function configureSession(name: string): Promise<void> {
+    // Mouse mode lets tmux enter copy-mode for CLIs that do not implement
+    // terminal mouse input; OpenCode keeps receiving its own mouse events.
+    await runTmux(["set-option", "-t", name, "mouse", "on"]);
+    await runTmux(["set-option", "-t", name, "history-limit", "10000"]);
+  }
+
   return {
     async createSession(options) {
       const args = [
@@ -37,6 +45,11 @@ export function createTmuxClient(): TmuxClient {
 
       args.push("--", options.command, ...options.args);
       await runTmux(args);
+      await configureSession(options.name);
+    },
+
+    async configureSession(name) {
+      await configureSession(name);
     },
 
     async killSession(name) {

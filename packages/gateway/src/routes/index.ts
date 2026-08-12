@@ -21,7 +21,6 @@ import { createSkillRoutes } from "./skills.js";
 import { createApiKeyRoutes } from "./api-keys.js";
 import { createCliConfigRoutes } from "./cli-config.js";
 import { createDashboardRoutes } from "./dashboard.js";
-import { createPluginRoutes } from "./plugins.js";
 import { createNotificationRoutes } from "./notifications.js";
 import { createSessionHookRoutes } from "./session-hooks.js";
 import { createSnapshotRoutes } from "./snapshots.js";
@@ -68,7 +67,6 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/model-providers", createModelProviderRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/agents", createAgentRoutes(deps.db));
   app.use("/api/v1", createSkillRoutes(deps.db));
-  app.use("/api/v1/plugins", createPluginRoutes(deps.db));
   app.use("/api/v1/notifications", createNotificationRoutes(deps.db));
   app.use("/api/v1/api-keys", createApiKeyRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/cli-config", createCliConfigRoutes());

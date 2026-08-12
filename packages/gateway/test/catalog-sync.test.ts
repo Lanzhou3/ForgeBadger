@@ -31,7 +31,7 @@ function createTestDb(): Database {
 }
 
 describe("remote catalog sync", () => {
-  it("stores remote Skill and plugin metadata without installing local Skill content", async () => {
+  it("stores remote Skill metadata without installing local Skill content", async () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("catalog@example.com", "hash");
     const manifest = JSON.stringify({
@@ -44,17 +44,6 @@ describe("remote catalog sync", () => {
           content: "# Do not install this yet"
         }
       ],
-      plugins: [
-        {
-          id: "plugin-safe",
-          name: "Safe Plugin",
-          description: "Safety checks",
-          version: "0.3.0",
-          adapter: "claude",
-          category: "safety",
-          configPath: ".claude/plugins/safe/plugin.json"
-        }
-      ]
     });
 
     const result = await refreshRemoteCatalog({
@@ -72,9 +61,9 @@ describe("remote catalog sync", () => {
     const sources = repo.listSources();
     const items = repo.listItems();
 
-    assert.equal(result.items.length, 2);
+    assert.equal(result.items.length, 1);
     assert.equal(sources[0]?.lastRefreshedAt instanceof Date, true);
-    assert.deepEqual(items.map((item) => item.externalId).sort(), ["plugin-safe", "review-skill"]);
+    assert.deepEqual(items.map((item) => item.externalId).sort(), ["review-skill"]);
     assert.equal(new SkillRepository(db, user.id).list().length, 0);
     db.close();
   });

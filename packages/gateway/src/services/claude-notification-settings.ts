@@ -30,6 +30,8 @@ export interface ClaudeHookSettings {
   hooks: Record<string, unknown> & {
     PermissionRequest: ClaudeHookGroup[];
     PermissionDenied: ClaudeHookGroup[];
+    Stop: ClaudeHookGroup[];
+    SessionEnd: ClaudeHookGroup[];
     Notification: ClaudeHookGroup[];
   };
 }
@@ -46,6 +48,16 @@ export function buildOpenForgeClaudeHookSettings(gatewayUrl: string, sessionId?:
         }
       ],
       PermissionDenied: [
+        {
+          hooks: [httpHook]
+        }
+      ],
+      Stop: [
+        {
+          hooks: [httpHook]
+        }
+      ],
+      SessionEnd: [
         {
           hooks: [httpHook]
         }
@@ -98,6 +110,8 @@ function mergeOpenForgeHookSettings(
     undefined,
     openForgeHook
   );
+  hooks.Stop = ensureHookGroup(hooks.Stop, undefined, openForgeHook);
+  hooks.SessionEnd = ensureHookGroup(hooks.SessionEnd, undefined, openForgeHook);
   hooks.Notification = ensureHookGroup(
     hooks.Notification,
     "permission_prompt",

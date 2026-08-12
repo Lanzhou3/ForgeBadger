@@ -18,7 +18,6 @@ import { ModelProviderRepository } from "../src/db/repositories/model-provider-r
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { ProjectManagerRepository } from "../src/db/repositories/project-manager-repository.js";
 import { AgentRepository } from "../src/db/repositories/agent-repository.js";
-import { PluginRepository } from "../src/db/repositories/plugin-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { SkillRepository } from "../src/db/repositories/skill-repository.js";
 import { ProjectSkillRepository } from "../src/db/repositories/project-skill-repository.js";
@@ -1117,7 +1116,7 @@ describe("copilot routes", () => {
     assert.equal(res.status, 201);
     assert.match(calls[0]?.instructions ?? "", /Project status and session status are different/);
     assert.match(calls[0]?.instructions ?? "", /openforge\.list_sessions/);
-    assert.match(calls[0]?.instructions ?? "", /inspect projects, sessions, agents, skills, templates, plugins/);
+    assert.match(calls[0]?.instructions ?? "", /inspect projects, sessions, agents, skills, templates/);
     assert.match(calls[0]?.instructions ?? "", /project create\/import\/delete\/config sync/);
     assert.match(calls[0]?.instructions ?? "", /session create\/start\/stop\/delete\/input/);
     assert.match(calls[0]?.instructions ?? "", /openforge\.propose_session_input/);
@@ -4483,31 +4482,6 @@ describe("copilot routes", () => {
     assert.equal(updated?.isEnabled, true);
   });
 
-  it("approves plugin-toggle actions by enabling or disabling a user-owned plugin state", async () => {
-    const { runId, actionId } = createPendingAction(userId, "openforge.propose_plugin_toggle", {
-      pluginId: "claude-safe-edits",
-      enabled: true,
-      reason: "Enable safer Claude edits."
-    });
-
-    const res = await makeRequest(
-      app,
-      "POST",
-      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
-      undefined,
-      authHeaders()
-    );
-
-    const updated = new PluginRepository(db, userId).getByPluginId("claude-safe-edits");
-    assert.equal(res.status, 200);
-    assert.equal(res.body.code, 0);
-    assert.equal(res.body.data.action.status, "approved");
-    assert.equal(res.body.data.action.result.executed, true);
-    assert.equal(res.body.data.action.result.plugin.id, "claude-safe-edits");
-    assert.equal(res.body.data.action.result.plugin.status, "enabled");
-    assert.equal(updated?.status, "enabled");
-  });
-
   it("approves project skill-toggle actions by overriding skill state for one project", async () => {
     const project = new ProjectRepository(db, userId).create({
       name: "OpenForge",
@@ -5030,26 +5004,6 @@ describe("copilot routes", () => {
     assert.equal(res.status, 400);
     assert.equal(res.body.code, 1);
     assert.equal(res.body.details.code, "copilot_skill_toggle_invalid");
-    assert.equal(action?.status, "pending");
-  });
-
-  it("does not approve invalid stored plugin-toggle actions", async () => {
-    const { runId, actionId } = createPendingAction(userId, "openforge.propose_plugin_toggle", {
-      enabled: true
-    });
-
-    const res = await makeRequest(
-      app,
-      "POST",
-      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
-      undefined,
-      authHeaders()
-    );
-
-    const action = new CopilotRepository(db, userId).getPendingAction(actionId);
-    assert.equal(res.status, 400);
-    assert.equal(res.body.code, 1);
-    assert.equal(res.body.details.code, "copilot_plugin_toggle_invalid");
     assert.equal(action?.status, "pending");
   });
 

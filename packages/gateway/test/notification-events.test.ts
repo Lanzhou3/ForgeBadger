@@ -6,7 +6,8 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { NotificationRepository, UserRepository } from "../src/db/repositories/index.js";
+import { NotificationRepository } from "../src/db/repositories/notification-repository.js";
+import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { OpenForgeEventBus } from "../src/services/event-bus.js";
 import { attachNotificationPersistence } from "../src/services/notification-events.js";
 
@@ -67,6 +68,41 @@ describe("notification event persistence", () => {
     assert.ok(notification);
     assert.equal(notification.titleKey, "notifications.claudePermissionRequest");
     assert.equal(notification.message, "Bash: Claude needs your permission to use Bash");
+    db.close();
+  });
+
+  it("persists adapter lifecycle notifications with project and session context", () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("lifecycle-notify@example.com", "hash");
+    const eventBus = new OpenForgeEventBus();
+    attachNotificationPersistence({ db, eventBus });
+
+    eventBus.emitEvent({
+      type: "claude_notification",
+      userId: user.id,
+      sessionId: "session-3",
+      projectId: "project-3",
+      projectName: "OpenForge",
+      sessionName: "Repair notifications",
+      hookEventName: "Interrupt",
+      notificationType: "task_interrupted",
+      message: "Kimi Code task was interrupted",
+      adapter: "kimi"
+    });
+
+    const notification = new NotificationRepository(db, user.id).list()[0];
+    assert.ok(notification);
+    assert.equal(notification.titleKey, "notifications.taskInterrupted");
+    assert.deepEqual(JSON.parse(notification.payload ?? "{}"), {
+      session_id: "session-3",
+      project_id: "project-3",
+      project_name: "OpenForge",
+      session_name: "Repair notifications",
+      hook_event_name: "Interrupt",
+      notification_type: "task_interrupted",
+      message: "Kimi Code task was interrupted",
+      adapter: "kimi"
+    });
     db.close();
   });
 });

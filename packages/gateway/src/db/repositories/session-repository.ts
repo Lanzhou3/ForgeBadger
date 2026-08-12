@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { Database } from "../types.js";
 
-import { sessions } from "../schema.js";
+import { sessions, projects } from "../schema.js";
 
 export interface CreateSessionInput {
   projectId: string;
@@ -38,6 +38,8 @@ export interface Session {
   errorMessage: string | null;
   createdAt: Date;
   updatedAt: Date;
+  /** Denormalized display name of the owning project (read queries only). */
+  projectName?: string | null;
 }
 
 export class SessionRepository {
@@ -70,26 +72,32 @@ export class SessionRepository {
 
   list(): Session[] {
     return this.drizzle
-      .select()
+      .select({ session: sessions, projectName: projects.name })
       .from(sessions)
+      .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(eq(sessions.userId, this.userId))
-      .all() as Session[];
+      .all()
+      .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
   }
 
   listByProject(projectId: string): Session[] {
     return this.drizzle
-      .select()
+      .select({ session: sessions, projectName: projects.name })
       .from(sessions)
+      .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(and(eq(sessions.userId, this.userId), eq(sessions.projectId, projectId)))
-      .all() as Session[];
+      .all()
+      .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
   }
 
   getById(id: string): Session | undefined {
-    return this.drizzle
-      .select()
+    const row = this.drizzle
+      .select({ session: sessions, projectName: projects.name })
       .from(sessions)
+      .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(and(eq(sessions.id, id), eq(sessions.userId, this.userId)))
-      .get() as Session | undefined;
+      .get();
+    return row ? ({ ...row.session, projectName: row.projectName } as Session) : undefined;
   }
 
   updateStatus(id: string, status: string): Session | undefined {

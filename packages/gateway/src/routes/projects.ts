@@ -24,6 +24,7 @@ import type { OpenForgeEventBus } from "../services/event-bus.js";
 import type { CredentialMode, WriteResult } from "../config-generation/types.js";
 import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } from "../services/project-ai-config.js";
 import { listWorkspaceTree, readWorkspaceFile } from "../services/workspace-context.js";
+import { getProjectGitChanges, getProjectGitFileDiff } from "../services/project-git.js";
 import { recordActivity } from "../services/activity-events.js";
 import { createDefaultAgentPack } from "../services/default-agent-pack.js";
 import { buildConfigSyncSummary, buildProjectConfigRenderPlan } from "../services/project-config-render.js";
@@ -41,6 +42,10 @@ const createProjectSchema = z.object({
   techStack: z.string().optional(),
   aiTool: aiToolSchema.optional(),
   templateId: z.string().optional()
+});
+
+const updateProjectTemplateSchema = z.object({
+  templateId: z.string().min(1).nullable().optional()
 });
 
 const configPreviewSchema = z.object({
@@ -73,6 +78,11 @@ const workspaceTreeQuerySchema = z.object({
 
 const workspaceFileQuerySchema = z.object({
   path: z.string().min(1).max(512)
+}).strict();
+
+const gitDiffQuerySchema = z.object({
+  path: z.string().min(1).max(512),
+  untracked: z.enum(["0", "1"]).optional()
 }).strict();
 
 const agentSequenceSchema = z.object({
@@ -335,6 +345,48 @@ export function createProjectRoutes(
     });
   });
 
+  router.patch("/:id", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = updateProjectTemplateSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const repo = new ProjectRepository(db, userId);
+    const project = repo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    const { templateId } = parseResult.data;
+
+    // 缺省:绑定关系保持不变
+    if (templateId === undefined) {
+      res.json({ code: 0, data: { project }, message: "" });
+      return;
+    }
+
+    // 切换模板:校验模板存在且属于当前用户
+    if (templateId !== null) {
+      const template = new TemplateRepository(db, userId).getById(templateId);
+      if (!template) {
+        res.status(404).json({ code: 1, message: "Template not found" });
+        return;
+      }
+    }
+
+    const updated = repo.updateTemplateId(project.id, templateId);
+    new AuditLogRepository(db, userId).create({
+      action: templateId === null ? "project.template.unbind" : "project.template.bind",
+      resourceType: "project",
+      resourceId: project.id,
+      details: { name: project.name, templateId }
+    });
+    res.json({ code: 0, data: { project: updated ?? project }, message: "" });
+  });
+
   router.post("/:id/config/preview", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const projectId = req.params.id;
@@ -589,7 +641,15 @@ export function createProjectRoutes(
         return;
       }
 
-      const templateId = parseResult.data.templateId ?? project.templateId ?? defaultTemplateIdForAiTool(project.aiTool);
+      const templateId = parseResult.data.templateId ?? project.templateId;
+      if (!templateId) {
+        res.status(404).json({
+          code: 1,
+          message: "Project is not tracking any template",
+          details: { code: "TEMPLATE_NOT_TRACKED" }
+        });
+        return;
+      }
       const plan = await buildProjectConfigRenderPlan(
         db,
         userId,
@@ -778,6 +838,68 @@ export function createProjectRoutes(
       res.status(400).json({
         code: 1,
         message: error instanceof Error ? error.message : "Workspace file read failed"
+      });
+    }
+  });
+
+  router.get("/:id/git-changes", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const projectRepo = new ProjectRepository(db, userId);
+    const project = projectRepo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const git = await getProjectGitChanges(project.path);
+      res.json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          git
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Git changes read failed"
+      });
+    }
+  });
+
+  router.get("/:id/git-diff", async (req, res) => {
+    const parseResult = gitDiffQuerySchema.safeParse(req.query ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const projectRepo = new ProjectRepository(db, userId);
+    const project = projectRepo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const file = await getProjectGitFileDiff(project.path, parseResult.data.path, {
+        untracked: parseResult.data.untracked === "1"
+      });
+      res.json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          file
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Git diff read failed"
       });
     }
   });

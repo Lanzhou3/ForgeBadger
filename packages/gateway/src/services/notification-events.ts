@@ -90,12 +90,7 @@ export function notificationInputFromEvent(event: OpenForgeEvent): CreateNotific
       };
     case "claude_notification": {
       const adapter = event.adapter ?? "claude";
-      const titleKey =
-        event.notificationType === "permission_prompt"
-          ? adapter === "opencode"
-            ? "notifications.opencodePermissionRequest"
-            : "notifications.claudePermissionRequest"
-          : "notifications.claudeNotification";
+      const titleKey = notificationTitleKey(event.notificationType, adapter);
       const message = event.toolName ? `${event.toolName}: ${event.message}` : event.message;
       return {
         type: event.type,
@@ -105,6 +100,9 @@ export function notificationInputFromEvent(event: OpenForgeEvent): CreateNotific
         sessionId: event.sessionId,
         payload: {
           session_id: event.sessionId,
+          ...(event.projectId ? { project_id: event.projectId } : {}),
+          ...(event.projectName ? { project_name: event.projectName } : {}),
+          ...(event.sessionName ? { session_name: event.sessionName } : {}),
           hook_event_name: event.hookEventName,
           notification_type: event.notificationType,
           message: event.message,
@@ -121,4 +119,18 @@ export function notificationInputFromEvent(event: OpenForgeEvent): CreateNotific
     case "error":
       return undefined;
   }
+}
+
+function notificationTitleKey(notificationType: string, adapter: string): string {
+  if (notificationType === "permission_prompt") {
+    if (adapter === "opencode") return "notifications.opencodePermissionRequest";
+    if (adapter === "codex") return "notifications.codexPermissionRequest";
+    if (adapter === "kimi") return "notifications.kimiPermissionRequest";
+    return "notifications.claudePermissionRequest";
+  }
+  if (notificationType === "task_completed") return "notifications.taskCompleted";
+  if (notificationType === "task_interrupted") return "notifications.taskInterrupted";
+  if (notificationType === "task_failed") return "notifications.taskFailed";
+  if (notificationType === "session_ended") return "notifications.sessionEnded";
+  return "notifications.cliNotification";
 }

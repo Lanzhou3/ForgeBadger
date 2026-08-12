@@ -5,7 +5,6 @@ import { AgentRepository, type Agent } from "../../db/repositories/agent-reposit
 import { CopilotRepository } from "../../db/repositories/copilot-repository.js";
 import { ModelProviderRepository, type ModelProfile, type ProviderProfile } from "../../db/repositories/model-provider-repository.js";
 import { NotificationRepository, type Notification } from "../../db/repositories/notification-repository.js";
-import { PluginRepository } from "../../db/repositories/plugin-repository.js";
 import {
   PROJECT_MANAGER_LEDGER_EVENT_TYPES,
   PROJECT_MANAGER_WORK_ITEM_STATUSES,
@@ -22,7 +21,6 @@ import { SessionRepository, type Session } from "../../db/repositories/session-r
 import { SkillRepository, type Skill } from "../../db/repositories/skill-repository.js";
 import { TemplateRepository, type Template, type TemplateFile } from "../../db/repositories/template-repository.js";
 import { UsageRepository, type UsageRate } from "../../db/repositories/usage-repository.js";
-import type { PluginSummary } from "../plugin-catalog.js";
 import { loadProviderCatalog, type ProviderCatalogPreset } from "../model-catalog.js";
 import { discoverAdapters } from "../adapter-discovery.js";
 import { getDashboardSummary } from "../dashboard-summary.js";
@@ -197,11 +195,6 @@ const proposeTemplateDeleteInput = z.object({
 }).strict();
 const proposeSkillToggleInput = z.object({
   skillId: z.string().min(1),
-  enabled: z.boolean(),
-  reason: z.string().min(1).optional()
-}).strict();
-const proposePluginToggleInput = z.object({
-  pluginId: z.string().min(1),
   enabled: z.boolean(),
   reason: z.string().min(1).optional()
 }).strict();
@@ -614,16 +607,6 @@ const proposeSkillToggleModelInputSchema = {
   required: ["skillId", "enabled"],
   additionalProperties: false
 };
-const proposePluginToggleModelInputSchema = {
-  type: "object",
-  properties: {
-    pluginId: { type: "string", minLength: 1 },
-    enabled: { type: "boolean" },
-    reason: { type: "string", minLength: 1 }
-  },
-  required: ["pluginId", "enabled"],
-  additionalProperties: false
-};
 const proposeProjectSkillToggleModelInputSchema = {
   type: "object",
   properties: {
@@ -877,16 +860,6 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       inputSchema: limitInput,
       modelInputSchema: limitModelInputSchema,
       execute: async (input, context) => listTemplates(input, context)
-    },
-    {
-      name: "openforge.list_plugins",
-      description:
-        "List OpenForge plugin catalog entries visible to the current user, including enabled/disabled state and bounded skill metadata.",
-      risk: "read",
-      requiresApproval: false,
-      inputSchema: limitInput,
-      modelInputSchema: limitModelInputSchema,
-      execute: async (input, context) => listPlugins(input, context)
     },
     {
       name: "openforge.get_notifications_summary",
@@ -1229,17 +1202,6 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       modelInputSchema: proposeSkillToggleModelInputSchema,
       execute: async (input, context) =>
         createSkillToggleProposal(input, context)
-    },
-    {
-      name: "openforge.propose_plugin_toggle",
-      description:
-        "Prepare enabling or disabling an OpenForge plugin for user approval. This does not change plugin state until the user approves it.",
-      risk: "prepare",
-      requiresApproval: true,
-      inputSchema: proposePluginToggleInput,
-      modelInputSchema: proposePluginToggleModelInputSchema,
-      execute: async (input, context) =>
-        createPluginToggleProposal(input, context)
     },
     {
       name: "openforge.propose_project_skill_toggle",
@@ -1733,38 +1695,6 @@ function toTemplateSummary(template: Template & { files?: TemplateFile[] }) {
     usageCount: template.usageCount,
     fileCount: files.length,
     filePaths: files.map((file) => file.filePath).slice(0, 20)
-  };
-}
-
-function listPlugins(
-  input: unknown,
-  context: Pick<CopilotToolContext, "db" | "userId">
-) {
-  const parsed = limitInput.parse(input);
-  return {
-    plugins: new PluginRepository(context.db, context.userId)
-      .list()
-      .slice(0, readLimit(parsed))
-      .map(toPluginSummary)
-  };
-}
-
-function toPluginSummary(plugin: PluginSummary) {
-  return {
-    id: plugin.id,
-    name: plugin.name,
-    description: plugin.description,
-    version: plugin.version,
-    adapter: plugin.adapter,
-    category: plugin.category,
-    status: plugin.status,
-    enabled: plugin.enabled,
-    configPath: plugin.configPath,
-    skillCount: plugin.skills.length,
-    skills: plugin.skills.map((skill) => ({
-      name: skill.name,
-      description: skill.description
-    })).slice(0, 20)
   };
 }
 
@@ -2352,18 +2282,6 @@ function createSkillToggleProposal(
     throw new CopilotToolValidationError("Copilot skill toggle target is not available");
   }
   return createPendingProposal(context, "openforge.propose_skill_toggle", parsed);
-}
-
-function createPluginToggleProposal(
-  input: unknown,
-  context: Pick<CopilotToolContext, "db" | "userId" | "runId">
-) {
-  const parsed = proposePluginToggleInput.parse(input);
-  const plugin = new PluginRepository(context.db, context.userId).getByPluginId(parsed.pluginId);
-  if (!plugin) {
-    throw new CopilotToolValidationError("Copilot plugin toggle target is not available");
-  }
-  return createPendingProposal(context, "openforge.propose_plugin_toggle", parsed);
 }
 
 function createProjectSkillToggleProposal(

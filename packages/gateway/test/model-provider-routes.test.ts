@@ -162,6 +162,89 @@ describe("model provider routes", () => {
     assert.equal(preview.body.data.preview.changedFiles[0].relativePath, "opencode.json");
   });
 
+  it("previews a Kimi provider apply in user-global scope without a project root", async () => {
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      name: "Volcengine",
+      providerKey: "volcengine",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+      authType: "api_key",
+      apiFormat: "openai",
+      supportedAdapters: ["kimi"]
+    }, authHeaders());
+    assert.equal(created.status, 201);
+    const provider = created.body.data.provider;
+    assert.deepEqual(provider.supportedAdapters, ["kimi"]);
+    const model = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/models`, {
+      name: "DeepSeek V3.1",
+      modelId: "deepseek-v3.1"
+    }, authHeaders());
+    assert.equal(model.status, 201);
+
+    const preview = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/preview-apply`, {
+      adapter: "kimi",
+      scope: "user-global",
+      modelProfileId: model.body.data.model.id
+    }, authHeaders());
+
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.code, 0);
+    assert.equal(preview.body.data.preview.adapter, "kimi");
+    assert.deepEqual(preview.body.data.preview.scope, "user-global");
+    assert.equal(preview.body.data.preview.changedFiles[0].relativePath, "config.toml");
+  });
+
+  it("requires a project root for project-scope preview apply", async () => {
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      name: "Volcengine",
+      providerKey: "volcengine",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+      authType: "api_key",
+      apiFormat: "openai",
+      supportedAdapters: ["kimi"]
+    }, authHeaders());
+    const provider = created.body.data.provider;
+    const model = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/models`, {
+      name: "DeepSeek V3.1",
+      modelId: "deepseek-v3.1"
+    }, authHeaders());
+
+    const preview = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/preview-apply`, {
+      adapter: "kimi",
+      modelProfileId: model.body.data.model.id
+    }, authHeaders());
+
+    assert.equal(preview.status, 400);
+    assert.equal(preview.body.code, 1);
+    assert.match(preview.body.message, /Project path is required/);
+  });
+
+  it("treats a missing project root as user-global for Claude and OpenCode preview", async () => {
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      catalogId: "deepseek"
+    }, authHeaders());
+    const provider = created.body.data.provider;
+    const model = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/models`, {
+      name: "DeepSeek Chat",
+      modelId: "deepseek-chat"
+    }, authHeaders());
+
+    const claudePreview = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/preview-apply`, {
+      adapter: "claude",
+      scope: "user-global",
+      modelProfileId: model.body.data.model.id
+    }, authHeaders());
+    const opencodePreview = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/preview-apply`, {
+      adapter: "opencode",
+      scope: "user-global",
+      modelProfileId: model.body.data.model.id
+    }, authHeaders());
+
+    assert.equal(claudePreview.status, 200);
+    assert.equal(claudePreview.body.data.preview.changedFiles[0].relativePath, "settings.json");
+    assert.equal(opencodePreview.status, 200);
+    assert.equal(opencodePreview.body.data.preview.changedFiles[0].relativePath, "opencode.json");
+  });
+
   it("treats adding the same catalog provider as idempotent", async () => {
     const first = await makeRequest(app, "POST", "/api/v1/model-providers", {
       catalogId: "deepseek"

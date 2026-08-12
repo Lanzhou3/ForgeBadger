@@ -245,6 +245,32 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
     assert.equal(captured, null);
   });
 
+  it("maps idle and error events to completion and failure notifications", async () => {
+    setEnv({
+      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731",
+      OPENFORGE_SESSION_ID: "sess-opencode-1",
+      OPENFORGE_ATTACH_TOKEN: "attach-token-123"
+    });
+    mockFetch();
+    const handler = await loadHandler();
+
+    await handler.event({ event: { id: "evt-idle", type: "session.idle", properties: {} } });
+    assert.deepEqual(captured?.body, {
+      hook_event_name: "Stop",
+      notification_type: "task_completed",
+      message: "OpenCode task completed",
+      adapter: "opencode"
+    });
+
+    await handler.event({ event: { id: "evt-error", type: "session.error", properties: {} } });
+    assert.deepEqual(captured?.body, {
+      hook_event_name: "StopFailure",
+      notification_type: "task_failed",
+      message: "OpenCode task failed",
+      adapter: "opencode"
+    });
+  });
+
   it("no-ops without fetching when GATEWAY_URL is missing", async () => {
     setEnv({
       OPENFORGE_SESSION_ID: "sess-opencode-1",

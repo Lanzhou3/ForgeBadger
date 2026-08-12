@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 
-import { sessions } from "../db/schema.js";
+import { projects, sessions } from "../db/schema.js";
 import type { Database } from "../db/types.js";
 import type { Session } from "../db/repositories/session-repository.js";
 import type { OpenForgeEventBus } from "../services/event-bus.js";
@@ -13,8 +13,13 @@ const claudeHookEventSchema = z.object({
   hook_event_name: z.string().optional(),
   notification_type: z.string().optional(),
   message: z.string().optional(),
+  /** Kimi Notification events carry the text as `body` (plus `title`). */
+  body: z.string().optional(),
   title: z.string().optional(),
-  tool_name: z.string().optional()
+  tool_name: z.string().optional(),
+  adapter: z.enum(["claude", "opencode", "codex", "kimi"]).optional(),
+  reason: z.string().optional(),
+  error: z.string().optional()
 }).passthrough();
 
 const wrappedClaudeNotificationSchema = z.object({
@@ -118,11 +123,13 @@ export function handleClaudeNotificationHook(
     return { status: 401, body: { code: 1, message: "Missing session token" } };
   }
 
-  const session = dbClient
-    .select()
+  const row = dbClient
+    .select({ session: sessions, projectName: projects.name })
     .from(sessions)
+    .leftJoin(projects, eq(sessions.projectId, projects.id))
     .where(eq(sessions.id, parsed.sessionId))
-    .get() as Session | undefined;
+    .get() as { session: Session; projectName: string | null } | undefined;
+  const session = row?.session;
 
   if (!session || !session.attachToken || session.attachToken !== sessionToken) {
     traceClaudeNotificationHook("reject", {
@@ -140,16 +147,17 @@ export function handleClaudeNotificationHook(
     parsed.event.message
   );
   const toolName = parsed.event.tool_name ?? inferPermissionToolName(parsed.event.message);
-  const message = notificationMessage(parsed.event, hookEventName, toolName);
-  const activityType = notificationType === "permission_denied"
-    ? "permission_denied"
-    : "permission_prompt";
+  const message = notificationMessage(parsed.event, hookEventName, notificationType, toolName);
+  const activityType = notificationType;
 
-  const adapter = parsed.event.adapter as string | undefined;
+  const adapter = parsed.event.adapter;
   eventBus.emitEvent({
     type: "claude_notification",
     userId: session.userId,
     sessionId: session.id,
+    projectId: session.projectId,
+    ...(row?.projectName ? { projectName: row.projectName } : {}),
+    sessionName: session.name,
     hookEventName,
     notificationType,
     message,
@@ -164,9 +172,7 @@ export function handleClaudeNotificationHook(
     sessionId: session.id,
     projectId: session.projectId,
     type: activityType,
-    status: notificationType === "permission_prompt" || notificationType === "permission_denied"
-      ? "warning"
-      : "info",
+    status: activityStatus(notificationType),
     message,
     metadata: {
       hookEventName,
@@ -206,13 +212,29 @@ function normalizeNotificationType(
   message?: string
 ): string {
   if (notificationType && notificationType.trim()) {
-    return notificationType.trim();
+    const explicit = notificationType.trim();
+    if (explicit === "task.completed" || explicit === "session.idle") {
+      return "task_completed";
+    }
+    return explicit;
   }
   if (hookEventName === "PermissionDenied") {
     return "permission_denied";
   }
   if (hookEventName === "PermissionRequest") {
     return "permission_prompt";
+  }
+  if (hookEventName === "Stop") {
+    return "task_completed";
+  }
+  if (hookEventName === "Interrupt") {
+    return "task_interrupted";
+  }
+  if (hookEventName === "StopFailure") {
+    return "task_failed";
+  }
+  if (hookEventName === "SessionEnd") {
+    return "session_ended";
   }
   if (hookEventName === "Notification" && isPermissionPromptMessage(message)) {
     return "permission_prompt";
@@ -223,18 +245,55 @@ function normalizeNotificationType(
 function notificationMessage(
   event: z.infer<typeof claudeHookEventSchema>,
   hookEventName: string,
+  notificationType: string,
   toolName?: string | undefined
 ): string {
-  if (event.message?.trim()) {
-    return event.message.trim();
+  const explicitMessage = event.message?.trim() || event.body?.trim();
+  if (explicitMessage) {
+    return explicitMessage;
   }
+  const adapter = typeof event.adapter === "string" ? event.adapter : "claude";
+  const label = adapterLabel(adapter);
   if (hookEventName === "PermissionRequest" && toolName) {
-    return `Claude needs permission to use ${toolName}`;
+    return `${label} needs permission to use ${toolName}`;
   }
   if (hookEventName === "PermissionDenied" && toolName) {
-    return `Claude permission was denied for ${toolName}`;
+    return `${label} permission was denied for ${toolName}`;
   }
-  return "Claude Code notification";
+  if (notificationType === "task_completed") {
+    // Do not persist the assistant's final response from Stop payloads. The
+    // notification only needs lifecycle context, not transcript content.
+    return `${label} task completed`;
+  }
+  if (hookEventName === "Interrupt") {
+    return event.reason?.trim() || `${label} task was interrupted`;
+  }
+  if (hookEventName === "StopFailure") {
+    return event.error?.trim() || event.reason?.trim() || `${label} task failed`;
+  }
+  if (hookEventName === "SessionEnd") {
+    return `${label} session ended`;
+  }
+  return `${label} notification`;
+}
+
+function adapterLabel(adapter: string): string {
+  if (adapter === "opencode") return "OpenCode";
+  if (adapter === "codex") return "Codex";
+  if (adapter === "kimi") return "Kimi Code";
+  return "Claude Code";
+}
+
+function activityStatus(notificationType: string): "info" | "warning" | "error" {
+  if (notificationType === "task_failed") return "error";
+  if (
+    notificationType === "permission_prompt" ||
+    notificationType === "permission_denied" ||
+    notificationType === "task_interrupted"
+  ) {
+    return "warning";
+  }
+  return "info";
 }
 
 function isPermissionPromptMessage(message?: string): boolean {

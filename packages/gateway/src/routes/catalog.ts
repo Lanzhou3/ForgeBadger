@@ -3,14 +3,13 @@ import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { CatalogRepository } from "../db/repositories/catalog-repository.js";
-import { PluginRepository } from "../db/repositories/plugin-repository.js";
 import { SkillRepository } from "../db/repositories/skill-repository.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
 import type { Database } from "../db/types.js";
 import { refreshRemoteCatalog } from "../services/catalog-sync.js";
 
 const refreshCatalogSchema = z.object({
-  type: z.enum(["skill", "plugin", "template"]),
+  type: z.enum(["skill", "template"]),
   sourceId: z.string().min(1),
   label: z.string().min(1),
   url: z.string().url(),
@@ -42,25 +41,6 @@ const skillCatalogMetadataSchema = z.object({
   })
 });
 
-const pluginIdSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/u);
-
-const pluginCatalogMetadataSchema = z.object({
-  pluginPackage: z.object({
-    id: pluginIdSchema,
-    name: z.string().min(1),
-    description: z.string().min(1),
-    version: z.string().min(1),
-    adapter: z.literal("claude"),
-    category: z.enum(["workflow", "safety", "integration"]),
-    configPath: z.string().min(1).refine(isSafeRelativeConfigPath, "Invalid config path"),
-    skills: z.array(z.object({
-      name: z.string().min(1),
-      description: z.string().min(1),
-      content: z.string().min(1)
-    })).min(1)
-  })
-});
-
 export function createCatalogRoutes(db: Database): Router {
   const router = Router();
   router.use(authenticate);
@@ -76,9 +56,14 @@ export function createCatalogRoutes(db: Database): Router {
 
   router.get("/items", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
+    const items = new CatalogRepository(db, userId)
+      .listItems()
+      // Defensive: DB rows predating the plugin module retirement may still
+      // carry itemType "plugin"; hide them even though new writes cannot.
+      .filter((item) => (item.itemType as string) !== "plugin");
     res.json({
       code: 0,
-      data: { items: new CatalogRepository(db, userId).listItems() },
+      data: { items },
       message: ""
     });
   });
@@ -167,31 +152,6 @@ export function createCatalogRoutes(db: Database): Router {
         return;
       }
 
-      if (item.itemType === "plugin") {
-        const parsed = pluginCatalogMetadataSchema.parse(metadata);
-        if (parsed.pluginPackage.id !== item.externalId) {
-          throw new Error("Plugin package id does not match catalog item");
-        }
-        const plugin = new PluginRepository(db, userId).install({
-          pluginId: parsed.pluginPackage.id,
-          name: parsed.pluginPackage.name,
-          description: parsed.pluginPackage.description,
-          version: parsed.pluginPackage.version,
-          adapter: parsed.pluginPackage.adapter,
-          category: parsed.pluginPackage.category,
-          configPath: parsed.pluginPackage.configPath,
-          skills: parsed.pluginPackage.skills,
-          installSource: `catalog:${item.sourceId}`
-        });
-
-        res.status(201).json({
-          code: 0,
-          data: { plugin, catalogItem },
-          message: ""
-        });
-        return;
-      }
-
       res.status(409).json({ code: 1, message: "Unsupported catalog item type" });
     } catch (error) {
       res.status(400).json({
@@ -202,12 +162,4 @@ export function createCatalogRoutes(db: Database): Router {
   });
 
   return router;
-}
-
-function isSafeRelativeConfigPath(value: string): boolean {
-  return (
-    !value.startsWith("/") &&
-    !value.includes("..") &&
-    value.endsWith("plugin.json")
-  );
 }

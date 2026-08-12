@@ -87,6 +87,15 @@ export class ProjectRepository {
       .get() as Project | undefined;
   }
 
+  updateTemplateId(id: string, templateId: string | null): Project | undefined {
+    return this.drizzle
+      .update(projects)
+      .set({ templateId })
+      .where(and(eq(projects.id, id), eq(projects.userId, this.userId)))
+      .returning()
+      .get() as Project | undefined;
+  }
+
   delete(id: string): void {
     this.drizzle
       .delete(projects)

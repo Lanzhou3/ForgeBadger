@@ -26,9 +26,36 @@ function toolName(props) {
   return "OpenCode";
 }
 
+function lifecyclePayload(event) {
+  if (event.type === "permission.asked") {
+    return {
+      hook_event_name: "PermissionRequest",
+      notification_type: "permission_prompt",
+      message: permissionText(event.properties),
+      tool_name: toolName(event.properties)
+    };
+  }
+  if (event.type === "session.idle") {
+    return {
+      hook_event_name: "Stop",
+      notification_type: "task_completed",
+      message: "OpenCode task completed"
+    };
+  }
+  if (event.type === "session.error") {
+    return {
+      hook_event_name: "StopFailure",
+      notification_type: "task_failed",
+      message: "OpenCode task failed"
+    };
+  }
+  return null;
+}
+
 async function notify(event) {
   if (!GATEWAY_URL || !SESSION_ID || !ATTACH_TOKEN) return;
-  const props = event && event.properties ? event.properties : null;
+  const lifecycle = event ? lifecyclePayload(event) : null;
+  if (!lifecycle) return;
   try {
     await fetch(
       \`\${GATEWAY_URL.replace(/\\/+$/u, "")}/api/v1/session-hooks/claude-notification/\${encodeURIComponent(SESSION_ID)}\`,
@@ -39,13 +66,7 @@ async function notify(event) {
           "x-openforge-session-id": SESSION_ID,
           "x-openforge-session-token": ATTACH_TOKEN
         },
-        body: JSON.stringify({
-          hook_event_name: "PermissionRequest",
-          notification_type: "permission_prompt",
-          message: permissionText(props),
-          tool_name: toolName(props),
-          adapter: "opencode"
-        })
+        body: JSON.stringify({ ...lifecycle, adapter: "opencode" })
       }
     );
   } catch {
@@ -55,7 +76,10 @@ async function notify(event) {
 
 export const OpenForgePermissionNotify = async () => ({
   event: async ({ event }) => {
-    if (event && event.type === "permission.asked") await notify(event);
+    if (
+      event &&
+      (event.type === "permission.asked" || event.type === "session.idle" || event.type === "session.error")
+    ) await notify(event);
   }
 });
 `;

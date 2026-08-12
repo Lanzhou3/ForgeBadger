@@ -24,7 +24,8 @@ export const PROJECT_MANAGER_LEDGER_EVENT_TYPES = [
   "copilot_observation_recorded",
   "feishu_reference_linked",
   "next_step_proposed",
-  "manual_completion_recorded"
+  "manual_completion_recorded",
+  "execution_state_changed"
 ] as const;
 
 export type ProjectManagerWorkItemStatus = typeof PROJECT_MANAGER_WORK_ITEM_STATUSES[number];

@@ -304,4 +304,68 @@ describe("Claude Code session hook route", () => {
     assert.equal(res.status, 401);
     assert.deepEqual(res.body, { code: 1, message: "Invalid session token" });
   });
+
+  it("normalizes completion, interruption, failure, and end events across adapters", async () => {
+    const user = new UserRepository(db).create("hook-lifecycle@example.com", "hash");
+    const project = new ProjectRepository(db, user.id).create({
+      name: "Lifecycle Project",
+      path: "/tmp/lifecycle-project",
+      aiTool: "kimi"
+    });
+    const session = new SessionRepository(db, user.id).create({
+      projectId: project.id,
+      name: "Fix notification flow",
+      aiTool: "kimi",
+      workingDir: project.path,
+      attachToken: "lifecycle-token",
+      tmuxSession: "of-lifecycle-session"
+    });
+
+    const cases = [
+      ["Stop", "task_completed"],
+      ["Interrupt", "task_interrupted"],
+      ["StopFailure", "task_failed"],
+      ["SessionEnd", "session_ended"]
+    ] as const;
+
+    for (const [hookEventName, notificationType] of cases) {
+      const eventPromise = waitForEvent(eventBus);
+      const res = handleClaudeNotificationHook(
+        db,
+        eventBus,
+        { hook_event_name: hookEventName, adapter: "kimi" },
+        "lifecycle-token",
+        session.id
+      );
+
+      assert.equal(res.status, 200);
+      const event = await eventPromise;
+      assert.equal(event.type, "claude_notification");
+      if (event.type === "claude_notification") {
+        assert.equal(event.notificationType, notificationType);
+        assert.equal(event.adapter, "kimi");
+        assert.equal(event.projectId, project.id);
+        assert.equal(event.projectName, "Lifecycle Project");
+        assert.equal(event.sessionName, "Fix notification flow");
+      }
+    }
+
+    const backgroundEventPromise = waitForEvent(eventBus);
+    handleClaudeNotificationHook(
+      db,
+      eventBus,
+      {
+        hook_event_name: "Notification",
+        notification_type: "task.completed",
+        adapter: "kimi"
+      },
+      "lifecycle-token",
+      session.id
+    );
+    const backgroundEvent = await backgroundEventPromise;
+    assert.equal(backgroundEvent.type, "claude_notification");
+    if (backgroundEvent.type === "claude_notification") {
+      assert.equal(backgroundEvent.notificationType, "task_completed");
+    }
+  });
 });

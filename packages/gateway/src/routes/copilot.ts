@@ -32,7 +32,6 @@ import {
   type ProjectManagerWorkItem
 } from "../db/repositories/project-manager-repository.js";
 import { AgentRepository, type Agent } from "../db/repositories/agent-repository.js";
-import { PluginRepository } from "../db/repositories/plugin-repository.js";
 import { ProjectSkillRepository } from "../db/repositories/project-skill-repository.js";
 import { SessionRepository, type Session } from "../db/repositories/session-repository.js";
 import { SkillRepository, type Skill } from "../db/repositories/skill-repository.js";
@@ -42,7 +41,6 @@ import { discoverAdapters, getAdapterLaunchStatus } from "../services/adapter-di
 import { recordActivity } from "../services/activity-events.js";
 import { buildLocalDiagnosticsExport } from "../services/diagnostics.js";
 import { loadProviderCatalog as loadProviderCatalogFromSource, type ProviderCatalogPreset } from "../services/model-catalog.js";
-import type { PluginSummary } from "../services/plugin-catalog.js";
 import { approveCopilotMemoryDelete, approveCopilotMemoryWrite } from "../services/copilot/memory.js";
 import { CopilotOrchestrator, CopilotRunControlRegistry, type CopilotOrchestratorOptions } from "../services/copilot/orchestrator.js";
 import { selectCopilotProvider } from "../services/copilot/provider-selection.js";
@@ -239,11 +237,6 @@ const templateDeleteApprovalSchema = z.object({
 }).strict();
 const skillToggleApprovalSchema = z.object({
   skillId: z.string().min(1),
-  enabled: z.boolean(),
-  reason: z.string().min(1).optional()
-}).strict();
-const pluginToggleApprovalSchema = z.object({
-  pluginId: z.string().min(1),
   enabled: z.boolean(),
   reason: z.string().min(1).optional()
 }).strict();
@@ -1712,9 +1705,6 @@ async function approvePendingAction(
   if (action.type === "openforge.propose_skill_toggle") {
     return approveCopilotSkillToggle(action, options, userId);
   }
-  if (action.type === "openforge.propose_plugin_toggle") {
-    return approveCopilotPluginToggle(action, options, userId);
-  }
   if (action.type === "openforge.propose_project_skill_toggle") {
     return approveCopilotProjectSkillToggle(action, options, userId);
   }
@@ -3080,45 +3070,6 @@ function skillToggleApprovalError(code: string, message: string): Record<string,
   };
 }
 
-function approveCopilotPluginToggle(
-  action: CopilotPendingAction,
-  options: CopilotRoutesOptions,
-  userId: string
-): Record<string, unknown> {
-  const parsed = pluginToggleApprovalSchema.safeParse(action.input);
-  if (!parsed.success) {
-    return pluginToggleApprovalError(
-      "copilot_plugin_toggle_invalid",
-      "Copilot plugin toggle payload is invalid"
-    );
-  }
-  const repo = new PluginRepository(options.db, userId);
-  const plugin = repo.getByPluginId(parsed.data.pluginId);
-  if (!plugin) {
-    return pluginToggleApprovalError(
-      "copilot_plugin_toggle_invalid",
-      "Copilot plugin toggle target is not available"
-    );
-  }
-  const updated = repo.setEnabled(plugin.id, parsed.data.enabled);
-  if (!updated) {
-    return pluginToggleApprovalError(
-      "copilot_plugin_toggle_failed",
-      "Failed to update plugin state"
-    );
-  }
-  return {
-    plugin: toCopilotPluginPayload(updated),
-    executed: true
-  };
-}
-
-function pluginToggleApprovalError(code: string, message: string): Record<string, unknown> {
-  return {
-    error: { code, message }
-  };
-}
-
 function approveCopilotProjectSkillToggle(
   action: CopilotPendingAction,
   options: CopilotRoutesOptions,
@@ -3172,14 +3123,6 @@ function toCopilotSkillPayload(skill: Skill): Omit<Skill, "content"> & { content
   return {
     ...safe,
     contentPreview: sanitizeCopilotAssistantText(skill.content).slice(0, 1_000)
-  };
-}
-
-function toCopilotPluginPayload(plugin: PluginSummary): Omit<PluginSummary, "skills"> & { skillCount: number } {
-  const { skills: _skills, ...safe } = plugin;
-  return {
-    ...safe,
-    skillCount: plugin.skills.length
   };
 }
 

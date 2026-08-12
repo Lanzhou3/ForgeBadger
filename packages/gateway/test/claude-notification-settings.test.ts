@@ -10,7 +10,7 @@ import {
 } from "../src/services/claude-notification-settings.js";
 
 describe("Claude notification settings", () => {
-  it("builds HTTP forwarding hooks for permission and notification events", () => {
+  it("builds HTTP forwarding hooks for permission and lifecycle events", () => {
     const settings = buildOpenForgeClaudeHookSettings("http://127.0.0.1:48731", "openforge-session-id");
 
     const permissionHook = settings.hooks.PermissionRequest[0]?.hooks[0];
@@ -27,6 +27,8 @@ describe("Claude notification settings", () => {
       "OPENFORGE_ATTACH_TOKEN"
     ]);
     assert.equal(settings.hooks.PermissionDenied[0]?.hooks[0]?.type, "http");
+    assert.equal(settings.hooks.Stop[0]?.hooks[0]?.type, "http");
+    assert.equal(settings.hooks.SessionEnd[0]?.hooks[0]?.type, "http");
     assert.equal(settings.hooks.Notification[0]?.matcher, "permission_prompt");
     const notificationHook = settings.hooks.Notification[0]?.hooks[0];
     assert.equal(notificationHook?.type, "http");

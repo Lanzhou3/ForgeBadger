@@ -5,7 +5,7 @@ import type {
 } from "../db/repositories/model-provider-repository.js";
 import type { FetchedProviderModel, FetchProviderModelsInput } from "./provider-model-fetch.js";
 
-export type ProviderReadinessAdapter = "claude" | "opencode" | "openforge-copilot" | "codex";
+export type ProviderReadinessAdapter = "claude" | "opencode" | "openforge-copilot" | "codex" | "kimi";
 
 export type ProviderReadinessCode =
   | "ready"

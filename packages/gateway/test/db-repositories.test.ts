@@ -12,7 +12,6 @@ import {
   ApiKeyRepository,
   ModelRepository,
   NotificationRepository,
-  PluginRepository,
   ProjectAgentSequenceRepository,
   ProjectRepository,
   SessionRepository,
@@ -118,53 +117,6 @@ describe("db repositories", () => {
       repo.delete(project.id);
       assert.equal(repo.getById(project.id), undefined);
       assert.equal(repo.list().length, 0);
-    });
-  });
-
-  describe("PluginRepository", () => {
-    it("stores plugin enablement per user", () => {
-      const userA = userRepo.create("plugin-a@example.com", "hash");
-      const userB = userRepo.create("plugin-b@example.com", "hash");
-      const repoA = new PluginRepository(db, userA.id);
-      const repoB = new PluginRepository(db, userB.id);
-
-      const enabled = repoA.setEnabled("claude-safe-edits", true);
-      assert.equal(enabled?.enabled, true);
-      assert.equal(repoA.list().find((plugin) => plugin.id === "claude-safe-edits")?.enabled, true);
-      assert.equal(repoB.list().find((plugin) => plugin.id === "claude-safe-edits")?.enabled, false);
-
-      const disabled = repoA.setEnabled("claude-safe-edits", false);
-      assert.equal(disabled?.enabled, false);
-    });
-
-    it("installs remote plugin packages disabled by default", () => {
-      const user = userRepo.create("plugin-install@example.com", "hash");
-      const repo = new PluginRepository(db, user.id);
-
-      const plugin = repo.install({
-        pluginId: "remote-review-plugin",
-        name: "Remote Review Plugin",
-        description: "Installed from catalog",
-        version: "1.0.0",
-        adapter: "claude",
-        category: "workflow",
-        configPath: ".claude/plugins/remote-review/plugin.json",
-        installSource: "catalog:clawhub",
-        skills: [
-          {
-            name: "remote-review",
-            description: "Remote review Skill",
-            content: "# Remote Review\n"
-          }
-        ]
-      });
-
-      assert.equal(plugin.enabled, false);
-      assert.equal(plugin.status, "disabled");
-
-      const enabled = repo.setEnabled("remote-review-plugin", true);
-      assert.equal(enabled?.enabled, true);
-      assert.equal(enabled?.skills[0]?.name, "remote-review");
     });
   });
 

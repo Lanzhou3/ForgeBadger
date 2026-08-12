@@ -36,8 +36,8 @@ import {
   type FetchProviderModelsInput
 } from "../services/provider-model-fetch.js";
 
-const adapterSchema = z.enum(["claude", "opencode", "openforge-copilot", "codex"]);
-const providerAdapterSchema = z.enum(["claude", "opencode"]);
+const adapterSchema = z.enum(["claude", "opencode", "openforge-copilot", "codex", "kimi"]);
+const providerAdapterSchema = z.enum(["claude", "opencode", "kimi"]);
 const productTypeSchema = z.enum(["payg_api", "coding_plan", "token_plan", "subscription", "local"]);
 const createProviderSchema = z.object({
   catalogId: z.string().min(1).optional(),
@@ -68,6 +68,7 @@ const createCredentialSchema = z.object({
 const rotateCredentialSchema = createCredentialSchema;
 const applySchema = z.object({
   adapter: adapterSchema,
+  scope: z.enum(["project", "user-global"]).optional(),
   projectRoot: z.preprocess(
     (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
     z.string().min(1).optional()
@@ -638,8 +639,8 @@ async function handleApplyRequest(input: {
     input.res.status(400).json({ code: 1, message: "Provider does not support the selected adapter" });
     return;
   }
-  if (!parseResult.data.projectRoot) {
-    input.res.status(400).json({ code: 1, message: "Project path is required for Claude Code and OpenCode apply" });
+  if (!parseResult.data.projectRoot && parseResult.data.scope !== "user-global") {
+    input.res.status(400).json({ code: 1, message: "Project path is required for project-scope provider apply" });
     return;
   }
   const model = selectModel(repo, provider, parseResult.data.modelProfileId);
@@ -660,6 +661,7 @@ async function handleApplyRequest(input: {
   const payload = {
     projectRoot: parseResult.data.projectRoot ?? "",
     adapter: parseResult.data.adapter,
+    scope: parseResult.data.scope ?? "project",
     provider: {
       id: provider.id,
       providerKey: provider.providerKey,

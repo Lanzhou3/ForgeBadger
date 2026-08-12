@@ -32,6 +32,9 @@ export interface ClaudeNotificationEvent {
   type: "claude_notification";
   userId: string;
   sessionId: string;
+  projectId?: string | undefined;
+  projectName?: string | undefined;
+  sessionName?: string | undefined;
   hookEventName: string;
   notificationType: string;
   message: string;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -174,5 +174,171 @@ describe("model provider config apply", () => {
       } as unknown as PreviewInput),
       /Codex provider apply is disabled/
     );
+  });
+
+  it("applies Kimi provider settings to a project-scope config.toml", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "openforge-kimi-apply-"));
+    await mkdir(path.join(root, ".kimi-code"));
+    await writeFile(path.join(root, ".kimi-code/config.toml"), [
+      "[providers.existing]",
+      "type = \"openai\"",
+      "base_url = \"http://127.0.0.1:11434/v1\"",
+      "# keep a comment"
+    ].join("\n") + "\n", "utf8");
+
+    const result = await applyModelProviderConfig({
+      projectRoot: root,
+      adapter: "kimi",
+      provider: {
+        id: "provider-1",
+        providerKey: "moonshot",
+        baseUrl: "https://api.moonshot.cn/v1",
+        authType: "api_key",
+        apiFormat: "openai"
+      },
+      model: {
+        id: "model-1",
+        modelId: "kimi-k2.5"
+      },
+      credential: {
+        id: "credential-1",
+        envName: "MOONSHOT_API_KEY"
+      }
+    });
+
+    const config = await readFile(path.join(root, ".kimi-code/config.toml"), "utf8");
+
+    assert.equal(result.adapter, "kimi");
+    assert.deepEqual(result.scope, "project");
+    assert.equal(result.changedFiles[0]?.relativePath, ".kimi-code/config.toml");
+    assert.deepEqual(result.env, { MOONSHOT_API_KEY: "{stored-provider-credential}" });
+    assert.match(result.backupPath, /\.openforge\/backups\/model-provider-apply\//);
+    assert.ok(config.includes("default_model = \"moonshot/kimi-k2.5\""));
+    assert.ok(config.includes("base_url = \"https://api.moonshot.cn/v1\""));
+    assert.ok(config.includes("api_key = \"{env:MOONSHOT_API_KEY}\""));
+    assert.ok(config.includes("[providers.existing]"));
+  });
+
+  it("applies Claude provider settings to the user-global settings.json", async () => {
+    const globalRoot = await mkdtemp(path.join(tmpdir(), "openforge-claude-global-"));
+    await writeFile(path.join(globalRoot, "settings.json"), JSON.stringify({
+      env: { GLOBAL_FLAG: "1" }
+    }, null, 2), "utf8");
+
+    const previous = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = globalRoot;
+    try {
+      const result = await applyModelProviderConfig({
+        projectRoot: "/unused",
+        adapter: "claude",
+        scope: "user-global",
+        provider: {
+          id: "provider-1",
+          providerKey: "anthropic",
+          baseUrl: "https://api.anthropic.com",
+          authType: "api_key",
+          apiFormat: "anthropic"
+        },
+        model: {
+          id: "model-1",
+          modelId: "claude-sonnet-4-5"
+        },
+        credential: {
+          id: "credential-1",
+          envName: "ANTHROPIC_AUTH_TOKEN"
+        }
+      });
+
+      const settings = JSON.parse(await readFile(path.join(globalRoot, "settings.json"), "utf8"));
+
+      assert.equal(result.changedFiles[0]?.relativePath, "settings.json");
+      assert.deepEqual(result.scope, "user-global");
+      assert.equal(settings.env.GLOBAL_FLAG, "1");
+      assert.equal(settings.env.ANTHROPIC_AUTH_TOKEN, "{env:ANTHROPIC_AUTH_TOKEN}");
+      assert.equal(settings.env.ANTHROPIC_MODEL, "claude-sonnet-4-5");
+      assert.match(result.backupPath, /\.openforge\/backups\/model-provider-apply\//);
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previous;
+      await rm(globalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("applies Kimi provider settings to the user-global config.toml", async () => {
+    const globalRoot = await mkdtemp(path.join(tmpdir(), "openforge-kimi-global-"));
+    await writeFile(path.join(globalRoot, "config.toml"), "[models]\n", "utf8");
+
+    const previous = process.env.KIMI_CODE_HOME;
+    process.env.KIMI_CODE_HOME = globalRoot;
+    try {
+      const result = await applyModelProviderConfig({
+        projectRoot: "/unused",
+        adapter: "kimi",
+        scope: "user-global",
+        provider: {
+          id: "provider-1",
+          providerKey: "volcengine",
+          baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+          authType: "api_key",
+          apiFormat: "openai"
+        },
+        model: {
+          id: "model-1",
+          modelId: "deepseek-v3.1"
+        },
+        credential: {
+          id: "credential-1",
+          envName: "ARK_API_KEY"
+        }
+      });
+
+      const config = await readFile(path.join(globalRoot, "config.toml"), "utf8");
+
+      assert.equal(result.changedFiles[0]?.relativePath, "config.toml");
+      assert.deepEqual(result.scope, "user-global");
+      assert.ok(config.includes("default_model = \"volcengine/deepseek-v3.1\""));
+      assert.ok(config.includes("api_key = \"{env:ARK_API_KEY}\""));
+    } finally {
+      if (previous === undefined) delete process.env.KIMI_CODE_HOME;
+      else process.env.KIMI_CODE_HOME = previous;
+      await rm(globalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("applies OpenCode provider settings to the user-global opencode.json", async () => {
+    const globalRoot = await mkdtemp(path.join(tmpdir(), "openforge-opencode-global-"));
+    await writeFile(path.join(globalRoot, "opencode.json"), JSON.stringify({}, null, 2), "utf8");
+
+    const previous = process.env.OPENCODE_CONFIG_DIR;
+    process.env.OPENCODE_CONFIG_DIR = globalRoot;
+    try {
+      const preview = await previewModelProviderConfig({
+        projectRoot: "/unused",
+        adapter: "opencode",
+        scope: "user-global",
+        provider: {
+          id: "provider-1",
+          providerKey: "deepseek",
+          baseUrl: "https://api.deepseek.com",
+          authType: "api_key",
+          apiFormat: "openai-compatible"
+        },
+        model: {
+          id: "model-1",
+          modelId: "deepseek-chat"
+        },
+        credential: {
+          id: "credential-1",
+          envName: "DEEPSEEK_API_KEY"
+        }
+      });
+
+      assert.equal(preview.changedFiles[0]?.relativePath, "opencode.json");
+      assert.deepEqual(preview.scope, "user-global");
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+      else process.env.OPENCODE_CONFIG_DIR = previous;
+      await rm(globalRoot, { recursive: true, force: true });
+    }
   });
 });

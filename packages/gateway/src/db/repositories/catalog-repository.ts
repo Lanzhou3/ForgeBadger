@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { catalogItems, catalogSources } from "../schema.js";
 import type { Database } from "../types.js";
 
-export type CatalogType = "skill" | "plugin" | "template";
+export type CatalogType = "skill" | "template";
 
 export interface CatalogSource {
   id: string;

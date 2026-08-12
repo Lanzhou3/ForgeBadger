@@ -17,7 +17,6 @@ import { SessionRepository, type Session } from "../db/repositories/session-repo
 import { ModelRepository } from "../db/repositories/model-repository.js";
 import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import { ApiKeyRepository } from "../db/repositories/api-key-repository.js";
-import { PluginRepository } from "../db/repositories/plugin-repository.js";
 import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
 import { SessionConflictError } from "../services/session-manager.js";
@@ -26,8 +25,11 @@ import type { CredentialMode } from "../config-generation/types.js";
 import { recordActivity } from "../services/activity-events.js";
 import { recordSessionSnapshot } from "../services/session-snapshots.js";
 import { ensureClaudeNotificationSettings } from "../services/claude-notification-settings.js";
-import { materializeClaudePluginPackages } from "../services/claude-plugin-packages.js";
 import { ensureOpenForgeOpenCodePlugin } from "../services/opencode-notification-settings.js";
+import {
+  ensureCodexNotificationSettings,
+  ensureKimiNotificationSettings
+} from "../services/cli-notification-settings.js";
 
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
@@ -51,6 +53,10 @@ const switchModelSchema = z.object({
 
 const listSessionsQuerySchema = z.object({
   projectId: z.string().min(1).optional()
+});
+
+const sessionOutputQuerySchema = z.object({
+  maxLines: z.coerce.number().int().min(1).max(10000).default(2000)
 });
 
 export function createSessionRoutes(
@@ -258,6 +264,41 @@ export function createSessionRoutes(
     res.json({
       code: 0,
       data: { session: toSessionPayload(session) },
+      message: ""
+    });
+  });
+
+  /**
+   * Read-only tail of the session's buffered terminal output (raw pty stream
+   * including ANSI escapes). The buffer is in-memory only and accumulates while
+   * a browser terminal is attached; it is cleared on Gateway restart and is
+   * NOT populated for detached/never-attached sessions (returns empty output).
+   */
+  router.get("/:id/output", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = sessionOutputQuerySchema.safeParse(req.query ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid maxLines" });
+      return;
+    }
+    const repo = new SessionRepository(db, userId);
+    const session = repo.getById(req.params.id);
+    if (!session) {
+      res.status(404).json({ code: 1, message: "Session not found" });
+      return;
+    }
+    const ring = sessionManager.getSessionOutput(req.params.id);
+    if (!ring) {
+      res.json({
+        code: 0,
+        data: { output: "", truncated: false, lineCount: 0 },
+        message: ""
+      });
+      return;
+    }
+    res.json({
+      code: 0,
+      data: ring.getTail(parseResult.data.maxLines),
       message: ""
     });
   });
@@ -566,6 +607,7 @@ export function createSessionRoutes(
     }
 
     recordSessionActivity(db, eventBus, userId, dbSession, "session_deleted", "warning", `Session ${dbSession.name} deleted`);
+    sessionManager.removeSessionOutput(req.params.id);
     sessionRepo.delete(req.params.id);
     eventBus?.emitEvent({
       type: "session_deleted",
@@ -704,17 +746,16 @@ export async function prepareAdapterLaunchExtras(
     await ensureOpenForgeOpenCodePlugin(projectRoot);
     return [];
   }
-  if (adapter !== "claude") {
+  if (adapter === "codex") {
+    await ensureCodexNotificationSettings(projectRoot);
     return [];
   }
-
+  if (adapter === "kimi") {
+    await ensureKimiNotificationSettings(projectRoot);
+    return [];
+  }
   await ensureClaudeNotificationSettings(projectRoot, getGatewayUrl(), sessionId);
-  const enabledPlugins = new PluginRepository(db, userId)
-    .list()
-    .filter((plugin) => plugin.enabled);
-  return (
-    await materializeClaudePluginPackages(projectRoot, enabledPlugins)
-  ).map((pluginPackage) => pluginPackage.directory);
+  return [];
 }
 
 export function normalizeAdapter(value: string): AdapterId | undefined {

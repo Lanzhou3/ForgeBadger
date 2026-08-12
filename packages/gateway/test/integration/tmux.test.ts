@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
+import { promisify } from "node:util";
 
 import type { LaunchPlan } from "../../src/adapters/claude.js";
 import {
@@ -11,6 +13,7 @@ import {
 import { createTmuxClient } from "../../src/services/tmux.js";
 
 const runTmuxTests = process.env.RUN_TMUX_TESTS === "1";
+const execFileAsync = promisify(execFile);
 
 describe("tmux integration", { skip: !runTmuxTests }, () => {
   it("creates, captures, and kills a real tmux session", async () => {
@@ -30,6 +33,39 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
     await tmux.killSession(sessionName);
 
     assert.match(output, /openforge-gate-a/);
+  });
+
+  it("enables tmux mouse scrolling and keeps a larger history", async () => {
+    const tmux = createTmuxClient();
+    const sessionName = `of-test-options-${process.pid}`;
+
+    try {
+      await tmux.createSession({
+        name: sessionName,
+        cwd: tmpdir(),
+        command: "bash",
+        args: ["-lc", "sleep 5"],
+        env: {}
+      });
+
+      const { stdout } = await execFileAsync("tmux", [
+        "show-options",
+        "-t",
+        sessionName,
+        "-v",
+        "mouse",
+        ";",
+        "show-options",
+        "-t",
+        sessionName,
+        "-v",
+        "history-limit"
+      ]);
+
+      assert.deepEqual(stdout.trim().split("\n"), ["on", "10000"]);
+    } finally {
+      await tmux.killSession(sessionName);
+    }
   });
 
   it("sends literal input to a real tmux session", async () => {

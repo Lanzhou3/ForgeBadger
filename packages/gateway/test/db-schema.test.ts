@@ -64,10 +64,14 @@ describe("db schema", () => {
       "model_provider_profiles",
       "models",
       "notifications",
-      "plugins",
       "project_agent_sequences",
+      "project_manager_acceptance_results",
+      "project_manager_commands",
       "project_manager_goals",
       "project_manager_ledger_events",
+      "project_manager_session_assignments",
+      "project_manager_task_attempts",
+      "project_manager_wakeups",
       "project_manager_work_items",
       "project_skills",
       "projects",
@@ -78,6 +82,8 @@ describe("db schema", () => {
       "skills",
       "template_files",
       "templates",
+      "token_usage_records",
+      "usage_sync_cursors",
       "user_settings",
       "users"
     ]);
@@ -177,12 +183,103 @@ describe("db schema", () => {
       .all() as Array<{ name: string }>;
 
     assert.deepEqual(indexes.map((index) => index.name), [
+      "idx_project_manager_acceptance_attempt",
+      "idx_project_manager_commands_attempt_created",
+      "idx_project_manager_commands_idempotency",
       "idx_project_manager_goals_user_project",
       "idx_project_manager_ledger_events_created",
       "idx_project_manager_ledger_events_type",
       "idx_project_manager_ledger_events_user_project",
+      "idx_project_manager_session_assignments_attempt",
+      "idx_project_manager_session_assignments_project_active",
+      "idx_project_manager_session_assignments_session_active",
+      "idx_project_manager_task_attempts_user_active",
+      "idx_project_manager_task_attempts_work_item_number",
+      "idx_project_manager_wakeups_attempt_due",
+      "idx_project_manager_wakeups_pending",
       "idx_project_manager_work_items_status",
       "idx_project_manager_work_items_user_project"
     ]);
+  });
+
+  it("creates tenant-scoped execution ledger tables and enforces active/idempotent slots", () => {
+    const executionTables = [
+      "project_manager_task_attempts",
+      "project_manager_session_assignments",
+      "project_manager_commands",
+      "project_manager_acceptance_results",
+      "project_manager_wakeups"
+    ];
+    for (const tableName of executionTables) {
+      const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+      assert.equal(columns.some((column) => column.name === "user_id"), true, `${tableName} must include user_id`);
+      assert.equal(columns.some((column) => column.name === "project_id"), true, `${tableName} must include project_id`);
+    }
+
+    db.prepare(
+      "INSERT INTO users (id, username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("pm-user", "pm-user", "pm-user@example.com", "hash", "user", "active");
+    db.prepare(
+      "INSERT INTO projects (id, user_id, name, path, ai_tool, status) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("pm-project", "pm-user", "PM", "/tmp/pm", "claude", "active");
+    db.prepare(`
+      INSERT INTO project_manager_work_items (
+        id, user_id, project_id, title, status, priority,
+        acceptance_criteria_json, evidence_refs_json, feishu_refs_json, details_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run("pm-work-1", "pm-user", "pm-project", "First", "todo", 0, "[]", "[]", "[]", "{}", 1, 1);
+    db.prepare(`
+      INSERT INTO project_manager_work_items (
+        id, user_id, project_id, title, status, priority,
+        acceptance_criteria_json, evidence_refs_json, feishu_refs_json, details_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run("pm-work-2", "pm-user", "pm-project", "Second", "todo", 0, "[]", "[]", "[]", "{}", 1, 1);
+
+    const insertAttempt = db.prepare(`
+      INSERT INTO project_manager_task_attempts (
+        id, user_id, project_id, work_item_id, attempt_number,
+        desired_state, observed_state, input_version, input_digest, active_slot,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'running', 'dispatching', 1, ?, 'running', 1, 1)
+    `);
+    insertAttempt.run("attempt-1", "pm-user", "pm-project", "pm-work-1", 1, "digest-1");
+    assert.throws(
+      () => insertAttempt.run("attempt-2", "pm-user", "pm-project", "pm-work-2", 1, "digest-2"),
+      /UNIQUE constraint failed/
+    );
+
+    db.prepare(`
+      INSERT INTO project_manager_commands (
+        id, user_id, project_id, work_item_id, attempt_id, command_type,
+        idempotency_key, payload_digest, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run("command-1", "pm-user", "pm-project", "pm-work-1", "attempt-1", "dispatch_task", "dispatch:1", "digest-1", "pending", 1, 1);
+    assert.throws(
+      () => db.prepare(`
+        INSERT INTO project_manager_commands (
+          id, user_id, project_id, work_item_id, attempt_id, command_type,
+          idempotency_key, payload_digest, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run("command-2", "pm-user", "pm-project", "pm-work-1", "attempt-1", "dispatch_task", "dispatch:1", "digest-1", "pending", 1, 1),
+      /UNIQUE constraint failed/
+    );
+
+    db.prepare(`
+      INSERT INTO project_manager_wakeups (
+        id, user_id, project_id, work_item_id, attempt_id, reason_class,
+        status, active_slot, not_before, attempt_count, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 'pending', 1, 0, 1, 1)
+    `).run("wakeup-1", "pm-user", "pm-project", "pm-work-1", "attempt-1", "dispatch");
+    assert.throws(
+      () => db.prepare(`
+        INSERT INTO project_manager_wakeups (
+          id, user_id, project_id, work_item_id, attempt_id, reason_class,
+          status, active_slot, not_before, attempt_count, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 'pending', 1, 0, 1, 1)
+      `).run("wakeup-2", "pm-user", "pm-project", "pm-work-1", "attempt-1", "dispatch"),
+      /UNIQUE constraint failed/
+    );
   });
 });

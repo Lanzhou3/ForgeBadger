@@ -366,6 +366,7 @@ async function handleTerminalSocket(
     });
 
   pty.onData((data) => {
+    sessionManager.appendSessionOutput(sessionId, data);
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "terminal_output", payload: { data } }));
     }

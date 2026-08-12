@@ -60,6 +60,7 @@ interface ComplianceResponseBody {
     conflicts: Array<{ relativePath: string; conflictType: string }>;
     files: Array<{ relativePath: string; sha256: string }>;
   };
+  details?: { code?: string };
 }
 
 interface AuthResponseBody {
@@ -203,6 +204,55 @@ describe("project config compliance", () => {
     const compliance = await getCompliance(otherToken, projectId);
     assert.equal(compliance.status, 404);
     assert.equal(compliance.body.code, 1);
+  });
+
+  it("returns 404 with TEMPLATE_NOT_TRACKED after the template binding is removed", async () => {
+    const token = await register("untracked-compliance@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-compliance-untracked-"));
+    const projectId = await createProject(token, {
+      name: "Untracked Compliance",
+      path: rootPath,
+      templateId: "builtin-claude-code"
+    });
+
+    const unbindRes = await fetch(`${baseUrl}/api/v1/projects/${projectId}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ templateId: null })
+    });
+    assert.equal(unbindRes.status, 200);
+
+    const compliance = await getCompliance(token, projectId);
+    assert.equal(compliance.status, 404);
+    assert.equal(compliance.body.code, 1);
+    assert.ok(compliance.body.message?.includes("not tracking"));
+    assert.equal(compliance.body.details?.code, "TEMPLATE_NOT_TRACKED");
+  });
+
+  it("allows an explicit templateId query for an untracked project", async () => {
+    const token = await register("explicit-query-compliance@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-compliance-explicit-"));
+    const projectId = await createProject(token, {
+      name: "Explicit Query Compliance",
+      path: rootPath,
+      templateId: "builtin-claude-code"
+    });
+
+    await fetch(`${baseUrl}/api/v1/projects/${projectId}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ templateId: null })
+    });
+
+    const compliance = await getCompliance(token, projectId, "builtin-claude-code");
+    assert.equal(compliance.status, 200);
+    assert.ok(compliance.body.data);
   });
 
   async function register(email: string): Promise<string> {

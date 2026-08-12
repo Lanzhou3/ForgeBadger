@@ -19,20 +19,6 @@ const manifestSchema = z.object({
     version: z.string().optional(),
     content: z.string().optional()
   }).passthrough()).optional(),
-  plugins: z.array(z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    description: z.string().optional(),
-    version: z.string().optional(),
-    adapter: z.literal("claude").default("claude"),
-    category: z.enum(["workflow", "safety", "integration"]).default("workflow"),
-    configPath: z.string().min(1),
-    skills: z.array(z.object({
-      name: z.string().min(1),
-      description: z.string().optional(),
-      content: z.string()
-    })).optional()
-  }).passthrough()).optional(),
   templates: z.array(z.object({
     id: z.string().min(1),
     name: z.string().min(1),
@@ -177,29 +163,6 @@ function manifestToItems(
       }
     }
   }));
-  const plugins = (manifest.plugins ?? []).map((plugin) => ({
-    sourceId,
-    itemType: "plugin" as const,
-    externalId: plugin.id,
-    name: plugin.name,
-    description: plugin.description,
-    version: plugin.version,
-    metadata: {
-      adapter: plugin.adapter,
-      category: plugin.category,
-      config_path: plugin.configPath,
-      pluginPackage: {
-        id: plugin.id,
-        name: plugin.name,
-        description: plugin.description ?? "",
-        version: plugin.version ?? "1.0.0",
-        adapter: plugin.adapter,
-        category: plugin.category,
-        configPath: plugin.configPath,
-        skills: plugin.skills ?? []
-      }
-    }
-  }));
   const templates = (manifest.templates ?? []).map((template) => ({
     sourceId,
     itemType: "template" as const,
@@ -221,7 +184,7 @@ function manifestToItems(
       }
     }
   }));
-  return [...skills, ...plugins, ...templates];
+  return [...skills, ...templates];
 }
 
 function starterSkillContent(name: string, description?: string): string {

@@ -18,7 +18,6 @@ import { ModelProviderRepository } from "../src/db/repositories/model-provider-r
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { AgentRepository } from "../src/db/repositories/agent-repository.js";
 import { NotificationRepository } from "../src/db/repositories/notification-repository.js";
-import { PluginRepository } from "../src/db/repositories/plugin-repository.js";
 import { ProjectManagerRepository } from "../src/db/repositories/project-manager-repository.js";
 import { SkillRepository } from "../src/db/repositories/skill-repository.js";
 import { TemplateRepository } from "../src/db/repositories/template-repository.js";
@@ -530,7 +529,7 @@ describe("copilot tools", () => {
     );
   });
 
-  it("reads plugins, notifications, and usage as Copilot platform state", async () => {
+  it("reads notifications and usage as Copilot platform state", async () => {
     const project = new ProjectRepository(db, userId).create({
       name: "OpenForge",
       path: "/tmp/openforge",
@@ -543,7 +542,6 @@ describe("copilot tools", () => {
       workingDir: "/tmp/openforge",
       attachToken: "attach-token"
     });
-    new PluginRepository(db, userId).setEnabled("claude-safe-edits", true);
     new NotificationRepository(db, userId).create({
       type: "session",
       titleKey: "notifications.session.completed",
@@ -560,7 +558,6 @@ describe("copilot tools", () => {
     new UsageRepository(db, userId).setModelRate(model.id, 3);
     new SessionRepository(db, userId).update(session.id, { modelId: model.id });
 
-    const pluginsResult = await executeCopilotTool(registry, "openforge.list_plugins", {}, context(userId));
     const notificationsResult = await executeCopilotTool(
       registry,
       "openforge.get_notifications_summary",
@@ -569,15 +566,9 @@ describe("copilot tools", () => {
     );
     const usageResult = await executeCopilotTool(registry, "openforge.get_usage_summary", {}, context(userId));
 
-    assert.equal(pluginsResult.ok, true);
     assert.equal(notificationsResult.ok, true);
     assert.equal(usageResult.ok, true);
-    if (!pluginsResult.ok || !notificationsResult.ok || !usageResult.ok) return;
-    assert.equal(
-      (pluginsResult.output as { plugins: Array<{ id: string; status: string }> }).plugins
-        .find((plugin) => plugin.id === "claude-safe-edits")?.status,
-      "enabled"
-    );
+    if (!notificationsResult.ok || !usageResult.ok) return;
     assert.equal((notificationsResult.output as { unreadCount: number }).unreadCount, 1);
     assert.equal(
       (notificationsResult.output as { notifications: Array<{ message: string; payload: unknown }> })
@@ -1188,7 +1179,6 @@ describe("copilot tools", () => {
     const listSkills = definitions.find((tool) => tool.name === "openforge.list_skills");
     const skillDetail = definitions.find((tool) => tool.name === "openforge.get_skill_detail");
     const listTemplates = definitions.find((tool) => tool.name === "openforge.list_templates");
-    const listPlugins = definitions.find((tool) => tool.name === "openforge.list_plugins");
     const notificationsSummary = definitions.find((tool) => tool.name === "openforge.get_notifications_summary");
     const usageSummary = definitions.find((tool) => tool.name === "openforge.get_usage_summary");
     const modelProviderCatalog = definitions.find((tool) => tool.name === "openforge.get_model_provider_catalog");
@@ -1206,7 +1196,6 @@ describe("copilot tools", () => {
     const proposeTemplateUpdate = definitions.find((tool) => tool.name === "openforge.propose_template_update");
     const proposeTemplateDelete = definitions.find((tool) => tool.name === "openforge.propose_template_delete");
     const proposeSkillToggle = definitions.find((tool) => tool.name === "openforge.propose_skill_toggle");
-    const proposePluginToggle = definitions.find((tool) => tool.name === "openforge.propose_plugin_toggle");
     const proposeProjectSkillToggle = definitions.find((tool) => tool.name === "openforge.propose_project_skill_toggle");
     const proposeProjectImport = definitions.find((tool) => tool.name === "openforge.propose_project_import");
     const proposeProjectDelete = definitions.find((tool) => tool.name === "openforge.propose_project_delete");
@@ -1258,13 +1247,6 @@ describe("copilot tools", () => {
       additionalProperties: false
     });
     assert.deepEqual(listTemplates?.inputSchema, {
-      type: "object",
-      properties: {
-        limit: { type: "integer", minimum: 1, maximum: 50 }
-      },
-      additionalProperties: false
-    });
-    assert.deepEqual(listPlugins?.inputSchema, {
       type: "object",
       properties: {
         limit: { type: "integer", minimum: 1, maximum: 50 }
@@ -1451,16 +1433,6 @@ describe("copilot tools", () => {
         reason: { type: "string", minLength: 1 }
       },
       required: ["skillId", "enabled"],
-      additionalProperties: false
-    });
-    assert.deepEqual(proposePluginToggle?.inputSchema, {
-      type: "object",
-      properties: {
-        pluginId: { type: "string", minLength: 1 },
-        enabled: { type: "boolean" },
-        reason: { type: "string", minLength: 1 }
-      },
-      required: ["pluginId", "enabled"],
       additionalProperties: false
     });
     assert.deepEqual(proposeProjectSkillToggle?.inputSchema, {
@@ -1861,30 +1833,6 @@ describe("copilot tools", () => {
     assert.equal(actions[0]?.status, "pending");
     assert.equal(actions[0]?.type, "openforge.propose_skill_toggle");
     assert.equal(new SkillRepository(db, userId).getById(skill.id)?.isEnabled, false);
-  });
-
-  it("creates plugin-toggle proposals as pending actions without changing plugin state", async () => {
-    const repo = new PluginRepository(db, userId);
-    const pluginBefore = repo.getByPluginId("claude-safe-edits");
-    const run = new CopilotRepository(db, userId).createRun({
-      status: "running",
-      source: "copilot",
-      goal: "Prepare plugin toggle"
-    });
-
-    const result = await executeCopilotTool(
-      registry,
-      "openforge.propose_plugin_toggle",
-      { pluginId: "claude-safe-edits", enabled: true, reason: "Enable safer Claude edits." },
-      context(userId, run.id)
-    );
-
-    const actions = new CopilotRepository(db, userId).listPendingActions(run.id);
-    assert.equal(result.ok, true);
-    assert.equal(actions.length, 1);
-    assert.equal(actions[0]?.status, "pending");
-    assert.equal(actions[0]?.type, "openforge.propose_plugin_toggle");
-    assert.equal(repo.getByPluginId("claude-safe-edits")?.status, pluginBefore?.status);
   });
 
   it("creates project skill-toggle proposals as pending actions without changing project skill state", async () => {

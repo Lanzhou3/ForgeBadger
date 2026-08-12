@@ -148,6 +148,9 @@ function buildPayload(event: OpenForgeEvent): Record<string, unknown> {
     case "claude_notification":
       return {
         session_id: event.sessionId,
+        ...(event.projectId ? { project_id: event.projectId } : {}),
+        ...(event.projectName ? { project_name: event.projectName } : {}),
+        ...(event.sessionName ? { session_name: event.sessionName } : {}),
         hook_event_name: event.hookEventName,
         notification_type: event.notificationType,
         message: event.message,

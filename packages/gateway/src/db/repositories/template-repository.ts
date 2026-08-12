@@ -369,7 +369,7 @@ function builtInClaudeMd(): string {
     "- Keep Web console responsibilities in `packages/web`; call Gateway through `/api/v1` and WebSocket endpoints.",
     "- REST responses use the OpenForge envelope: `{ \"code\": 0, \"data\": {}, \"message\": \"\" }` or `{ \"code\": 1, \"message\": \"...\", \"details\": {} }`.",
     "- Terminal sessions are tmux-backed. Gateway restarts and browser reconnects must not kill the underlying CLI session.",
-    "- Store project, session, model, agent, skill, template, and plugin state in SQLite. Do not store terminal scrollback in SQLite.",
+    "- Store project, session, model, agent, skill, and template state in SQLite. Do not store terminal scrollback in SQLite.",
     "",
     "## Coding Standards",
     "",

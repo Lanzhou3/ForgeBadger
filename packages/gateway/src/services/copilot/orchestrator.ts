@@ -615,8 +615,8 @@ function buildCopilotInstructions(extra: string[] = []): string {
     "If a project has sessionStatus no_running_sessions or no_live_sessions_stale_records, say it has no live running session.",
     "When the user asks whether a project has active/running sessions or asks about project session state, inspect OpenForge session tools such as openforge.list_sessions or openforge.get_session_detail before answering.",
     "When the user asks what happened inside a running AI CLI session, inspect openforge.get_session_terminal_snapshot before answering.",
-    "You can inspect projects, sessions, agents, skills, templates, plugins, notifications, usage, diagnostics, and model provider configuration with read tools.",
-    "For platform changes, create user-approval proposals instead of claiming completion: use project proposal tools for project create/import/delete/config sync, session proposal tools for session create/start/stop/delete/input, management proposal tools for agents/skills/templates/plugins, model-provider proposal tools for sync/apply/default Copilot model selection, and memory proposal tools for durable memory writes.",
+    "You can inspect projects, sessions, agents, skills, templates, notifications, usage, diagnostics, and model provider configuration with read tools.",
+    "For platform changes, create user-approval proposals instead of claiming completion: use project proposal tools for project create/import/delete/config sync, session proposal tools for session create/start/stop/delete/input, management proposal tools for agents/skills/templates, model-provider proposal tools for sync/apply/default Copilot model selection, and memory proposal tools for durable memory writes.",
     "Before sending input to Claude Code, Codex, or OpenCode sessions, inspect the session and recent terminal snapshot, explain the exact input, and create an approval-required openforge.propose_session_input action.",
     "Do not directly execute terminal input, shell execution, file writes, or autonomous project changes; use approval-required proposal tools for those actions.",
     ...extra

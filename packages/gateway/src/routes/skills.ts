@@ -14,6 +14,7 @@ import {
 } from "../services/skill-sources.js";
 import { listSkillTemplates } from "../services/skill-templates.js";
 import { syncLocalSkills } from "../services/local-skills.js";
+import { builtinSkillSeeds } from "../services/builtin-skills.js";
 import type { Database } from "../db/types.js";
 
 const createSkillSchema = z.object({
@@ -59,6 +60,7 @@ export function createSkillRoutes(db: Database): Router {
   router.get("/skills", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const repo = new SkillRepository(db, userId);
+    seedBuiltinSkills(repo);
     const discovery = syncLocalSkills(repo);
     const skills = repo.list();
     res.json({
@@ -309,4 +311,18 @@ export function createSkillRoutes(db: Database): Router {
   });
 
   return router;
+}
+
+function seedBuiltinSkills(repo: SkillRepository): void {
+  for (const seed of builtinSkillSeeds) {
+    repo.createIfMissing({
+      name: seed.name,
+      description: seed.description,
+      source: "builtin",
+      content: seed.content,
+      version: "1.0.0",
+      visibility: "private",
+      isEnabled: true
+    });
+  }
 }

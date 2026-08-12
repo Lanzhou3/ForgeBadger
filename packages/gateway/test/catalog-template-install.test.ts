@@ -76,12 +76,6 @@ interface CatalogInstallBody {
       version: string;
       isEnabled: boolean;
     };
-    plugin?: {
-      id: string;
-      enabled: boolean;
-      status: string;
-      name: string;
-    };
     catalogItem: {
       id: string;
       externalId: string;
@@ -239,94 +233,7 @@ describe("catalog template install", () => {
     assert.equal(body.data?.catalogItem.externalId, "review-skill");
   });
 
-  it("installs a Claude plugin package disabled by default", async () => {
-    const auth = await register("catalog-plugin-install@example.com");
-    const item = new CatalogRepository(db, auth.userId).replaceItems("clawhub", [
-      {
-        sourceId: "clawhub",
-        itemType: "plugin",
-        externalId: "remote-review-plugin",
-        name: "Remote Review Plugin",
-        description: "Catalog plugin",
-        version: "1.0.0",
-        metadata: {
-          pluginPackage: {
-            id: "remote-review-plugin",
-            name: "Remote Review Plugin",
-            description: "Catalog plugin",
-            version: "1.0.0",
-            adapter: "claude",
-            category: "workflow",
-            configPath: ".claude/plugins/remote-review/plugin.json",
-            skills: [
-              {
-                name: "remote-review",
-                description: "Remote review Skill",
-                content: "# Remote Review\n"
-              }
-            ]
-          }
-        }
-      }
-    ])[0];
 
-    const installRes = await fetch(`${baseUrl}/api/v1/catalog/items/${item.id}/install`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${auth.token}` }
-    });
-    const body = (await installRes.json()) as CatalogInstallBody;
-
-    assert.equal(installRes.status, 201, JSON.stringify(body));
-    assert.equal(body.data?.plugin?.id, "remote-review-plugin");
-    assert.equal(body.data?.plugin?.enabled, false);
-    assert.equal(body.data?.plugin?.status, "disabled");
-
-    const enableRes = await fetch(`${baseUrl}/api/v1/plugins/remote-review-plugin/toggle`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${auth.token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ enabled: true })
-    });
-    const enableBody = (await enableRes.json()) as CatalogInstallBody;
-
-    assert.equal(enableRes.status, 200, JSON.stringify(enableBody));
-    assert.equal(enableBody.data?.plugin?.enabled, true);
-  });
-
-  it("rejects malformed plugin catalog packages", async () => {
-    const auth = await register("catalog-plugin-invalid@example.com");
-    const item = new CatalogRepository(db, auth.userId).replaceItems("clawhub", [
-      {
-        sourceId: "clawhub",
-        itemType: "plugin",
-        externalId: "broken-plugin",
-        name: "Broken Plugin",
-        metadata: {
-          pluginPackage: {
-            id: "broken-plugin",
-            name: "Broken Plugin",
-            description: "Invalid package",
-            version: "1.0.0",
-            adapter: "claude",
-            category: "workflow",
-            configPath: ".claude/plugins/broken/plugin.json",
-            skills: []
-          }
-        }
-      }
-    ])[0];
-
-    const installRes = await fetch(`${baseUrl}/api/v1/catalog/items/${item.id}/install`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${auth.token}` }
-    });
-    const body = (await installRes.json()) as CatalogInstallBody;
-
-    assert.equal(installRes.status, 400);
-    assert.equal(body.code, 1);
-  });
 
   async function register(email: string): Promise<{ token: string; userId: string }> {
     const res = await fetch(`${baseUrl}/api/v1/auth/register`, {

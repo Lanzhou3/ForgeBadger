@@ -5,7 +5,7 @@ import { decryptSecret, encryptSecret, type EncryptedSecret } from "../../crypto
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderAdapter = "claude" | "opencode";
+export type ProviderAdapter = "claude" | "opencode" | "kimi";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
 export interface ProviderProfile {
@@ -621,7 +621,7 @@ function parseJsonObject(value: string): Record<string, string> {
 }
 
 function isProviderAdapter(value: string): value is ProviderAdapter {
-  return value === "claude" || value === "opencode";
+  return value === "claude" || value === "opencode" || value === "kimi";
 }
 
 function normalizeSupportedAdapters(adapters: ProviderAdapter[]): ProviderAdapter[] {

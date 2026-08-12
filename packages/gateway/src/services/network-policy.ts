@@ -3,7 +3,7 @@ import { isIP } from "node:net";
 
 /**
  * Single source of truth for SSRF defenses used by every outbound HTTP path
- * (model endpoint health, catalog manifest fetches, skill/plugin/template
+ * (model endpoint health, catalog manifest fetches, skill/template
  * remote fetches). Each function returns either `undefined` when the host is
  * acceptable, or a human-readable error string explaining why the host was
  * rejected.

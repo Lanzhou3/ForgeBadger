@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { LaunchPlan } from "../adapters/claude.js";
 import type { TmuxClient } from "./tmux.js";
 import type { OpenForgeEventBus } from "./event-bus.js";
+import { SessionOutputRing } from "./session-output-buffer.js";
 
 export type SessionStatus = "pending" | "running" | "detached" | "exited" | "error";
 
@@ -65,6 +66,14 @@ export interface SessionManagerOptions {
   tmuxPrefix?: string;
 }
 
+/**
+ * Upper bound on the number of sessions whose terminal output is buffered at
+ * once. New sessions evict the oldest buffered session (Map insertion order)
+ * once the limit is reached. Worst-case memory ≈ 200 × 1 MiB = 200 MiB (see
+ * session-output-buffer.ts).
+ */
+export const MAX_BUFFERED_SESSIONS = 200;
+
 class EmptyRecoveryStore implements SessionRecoveryStore {
   async listSessions(): Promise<StoredSession[]> {
     return [];
@@ -77,6 +86,7 @@ class EmptyRecoveryStore implements SessionRecoveryStore {
 
 export class InMemorySessionManager {
   private readonly sessions = new Map<string, GateASession>();
+  private readonly sessionOutputs = new Map<string, SessionOutputRing>();
   private readonly tmuxPrefix: string;
   private readonly sessionLocks = new Map<string, Promise<unknown>>();
   private correctionInterval: ReturnType<typeof setInterval> | undefined;
@@ -163,6 +173,38 @@ export class InMemorySessionManager {
     return this.sessions.get(id);
   }
 
+  /**
+   * Append raw pty output to a session's ring buffer. No-op when the session
+   * does not exist in memory (buffer only tracks live sessions, matching the
+   * documented "attached-duration output" scope). Evicts the oldest buffered
+   * session once MAX_BUFFERED_SESSIONS is reached.
+   */
+  appendSessionOutput(sessionId: string, data: string): void {
+    if (!this.getSession(sessionId)) {
+      return;
+    }
+    let ring = this.sessionOutputs.get(sessionId);
+    if (!ring) {
+      if (this.sessionOutputs.size >= MAX_BUFFERED_SESSIONS) {
+        const oldest = this.sessionOutputs.keys().next().value;
+        if (oldest !== undefined) {
+          this.sessionOutputs.delete(oldest);
+        }
+      }
+      ring = new SessionOutputRing();
+      this.sessionOutputs.set(sessionId, ring);
+    }
+    ring.append(data);
+  }
+
+  getSessionOutput(sessionId: string): SessionOutputRing | undefined {
+    return this.sessionOutputs.get(sessionId);
+  }
+
+  removeSessionOutput(sessionId: string): void {
+    this.sessionOutputs.delete(sessionId);
+  }
+
   async attachExistingSession(input: AttachExistingSessionInput): Promise<GateASession> {
     const liveTmuxSessions = await this.tmux.listSessions();
     if (!liveTmuxSessions.includes(input.tmuxName)) {
@@ -184,6 +226,8 @@ export class InMemorySessionManager {
         throw new Error("tmux session attach token mismatch");
       }
     }
+
+    await this.tmux.configureSession?.(input.tmuxName);
 
     const now = new Date().toISOString();
     const session: GateASession = {
@@ -347,6 +391,10 @@ export class InMemorySessionManager {
       if (this.sessions.has(indexedSession.id)) {
         continue;
       }
+
+      // tmux outlives Gateway restarts, so bring recovered sessions up to the
+      // current scrolling and history defaults before exposing them again.
+      await this.tmux.configureSession?.(tmuxName);
 
       const now = new Date().toISOString();
       const attachToken = indexedSession.attachToken ?? randomUUID();
