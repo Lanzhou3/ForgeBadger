@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
 import TemplatesPage from "./page";
@@ -88,6 +88,7 @@ function renderPage() {
 
 describe("TemplatesPage sync block", () => {
   beforeEach(() => {
+    cleanup();
     vi.clearAllMocks();
     listTemplatesMock.mockResolvedValue({ templates: [template] });
     listCatalogItemsMock.mockResolvedValue({ items: [] });
@@ -146,6 +147,21 @@ describe("TemplatesPage sync block", () => {
     expect(screen.getByText("In sync")).toBeTruthy();
     expect(screen.getByText("Stale")).toBeTruthy();
     expect(getTemplateUsageMock).toHaveBeenCalledWith("tpl-1");
+  });
+
+  it("partitions templates into governed and seed-only sections", async () => {
+    listTemplatesMock.mockResolvedValue({
+      templates: [
+        { ...template, id: "tpl-governed", name: "Governed Template", usageCount: 3 },
+        { ...template, id: "tpl-seed", name: "Seed Template" },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("治理中的模板")).toBeTruthy());
+    expect(screen.getByText("仅作初始化种子的模板")).toBeTruthy();
+    expect(screen.getByText("Governed Template")).toBeTruthy();
+    expect(screen.getByText("Seed Template")).toBeTruthy();
   });
 
   it("previews sync and applies with overwrite decisions for modified files", async () => {

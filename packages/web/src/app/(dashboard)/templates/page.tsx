@@ -20,10 +20,11 @@ import {
   listCatalogItems,
   listTemplates,
   listTemplateVersions,
-  restoreTemplateVersion,
-  type TemplatePackage,
+restoreTemplateVersion,
   updateTemplate,
   updateTemplateFile,
+  type Template,
+  type TemplatePackage,
 } from "@/lib/api";
 import {
   filterByVisibility,
@@ -71,6 +72,27 @@ export default function TemplatesPage() {
 
   const templates = data?.templates ?? [];
   const filteredTemplates = filterByVisibility(templates, visibilityFilter);
+  const governedTemplates = filteredTemplates.filter((template) => (template.usageCount ?? 0) > 0);
+  const seedTemplates = filteredTemplates.filter((template) => (template.usageCount ?? 0) === 0);
+
+  function renderTemplateItem(template: Template) {
+    return (
+      <button
+        key={template.id}
+        type="button"
+        className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm hover:bg-accent"
+        onClick={() => selectTemplate(template.id)}
+      >
+        <span className="font-medium">{template.name}</span>
+        <span className="flex flex-wrap justify-end gap-2">
+          {(template.isBuiltin || template.builtin) && (
+            <Badge variant="secondary">{t("templates.builtin")}</Badge>
+          )}
+          <Badge variant="outline">{t(visibilityLabelKey(normalizeVisibility(template.visibility)))}</Badge>
+        </span>
+      </button>
+    );
+  }
   const { data: catalogItemsData } = useQuery({
     queryKey: ["catalog-items"],
     queryFn: listCatalogItems,
@@ -394,22 +416,30 @@ export default function TemplatesPage() {
               ) : filteredTemplates.length === 0 ? (
                 <div className="py-6 text-center text-sm text-muted-foreground">{t("templates.emptyTitle")}</div>
               ) : (
-                filteredTemplates.map((template) => (
-                  <button
-                    key={template.id}
-                    type="button"
-                    className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm hover:bg-accent"
-                    onClick={() => selectTemplate(template.id)}
-                  >
-                    <span className="font-medium">{template.name}</span>
-                    <span className="flex flex-wrap justify-end gap-2">
-                      {(template.isBuiltin || template.builtin) && (
-                        <Badge variant="secondary">{t("templates.builtin")}</Badge>
-                      )}
-                      <Badge variant="outline">{t(visibilityLabelKey(normalizeVisibility(template.visibility)))}</Badge>
-                    </span>
-                  </button>
-                ))
+                <div className="space-y-3">
+                  {governedTemplates.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 px-1">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          {t("templates.governedTitle")}
+                        </span>
+                        <Badge variant="secondary">{governedTemplates.length}</Badge>
+                      </div>
+                      {governedTemplates.map((template) => renderTemplateItem(template))}
+                    </div>
+                  )}
+                  {seedTemplates.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 px-1">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          {t("templates.seedTitle")}
+                        </span>
+                        <Badge variant="secondary">{seedTemplates.length}</Badge>
+                      </div>
+                      {seedTemplates.map((template) => renderTemplateItem(template))}
+                    </div>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>

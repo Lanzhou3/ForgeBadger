@@ -119,7 +119,7 @@ export default function DashboardPage() {
       labelText: t("nav.agents"),
       value: dashboardStats?.agents ?? 0,
       icon: Bot,
-      href: "/agents",
+      href: "/projects",
     },
     {
       label: "Skills",
@@ -199,7 +199,7 @@ export default function DashboardPage() {
       detail: dashboardHealth?.agents.message ?? t("dashboard.agentHealthDescription"),
       healthy: dashboardHealth?.agents.healthy ?? false,
       icon: Bot,
-      href: "/agents",
+      href: "/projects",
     },
     {
       label: t("dashboard.skillHealth"),

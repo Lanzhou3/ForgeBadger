@@ -2,15 +2,16 @@
 import { createRef } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
 import { ConfigSyncPanel, type ConfigSyncPanelHandle } from "./ConfigSyncPanel";
 
-const { previewConfigSyncMock, applyConfigSyncMock, getConfigComplianceMock } = vi.hoisted(() => ({
+const { previewConfigSyncMock, applyConfigSyncMock, getConfigComplianceMock, updateProjectTemplateMock } = vi.hoisted(() => ({
   previewConfigSyncMock: vi.fn(),
   applyConfigSyncMock: vi.fn(),
   getConfigComplianceMock: vi.fn(),
+  updateProjectTemplateMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -20,6 +21,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     previewConfigSync: previewConfigSyncMock,
     applyConfigSync: applyConfigSyncMock,
     getConfigCompliance: getConfigComplianceMock,
+    updateProjectTemplate: updateProjectTemplateMock,
   };
 });
 
@@ -47,6 +49,7 @@ function renderPanel(overrides: Record<string, unknown> = {}) {
 
 describe("ConfigSyncPanel", () => {
   beforeEach(() => {
+    cleanup();
     vi.clearAllMocks();
     previewConfigSyncMock.mockResolvedValue({
       plan: { dryRun: true, files: [{ relativePath: ".claude/settings.json", content: "", sizeBytes: 0 }] },
@@ -170,5 +173,35 @@ describe("ConfigSyncPanel", () => {
       expect(typeof pending.preview).toBe("boolean");
       expect(typeof pending.compliance).toBe("boolean");
     }
+  });
+
+  it("renders the independent config card when no template is tracked", async () => {
+    renderPanel({ templateId: null });
+
+    expect(screen.getByText("独立配置")).toBeTruthy();
+    expect(screen.getByText(/未跟踪任何模板/)).toBeTruthy();
+    expect(screen.queryByText("停止跟踪模板")).toBeNull();
+    expect(screen.queryByRole("button", { name: /预览配置/ })).toBeNull();
+  });
+
+  it("stops tracking only after confirmation", async () => {
+    updateProjectTemplateMock.mockResolvedValue({ project: { id: "project-1", templateId: null } });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { ref } = renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: /停止跟踪模板/ }));
+
+    await waitFor(() => expect(updateProjectTemplateMock).toHaveBeenCalledWith("project-1", null));
+    confirmSpy.mockRestore();
+  });
+
+  it("does not stop tracking when confirmation is cancelled", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { ref } = renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: /停止跟踪模板/ }));
+
+    expect(updateProjectTemplateMock).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 });

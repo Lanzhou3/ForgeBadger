@@ -34,18 +34,19 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "notifications.opencodePermissionRequest")).toBe("OpenCode 权限申请");
     expect(getTranslation("zh-TW", "notifications.opencodePermissionRequest")).toBe("OpenCode 權限申請");
     expect(getTranslation("en", "notifications.opencodePermissionRequest")).toBe("OpenCode permission request");
-    expect(getTranslation("zh-CN", "plugins.explanationTitle")).toBe("插件 Tab 是什么");
-    expect(getTranslation("en", "plugins.materializationNote")).toContain("--plugin-dir");
     expect(getTranslation("zh-CN", "nav.members")).toBe("成员");
     expect(getTranslation("zh-TW", "members.accessDeniedTitle")).toBe("需要管理員權限");
     expect(getTranslation("en", "members.admin")).toBe("Admin");
-    expect(getTranslation("zh-CN", "agents.quickCreateTemplates")).toBe("快速创建模板");
-    expect(getTranslation("en", "agents.templatesDescription")).toContain("prefills");
     expect(getTranslation("zh-CN", "skills.quickCreateTemplates")).toBe("快速创建模板");
     expect(getTranslation("en", "skills.templatesDescription")).toContain("SKILL.md");
     expect(getTranslation("zh-CN", "projects.configCompliance")).toBe("配置合规");
     expect(getTranslation("zh-TW", "projects.staleFiles")).toBe("過期");
     expect(getTranslation("en", "projects.checkCompliance")).toBe("Check Compliance");
+    expect(getTranslation("zh-CN", "projects.untrackedConfigTitle")).toBe("独立配置");
+    expect(getTranslation("en", "projects.stopTrackingTemplate")).toBe("Stop tracking template");
+    expect(getTranslation("zh-TW", "projects.templateSeedHint")).toContain("初始化種子");
+    expect(getTranslation("zh-CN", "templates.governedTitle")).toBe("治理中的模板");
+    expect(getTranslation("en", "templates.seedTitle")).toBe("Seed-only Templates");
     expect(getTranslation("zh-CN", "templates.catalogInstall")).toBe("从目录安装");
     expect(getTranslation("en", "templates.catalogEmpty")).toContain("catalog");
     expect(getTranslation("zh-CN", "nav.history")).toBe("历史");
@@ -56,9 +57,6 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "skills.catalogInstall")).toContain("目录");
     expect(getTranslation("en", "skills.discoveryRoots")).toContain("Scan roots");
     expect(getTranslation("zh-CN", "skills.discoveryHint")).toContain("OPENFORGE_SKILL_DIRS");
-    expect(getTranslation("en", "plugins.catalogInstalled")).toContain("disabled");
-    expect(getTranslation("zh-CN", "plugins.whatItDoes")).toContain("Claude Code");
-    expect(getTranslation("en", "plugins.whatItDoes")).toContain("skills");
     expect(getTranslation("zh-CN", "common.visibility")).toBe("可见性");
     expect(getTranslation("en", "visibility.sharedDescription")).toContain("local instance");
     expect(getTranslation("zh-CN", "commandPalette.title")).toBe("命令面板");
@@ -124,6 +122,16 @@ describe("i18n", () => {
     expect(getTranslation("en", "copilot.error.modelSelectionFailed")).toContain("model selection failed");
     expect(getTranslation("en", "copilot.starter.launchReadiness")).toBe("Diagnose launch readiness");
     expect(getTranslation("zh-CN", "copilot.starter.releaseGates")).toBe("总结发布门禁");
+    expect(getTranslation("zh-CN", "terminal.historyOutput")).toBe("历史输出");
+    expect(getTranslation("zh-TW", "terminal.historyOutput")).toBe("歷史輸出");
+    expect(getTranslation("en", "terminal.historyOutput")).toBe("Output history");
+    expect(getTranslation("zh-CN", "terminal.historyEmpty")).toBe("暂无输出记录");
+    expect(getTranslation("zh-TW", "terminal.historyEmpty")).toBe("暫無輸出記錄");
+    expect(getTranslation("en", "terminal.historyEmpty")).toBe("No output yet");
+    expect(getTranslation("zh-CN", "terminal.historyRefresh")).toBe("刷新");
+    expect(getTranslation("zh-TW", "terminal.historyRefresh")).toBe("重新整理");
+    expect(getTranslation("en", "terminal.historyRefresh")).toBe("Refresh");
+    expect(getTranslation("en", "terminal.historyLoadFailed")).toContain("output history");
   });
 
   it("normalizes unsupported language values to Simplified Chinese", () => {

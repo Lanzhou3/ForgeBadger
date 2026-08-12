@@ -84,7 +84,6 @@ describe("copilot display helpers", () => {
     expect(getCopilotPendingActionLabel("openforge.propose_template_update")).toBe("Template update");
     expect(getCopilotPendingActionLabel("openforge.propose_template_delete")).toBe("Template delete");
     expect(getCopilotPendingActionLabel("openforge.propose_skill_toggle")).toBe("Skill toggle");
-    expect(getCopilotPendingActionLabel("openforge.propose_plugin_toggle")).toBe("Plugin toggle");
     expect(getCopilotPendingActionLabel("openforge.propose_project_skill_toggle")).toBe("Project skill toggle");
     expect(getCopilotPendingActionLabel("openforge.propose_copilot_model_selection")).toBe("Copilot model selection");
     expect(getCopilotPendingActionLabel("openforge.propose_model_provider_sync")).toBe("Model provider sync");
@@ -127,9 +126,6 @@ describe("copilot display helpers", () => {
       "copilot.pendingAction.templateDelete"
     );
     expect(getCopilotPendingActionLabelKey("openforge.propose_skill_toggle")).toBe("copilot.pendingAction.skillToggle");
-    expect(getCopilotPendingActionLabelKey("openforge.propose_plugin_toggle")).toBe(
-      "copilot.pendingAction.pluginToggle"
-    );
     expect(getCopilotPendingActionLabelKey("openforge.propose_project_skill_toggle")).toBe(
       "copilot.pendingAction.projectSkillToggle"
     );
@@ -272,8 +268,6 @@ describe("copilot display helpers", () => {
     expect(getCopilotErrorMessageKey("copilot_template_delete_failed")).toBe("copilot.error.templateDeleteFailed");
     expect(getCopilotErrorMessageKey("copilot_skill_toggle_invalid")).toBe("copilot.error.skillToggleInvalid");
     expect(getCopilotErrorMessageKey("copilot_skill_toggle_failed")).toBe("copilot.error.skillToggleFailed");
-    expect(getCopilotErrorMessageKey("copilot_plugin_toggle_invalid")).toBe("copilot.error.pluginToggleInvalid");
-    expect(getCopilotErrorMessageKey("copilot_plugin_toggle_failed")).toBe("copilot.error.pluginToggleFailed");
     expect(getCopilotErrorMessageKey("copilot_project_skill_toggle_invalid")).toBe(
       "copilot.error.projectSkillToggleInvalid"
     );
@@ -593,15 +587,6 @@ describe("copilot display helpers", () => {
     ).toEqual({
       detail: "skill-debugging / enable",
       preview: "Enable debugging skill.",
-    });
-    expect(
-      getCopilotPendingActionSummary({
-        type: "openforge.propose_plugin_toggle",
-        input: { pluginId: "claude-safe-edits", enabled: true, reason: "Enable safe edits." },
-      })
-    ).toEqual({
-      detail: "claude-safe-edits / enable",
-      preview: "Enable safe edits.",
     });
     expect(
       getCopilotPendingActionSummary({
@@ -1303,21 +1288,6 @@ describe("copilot display helpers", () => {
     ).toEqual({
       detail: "debugging / enabled",
       preview: "Skill state updated",
-    });
-    expect(
-      getCopilotEventResultSummary({
-        type: "pending_action_approved",
-        payload: {
-          actionType: "openforge.propose_plugin_toggle",
-          result: {
-            plugin: { id: "claude-safe-edits", name: "Safe edits", status: "enabled" },
-            executed: true,
-          },
-        },
-      })
-    ).toEqual({
-      detail: "Safe edits / enabled",
-      preview: "Plugin state updated",
     });
     expect(
       getCopilotEventResultSummary({

@@ -51,8 +51,8 @@
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 10%;
-    --brand: 24 100% 50%;
-    --brand-foreground: 0 0% 100%;
+    --brand: 187 86% 53%;
+    --brand-foreground: 220 30% 6%;
     --surface-raised: 0 0% 100%;
     --terminal-bg: 220 33% 3%;
     --radius: 0.5rem;
@@ -78,14 +78,48 @@
     --border: 211 28% 15%;
     --input: 211 28% 15%;
     --ring: 240 4.9% 83.9%;
-    --brand: 24 100% 50%;
-    --brand-foreground: 0 0% 100%;
+    --brand: 187 86% 53%;
+    --brand-foreground: 220 30% 6%;
     --surface-raised: 213 27% 9%;
     --terminal-bg: 220 33% 3%;
   }
 
   html.dark {
     color-scheme: dark;
+  }
+
+  /* Accent themes: --brand recolor driven by data-accent on <html>
+     (see src/lib/accent-theme.ts). */
+  :root[data-accent="cyan"] {
+    --brand: 187 86% 53%;
+    --brand-foreground: 220 30% 6%;
+  }
+  :root[data-accent="orange"] {
+    --brand: 24 100% 50%;
+    --brand-foreground: 0 0% 100%;
+  }
+  :root[data-accent="violet"] {
+    --brand: 258 90% 66%;
+    --brand-foreground: 0 0% 100%;
+  }
+  :root[data-accent="emerald"] {
+    --brand: 160 84% 39%;
+    --brand-foreground: 160 60% 6%;
+  }
+  :root[data-accent="blue"] {
+    --brand: 217 91% 60%;
+    --brand-foreground: 0 0% 100%;
+  }
+  :root[data-accent="rose"] {
+    --brand: 350 89% 60%;
+    --brand-foreground: 0 0% 100%;
+  }
+  :root[data-accent="amber"] {
+    --brand: 38 92% 55%;
+    --brand-foreground: 38 60% 8%;
+  }
+  .dark[data-accent] {
+    --ring: var(--brand);
   }
 }
 

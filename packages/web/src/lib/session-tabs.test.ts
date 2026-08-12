@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  groupSessionTabs,
   pruneSessionTabs,
   readSessionTabs,
   removeSessionTab,
+  sessionTabGroupColor,
   sessionToTab,
+  setSessionTabPrompt,
   upsertSessionTab
 } from "./session-tabs";
 
@@ -75,5 +78,70 @@ describe("session tabs", () => {
       status: "running",
       updatedAt: 10
     });
+  });
+
+  it("groups tabs by project preserving first-appearance order", () => {
+    const groups = groupSessionTabs([
+      { id: "a", label: "A", projectName: "Alpha", updatedAt: 1 },
+      { id: "b", label: "B", projectName: "Beta", updatedAt: 2 },
+      { id: "c", label: "C", projectName: "Alpha", updatedAt: 3 },
+      { id: "d", label: "D", updatedAt: 4 },
+    ]);
+
+    expect(groups.map((group) => group.projectName)).toEqual(["Alpha", "Beta", undefined]);
+    expect(groups[0]?.tabs.map((tab) => tab.id)).toEqual(["a", "c"]);
+    expect(groups[1]?.tabs.map((tab) => tab.id)).toEqual(["b"]);
+    expect(groups[2]?.tabs.map((tab) => tab.id)).toEqual(["d"]);
+  });
+
+  it("preserves the captured prompt when a session tab is refreshed", () => {
+    const storage = new MemoryStorage();
+
+    upsertSessionTab({ id: "a", label: "A", lastPrompt: "修一下登录页", updatedAt: 1 }, storage);
+    const tabs = upsertSessionTab({ id: "a", label: "A2", status: "running", updatedAt: 2 }, storage);
+
+    expect(tabs[0]?.lastPrompt).toBe("修一下登录页");
+  });
+
+  it("stores the latest prompt line on the session tab", () => {
+    const storage = new MemoryStorage();
+
+    upsertSessionTab({ id: "a", label: "A", updatedAt: 1 }, storage);
+    const tabs = setSessionTabPrompt("a", "解释一下这个报错", storage);
+
+    expect(tabs[0]?.lastPrompt).toBe("解释一下这个报错");
+    expect(setSessionTabPrompt("missing", "noop", storage)).toHaveLength(1);
+  });
+
+  it("preserves the project name when a session tab is refreshed", () => {
+    const storage = new MemoryStorage();
+
+    upsertSessionTab({ id: "a", label: "A", projectName: "Alpha", updatedAt: 1 }, storage);
+    const tabs = upsertSessionTab({ id: "a", label: "A2", status: "running", updatedAt: 2 }, storage);
+
+    expect(tabs[0]?.projectName).toBe("Alpha");
+  });
+
+  it("drops captured terminal query responses when reading tabs", () => {
+    const storage = new MemoryStorage();
+
+    upsertSessionTab(
+      { id: "a", label: "A", lastPrompt: "10;rgb:e5e5/eded/f7f711", updatedAt: 1 },
+      storage
+    );
+    upsertSessionTab({ id: "b", label: "B", lastPrompt: "正常提示词", updatedAt: 2 }, storage);
+    const tabs = readSessionTabs(storage);
+
+    expect(tabs[0]?.lastPrompt).toBeUndefined();
+    expect(tabs[1]?.lastPrompt).toBe("正常提示词");
+  });
+
+  it("assigns stable, distinct group colors per project name", () => {
+    expect(sessionTabGroupColor("OpenForge")).toBe(sessionTabGroupColor("OpenForge"));
+    expect(sessionTabGroupColor("OpenForge")).toMatch(/^#[0-9a-f]{6}$/);
+    const colors = new Set(
+      ["OpenForge", "Mindspark", "Shop API", "Docs"].map((name) => sessionTabGroupColor(name))
+    );
+    expect(colors.size).toBeGreaterThan(1);
   });
 });

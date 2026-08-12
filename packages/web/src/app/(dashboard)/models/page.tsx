@@ -3,6 +3,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowUpRight,
   Braces,
   CheckCircle2,
   Cloud,
@@ -20,6 +21,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -145,6 +147,7 @@ export default function ModelsPage() {
   const [credentialForm, setCredentialForm] = useState<CredentialForm>(emptyCredential);
   const [modelForm, setModelForm] = useState<ModelForm>(emptyModel);
   const [projectRoot, setProjectRoot] = useState("");
+  const [applyScope, setApplyScope] = useState<"project" | "user-global">("project");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedCredentialId, setSelectedCredentialId] = useState("");
   const [selectedApplyAdapter, setSelectedApplyAdapter] = useState<ProviderApplyAdapter>("claude");
@@ -543,7 +546,7 @@ export default function ModelsPage() {
       if (!selectedProviderId) throw new Error(t("models.providerRequired"));
       return previewProviderApply(
         selectedProviderId,
-        buildApplyPayload(selectedApplyAdapter, projectRoot, selectedModelId, selectedCredentialId)
+        buildApplyPayload(selectedApplyAdapter, applyScope, projectRoot, selectedModelId, selectedCredentialId)
       );
     },
     onSuccess: (result) => {
@@ -557,7 +560,7 @@ export default function ModelsPage() {
       if (!selectedProviderId) throw new Error(t("models.providerRequired"));
       return applyProviderConfig(
         selectedProviderId,
-        buildApplyPayload(selectedApplyAdapter, projectRoot, selectedModelId, selectedCredentialId)
+        buildApplyPayload(selectedApplyAdapter, applyScope, projectRoot, selectedModelId, selectedCredentialId)
       );
     },
     onSuccess: (result) => {
@@ -911,6 +914,20 @@ export default function ModelsPage() {
 
         <div className="min-w-0 xl:col-start-2 2xl:col-start-auto">
           <div className="space-y-4">
+            <Card>
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0 space-y-0.5">
+                  <p className="text-sm font-medium">{t("models.viewGlobalCliConfig")}</p>
+                  <p className="text-xs text-muted-foreground">{t("models.viewGlobalCliConfigDescription")}</p>
+                </div>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/cli-config">
+                    <ArrowUpRight className="size-4" />
+                    {t("models.viewGlobalCliConfig")}
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
             <ProviderHealthCard
               readiness={providerReadiness}
               isChecking={readinessMutation.isPending}
@@ -928,6 +945,7 @@ export default function ModelsPage() {
               models={providerModels}
               credentials={providerCredentials}
               projectRoot={projectRoot}
+              applyScope={applyScope}
               selectedModelId={selectedModelId}
               selectedCredentialId={selectedCredentialId}
               selectedAdapter={selectedApplyAdapter}
@@ -935,6 +953,7 @@ export default function ModelsPage() {
               isPreviewing={previewMutation.isPending}
               isApplying={applyMutation.isPending}
               onProjectRootChange={setProjectRoot}
+              onScopeChange={setApplyScope}
               onModelChange={setSelectedModelId}
               onCredentialChange={setSelectedCredentialId}
               onAdapterChange={setSelectedApplyAdapter}
@@ -1458,7 +1477,7 @@ function DeleteConfirmDialog({
                       name={item.name}
                       status={item.status}
                       kindLabel={t("models.referencedAgents")}
-                      href="/agents"
+                      href="/projects"
                       linkLabel={t("models.viewAgents")}
                     />
                   ))}
@@ -1685,14 +1704,16 @@ function applyTargetsForProvider(provider: ProviderProfile | undefined): Provide
 
 function buildApplyPayload(
   adapter: ProviderApplyAdapter,
+  scope: "project" | "user-global",
   projectRoot: string,
   modelProfileId: string,
   credentialId: string
-): { adapter: ProviderApplyAdapter; projectRoot?: string; modelProfileId?: string; credentialId?: string } {
+): { adapter: ProviderApplyAdapter; scope?: "project" | "user-global"; projectRoot?: string; modelProfileId?: string; credentialId?: string } {
   const root = projectRoot.trim();
   return {
     adapter,
-    ...(adapter !== "openforge-copilot" && root ? { projectRoot: root } : {}),
+    scope,
+    ...(adapter !== "openforge-copilot" && scope === "project" && root ? { projectRoot: root } : {}),
     ...(modelProfileId ? { modelProfileId } : {}),
     ...(credentialId ? { credentialId } : {}),
   };
@@ -1912,6 +1933,7 @@ function ApplyColumn({
   models,
   credentials,
   projectRoot,
+  applyScope,
   selectedModelId,
   selectedCredentialId,
   selectedAdapter,
@@ -1919,6 +1941,7 @@ function ApplyColumn({
   isPreviewing,
   isApplying,
   onProjectRootChange,
+  onScopeChange,
   onModelChange,
   onCredentialChange,
   onAdapterChange,
@@ -1930,6 +1953,7 @@ function ApplyColumn({
   models: ModelProfile[];
   credentials: ProviderCredentialSummary[];
   projectRoot: string;
+  applyScope: "project" | "user-global";
   selectedModelId: string;
   selectedCredentialId: string;
   selectedAdapter: ProviderApplyAdapter;
@@ -1937,6 +1961,7 @@ function ApplyColumn({
   isPreviewing: boolean;
   isApplying: boolean;
   onProjectRootChange: (projectRoot: string) => void;
+  onScopeChange: (scope: "project" | "user-global") => void;
   onModelChange: (modelId: string) => void;
   onCredentialChange: (credentialId: string) => void;
   onAdapterChange: (adapter: ProviderApplyAdapter) => void;
@@ -1952,6 +1977,7 @@ function ApplyColumn({
     selectedAdapter,
     selectedModelId,
     projectRoot,
+    scope: applyScope,
     needsPreview: false,
     preview,
     t,
@@ -1962,6 +1988,7 @@ function ApplyColumn({
     selectedAdapter,
     selectedModelId,
     projectRoot,
+    scope: applyScope,
     needsPreview: true,
     preview,
     t,
@@ -1995,15 +2022,31 @@ function ApplyColumn({
             </select>
           </div>
           {!isCopilotTarget ? (
-            <div className="space-y-2">
-              <Label htmlFor="apply-root">{t("models.projectPath")}</Label>
-              <Input
-                id="apply-root"
-                value={projectRoot}
-                onChange={(event) => onProjectRootChange(event.target.value)}
-                placeholder="/path/to/project"
-              />
-            </div>
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="apply-scope">{t("models.applyScopeMode")}</Label>
+                <select
+                  id="apply-scope"
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  value={applyScope}
+                  onChange={(event) => onScopeChange(event.target.value as "project" | "user-global")}
+                >
+                  <option value="project">{t("models.scopeProject")}</option>
+                  <option value="user-global">{t("models.scopeUserGlobal")}</option>
+                </select>
+              </div>
+              {applyScope === "project" && (
+                <div className="space-y-2">
+                  <Label htmlFor="apply-root">{t("models.projectPath")}</Label>
+                  <Input
+                    id="apply-root"
+                    value={projectRoot}
+                    onChange={(event) => onProjectRootChange(event.target.value)}
+                    placeholder="/path/to/project"
+                  />
+                </div>
+              )}
+            </>
           ) : (
             <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
               {t("models.copilotInternalApplyDescription")}
@@ -2106,6 +2149,7 @@ function getApplyBlockedReason({
   selectedAdapter,
   selectedModelId,
   projectRoot,
+  scope,
   needsPreview,
   preview,
   t,
@@ -2115,6 +2159,7 @@ function getApplyBlockedReason({
   selectedAdapter: ProviderApplyAdapter;
   selectedModelId: string;
   projectRoot: string;
+  scope: "project" | "user-global";
   needsPreview: boolean;
   preview: ProviderApplyPreview | null;
   t: (key: any) => string;
@@ -2123,7 +2168,7 @@ function getApplyBlockedReason({
   if (!provider) return t("models.providerRequired");
   if (!supportedAdapters.includes(selectedAdapter)) return t("models.applyTargetUnsupported");
   if (!selectedModelId) return t("models.applyModelRequired");
-  if (!isCopilotTarget && !projectRoot.trim()) return t("models.projectPathRequired");
+  if (!isCopilotTarget && scope === "project" && !projectRoot.trim()) return t("models.projectPathRequired");
   if (needsPreview && !preview) return t("models.previewRequiredBeforeApply");
   return null;
 }

@@ -19,6 +19,18 @@ export interface StoredNotification {
   createdAt: string;
   href: string;
   read: boolean;
+  projectId?: string;
+  projectName?: string;
+  sessionId?: string;
+  sessionName?: string;
+  adapter?: string;
+  notificationType?: string;
+}
+
+export interface NotificationContextLabels {
+  project: string;
+  session: string;
+  cli: string;
 }
 
 const notificationTitleKeys = {
@@ -51,13 +63,11 @@ export function createNotificationFromEvent(
       : event.type === "claude_notification"
         ? `:${getString(event.payload, "notification_type") ?? "unknown"}`
       : "";
-  const titleKey =
-    event.type === "claude_notification" &&
-    getString(event.payload, "notification_type") === "permission_prompt"
-      ? getString(event.payload, "adapter") === "opencode"
-        ? "notifications.opencodePermissionRequest"
-        : "notifications.claudePermissionRequest"
-      : notificationTitleKeys[event.type];
+  const notificationType = getString(event.payload, "notification_type");
+  const adapter = getString(event.payload, "adapter");
+  const titleKey = event.type === "claude_notification"
+    ? cliNotificationTitleKey(notificationType, adapter)
+    : notificationTitleKeys[event.type];
 
   return {
     id: serverId ?? `${event.type}:${sessionId}${statusSuffix}:${createdAt}`,
@@ -67,7 +77,24 @@ export function createNotificationFromEvent(
     createdAt,
     href: `/sessions/${encodeURIComponent(sessionId)}`,
     read,
+    projectId: getString(event.payload, "project_id"),
+    projectName: getString(event.payload, "project_name"),
+    sessionId,
+    sessionName: getString(event.payload, "session_name"),
+    adapter,
+    notificationType,
   };
+}
+
+export function notificationContextParts(
+  notification: StoredNotification,
+  labels?: NotificationContextLabels
+): string[] {
+  return [
+    formatContextPart(labels?.project, notification.projectName),
+    formatContextPart(labels?.session, notification.sessionName),
+    formatContextPart(labels?.cli, adapterLabel(notification.adapter)),
+  ].filter((value): value is string => Boolean(value));
 }
 
 export function mergeNotifications(
@@ -99,7 +126,7 @@ function formatNotificationMessage(
     return `${getString(payload, "name") ?? sessionId}`;
   }
   if (type === "claude_notification") {
-    const message = getString(payload, "message") ?? "Claude Code notification";
+    const message = getString(payload, "message") ?? "Code CLI notification";
     const toolName = getString(payload, "tool_name");
     return toolName ? `${toolName}: ${message}` : message;
   }
@@ -113,6 +140,36 @@ function isNotificationEventType(type: string | undefined): type is Notification
     type === "session_deleted" ||
     type === "claude_notification"
   );
+}
+
+function cliNotificationTitleKey(
+  notificationType?: string,
+  adapter?: string
+): TranslationKey {
+  if (notificationType === "permission_prompt") {
+    if (adapter === "opencode") return "notifications.opencodePermissionRequest";
+    if (adapter === "codex") return "notifications.codexPermissionRequest";
+    if (adapter === "kimi") return "notifications.kimiPermissionRequest";
+    return "notifications.claudePermissionRequest";
+  }
+  if (notificationType === "task_completed") return "notifications.taskCompleted";
+  if (notificationType === "task_interrupted") return "notifications.taskInterrupted";
+  if (notificationType === "task_failed") return "notifications.taskFailed";
+  if (notificationType === "session_ended") return "notifications.sessionEnded";
+  return "notifications.cliNotification";
+}
+
+function adapterLabel(adapter?: string): string | undefined {
+  if (adapter === "claude") return "Claude Code";
+  if (adapter === "opencode") return "OpenCode";
+  if (adapter === "codex") return "Codex";
+  if (adapter === "kimi") return "Kimi Code";
+  return adapter;
+}
+
+function formatContextPart(label: string | undefined, value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return label ? `${label}: ${value}` : value;
 }
 
 function getString(payload: Record<string, unknown> | undefined, key: string): string | undefined {

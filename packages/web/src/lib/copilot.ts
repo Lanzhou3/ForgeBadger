@@ -52,7 +52,6 @@ const pendingActionLabels: Record<string, string> = {
   "openforge.propose_template_update": "Template update",
   "openforge.propose_template_delete": "Template delete",
   "openforge.propose_skill_toggle": "Skill toggle",
-  "openforge.propose_plugin_toggle": "Plugin toggle",
   "openforge.propose_project_skill_toggle": "Project skill toggle",
   "openforge.propose_copilot_model_selection": "Copilot model selection",
   "openforge.propose_model_provider_sync": "Model provider sync",
@@ -89,7 +88,6 @@ const pendingActionLabelKeys: Record<string, TranslationKey> = {
   "openforge.propose_template_update": "copilot.pendingAction.templateUpdate",
   "openforge.propose_template_delete": "copilot.pendingAction.templateDelete",
   "openforge.propose_skill_toggle": "copilot.pendingAction.skillToggle",
-  "openforge.propose_plugin_toggle": "copilot.pendingAction.pluginToggle",
   "openforge.propose_project_skill_toggle": "copilot.pendingAction.projectSkillToggle",
   "openforge.propose_copilot_model_selection": "copilot.pendingAction.copilotModelSelection",
   "openforge.propose_model_provider_sync": "copilot.pendingAction.modelProviderSync",
@@ -171,8 +169,6 @@ const errorMessageKeys: Record<string, TranslationKey> = {
   copilot_template_delete_failed: "copilot.error.templateDeleteFailed",
   copilot_skill_toggle_invalid: "copilot.error.skillToggleInvalid",
   copilot_skill_toggle_failed: "copilot.error.skillToggleFailed",
-  copilot_plugin_toggle_invalid: "copilot.error.pluginToggleInvalid",
-  copilot_plugin_toggle_failed: "copilot.error.pluginToggleFailed",
   copilot_project_skill_toggle_invalid: "copilot.error.projectSkillToggleInvalid",
   copilot_project_skill_toggle_failed: "copilot.error.projectSkillToggleFailed",
   copilot_model_selection_invalid: "copilot.error.modelSelectionInvalid",
@@ -503,8 +499,6 @@ export function getCopilotPendingActionSummary(
       return summarizeTemplateDelete(payload);
     case "openforge.propose_skill_toggle":
       return summarizeSkillToggle(payload);
-    case "openforge.propose_plugin_toggle":
-      return summarizePluginToggle(payload);
     case "openforge.propose_project_skill_toggle":
       return summarizeProjectSkillToggle(payload);
     case "openforge.propose_copilot_model_selection":
@@ -595,8 +589,6 @@ export function getCopilotEventResultSummary(
       return summarizeTemplateDeleteResult(result);
     case "openforge.propose_skill_toggle":
       return summarizeSkillToggleResult(result);
-    case "openforge.propose_plugin_toggle":
-      return summarizePluginToggleResult(result);
     case "openforge.propose_project_skill_toggle":
       return summarizeProjectSkillToggleResult(result);
     case "openforge.propose_copilot_model_selection":
@@ -1085,16 +1077,6 @@ function summarizeSkillToggle(payload: Record<string, unknown>): CopilotPendingA
   };
 }
 
-function summarizePluginToggle(payload: Record<string, unknown>): CopilotPendingActionSummary {
-  return {
-    detail: joinPresent([
-      readString(payload, "pluginId") ?? "plugin",
-      payload.enabled === true ? "enable" : "disable",
-    ]),
-    preview: previewText(readString(payload, "reason")),
-  };
-}
-
 function summarizeProjectSkillToggle(payload: Record<string, unknown>): CopilotPendingActionSummary {
   return {
     detail: joinPresent([
@@ -1497,17 +1479,6 @@ function summarizeSkillToggleResult(payload: Record<string, unknown>): CopilotPe
       readBoolean(skill ?? {}, "isEnabled") ? "enabled" : "disabled",
     ]),
     preview: payload.executed === true ? "Skill state updated" : undefined,
-  };
-}
-
-function summarizePluginToggleResult(payload: Record<string, unknown>): CopilotPendingActionSummary {
-  const plugin = readRecord(payload.plugin);
-  return {
-    detail: joinPresent([
-      readString(plugin ?? {}, "name") ?? readString(plugin ?? {}, "id") ?? "plugin",
-      readString(plugin ?? {}, "status") === "enabled" ? "enabled" : "disabled",
-    ]),
-    preview: payload.executed === true ? "Plugin state updated" : undefined,
   };
 }
 

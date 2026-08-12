@@ -65,7 +65,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         Skip to content
       </a>
-      <Sidebar collapsed={sidebarCollapsed} />
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((current) => !current)}
+      />
       <main
         id="main-content"
         tabIndex={-1}

@@ -49,6 +49,14 @@ import {
   replaceFeishuUserMappings,
   updateFeishuIntegrationConfig,
   getConfigCompliance,
+  getCliConfig,
+  getCliConfigFile,
+  writeCliConfigFile,
+  upsertCliProvider,
+  removeCliProvider,
+  upsertCliModel,
+  removeCliModel,
+  setCliDefaultModel,
   getGlobalAiConfig,
   getProjectAgentSequence,
   getProjectAiConfig,
@@ -63,7 +71,6 @@ import {
   importProjectWithConfig,
   installCatalogTemplate,
   installCatalogSkill,
-  installCatalogPlugin,
   getUsageSummary,
   listActivities,
   listAuditLogs,
@@ -82,7 +89,6 @@ import {
   rotateProviderCredential,
   setDefaultProviderModel,
   updateProviderModel,
-  listPlugins,
   refreshCatalog,
   restoreTemplateVersion,
   restoreSnapshot,
@@ -110,7 +116,6 @@ import {
   startCodexAppServerTurn,
   setProjectSkill,
   stopCodexAppServer,
-  togglePlugin,
   updateAgent,
   updateAdminUser,
   updateCopilotConversation,
@@ -120,6 +125,9 @@ import {
   updateTemplate,
   updateTemplateFile,
   updateModel,
+  updateProjectTemplate,
+  isTemplateNotTrackedError,
+  GatewayApiError,
   writeConfig,
   type ProjectManagerEvidenceRef,
   type ProjectManagerLedgerEvent,
@@ -669,7 +677,6 @@ describe("api client", () => {
     });
     await installCatalogTemplate("catalog-item-1");
     await installCatalogSkill("catalog-skill-1");
-    await installCatalogPlugin("catalog-plugin-1");
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -694,11 +701,6 @@ describe("api client", () => {
     expect(fetch).toHaveBeenNthCalledWith(
       5,
       "http://127.0.0.1:48731/api/v1/catalog/items/catalog-skill-1/install",
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      6,
-      "http://127.0.0.1:48731/api/v1/catalog/items/catalog-plugin-1/install",
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -1418,31 +1420,12 @@ describe("api client", () => {
     );
   });
 
-  it("manages Claude Code plugins through REST", async () => {
-    await listPlugins();
-    await togglePlugin("claude-safe-edits", true);
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:48731/api/v1/plugins",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/plugins/claude-safe-edits/toggle",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ enabled: true }),
-      })
-    );
-  });
-
   it("lists audit logs through REST", async () => {
-    await listAuditLogs({ resourceType: "plugin", resourceId: "claude-safe-edits", limit: 20 });
+    await listAuditLogs({ resourceType: "skill", resourceId: "review-skill", limit: 20 });
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/audit-logs?resourceType=plugin&resourceId=claude-safe-edits&limit=20",
+      "http://127.0.0.1:48731/api/v1/audit-logs?resourceType=skill&resourceId=review-skill&limit=20",
       expect.objectContaining({ headers: expect.any(Object) })
     );
   });
@@ -1483,6 +1466,47 @@ describe("api client", () => {
       "http://127.0.0.1:48731/api/v1/projects/project-1/config/compliance?templateId=template-1&credentialMode=stored_encrypted_key",
       expect.objectContaining({ headers: expect.any(Object) })
     );
+  });
+
+  it("patches the project template binding with nullable templateId", async () => {
+    await updateProjectTemplate("project-1", null);
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/projects/project-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ templateId: null }),
+      })
+    );
+
+    await updateProjectTemplate("project-1", "template-9");
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/projects/project-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ templateId: "template-9" }),
+      })
+    );
+
+    await updateProjectTemplate("project-1", undefined);
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/projects/project-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: "{}",
+      })
+    );
+  });
+
+  it("recognizes the TEMPLATE_NOT_TRACKED 404 error", () => {
+    expect(
+      isTemplateNotTrackedError(new GatewayApiError("not tracking", 404, { code: "TEMPLATE_NOT_TRACKED" }))
+    ).toBe(true);
+    expect(isTemplateNotTrackedError(new GatewayApiError("boom", 404))).toBe(false);
+    expect(isTemplateNotTrackedError(new GatewayApiError("unknowable", 500, { code: "TEMPLATE_NOT_TRACKED" }))).toBe(false);
+    expect(isTemplateNotTrackedError(new Error("boom"))).toBe(false);
   });
 
   it("manages custom templates and project config application", async () => {
@@ -1919,6 +1943,89 @@ describe("api client", () => {
     expect(fetch).toHaveBeenCalledWith(
       "http://127.0.0.1:48731/api/v1/models/model-1/check",
       expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("manages CLI global config through REST", async () => {
+    await getCliConfig("kimi");
+    await getCliConfigFile("kimi", "config.toml", true);
+    await writeCliConfigFile("kimi", "config.toml", "default_model = \"k2\"");
+    await upsertCliProvider("kimi", "moonshot", {
+      baseUrl: "https://api.moonshot.cn/anthropic",
+      protocol: "anthropic",
+      apiKey: "sk-test",
+    });
+    await removeCliProvider("kimi", "moonshot");
+    await upsertCliModel("kimi", {
+      alias: "moonshot/kimi-k2.5",
+      provider: "moonshot",
+      modelId: "kimi-k2.5",
+    });
+    await removeCliModel("kimi", "moonshot/kimi-k2.5");
+    await setCliDefaultModel("kimi", "moonshot/kimi-k2.5");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/cli-config/kimi",
+      expect.objectContaining({})
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/cli-config/kimi/file?path=config.toml&reveal=1",
+      expect.objectContaining({})
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/cli-config/kimi/file",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ path: "config.toml", content: "default_model = \"k2\"" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:48731/api/v1/cli-config/kimi/providers/moonshot",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          baseUrl: "https://api.moonshot.cn/anthropic",
+          protocol: "anthropic",
+          apiKey: "sk-test",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:48731/api/v1/cli-config/kimi/providers/moonshot",
+      expect.objectContaining({ method: "DELETE" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      6,
+      "http://127.0.0.1:48731/api/v1/cli-config/kimi/models",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          alias: "moonshot/kimi-k2.5",
+          provider: "moonshot",
+          modelId: "kimi-k2.5",
+        }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      7,
+      "http://127.0.0.1:48731/api/v1/cli-config/kimi/models",
+      expect.objectContaining({
+        method: "DELETE",
+        body: JSON.stringify({ alias: "moonshot/kimi-k2.5" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      8,
+      "http://127.0.0.1:48731/api/v1/cli-config/kimi/default-model",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ model: "moonshot/kimi-k2.5" }),
+      })
     );
   });
 });

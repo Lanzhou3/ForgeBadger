@@ -35,7 +35,14 @@ export function shouldTriggerBrowserNotification(
   }
   if (
     event.type === "claude_notification" &&
-    event.payload?.notification_type === "permission_prompt"
+    [
+      "permission_prompt",
+      "permission_denied",
+      "task_completed",
+      "task_interrupted",
+      "task_failed",
+      "session_ended",
+    ].includes(String(event.payload?.notification_type ?? ""))
   ) {
     return true;
   }

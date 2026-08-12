@@ -5,9 +5,13 @@ import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit";
 import type { Terminal as TerminalInstance } from "@xterm/xterm";
 
 import { Button } from "@/components/ui/button";
+import { SessionOutputHistory } from "@/components/sessions/session-output-history";
 import { useLanguage } from "@/hooks/use-language";
+import { resolveWheelAction } from "@/lib/terminal-scroll";
 import { copySelectedTerminalText, shouldCopyTerminalSelection } from "@/lib/terminal-copy";
 import { createTerminalInputMessage, createTerminalResizeMessage } from "@/lib/terminal-messages";
+import { createTerminalPromptCapture } from "@/lib/terminal-prompt-capture";
+import { notifySessionTabsChanged, setSessionTabPrompt } from "@/lib/session-tabs";
 import { parseTerminalWebSocketMessage } from "@/lib/terminal-websocket-messages";
 import { replaceTerminalInputListener, type DisposableInputListener } from "@/lib/terminal-input-listener";
 import { cn } from "@/lib/utils";
@@ -31,11 +35,16 @@ function getReconnectDelay(attempt: number): number {
 export function TerminalView({
   sessionId,
   authToken,
-  attachToken
+  attachToken,
+  historyOpen = false,
+  onHistoryClose,
 }: {
   sessionId: string;
   authToken: string;
   attachToken: string;
+  /** Controlled read-only output-history overlay (trigger lives in the tab strip). */
+  historyOpen?: boolean;
+  onHistoryClose?: () => void;
 }) {
   const { t } = useLanguage();
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -46,6 +55,7 @@ export function TerminalView({
   const attemptCountRef = useRef(0);
   const inputDisposableRef = useRef<DisposableInputListener | null>(null);
   const resizeHandlerRef = useRef<(() => void) | null>(null);
+  const promptCaptureRef = useRef(createTerminalPromptCapture());
   const mountedRef = useRef(true);
 
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
@@ -141,6 +151,11 @@ export function TerminalView({
     if (terminal) {
       replaceTerminalInputListener(inputDisposableRef, null);
       const disposable = terminal.onData((data) => {
+        const prompt = promptCaptureRef.current.push(data);
+        if (prompt) {
+          setSessionTabPrompt(sessionId, prompt);
+          notifySessionTabsChanged();
+        }
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(createTerminalInputMessage(data));
         }
@@ -188,6 +203,24 @@ export function TerminalView({
             event.preventDefault();
             void copySelectedTerminalText(terminal);
             return false;
+          });
+          // Full-screen TUIs (Claude Code / Kimi Code) run on the alternate
+          // screen with mouse reporting disabled, so xterm's alternateScroll
+          // converts the wheel into ↑/↓ key sequences that pollute the input
+          // history. Suppress only in that state; OpenCode (mouse on) keeps its
+          // SGR wheel events and the normal buffer keeps its scrollback scroll.
+          terminal.attachCustomWheelEventHandler((event) => {
+            const suppress =
+              resolveWheelAction(
+                terminal.buffer.active.type,
+                // Prefer xterm's public terminal-mode API over renderer CSS.
+                terminal.modes.mouseTrackingMode !== "none"
+              ) === "suppress";
+            if (suppress) {
+              event.preventDefault();
+              return false; // 阻止 xterm alternateScroll（滚轮→↑/↓）
+            }
+            return true;
           });
           const fitAddon = new fit.FitAddon();
           terminal.loadAddon(fitAddon);
@@ -285,6 +318,9 @@ export function TerminalView({
 
   const showReconnectingOverlay = status === "reconnecting";
   const showFailedOverlay = status === "failed";
+  // The status strip only earns its vertical space when something is wrong or
+  // in flux; a healthy connection stays invisible (VS Code-style chrome).
+  const showStatusBar = status !== "connected";
   const statusTone =
     status === "connected"
       ? "bg-emerald-500"
@@ -297,20 +333,32 @@ export function TerminalView({
   return (
     <div
       data-testid="terminal-frame"
-      className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-[#05070a]"
+      className={cn(
+        "grid h-full min-h-0 overflow-hidden rounded-lg border border-border bg-[#05070a]",
+        showStatusBar ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]"
+      )}
     >
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        <div className="flex min-w-0 items-center gap-2">
+      {/* The status strip only appears while the connection is in flux or
+          broken; the output-history trigger lives in the tab strip above. */}
+      {showStatusBar && (
+        <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           <span className={cn("size-2 rounded-full", statusTone)} aria-hidden="true" />
           <span aria-live="polite">{status}</span>
-          {attemptCount > 0 && status !== "connected" && (
+          {attemptCount > 0 && (
             <span className="text-amber-300">
               {attemptCount}/{MAX_RECONNECT_ATTEMPTS}
             </span>
           )}
+          <span className="min-w-0 truncate font-mono">session {sessionId}</span>
         </div>
-        <span className="min-w-0 truncate font-mono">session {sessionId}</span>
-      </div>
+      )}
+      {/* Screen readers still get the connecting → connected transition even
+          though the healthy state has no visible strip. */}
+      {!showStatusBar && (
+        <span aria-live="polite" className="sr-only">
+          {status}
+        </span>
+      )}
       {!authToken || !attachToken ? (
         <div className="p-4 text-sm text-destructive">
           {t("terminal.missingCredentials")}
@@ -322,6 +370,14 @@ export function TerminalView({
           data-testid="terminal-host"
           className="h-full min-h-0 p-2 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
         />
+        {historyOpen && (
+          <SessionOutputHistory
+            sessionId={sessionId}
+            authToken={authToken}
+            open={historyOpen}
+            onClose={() => onHistoryClose?.()}
+          />
+        )}
         {showReconnectingOverlay && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-10">
             <div className="text-center">

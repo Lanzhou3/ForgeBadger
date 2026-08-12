@@ -4,35 +4,38 @@ import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Square, Activity, ClipboardList, Copy, Download, ExternalLink, History, Maximize2, Minimize2, Sparkles } from "lucide-react";
+import { ArrowLeft, Square, ClipboardList, Copy, Download, ExternalLink, History, Maximize2, Minimize2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { notifySessionTabsChanged, SessionTabs } from "@/components/session-tabs";
 import { TerminalView } from "@/components/terminal-view";
 import {
   connectSession,
   getSession,
-  listActivities,
   listProjectManagerTaskPackets,
   startSession,
   stopSession,
   type ProjectManagerTaskPacket,
   type ProjectManagerTaskPacketQueueStatus,
   type Session,
-  type SessionActivity,
 } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import { useLanguage } from "@/hooks/use-language";
-import { buildCopilotLaunchHref } from "@/lib/copilot";
 import {
   findSessionTaskPacket,
   sessionTaskPacketProjectManagerHref,
 } from "@/components/sessions/session-task-packet";
+import { GitChangesPanel } from "@/components/sessions/git-changes-panel";
 import { SessionNotificationBell } from "@/components/sessions/session-notification-bell";
 import {
   auditSessionHandoffExportInput,
@@ -42,7 +45,6 @@ import {
 } from "@/components/sessions/session-handoff-export";
 import {
   shouldAutoConnectSession,
-  shouldLoadSessionActivities,
   shouldShowSessionPreparing,
 } from "@/lib/session-connect-state";
 
@@ -53,11 +55,7 @@ export default function TerminalPage() {
   const { t } = useLanguage();
   const id = params.id as string;
   const [focusMode, setFocusMode] = useState(false);
-  const sessionCopilotHref = buildCopilotLaunchHref({
-    source: "session",
-    sourceRefId: id,
-    intent: "session_readiness",
-  });
+  const [outputHistoryOpen, setOutputHistoryOpen] = useState(false);
 
   const authToken = getToken() ?? "";
   const attachTokenOverride = searchParams.get("attachToken");
@@ -79,13 +77,6 @@ export default function TerminalPage() {
 
   const session = connectMutation.data?.session ?? sessionData?.session;
   const attachToken = attachTokenOverride ?? connectMutation.data?.session.attachToken ?? "";
-
-  const { data: activityData } = useQuery({
-    queryKey: ["activities", { sessionId: id }],
-    queryFn: () => listActivities({ sessionId: id, limit: 20 }),
-    enabled: shouldLoadSessionActivities({ sessionId: id, hasSession: Boolean(session) }),
-    retry: false,
-  });
 
   const { data: taskPacketData, error: taskPacketError, isFetching: isTaskPacketFetching } = useQuery({
     queryKey: ["project-manager", session?.projectId, "task-packets", { limit: 50, sessionId: id }],
@@ -164,7 +155,7 @@ export default function TerminalPage() {
   ) {
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <SessionFallbackHeader sessionId={id} copilotHref={sessionCopilotHref} />
+        <SessionFallbackHeader sessionId={id} />
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           {t("sessions.preparing")}
         </div>
@@ -179,7 +170,7 @@ export default function TerminalPage() {
         : `Missing ${missing.join(" and ")}`;
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <SessionFallbackHeader sessionId={id} copilotHref={sessionCopilotHref} />
+        <SessionFallbackHeader sessionId={id} />
         <div className="flex flex-1 items-center justify-center">
           <div className="max-w-md rounded-lg border border-destructive/50 bg-destructive/10 p-6 text-center">
             <h2 className="text-lg font-semibold text-destructive">
@@ -208,11 +199,6 @@ export default function TerminalPage() {
                   {t("sessions.openSettings")}
                 </Link>
               </Button>
-              <Button asChild variant="ghost" size="sm">
-                <Link href={sessionCopilotHref}>
-                  {t("sessions.askCopilotRecovery")}
-                </Link>
-              </Button>
             </div>
           </div>
         </div>
@@ -222,69 +208,59 @@ export default function TerminalPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <SessionTabs activeSessionId={id} />
-      {/* Top bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/sessions">
-              <ArrowLeft className="size-4" />
-              {t("sessions.back")}
-            </Link>
-          </Button>
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-medium">
-              {session?.name || session?.tmuxName || `Session ${id}`}
-            </span>
+      {/* Single chrome row: session tabs on the left, session actions on the right */}
+      <SessionTabs
+        activeSessionId={id}
+        trailing={
+          <>
             <SessionStatusBadge status={session?.status} />
-          </div>
-        </div>
-
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-          <Badge variant="outline" className="text-xs">
-            {session?.aiTool ?? "Claude"}
-          </Badge>
-          <SessionNotificationBell />
-          <Button asChild variant="ghost" size="sm">
-            <Link href={`/history?sessionId=${id}`}>
-              <History className="mr-2 size-3" />
-              {t("nav.history")}
-            </Link>
-          </Button>
-          <Button asChild variant="ghost" size="sm">
-            <Link
-              href={sessionCopilotHref}
-              aria-label={t("copilot.askCopilot")}
-              title={t("copilot.askCopilot")}
+            <SessionNotificationBell />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 text-muted-foreground hover:text-foreground"
+                  title={t("nav.history")}
+                  aria-label={t("nav.history")}
+                >
+                  <History className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setOutputHistoryOpen(true)}>
+                  {t("terminal.historyOutput")}
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href={`/history?sessionId=${id}`}>{t("sessions.snapshotHistory")}</Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 text-muted-foreground hover:text-foreground"
+              onClick={() => setFocusMode((current) => !current)}
+              title={focusMode ? t("sessions.exitFocusMode") : t("sessions.focusMode")}
+              aria-label={focusMode ? t("sessions.exitFocusMode") : t("sessions.focusMode")}
             >
-              <Sparkles className="size-3 sm:mr-2" />
-              <span className="hidden sm:inline">{t("copilot.askCopilot")}</span>
-            </Link>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setFocusMode((current) => !current)}
-          >
-            {focusMode ? <Minimize2 className="size-3 sm:mr-2" /> : <Maximize2 className="size-3 sm:mr-2" />}
-            <span className="hidden sm:inline">
-              {focusMode ? t("sessions.exitFocusMode") : t("sessions.focusMode")}
-            </span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive"
-            onClick={() => stopMutation.mutate()}
-            disabled={stopMutation.isPending}
-          >
-            <Square className="size-3 sm:mr-2" />
-            <span className="hidden sm:inline">
-              {stopMutation.isPending ? t("sessions.stopping") : t("common.stop")}
-            </span>
-          </Button>
-        </div>
-      </div>
+              {focusMode ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </Button>
+            <div className="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => stopMutation.mutate()}
+              disabled={stopMutation.isPending}
+              title={stopMutation.isPending ? t("sessions.stopping") : t("common.stop")}
+              aria-label={stopMutation.isPending ? t("sessions.stopping") : t("common.stop")}
+            >
+              <Square className="size-4" />
+            </Button>
+          </>
+        }
+      />
 
       <div className={focusMode ? "grid min-h-0 flex-1 grid-cols-1 overflow-hidden" : "grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px]"}>
         <div className="h-full min-h-0 overflow-hidden">
@@ -292,13 +268,14 @@ export default function TerminalPage() {
             sessionId={id}
             authToken={authToken}
             attachToken={attachToken}
+            historyOpen={outputHistoryOpen}
+            onHistoryClose={() => setOutputHistoryOpen(false)}
           />
         </div>
         {!focusMode && (
           <SessionSidePanel
             projectId={session?.projectId}
             session={session}
-            activities={activityData?.activities ?? []}
             taskPacket={sessionTaskPacket}
             taskPacketError={taskPacketError}
             taskPacketFetching={isTaskPacketFetching}
@@ -309,13 +286,7 @@ export default function TerminalPage() {
   );
 }
 
-function SessionFallbackHeader({
-  sessionId,
-  copilotHref,
-}: {
-  sessionId: string;
-  copilotHref: string;
-}) {
+function SessionFallbackHeader({ sessionId }: { sessionId: string }) {
   const { t } = useLanguage();
 
   return (
@@ -331,16 +302,6 @@ function SessionFallbackHeader({
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <SessionNotificationBell />
-        <Button asChild variant="ghost" size="sm">
-          <Link
-            href={copilotHref}
-            aria-label={t("copilot.askCopilot")}
-            title={t("copilot.askCopilot")}
-          >
-            <Sparkles className="size-3 sm:mr-2" />
-            <span className="hidden sm:inline">{t("copilot.askCopilot")}</span>
-          </Link>
-        </Button>
       </div>
     </div>
   );
@@ -349,14 +310,12 @@ function SessionFallbackHeader({
 function SessionSidePanel({
   projectId,
   session,
-  activities,
   taskPacket,
   taskPacketError,
   taskPacketFetching,
 }: {
   projectId?: string;
   session?: Session;
-  activities: SessionActivity[];
   taskPacket: ProjectManagerTaskPacket | null;
   taskPacketError: unknown;
   taskPacketFetching: boolean;
@@ -371,9 +330,8 @@ function SessionSidePanel({
           taskPacket={taskPacket}
         />
         {projectId ? (
-          <WorkspaceContextPanel projectId={projectId} />
+          <GitChangesPanel projectId={projectId} />
         ) : null}
-        <ActivityPanel activities={activities} />
       </div>
     </aside>
   );
@@ -394,7 +352,7 @@ function SessionTaskPacketPanel({
 
   if (error) {
     return (
-      <section className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+      <section className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
         <div className="flex items-center gap-2 text-sm font-medium text-destructive">
           <ClipboardList className="size-4" />
           {t("sessions.taskPacketHandoff")}
@@ -409,7 +367,7 @@ function SessionTaskPacketPanel({
   if (!taskPacket) {
     if (!isFetching) return null;
     return (
-      <section className="rounded-md border border-border p-3">
+      <section className="rounded-lg border border-border p-3">
         <div className="flex items-center gap-2 text-sm font-medium">
           <ClipboardList className="size-4 text-muted-foreground" />
           {t("sessions.taskPacketHandoff")}
@@ -422,7 +380,7 @@ function SessionTaskPacketPanel({
   }
 
   return (
-    <section className="rounded-md border border-border p-3" data-testid="session-task-packet-handoff">
+    <section className="rounded-lg border border-border p-3" data-testid="session-task-packet-handoff">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <ClipboardList className="size-4 shrink-0 text-muted-foreground" />
@@ -642,46 +600,6 @@ function SessionTaskPacketList({ title, values }: { title: string; values: strin
   );
 }
 
-function ActivityPanel({ activities }: { activities: SessionActivity[] }) {
-  const { t } = useLanguage();
-
-  return (
-    <div>
-      <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-        <Activity className="size-4 text-muted-foreground" />
-        {t("sessions.activity")}
-      </div>
-      {activities.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("sessions.noActivity")}</p>
-      ) : (
-        <div className="space-y-2">
-          {activities.map((activity) => (
-            <div key={activity.id} className="rounded-md border border-border p-2">
-              <div className="flex items-center justify-between gap-2">
-                <Badge variant={activity.status === "error" ? "destructive" : "secondary"}>
-                  {activity.type}
-                </Badge>
-                <span className="text-xs text-muted-foreground">
-                  {formatActivityTime(activity.createdAt)}
-                </span>
-              </div>
-              <p className="mt-2 break-words text-sm text-muted-foreground">{activity.message}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatActivityTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleTimeString();
-}
-
 function taskPacketQueueBadgeVariant(status: ProjectManagerTaskPacketQueueStatus) {
   if (status === "completed") return "default";
   if (status === "blocked") return "destructive";
@@ -717,8 +635,8 @@ function SessionStatusBadge({ status }: { status?: string }) {
   const normalizedStatus = normalizeSessionStatus(status);
   if (normalizedStatus === "running") {
     return (
-      <Badge variant="default" className="gap-1 bg-green-600 hover:bg-green-600">
-        <Activity className="size-3" />
+      <Badge variant="default" className="gap-1.5 bg-green-600 hover:bg-green-600">
+        <span className="size-1.5 rounded-full bg-white motion-safe:animate-pulse" />
         {t("sessions.running")}
       </Badge>
     );

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, EyeOff, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowUpRight, Eye, EyeOff, Plus, Save, Trash2 } from "lucide-react";
+import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -186,6 +187,21 @@ export default function CliConfigPage() {
         <h1 className="text-2xl font-semibold tracking-tight">{t("cliConfig.title")}</h1>
         <p className="text-sm text-muted-foreground">{t("cliConfig.description")}</p>
       </div>
+
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-sm font-medium">{t("cliConfig.manageInModelCenter")}</p>
+            <p className="text-xs text-muted-foreground">{t("cliConfig.manageInModelCenterDescription")}</p>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/models">
+              <ArrowUpRight className="size-4" />
+              {t("cliConfig.openModelCenter")}
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       <Tabs value={adapter} onValueChange={(value) => setAdapter(value as RuntimeAdapterId)}>
         <TabsList>

@@ -96,6 +96,11 @@ export function TemplateSyncPanel({ templateId }: { templateId: string }) {
         <CardTitle className="flex items-center gap-2 text-base">
           <RefreshCw className="size-4" />
           Sync to projects
+          {usage && usage.usageCount === 0 && (
+            <Badge variant="outline" className="text-xs font-normal">
+              seed only
+            </Badge>
+          )}
         </CardTitle>
         <CardDescription>
           {isLoading || !usage
@@ -115,7 +120,8 @@ export function TemplateSyncPanel({ templateId }: { templateId: string }) {
         <div className="space-y-2">
           {!usage || usage.projects.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">
-              No projects use this template yet.
+              No projects are tracking this template. It currently serves as a one-time
+              project initialization seed — bind a project to it to enable batch sync.
             </p>
           ) : (
             usage.projects.map((project) => (

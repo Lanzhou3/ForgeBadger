@@ -6,6 +6,8 @@ export interface SessionTab {
   projectName?: string;
   aiTool?: string;
   status?: string;
+  /** Most recent prompt line captured from terminal input, shown in the tab. */
+  lastPrompt?: string;
   updatedAt: number;
 }
 
@@ -29,7 +31,15 @@ export function readSessionTabs(storage: Pick<Storage, "getItem"> = window.local
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isSessionTab).slice(0, MAX_SESSION_TABS);
+    return parsed
+      .filter(isSessionTab)
+      .slice(0, MAX_SESSION_TABS)
+      .map((tab) => {
+        const lastPrompt = sanitizeStoredPrompt(tab.lastPrompt);
+        if (lastPrompt === tab.lastPrompt) return tab;
+        const { lastPrompt: _dropped, ...rest } = tab;
+        return lastPrompt ? { ...rest, lastPrompt } : rest;
+      });
   } catch {
     return [];
   }
@@ -51,11 +61,70 @@ export function upsertSessionTab(
   const existing = readSessionTabs(storage);
   const currentIndex = existing.findIndex((current) => current.id === tab.id);
   if (currentIndex >= 0) {
+    const previous = existing[currentIndex];
+    const preservedPrompt =
+      tab.lastPrompt === undefined ? previous?.lastPrompt : tab.lastPrompt;
+    const preservedProject =
+      tab.projectName === undefined ? previous?.projectName : tab.projectName;
     const nextTabs = [...existing];
-    nextTabs[currentIndex] = tab;
+    nextTabs[currentIndex] = {
+      ...tab,
+      ...(preservedPrompt !== undefined ? { lastPrompt: preservedPrompt } : {}),
+      ...(preservedProject !== undefined ? { projectName: preservedProject } : {}),
+    };
     return writeSessionTabs(nextTabs, storage);
   }
   return writeSessionTabs([...existing, tab], storage);
+}
+
+/**
+ * A captured prompt must look like human input. Terminal query responses
+ * (e.g. OSC `10;rgb:…` color reports) are control traffic, not prompts.
+ */
+function sanitizeStoredPrompt(prompt: unknown): string | undefined {
+  if (typeof prompt !== "string") return undefined;
+  const cleaned = prompt.replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim();
+  if (cleaned.length < 2) return undefined;
+  if (/^\d+;/.test(cleaned)) return undefined;
+  return cleaned;
+}
+
+export function setSessionTabPrompt(
+  id: string,
+  prompt: string,
+  storage: Pick<Storage, "getItem" | "setItem"> = window.localStorage
+): SessionTab[] {
+  const tabs = readSessionTabs(storage);
+  const index = tabs.findIndex((tab) => tab.id === id);
+  const tab = index < 0 ? undefined : tabs[index];
+  if (!tab) return tabs;
+  const nextTabs = [...tabs];
+  nextTabs[index] = { ...tab, lastPrompt: prompt, updatedAt: Date.now() };
+  return writeSessionTabs(nextTabs, storage);
+}
+
+const TAB_GROUP_COLORS: readonly string[] = [
+  "#38bdf8",
+  "#4ade80",
+  "#c084fc",
+  "#f472b6",
+  "#fb923c",
+  "#facc15",
+  "#2dd4bf",
+  "#818cf8",
+];
+
+/** Stable Edge-style color for a project tab group, hashed from the name. */
+export function sessionTabGroupColor(projectName: string): string {
+  let hash = 0;
+  for (let index = 0; index < projectName.length; index += 1) {
+    hash = (hash * 31 + projectName.charCodeAt(index)) | 0;
+  }
+  return TAB_GROUP_COLORS[Math.abs(hash) % TAB_GROUP_COLORS.length] ?? "#38bdf8";
+}
+
+export function notifySessionTabsChanged() {
+  window.dispatchEvent(new Event("openforge-session-tabs-changed"));
 }
 
 export function removeSessionTab(
@@ -63,6 +132,36 @@ export function removeSessionTab(
   storage: Pick<Storage, "getItem" | "setItem"> = window.localStorage
 ): SessionTab[] {
   return writeSessionTabs(readSessionTabs(storage).filter((tab) => tab.id !== id), storage);
+}
+
+export interface SessionTabGroup {
+  projectName?: string;
+  tabs: SessionTab[];
+}
+
+/**
+ * Groups tabs by project while preserving the order in which projects first
+ * appear and the tab order within each project. Tabs without a project name
+ * share one anonymous group.
+ */
+export function groupSessionTabs(tabs: SessionTab[]): SessionTabGroup[] {
+  const groups: SessionTabGroup[] = [];
+  const indexByProject = new Map<string, number>();
+  for (const tab of tabs) {
+    const key = tab.projectName ?? "";
+    const groupIndex = indexByProject.get(key);
+    const group = groupIndex === undefined ? undefined : groups[groupIndex];
+    if (group) {
+      group.tabs.push(tab);
+      continue;
+    }
+    indexByProject.set(key, groups.length);
+    groups.push({
+      ...(tab.projectName ? { projectName: tab.projectName } : {}),
+      tabs: [tab],
+    });
+  }
+  return groups;
 }
 
 export function pruneSessionTabs(

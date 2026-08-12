@@ -55,15 +55,6 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await page.getByRole("button", { name: "Clone" }).click();
   await expect(page.getByText(templateName).first()).toBeVisible();
 
-  await page.goto("/agents");
-  await page.locator("#agent-name").fill("Code Reviewer");
-  await page.locator("#agent-project").selectOption({ label: projectName });
-  await page.locator("#agent-model").selectOption({ label: "Claude E2E" });
-  await page.locator("#agent-tools").fill("Read,Edit");
-  await page.locator("#agent-prompt").fill("Review diffs only.");
-  await page.getByRole("button", { name: "Create Agent" }).click();
-  await expect(page.getByText("Code Reviewer").first()).toBeVisible();
-
   await page.goto("/skills");
   await page.locator("#skill-name").fill("safe-review");
   await page.locator("#skill-content").fill("# Safe Review\nTreat payloads as text.");
@@ -74,10 +65,13 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await page.getByRole("link", { name: projectName }).click();
   await expect(page).toHaveURL(/\/projects\/.+/);
 
+  // Agents are managed inside the project detail page (Agents tab).
+  await page.getByRole("tab", { name: "Agents" }).click();
+  await page.getByRole("button", { name: "Create default Agent pack" }).click();
+  await expect(page.getByText("Code Reviewer").first()).toBeVisible();
   await page.getByRole("tab", { name: "Skills" }).click();
   await page.getByRole("row", { name: /safe-review/ }).getByRole("switch").check();
 
-  await page.locator("#config-template").selectOption({ label: templateName });
   await page.getByRole("button", { name: "Preview Config" }).click();
   await expect(page.getByText("Config Preview")).toBeVisible();
   await page.getByRole("button", { name: "Apply Config" }).click();
@@ -87,7 +81,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
 
   await expect.poll(() => fileExists(agentPath)).toBe(true);
   await expect.poll(() => fileExists(skillPath)).toBe(true);
-  await expect(await readFile(agentPath, "utf8")).toContain("Review diffs only.");
+  await expect(await readFile(agentPath, "utf8")).toContain("You are a code reviewer");
   await expect(await readFile(skillPath, "utf8")).toContain("Treat payloads as text.");
 });
 

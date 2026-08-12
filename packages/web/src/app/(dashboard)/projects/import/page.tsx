@@ -296,6 +296,7 @@ export default function ImportProjectPage() {
                         </select>
                       </FormControl>
                       <p className="text-xs text-muted-foreground">{t("projects.configTemplateDescription")}</p>
+                      <p className="text-xs text-muted-foreground">{t("projects.templateSeedHint")}</p>
                       {templatesQuery.isError && (
                         <p className="text-xs text-destructive">{t("projects.failedLoadTemplates")}</p>
                       )}

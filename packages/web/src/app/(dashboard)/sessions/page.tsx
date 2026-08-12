@@ -2,12 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, FolderOpen, Play, Plus, RotateCcw, Search, Square, TerminalSquare, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import {
   Table,
@@ -18,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
+import { CliBrandChip } from "@/components/cli-brand-chip";
 import { deleteSession, getDependencies, listProjects, listSessions, startSession, stopSession } from "@/lib/api";
 import { notifySessionTabsChanged } from "@/components/session-tabs";
 import { pruneSessionTabs, sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
@@ -27,14 +36,16 @@ import { useLanguage } from "@/hooks/use-language";
 
 export default function SessionsPage() {
   const { t } = useLanguage();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ["sessions"],
     queryFn: listSessions,
   });
-  const { data: projectsData } = useQuery({
+  const { data: projectsData, isLoading: projectsLoading } = useQuery({
     queryKey: ["projects"],
     queryFn: listProjects,
   });
@@ -62,8 +73,7 @@ export default function SessionsPage() {
 
   const sessions = data?.sessions ?? [];
   const projects = projectsData?.projects ?? [];
-  const firstProject = projects[0];
-  const newSessionHref = firstProject ? `/projects/${firstProject.id}` : "/projects/new";
+  const hasProjects = !projectsLoading && projects.length > 0;
   const terminalRuntime = dependenciesData?.terminalRuntime;
   const terminalSetupGuidance = getTerminalRuntimeSetupGuidance(
     terminalRuntime?.mode,
@@ -122,12 +132,19 @@ export default function SessionsPage() {
             {t("sessions.subtitle")}
           </p>
         </div>
-        <Button asChild>
-          <Link href={newSessionHref}>
+        {hasProjects ? (
+          <Button onClick={() => setProjectPickerOpen(true)}>
             <Plus className="mr-2 size-4" />
-            {firstProject ? t("projects.newSession") : t("sessions.createProject")}
-          </Link>
-        </Button>
+            {t("projects.newSession")}
+          </Button>
+        ) : (
+          <Button asChild>
+            <Link href="/projects/new">
+              <Plus className="mr-2 size-4" />
+              {t("sessions.createProject")}
+            </Link>
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
@@ -173,16 +190,19 @@ export default function SessionsPage() {
                   </Link>
                 </Button>
               )}
-              <Button asChild>
-                <Link href={newSessionHref}>
-                  {firstProject ? (
-                    <FolderOpen className="mr-2 size-4" />
-                  ) : (
+              {hasProjects ? (
+                <Button onClick={() => setProjectPickerOpen(true)}>
+                  <FolderOpen className="mr-2 size-4" />
+                  {t("sessions.createFromProject")}
+                </Button>
+              ) : (
+                <Button asChild>
+                  <Link href="/projects/new">
                     <Plus className="mr-2 size-4" />
-                  )}
-                  {firstProject ? t("sessions.createFromProject") : t("sessions.createProject")}
-                </Link>
-              </Button>
+                    {t("sessions.createProject")}
+                  </Link>
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -256,7 +276,9 @@ export default function SessionsPage() {
                               <TableCell>
                                 <SessionStatusBadge status={session.status} />
                               </TableCell>
-                              <TableCell>{session.aiTool ?? "—"}</TableCell>
+                              <TableCell>
+                                {session.aiTool ? <CliBrandChip aiTool={session.aiTool} /> : "—"}
+                              </TableCell>
                               <TableCell>
                                 <div className="flex justify-end gap-1">
                                   {isRunning ? (
@@ -325,6 +347,55 @@ export default function SessionsPage() {
           )}
         </>
       )}
+
+      <Dialog open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("sessions.chooseProjectTitle")}</DialogTitle>
+            <DialogDescription>{t("sessions.chooseProjectDescription")}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            {projects.map((project) => (
+              <Button
+                key={project.id}
+                variant="outline"
+                className="h-auto justify-start gap-3 px-3 py-2.5"
+                onClick={() => {
+                  setProjectPickerOpen(false);
+                  router.push(`/projects/${project.id}?tab=sessions`);
+                }}
+              >
+                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-col items-start gap-0.5">
+                  <span className="truncate text-sm font-medium">{project.name}</span>
+                  {project.path && (
+                    <span className="truncate font-mono text-xs text-muted-foreground">
+                      {project.path}
+                    </span>
+                  )}
+                </span>
+              </Button>
+            ))}
+            {projectsLoading ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                {t("sessions.loading")}
+              </p>
+            ) : projects.length === 0 ? (
+              <div className="flex flex-col items-center gap-4 py-6 text-center">
+                <p className="text-sm text-muted-foreground">
+                  {t("sessions.chooseProjectEmpty")}
+                </p>
+                <Button asChild>
+                  <Link href="/projects/new">
+                    <Plus className="mr-2 size-4" />
+                    {t("sessions.createProject")}
+                  </Link>
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

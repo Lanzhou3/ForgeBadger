@@ -142,7 +142,7 @@ export default function SkillInstallPage() {
                     type="button"
                     onClick={() => selectSource(source.id)}
                     className={[
-                      "rounded-md border p-4 text-left transition-colors",
+                      "rounded-lg border p-4 text-left transition-colors",
                       sourceId === source.id
                         ? "border-primary bg-primary/5"
                         : "border-border bg-background hover:bg-accent/30",

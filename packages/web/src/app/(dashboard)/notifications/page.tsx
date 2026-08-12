@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLanguage } from "@/hooks/use-language";
 import { useNotifications } from "@/hooks/use-notifications";
-import type { StoredNotification } from "@/lib/notifications";
+import { notificationContextParts, type StoredNotification } from "@/lib/notifications";
 
 export default function NotificationsPage() {
   const { t } = useLanguage();
@@ -63,6 +63,11 @@ export default function NotificationsPage() {
                 notification={notification}
                 title={t(notification.titleKey)}
                 openLabel={t("notifications.openSession")}
+                contextLabels={{
+                  project: t("notifications.projectContext"),
+                  session: t("notifications.sessionContext"),
+                  cli: t("notifications.cliContext"),
+                }}
                 onMarkRead={() => markRead(notification.id)}
               />
             ))}
@@ -77,11 +82,13 @@ function NotificationRow({
   notification,
   title,
   openLabel,
+  contextLabels,
   onMarkRead,
 }: {
   notification: StoredNotification;
   title: string;
   openLabel: string;
+  contextLabels: { project: string; session: string; cli: string };
   onMarkRead: () => void;
 }) {
   return (
@@ -93,6 +100,15 @@ function NotificationRow({
           <span className="text-xs text-muted-foreground">{formatCreatedAt(notification.createdAt)}</span>
         </div>
         <p className="mt-1 break-words text-sm text-muted-foreground">{notification.message}</p>
+        {notificationContextParts(notification, contextLabels).length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {notificationContextParts(notification, contextLabels).map((part) => (
+              <Badge key={part} variant="outline" className="font-normal">
+                {part}
+              </Badge>
+            ))}
+          </div>
+        )}
       </div>
       <div className="flex justify-end gap-2">
         {!notification.read && (

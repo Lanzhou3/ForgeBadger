@@ -28,6 +28,7 @@ import { showNotificationToast } from "@/lib/notification-toast";
 import {
   createNotificationFromEvent,
   mergeNotifications,
+  notificationContextParts,
   trimNotifications,
   type GatewayEvent,
   type StoredNotification,
@@ -132,8 +133,14 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         dispatchGatewayEvent(message);
         const notification = createNotificationFromEvent(message);
         if (notification) {
+          const context = notificationContextParts(notification, {
+            project: t("notifications.projectContext"),
+            session: t("notifications.sessionContext"),
+            cli: t("notifications.cliContext"),
+          }).join(" · ");
+          const title = [t(notification.titleKey), context].filter(Boolean).join(" · ");
           updateNotifications((current) => mergeNotifications(current, notification));
-          showBrowserNotification(t(notification.titleKey), notification, message);
+          showBrowserNotification(title, notification, message);
           if (shouldTriggerBrowserNotification(message, notification)) {
             showNotificationToast(t(notification.titleKey), notification, message, {
               onOpen: () => {
@@ -141,6 +148,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
                 router.push(notification.href);
               },
               openLabel: t("notifications.openSession"),
+              context,
             });
           }
         }

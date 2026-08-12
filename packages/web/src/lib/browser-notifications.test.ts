@@ -83,6 +83,20 @@ describe("browser notifications", () => {
     }
   });
 
+  it("triggers for unread CLI lifecycle notifications", () => {
+    for (const notificationType of ["task_completed", "task_interrupted", "task_failed", "session_ended"]) {
+      expect(
+        shouldTriggerBrowserNotification(
+          {
+            type: "claude_notification",
+            payload: { session_id: "session-1", notification_type: notificationType },
+          },
+          notification()
+        )
+      ).toBe(true);
+    }
+  });
+
   it("does not trigger for read notifications or routine running status", () => {
     expect(
       shouldTriggerBrowserNotification(

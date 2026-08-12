@@ -221,6 +221,7 @@ export interface Template {
   isBuiltin?: boolean;
   status?: string;
   files?: TemplateFile[];
+  usageCount?: number;
 }
 
 export interface TemplateFile {
@@ -700,7 +701,7 @@ export interface SkillSource {
 export interface CatalogSource {
   id: string;
   sourceId: string;
-  type: "skill" | "plugin" | "template";
+  type: "skill" | "template";
   label: string;
   url: string;
   status: string;
@@ -710,7 +711,7 @@ export interface CatalogSource {
 export interface CatalogItem {
   id: string;
   sourceId: string;
-  itemType: "skill" | "plugin" | "template";
+  itemType: "skill" | "template";
   externalId: string;
   name: string;
   description?: string | null;
@@ -779,8 +780,8 @@ export interface ModelGroup {
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderApplyAdapter = "claude" | "opencode" | "openforge-copilot" | "codex";
-export type ProviderSupportedAdapter = "claude" | "opencode";
+export type ProviderApplyAdapter = "claude" | "opencode" | "openforge-copilot" | "codex" | "kimi";
+export type ProviderSupportedAdapter = "claude" | "opencode" | "kimi";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 export type ProviderReadinessAdapter = ProviderApplyAdapter;
 export type ProviderReadinessStatus = "ready" | "needs_attention" | "managed_elsewhere";
@@ -905,6 +906,7 @@ export interface ProviderCredentialSummary {
 
 export interface ProviderApplyPreview {
   adapter: ProviderApplyAdapter;
+  scope?: "project" | "user-global";
   env: Record<string, string>;
   secretEnvNames: string[];
   changedFiles: Array<{ relativePath: string; operation: "create" | "update" }>;
@@ -965,23 +967,6 @@ export interface CodexSubscriptionStatus {
     docsUrl: string;
     appServerDocsUrl: string;
   };
-}
-
-export interface Plugin {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  adapter: "claude";
-  category: "workflow" | "safety" | "integration";
-  configPath: string;
-  skills: Array<{
-    name: string;
-    description: string;
-    content: string;
-  }>;
-  enabled: boolean;
-  status: "enabled" | "disabled";
 }
 
 export interface SessionActivity {
@@ -1700,6 +1685,29 @@ export async function getProject(id: string): Promise<{ project: Project }> {
   return fetchJson(`/api/v1/projects/${id}`) as Promise<{ project: Project }>;
 }
 
+/**
+ * 更新项目与模板的跟踪关系:传 `null` 解除跟踪;传模板 ID 切换/绑定;缺省(undefined)保持不变。
+ */
+export async function updateProjectTemplate(
+  projectId: string,
+  templateId: string | null | undefined
+): Promise<{ project: Project }> {
+  const body = templateId === undefined ? {} : { templateId };
+  return fetchJson(`/api/v1/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }) as Promise<{ project: Project }>;
+}
+
+/** 识别 Gateway 的"项目未跟踪任何模板"(404 + TEMPLATE_NOT_TRACKED)错误。 */
+export function isTemplateNotTrackedError(error: unknown): boolean {
+  return (
+    error instanceof GatewayApiError &&
+    error.status === 404 &&
+    error.details?.code === "TEMPLATE_NOT_TRACKED"
+  );
+}
+
 export async function getProjectAgentSequence(id: string): Promise<{ sequence: ProjectAgentSequenceItem[] }> {
   return fetchJson(`/api/v1/projects/${id}/agent-sequence`) as Promise<{ sequence: ProjectAgentSequenceItem[] }>;
 }
@@ -1866,6 +1874,54 @@ export async function getProjectWorkspaceFile(
 ): Promise<WorkspaceFileSnapshot> {
   const searchParams = new URLSearchParams({ path: filePath });
   return fetchJson(projectWorkspacePath(id, `/file?${searchParams.toString()}`)) as Promise<WorkspaceFileSnapshot>;
+}
+
+export interface GitWorkingTreeEntry {
+  path: string;
+  status: string;
+  staged: boolean;
+}
+
+export interface GitCommitEntry {
+  hash: string;
+  subject: string;
+  author: string;
+  relativeDate: string;
+}
+
+export interface ProjectGitChanges {
+  isGitRepo: boolean;
+  branch?: string;
+  changed: GitWorkingTreeEntry[];
+  commits: GitCommitEntry[];
+}
+
+export async function getProjectGitChanges(id: string): Promise<ProjectGitChanges> {
+  const { git } = await fetchJson<{ git: ProjectGitChanges }>(
+    `/api/v1/projects/${encodeURIComponent(id)}/git-changes`
+  );
+  return git;
+}
+
+export interface ProjectGitFileDiff {
+  path: string;
+  kind: "diff" | "untracked";
+  diff?: string;
+  content?: string;
+  truncated: boolean;
+}
+
+export async function getProjectGitFileDiff(
+  id: string,
+  path: string,
+  options: { untracked?: boolean } = {}
+): Promise<ProjectGitFileDiff> {
+  const searchParams = new URLSearchParams({ path });
+  if (options.untracked) searchParams.set("untracked", "1");
+  const { file } = await fetchJson<{ file: ProjectGitFileDiff }>(
+    `/api/v1/projects/${encodeURIComponent(id)}/git-diff?${searchParams.toString()}`
+  );
+  return file;
 }
 
 export async function updateProjectAiConfigFile(
@@ -2440,7 +2496,7 @@ export async function listCatalogItems(): Promise<{ items: CatalogItem[] }> {
 }
 
 export async function refreshCatalog(data: {
-  type: "skill" | "plugin" | "template";
+  type: "skill" | "template";
   sourceId: string;
   label: string;
   url: string;
@@ -2466,14 +2522,6 @@ export async function installCatalogSkill(
   return fetchJson(`/api/v1/catalog/items/${encodeURIComponent(itemId)}/install`, {
     method: "POST",
   }) as Promise<{ skill: Skill; catalogItem: Pick<CatalogItem, "id" | "externalId" | "sourceId"> }>;
-}
-
-export async function installCatalogPlugin(
-  itemId: string
-): Promise<{ plugin: Plugin; catalogItem: Pick<CatalogItem, "id" | "externalId" | "sourceId"> }> {
-  return fetchJson(`/api/v1/catalog/items/${encodeURIComponent(itemId)}/install`, {
-    method: "POST",
-  }) as Promise<{ plugin: Plugin; catalogItem: Pick<CatalogItem, "id" | "externalId" | "sourceId"> }>;
 }
 
 export async function createSkill(data: SkillInput): Promise<{ skill: Skill }> {
@@ -2532,17 +2580,6 @@ export async function setProjectSkill(
   }) as Promise<{ projectSkill: { projectId: string; skillId: string; isEnabled: boolean } }>;
 }
 
-// Plugins
-export async function listPlugins(): Promise<{ plugins: Plugin[] }> {
-  return fetchJson("/api/v1/plugins") as Promise<{ plugins: Plugin[] }>;
-}
-
-export async function togglePlugin(id: string, enabled: boolean): Promise<{ plugin: Plugin }> {
-  return fetchJson(`/api/v1/plugins/${id}/toggle`, {
-    method: "POST",
-    body: JSON.stringify({ enabled }),
-  }) as Promise<{ plugin: Plugin }>;
-}
 
 // Project import
 export interface ScanResult {
@@ -2900,7 +2937,13 @@ export async function checkModelProviderReadiness(
 
 export async function previewProviderApply(
   providerId: string,
-  data: { adapter: ProviderApplyAdapter; projectRoot?: string; modelProfileId?: string; credentialId?: string }
+  data: {
+    adapter: ProviderApplyAdapter;
+    scope?: "project" | "user-global";
+    projectRoot?: string;
+    modelProfileId?: string;
+    credentialId?: string;
+  }
 ): Promise<{ preview: ProviderApplyPreview }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/preview-apply`, {
     method: "POST",
@@ -2910,7 +2953,13 @@ export async function previewProviderApply(
 
 export async function applyProviderConfig(
   providerId: string,
-  data: { adapter: ProviderApplyAdapter; projectRoot?: string; modelProfileId?: string; credentialId?: string }
+  data: {
+    adapter: ProviderApplyAdapter;
+    scope?: "project" | "user-global";
+    projectRoot?: string;
+    modelProfileId?: string;
+    credentialId?: string;
+  }
 ): Promise<{ result: ProviderApplyPreview }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/apply`, {
     method: "POST",

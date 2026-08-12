@@ -41,13 +41,11 @@ import {
   deleteProject,
   listProjectSkills,
   listSkills,
-  listTemplates,
   setProjectSkill,
   updateAgent,
   updateProjectAiConfigFile,
   updateProjectAgentSequence,
   chooseDefaultRuntimeAdapter,
-  defaultTemplateForAiTool,
   isAdapterLaunchable,
   type RuntimeAdapterId,
   type Agent,
@@ -71,13 +69,6 @@ import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highligh
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 
-const builtinTemplateOptions = [
-  { id: "builtin-claude-code", name: "Claude Code" },
-  { id: "builtin-opencode", name: "OpenCode" },
-  { id: "builtin-codex", name: "Codex CLI" },
-  { id: "builtin-kimi", name: "Kimi Code" },
-];
-
 const PROJECT_DETAIL_TABS = [
   "sessions",
   "project-manager",
@@ -100,7 +91,6 @@ export default function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState<ProjectDetailTab>(() =>
     readProjectDetailTab(searchParams.get("tab")) ?? "sessions"
   );
-  const [selectedTemplateId, setSelectedTemplateId] = useState("builtin-claude-code");
   const [selectedRuntimeAdapter, setSelectedRuntimeAdapter] = useState<RuntimeAdapterId | "">("");
   const [selectedConfigPath, setSelectedConfigPath] = useState("");
   const [configDraft, setConfigDraft] = useState("");
@@ -147,11 +137,6 @@ export default function ProjectDetailPage() {
     queryKey: ["project-skills", id],
     queryFn: () => listProjectSkills(id),
     enabled: !!id,
-  });
-
-  const { data: templatesData } = useQuery({
-    queryKey: ["templates"],
-    queryFn: listTemplates,
   });
 
   const { data: adapterDiscoveryData, isLoading: adapterDiscoveryLoading } = useQuery({
@@ -278,7 +263,8 @@ export default function ProjectDetailPage() {
     () => new Set(projectSkills.filter((skill) => skill.isEnabled).map((skill) => skill.skillId)),
     [projectSkills]
   );
-  const templates = templatesData?.templates ?? [];
+  const resolvedTemplateId = project?.templateId ?? null;
+  const isUntrackedTemplate = !!project && project.templateId === null;
   const runtimeAdapters = adapterDiscoveryData?.adapters ?? [];
   const terminalRuntime = dependenciesData?.terminalRuntime;
   const terminalSetupGuidance = getTerminalRuntimeSetupGuidance(
@@ -327,11 +313,6 @@ export default function ProjectDetailPage() {
       scroll: false,
     });
   };
-
-  useEffect(() => {
-    const nextTemplateId = project?.templateId ?? defaultTemplateForAiTool(project?.aiTool);
-    setSelectedTemplateId((current) => current === nextTemplateId ? current : nextTemplateId);
-  }, [project?.templateId, project?.aiTool]);
 
   useEffect(() => {
     if (!adapterDiscoveryData?.adapters) return;
@@ -418,8 +399,9 @@ export default function ProjectDetailPage() {
                   </div>
                 </div>
                 <div className="border-t border-border/70 bg-muted/20 p-5 lg:border-l lg:border-t-0">
-                  <div className="grid gap-2">
+                  <div className="flex flex-col gap-1.5">
                     <Button
+                      size="sm"
                       className="justify-start"
                       onClick={() => createSessionMutation.mutate()}
                       disabled={cannotCreateSession}
@@ -433,33 +415,37 @@ export default function ProjectDetailPage() {
                         {t("copilot.askCopilot")}
                       </Link>
                     </Button>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-1.5">
                       <Button asChild variant="outline" size="sm">
                         <Link href={`/history?projectId=${project.id}`}>
                           <History className="mr-2 size-4" />
                           {t("nav.history")}
                         </Link>
                       </Button>
+                      {!isUntrackedTemplate && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => configSyncRef.current?.checkCompliance()}
+                          disabled={syncPending.compliance}
+                        >
+                          <ShieldCheck className="mr-2 size-4" />
+                          {syncPending.compliance ? t("projects.checkingCompliance") : t("projects.checkCompliance")}
+                        </Button>
+                      )}
+                    </div>
+                    {!isUntrackedTemplate && (
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => configSyncRef.current?.checkCompliance()}
-                        disabled={syncPending.compliance}
+                        className="justify-start"
+                        onClick={() => configSyncRef.current?.preview()}
+                        disabled={syncPending.preview}
                       >
-                        <ShieldCheck className="mr-2 size-4" />
-                        {syncPending.compliance ? t("projects.checkingCompliance") : t("projects.checkCompliance")}
+                        <FileCode2 className="mr-2 size-4" />
+                        {syncPending.preview ? t("projects.generating") : t("projects.previewConfig")}
                       </Button>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="justify-start"
-                      onClick={() => configSyncRef.current?.preview()}
-                      disabled={syncPending.preview}
-                    >
-                      <FileCode2 className="mr-2 size-4" />
-                      {syncPending.preview ? t("projects.generating") : t("projects.previewConfig")}
-                    </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -477,67 +463,40 @@ export default function ProjectDetailPage() {
                   </div>
                 </div>
               </div>
-            </CardContent>
-          </Card>
 
-          {configNeedsReview && (
-            <Card className="border-amber-500/50 bg-amber-500/10">
-              <CardContent className="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between">
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">{t("projects.configNeedsReviewTitle")}</div>
-                  <p className="text-sm text-muted-foreground">
-                    {t("projects.configNeedsReviewDescription")}
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => configSyncRef.current?.preview()}
-                  disabled={syncPending.preview}
-                >
-                  <FileCode2 className="mr-2 size-4" />
-                  {syncPending.preview
-                    ? t("projects.generating")
-                    : t("projects.reviewConfig")}
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{t("projects.launchOptions")}</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="runtime-adapter">{t("projects.runtimeCli")}</Label>
-                <select
-                  id="runtime-adapter"
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
-                  value={selectedRuntimeAdapter}
-                  onChange={(event) => setSelectedRuntimeAdapter(event.target.value as RuntimeAdapterId)}
-                  disabled={adapterDiscoveryLoading || runtimeAdapters.length === 0}
-                >
-                  <option value="">
-                    {adapterDiscoveryLoading
-                      ? t("projects.loadingRuntimeCli")
-                      : t("projects.selectRuntimeCli")}
-                  </option>
-                  {runtimeAdapters.map((adapter) => (
-                    <option
-                      key={adapter.id}
-                      value={adapter.id}
-                      disabled={!isAdapterLaunchable(adapter)}
-                    >
-                      {adapter.label}
-                      {!adapter.available
-                        ? ` (${t("projects.runtimeUnavailable")})`
-                        : !adapter.launchEnabled
-                          ? ` (${t("projects.runtimeLaunchDisabled")})`
-                          : ""}
+              <div className="space-y-3 border-t border-border/70 p-5">
+                <div>
+                  <Label className="text-sm font-medium" htmlFor="runtime-adapter">
+                    {t("projects.launchOptions")}
+                  </Label>
+                  <select
+                    id="runtime-adapter"
+                    className="mt-2 h-9 w-full max-w-xl rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
+                    value={selectedRuntimeAdapter}
+                    onChange={(event) => setSelectedRuntimeAdapter(event.target.value as RuntimeAdapterId)}
+                    disabled={adapterDiscoveryLoading || runtimeAdapters.length === 0}
+                  >
+                    <option value="">
+                      {adapterDiscoveryLoading
+                        ? t("projects.loadingRuntimeCli")
+                        : t("projects.selectRuntimeCli")}
                     </option>
-                  ))}
-                </select>
+                    {runtimeAdapters.map((adapter) => (
+                      <option
+                        key={adapter.id}
+                        value={adapter.id}
+                        disabled={!isAdapterLaunchable(adapter)}
+                      >
+                        {adapter.label}
+                        {!adapter.available
+                          ? ` (${t("projects.runtimeUnavailable")})`
+                          : !adapter.launchEnabled
+                            ? ` (${t("projects.runtimeLaunchDisabled")})`
+                            : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 {launchableRuntimeAdapters.length === 0 && !adapterDiscoveryLoading ? (
                   <div className="space-y-2">
                     <p className="flex items-center gap-1 text-xs text-destructive">
@@ -572,43 +531,34 @@ export default function ProjectDetailPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{t("projects.configTemplate")}</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="config-template">{t("projects.configTemplate")}</Label>
-                <select
-                  id="config-template"
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  value={selectedTemplateId}
-                  onChange={(event) => {
-                    setSelectedTemplateId(event.target.value);
-                  }}
+          {configNeedsReview && !isUntrackedTemplate && (
+            <Card className="border-amber-500/50 bg-amber-500/10">
+              <CardContent className="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">{t("projects.configNeedsReviewTitle")}</div>
+                  <p className="text-sm text-muted-foreground">
+                    {t("projects.configNeedsReviewDescription")}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => configSyncRef.current?.preview()}
+                  disabled={syncPending.preview}
                 >
-                  {builtinTemplateOptions.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                  {templates.filter((template) => !builtinTemplateOptions.some((builtin) => builtin.id === template.id)).map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-muted-foreground">
-                  {t("projects.configTemplateDescription")}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+                  <FileCode2 className="mr-2 size-4" />
+                  {syncPending.preview
+                    ? t("projects.generating")
+                    : t("projects.reviewConfig")}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
 
           <ConfigSyncPanel
             ref={configSyncRef}
             projectId={id}
-            templateId={selectedTemplateId}
+            templateId={resolvedTemplateId}
             credentialMode="host_environment"
             onPendingChange={setSyncPending}
           />

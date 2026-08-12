@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Bell, Cpu, Download, FlaskConical, Globe2, KeyRound, MessageSquare, RefreshCw, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Bell, Cpu, Download, FlaskConical, Globe2, KeyRound, MessageSquare, Palette, RefreshCw, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,12 @@ import {
 } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { useLanguage } from "@/hooks/use-language";
+import {
+  ACCENT_THEMES,
+  DEFAULT_ACCENT_ID,
+  applyAccentTheme,
+  readStoredAccent,
+} from "@/lib/accent-theme";
 import {
   getBrowserNotificationPermission,
   getBrowserNotificationPreference,
@@ -50,6 +56,11 @@ export default function SettingsPage() {
   const [browserNotificationPermission, setBrowserNotificationPermission] =
     useState<BrowserNotificationPermission>("unsupported");
   const [diagnosticsState, setDiagnosticsState] = useState<"idle" | "exporting" | "success" | "error">("idle");
+  const [accentId, setAccentId] = useState(DEFAULT_ACCENT_ID);
+
+  useEffect(() => {
+    setAccentId(readStoredAccent());
+  }, []);
   const {
     data: adapterData,
     isLoading: adaptersLoading,
@@ -164,6 +175,45 @@ export default function SettingsPage() {
                     {option.label}
                   </Button>
                 ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Palette className="size-4 text-muted-foreground" />
+                <CardTitle>{t("settings.theme")}</CardTitle>
+              </div>
+              <CardDescription>
+                {t("settings.themeDescription")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {ACCENT_THEMES.map((theme) => {
+                  const selected = accentId === theme.id;
+                  return (
+                    <button
+                      key={theme.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setAccentId(applyAccentTheme(theme.id))}
+                      className={
+                        selected
+                          ? "flex items-center gap-2 rounded-md border border-brand/60 bg-brand/10 px-3 py-2 text-sm text-foreground transition-colors duration-150"
+                          : "flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors duration-150 hover:border-border/80 hover:bg-white/[0.03] hover:text-foreground"
+                      }
+                    >
+                      <span
+                        className="size-3.5 rounded-full ring-1 ring-white/20"
+                        style={{ backgroundColor: theme.swatch }}
+                        aria-hidden="true"
+                      />
+                      {t(theme.nameKey)}
+                    </button>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>

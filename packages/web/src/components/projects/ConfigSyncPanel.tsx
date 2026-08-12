@@ -2,7 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { FileCode2 } from "lucide-react";
+import { FileCode2, Unlink } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import {
   defaultConfigConflictDecisions,
   getConfigCompliance,
   previewConfigSync,
+  updateProjectTemplate,
   type ConfigComplianceReport,
   type ConfigConflict,
   type ConfigDecision,
@@ -26,7 +27,7 @@ export interface ConfigSyncPanelHandle {
 
 interface ConfigSyncPanelProps {
   projectId: string;
-  templateId: string;
+  templateId: string | null;
   credentialMode: CredentialMode;
   onPendingChange?: (pending: { preview: boolean; compliance: boolean }) => void;
 }
@@ -53,8 +54,15 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
   const [configConflicts, setConfigConflicts] = useState<ConfigConflict[]>([]);
   const [configDecisions, setConfigDecisions] = useState<Record<string, ConfigDecision>>({});
 
+  const isUntracked = templateId === null;
+
   const previewConfigMutation = useMutation({
-    mutationFn: () => previewConfigSync(projectId, templateId, credentialMode),
+    mutationFn: () => {
+      if (templateId === null) {
+        throw new Error("Project is not tracking a template");
+      }
+      return previewConfigSync(projectId, templateId, credentialMode);
+    },
     onSuccess: (preview) => {
       setConfigConflicts(preview.conflicts ?? []);
       setConfigDecisions(defaultConfigConflictDecisions(preview.conflicts ?? []));
@@ -63,6 +71,9 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
 
   const applyConfigMutation = useMutation({
     mutationFn: () => {
+      if (templateId === null) {
+        throw new Error("Project is not tracking a template");
+      }
       return applyConfigSync(projectId, configDecisions, templateId, credentialMode);
     },
     onSuccess: () => {
@@ -73,15 +84,35 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
   });
 
   const complianceMutation = useMutation<ConfigComplianceReport>({
-    mutationFn: () => getConfigCompliance(projectId, {
-      templateId,
-      credentialMode,
-    }),
+    mutationFn: () => {
+      if (templateId === null) {
+        throw new Error("Project is not tracking a template");
+      }
+      return getConfigCompliance(projectId, {
+        templateId,
+        credentialMode,
+      });
+    },
+  });
+
+  const unbindMutation = useMutation({
+    mutationFn: () => updateProjectTemplate(projectId, null),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    },
   });
 
   useImperativeHandle(ref, () => ({
-    preview: () => previewConfigMutation.mutate(),
-    checkCompliance: () => complianceMutation.mutate(),
+    preview: () => {
+      if (!isUntracked) {
+        previewConfigMutation.mutate();
+      }
+    },
+    checkCompliance: () => {
+      if (!isUntracked) {
+        complianceMutation.mutate();
+      }
+    },
   }));
 
   useEffect(() => {
@@ -95,6 +126,26 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
       compliance: complianceMutation.isPending,
     });
   }, [onPendingChange, previewConfigMutation.isPending, complianceMutation.isPending]);
+
+  const handleUnbind = () => {
+    if (window.confirm(t("projects.stopTrackingConfirm"))) {
+      unbindMutation.mutate();
+    }
+  };
+
+  if (isUntracked) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{t("projects.untrackedConfigTitle")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-sm text-muted-foreground">{t("projects.untrackedConfigDescription")}</p>
+          <p className="text-xs text-muted-foreground">{t("projects.untrackedConfigHint")}</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const hasBlockedConflicts = configConflicts.some((conflict) => conflict.allowedActions.length === 0);
 
@@ -281,6 +332,27 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
             : t("projects.failedGenerateConfig")}
         </p>
       )}
+
+      {unbindMutation.isError && (
+        <p className="text-sm text-destructive">
+          {unbindMutation.error instanceof Error
+            ? unbindMutation.error.message
+            : t("projects.failedCompliance")}
+        </p>
+      )}
+
+      <div className="flex justify-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-destructive"
+          onClick={handleUnbind}
+          disabled={unbindMutation.isPending}
+        >
+          <Unlink className="mr-2 size-4" />
+          {unbindMutation.isPending ? t("projects.unbinding") : t("projects.stopTrackingTemplate")}
+        </Button>
+      </div>
     </>
   );
 });

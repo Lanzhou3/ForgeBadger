@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createNotificationFromEvent,
   mergeNotifications,
+  notificationContextParts,
   trimNotifications,
   type StoredNotification,
 } from "./notifications";
@@ -108,7 +109,7 @@ describe("notifications", () => {
     });
   });
 
-  it("keeps the generic Claude notification title for non-permission OpenCode notifications", () => {
+  it("uses the generic CLI notification title for unclassified adapter notifications", () => {
     const notification = createNotificationFromEvent({
       type: "claude_notification",
       payload: {
@@ -120,8 +121,42 @@ describe("notifications", () => {
     });
 
     expect(notification).toMatchObject({
-      titleKey: "notifications.claudeNotification",
+      titleKey: "notifications.cliNotification",
     });
+  });
+
+  it("keeps project, session, adapter, and lifecycle type context", () => {
+    const notification = createNotificationFromEvent({
+      type: "claude_notification",
+      payload: {
+        session_id: "session-7",
+        project_id: "project-7",
+        project_name: "OpenForge",
+        session_name: "Repair notifications",
+        notification_type: "task_interrupted",
+        adapter: "kimi",
+        message: "Kimi Code task was interrupted",
+      },
+    });
+
+    expect(notification).toMatchObject({
+      titleKey: "notifications.taskInterrupted",
+      projectId: "project-7",
+      projectName: "OpenForge",
+      sessionId: "session-7",
+      sessionName: "Repair notifications",
+      adapter: "kimi",
+      notificationType: "task_interrupted",
+    });
+    expect(notificationContextParts(notification!, {
+      project: "Project",
+      session: "Session",
+      cli: "CLI",
+    })).toEqual([
+      "Project: OpenForge",
+      "Session: Repair notifications",
+      "CLI: Kimi Code",
+    ]);
   });
 
   it("ignores malformed Gateway events", () => {

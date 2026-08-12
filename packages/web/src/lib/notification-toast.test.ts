@@ -7,7 +7,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { toast } from "sonner";
-import { showNotificationToast, toastDurationFor } from "./notification-toast";
+import { showNotificationToast, toastDurationFor, toastToneFor } from "./notification-toast";
 
 function notification(overrides: Partial<StoredNotification> = {}): StoredNotification {
   return {
@@ -55,12 +55,18 @@ describe("notification toast", () => {
         { onOpen, openLabel: "Open" }
       );
 
-      expect(toast).toHaveBeenCalledWith("Title", {
-        description: "Bash: Claude needs permission",
-        duration: 12000,
-        id: "notification-1",
-        action: { label: "Open", onClick: onOpen },
-      });
+      expect(toast).toHaveBeenCalledWith(
+        "Title",
+        expect.objectContaining({
+          description: "Bash: Claude needs permission",
+          duration: 12000,
+          id: "notification-1",
+          className: "border-l-2 border-l-amber-400",
+          action: { label: "Open", onClick: onOpen },
+        })
+      );
+      const options = vi.mocked(toast).mock.calls[0]?.[1] as { icon?: unknown };
+      expect(options.icon).toBeTruthy();
     });
 
     it("uses the default duration for non-permission notifications", () => {
@@ -76,12 +82,36 @@ describe("notification toast", () => {
         { onOpen, openLabel: "Open" }
       );
 
-      expect(toast).toHaveBeenCalledWith("Title", {
-        description: "Bash: Claude needs permission",
-        duration: 5000,
-        id: "notification-2",
-        action: { label: "Open", onClick: onOpen },
-      });
+      expect(toast).toHaveBeenCalledWith(
+        "Title",
+        expect.objectContaining({
+          description: "Bash: Claude needs permission",
+          duration: 5000,
+          id: "notification-2",
+          className: "border-l-2 border-l-emerald-500",
+          action: { label: "Open", onClick: onOpen },
+        })
+      );
+    });
+  });
+
+  describe("toastToneFor", () => {
+    it("maps permission prompts to warning", () => {
+      expect(toastToneFor("permission_prompt", { type: "claude_notification" })).toBe("warning");
+    });
+
+    it("maps completed and errored sessions to success and error", () => {
+      expect(
+        toastToneFor(undefined, { type: "session_status_changed", payload: { new_status: "completed" } })
+      ).toBe("success");
+      expect(
+        toastToneFor(undefined, { type: "session_status_changed", payload: { new_status: "error" } })
+      ).toBe("error");
+    });
+
+    it("maps gateway error events to error and everything else to info", () => {
+      expect(toastToneFor(undefined, { type: "error" })).toBe("error");
+      expect(toastToneFor(undefined, { type: "session_created" })).toBe("info");
     });
   });
 });
