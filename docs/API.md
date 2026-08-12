@@ -787,7 +787,6 @@ Read tools are allowlisted and validated server-side. Current read tools are:
 - `openforge.list_skills`
 - `openforge.get_skill_detail`
 - `openforge.list_templates`
-- `openforge.list_plugins`
 - `openforge.get_notifications_summary`
 - `openforge.get_usage_summary`
 - `openforge.list_sessions`
@@ -838,7 +837,6 @@ Prepare tools create pending actions and do not directly mutate runtime state:
 - `openforge.propose_template_update`
 - `openforge.propose_template_delete`
 - `openforge.propose_skill_toggle`
-- `openforge.propose_plugin_toggle`
 - `openforge.propose_project_skill_toggle`
 - `openforge.propose_copilot_model_selection`
 - `openforge.propose_model_provider_sync`
@@ -938,6 +936,7 @@ mixed into `/ws/terminal/:sessionId`.
 - `POST /api/v1/projects`
 - `GET /api/v1/projects/:id`
 - `DELETE /api/v1/projects/:id`
+- `PATCH /api/v1/projects/:id`
 - `POST /api/v1/projects/scan`
 - `POST /api/v1/projects/import`
 - `POST /api/v1/projects/:id/config/preview`
@@ -950,6 +949,8 @@ mixed into `/ws/terminal/:sessionId`.
 - `PUT /api/v1/projects/:id/ai-config/files`
 - `GET /api/v1/projects/:id/workspace/tree`
 - `GET /api/v1/projects/:id/workspace/file`
+- `GET /api/v1/projects/:id/git-changes`
+- `GET /api/v1/projects/:id/git-diff`
 - `POST /api/v1/projects/:id/generate-config`
 - `GET /api/v1/projects/:id/agent-sequence`
 - `PUT /api/v1/projects/:id/agent-sequence`
@@ -969,6 +970,21 @@ Import behavior:
   built-in template matching `aiTool`: Claude Code uses
   `builtin-claude-code`, OpenCode uses `builtin-opencode`, and Codex uses
   `builtin-codex`.
+
+Project template binding:
+
+- `PATCH /api/v1/projects/:id` updates the project's template tracking
+  relationship. The body accepts an optional `templateId` field with three
+  states: omitted (leave the binding unchanged), explicit `null` (untrack the
+  project — the record keeps its files untouched and becomes "independent
+  config"), or a non-empty template id (switch/bind to that template; the
+  template must exist and belong to the same user, otherwise `404`).
+- Untracking is a platform-level relationship change only: it never deletes,
+  overwrites, or rolls back any project file. Untracked projects are excluded
+  from the template usage list and from template bulk sync (preview/apply).
+- `GET /api/v1/projects/:id/config/compliance` returns `404` with a
+  `TEMPLATE_NOT_TRACKED` error code in `details` when the project tracks no
+  template and no explicit `templateId` query parameter is supplied.
 
 Config conflict behavior:
 
@@ -1004,6 +1020,10 @@ Project config compliance:
   for the Web project detail page and CI scripts.
 - Query parameters are optional: `templateId` overrides the project's saved
   template and `credentialMode` defaults to `host_environment`.
+- When the project tracks no template and no explicit `templateId` query is
+  given, Gateway returns `404` with `message` describing the untracked state
+  and `details.code: "TEMPLATE_NOT_TRACKED"` so clients can render the
+  "independent config" state instead of a generic error.
 - The response includes `compliance`, `conflicts`, and generated file hashes.
   `compliance.status` is `compliant` only when there are no missing, modified,
   unsafe, or stale generated files.
@@ -1041,6 +1061,19 @@ Project workspace context:
   project roots under sensitive system roots are rejected, absolute paths and
   traversal are rejected, and symbolic-link targets are not followed for tree
   traversal or file reads.
+- `GET /api/v1/projects/:id/git-changes` returns the project's git state for
+  the session side panel: `{ isGitRepo, branch?, changed, commits }` with
+  working-tree entries (porcelain status + staged flag, capped at 200) and up
+  to 15 recent commits. Git is invoked via `execFile` with the tenant-scoped
+  project path as cwd (no shell interpolation, 5 s timeout, optional locks
+  disabled); non-git directories return `isGitRepo: false` instead of an error.
+- `GET /api/v1/projects/:id/git-diff?path=<relative-path>&untracked=0|1`
+  returns the unified diff (`git diff HEAD -- <path>`, falling back to staged +
+  unstaged diffs when the repo has no commits) for one tracked file, capped at
+  200 KB with a `truncated` flag. With `untracked=1` it returns the file
+  preview through the workspace safe-path boundary instead (git has no diff
+  for untracked files). Paths are validated segment-by-segment; absolute paths
+  and `..` traversal are rejected.
 - These routes are read-only. They do not store file contents, terminal
   scrollback, or evidence blobs in SQLite; later Project Manager evidence uses
   bounded references to these paths rather than copying raw content.
@@ -1113,12 +1146,34 @@ in the tmux launch environment. Stored API keys are decrypted only in Gateway
 memory and injected as `ANTHROPIC_API_KEY`.
 
 For OpenCode projects, the session uses the project `aiTool` as the adapter and
-receives `opencode --model <provider/model>` when a model is selected. Codex
-sessions are subscription-managed and do not receive provider model/API-key
-environment injection from the model-provider module. Codex app-server support
+receives `opencode --model <provider/model>` when a model is selected. Codex and
+Kimi Code sessions are subscription-managed and do not receive provider
+model/API-key environment injection from the model-provider module; supplying
+`modelId`/`apiKeyId` for them is rejected. Codex app-server support
 is exposed as adapter capability metadata and Gateway launch/protocol helpers;
 interactive browser terminal sessions continue to use the existing tmux-backed
 TUI path instead of sending JSON-RPC frames over the terminal WebSocket.
+
+### CLI Global Config
+
+cc-switch style management of each code CLI's global config files
+(Kimi `~/.kimi-code/config.toml`, Claude `~/.claude/settings.json`,
+Codex `~/.codex/config.toml`, OpenCode `$XDG_CONFIG_HOME/opencode/opencode.json`;
+`KIMI_CODE_HOME` / `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `OPENCODE_CONFIG_DIR`
+overrides are honored):
+
+- `GET /api/v1/cli-config/adapters`
+- `GET /api/v1/cli-config/:adapter`
+- `GET /api/v1/cli-config/:adapter/file?path=<name>&reveal=1`
+- `PUT /api/v1/cli-config/:adapter/file` — raw file write (whitelisted file names, 128 KB cap, mode `0600`)
+- `PUT /api/v1/cli-config/:adapter/providers/:providerId`
+- `DELETE /api/v1/cli-config/:adapter/providers/:providerId`
+- `PUT /api/v1/cli-config/:adapter/models` — body carries `alias` (Kimi only; aliases may contain `/`)
+- `DELETE /api/v1/cli-config/:adapter/models` — body carries `alias`
+- `PUT /api/v1/cli-config/:adapter/default-model`
+
+Secrets are redacted in responses unless `reveal=1` is passed. Deleting a Kimi
+provider cascades to its model aliases and clears a dangling `default_model`.
 
 ### Codex App-Server Prototype
 
@@ -1179,8 +1234,7 @@ The current Web prototype does not expose prompt/turn controls and does not call
 this route.
 
 For Claude Code sessions, both create and restart paths merge OpenForge command
-hooks into `.claude/settings.local.json` before tmux launch and materialize
-enabled curated plugins before passing them with `--plugin-dir`.
+hooks into `.claude/settings.local.json` before tmux launch.
 
 Codex terminal sessions are also subscription-managed. Session create/start and
 the launch-plan helper reject provider credentials and model overrides for the
@@ -1248,15 +1302,29 @@ timeout used by the check.
 - `POST /api/v1/model-providers/:id/apply`
 
 Provider Profiles are the source of truth for model provider configuration,
-encrypted API keys, configured model profiles, and CLI apply plans. Provider
-configuration apply currently supports:
+encrypted API keys, configured model profiles, and CLI apply plans. Both
+`preview-apply` and `apply` accept an optional `scope` field:
 
-- `claude`: preview/apply writes `.claude/settings.local.json` environment
-  entries such as `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`,
-  `ANTHROPIC_MODEL`, and the cc-switch style
-  `ANTHROPIC_DEFAULT_*_MODEL` / `API_TIMEOUT_MS` defaults.
+- `project` (default): writes into the project directory (`projectRoot` is
+  required).
+- `user-global`: writes into the CLI's user-global config directory, so no
+  `projectRoot` is needed. Target roots follow each CLI's conventions:
+  `CLAUDE_CONFIG_DIR`/`~/.claude` for Claude, `OPENCODE_CONFIG_DIR` or
+  `XDG_CONFIG_HOME/opencode` for OpenCode, and `KIMI_CODE_HOME`/`~/.kimi-code`
+  for Kimi.
+
+Provider configuration apply currently supports:
+
+- `claude`: preview/apply writes environment entries (`ANTHROPIC_BASE_URL`,
+  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, and the cc-switch style
+  `ANTHROPIC_DEFAULT_*_MODEL` / `API_TIMEOUT_MS` defaults). Project scope
+  targets `.claude/settings.local.json`; user-global scope targets
+  `settings.json`.
 - `opencode`: preview/apply writes `opencode.json` provider and model
-  fragments.
+  fragments in the project root or the user-global config directory.
+- `kimi`: preview/apply writes `config.toml` `[providers]`, `[models]`, and
+  `default_model` fragments. Project scope targets `.kimi-code/config.toml`;
+  user-global scope targets `config.toml` under `KIMI_CODE_HOME`/`~/.kimi-code`.
 
 Codex remains subscription-managed and must not accept Provider URL/API key
 configuration through these endpoints.
@@ -1511,9 +1579,9 @@ console rescan action.
 
 Catalog refresh accepts `{ type, sourceId, label, url, timeoutMs? }`, fetches a
 remote manifest with timeout and size limits, stores source refresh metadata,
-and stores Skill, plugin, or template catalog item metadata separately from
-installed local content. Refresh never installs a Skill, enables a plugin, or
-imports a template; install and enable remain explicit user actions.
+and stores Skill or template catalog item metadata separately from installed
+local content. Refresh never installs a Skill or imports a template; install
+remains an explicit user action.
 
 Template catalog items use `itemType: "template"` and carry a `templatePackage`
 metadata object with the same shape as template export/import packages.
@@ -1524,35 +1592,6 @@ scoped.
 Skill catalog items use `itemType: "skill"` and carry a `skillPackage`
 metadata object with name, description, version, and content. Install creates a
 tenant-owned Skill row with `source: "catalog:<sourceId>"`.
-
-Plugin catalog items use `itemType: "plugin"` and carry a `pluginPackage`
-metadata object with manifest fields and Skill payloads. Install validates the
-package id, safe relative config path, adapter/category, and at least one Skill
-payload, then stores the package disabled by default. A separate plugin toggle
-is required before the package can affect Claude Code session launches.
-
-### Plugins
-
-- `GET /api/v1/plugins`
-- `POST /api/v1/plugins/:id/toggle`
-
-Plugin management is scoped to Claude Code plugins. The Gateway returns a
-curated plugin catalog merged with user-scoped installed plugin packages and
-enablement state. Enablement is stored in SQLite. Curated and installed plugin
-entries include versioned Skill payloads. When a Claude session starts,
-enabled Claude plugins are materialized under
-`.openforge/claude-plugins/<plugin-id>` with `.claude-plugin/plugin.json`,
-`skills/<name>/SKILL.md`, and `.openforge/metadata.json`; the Gateway validates
-manifest name/version, expected files, and checksum metadata before passing the
-directory to Claude Code with `--plugin-dir`.
-
-In Claude Code terms, plugins are distributable bundles that can contain
-Skills, Agents, Hooks, MCP/LSP configuration, monitors, executables, and
-default settings. OpenForge currently materializes Skill-only curated and
-catalog-installed packages; richer executable/MCP/LSP plugin package handling
-remains future work.
-Plugin enable/disable actions write audit rows using `plugin.enable` and
-`plugin.disable`.
 
 ### Audit Logs
 
@@ -1566,8 +1605,8 @@ Query parameters:
 - `limit` returns 1 to 200 rows, defaulting to 50.
 
 Audit logs are tenant scoped. Current audited actions include
-`template.restore`, `plugin.enable`, `plugin.disable`, `project.config_sync`,
-`copilot.pending_action.approve`, and `copilot.pending_action.reject`.
+`template.restore`, `project.config_sync`, `copilot.pending_action.approve`, and
+`copilot.pending_action.reject`.
 Template version audit rows are sanitized on read: OpenForge returns template
 metadata, `fileCount`, and file paths, but not raw template file contents.
 Copilot pending-action audit rows store redacted action input, the acting user
@@ -1581,19 +1620,28 @@ id, and bounded result details under `resourceType=copilot_run`.
 - `DELETE /api/v1/notifications`
 
 Notifications are tenant-scoped and persisted in SQLite. Gateway stores session
-lifecycle events and accepted AI CLI hook notifications (Claude Code HTTP hooks
-and the OpenCode permission-notify plugin) before broadcasting them on
+lifecycle events and accepted AI CLI hook notifications from Claude Code,
+OpenCode, Codex, and Kimi Code before broadcasting them on
 `/ws/events`. The Web console uses these APIs to hydrate notification history
 after reload, persist read state, mark all notifications read, and clear the
-current user's notification list.
+current user's notification list. AI CLI notification payloads include normalized
+`notification_type`, `adapter`, `project_id`, `project_name`, `session_id`, and
+`session_name` context.
 
 The built-in Claude Code template writes `.claude/settings.json` hooks for
 `PermissionRequest`, `PermissionDenied`, and `Notification(permission_prompt)`.
-Session create and restart also merge the same OpenForge hooks into
+Session create and restart merge OpenForge hooks into
 `.claude/settings.local.json` before starting Claude Code, so imported projects
-can receive permission prompt notifications even before a manual template sync.
-These hooks use Claude Code `http` hook handlers and send the raw Claude hook
-payload as JSON to OpenForge. Headers interpolate `OPENFORGE_SESSION_ID` and
+can receive permission, `Stop`, and `SessionEnd` notifications even before a
+manual template sync. OpenCode project plugins subscribe to `permission.asked`,
+`session.idle`, and `session.error`. Codex project hooks subscribe to
+`PermissionRequest`, `Stop`, and `SessionEnd`; Codex may require one-time hook
+trust approval through `/hooks`. Kimi project hooks subscribe to
+`PermissionRequest`, `Stop`, `Interrupt`, `StopFailure`, `SessionEnd`, and
+`Notification(task.completed)`.
+Claude hooks use `http` handlers and send the raw Claude hook payload as JSON
+to OpenForge; Codex and Kimi use managed command scripts, while OpenCode uses a
+managed plugin. Headers interpolate `OPENFORGE_SESSION_ID` and
 `OPENFORGE_ATTACH_TOKEN` from the tmux launch environment. The endpoint also
 accepts the legacy wrapper payload used by older command-hook templates.
 
@@ -1633,9 +1681,8 @@ Snapshot restore is explicit and tenant-scoped. When the recorded tmux session
 still exists, OpenForge reattaches the database session to that tmux session and
 returns `mode: "attach_tmux"` without rotating the existing session attach
 token. When tmux no longer has the recorded session, OpenForge recreates a new
-tmux-backed session from the snapshot's project/model/Agent metadata plus any
-credential, API key, and plugin metadata still available on the original session
-record. If the original session record is unavailable, restore falls back to the
+tmux-backed session from the snapshot's project/model/Agent metadata plus any credential and API key
+metadata still available on the original session record. If the original session record is unavailable, restore falls back to the
 snapshot metadata and `host_environment` credentials. Restore returns
 `mode: "recreate_session"` and never writes terminal scrollback to SQLite.
 
@@ -1656,16 +1703,16 @@ provider token billing accuracy from this endpoint.
 - `POST /api/v1/session-hooks/claude-notification/:sessionId`
 
 This unauthenticated endpoint is for OpenForge-generated AI CLI hooks: Claude
-Code HTTP hooks and the OpenCode permission-notify plugin
-(`.opencode/plugins/openforge-permission-notify.js`, materialized by the
-Gateway on OpenCode session create/restart). It requires
+Code HTTP hooks, the OpenCode notification plugin, Codex hooks, and Kimi hooks.
+All integrations are materialized by the Gateway on session create/restart. It requires
 `X-OpenForge-Session-Token` to match the session attach token and accepts
 either legacy `{ sessionId, event }` payloads or raw Claude Code hook JSON sent
 by Claude Code HTTP hooks / the OpenCode plugin. The session id may be supplied
 in the path or `X-OpenForge-Session-Id`. The payload may carry an optional
-`adapter` field (`"claude"` by default; the OpenCode plugin sends
-`adapter: "opencode"`) which brands the resulting notification title on the
-Web. Accepted hook payloads emit a user-scoped `claude_notification` event on
+`adapter` field (`"claude"` by default; other integrations send `"opencode"`,
+`"codex"`, or `"kimi"`). Accepted hook payloads are normalized to
+`permission_prompt`, `permission_denied`, `task_completed`, `task_interrupted`,
+`task_failed`, or `session_ended` and emit a user-scoped `claude_notification` event on
 `/ws/events`.
 
 ## 4. WebSocket Contract

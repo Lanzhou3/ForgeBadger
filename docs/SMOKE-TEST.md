@@ -80,7 +80,7 @@ browser terminal sessions.
   overwrite decision is required.
 - Confirm config compliance reports compliant after a clean sync.
 
-## 4. Template, Agent, Skill, Plugin
+## 4. Template, Agent, Skill
 
 - Clone the built-in Claude Code template.
 - Edit the cloned template and confirm a version history row is recorded.
@@ -88,9 +88,9 @@ browser terminal sessions.
 - Create a Skill from a quick-create template.
 - Enable the Skill for the project and verify it appears in config preview.
 - Run local Skill rescan and confirm discovered roots/counts appear.
-- Install one catalog Skill or plugin package if a catalog source is available.
-- Enable a Claude plugin and confirm the Plugins page explains it as a Claude
-  Code plugin package, not a browser extension.
+- Install one catalog Skill package if a catalog source is available.
+- Open the Skill list on a fresh user and confirm the three builtin skills
+  (code-review, safe-edits, github-context) appear once and stay enabled.
 
 ## 5. Model And API Key
 

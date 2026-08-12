@@ -9,8 +9,8 @@
 OpenForge is a local-first control plane for AI programming CLIs. It gives
 developers one Web console for managing projects, persistent terminal
 sessions, AI tool configuration, models, API keys, Agents, Skills, Templates,
-plugins, usage visibility, and session history across Claude Code, OpenCode,
-and Codex.
+usage visibility, and session history across Claude Code, OpenCode, and
+Codex.
 
 OpenForge is built for self-hosted developer machines and private workspaces.
 The Gateway owns filesystem access, SQLite persistence, tmux sessions,
@@ -59,7 +59,7 @@ not part of the current local-first MVP.
   Codex.
 - Provider model profiles with encrypted API key storage and live model sync
   for OpenAI-compatible provider endpoints.
-- Agent, Skill, Template, plugin, usage, history, notification, and settings
+- Agent, Skill, Template, usage, history, notification, and settings
   surfaces in the Web console.
 - Session snapshots, terminal focus mode, command palette prototype, and local
   diagnostics export.

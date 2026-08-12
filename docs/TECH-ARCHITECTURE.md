@@ -160,6 +160,33 @@ interface RollbackResult {
 | Gate C Security Baseline | API key 加密、日志脱敏、路径边界、WebSocket auth/ownership/限流、API envelope 冲突已修复 |
 | Gate D MVP-0 Acceptance | A/B/C 已通过，5 分钟闭环可演示，核心验证命令已运行或记录跳过原因 |
 
+### 0.5.7 Project Manager Agent Execution Contract（2026-08-12）
+
+Project Manager Agent 采用持久化控制循环，而不是用一次 Copilot 对话或长驻模型调用充当执行状态机。
+
+```text
+Project goal / work item
+  -> task attempt (desired state + observed state)
+  -> session assignment (lease + adapter capability snapshot)
+  -> semantic command
+  -> SessionWorkerAdapter
+  -> CLI session managed by tmux
+  -> normalized lifecycle event
+  -> evaluator + acceptance result
+```
+
+架构约束：
+
+- task attempt、session assignment、command、wakeup 和 acceptance result 是执行事实源；Copilot conversation、Web 本地状态和 ledger event 只提供交互或审计投影。
+- Controller 必须通过幂等 reconcile 推进状态。外部副作用采用 command-first、稳定 idempotency key 和 assignment lease，重复或乱序事件不得重复创建 session 或提交任务。
+- Controller 只调用 `SessionWorkerAdapter` 的准备、启动、分派、跟进、打断、权限响应和观测接口，不直接拼接 tmux 字符输入。
+- adapter 必须显式报告结构化 turn、权限事件、完成事件、interrupt、resume、terminal fallback 和证据提取能力；降级能力不得伪装成完整支持。
+- Task Packet 的 prepare 不启动 CLI、不发送输入；dispatch 只有在 capability、policy、lease、payload digest 和 session readiness 校验通过后才能执行。
+- 所有副作用必须经过服务器端 Action Policy。默认策略为 `observe`；有期限的项目 `operate` 只允许明确列出的低风险可逆动作；删除、密钥、权限扩大、外部发布、跨项目操作和 raw shell 始终审批或拒绝。
+- CLI 的完成声明只产生 completion candidate。工作项进入 `done` 前必须有 accepted 或 verified acceptance result。
+- tmux 继续作为进程持久层和 terminal fallback。SQLite 只保存结构化状态、摘要、哈希、证据引用和审计，不保存完整终端日志。
+- `OPENFORGE_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED` 默认 `false`，只有显式设置为字符串 `true` 才允许未来的自动 dispatch runner；无效布尔值必须使 Gateway 启动校验失败。
+
 ## 零、架构总览
 
 ### 架构模式
