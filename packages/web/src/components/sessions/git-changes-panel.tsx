@@ -31,9 +31,12 @@ export function GitChangesPanel({ projectId }: Props) {
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <GitBranch className="size-4 shrink-0 text-muted-foreground" />
-          <span className="truncate">{t("sessions.gitChanges")}</span>
+          <span className="shrink-0">{t("sessions.gitChanges")}</span>
           {data?.branch && (
-            <span className="shrink-0 rounded-full bg-muted/50 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+            <span
+              className="min-w-0 truncate rounded-full bg-muted/50 px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+              title={data.branch}
+            >
               {data.branch}
             </span>
           )}

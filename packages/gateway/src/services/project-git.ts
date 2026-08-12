@@ -26,6 +26,7 @@ export interface ProjectGitChanges {
 const MAX_CHANGED_ENTRIES = 200;
 const MAX_COMMITS = 15;
 const GIT_TIMEOUT_MS = 5_000;
+const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const FIELD_SEPARATOR = "\x1f";
 
 function runGit(cwd: string, args: string[]): Promise<string> {
@@ -36,7 +37,12 @@ function runGit(cwd: string, args: string[]): Promise<string> {
       {
         cwd,
         timeout: GIT_TIMEOUT_MS,
-        maxBuffer: 1024 * 1024,
+        // Large working trees (e.g. untracked node_modules/.pnpm-store content)
+        // can produce git status output far beyond 1 MiB. execFile rejects with
+        // ENOBUFS when stdout exceeds maxBuffer, which getProjectGitChanges
+        // would silently swallow and report an empty change list. Keep the
+        // buffer generous so the working tree is actually reported.
+        maxBuffer: GIT_MAX_BUFFER_BYTES,
         env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
       },
       (error, stdout, stderr) => {

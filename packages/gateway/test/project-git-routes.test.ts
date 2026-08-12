@@ -120,6 +120,38 @@ describe("project git-changes routes", () => {
     assert.equal(body.data?.git.commits[0]?.author, "Test");
   });
 
+  it("reports changes even when git status output exceeds the old 1 MiB buffer limit", async () => {
+    const token = await register("git-large@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-git-large-"));
+    await git(rootPath, "init", "-b", "main");
+    await writeFile(path.join(rootPath, "tracked.ts"), "export const v = 1;\n", "utf8");
+    await git(rootPath, "add", "tracked.ts");
+    await git(rootPath, "-c", "user.email=test@openforge.local", "-c", "user.name=Test", "commit", "-m", "initial commit");
+    await writeFile(path.join(rootPath, "tracked.ts"), "export const v = 2;\n", "utf8");
+    // Long untracked filenames produce a large porcelain listing; enough of
+    // them push the `-z` status output past 1 MiB, which used to make execFile
+    // reject with ENOBUFS and silently drop every reported change.
+    const longName = "u".repeat(210);
+    for (let i = 0; i < 5600; i += 200) {
+      await Promise.all(
+        Array.from({ length: Math.min(200, 5600 - i) }, (_, j) =>
+          writeFile(path.join(rootPath, `${longName}-${i + j}.txt`), "", "utf8")
+        )
+      );
+    }
+    const projectId = await importProject(token, rootPath);
+
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/git-changes`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = (await res.json()) as GitChangesResponseBody;
+
+    assert.equal(res.status, 200, JSON.stringify(body));
+    assert.equal(body.data?.git.isGitRepo, true);
+    const modified = body.data?.git.changed.find((entry) => entry.path === "tracked.ts");
+    assert.equal(modified?.status.trim(), "M");
+  });
+
   it("reports isGitRepo=false for directories without git", async () => {
     const token = await register("git-plain@test.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-git-plain-"));
