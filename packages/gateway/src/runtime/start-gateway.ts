@@ -23,14 +23,15 @@ export async function createGatewayRuntime(
   const env = resolveGatewayEnv(input);
   const startupOptions =
     overrides.tmuxClient === undefined ? { env } : { env, tmuxClient: overrides.tmuxClient };
-  const { db, sessionManager, apiKeyStore, eventBus } = await startupGateway(startupOptions);
+  const { db, sessionManager, apiKeyStore, eventBus, feishuChannelRuntime } = await startupGateway(startupOptions);
   const runtime = createGatewayApp({
     jwtSecret: env.OPENFORGE_JWT_SECRET,
     masterKey: env.OPENFORGE_MASTER_KEY,
     db,
     sessionManager,
     apiKeyStore,
-    eventBus
+    eventBus,
+    feishuChannelRuntime
   });
 
   await runtime.recoveryReady;

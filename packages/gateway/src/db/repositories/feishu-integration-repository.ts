@@ -25,6 +25,12 @@ export interface UpdateFeishuIntegrationConfigInput {
   commandPrefix?: string | undefined;
 }
 
+export interface FeishuAppAccountSummary {
+  appId: string;
+  enabled: boolean;
+  secretConfigured: boolean;
+}
+
 export interface ConfigureFeishuPublicWebhookInput {
   publicWebhookId?: string | undefined;
   publicWebhookEnabled?: boolean | undefined;
@@ -86,6 +92,8 @@ interface FeishuConfigRow {
   identity_mode: string;
   allowed_chat_ids: string;
   command_prefix: string;
+  app_id: string | null;
+  app_secret_encrypted: string | null;
   public_webhook_id: string | null;
   public_webhook_enabled: number;
   verification_token_encrypted: string | null;
@@ -178,6 +186,50 @@ export class FeishuIntegrationRepository {
     );
 
     return this.getConfig();
+  }
+
+  getAppAccount(): FeishuAppAccountSummary | undefined {
+    const row = this.getConfigRow();
+    if (!row?.app_id || !row.app_secret_encrypted) return undefined;
+    return {
+      appId: row.app_id,
+      enabled: row.enabled === 1,
+      secretConfigured: true
+    };
+  }
+
+  upsertAppAccount(input: {
+    appId: string;
+    appSecret?: string | undefined;
+    enabled: boolean;
+  }): FeishuAppAccountSummary {
+    if (!this.masterKey) {
+      throw new Error("Master key is required for Feishu App credentials");
+    }
+    const appId = input.appId.trim();
+    if (!appId) throw new Error("Feishu App ID is required");
+
+    const existing = this.getConfigRow();
+    if (!existing?.app_secret_encrypted && !input.appSecret) {
+      throw new Error("Feishu App Secret is required for initial setup");
+    }
+    const encryptedSecret = input.appSecret
+      ? JSON.stringify(encryptSecret(input.appSecret, { key: this.masterKey }))
+      : existing?.app_secret_encrypted;
+
+    // Reuse the existing tenant-scoped integration row so legacy policy and SDK credentials stay atomic.
+    this.upsertConfig({
+      enabled: input.enabled,
+      emergencyDisabled: false,
+      identityMode: "bot"
+    });
+    this.db.prepare(`
+      UPDATE integration_feishu_configs
+      SET app_id = ?, app_secret_encrypted = ?, updated_at = ?
+      WHERE user_id = ?
+    `).run(appId, encryptedSecret, Date.now(), this.userId);
+
+    return this.getAppAccount() as FeishuAppAccountSummary;
   }
 
   canExecuteActions(): boolean {
@@ -358,6 +410,13 @@ export class FeishuIntegrationRepository {
       throw new Error("Master key is required for Feishu public webhook secrets");
     }
     return JSON.stringify(encryptSecret(value, { key: this.masterKey }));
+  }
+
+  private getConfigRow(): FeishuConfigRow | undefined {
+    return this.db.prepare(`
+      SELECT * FROM integration_feishu_configs
+      WHERE user_id = ?
+    `).get(this.userId) as FeishuConfigRow | undefined;
   }
 
   private decryptWebhookSecret(value: string | null): string {

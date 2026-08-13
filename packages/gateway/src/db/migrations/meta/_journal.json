@@ -183,6 +183,41 @@
       "when": 1786465500000,
       "tag": "0026_project_manager_execution_control",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1786467600000,
+      "tag": "0027_feishu_app_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1786510000000,
+      "tag": "0028_feishu_channel_runtime",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1786510100000,
+      "tag": "0029_copilot_automations",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1786550400000,
+      "tag": "0030_copilot_source_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1786579200000,
+      "tag": "0031_feishu_card_message_binding",
+      "breakpoints": true
     }
   ]
 }

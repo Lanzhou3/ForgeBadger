@@ -6,12 +6,15 @@ import { InMemorySessionManager } from "./session-manager.js";
 import { createDbSessionRecoveryStore } from "./db-session-recovery-store.js";
 import { createTmuxClient, type TmuxClient } from "./tmux.js";
 import { OpenForgeEventBus } from "./event-bus.js";
+import { createProductionFeishuChannelRuntime } from "./integrations/feishu-runtime-factory.js";
+import type { FeishuChannelRuntime } from "./integrations/feishu-channel-runtime.js";
 
 export interface StartupResult {
   db: Database;
   sessionManager: InMemorySessionManager;
   apiKeyStore: InMemoryApiKeyStore;
   eventBus: OpenForgeEventBus;
+  feishuChannelRuntime: FeishuChannelRuntime;
 }
 
 export async function startupGateway(options: {
@@ -54,5 +57,13 @@ export async function startupGateway(options: {
       );
     });
 
-  return { db, sessionManager, apiKeyStore, eventBus };
+  // Feishu connection failures are isolated from HTTP readiness and retried by the supervisor.
+  const feishuChannelRuntime = createProductionFeishuChannelRuntime({
+    db,
+    masterKey: options.env.OPENFORGE_MASTER_KEY,
+    sessionManager
+  });
+  await feishuChannelRuntime.start();
+
+  return { db, sessionManager, apiKeyStore, eventBus, feishuChannelRuntime };
 }

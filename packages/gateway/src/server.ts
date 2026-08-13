@@ -13,6 +13,7 @@ import { attachTerminalWebSocket } from "./websocket/terminal.js";
 import { attachEventsWebSocket } from "./websocket/events.js";
 import type { Database } from "./db/types.js";
 import type { CommandRunner } from "./lib/dependency-check.js";
+import type { FeishuChannelRuntime } from "./services/integrations/feishu-channel-runtime.js";
 
 import { mountRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -27,6 +28,7 @@ export interface ServerDeps {
   codexAppServerManager: CodexAppServerManager;
   appVersion: string;
   adapterCommandRunner?: CommandRunner | undefined;
+  feishuChannelRuntime?: FeishuChannelRuntime | undefined;
 }
 
 export interface GatewayApp {
@@ -49,6 +51,7 @@ export interface GatewayAppOptions {
   codexAppServerManager?: CodexAppServerManager;
   appVersion?: string;
   adapterCommandRunner?: CommandRunner | undefined;
+  feishuChannelRuntime?: FeishuChannelRuntime | undefined;
 }
 
 export function createServer(deps: ServerDeps): express.Express {
@@ -105,7 +108,8 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     eventBus,
     codexAppServerManager,
     appVersion: options.appVersion ?? "0.0.0",
-    adapterCommandRunner: options.adapterCommandRunner
+    adapterCommandRunner: options.adapterCommandRunner,
+    feishuChannelRuntime: options.feishuChannelRuntime
   });
 
   const server = createHttpServer(app);
@@ -133,6 +137,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
       closed = true;
 
       try {
+        await options.feishuChannelRuntime?.stop();
         codexAppServerManager.stopAll();
         await closeServerIfListening(server);
       } finally {

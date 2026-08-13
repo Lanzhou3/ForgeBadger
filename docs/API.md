@@ -383,10 +383,19 @@ they do not execute Feishu writes.
 ### Integrations
 
 - `GET /api/v1/integrations/feishu/status`
+- `GET /api/v1/integrations/feishu/account`
+- `PUT /api/v1/integrations/feishu/account`
+- `GET /api/v1/integrations/feishu/health`
 - `GET /api/v1/integrations/feishu/config`
 - `PATCH /api/v1/integrations/feishu/config`
 - `GET /api/v1/integrations/feishu/user-mappings`
 - `PUT /api/v1/integrations/feishu/user-mappings`
+- `GET /api/v1/integrations/feishu/bindings`
+- `POST /api/v1/integrations/feishu/bindings`
+- `PATCH /api/v1/integrations/feishu/bindings/:bindingId`
+- `DELETE /api/v1/integrations/feishu/bindings/:bindingId`
+- `GET /api/v1/integrations/feishu/queue-summary`
+- `POST /api/v1/integrations/feishu/emergency-stop`
 - `POST /api/v1/integrations/feishu/bot-websocket/events`
 - `POST /api/v1/integrations/feishu/bot-websocket/connection-events`
 - `POST /api/v1/integrations/feishu/inbound`
@@ -395,9 +404,24 @@ they do not execute Feishu writes.
 Feishu integration endpoints are authenticated, tenant scoped, and
 Gateway-owned. Status discovers the local `lark-cli` binary, reports version
 and structured auth status when available, and overlays the tenant's persisted
-enabled/emergency-disabled state. Configuration and user mappings are persisted
-without Feishu tokens, cookies, credentials, raw CLI stderr, or secret-like
-fields.
+enabled/emergency-disabled state. The account endpoints read safe App ID/status
+metadata and write App ID/App Secret credentials. App Secret is encrypted with
+the Gateway master key, is never returned by the API, and may be omitted on a
+later update to preserve the existing encrypted value. Policy configuration and
+user mappings remain separate tenant-scoped resources.
+
+Conversation bindings map a Feishu Chat ID and thread key to a stable Copilot
+conversation. `POST /bindings` supports manual creation with either workspace
+scope or a tenant-owned internal project ID; the Settings UI resolves that ID
+from a project-name selector. `PATCH /bindings/:bindingId` changes only the
+scope, while delete removes the binding without deleting project data.
+
+After an inbound message passes tenant, user, chat, and mention policy, the
+Inbox worker adds a transient Feishu `Typing` reaction to the original message.
+The reaction is removed after the assistant result is persisted and its final
+reply is queued in the durable Outbox. Reaction add/remove failures are
+best-effort, redacted diagnostics and never change the Copilot or Outbox result;
+rejected and logically duplicated messages receive no new reaction.
 
 These endpoints do not execute Feishu writes, accept model-generated command
 strings, send terminal input, approve actions from Feishu text, or start

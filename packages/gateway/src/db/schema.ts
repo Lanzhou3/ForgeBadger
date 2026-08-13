@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { sql } from "drizzle-orm";
 import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable("users", {
@@ -118,6 +119,7 @@ export const copilotRuns = sqliteTable(
     modelProfileId: text("model_profile_id").references(() => modelProfiles.id, { onDelete: "set null" }),
     source: text("source").notNull(),
     sourceRefId: text("source_ref_id"),
+    sourceIdempotencyKey: text("source_idempotency_key"),
     goal: text("goal").notNull(),
     stepCount: integer("step_count").notNull().default(0),
     maxSteps: integer("max_steps").notNull().default(32),
@@ -128,7 +130,10 @@ export const copilotRuns = sqliteTable(
     completedAt: integer("completed_at", { mode: "timestamp" })
   },
   (table) => ({
-    idx_copilot_runs_user_created: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt)
+    idx_copilot_runs_user_created: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt),
+    idx_copilot_runs_source_idempotency: uniqueIndex("idx_copilot_runs_source_idempotency")
+      .on(table.userId, table.source, table.sourceIdempotencyKey)
+      .where(sql`${table.sourceIdempotencyKey} IS NOT NULL`)
   })
 );
 
@@ -871,6 +876,8 @@ export const integrationFeishuConfigs = sqliteTable(
     identityMode: text("identity_mode").notNull().default("unknown"),
     allowedChatIds: text("allowed_chat_ids").notNull().default("[]"),
     commandPrefix: text("command_prefix").notNull().default("/openforge"),
+    appId: text("app_id"),
+    appSecretEncrypted: text("app_secret_encrypted"),
     publicWebhookId: text("public_webhook_id"),
     publicWebhookEnabled: integer("public_webhook_enabled", { mode: "boolean" }).notNull().default(false),
     verificationTokenEncrypted: text("verification_token_encrypted"),
@@ -955,6 +962,223 @@ export const integrationFeishuWebhookRateWindows = sqliteTable(
       table.scope,
       table.scopeId
     )
+  })
+);
+
+export const feishuChannelAccounts = sqliteTable(
+  "feishu_channel_accounts",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    appId: text("app_id").notNull(),
+    appSecretEncrypted: text("app_secret_encrypted").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    connectionState: text("connection_state").notNull().default("disabled"),
+    lastConnectedAt: integer("last_connected_at", { mode: "timestamp" }),
+    lastErrorCode: text("last_error_code"),
+    lastErrorMessage: text("last_error_message"),
+    configRevision: integer("config_revision").notNull().default(1),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idxFeishuChannelAccountsUser: uniqueIndex("idx_feishu_channel_accounts_user").on(table.userId),
+    idxFeishuChannelAccountsApp: uniqueIndex("idx_feishu_channel_accounts_app").on(table.userId, table.appId)
+  })
+);
+
+export const feishuChannelInbox = sqliteTable(
+  "feishu_channel_inbox",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    accountId: text("account_id").notNull().references(() => feishuChannelAccounts.id, { onDelete: "cascade" }),
+    eventId: text("event_id").notNull(),
+    messageId: text("message_id"),
+    eventType: text("event_type").notNull(),
+    laneKey: text("lane_key").notNull(),
+    chatId: text("chat_id").notNull(),
+    threadId: text("thread_id"),
+    senderOpenId: text("sender_open_id"),
+    contentEncrypted: text("content_encrypted").notNull(),
+    status: text("status").notNull().default("pending"),
+    notBefore: integer("not_before", { mode: "timestamp" }).notNull(),
+    claimToken: text("claim_token"),
+    claimExpiresAt: integer("claim_expires_at", { mode: "timestamp" }),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastErrorCode: text("last_error_code"),
+    retentionUntil: integer("retention_until", { mode: "timestamp" }).notNull(),
+    conversationId: text("conversation_id"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+    completedAt: integer("completed_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idxFeishuInboxEvent: uniqueIndex("idx_feishu_channel_inbox_event").on(table.userId, table.accountId, table.eventId),
+    idxFeishuInboxDue: index("idx_feishu_channel_inbox_due").on(table.userId, table.status, table.notBefore),
+    idxFeishuInboxLane: index("idx_feishu_channel_inbox_lane").on(table.userId, table.accountId, table.laneKey, table.createdAt)
+  })
+);
+
+export const feishuChannelLogicalClaims = sqliteTable(
+  "feishu_channel_logical_claims",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    accountId: text("account_id").notNull().references(() => feishuChannelAccounts.id, { onDelete: "cascade" }),
+    messageId: text("message_id").notNull(),
+    inboxId: text("inbox_id").notNull().references(() => feishuChannelInbox.id, { onDelete: "cascade" }),
+    adoptedAt: integer("adopted_at", { mode: "timestamp" }).notNull()
+  },
+  (table) => ({
+    idxFeishuLogicalMessage: uniqueIndex("idx_feishu_channel_logical_message").on(table.userId, table.accountId, table.messageId)
+  })
+);
+
+export const feishuConversationBindings = sqliteTable(
+  "feishu_conversation_bindings",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    accountId: text("account_id").notNull().references(() => feishuChannelAccounts.id, { onDelete: "cascade" }),
+    chatId: text("chat_id").notNull(),
+    threadKey: text("thread_key").notNull().default("root"),
+    conversationId: text("conversation_id").notNull(),
+    scopeType: text("scope_type").notNull().default("unbound"),
+    scopeId: text("scope_id"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idxFeishuConversationBinding: uniqueIndex("idx_feishu_conversation_binding").on(table.userId, table.accountId, table.chatId, table.threadKey)
+  })
+);
+
+export const feishuChannelOutbox = sqliteTable(
+  "feishu_channel_outbox",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    accountId: text("account_id").notNull().references(() => feishuChannelAccounts.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    chatId: text("chat_id").notNull(),
+    threadId: text("thread_id"),
+    payloadEncrypted: text("payload_encrypted").notNull(),
+    status: text("status").notNull().default("pending"),
+    nextPartIndex: integer("next_part_index").notNull().default(0),
+    providerMessageIds: text("provider_message_ids").notNull().default("[]"),
+    notBefore: integer("not_before", { mode: "timestamp" }).notNull(),
+    claimToken: text("claim_token"),
+    claimExpiresAt: integer("claim_expires_at", { mode: "timestamp" }),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastErrorCode: text("last_error_code"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+    completedAt: integer("completed_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idxFeishuOutboxKey: uniqueIndex("idx_feishu_channel_outbox_key").on(table.userId, table.accountId, table.idempotencyKey),
+    idxFeishuOutboxDue: index("idx_feishu_channel_outbox_due").on(table.userId, table.status, table.notBefore)
+  })
+);
+
+export const feishuCardActions = sqliteTable(
+  "feishu_card_actions",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    accountId: text("account_id").notNull().references(() => feishuChannelAccounts.id, { onDelete: "cascade" }),
+    chatId: text("chat_id").notNull(),
+    threadId: text("thread_id"),
+    operatorOpenId: text("operator_open_id").notNull(),
+    actionType: text("action_type").notNull(),
+    resourceId: text("resource_id").notNull(),
+    payloadDigest: text("payload_digest").notNull(),
+    resourceRevision: integer("resource_revision").notNull(),
+    permissionSnapshot: text("permission_snapshot").notNull(),
+    nonce: text("nonce").notNull(),
+    cardMessageId: text("card_message_id"),
+    status: text("status").notNull().default("pending"),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    claimedAt: integer("claimed_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idxFeishuCardNonce: uniqueIndex("idx_feishu_card_nonce").on(table.userId, table.nonce),
+    idxFeishuCardMessage: index("idx_feishu_card_message").on(table.userId, table.accountId, table.cardMessageId),
+    idxFeishuCardExpiry: index("idx_feishu_card_expiry").on(table.userId, table.status, table.expiresAt)
+  })
+);
+
+export const copilotAutomations = sqliteTable(
+  "copilot_automations",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    status: text("status").notNull().default("draft"),
+    scopeType: text("scope_type").notNull(),
+    scopePolicy: text("scope_policy").notNull(),
+    prompt: text("prompt").notNull(),
+    scheduleKind: text("schedule_kind").notNull(),
+    scheduleExpression: text("schedule_expression").notNull(),
+    timezone: text("timezone").notNull(),
+    deliveryPlan: text("delivery_plan").notNull(),
+    authoritySnapshot: text("authority_snapshot").notNull(),
+    revision: integer("revision").notNull().default(1),
+    nextRunAt: integer("next_run_at", { mode: "timestamp" }),
+    lastRunAt: integer("last_run_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idxCopilotAutomationsUserStatus: index("idx_copilot_automations_user_status").on(table.userId, table.status, table.nextRunAt)
+  })
+);
+
+export const copilotAutomationRuns = sqliteTable(
+  "copilot_automation_runs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    automationId: text("automation_id").notNull().references(() => copilotAutomations.id, { onDelete: "cascade" }),
+    executionId: text("execution_id").notNull(),
+    scheduledSlot: text("scheduled_slot").notNull(),
+    triggerKind: text("trigger_kind").notNull(),
+    status: text("status").notNull().default("pending"),
+    notBefore: integer("not_before", { mode: "timestamp" }).notNull(),
+    claimToken: text("claim_token"),
+    claimExpiresAt: integer("claim_expires_at", { mode: "timestamp" }),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    scopeSnapshot: text("scope_snapshot"),
+    generatedContentEncrypted: text("generated_content_encrypted"),
+    outboxId: text("outbox_id"),
+    lastErrorCode: text("last_error_code"),
+    lastErrorMessage: text("last_error_message"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+    completedAt: integer("completed_at", { mode: "timestamp" })
+  },
+  (table) => ({
+    idxCopilotAutomationRunSlot: uniqueIndex("idx_copilot_automation_run_slot").on(table.userId, table.automationId, table.scheduledSlot),
+    idxCopilotAutomationExecution: uniqueIndex("idx_copilot_automation_execution").on(table.userId, table.executionId),
+    idxCopilotAutomationRunDue: index("idx_copilot_automation_run_due").on(table.userId, table.status, table.notBefore)
+  })
+);
+
+export const copilotAutomationRunProjects = sqliteTable(
+  "copilot_automation_run_projects",
+  {
+    runId: text("run_id").notNull().references(() => copilotAutomationRuns.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    projectName: text("project_name").notNull(),
+    ordinal: integer("ordinal").notNull()
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.runId, table.projectId] }),
+    idxCopilotAutomationSnapshotUser: index("idx_copilot_automation_snapshot_user").on(table.userId, table.runId, table.ordinal)
   })
 );
 

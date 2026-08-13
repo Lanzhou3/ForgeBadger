@@ -227,7 +227,7 @@ describe("FeishuIntegrationRepository", () => {
     );
   });
 
-  it("does not persist secret-like columns for Feishu integration data", () => {
+  it("uses encrypted-only columns for Feishu integration secrets", () => {
     const rows = [
       ...db.prepare("PRAGMA table_info(integration_feishu_configs)").all(),
       ...db.prepare("PRAGMA table_info(integration_feishu_user_mappings)").all()
@@ -237,11 +237,84 @@ describe("FeishuIntegrationRepository", () => {
     const sensitiveColumns = rows
       .map((row) => row.name)
       .filter((name) => /secret|token|credential|cookie|password/i.test(name));
-    assert.deepEqual(sensitiveColumns, ["verification_token_encrypted"]);
+    assert.deepEqual(sensitiveColumns.sort(), ["app_secret_encrypted", "verification_token_encrypted"]);
+    assert.equal(sensitiveColumns.every((name) => name.endsWith("_encrypted")), true);
   });
 });
 
 describe("Feishu integration routes", () => {
+  it("exposes the managed WebSocket channel health for the authenticated user", async () => {
+    const app = express();
+    app.locals.jwtSecret = secret;
+    app.use(express.json());
+    const routeOptions = {
+      channelRuntime: {
+        async reconcileAccount() {},
+        getHealth(userId) {
+          return {
+            state: "connected",
+            accountId: "account-1",
+            configRevision: 2,
+            reconnectAttempt: 0,
+            lastConnectedAt: 1_786_510_000_000,
+            lastErrorMessage: null,
+            userId
+          };
+        }
+      }
+    };
+    app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes(routeOptions));
+
+    const token = signJwt({ userId: "user-1", email: "route@example.com" }, secret);
+    const response = await makeRequest(app, "GET", "/api/v1/integrations/feishu/health", undefined, {
+      Authorization: `Bearer ${token}`
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.data.health.state, "connected");
+    assert.equal(response.body.data.health.userId, "user-1");
+  });
+
+  it("stores Feishu app credentials encrypted and never returns the App Secret", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("account-owner@example.com", "hash");
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const app = createTestApp(db);
+    const headers = { Authorization: `Bearer ${token}` };
+
+    const empty = await makeRequest(app, "GET", "/api/v1/integrations/feishu/account", undefined, headers);
+    assert.equal(empty.status, 200);
+    assert.equal(empty.body.data.account, null);
+
+    const saved = await makeRequest(app, "PUT", "/api/v1/integrations/feishu/account", {
+      appId: " cli_test_app ",
+      appSecret: "test-app-secret",
+      enabled: false
+    }, headers);
+
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.data.account.appId, "cli_test_app");
+    assert.equal(saved.body.data.account.enabled, false);
+    assert.equal(saved.body.data.account.secretConfigured, true);
+    assert.equal(saved.body.data.account.connectionState, "disabled");
+    assert.equal(JSON.stringify(saved.body).includes("test-app-secret"), false);
+
+    const row = db.prepare(`
+      SELECT app_id, app_secret_encrypted
+      FROM integration_feishu_configs
+      WHERE user_id = ?
+    `).get(user.id) as { app_id: string; app_secret_encrypted: string };
+    assert.equal(row.app_id, "cli_test_app");
+    assert.equal(row.app_secret_encrypted.includes("test-app-secret"), false);
+
+    const preserved = await makeRequest(app, "PUT", "/api/v1/integrations/feishu/account", {
+      appId: "cli_test_app_updated",
+      enabled: true
+    }, headers);
+    assert.equal(preserved.status, 200);
+    assert.equal(preserved.body.data.account.secretConfigured, true);
+  });
+
   it("returns authenticated read-only Feishu integration status", async () => {
     const app = express();
     app.locals.jwtSecret = secret;
@@ -1248,9 +1321,17 @@ async function makeRequest(
           });
           res.on("end", () => {
             server.close();
+            let responseBody: unknown = data;
+            if (data) {
+              try {
+                responseBody = JSON.parse(data);
+              } catch {
+                // Keep non-JSON error pages inspectable so route tests report the real HTTP status.
+              }
+            }
             resolve({
               status: res.statusCode || 0,
-              body: data ? JSON.parse(data) : undefined
+              body: data ? responseBody : undefined
             });
           });
         }

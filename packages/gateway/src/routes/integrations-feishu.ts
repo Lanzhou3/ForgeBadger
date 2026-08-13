@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { AuditLogRepository } from "../db/repositories/audit-log-repository.js";
+import { FeishuChannelRepository } from "../db/repositories/feishu-channel-repository.js";
 import {
   CopilotLiveRunConflictError,
   CopilotRepository,
@@ -42,12 +43,27 @@ const feishuConfigSchema = z.object({
   commandPrefix: z.string().min(2).max(32).regex(/^\/\S+$/).optional()
 }).strict();
 
+const feishuAccountSchema = z.object({
+  appId: z.string().trim().min(1).max(128),
+  appSecret: z.string().min(1).max(512).optional(),
+  enabled: z.boolean()
+}).strict();
+
 const feishuUserMappingsSchema = z.object({
   mappings: z.array(z.object({
     feishuUserId: z.string().trim().min(1).max(128),
     openforgeUserId: z.string().trim().min(1).max(128),
     displayName: z.string().trim().min(1).max(128).nullable().optional()
   }).strict()).max(100)
+}).strict();
+const feishuBindingScopeSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("workspace") }).strict(),
+  z.object({ type: z.literal("project"), id: z.string().trim().min(1).max(128) }).strict()
+]);
+const createFeishuBindingSchema = z.object({
+  chatId: z.string().trim().min(1).max(128),
+  threadKey: z.string().trim().min(1).max(128).default("root"),
+  scope: feishuBindingScopeSchema.default({ type: "workspace" })
 }).strict();
 
 const inboundFeishuCommandSchema = z.object({
@@ -89,6 +105,10 @@ export interface FeishuIntegrationRoutesOptions {
   adapterCommandRunner?: CopilotOrchestratorOptions["adapterCommandRunner"];
   staleRunTimeoutMs?: number;
   staleApprovalTimeoutMs?: number;
+  channelRuntime?: {
+    reconcileAccount(userId: string): Promise<void>;
+    getHealth(userId: string): unknown;
+  };
 }
 
 export function createFeishuIntegrationRoutes(
@@ -295,6 +315,74 @@ export function createFeishuIntegrationRoutes(
 
   router.use(authenticate);
 
+  router.get("/account", (req, res) => {
+    const db = requireRepo(options.db, res);
+    if (!db) return;
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const account = options.masterKey
+      ? new FeishuChannelRepository(db, userId, options.masterKey).getAccount()
+      : new FeishuIntegrationRepository(db, userId, options.masterKey).getAppAccount();
+    res.json({ code: 0, data: { account: account ?? null }, message: "" });
+  });
+
+  router.put("/account", async (req, res) => {
+    const db = requireRepo(options.db, res);
+    if (!db) return;
+    if (!options.masterKey) {
+      res.status(503).json({ code: 1, message: "Feishu credential encryption is unavailable" });
+      return;
+    }
+    const parsed = feishuAccountSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ code: 1, message: "Invalid Feishu App credentials" });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    try {
+      const legacyRepository = new FeishuIntegrationRepository(db, userId, options.masterKey);
+      legacyRepository.upsertAppAccount(parsed.data);
+      const account = new FeishuChannelRepository(db, userId, options.masterKey)
+        .upsertAccount({
+          appId: parsed.data.appId,
+          enabled: parsed.data.enabled,
+          ...(parsed.data.appSecret ? { appSecret: parsed.data.appSecret } : {})
+        });
+      legacyRepository.upsertConfig({
+        enabled: parsed.data.enabled,
+        emergencyDisabled: false,
+        identityMode: "bot"
+      });
+      await options.channelRuntime?.reconcileAccount(userId);
+      // Audit only safe metadata; App Secret is write-only and never logged or returned.
+      new AuditLogRepository(db, userId).create({
+        action: "feishu.account.update",
+        resourceType: "feishu_integration",
+        details: { appId: account.appId, enabled: account.enabled, secretConfigured: true },
+        ipAddress: req.ip
+      });
+      res.json({ code: 0, data: { account }, message: "" });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Failed to save Feishu App credentials"
+      });
+    }
+  });
+
+  router.get("/health", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const health = options.channelRuntime?.getHealth(userId) ?? {
+      state: "disabled",
+      accountId: null,
+      configRevision: null,
+      reconnectAttempt: 0,
+      lastConnectedAt: null,
+      lastErrorMessage: null
+    };
+    res.json({ code: 0, data: { health }, message: "" });
+  });
+
   router.get("/status", async (req, res) => {
     try {
       const status = await getStatus();
@@ -402,6 +490,117 @@ export function createFeishuIntegrationRoutes(
         message: error instanceof Error ? error.message : "Invalid Feishu user mappings"
       });
     }
+  });
+
+  router.get("/bindings", (req, res) => {
+    const db = requireRepo(options.db, res);
+    if (!db || !options.masterKey) return;
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const bindings = new FeishuChannelRepository(db, userId, options.masterKey)
+      .listConversationBindings();
+    res.json({ code: 0, data: { bindings }, message: "" });
+  });
+
+  router.post("/bindings", (req, res) => {
+    const db = requireRepo(options.db, res);
+    const parsed = createFeishuBindingSchema.safeParse(req.body ?? {});
+    if (!db || !options.masterKey) return;
+    if (!parsed.success) {
+      res.status(400).json({ code: 1, message: "Invalid Feishu binding", details: {} });
+      return;
+    }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    if (parsed.data.scope.type === "project" && !new ProjectRepository(db, userId).getById(parsed.data.scope.id)) {
+      res.status(404).json({ code: 1, message: "Project not found", details: {} });
+      return;
+    }
+    const channelRepository = new FeishuChannelRepository(db, userId, options.masterKey);
+    const account = channelRepository.getAccount();
+    if (!account) {
+      res.status(409).json({ code: 1, message: "Feishu account is not configured", details: {} });
+      return;
+    }
+    if (channelRepository.findConversationBinding({
+      accountId: account.id,
+      chatId: parsed.data.chatId,
+      threadKey: parsed.data.threadKey
+    })) {
+      res.status(409).json({ code: 1, message: "Feishu binding already exists", details: {} });
+      return;
+    }
+    const conversation = new CopilotRepository(db, userId).createConversation({
+      title: `Feishu ${parsed.data.chatId}`,
+      source: "feishu",
+      sourceRefId: parsed.data.chatId
+    });
+    const created = channelRepository.createConversationBinding({
+      accountId: account.id,
+      chatId: parsed.data.chatId,
+      threadKey: parsed.data.threadKey,
+      conversationId: conversation.id
+    });
+    const binding = channelRepository.updateConversationBindingScope(created.id, parsed.data.scope);
+    res.status(201).json({ code: 0, data: { binding }, message: "" });
+  });
+
+  router.patch("/bindings/:bindingId", (req, res) => {
+    const db = requireRepo(options.db, res);
+    const parsed = feishuBindingScopeSchema.safeParse(req.body ?? {});
+    if (!db || !options.masterKey) return;
+    if (!parsed.success) {
+      res.status(400).json({ code: 1, message: "Invalid Feishu binding scope", details: {} });
+      return;
+    }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    try {
+      const binding = new FeishuChannelRepository(db, userId, options.masterKey)
+        .updateConversationBindingScope(req.params.bindingId, parsed.data);
+      res.json({ code: 0, data: { binding }, message: "" });
+    } catch {
+      res.status(404).json({ code: 1, message: "Feishu binding not found", details: {} });
+    }
+  });
+
+  router.delete("/bindings/:bindingId", (req, res) => {
+    const db = requireRepo(options.db, res);
+    if (!db || !options.masterKey) return;
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const deleted = new FeishuChannelRepository(db, userId, options.masterKey)
+      .deleteConversationBinding(req.params.bindingId);
+    if (!deleted) {
+      res.status(404).json({ code: 1, message: "Feishu binding not found", details: {} });
+      return;
+    }
+    res.json({ code: 0, data: { deleted: true }, message: "" });
+  });
+
+  router.get("/queue-summary", (req, res) => {
+    const db = requireRepo(options.db, res);
+    if (!db || !options.masterKey) return;
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const queues = new FeishuChannelRepository(db, userId, options.masterKey).getQueueSummary();
+    res.json({ code: 0, data: { queues }, message: "" });
+  });
+
+  router.post("/emergency-stop", async (req, res) => {
+    const db = requireRepo(options.db, res);
+    if (!db || !options.masterKey) return;
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const channelRepository = new FeishuChannelRepository(db, userId, options.masterKey);
+    const account = channelRepository.getAccount();
+    if (account) channelRepository.upsertAccount({ appId: account.appId, enabled: false });
+    new FeishuIntegrationRepository(db, userId, options.masterKey).upsertConfig({
+      enabled: false,
+      emergencyDisabled: true
+    });
+    await options.channelRuntime?.reconcileAccount(userId);
+    new AuditLogRepository(db, userId).create({
+      action: "feishu.channel.emergency_stop",
+      resourceType: "feishu_integration",
+      details: {},
+      ipAddress: req.ip
+    });
+    res.json({ code: 0, data: { stopped: true }, message: "" });
   });
 
   router.post("/bot-websocket/events", (req, res) => {

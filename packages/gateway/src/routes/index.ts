@@ -32,6 +32,7 @@ import { createCodexSubscriptionRoutes } from "./codex-subscription.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { createCopilotRoutes } from "./copilot.js";
 import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
+import { createAutomationRoutes } from "./automations.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
@@ -85,8 +86,19 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     db: deps.db,
     masterKey: deps.masterKey,
     sessionManager: deps.sessionManager,
+    ...(deps.feishuChannelRuntime ? { channelRuntime: deps.feishuChannelRuntime } : {}),
     ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
   }));
+  app.use("/api/v1/automations", createAutomationRoutes(
+    deps.db,
+    deps.masterKey,
+    deps.feishuChannelRuntime ? {
+      scheduler: {
+        runNow: (userId, automationId) => deps.feishuChannelRuntime!.runAutomationNow(userId, automationId),
+        reconcile: (userId) => deps.feishuChannelRuntime!.reconcileAutomations(userId)
+      }
+    } : {}
+  ));
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
     db: deps.db,
     masterKey: deps.masterKey,

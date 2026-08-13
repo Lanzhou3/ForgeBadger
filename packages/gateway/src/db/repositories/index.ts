@@ -1,6 +1,8 @@
 export { ActivityRepository } from "./activity-repository.js";
 export { AgentRepository } from "./agent-repository.js";
 export { AuditLogRepository } from "./audit-log-repository.js";
+export { CopilotAutomationRepository } from "./copilot-automation-repository.js";
+export { FeishuChannelRepository } from "./feishu-channel-repository.js";
 export { ApiKeyRepository } from "./api-key-repository.js";
 export { CatalogRepository } from "./catalog-repository.js";
 export { ModelRepository } from "./model-repository.js";
