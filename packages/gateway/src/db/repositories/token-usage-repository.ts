@@ -15,6 +15,8 @@ export interface TokenUsageBucket {
   reasoningTokens: number;
   totalTokens: number;
   requestCount: number;
+  /** Cache hit rate (read/(read+write)) as a 0-100 percentage, or null when no cache activity. */
+  cacheHitRate: number | null;
 }
 
 export interface TokenUsageSummary {
@@ -25,6 +27,8 @@ export interface TokenUsageSummary {
   totalReasoningTokens: number;
   totalTokens: number;
   requestCount: number;
+  /** Overall cache hit rate (read/(read+write)) 0-100, or null when no cache activity. */
+  cacheHitRate: number | null;
   byAdapter: TokenUsageBucket[];
   byProject: TokenUsageBucket[];
   byModel: TokenUsageBucket[];
@@ -39,38 +43,42 @@ export class TokenUsageRepository {
 
   /** Persist scanned records (idempotent via unique (user_id, adapter, request_id)). */
   upsertRecords(records: TokenUsageRecord[]): void {
-    const upsert = this.drizzle
-      .insert(tokenUsageRecords)
-      .values(
-        records.map((record) => ({
-          userId: this.userId,
-          adapter: record.adapter,
-          sessionId: record.sessionId,
-          projectPath: record.projectPath,
-          modelId: record.modelId,
-          requestId: record.requestId,
-          occurredAt: record.occurredAt,
-          inputTokens: record.inputTokens,
-          outputTokens: record.outputTokens,
-          cacheReadTokens: record.cacheReadTokens,
-          cacheWriteTokens: record.cacheWriteTokens,
-          reasoningTokens: record.reasoningTokens,
-          sourceFile: record.sourceFile
-        }))
-      )
-      .onConflictDoUpdate({
-        target: [tokenUsageRecords.userId, tokenUsageRecords.adapter, tokenUsageRecords.requestId],
-        set: {
-          occurredAt: sql`excluded.occurred_at`,
-          inputTokens: sql`excluded.input_tokens`,
-          outputTokens: sql`excluded.output_tokens`,
-          cacheReadTokens: sql`excluded.cache_read_tokens`,
-          cacheWriteTokens: sql`excluded.cache_write_tokens`,
-          reasoningTokens: sql`excluded.reasoning_tokens`,
-          sourceFile: sql`excluded.source_file`
-        }
-      });
-    upsert.run();
+    const BATCH = 200; // SQLite caps bound variables (~999); 200 rows × 12 cols fits safely.
+    const build = (records: TokenUsageRecord[]) =>
+      this.drizzle
+        .insert(tokenUsageRecords)
+        .values(
+          records.map((record) => ({
+            userId: this.userId,
+            adapter: record.adapter,
+            sessionId: record.sessionId,
+            projectPath: record.projectPath,
+            modelId: record.modelId,
+            requestId: record.requestId,
+            occurredAt: record.occurredAt,
+            inputTokens: record.inputTokens,
+            outputTokens: record.outputTokens,
+            cacheReadTokens: record.cacheReadTokens,
+            cacheWriteTokens: record.cacheWriteTokens,
+            reasoningTokens: record.reasoningTokens,
+            sourceFile: record.sourceFile
+          }))
+        )
+        .onConflictDoUpdate({
+          target: [tokenUsageRecords.userId, tokenUsageRecords.adapter, tokenUsageRecords.requestId],
+          set: {
+            occurredAt: sql`excluded.occurred_at`,
+            inputTokens: sql`excluded.input_tokens`,
+            outputTokens: sql`excluded.output_tokens`,
+            cacheReadTokens: sql`excluded.cache_read_tokens`,
+            cacheWriteTokens: sql`excluded.cache_write_tokens`,
+            reasoningTokens: sql`excluded.reasoning_tokens`,
+            sourceFile: sql`excluded.source_file`
+          }
+        });
+    for (let i = 0; i < records.length; i += BATCH) {
+      build(records.slice(i, i + BATCH)).run();
+    }
   }
 
   getCursor(adapter: string): string {
@@ -140,14 +148,20 @@ export class TokenUsageRepository {
       merge(byModel, row.modelId || "unknown", row);
     }
 
+    const totalInputTokens = sum(rows, (r) => r.inputTokens);
+    const totalOutputTokens = sum(rows, (r) => r.outputTokens);
+    const totalReasoningTokens = sum(rows, (r) => r.reasoningTokens);
+    const totalCacheReadTokens = sum(rows, (r) => r.cacheReadTokens);
+    const totalCacheWriteTokens = sum(rows, (r) => r.cacheWriteTokens);
     return {
-      totalInputTokens: sum(rows, (r) => r.inputTokens),
-      totalOutputTokens: sum(rows, (r) => r.outputTokens),
-      totalCacheReadTokens: sum(rows, (r) => r.cacheReadTokens),
-      totalCacheWriteTokens: sum(rows, (r) => r.cacheWriteTokens),
-      totalReasoningTokens: sum(rows, (r) => r.reasoningTokens),
-      totalTokens: sum(rows, (r) => r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheWriteTokens + r.reasoningTokens),
+      totalInputTokens,
+      totalOutputTokens,
+      totalCacheReadTokens,
+      totalCacheWriteTokens,
+      totalReasoningTokens,
+      totalTokens: totalInputTokens + totalOutputTokens + totalCacheReadTokens + totalCacheWriteTokens + totalReasoningTokens,
       requestCount: rows.length,
+      cacheHitRate: hitRate(totalCacheReadTokens, totalCacheWriteTokens, totalInputTokens),
       byAdapter: sortBuckets(byAdapter),
       byProject: sortBuckets(byProject),
       byModel: sortBuckets(byModel)
@@ -238,7 +252,8 @@ function merge(map: Map<string, TokenUsageBucket>, key: string, row: TokenRow): 
     cacheWriteTokens: 0,
     reasoningTokens: 0,
     totalTokens: 0,
-    requestCount: 0
+    requestCount: 0,
+    cacheHitRate: null
   };
   current.inputTokens += row.inputTokens;
   current.outputTokens += row.outputTokens;
@@ -247,7 +262,22 @@ function merge(map: Map<string, TokenUsageBucket>, key: string, row: TokenRow): 
   current.reasoningTokens += row.reasoningTokens;
   current.totalTokens += row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens + row.reasoningTokens;
   current.requestCount += 1;
+  current.cacheHitRate = hitRate(current.cacheReadTokens, current.cacheWriteTokens, current.inputTokens);
   map.set(key, current);
+}
+
+/**
+ * Cache coverage (industry-standard "cache hit rate"): cache read tokens as a
+ * share of all input tokens (uncached input + cache write + cache read), as
+ * 0-100. Matches Anthropic's own cache-hit-rate definition and OpenUsage's
+ * convention. Returns null when there is no cache activity at all (read+write
+ * == 0), so a quiet/non-caching window never shows a misleading 0%.
+ */
+function hitRate(readTokens: number, writeTokens: number, inputTokens: number): number | null {
+  if (readTokens + writeTokens <= 0) return null;
+  const total = inputTokens + readTokens + writeTokens;
+  if (total <= 0) return null;
+  return Math.round((readTokens / total) * 1000) / 10;
 }
 
 function sortBuckets(map: Map<string, TokenUsageBucket>): TokenUsageBucket[] {

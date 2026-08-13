@@ -11,7 +11,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 
-export type UsageTokenAdapter = "claude" | "opencode";
+export type UsageTokenAdapter = "claude" | "opencode" | "codex";
 
 export interface TokenUsageRecord {
   /** Which CLI the record came from. */
@@ -64,6 +64,12 @@ export function opencodeDbPath(): string {
   const xdg = process.env.XDG_DATA_HOME?.trim();
   const base = xdg || pathJoinHome(".local", "share");
   return path.join(base, "opencode", "opencode.db");
+}
+
+/** Root of Codex rollout transcripts (CODEX_HOME-aware). */
+export function codexSessionsRoot(): string {
+  const codexHome = process.env.CODEX_HOME?.trim();
+  return path.join(codexHome || pathJoinHome(".codex"), "sessions");
 }
 
 /** Decode a Claude encode-project-dir into an absolute path (`-Users-a-B` -> `/Users/a/B`). */

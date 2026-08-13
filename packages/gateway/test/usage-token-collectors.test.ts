@@ -9,6 +9,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { fileURLToPath } from "node:url";
 
 import { ClaudeCodeSource } from "../src/services/usage/claude-code-source.js";
+import { CodexSource } from "../src/services/usage/codex-source.js";
 import { OpenCodeSource } from "../src/services/usage/opencode-source.js";
 import { TokenUsageRepository, type TokenUsageSummary } from "../src/db/repositories/token-usage-repository.js";
 import { UserRepository } from "../src/db/repositories/index.js";
@@ -260,6 +261,150 @@ describe("OpenCodeSource", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Codex fixture
+// ---------------------------------------------------------------------------
+
+function writeCodexFixture(root: string, lines: string[]): string {
+  const dayDir = path.join(root, "sessions", "2026", "08", "01");
+  mkdirSync(dayDir, { recursive: true });
+  const file = path.join(dayDir, "rollout-2026-08-01T10-00-00-019efec2-ef2b-7d42-bd6d-b986f1aaed46.jsonl");
+  writeFileSync(file, lines.join("\n"));
+  return file;
+}
+
+const codexSessionMeta = () =>
+  JSON.stringify({
+    timestamp: "2026-08-01T10:00:00.000Z",
+    type: "session_meta",
+    payload: { id: "sess-codex-1", cwd: "/Users/lanzhou/Project/Mindspark" }
+  });
+
+const codexTurnContext = (model: string) =>
+  JSON.stringify({
+    timestamp: "2026-08-01T10:00:01.000Z",
+    type: "turn_context",
+    payload: { turn_id: "turn-1", cwd: "/Users/lanzhou/Project/Mindspark", model }
+  });
+
+const codexTokenCount = (
+  ts: string,
+  usage: { input: number; cached: number; output: number; reasoning: number }
+) =>
+  JSON.stringify({
+    timestamp: ts,
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: {
+        total_token_usage: {},
+        last_token_usage: {
+          input_tokens: usage.input,
+          cached_input_tokens: usage.cached,
+          output_tokens: usage.output,
+          reasoning_output_tokens: usage.reasoning,
+          total_tokens: usage.input + usage.output
+        }
+      }
+    }
+  });
+
+describe("CodexSource", () => {
+  it("extracts token_count deltas with session cwd and model context", () => {
+    const root = tempDir();
+    writeCodexFixture(root, [
+      codexSessionMeta(),
+      codexTurnContext("gpt-5-codex"),
+      codexTokenCount("2026-08-01T10:00:05.000Z", { input: 1200, cached: 500, output: 80, reasoning: 30 }),
+      codexTokenCount("2026-08-01T10:01:00.000Z", { input: 900, cached: 0, output: 40, reasoning: 0 }),
+      // All-zero delta carries no usage and must be skipped.
+      codexTokenCount("2026-08-01T10:01:30.000Z", { input: 0, cached: 0, output: 0, reasoning: 0 }),
+      // Non-usage events must be ignored.
+      JSON.stringify({ timestamp: "2026-08-01T10:02:00.000Z", type: "event_msg", payload: { type: "task_started" } })
+    ]);
+
+    const original = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = root;
+    try {
+      const source = new CodexSource();
+      const result = source.scan(null);
+      assert.equal(result.records.length, 2);
+      const [first, second] = result.records;
+      assert.equal(first.adapter, "codex");
+      assert.equal(first.sessionId, "sess-codex-1");
+      assert.equal(first.projectPath, "/Users/lanzhou/Project/Mindspark");
+      assert.equal(first.modelId, "gpt-5-codex");
+      assert.equal(first.inputTokens, 1200);
+      assert.equal(first.cacheReadTokens, 500);
+      assert.equal(first.outputTokens, 80);
+      assert.equal(first.reasoningTokens, 30);
+      assert.equal(first.cacheWriteTokens, 0);
+      assert.match(first.requestId, /^rollout-.*\.jsonl@\d+$/);
+      assert.equal(second.inputTokens, 900);
+
+      // Watermark: unchanged file yields no duplicates on the next scan.
+      const second2 = source.scan(result.nextWatermark);
+      assert.equal(second2.records.length, 0);
+    } finally {
+      if (original === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = original;
+    }
+  });
+
+  it("re-parses a changed file without duplicating request ids", () => {
+    const root = tempDir();
+    const file = writeCodexFixture(root, [
+      codexSessionMeta(),
+      codexTokenCount("2026-08-01T10:00:05.000Z", { input: 100, cached: 0, output: 10, reasoning: 0 })
+    ]);
+
+    const original = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = root;
+    try {
+      const source = new CodexSource();
+      const first = source.scan(null);
+      assert.equal(first.records.length, 1);
+      const firstRequestId = first.records[0]!.requestId;
+
+      // Append a new token_count event and force a newer mtime.
+      writeFileSync(
+        file,
+        [
+          codexSessionMeta(),
+          codexTokenCount("2026-08-01T10:00:05.000Z", { input: 100, cached: 0, output: 10, reasoning: 0 }),
+          codexTokenCount("2026-08-01T10:05:00.000Z", { input: 200, cached: 0, output: 20, reasoning: 0 })
+        ].join("\n")
+      );
+      const now = Date.now();
+      utimesSync(file, now / 1000, now / 1000);
+
+      const second = source.scan(first.nextWatermark);
+      // Full re-parse returns both lines, but the first keeps the same byte-offset
+      // request id so the repository upsert dedupes it.
+      assert.equal(second.records.length, 2);
+      assert.equal(second.records[0]!.requestId, firstRequestId);
+      assert.equal(second.records[1]!.inputTokens, 200);
+    } finally {
+      if (original === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = original;
+    }
+  });
+
+  it("handles a missing sessions directory gracefully", () => {
+    const root = tempDir();
+    const original = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = root;
+    try {
+      const source = new CodexSource();
+      const result = source.scan(null);
+      assert.deepEqual(result.records, []);
+    } finally {
+      if (original === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = original;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Repository
 // ---------------------------------------------------------------------------
 
@@ -297,6 +442,9 @@ describe("TokenUsageRepository", () => {
     assert.equal(summary.totalInputTokens, 2500);
     assert.equal(summary.totalOutputTokens, 450);
     assert.equal(summary.totalCacheReadTokens, 600);
+    // cache coverage = read/(input+read+write) = 600 / (2500 + 600 + 0) = 19.4
+    assert.equal(summary.cacheHitRate, 19.4);
+    assert.equal(summary.byModel[0]?.cacheHitRate, 19.4);
     assert.equal(summary.byAdapter.length, 1);
     assert.equal(summary.byAdapter[0]?.key, "claude");
     assert.equal(summary.byProject[0]?.key, "/tmp/proj-a");
