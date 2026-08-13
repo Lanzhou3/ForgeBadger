@@ -18,16 +18,18 @@ test("Models provider catalog supports direct search through a long verified pro
 
   await page.goto("/models");
 
-  await expect(page.getByText("Provider Catalog")).toBeVisible();
-  await expect(page.getByText("40/40 matches")).toBeVisible();
+  await page.getByRole("button", { name: "Add provider" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Provider Catalog" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("40/40 matches")).toBeVisible();
 
-  await page.getByPlaceholder("Type a provider, model, endpoint, or API format").fill("provider-39");
+  await dialog.getByPlaceholder("Type a provider, model, endpoint, or API format").fill("provider-39");
 
-  await expect(page.getByText("1/40 matches")).toBeVisible();
-  await expect(page.getByText("Provider 39", { exact: true })).toBeVisible();
-  await expect(page.getByText("Provider 01")).toHaveCount(0);
+  await expect(dialog.getByText("1/40 matches")).toBeVisible();
+  await expect(dialog.getByText("Provider 39", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Provider 01")).toHaveCount(0);
 
-  const catalogScrollArea = page.getByTestId("provider-catalog-list");
+  const catalogScrollArea = dialog.getByTestId("provider-catalog-list");
   await expect(catalogScrollArea).toHaveCSS("overflow-y", "auto");
 });
 
@@ -67,8 +69,10 @@ test("Models provider add dialog saves credential, syncs models, and previews Co
   const requests = await mockModelsApis(page);
 
   await page.goto("/models");
-  await page.getByPlaceholder("Type a provider, model, endpoint, or API format").fill("provider-01");
-  await page.getByRole("button", { name: "Add" }).click();
+  await page.getByRole("button", { name: "Add provider" }).first().click();
+  const catalogDialog = page.getByRole("dialog", { name: "Provider Catalog" });
+  await catalogDialog.getByPlaceholder("Type a provider, model, endpoint, or API format").fill("provider-01");
+  await catalogDialog.getByRole("button", { name: "Add" }).click();
 
   const dialog = page.getByRole("dialog", { name: /Configure Provider 01/ });
   await expect(dialog).toBeVisible();
@@ -79,6 +83,7 @@ test("Models provider add dialog saves credential, syncs models, and previews Co
   await dialog.getByRole("button", { name: "Save and sync models" }).click();
 
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("tab", { name: "Apply" }).click();
   await expect(page.locator("#apply-model")).toHaveValue("model-1");
   expect(requests.providerCreate).toEqual({ catalogId: "provider-01" });
   expect(requests.credentialCreate).toEqual({
@@ -93,6 +98,7 @@ test("Models provider add dialog saves credential, syncs models, and previews Co
 
   expect(requests.previewApply).toEqual({
     adapter: "openforge-copilot",
+    scope: "project",
     modelProfileId: "model-1",
     credentialId: "credential-1",
   });

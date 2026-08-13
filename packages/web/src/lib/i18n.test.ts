@@ -53,7 +53,8 @@ describe("i18n", () => {
     expect(getTranslation("zh-TW", "snapshots.title")).toBe("歷史快照");
     expect(getTranslation("en", "snapshots.noTerminalHistory")).toContain("terminal scrollback");
     expect(getTranslation("zh-CN", "nav.usage")).toBe("使用统计");
-    expect(getTranslation("en", "usage.estimatedCostNotice")).toContain("estimates");
+    expect(getTranslation("en", "usage.subtitle")).toContain("token");
+    expect(getTranslation("en", "usage.totalTokens")).toContain("tokens");
     expect(getTranslation("zh-CN", "skills.catalogInstall")).toContain("目录");
     expect(getTranslation("en", "skills.discoveryRoots")).toContain("Scan roots");
     expect(getTranslation("zh-CN", "skills.discoveryHint")).toContain("OPENFORGE_SKILL_DIRS");

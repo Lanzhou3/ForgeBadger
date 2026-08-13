@@ -112,13 +112,13 @@ export default function SkillInstallPage() {
   }
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">{t("skills.install")}</h1>
+          <h1 className="text-xl font-semibold tracking-tight">{t("skills.install")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("skills.installSubtitle")}</p>
         </div>
-        <Button asChild variant="outline">
+        <Button asChild size="sm" variant="outline">
           <Link href="/skills">
             <ArrowLeft className="size-4" />
             {t("common.back")}
@@ -126,9 +126,9 @@ export default function SkillInstallPage() {
         </Button>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-        <Card>
-          <CardHeader>
+      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+        <Card className="of-animate-in">
+          <CardHeader className="pb-3">
             <CardTitle className="text-base">{t("skills.sourceCatalog")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -136,16 +136,17 @@ export default function SkillInstallPage() {
               <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
             ) : (
               <div className="grid gap-3 md:grid-cols-3">
-                {sources.map((source) => (
+                {sources.map((source, index) => (
                   <button
                     key={source.id}
                     type="button"
                     onClick={() => selectSource(source.id)}
+                    style={{ animationDelay: `${index * 40}ms` }}
                     className={[
-                      "rounded-lg border p-4 text-left transition-colors",
+                      "rounded-md border p-4 text-left transition-all duration-200 of-animate-in",
                       sourceId === source.id
-                        ? "border-primary bg-primary/5"
-                        : "border-border bg-background hover:bg-accent/30",
+                        ? "border-brand/50 bg-brand/5"
+                        : "border-border bg-background hover:-translate-y-0.5 hover:border-brand/30 hover:bg-muted/40",
                     ].join(" ")}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -160,23 +161,23 @@ export default function SkillInstallPage() {
               </div>
             )}
 
-            <div className="rounded-md border bg-muted/20 p-4">
+            <div className="rounded-md border border-border/70 bg-muted/20 p-4">
               <div className="flex items-center gap-2 text-sm font-medium">
-                <Sparkles className="size-4 text-muted-foreground" />
+                <Sparkles className="size-4 text-brand" />
                 {t("skills.selectSource")}
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
                 {selectedSource?.description ?? t("common.loading")}
               </p>
-              <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-background p-3 text-xs">
+              <pre className="mt-3 max-h-64 overflow-auto rounded-md border border-border/70 bg-background p-3 text-xs">
                 {selectedSource?.starterContent ?? ""}
               </pre>
             </div>
 
-            <div className="rounded-md border bg-background p-4">
+            <div className="rounded-md border border-border/70 bg-background p-4">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-medium">{t("skills.catalogInstall")}</h3>
+                  <h3 className="text-sm font-semibold">{t("skills.catalogInstall")}</h3>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t("skills.catalogInstallDescription")}
                   </p>
@@ -189,11 +190,11 @@ export default function SkillInstallPage() {
                   {catalogSkills.map((item) => (
                     <div
                       key={item.id}
-                      className="flex flex-col gap-3 rounded-md border border-border p-3 md:flex-row md:items-center md:justify-between"
+                      className="flex flex-col gap-3 rounded-md border border-border/70 px-3 py-2.5 transition-colors hover:bg-muted/40 md:flex-row md:items-center md:justify-between"
                     >
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium">{item.name}</div>
-                        <p className="mt-1 text-xs text-muted-foreground">
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
                           {item.description ?? item.externalId}
                         </p>
                       </div>
@@ -216,8 +217,8 @@ export default function SkillInstallPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
+        <Card className="of-animate-in">
+          <CardHeader className="pb-3">
             <CardTitle className="text-base">{t("skills.installSkill")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -264,7 +265,7 @@ export default function SkillInstallPage() {
               </div>
             </div>
             {isRemoteSource && (
-              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+              <div className="space-y-3 rounded-md border border-border/70 bg-muted/20 p-3">
                 <div className="space-y-2">
                   <Label htmlFor="skill-source-url">{t("skills.remoteUrl")}</Label>
                   <Input
@@ -289,7 +290,7 @@ export default function SkillInstallPage() {
                   {previewMutation.isPending ? t("skills.previewingSource") : t("skills.previewSource")}
                 </Button>
                 {remotePreview && (
-                  <div className="rounded-md border bg-background p-3 text-sm">
+                  <div className="rounded-md border border-border/70 bg-background p-3 text-sm">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{t("skills.remotePreviewTitle")}</span>
                       <Badge variant="outline">{remotePreview.provenance.kind}</Badge>
@@ -307,7 +308,8 @@ export default function SkillInstallPage() {
             )}
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button
-              className="w-full"
+              size="sm"
+              className="w-full bg-brand text-brand-foreground hover:bg-brand/90"
               onClick={() => installMutation.mutate()}
               disabled={installMutation.isPending || !name.trim() || remotePreviewRequired}
             >

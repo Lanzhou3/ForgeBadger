@@ -44,7 +44,6 @@ describe("buildActivationReadiness", () => {
       ["adapter", true],
       ["model", true],
       ["project", false],
-      ["template", false],
       ["session", false],
     ]);
   });
@@ -81,10 +80,10 @@ describe("buildActivationReadiness", () => {
       firstProjectId: "project-1",
     });
 
-    expect(readiness.currentStepId).toBe("template");
+    expect(readiness.currentStepId).toBe("session");
     expect(readiness.primaryAction).toEqual({
       href: "/projects/project-1",
-      labelKey: "dashboard.activationReviewTemplate",
+      labelKey: "dashboard.activationStartSession",
     });
     expect(readiness.steps.find((step) => step.id === "model")).toMatchObject({ done: true });
   });
@@ -116,7 +115,6 @@ describe("buildActivationReadiness", () => {
       projectCount: 1,
       sessionCount: 0,
       firstProjectId: "project-1",
-      projectConfigCompliant: true,
     });
 
     expect(readiness.currentStepId).toBe("session");
@@ -129,39 +127,8 @@ describe("buildActivationReadiness", () => {
       "adapter",
       "model",
       "project",
-      "template",
       "session",
     ]);
-    expect(readiness.steps.find((step) => step.id === "template")).toMatchObject({
-      done: true,
-      action: {
-        href: "/projects/project-1",
-        labelKey: "dashboard.activationReviewTemplate",
-      },
-      detailKey: "dashboard.activationTemplateReady",
-    });
-  });
-
-  it("keeps template readiness blocked until the selected project's config is compliant", () => {
-    const readiness = buildActivationReadiness({
-      terminalRuntime: readyRuntime,
-      adapters: [readyAdapter],
-      modelsHealthy: true,
-      projectCount: 1,
-      sessionCount: 0,
-      firstProjectId: "project-1",
-      projectConfigCompliant: false,
-    });
-
-    expect(readiness.currentStepId).toBe("template");
-    expect(readiness.primaryAction).toEqual({
-      href: "/projects/project-1",
-      labelKey: "dashboard.activationReviewTemplate",
-    });
-    expect(readiness.steps.find((step) => step.id === "template")).toMatchObject({
-      done: false,
-      detailKey: "dashboard.activationTemplateNeedsAttention",
-    });
   });
 
   it("marks activation complete and links to sessions once a local AI CLI session exists", () => {
@@ -172,7 +139,6 @@ describe("buildActivationReadiness", () => {
       projectCount: 1,
       sessionCount: 1,
       firstProjectId: "project-1",
-      projectConfigCompliant: true,
     });
 
     expect(readiness.complete).toBe(true);

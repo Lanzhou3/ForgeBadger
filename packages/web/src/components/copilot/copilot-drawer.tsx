@@ -27,7 +27,7 @@ export function CopilotDrawer({ open, onOpenChange, context }: CopilotDrawerProp
       {!open && (
         <Button
           type="button"
-          className="fixed bottom-5 right-5 z-40 h-11 w-11 rounded-full shadow-lg"
+          className="fixed bottom-5 right-5 z-40 h-11 w-11 rounded-full bg-brand text-brand-foreground shadow-lg shadow-brand/20 hover:bg-brand/90"
           onClick={() => onOpenChange(true)}
           aria-label={t("copilot.openDrawer")}
         >

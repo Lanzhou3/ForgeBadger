@@ -703,7 +703,7 @@ export function CopilotChatPanel({
   }
 
   return (
-    <section className={cn("flex min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-background", className)}>
+    <section className={cn("of-animate-in flex min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-card", className)}>
       {!compact && (
         <aside className="hidden w-72 shrink-0 border-r border-border bg-muted/20 md:flex md:flex-col">
           <PanelHeader view={sidebarView} onViewChange={setSidebarView} onNew={startNewConversation} />
@@ -734,13 +734,21 @@ export function CopilotChatPanel({
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <Bot className="size-4 text-primary" aria-hidden="true" />
-              <h1 className="truncate text-sm font-semibold text-foreground">{t("copilot.title")}</h1>
-              {activeRun?.run.status && <Badge variant="outline">{activeRun.run.status}</Badge>}
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+              <Bot className="size-4" aria-hidden="true" />
             </div>
-            <p className="mt-1 truncate text-xs text-muted-foreground">{t("copilot.chatSubtitle")}</p>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className={cn("truncate font-semibold tracking-tight text-foreground", compact ? "text-sm" : "text-xl")}>
+                  {t("copilot.title")}
+                </h1>
+                {activeRun?.run.status && <Badge variant="outline">{activeRun.run.status}</Badge>}
+              </div>
+              <p className={cn("mt-0.5 truncate text-muted-foreground", compact ? "text-xs" : "text-sm")}>
+                {t("copilot.chatSubtitle")}
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {onClose && (
@@ -865,7 +873,7 @@ export function CopilotChatPanel({
 
         <form className="border-t border-border p-3" onSubmit={handleSubmit}>
           <div className={cn("mx-auto", compact ? "max-w-none" : "max-w-4xl")}>
-            <div className="flex items-end gap-2 rounded-md border border-border bg-card p-2">
+            <div className="flex items-end gap-2 rounded-md border border-border bg-background p-2">
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
@@ -880,6 +888,11 @@ export function CopilotChatPanel({
                 disabled={activeRunIsLive ? stopDisabled : sendDisabled}
                 onClick={activeRunIsLive ? stopActiveRun : undefined}
                 aria-label={activeRunIsLive ? t("copilot.stop") : t("copilot.send")}
+                className={cn(
+                  activeRunIsLive
+                    ? "border border-destructive/40 bg-transparent text-destructive hover:bg-destructive/10"
+                    : "bg-brand text-brand-foreground hover:bg-brand/90"
+                )}
               >
                 {activeRunIsLive ? (
                   cancelRunMutation.isPending ? (
@@ -958,7 +971,7 @@ function RunEventRow({ event }: { event: CopilotRunEvent }) {
   const resultSummary = getCopilotEventResultSummary(event);
   return (
     <div className="flex min-w-0 items-start gap-2 text-sm">
-      <span className="mt-2 size-1.5 shrink-0 rounded-full bg-primary/70" aria-hidden="true" />
+      <span className="mt-2 size-1.5 shrink-0 rounded-full bg-brand/70" aria-hidden="true" />
       <div className="min-w-0">
         <div className="font-medium text-foreground">{label}</div>
         {detail && <div className="mt-0.5 break-words text-xs text-muted-foreground">{detail}</div>}
@@ -1024,6 +1037,7 @@ function PendingActionCard({
             size="sm"
             disabled={deciding || approveBlocked}
             onClick={() => onDecide(action, "approve")}
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
           >
             {t("copilot.approve")}
           </Button>
@@ -1094,7 +1108,7 @@ function CopilotSummaryMarkers({ summary }: { summary: CopilotPendingActionSumma
         </div>
       )}
       {summary.anchor && (
-        <Link className="inline-flex text-xs font-medium text-primary underline-offset-4 hover:underline" href={summary.anchor.href}>
+        <Link className="inline-flex text-xs font-medium text-brand underline-offset-4 hover:underline" href={summary.anchor.href}>
           {t(summary.anchor.labelKey)}
         </Link>
       )}
@@ -1106,7 +1120,7 @@ function TypingIndicator() {
   const { t } = useLanguage();
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+      <Loader2 className="size-4 animate-spin text-brand" aria-hidden="true" />
       {t("copilot.runStarting")}
     </div>
   );
@@ -1220,13 +1234,18 @@ function MemoryPanel({
         </div>
       ) : (
         <div className="flex-1 space-y-2 overflow-y-auto p-2">
-          {items.map((item) => (
-            <MemoryListItem
+          {items.map((item, index) => (
+            <div
               key={`${item.type}-${item.id}`}
-              item={item}
-              deleting={deleting && deletingId === item.id}
-              onDelete={() => onDelete(item.type, item.id)}
-            />
+              className="of-animate-in"
+              style={{ animationDelay: `${Math.min(index, 10) * 40}ms` }}
+            >
+              <MemoryListItem
+                item={item}
+                deleting={deleting && deletingId === item.id}
+                onDelete={() => onDelete(item.type, item.id)}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -1258,9 +1277,9 @@ function MemoryListItem({
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-1.5">
             {item.type === "entry" ? (
-              <Brain className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+              <Brain className="size-3.5 shrink-0 text-brand" aria-hidden="true" />
             ) : (
-              <FileText className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+              <FileText className="size-3.5 shrink-0 text-brand" aria-hidden="true" />
             )}
             <span className="truncate text-xs font-medium text-foreground">{item.label}</span>
           </div>
@@ -1342,16 +1361,17 @@ function ConversationList({
   }
   return (
     <div className={cn("gap-2 p-2", horizontal ? "flex overflow-x-auto" : "flex flex-1 flex-col overflow-y-auto")}>
-      {conversations.map((conversation) => (
+      {conversations.map((conversation, index) => (
         <div
           key={conversation.id}
           className={cn(
-            "group flex min-w-0 items-center gap-1 rounded-md transition",
+            "of-animate-in group flex min-w-0 items-center gap-1 rounded-md transition",
             horizontal ? "w-44 shrink-0" : "w-full",
             selectedConversationId === conversation.id
-              ? "bg-primary/15 text-foreground"
+              ? "bg-brand/10 text-foreground"
               : "text-muted-foreground hover:bg-muted hover:text-foreground"
           )}
+          style={{ animationDelay: `${Math.min(index, 10) * 40}ms` }}
         >
           <button
             type="button"
@@ -1384,16 +1404,23 @@ function EmptyChat({ onPrompt }: { onPrompt: (prompt: string) => void }) {
   ];
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center justify-center gap-4 py-16 text-center">
-      <div className="rounded-full border border-border bg-muted/30 p-3">
-        <Bot className="size-6 text-primary" aria-hidden="true" />
+      <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+        <Bot className="size-5" aria-hidden="true" />
       </div>
       <div>
         <h2 className="text-base font-semibold text-foreground">{t("copilot.emptyChatTitle")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{t("copilot.emptyChatDescription")}</p>
       </div>
       <div className="grid w-full gap-2 sm:grid-cols-3">
-        {starters.map((starter) => (
-          <Button key={starter} type="button" variant="outline" className="h-auto whitespace-normal text-left" onClick={() => onPrompt(starter)}>
+        {starters.map((starter, index) => (
+          <Button
+            key={starter}
+            type="button"
+            variant="outline"
+            className="of-animate-in h-auto whitespace-normal text-left text-muted-foreground hover:text-foreground"
+            style={{ animationDelay: `${index * 40}ms` }}
+            onClick={() => onPrompt(starter)}
+          >
             {starter.slice(0, 42)}
           </Button>
         ))}
@@ -1431,13 +1458,13 @@ function MessageBubble({
       data-testid="copilot-message-bubble"
       className={cn("flex gap-3", assistant ? "justify-start" : "justify-end")}
     >
-      {assistant && <BubbleAvatar icon={<Bot className="size-4" aria-hidden="true" />} />}
+      {assistant && <BubbleAvatar tone="brand" icon={<Bot className="size-4" aria-hidden="true" />} />}
       <div
         className={cn(
           "group relative min-w-0 rounded-2xl px-4 py-3 shadow-sm",
           assistant
-            ? "max-w-[min(760px,calc(100%-2.5rem))] border border-border/80 bg-card/75 text-foreground"
-            : "max-w-[min(620px,calc(100%-2.5rem))] border border-primary/30 bg-primary/15 text-foreground"
+            ? "max-w-[min(760px,calc(100%-2.5rem))] border border-border/70 bg-background/70 text-foreground"
+            : "max-w-[min(620px,calc(100%-2.5rem))] border border-brand/30 bg-brand/10 text-foreground"
         )}
       >
         {assistant ? (
@@ -1527,7 +1554,7 @@ function MarkdownContent({ content }: { content: string }) {
                   <input
                     aria-label={item.text}
                     checked={item.checked}
-                    className="mt-1 size-3.5 rounded border-border accent-primary"
+                    className="mt-1 size-3.5 rounded border-border accent-brand"
                     disabled
                     readOnly
                     type="checkbox"
@@ -1548,7 +1575,7 @@ function MarkdownContent({ content }: { content: string }) {
         }
         if (block.type === "quote") {
           return (
-            <blockquote key={index} className="border-l-2 border-primary/50 pl-3 text-muted-foreground">
+            <blockquote key={index} className="border-l-2 border-brand/50 pl-3 text-muted-foreground">
               {renderInlineMarkdown(block.text, String(index))}
             </blockquote>
           );
@@ -1750,9 +1777,16 @@ function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
   return nodes;
 }
 
-function BubbleAvatar({ icon }: { icon: ReactNode }) {
+function BubbleAvatar({ icon, tone = "default" }: { icon: ReactNode; tone?: "default" | "brand" }) {
   return (
-    <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground">
+    <div
+      className={cn(
+        "mt-1 flex size-7 shrink-0 items-center justify-center rounded-full border",
+        tone === "brand"
+          ? "border-brand/30 bg-brand/10 text-brand"
+          : "border-border bg-background text-muted-foreground"
+      )}
+    >
       {icon}
     </div>
   );

@@ -1,23 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Eye, Pencil, Plus, RefreshCw, Save, Sparkles, Trash2, Wrench } from "lucide-react";
+import { Eye, Pencil, Plus, RefreshCw, Save, Sparkles, Trash2, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
 import {
   createSkill,
@@ -41,6 +33,7 @@ import {
   type VisibilityFilter,
 } from "@/lib/visibility";
 import { useLanguage } from "@/hooks/use-language";
+import { cn } from "@/lib/utils";
 
 const emptySkillForm: SkillInput = {
   name: "",
@@ -177,85 +170,88 @@ export default function SkillsPage() {
   };
 
   return (
-    <div className="p-6 space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold">{t("skills.title")}</h1>
-        <p className="mt-1 text-muted-foreground">{t("skills.subtitle")}</p>
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">{t("skills.title")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("skills.subtitle")}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+            <Link href="/skills/install">
+              <Plus className="size-4" />
+              {t("skills.install")}
+            </Link>
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+          >
+            <RefreshCw className={syncMutation.isPending ? "size-4 animate-spin" : "size-4"} />
+            {t("skills.syncLocal")}
+          </Button>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant={sourceFilter === "all" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setSourceFilter("all")}
-          >
-            {t("skills.sourceAll")}
-          </Button>
-          {sources.map((source) => (
-            <Button
-              key={source.id}
-              variant={sourceFilter === source.id ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSourceFilter(source.id)}
-            >
-              {source.label}
-            </Button>
-          ))}
-          <div className="mx-1 h-8 w-px bg-border" />
-          <Button
-            variant={visibilityFilter === "all" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setVisibilityFilter("all")}
-          >
-            {t("visibility.all")}
-          </Button>
-          {visibilityOptions.map((visibility) => (
-            <Button
-              key={visibility}
-              variant={visibilityFilter === visibility ? "default" : "outline"}
-              size="sm"
-              onClick={() => setVisibilityFilter(visibility)}
-            >
-              {t(visibilityLabelKey(visibility))}
-            </Button>
-          ))}
-        </div>
-        <Button asChild variant="outline">
-          <Link href="/skills/install">
-            <ArrowRight className="size-4" />
-            {t("skills.install")}
-          </Link>
-        </Button>
+      <div className="flex flex-wrap items-center gap-2">
         <Button
-          type="button"
-          variant="outline"
-          onClick={() => syncMutation.mutate()}
-          disabled={syncMutation.isPending}
+          variant={sourceFilter === "all" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setSourceFilter("all")}
         >
-          <RefreshCw className={syncMutation.isPending ? "size-4 animate-spin" : "size-4"} />
-          {t("skills.syncLocal")}
+          {t("skills.sourceAll")}
         </Button>
+        {sources.map((source) => (
+          <Button
+            key={source.id}
+            variant={sourceFilter === source.id ? "default" : "outline"}
+            size="sm"
+            onClick={() => setSourceFilter(source.id)}
+          >
+            {source.label}
+          </Button>
+        ))}
+        <div className="mx-1 h-6 w-px bg-border" />
+        <Button
+          variant={visibilityFilter === "all" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setVisibilityFilter("all")}
+        >
+          {t("visibility.all")}
+        </Button>
+        {visibilityOptions.map((visibility) => (
+          <Button
+            key={visibility}
+            variant={visibilityFilter === visibility ? "default" : "outline"}
+            size="sm"
+            onClick={() => setVisibilityFilter(visibility)}
+          >
+            {t(visibilityLabelKey(visibility))}
+          </Button>
+        ))}
       </div>
 
       {data?.discovery && (
-        <Card>
-          <CardContent className="space-y-3 py-3 text-sm text-muted-foreground">
-            <div className="flex flex-wrap items-center gap-3">
+        <Card className="of-animate-in">
+          <CardContent className="space-y-3 py-4">
+            <div className="flex flex-wrap items-center gap-3 text-sm">
               <Badge variant="outline">
                 {t("skills.discoveredLocal")}: {data.discovery.discoveredCount}
               </Badge>
               <Badge variant="outline">
                 {t("skills.discoveryRoots")}: {data.discovery.discoveredRoots?.length ?? 0} / {data.discovery.roots.length}
               </Badge>
-              <span>
+              <span className="text-muted-foreground">
                 {t("skills.localSyncSummary")}: {data.discovery.createdCount} / {data.discovery.updatedCount} / {data.discovery.deletedCount} / {data.discovery.skippedCount}
               </span>
             </div>
-            <p className="text-xs">{t("skills.discoveryHint")}</p>
+            <p className="text-xs text-muted-foreground">{t("skills.discoveryHint")}</p>
             <div className="grid gap-2 md:grid-cols-2">
               {(data.discovery.discoveredRoots ?? []).slice(0, 6).map((root) => (
-                <code key={root} className="truncate rounded border border-border bg-muted/30 px-2 py-1 text-xs">
+                <code key={root} className="truncate rounded-md border border-border/70 bg-muted/30 px-2 py-1 text-xs">
                   {root}
                 </code>
               ))}
@@ -264,17 +260,17 @@ export default function SkillsPage() {
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
+      <Card className="of-animate-in">
+        <CardHeader className="pb-3">
           <CardTitle className="text-base">
             {editingId ? t("skills.editSkill") : t("skills.createSkill")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {templates.length > 0 && (
-            <div className="rounded-md border bg-muted/20 p-3">
+            <div className="rounded-md border border-border/70 bg-muted/20 p-3">
               <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-                <Sparkles className="size-4 text-muted-foreground" />
+                <Sparkles className="size-4 text-brand" />
                 {t("skills.quickCreateTemplates")}
               </div>
               <div className="grid gap-2 md:grid-cols-5">
@@ -377,7 +373,7 @@ export default function SkillsPage() {
               onChange={(event) => setForm((current) => ({ ...current, content: event.target.value }))}
             />
           </div>
-          <div className="rounded-md border bg-muted/20 p-3">
+          <div className="rounded-md border border-border/70 bg-muted/20 p-3">
             <div className="mb-2 flex items-center gap-2 text-sm font-medium">
               <Eye className="size-4 text-muted-foreground" />
               {t("skills.preview")}
@@ -387,18 +383,24 @@ export default function SkillsPage() {
               <Badge variant="outline">{form.version || "1.0.0"}</Badge>
               <Badge variant="secondary">{t(visibilityLabelKey(normalizeVisibility(form.visibility)))}</Badge>
             </div>
-            <pre className="max-h-56 overflow-auto rounded-md bg-background p-3 text-xs">
+            <pre className="max-h-56 overflow-auto rounded-md border border-border/70 bg-background p-3 text-xs">
               {form.content.trim() || t("skills.previewEmpty")}
             </pre>
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
-              {editingId ? <Save className="mr-2 size-4" /> : <Plus className="mr-2 size-4" />}
+            <Button
+              size="sm"
+              className="bg-brand text-brand-foreground hover:bg-brand/90"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+            >
+              {editingId ? <Save className="size-4" /> : <Plus className="size-4" />}
               {saveMutation.isPending ? t("skills.saving") : editingId ? t("skills.saveSkill") : t("skills.createSkill")}
             </Button>
             {editingId && (
               <Button
+                size="sm"
                 variant="outline"
                 onClick={() => {
                   setEditingId(null);
@@ -415,107 +417,105 @@ export default function SkillsPage() {
 
       {isLoading ? (
         <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("skills.loading")}
           </CardContent>
         </Card>
       ) : filteredSkills.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <Wrench className="size-10 text-muted-foreground" />
-            <h3 className="mt-4 text-lg font-medium">{t("skills.emptyTitle")}</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("skills.emptyDescription")}
-            </p>
+        <Card className="of-animate-in">
+          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+            <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+              <Wrench className="size-5" />
+            </div>
+            <div>
+              <div className="text-sm font-medium">{t("skills.emptyTitle")}</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("skills.emptyDescription")}
+              </p>
+            </div>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/skills/install">
+                <Plus className="size-4" />
+                {t("skills.install")}
+              </Link>
+            </Button>
           </CardContent>
         </Card>
       ) : (
-        <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("common.name")}</TableHead>
-                <TableHead>{t("skills.source")}</TableHead>
-                <TableHead>{t("common.visibility")}</TableHead>
-                <TableHead>{t("skills.enabled")}</TableHead>
-                <TableHead className="text-right">{t("common.actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredSkills.map((skill) => {
-                const isPreviewing = previewSkillId === skill.id;
-                return (
-                  <Fragment key={skill.id}>
-                    <TableRow>
-                      <TableCell className="font-medium">
-                        <div className="flex flex-col gap-1">
-                          <span>{skill.name}</span>
-                          {skill.description && (
-                            <span className="text-xs text-muted-foreground">{skill.description}</span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          <Badge variant="outline">{sourceLabel(skill.source)}</Badge>
-                          <Badge variant="outline">{skill.version ?? "1.0.0"}</Badge>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{t(visibilityLabelKey(normalizeVisibility(skill.visibility)))}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Switch
-                          checked={skill.isEnabled}
-                          onCheckedChange={(enabled) => toggleMutation.mutate({ id: skill.id, enabled })}
-                          disabled={toggleMutation.isPending}
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setPreviewSkillId(isPreviewing ? null : skill.id)}
-                          >
-                            <Eye className="size-4" />
-                            <span className="sr-only">{t("skills.preview")}</span>
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => startEdit(skill)}>
-                            <Pencil className="size-4" />
-                            <span className="sr-only">{t("skills.editSkill")}</span>
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive"
-                            onClick={() => {
-                              if (window.confirm(t("skills.deleteConfirm"))) {
-                                deleteMutation.mutate(skill.id);
-                              }
-                            }}
-                          >
-                            <Trash2 className="size-4" />
-                            <span className="sr-only">{t("common.delete")}</span>
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                    {isPreviewing && (
-                      <TableRow>
-                        <TableCell colSpan={5}>
-                          <pre className="max-h-72 overflow-auto rounded-md border bg-muted/20 p-3 text-xs">
-                            {skill.content?.trim() || t("skills.previewEmpty")}
-                          </pre>
-                        </TableCell>
-                      </TableRow>
+        <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+          {filteredSkills.map((skill, index) => {
+            const isPreviewing = previewSkillId === skill.id;
+            return (
+              <div key={skill.id}>
+                <div
+                  className="flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40"
+                  style={{ animationDelay: `${index * 40}ms` }}
+                >
+                  <span
+                    className={cn(
+                      "size-2 shrink-0 rounded-full",
+                      skill.isEnabled ? "bg-emerald-400" : "bg-muted-foreground/40"
                     )}
-                  </Fragment>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </Card>
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{skill.name}</div>
+                    {skill.description && (
+                      <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {skill.description}
+                      </div>
+                    )}
+                  </div>
+                  <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+                    <Badge variant="outline">{sourceLabel(skill.source)}</Badge>
+                    <Badge variant="outline">{skill.version ?? "1.0.0"}</Badge>
+                    <Badge variant="secondary">
+                      {t(visibilityLabelKey(normalizeVisibility(skill.visibility)))}
+                    </Badge>
+                  </div>
+                  <Switch
+                    checked={skill.isEnabled}
+                    onCheckedChange={(enabled) => toggleMutation.mutate({ id: skill.id, enabled })}
+                    disabled={toggleMutation.isPending}
+                  />
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setPreviewSkillId(isPreviewing ? null : skill.id)}
+                    >
+                      <Eye className="size-4" />
+                      <span className="sr-only">{t("skills.preview")}</span>
+                    </Button>
+                    <Button variant="ghost" size="icon" onClick={() => startEdit(skill)}>
+                      <Pencil className="size-4" />
+                      <span className="sr-only">{t("skills.editSkill")}</span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive"
+                      onClick={() => {
+                        if (window.confirm(t("skills.deleteConfirm"))) {
+                          deleteMutation.mutate(skill.id);
+                        }
+                      }}
+                    >
+                      <Trash2 className="size-4" />
+                      <span className="sr-only">{t("common.delete")}</span>
+                    </Button>
+                  </div>
+                </div>
+                {isPreviewing && (
+                  <div className="border-t border-border/70 bg-muted/20 px-4 py-3">
+                    <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background p-3 text-xs">
+                      {skill.content?.trim() || t("skills.previewEmpty")}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

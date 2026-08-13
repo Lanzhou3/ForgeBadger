@@ -1,41 +1,31 @@
 "use client";
 
-import type { ReactNode } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity,
-  AlertTriangle,
-  FolderOpen,
-  TerminalSquare,
+  ArrowUpRight,
   Bot,
   CheckCircle2,
-  FileCode2,
-  Wrench,
+  ChevronRight,
+  Circle,
+  FolderOpen,
   Plus,
-  ArrowRight,
   Sparkles,
+  TerminalSquare,
+  Wrench,
 } from "lucide-react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CliBrandChip } from "@/components/cli-brand-chip";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  getDependencies,
-  listSessions,
-  getDashboardSummary,
-  getConfigCompliance,
-  listProjects,
   discoverAdapters,
+  getDashboardSummary,
+  getDependencies,
+  isAdapterLaunchable,
+  listProjects,
+  listSessions,
 } from "@/lib/api";
 import { buildActivationReadiness } from "@/lib/activation-readiness";
 import { buildCopilotLaunchHref } from "@/lib/copilot";
@@ -45,6 +35,7 @@ import {
   getTerminalRuntimeSetupGuidance,
 } from "@/lib/terminal-runtime";
 import { useLanguage } from "@/hooks/use-language";
+import { cn } from "@/lib/utils";
 
 export default function DashboardPage() {
   const { t } = useLanguage();
@@ -68,20 +59,12 @@ export default function DashboardPage() {
     queryKey: ["adapters", "discovery"],
     queryFn: discoverAdapters,
   });
-  const firstProjectId = projectsQuery.data?.projects[0]?.id;
-  const configComplianceQuery = useQuery({
-    queryKey: ["project-config-compliance", firstProjectId],
-    queryFn: () => getConfigCompliance(firstProjectId ?? ""),
-    enabled: Boolean(firstProjectId),
-    retry: false,
-  });
 
-  const sessionsData = sessionsQuery.data;
+  const sessions = sessionsQuery.data?.sessions ?? [];
   const projects = projectsQuery.data?.projects ?? [];
   const firstProject = projects[0];
-  const dashboard = dashboardQuery.data;
-  const dashboardStats = dashboard?.stats;
-  const dashboardHealth = dashboard?.health;
+  const dashboardStats = dashboardQuery.data?.stats;
+  const dashboardHealth = dashboardQuery.data?.health;
   const terminalRuntime = dependenciesQuery.data?.terminalRuntime;
   const terminalRemediation = getTerminalRuntimeRemediation(terminalRuntime?.mode);
   const terminalSetupGuidance = getTerminalRuntimeSetupGuidance(
@@ -90,7 +73,7 @@ export default function DashboardPage() {
   );
   const dependenciesHealthy = dependenciesQuery.isSuccess && terminalRuntime?.supported === true;
   const dependenciesDetail = dependenciesQuery.isLoading
-    ? t("dashboard.dependenciesHealthLoading")
+    ? t("dashboard.statusLoading")
     : dependenciesQuery.isError || !terminalRuntime
       ? t("dashboard.dependenciesHealthUnavailable")
       : t(terminalRemediation.detailKey);
@@ -99,192 +82,227 @@ export default function DashboardPage() {
     source: "dashboard",
   });
 
-  const stats = [
+  const adapters = adaptersQuery.data?.adapters ?? [];
+  const launchableAdapterCount = adapters.filter(isAdapterLaunchable).length;
+  const adaptersHealthy = adaptersQuery.isSuccess && launchableAdapterCount > 0;
+  const adaptersDetail = adaptersQuery.isLoading
+    ? t("dashboard.statusLoading")
+    : adaptersQuery.isError
+      ? t("dashboard.activationAdapterUnavailable")
+      : launchableAdapterCount > 0
+        ? t("dashboard.adaptersHealthReady").replace("{count}", String(launchableAdapterCount))
+        : t("dashboard.activationAdapterMissing");
+
+  const runningCount = dashboardStats?.runningSessions
+    ?? sessions.filter((session) => normalizeSessionStatus(session.status) === "running").length;
+
+  const stats: { label: string; value: number; sub?: string; icon: typeof FolderOpen; href: string }[] = [
     {
-      label: "Projects",
-      labelText: t("nav.projects"),
+      label: t("nav.projects"),
       value: dashboardStats?.projects ?? 0,
       icon: FolderOpen,
       href: "/projects",
     },
     {
-      label: "Sessions",
-      labelText: t("nav.sessions"),
+      label: t("nav.sessions"),
       value: dashboardStats?.sessions ?? 0,
+      sub: t("dashboard.runningNow").replace("{count}", String(runningCount)),
       icon: TerminalSquare,
       href: "/sessions",
     },
     {
-      label: "Agents",
-      labelText: t("nav.agents"),
-      value: dashboardStats?.agents ?? 0,
-      icon: Bot,
-      href: "/projects",
-    },
-    {
-      label: "Skills",
-      labelText: t("nav.skills"),
+      label: t("nav.skills"),
       value: dashboardStats?.skills ?? 0,
       icon: Wrench,
       href: "/skills",
     },
+    {
+      label: t("nav.agents"),
+      value: dashboardStats?.agents ?? 0,
+      icon: Bot,
+      href: "/projects",
+    },
   ];
 
-  const recentSessions = (sessionsData?.sessions ?? []).slice(0, 5);
+  const recentSessions = sessions.slice(0, 6);
   const projectCount = dashboardStats?.projects ?? projects.length;
-  const sessionCount = dashboardStats?.sessions ?? sessionsData?.sessions.length ?? 0;
+  const sessionCount = dashboardStats?.sessions ?? sessions.length;
   const activationReadiness = buildActivationReadiness({
     terminalRuntime,
     dependenciesLoading: dependenciesQuery.isLoading,
     dependenciesError: dependenciesQuery.isError,
-    adapters: adaptersQuery.data?.adapters ?? [],
+    adapters,
     adaptersLoading: adaptersQuery.isLoading,
     adaptersError: adaptersQuery.isError,
     modelsHealthy: dashboardHealth?.models.healthy,
     modelsLoading: dashboardQuery.isLoading,
     modelsError: dashboardQuery.isError,
     projectCount,
-    projectConfigCompliant: configComplianceQuery.data?.compliance.status === "compliant",
-    projectConfigLoading: Boolean(firstProjectId) && configComplianceQuery.isLoading,
-    projectConfigError: Boolean(firstProjectId) && configComplianceQuery.isError,
     sessionCount,
     firstProjectId: firstProject?.id,
   });
   const showFirstRunReadiness = !activationReadiness.complete;
-  const healthCards = [
+  const doneStepCount = activationReadiness.steps.filter((step) => step.done).length;
+
+  const statusItems = [
     {
-      label: t("dashboard.gatewayHealth"),
-      detail: dashboardHealth?.gateway.message ?? t("dashboard.gatewayHealthDescription"),
-      healthy: dashboardHealth?.gateway.healthy ?? !dashboardQuery.isError,
-      icon: Activity,
-      href: "/settings",
-    },
-    {
-      label: t("dashboard.databaseHealth"),
-      detail: dashboardHealth?.database.message ?? t("dashboard.databaseHealthDescription"),
-      healthy: dashboardHealth?.database.healthy ?? !dashboardQuery.isError,
-      icon: CheckCircle2,
-      href: "/settings",
-    },
-    {
+      key: "runtime",
       label: t("dashboard.dependenciesHealth"),
       detail: dependenciesDetail,
       healthy: dependenciesHealthy,
-      icon: CheckCircle2,
       href: terminalRemediation.href,
     },
     {
-      label: t("dashboard.configHealth"),
-      detail: dashboardHealth?.projectConfig.message ?? t("dashboard.configHealthDescription"),
-      healthy: dashboardHealth?.projectConfig.healthy ?? false,
-      icon: FileCode2,
-      href: "/templates",
+      key: "adapters",
+      label: t("dashboard.adaptersHealth"),
+      detail: adaptersDetail,
+      healthy: adaptersHealthy,
+      href: "/settings",
     },
     {
+      key: "models",
       label: t("dashboard.modelHealth"),
       detail: dashboardHealth?.models.message ?? t("dashboard.modelHealthDescription"),
       healthy: dashboardHealth?.models.healthy ?? false,
-      icon: Bot,
       href: "/models",
     },
     {
+      key: "config",
+      label: t("dashboard.configHealth"),
+      detail: dashboardHealth?.projectConfig.message ?? t("dashboard.configHealthDescription"),
+      healthy: dashboardHealth?.projectConfig.healthy ?? false,
+      href: "/templates",
+    },
+    {
+      key: "sessions",
       label: t("dashboard.sessionHealth"),
       detail: dashboardHealth?.sessions.message ?? t("dashboard.sessionHealthDescription"),
       healthy: dashboardHealth?.sessions.healthy ?? false,
-      icon: TerminalSquare,
       href: "/sessions",
     },
     {
+      key: "agents",
       label: t("dashboard.agentHealth"),
       detail: dashboardHealth?.agents.message ?? t("dashboard.agentHealthDescription"),
       healthy: dashboardHealth?.agents.healthy ?? false,
-      icon: Bot,
       href: "/projects",
     },
     {
+      key: "skills",
       label: t("dashboard.skillHealth"),
       detail: dashboardHealth?.skills.message ?? t("dashboard.skillHealthDescription"),
       healthy: dashboardHealth?.skills.healthy ?? false,
-      icon: Wrench,
       href: "/skills",
     },
   ];
-  const healthGaps = healthCards.filter((card) => !card.healthy);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">{t("dashboard.title")}</h1>
-          <p className="mt-1 text-muted-foreground">
-            {t("dashboard.subtitle")}
-          </p>
+          <h1 className="text-xl font-semibold tracking-tight">{t("dashboard.title")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("dashboard.subtitle")}</p>
         </div>
-        <Button asChild variant="outline">
-          <Link href={dashboardCopilotHref}>
-            <Sparkles className="mr-2 size-4" />
-            {t("copilot.askCopilot")}
-          </Link>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+            <Link href="/sessions">
+              <Plus className="size-4" />
+              {t("projects.newSession")}
+            </Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/projects/new">{t("projects.create")}</Link>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
+            <Link href={dashboardCopilotHref}>
+              <Sparkles className="size-4" />
+              {t("copilot.askCopilot")}
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => (
-          <Card key={stat.label}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {stat.labelText}
-              </CardTitle>
-              <stat.icon className="size-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stat.value}</div>
-              <Link
-                href={stat.href}
-                className="mt-1 inline-flex items-center text-xs text-muted-foreground hover:text-foreground"
-              >
-                {t("dashboard.viewAll")} <ArrowRight className="ml-1 size-3" />
-              </Link>
-            </CardContent>
-          </Card>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {stats.map((stat, index) => (
+          <Link
+            key={stat.label}
+            href={stat.href}
+            className="group of-animate-in"
+            style={{ animationDelay: `${index * 50}ms` }}
+          >
+            <Card className="h-full transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-brand/40 group-hover:shadow-lg group-hover:shadow-brand/5">
+              <CardContent className="flex items-center gap-3 p-4">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+                  <stat.icon className="size-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-2xl font-semibold leading-none">{stat.value}</div>
+                  <div className="mt-1.5 truncate text-xs text-muted-foreground">
+                    {stat.label}
+                    {stat.sub ? <span className="text-muted-foreground/70"> · {stat.sub}</span> : null}
+                  </div>
+                </div>
+                <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-brand" />
+              </CardContent>
+            </Card>
+          </Link>
         ))}
       </div>
 
       {showFirstRunReadiness && (
-        <Card className="border-primary/30 bg-muted/20">
-          <CardHeader>
-            <div className="flex flex-wrap items-start justify-between gap-3">
+        <Card className="of-animate-in border-brand/30 bg-brand/5">
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <CardTitle className="text-base">{t("dashboard.firstRunTitle")}</CardTitle>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {t("dashboard.firstRunDescription")}
                 </p>
               </div>
-              <Badge variant={activationReadiness.complete ? "secondary" : "outline"}>
-                {activationReadiness.complete
-                  ? t("dashboard.firstRunReady")
-                  : t("dashboard.firstRunBlocked")}
-              </Badge>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-brand transition-all duration-500"
+                    style={{
+                      width: `${Math.round((doneStepCount / activationReadiness.steps.length) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <span className="tabular-nums">
+                  {doneStepCount}/{activationReadiness.steps.length}
+                </span>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {activationReadiness.steps.map((step) => (
-                <FirstRunStep
+                <div
                   key={step.id}
-                  label={t(step.labelKey)}
-                  done={step.done}
-                  detail={t(step.detailKey)}
+                  className="flex items-start gap-2.5 rounded-md border border-border/70 bg-background/60 p-3"
                 >
-                  {step.id === "runtime" && showRuntimeCommands && (
-                    <RuntimeSetupCommands guidance={terminalSetupGuidance} />
+                  {step.done ? (
+                    <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" />
+                  ) : (
+                    <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground/40" />
                   )}
-                </FirstRunStep>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t(step.labelKey)}</div>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                      {t(step.detailKey)}
+                    </p>
+                    {step.id === "runtime" && showRuntimeCommands && (
+                      <div className="mt-2">
+                        <RuntimeSetupCommands guidance={terminalSetupGuidance} />
+                      </div>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button asChild size="sm">
+              <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
                 <Link href={activationReadiness.primaryAction.href}>
                   {t(activationReadiness.primaryAction.labelKey)}
                 </Link>
@@ -299,155 +317,129 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold">{t("dashboard.health")}</h2>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {healthCards.map((card) => (
-            <Link key={card.label} href={card.href}>
-              <Card className="h-full transition-colors hover:border-foreground/30">
-                <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-                  <div>
-                    <CardTitle className="text-sm">{card.label}</CardTitle>
-                    <p className="mt-1 text-xs text-muted-foreground">{card.detail}</p>
-                  </div>
-                  <card.icon className="size-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <Badge variant={card.healthy ? "secondary" : "destructive"}>
-                    {card.healthy ? t("dashboard.healthy") : t("dashboard.needsSetup")}
-                  </Badge>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      {/* Active Sessions */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{t("dashboard.activeSessions")}</h2>
-          <Link href="/sessions">
-            <Button variant="ghost" size="sm">
-              {t("dashboard.viewAll")}
+      <div className="grid gap-6 xl:grid-cols-5">
+        {/* Recent sessions */}
+        <section className="space-y-3 xl:col-span-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">{t("dashboard.recentSessions")}</h2>
+            <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+              <Link href="/sessions">{t("dashboard.viewAll")}</Link>
             </Button>
-          </Link>
-        </div>
-        {recentSessions.length === 0 ? (
+          </div>
+          {recentSessions.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+                <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                  <TerminalSquare className="size-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-medium">{t("dashboard.noSessions")}</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("dashboard.emptySessionsDescription")}
+                  </p>
+                </div>
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/sessions">
+                    <Plus className="size-4" />
+                    {t("projects.newSession")}
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+              {recentSessions.map((session, index) => (
+                <Link
+                  key={session.id}
+                  href={`/sessions/${session.id}`}
+                  className="group flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40"
+                  style={{ animationDelay: `${index * 40}ms` }}
+                >
+                  <SessionStatusDot status={session.status} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">
+                      {session.name || session.tmuxName || session.id}
+                    </div>
+                    <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {session.projectName ?? "—"}
+                    </div>
+                  </div>
+                  <CliBrandChip aiTool={session.aiTool} />
+                  <SessionStatusText status={session.status} />
+                  <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-brand" />
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* System status */}
+        <section className="space-y-3 xl:col-span-2">
+          <h2 className="text-sm font-semibold">{t("dashboard.systemStatus")}</h2>
           <Card>
-            <CardContent className="py-8 text-center text-sm text-muted-foreground">
-              {t("dashboard.noSessions")}
+            <CardContent className="space-y-0.5 p-2">
+              {statusItems.map((item) => (
+                <Link
+                  key={item.key}
+                  href={item.href}
+                  className="flex items-center gap-3 rounded-md px-2.5 py-2 transition-colors hover:bg-muted/40"
+                >
+                  <span
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full",
+                      item.healthy ? "bg-emerald-400" : "bg-amber-400"
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm">{item.label}</div>
+                    <div className="truncate text-xs text-muted-foreground">{item.detail}</div>
+                  </div>
+                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/30" />
+                </Link>
+              ))}
             </CardContent>
           </Card>
-        ) : (
-          <Card>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("common.name")}</TableHead>
-                  <TableHead>{t("common.status")}</TableHead>
-                  <TableHead>{t("common.aiTool")}</TableHead>
-                  <TableHead className="text-right">{t("projects.action")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentSessions.map((session) => (
-                  <TableRow key={session.id}>
-                    <TableCell className="font-medium">
-                      {session.name || session.tmuxName || session.id}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={session.status} />
-                    </TableCell>
-                    <TableCell>{session.aiTool ?? "—"}</TableCell>
-                    <TableCell className="text-right">
-                      <Link href={`/sessions/${session.id}`}>
-                        <Button variant="ghost" size="sm">
-                          {t("common.connect")}
-                        </Button>
-                      </Link>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Card>
-        )}
-      </div>
-
-      {/* Quick Actions */}
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold">{t("dashboard.quickActions")}</h2>
-        <div className="flex flex-wrap gap-3">
-          {healthGaps.slice(0, 4).map((gap) => (
-            <Link key={gap.label} href={gap.href}>
-              <Button variant="outline">
-                <AlertTriangle className="mr-2 size-4" />
-                {gap.label}
-              </Button>
-            </Link>
-          ))}
-          <Link href="/projects/new">
-            <Button>
-              <Plus className="mr-2 size-4" />
-              {t("projects.create")}
-            </Button>
-          </Link>
-          <Link href="/sessions">
-            <Button variant="outline">
-              <TerminalSquare className="mr-2 size-4" />
-              {t("projects.newSession")}
-            </Button>
-          </Link>
-        </div>
+        </section>
       </div>
     </div>
   );
 }
 
-function FirstRunStep({
-  label,
-  detail,
-  done,
-  children,
-}: {
-  label: string;
-  detail: string;
-  done: boolean;
-  children?: ReactNode;
-}) {
-  const { t } = useLanguage();
-
+function SessionStatusDot({ status }: { status: string }) {
+  const normalized = normalizeSessionStatus(status);
   return (
-    <div className="min-w-0 rounded-md border border-border bg-background/70 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-sm font-medium">{label}</div>
-        <Badge variant={done ? "secondary" : "destructive"}>
-          {done ? t("dashboard.firstRunReady") : t("dashboard.firstRunBlocked")}
-        </Badge>
-      </div>
-      <p className="mt-2 text-sm text-muted-foreground">{detail}</p>
-      {children && <div className="mt-3">{children}</div>}
-    </div>
+    <span
+      className={cn(
+        "size-2 shrink-0 rounded-full",
+        normalized === "running"
+          ? "animate-pulse bg-emerald-400"
+          : normalized === "error"
+            ? "bg-red-400"
+            : "bg-muted-foreground/40"
+      )}
+    />
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function SessionStatusText({ status }: { status: string }) {
   const { t } = useLanguage();
-  const normalizedStatus = normalizeSessionStatus(status);
-  const variant =
-    normalizedStatus === "running"
-      ? "default"
-      : normalizedStatus === "error"
-        ? "destructive"
-        : "secondary";
+  const normalized = normalizeSessionStatus(status);
   return (
-    <Badge variant={variant as "default" | "destructive" | "secondary"}>
-      {normalizedStatus === "running"
+    <span
+      className={cn(
+        "shrink-0 text-xs",
+        normalized === "running"
+          ? "text-emerald-400"
+          : normalized === "error"
+            ? "text-red-400"
+            : "text-muted-foreground"
+      )}
+    >
+      {normalized === "running"
         ? t("sessions.running")
-        : normalizedStatus === "error"
+        : normalized === "error"
           ? t("sessions.error")
           : t("sessions.stopped")}
-    </Badge>
+    </span>
   );
 }

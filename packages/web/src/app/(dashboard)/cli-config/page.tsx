@@ -2,12 +2,23 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, Eye, EyeOff, Plus, Save, Trash2 } from "lucide-react";
+import {
+  ArrowUpRight,
+  Boxes,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Plus,
+  Save,
+  Server,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CliBrandChip } from "@/components/cli-brand-chip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -32,13 +43,9 @@ import {
   type RuntimeAdapterId,
 } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
+import { cn } from "@/lib/utils";
 
-const cliAdapters: Array<{ id: RuntimeAdapterId; label: string }> = [
-  { id: "claude", label: "Claude Code" },
-  { id: "opencode", label: "OpenCode" },
-  { id: "codex", label: "Codex CLI" },
-  { id: "kimi", label: "Kimi Code" },
-];
+const cliAdapters: RuntimeAdapterId[] = ["claude", "opencode", "codex", "kimi"];
 
 interface ProviderFormState {
   id: string;
@@ -182,154 +189,191 @@ export default function CliConfigPage() {
   const showEnvKeyField = adapter === "codex";
 
   return (
-    <div className="min-h-full space-y-5 p-4 lg:p-6">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{t("cliConfig.title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("cliConfig.description")}</p>
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">{t("cliConfig.title")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("cliConfig.description")}</p>
+        </div>
+        <Button asChild size="sm" variant="outline">
+          <Link href="/models">
+            {t("cliConfig.openModelCenter")}
+            <ArrowUpRight className="size-4" />
+          </Link>
+        </Button>
       </div>
 
-      <Card>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
-          <div className="min-w-0 space-y-0.5">
-            <p className="text-sm font-medium">{t("cliConfig.manageInModelCenter")}</p>
-            <p className="text-xs text-muted-foreground">{t("cliConfig.manageInModelCenterDescription")}</p>
+      <Card className="of-animate-in">
+        <CardContent className="flex items-center gap-3 p-4">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+            <KeyRound className="size-4" />
           </div>
-          <Button asChild variant="outline" size="sm">
-            <Link href="/models">
-              <ArrowUpRight className="size-4" />
-              {t("cliConfig.openModelCenter")}
-            </Link>
-          </Button>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium">{t("cliConfig.manageInModelCenter")}</div>
+            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+              {t("cliConfig.manageInModelCenterDescription")}
+            </p>
+          </div>
         </CardContent>
       </Card>
 
-      <Tabs value={adapter} onValueChange={(value) => setAdapter(value as RuntimeAdapterId)}>
+      <Tabs
+        value={adapter}
+        onValueChange={(value) => setAdapter(value as RuntimeAdapterId)}
+        className="of-animate-in"
+      >
         <TabsList>
-          {cliAdapters.map((item) => (
-            <TabsTrigger key={item.id} value={item.id}>
-              {item.label}
+          {cliAdapters.map((adapterId) => (
+            <TabsTrigger key={adapterId} value={adapterId}>
+              <CliBrandChip aiTool={adapterId} />
             </TabsTrigger>
           ))}
         </TabsList>
       </Tabs>
 
       {isLoading ? (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+        <Card className="of-animate-in">
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("common.loading")}
           </CardContent>
         </Card>
       ) : error || !snapshot ? (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-destructive">
+        <Card className="of-animate-in">
+          <CardContent className="py-10 text-center text-sm text-destructive">
             {error instanceof Error ? error.message : t("cliConfig.loadFailed")}
           </CardContent>
         </Card>
       ) : (
         <>
-          <Card>
-            <CardContent className="grid gap-2 py-4 text-sm md:grid-cols-2">
-              <div className="space-y-1">
+          <Card className="of-animate-in" style={{ animationDelay: "40ms" }}>
+            <CardContent className="grid gap-3 p-4 md:grid-cols-2">
+              <div className="space-y-1.5">
                 <div className="text-xs text-muted-foreground">{t("cliConfig.configRoot")}</div>
-                <div className="break-all font-mono text-xs">{snapshot.configRoot}</div>
+                <div className="break-all rounded-md bg-muted/40 px-2.5 py-1.5 font-mono text-xs">
+                  {snapshot.configRoot}
+                </div>
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <div className="text-xs text-muted-foreground">{t("cliConfig.mainConfigFile")}</div>
-                <div className="break-all font-mono text-xs">
+                <div className="break-all rounded-md bg-muted/40 px-2.5 py-1.5 font-mono text-xs">
                   {snapshot.configRoot}/{snapshot.configFile}
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{t("cliConfig.providers")}</CardTitle>
+          <Card className="of-animate-in" style={{ animationDelay: "80ms" }}>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold">{t("cliConfig.providers")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {adapter === "claude" && (
-                <p className="text-xs text-muted-foreground">{t("cliConfig.claudeEndpointNote")}</p>
+                <p className="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                  {t("cliConfig.claudeEndpointNote")}
+                </p>
               )}
               {adapter === "codex" && (
-                <p className="text-xs text-muted-foreground">{t("cliConfig.codexEnvKeyNote")}</p>
+                <p className="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                  {t("cliConfig.codexEnvKeyNote")}
+                </p>
               )}
               {providers.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t("cliConfig.noProviders")}</p>
+                <div className="flex flex-col items-center gap-3 py-8 text-center">
+                  <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                    <Server className="size-5" />
+                  </div>
+                  <div className="text-sm font-medium">{t("cliConfig.noProviders")}</div>
+                </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("cliConfig.providerId")}</TableHead>
-                      <TableHead>{t("cliConfig.protocol")}</TableHead>
-                      <TableHead>{t("cliConfig.baseUrl")}</TableHead>
-                      <TableHead>{t("cliConfig.apiKey")}</TableHead>
-                      <TableHead>{t("common.status")}</TableHead>
-                      <TableHead className="text-right">{t("common.actions")}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {providers.map((provider) => (
-                      <TableRow key={provider.id}>
-                        <TableCell className="font-medium">
-                          {provider.name}
-                          <div className="font-mono text-xs text-muted-foreground">{provider.id}</div>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{provider.protocol || "—"}</TableCell>
-                        <TableCell className="max-w-56 truncate font-mono text-xs">
-                          {provider.baseUrl || "—"}
-                        </TableCell>
-                        <TableCell>
-                          {provider.envKey ? (
-                            <span className="font-mono text-xs">{provider.envKey}</span>
-                          ) : (
-                            <Badge variant={provider.hasApiKey ? "default" : "secondary"}>
-                              {provider.hasApiKey ? t("cliConfig.hasKey") : t("cliConfig.noKey")}
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {provider.isActive && <Badge>{t("cliConfig.active")}</Badge>}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() =>
-                                setProviderForm({
-                                  id: provider.id,
-                                  name: provider.name,
-                                  protocol: provider.protocol,
-                                  baseUrl: provider.baseUrl,
-                                  apiKey: "",
-                                  envKey: provider.envKey ?? "",
-                                })
-                              }
-                            >
-                              {t("common.edit")}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive"
-                              onClick={() => {
-                                if (window.confirm(t("cliConfig.deleteProviderConfirm"))) {
-                                  removeProviderMutation.mutate(provider.id);
-                                }
-                              }}
-                            >
-                              <Trash2 className="size-4" />
-                              <span className="sr-only">{t("common.delete")}</span>
-                            </Button>
-                          </div>
-                        </TableCell>
+                <div className="overflow-hidden rounded-lg border border-border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t("cliConfig.providerId")}</TableHead>
+                        <TableHead>{t("cliConfig.protocol")}</TableHead>
+                        <TableHead>{t("cliConfig.baseUrl")}</TableHead>
+                        <TableHead>{t("cliConfig.apiKey")}</TableHead>
+                        <TableHead>{t("common.status")}</TableHead>
+                        <TableHead className="text-right">{t("common.actions")}</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {providers.map((provider) => (
+                        <TableRow key={provider.id}>
+                          <TableCell className="font-medium">
+                            {provider.name}
+                            <div className="font-mono text-xs text-muted-foreground">{provider.id}</div>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{provider.protocol || "—"}</TableCell>
+                          <TableCell className="max-w-56 truncate font-mono text-xs">
+                            {provider.baseUrl || "—"}
+                          </TableCell>
+                          <TableCell>
+                            {provider.envKey ? (
+                              <span className="font-mono text-xs">{provider.envKey}</span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <span
+                                  className={cn(
+                                    "size-1.5 shrink-0 rounded-full",
+                                    provider.hasApiKey ? "bg-emerald-400" : "bg-amber-400"
+                                  )}
+                                />
+                                {provider.hasApiKey ? t("cliConfig.hasKey") : t("cliConfig.noKey")}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {provider.isActive && (
+                              <Badge
+                                variant="secondary"
+                                className="border-brand/30 bg-brand/10 text-brand"
+                              >
+                                {t("cliConfig.active")}
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  setProviderForm({
+                                    id: provider.id,
+                                    name: provider.name,
+                                    protocol: provider.protocol,
+                                    baseUrl: provider.baseUrl,
+                                    apiKey: "",
+                                    envKey: provider.envKey ?? "",
+                                  })
+                                }
+                              >
+                                {t("common.edit")}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive hover:bg-destructive/10"
+                                onClick={() => {
+                                  if (window.confirm(t("cliConfig.deleteProviderConfirm"))) {
+                                    removeProviderMutation.mutate(provider.id);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="size-4" />
+                                <span className="sr-only">{t("common.delete")}</span>
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
 
-              <div className="grid gap-3 rounded-md border border-border p-3 md:grid-cols-3">
+              <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-3 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="provider-id">{t("cliConfig.providerId")}</Label>
                   <Input
@@ -411,13 +455,14 @@ export default function CliConfigPage() {
                 )}
                 <div className="flex items-end">
                   <Button
+                    size="sm"
                     onClick={() => providerMutation.mutate()}
                     disabled={
                       providerMutation.isPending ||
                       (!providerIdFixed && !providerForm.id.trim())
                     }
                   >
-                    <Plus className="mr-2 size-4" />
+                    <Plus className="size-4" />
                     {providerMutation.isPending
                       ? t("common.saving")
                       : providers.some((provider) => provider.id === (providerIdFixed ? "anthropic" : providerForm.id.trim()))
@@ -444,50 +489,57 @@ export default function CliConfigPage() {
           </Card>
 
           {adapter === "kimi" && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">{t("cliConfig.models")}</CardTitle>
+            <Card className="of-animate-in" style={{ animationDelay: "120ms" }}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold">{t("cliConfig.models")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 {models.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">{t("cliConfig.noModels")}</p>
+                  <div className="flex flex-col items-center gap-3 py-8 text-center">
+                    <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                      <Boxes className="size-5" />
+                    </div>
+                    <div className="text-sm font-medium">{t("cliConfig.noModels")}</div>
+                  </div>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("cliConfig.modelAlias")}</TableHead>
-                        <TableHead>{t("cliConfig.providerId")}</TableHead>
-                        <TableHead>{t("cliConfig.modelId")}</TableHead>
-                        <TableHead className="text-right">{t("common.actions")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {models.map((model) => (
-                        <TableRow key={model.alias}>
-                          <TableCell className="font-mono text-xs">{model.alias}</TableCell>
-                          <TableCell className="font-mono text-xs">{model.provider}</TableCell>
-                          <TableCell className="font-mono text-xs">{model.modelId}</TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive"
-                              onClick={() => {
-                                if (window.confirm(t("cliConfig.deleteModelConfirm"))) {
-                                  removeModelMutation.mutate(model.alias);
-                                }
-                              }}
-                            >
-                              <Trash2 className="size-4" />
-                              <span className="sr-only">{t("common.delete")}</span>
-                            </Button>
-                          </TableCell>
+                  <div className="overflow-hidden rounded-lg border border-border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{t("cliConfig.modelAlias")}</TableHead>
+                          <TableHead>{t("cliConfig.providerId")}</TableHead>
+                          <TableHead>{t("cliConfig.modelId")}</TableHead>
+                          <TableHead className="text-right">{t("common.actions")}</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {models.map((model) => (
+                          <TableRow key={model.alias}>
+                            <TableCell className="font-mono text-xs">{model.alias}</TableCell>
+                            <TableCell className="font-mono text-xs">{model.provider}</TableCell>
+                            <TableCell className="font-mono text-xs">{model.modelId}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive hover:bg-destructive/10"
+                                onClick={() => {
+                                  if (window.confirm(t("cliConfig.deleteModelConfirm"))) {
+                                    removeModelMutation.mutate(model.alias);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="size-4" />
+                                <span className="sr-only">{t("common.delete")}</span>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
-                <div className="grid gap-3 rounded-md border border-border p-3 md:grid-cols-4">
+                <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-3 md:grid-cols-4">
                   <div className="space-y-2">
                     <Label htmlFor="model-alias">{t("cliConfig.modelAlias")}</Label>
                     <Input
@@ -524,6 +576,7 @@ export default function CliConfigPage() {
                   </div>
                   <div className="flex items-end">
                     <Button
+                      size="sm"
                       onClick={() => modelMutation.mutate()}
                       disabled={
                         modelMutation.isPending ||
@@ -532,7 +585,7 @@ export default function CliConfigPage() {
                         !modelForm.modelId.trim()
                       }
                     >
-                      <Plus className="mr-2 size-4" />
+                      <Plus className="size-4" />
                       {modelMutation.isPending ? t("common.saving") : t("cliConfig.addModel")}
                     </Button>
                   </div>
@@ -548,9 +601,9 @@ export default function CliConfigPage() {
             </Card>
           )}
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{t("cliConfig.defaultModel")}</CardTitle>
+          <Card className="of-animate-in" style={{ animationDelay: "160ms" }}>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold">{t("cliConfig.defaultModel")}</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-3">
               <div className="space-y-2 md:col-span-2">
@@ -598,10 +651,11 @@ export default function CliConfigPage() {
               )}
               <div className="flex items-end">
                 <Button
+                  size="sm"
                   onClick={() => defaultModelMutation.mutate()}
                   disabled={defaultModelMutation.isPending || !defaultModelInput.trim()}
                 >
-                  <Save className="mr-2 size-4" />
+                  <Save className="size-4" />
                   {defaultModelMutation.isPending ? t("common.saving") : t("common.save")}
                 </Button>
               </div>
@@ -615,20 +669,20 @@ export default function CliConfigPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between gap-3 text-base">
-                <span>{t("cliConfig.rawEditor")}</span>
+          <Card className="of-animate-in" style={{ animationDelay: "200ms" }}>
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle className="text-sm font-semibold">{t("cliConfig.rawEditor")}</CardTitle>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => revealFileMutation.mutate(!fileRevealed)}
                   disabled={!selectedFile?.exists || revealFileMutation.isPending}
                 >
-                  {fileRevealed ? <EyeOff className="mr-2 size-4" /> : <Eye className="mr-2 size-4" />}
+                  {fileRevealed ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                   {fileRevealed ? t("cliConfig.hideContent") : t("cliConfig.revealContent")}
                 </Button>
-              </CardTitle>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-2">
@@ -655,14 +709,18 @@ export default function CliConfigPage() {
               />
               <div className="flex items-center gap-3">
                 <Button
+                  size="sm"
                   onClick={() => saveFileMutation.mutate()}
                   disabled={saveFileMutation.isPending || !selectedFilePath}
                 >
-                  <Save className="mr-2 size-4" />
+                  <Save className="size-4" />
                   {saveFileMutation.isPending ? t("common.saving") : t("common.save")}
                 </Button>
                 {saveFileMutation.isSuccess && !saveFileMutation.isPending && (
-                  <span className="text-xs text-muted-foreground">{t("cliConfig.saved")}</span>
+                  <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="size-1.5 rounded-full bg-emerald-400" />
+                    {t("cliConfig.saved")}
+                  </span>
                 )}
               </div>
               {saveFileMutation.isError && (

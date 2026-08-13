@@ -5,11 +5,12 @@ import type { UIEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, FileCode2, FileText, Globe2, History, Play, Plus, Power, Save, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Bot, FileCode2, FileText, Globe2, History, ListOrdered, Plus, Power, Save, ShieldCheck, Sparkles, TerminalSquare, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CliBrandChip } from "@/components/cli-brand-chip";
 import { ProjectManagerPanel } from "@/components/projects/ProjectManagerPanel";
 import { ConfigSyncPanel, type ConfigSyncPanelHandle } from "@/components/projects/ConfigSyncPanel";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
@@ -17,14 +18,6 @@ import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPan
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   getProject,
   getProjectAgentSequence,
@@ -65,6 +58,7 @@ import {
 import { useLanguage } from "@/hooks/use-language";
 import { buildCopilotLaunchHref } from "@/lib/copilot";
 import { activityFiltersForProject } from "@/lib/snapshot-filters";
+import { normalizeSessionStatus } from "@/lib/session-status";
 import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highlight";
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
@@ -356,189 +350,231 @@ export default function ProjectDetailPage() {
     });
   };
 
+  const projectStats = [
+    {
+      label: t("nav.sessions"),
+      value: projectSessions.length,
+      sub: t("dashboard.runningNow").replace("{count}", String(runningSessionCount)),
+      icon: TerminalSquare,
+    },
+    {
+      label: t("nav.agents"),
+      value: projectAgents.length,
+      icon: Bot,
+    },
+    {
+      label: t("nav.skills"),
+      value: enabledSkillCount,
+      icon: Wrench,
+    },
+  ];
+
   return (
-    <div className="min-h-full space-y-5 bg-[linear-gradient(180deg,rgba(15,23,42,0.24),transparent_22%)] p-4 lg:p-6">
-      <Button variant="ghost" size="sm" onClick={() => router.push("/projects")}>
-        <ArrowLeft className="mr-2 size-4" />
-        {t("projects.back")}
-      </Button>
+    <div className="mx-auto max-w-7xl space-y-6 p-6">
+      <div className="of-animate-in">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-2 text-muted-foreground"
+          onClick={() => router.push("/projects")}
+        >
+          <ArrowLeft className="size-4" />
+          {t("projects.back")}
+        </Button>
+      </div>
 
       {projectLoading ? (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+        <Card className="of-animate-in">
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("projects.loadingOne")}
           </CardContent>
         </Card>
       ) : !project ? (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+        <Card className="of-animate-in">
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("projects.notFound")}
           </CardContent>
         </Card>
       ) : (
         <>
-          <Card className="overflow-hidden border-border/70 bg-card/80 shadow-sm">
-            <CardContent className="p-0">
-              <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
-                <div className="space-y-5 p-5">
-                  <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.22em] text-muted-foreground">
-                    <span>Project Control</span>
-                    <span className="h-px w-8 bg-border" />
-                    {project.status && <Badge variant="outline">{project.status}</Badge>}
-                  </div>
-                  <div className="space-y-2">
-                    <h1 className="break-words text-2xl font-semibold tracking-tight">{project.name}</h1>
-                    <p className="break-all font-mono text-xs text-muted-foreground">
-                      {project.path ?? project.rootPath}
-                    </p>
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <ProjectStat label={t("nav.sessions")} value={projectSessions.length} />
-                    <ProjectStat label={t("nav.agents")} value={projectAgents.length} />
-                    <ProjectStat label={t("nav.skills")} value={enabledSkillIds.size} />
-                  </div>
-                </div>
-                <div className="border-t border-border/70 bg-muted/20 p-5 lg:border-l lg:border-t-0">
-                  <div className="flex flex-col gap-1.5">
-                    <Button
-                      size="sm"
-                      className="justify-start"
-                      onClick={() => createSessionMutation.mutate()}
-                      disabled={cannotCreateSession}
-                    >
-                      <Plus className="mr-2 size-4" />
-                      {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
-                    </Button>
-                    <Button asChild variant="outline" size="sm" className="justify-start">
-                      <Link href={projectCopilotHref}>
-                        <Sparkles className="mr-2 size-4" />
-                        {t("copilot.askCopilot")}
-                      </Link>
-                    </Button>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <Button asChild variant="outline" size="sm">
-                        <Link href={`/history?projectId=${project.id}`}>
-                          <History className="mr-2 size-4" />
-                          {t("nav.history")}
-                        </Link>
-                      </Button>
-                      {!isUntrackedTemplate && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => configSyncRef.current?.checkCompliance()}
-                          disabled={syncPending.compliance}
-                        >
-                          <ShieldCheck className="mr-2 size-4" />
-                          {syncPending.compliance ? t("projects.checkingCompliance") : t("projects.checkCompliance")}
-                        </Button>
-                      )}
-                    </div>
-                    {!isUntrackedTemplate && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="justify-start"
-                        onClick={() => configSyncRef.current?.preview()}
-                        disabled={syncPending.preview}
-                      >
-                        <FileCode2 className="mr-2 size-4" />
-                        {syncPending.preview ? t("projects.generating") : t("projects.previewConfig")}
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="justify-start text-destructive"
-                      onClick={() => {
-                        if (window.confirm(t("projects.deleteConfirm"))) {
-                          deleteMutation.mutate();
-                        }
-                      }}
-                      disabled={deleteMutation.isPending}
-                    >
-                      <Trash2 className="mr-2 size-4" />
-                      {deleteMutation.isPending ? t("projects.deleting") : t("projects.deleteRecord")}
-                    </Button>
-                  </div>
-                </div>
+          <div className="flex flex-wrap items-start justify-between gap-3 of-animate-in">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="break-words text-xl font-semibold tracking-tight">{project.name}</h1>
+                {project.status && <Badge variant="outline">{project.status}</Badge>}
               </div>
+              <p className="mt-1 break-all font-mono text-sm text-muted-foreground">
+                {project.path ?? project.rootPath}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                className="bg-brand text-brand-foreground hover:bg-brand/90"
+                onClick={() => createSessionMutation.mutate()}
+                disabled={cannotCreateSession}
+              >
+                <Plus className="size-4" />
+                {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
+              </Button>
+              <Button asChild size="sm" variant="outline">
+                <Link href={projectCopilotHref}>
+                  <Sparkles className="size-4" />
+                  {t("copilot.askCopilot")}
+                </Link>
+              </Button>
+              {!isUntrackedTemplate && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => configSyncRef.current?.checkCompliance()}
+                  disabled={syncPending.compliance}
+                >
+                  <ShieldCheck className="size-4" />
+                  {syncPending.compliance ? t("projects.checkingCompliance") : t("projects.checkCompliance")}
+                </Button>
+              )}
+              {!isUntrackedTemplate && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => configSyncRef.current?.preview()}
+                  disabled={syncPending.preview}
+                >
+                  <FileCode2 className="size-4" />
+                  {syncPending.preview ? t("projects.generating") : t("projects.previewConfig")}
+                </Button>
+              )}
+              <Button asChild size="sm" variant="ghost">
+                <Link href={`/history?projectId=${project.id}`}>
+                  <History className="size-4" />
+                  {t("nav.history")}
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => {
+                  if (window.confirm(t("projects.deleteConfirm"))) {
+                    deleteMutation.mutate();
+                  }
+                }}
+                disabled={deleteMutation.isPending}
+              >
+                <Trash2 className="size-4" />
+                {deleteMutation.isPending ? t("projects.deleting") : t("projects.deleteRecord")}
+              </Button>
+            </div>
+          </div>
 
-              <div className="space-y-3 border-t border-border/70 p-5">
-                <div>
-                  <Label className="text-sm font-medium" htmlFor="runtime-adapter">
-                    {t("projects.launchOptions")}
-                  </Label>
-                  <select
-                    id="runtime-adapter"
-                    className="mt-2 h-9 w-full max-w-xl rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
-                    value={selectedRuntimeAdapter}
-                    onChange={(event) => setSelectedRuntimeAdapter(event.target.value as RuntimeAdapterId)}
-                    disabled={adapterDiscoveryLoading || runtimeAdapters.length === 0}
-                  >
-                    <option value="">
-                      {adapterDiscoveryLoading
-                        ? t("projects.loadingRuntimeCli")
-                        : t("projects.selectRuntimeCli")}
-                    </option>
-                    {runtimeAdapters.map((adapter) => (
-                      <option
-                        key={adapter.id}
-                        value={adapter.id}
-                        disabled={!isAdapterLaunchable(adapter)}
-                      >
-                        {adapter.label}
-                        {!adapter.available
-                          ? ` (${t("projects.runtimeUnavailable")})`
-                          : !adapter.launchEnabled
-                            ? ` (${t("projects.runtimeLaunchDisabled")})`
-                            : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {launchableRuntimeAdapters.length === 0 && !adapterDiscoveryLoading ? (
-                  <div className="space-y-2">
-                    <p className="flex items-center gap-1 text-xs text-destructive">
-                      <AlertTriangle className="size-3.5" />
-                      {!dependenciesLoading && terminalSetupGuidance.blocked
-                        ? t(terminalSetupGuidance.titleKey)
-                        : t("projects.noLaunchableRuntimeCli")}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {!dependenciesLoading && terminalSetupGuidance.blocked
-                        ? t(terminalSetupGuidance.descriptionKey)
-                        : t("projects.runtimeCliRecoveryDescription")}
-                    </p>
-                    {!dependenciesLoading && terminalSetupGuidance.blocked && (
-                      <RuntimeSetupCommands guidance={terminalSetupGuidance} />
-                    )}
-                    <div className="flex flex-wrap gap-2">
-                      <Button asChild variant="outline" size="sm">
-                        <Link href="/settings">{t("projects.openSettings")}</Link>
-                      </Button>
-                      <Button asChild variant="ghost" size="sm">
-                        <Link href={projectCopilotHref}>{t("projects.askCopilotReadiness")}</Link>
-                      </Button>
+          {/* Project stats */}
+          <div className="grid grid-cols-3 gap-3">
+            {projectStats.map((stat, index) => (
+              <Card
+                key={stat.label}
+                className="of-animate-in"
+                style={{ animationDelay: `${index * 50}ms` }}
+              >
+                <CardContent className="flex items-center gap-3 p-4">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+                    <stat.icon className="size-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-2xl font-semibold leading-none tabular-nums">{stat.value}</div>
+                    <div className="mt-1.5 truncate text-xs text-muted-foreground">
+                      {stat.label}
+                      {stat.sub ? <span className="text-muted-foreground/70"> · {stat.sub}</span> : null}
                     </div>
                   </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    {t("projects.runtimeCliDescription")}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Launch options */}
+          <Card className="of-animate-in" style={{ animationDelay: "150ms" }}>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold">
+                <Label htmlFor="runtime-adapter" className="cursor-pointer">
+                  {t("projects.launchOptions")}
+                </Label>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <select
+                id="runtime-adapter"
+                className="h-9 w-full max-w-xl rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
+                value={selectedRuntimeAdapter}
+                onChange={(event) => setSelectedRuntimeAdapter(event.target.value as RuntimeAdapterId)}
+                disabled={adapterDiscoveryLoading || runtimeAdapters.length === 0}
+              >
+                <option value="">
+                  {adapterDiscoveryLoading
+                    ? t("projects.loadingRuntimeCli")
+                    : t("projects.selectRuntimeCli")}
+                </option>
+                {runtimeAdapters.map((adapter) => (
+                  <option
+                    key={adapter.id}
+                    value={adapter.id}
+                    disabled={!isAdapterLaunchable(adapter)}
+                  >
+                    {adapter.label}
+                    {!adapter.available
+                      ? ` (${t("projects.runtimeUnavailable")})`
+                      : !adapter.launchEnabled
+                        ? ` (${t("projects.runtimeLaunchDisabled")})`
+                        : ""}
+                  </option>
+                ))}
+              </select>
+              {launchableRuntimeAdapters.length === 0 && !adapterDiscoveryLoading ? (
+                <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
+                  <p className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+                    <AlertTriangle className="size-3.5" />
+                    {!dependenciesLoading && terminalSetupGuidance.blocked
+                      ? t(terminalSetupGuidance.titleKey)
+                      : t("projects.noLaunchableRuntimeCli")}
                   </p>
-                )}
-              </div>
+                  <p className="text-xs text-muted-foreground">
+                    {!dependenciesLoading && terminalSetupGuidance.blocked
+                      ? t(terminalSetupGuidance.descriptionKey)
+                      : t("projects.runtimeCliRecoveryDescription")}
+                  </p>
+                  {!dependenciesLoading && terminalSetupGuidance.blocked && (
+                    <RuntimeSetupCommands guidance={terminalSetupGuidance} />
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <Button asChild variant="outline" size="sm">
+                      <Link href="/settings">{t("projects.openSettings")}</Link>
+                    </Button>
+                    <Button asChild variant="ghost" size="sm">
+                      <Link href={projectCopilotHref}>{t("projects.askCopilotReadiness")}</Link>
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {t("projects.runtimeCliDescription")}
+                </p>
+              )}
             </CardContent>
           </Card>
 
           {configNeedsReview && !isUntrackedTemplate && (
-            <Card className="border-amber-500/50 bg-amber-500/10">
+            <Card className="of-animate-in border-amber-500/40 bg-amber-500/10">
               <CardContent className="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between">
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">{t("projects.configNeedsReviewTitle")}</div>
-                  <p className="text-sm text-muted-foreground">
-                    {t("projects.configNeedsReviewDescription")}
-                  </p>
+                <div className="flex items-start gap-3">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-400">
+                    <AlertTriangle className="size-4" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium">{t("projects.configNeedsReviewTitle")}</div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t("projects.configNeedsReviewDescription")}
+                    </p>
+                  </div>
                 </div>
                 <Button
                   variant="outline"
@@ -546,7 +582,7 @@ export default function ProjectDetailPage() {
                   onClick={() => configSyncRef.current?.preview()}
                   disabled={syncPending.preview}
                 >
-                  <FileCode2 className="mr-2 size-4" />
+                  <FileCode2 className="size-4" />
                   {syncPending.preview
                     ? t("projects.generating")
                     : t("projects.reviewConfig")}
@@ -595,53 +631,44 @@ export default function ProjectDetailPage() {
             <TabsContent value="sessions" className="mt-4">
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
                 {projectSessions.length === 0 ? (
-                  <Card>
-                    <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                      {t("projects.noSessions")}
+                  <Card className="of-animate-in">
+                    <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+                      <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                        <TerminalSquare className="size-5" />
+                      </div>
+                      <div className="text-sm font-medium">{t("projects.noSessions")}</div>
+                      <Button
+                        size="sm"
+                        className="bg-brand text-brand-foreground hover:bg-brand/90"
+                        onClick={() => createSessionMutation.mutate()}
+                        disabled={cannotCreateSession}
+                      >
+                        <Plus className="size-4" />
+                        {t("projects.newSession")}
+                      </Button>
                     </CardContent>
                   </Card>
                 ) : (
-                  <Card>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{t("common.name")}</TableHead>
-                          <TableHead>{t("common.status")}</TableHead>
-                          <TableHead className="text-right">{t("projects.action")}</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {projectSessions.map((session) => (
-                          <TableRow key={session.id}>
-                            <TableCell className="font-medium">
-                              {session.name || session.tmuxName || session.id}
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant={
-                                  session.status === "running"
-                                    ? "default"
-                                    : session.status === "error"
-                                      ? "destructive"
-                                      : "secondary"
-                                }
-                              >
-                                {session.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Link href={`/sessions/${session.id}`}>
-                                <Button variant="ghost" size="sm">
-                                  <Play className="mr-2 size-3" />
-                                  {t("common.connect")}
-                                </Button>
-                              </Link>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </Card>
+                  <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+                    {projectSessions.map((session, index) => (
+                      <Link
+                        key={session.id}
+                        href={`/sessions/${session.id}`}
+                        className="group flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40"
+                        style={{ animationDelay: `${index * 40}ms` }}
+                      >
+                        <SessionStatusDot status={session.status} />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium">
+                            {session.name || session.tmuxName || session.id}
+                          </div>
+                        </div>
+                        <CliBrandChip aiTool={session.aiTool} />
+                        <SessionStatusText status={session.status} />
+                        <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-brand" />
+                      </Link>
+                    ))}
+                  </div>
                 )}
                 <WorkspaceContextPanel projectId={id} enabled={activeTab === "sessions"} />
               </div>
@@ -655,87 +682,92 @@ export default function ProjectDetailPage() {
               />
             </TabsContent>
 
-            <TabsContent value="agents" className="mt-4">
-              <div className="mb-3 flex justify-end">
+            <TabsContent value="agents" className="mt-4 space-y-3">
+              <div className="flex justify-end">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => defaultAgentPackMutation.mutate()}
                   disabled={defaultAgentPackMutation.isPending}
                 >
-                  <Sparkles className="mr-2 size-4" />
+                  <Sparkles className="size-4" />
                   {defaultAgentPackMutation.isPending
                     ? t("projects.creatingAgentPack")
                     : t("projects.createAgentPack")}
                 </Button>
               </div>
               {projectAgents.length === 0 ? (
-                <Card>
-                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                    {t("projects.noAgents")}
+                <Card className="of-animate-in">
+                  <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+                    <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                      <Bot className="size-5" />
+                    </div>
+                    <div className="text-sm font-medium">{t("projects.noAgents")}</div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => defaultAgentPackMutation.mutate()}
+                      disabled={defaultAgentPackMutation.isPending}
+                    >
+                      <Sparkles className="size-4" />
+                      {defaultAgentPackMutation.isPending
+                        ? t("projects.creatingAgentPack")
+                        : t("projects.createAgentPack")}
+                    </Button>
                   </CardContent>
                 </Card>
               ) : (
-                <Card>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("common.name")}</TableHead>
-                        <TableHead>{t("projects.model")}</TableHead>
-                        <TableHead>{t("common.status")}</TableHead>
-                        <TableHead className="text-right">{t("common.actions")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {projectAgents.map((agent) => (
-                        <TableRow key={agent.id}>
-                          <TableCell className="font-medium">
-                            {agent.name}
-                          </TableCell>
-                          <TableCell>{agent.model ?? "—"}</TableCell>
-                          <TableCell>
-                            <Badge variant="secondary">
-                              {agent.status ?? "idle"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() =>
-                                  agentStatusMutation.mutate({
-                                    agentId: agent.id,
-                                    status: agent.status === "disabled" ? "active" : "disabled",
-                                  })
-                                }
-                              >
-                                <Power className="size-4" />
-                                <span className="sr-only">{t("agents.toggleStatus")}</span>
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-destructive"
-                                onClick={() => {
-                                  if (window.confirm(t("agents.deleteConfirm"))) {
-                                    agentDeleteMutation.mutate(agent.id);
-                                  }
-                                }}
-                              >
-                                <Trash2 className="size-4" />
-                                <span className="sr-only">{t("common.delete")}</span>
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </Card>
+                <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+                  {projectAgents.map((agent, index) => (
+                    <div
+                      key={agent.id}
+                      className="flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40"
+                      style={{ animationDelay: `${index * 40}ms` }}
+                    >
+                      <AgentStatusDot status={agent.status} />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{agent.name}</div>
+                        <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                          {agent.model ?? "—"}
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {agent.status ?? "idle"}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() =>
+                            agentStatusMutation.mutate({
+                              agentId: agent.id,
+                              status: agent.status === "disabled" ? "active" : "disabled",
+                            })
+                          }
+                        >
+                          <Power className="size-4" />
+                          <span className="sr-only">{t("agents.toggleStatus")}</span>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => {
+                            if (window.confirm(t("agents.deleteConfirm"))) {
+                              agentDeleteMutation.mutate(agent.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="size-4" />
+                          <span className="sr-only">{t("common.delete")}</span>
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
               {defaultAgentPackMutation.isError && (
-                <p className="mt-3 text-sm text-destructive">
+                <p className="text-sm text-destructive">
                   {defaultAgentPackMutation.error instanceof Error
                     ? defaultAgentPackMutation.error.message
                     : t("projects.failedAgentPack")}
@@ -743,77 +775,75 @@ export default function ProjectDetailPage() {
               )}
             </TabsContent>
 
-            <TabsContent value="orchestration" className="mt-4">
+            <TabsContent value="orchestration" className="mt-4 space-y-3">
               {orderedProjectAgents.length === 0 ? (
-                <Card>
-                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                    {t("projects.noOrchestrationAgents")}
+                <Card className="of-animate-in">
+                  <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+                    <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                      <ListOrdered className="size-5" />
+                    </div>
+                    <div className="text-sm font-medium">{t("projects.noOrchestrationAgents")}</div>
                   </CardContent>
                 </Card>
               ) : (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between gap-3 text-base">
-                      <span>{t("projects.agentSequence")}</span>
-                      <Button
-                        size="sm"
-                        onClick={() => agentSequenceMutation.mutate()}
-                        disabled={agentSequenceMutation.isPending}
-                      >
-                        <Save className="mr-2 size-4" />
-                        {agentSequenceMutation.isPending
-                          ? t("projects.savingSequence")
-                          : t("projects.saveSequence")}
-                      </Button>
-                    </CardTitle>
+                <Card className="of-animate-in overflow-hidden">
+                  <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pb-3">
+                    <CardTitle className="text-sm font-semibold">{t("projects.agentSequence")}</CardTitle>
+                    <Button
+                      size="sm"
+                      className="bg-brand text-brand-foreground hover:bg-brand/90"
+                      onClick={() => agentSequenceMutation.mutate()}
+                      disabled={agentSequenceMutation.isPending}
+                    >
+                      <Save className="size-4" />
+                      {agentSequenceMutation.isPending
+                        ? t("projects.savingSequence")
+                        : t("projects.saveSequence")}
+                    </Button>
                   </CardHeader>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("projects.order")}</TableHead>
-                        <TableHead>{t("common.name")}</TableHead>
-                        <TableHead>{t("common.status")}</TableHead>
-                        <TableHead className="text-right">{t("common.actions")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {orderedProjectAgents.map((agent, index) => (
-                        <TableRow key={agent.id}>
-                          <TableCell className="font-mono text-xs">{index + 1}</TableCell>
-                          <TableCell className="font-medium">{agent.name}</TableCell>
-                          <TableCell>
-                            <Badge variant="secondary">{agent.status ?? "active"}</Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => moveAgentInSequence(agent.id, "up")}
-                                disabled={index === 0}
-                              >
-                                <ArrowUp className="size-4" />
-                                <span className="sr-only">{t("projects.moveAgentUp")}</span>
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => moveAgentInSequence(agent.id, "down")}
-                                disabled={index === orderedProjectAgents.length - 1}
-                              >
-                                <ArrowDown className="size-4" />
-                                <span className="sr-only">{t("projects.moveAgentDown")}</span>
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  <div className="divide-y divide-border/70 border-t border-border/70">
+                    {orderedProjectAgents.map((agent, index) => (
+                      <div
+                        key={agent.id}
+                        className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
+                      >
+                        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/60 font-mono text-xs text-muted-foreground tabular-nums">
+                          {index + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium">{agent.name}</div>
+                        </div>
+                        <AgentStatusDot status={agent.status} />
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {agent.status ?? "active"}
+                        </span>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => moveAgentInSequence(agent.id, "up")}
+                            disabled={index === 0}
+                          >
+                            <ArrowUp className="size-4" />
+                            <span className="sr-only">{t("projects.moveAgentUp")}</span>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => moveAgentInSequence(agent.id, "down")}
+                            disabled={index === orderedProjectAgents.length - 1}
+                          >
+                            <ArrowDown className="size-4" />
+                            <span className="sr-only">{t("projects.moveAgentDown")}</span>
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </Card>
               )}
               {agentSequenceMutation.isError && (
-                <p className="mt-3 text-sm text-destructive">
+                <p className="text-sm text-destructive">
                   {agentSequenceMutation.error instanceof Error
                     ? agentSequenceMutation.error.message
                     : t("projects.failedSaveSequence")}
@@ -823,53 +853,53 @@ export default function ProjectDetailPage() {
 
             <TabsContent value="skills" className="mt-4">
               {skills.length === 0 ? (
-                <Card>
-                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                    {t("skills.emptyTitle")}
+                <Card className="of-animate-in">
+                  <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+                    <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                      <Wrench className="size-5" />
+                    </div>
+                    <div className="text-sm font-medium">{t("skills.emptyTitle")}</div>
                   </CardContent>
                 </Card>
               ) : (
-                <Card>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("common.name")}</TableHead>
-                        <TableHead>{t("skills.source")}</TableHead>
-                        <TableHead>{t("skills.enabledForProject")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {skills.map((skill) => {
-                        const projectSkill = projectSkillById.get(skill.id);
-                        return (
-                          <TableRow key={skill.id}>
-                            <TableCell className="font-medium">
-                              <div>{skill.name}</div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {projectSkillStateLabel(projectSkill?.selectionState, t)}
-                              </div>
-                            </TableCell>
-                            <TableCell>{skill.source}</TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-3">
-                                <Switch
-                                  checked={enabledSkillIds.has(skill.id)}
-                                  onCheckedChange={(enabled) =>
-                                    projectSkillMutation.mutate({ skillId: skill.id, enabled })
-                                  }
-                                  disabled={projectSkillMutation.isPending}
-                                />
-                                <Badge variant={enabledSkillIds.has(skill.id) ? "default" : "secondary"}>
-                                  {enabledSkillIds.has(skill.id) ? t("common.enabled") : t("common.disabled")}
-                                </Badge>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </Card>
+                <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+                  {skills.map((skill, index) => {
+                    const projectSkill = projectSkillById.get(skill.id);
+                    const isEnabled = enabledSkillIds.has(skill.id);
+                    return (
+                      <div
+                        key={skill.id}
+                        className="flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40"
+                        style={{ animationDelay: `${index * 40}ms` }}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium">{skill.name}</div>
+                          <div className="mt-0.5 text-xs text-muted-foreground">
+                            {projectSkillStateLabel(projectSkill?.selectionState, t)}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className="shrink-0">{skill.source}</Badge>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Switch
+                            checked={isEnabled}
+                            onCheckedChange={(enabled) =>
+                              projectSkillMutation.mutate({ skillId: skill.id, enabled })
+                            }
+                            disabled={projectSkillMutation.isPending}
+                          />
+                          <span
+                            className={cn(
+                              "w-10 shrink-0 text-xs",
+                              isEnabled ? "text-emerald-400" : "text-muted-foreground"
+                            )}
+                          >
+                            {isEnabled ? t("common.enabled") : t("common.disabled")}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </TabsContent>
 
@@ -904,12 +934,57 @@ export default function ProjectDetailPage() {
   );
 }
 
-function ProjectStat({ label, value }: { label: string; value: number }) {
+function SessionStatusDot({ status }: { status: string }) {
+  const normalized = normalizeSessionStatus(status);
   return (
-    <div className="rounded-lg border border-border/70 bg-background/70 px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-    </div>
+    <span
+      className={cn(
+        "size-2 shrink-0 rounded-full",
+        normalized === "running"
+          ? "animate-pulse bg-emerald-400"
+          : normalized === "error"
+            ? "bg-red-400"
+            : "bg-muted-foreground/40"
+      )}
+    />
+  );
+}
+
+function SessionStatusText({ status }: { status: string }) {
+  const { t } = useLanguage();
+  const normalized = normalizeSessionStatus(status);
+  return (
+    <span
+      className={cn(
+        "shrink-0 text-xs",
+        normalized === "running"
+          ? "text-emerald-400"
+          : normalized === "error"
+            ? "text-red-400"
+            : "text-muted-foreground"
+      )}
+    >
+      {normalized === "running"
+        ? t("sessions.running")
+        : normalized === "error"
+          ? t("sessions.error")
+          : t("sessions.stopped")}
+    </span>
+  );
+}
+
+function AgentStatusDot({ status }: { status?: string | null }) {
+  return (
+    <span
+      className={cn(
+        "size-2 shrink-0 rounded-full",
+        status === "active"
+          ? "bg-emerald-400"
+          : status === "error"
+            ? "bg-red-400"
+            : "bg-muted-foreground/40"
+      )}
+    />
   );
 }
 
@@ -972,8 +1047,8 @@ function ProjectConfigPanel({
 
   if (projectLoading) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+      <Card className="of-animate-in">
+        <CardContent className="py-10 text-center text-sm text-muted-foreground">
           {t("common.loading")}
         </CardContent>
       </Card>
@@ -982,10 +1057,10 @@ function ProjectConfigPanel({
 
   return (
     <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <FileText className="size-4" />
+      <Card className="of-animate-in">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+            <FileText className="size-4 text-brand" />
             {t("projects.projectConfigFiles")}
           </CardTitle>
         </CardHeader>
@@ -997,11 +1072,12 @@ function ProjectConfigPanel({
               <button
                 key={file.relativePath}
                 type="button"
-                className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                className={cn(
+                  "flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left text-sm transition-colors",
                   file.relativePath === selectedPath
-                    ? "border-primary bg-primary/10 text-foreground"
-                    : "border-border bg-background hover:bg-muted"
-                }`}
+                    ? "border-brand/50 bg-brand/10 text-foreground"
+                    : "border-border/70 bg-background hover:bg-muted/40"
+                )}
                 onClick={() => onSelectedPathChange(file.relativePath)}
               >
                 <span className="min-w-0 truncate font-mono text-xs">{file.relativePath}</span>
@@ -1014,25 +1090,24 @@ function ProjectConfigPanel({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between gap-3 text-base">
-            <span className="min-w-0 truncate font-mono text-sm">
-              {selectedFile?.relativePath ?? t("projects.selectConfigFile")}
-            </span>
-            <Button
-              size="sm"
-              onClick={onSave}
-              disabled={!selectedFile || isSaving}
-            >
-              <Save className="mr-2 size-4" />
-              {isSaving ? t("projects.savingConfig") : t("common.save")}
-            </Button>
+      <Card className="of-animate-in" style={{ animationDelay: "50ms" }}>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pb-3">
+          <CardTitle className="min-w-0 truncate font-mono text-sm font-semibold">
+            {selectedFile?.relativePath ?? t("projects.selectConfigFile")}
           </CardTitle>
+          <Button
+            size="sm"
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            onClick={onSave}
+            disabled={!selectedFile || isSaving}
+          >
+            <Save className="size-4" />
+            {isSaving ? t("projects.savingConfig") : t("common.save")}
+          </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           {matchingForms.length > 0 && (
-            <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+            <div className="space-y-3 rounded-md border border-border/70 bg-muted/20 p-3">
               <div className="text-sm font-medium">{t("projects.formFields")}</div>
               {matchingForms.map((form) => (
                 <div key={form.filePath} className="space-y-2">
@@ -1081,10 +1156,10 @@ function ProjectConfigPanel({
       </Card>
 
       <div className="grid gap-4 xl:col-span-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Globe2 className="size-4" />
+        <Card className="of-animate-in" style={{ animationDelay: "100ms" }}>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+              <Globe2 className="size-4 text-brand" />
               {t("projects.globalConfigReadOnly")}
             </CardTitle>
           </CardHeader>
@@ -1125,7 +1200,7 @@ function AiConfigFieldControl({
 
   if (field.inputType === "boolean") {
     return (
-      <div className="rounded-md border border-border px-2 py-2 text-xs">
+      <div className="rounded-md border border-border/70 px-2 py-2 text-xs">
         <div className="flex items-center justify-between gap-3">
           <span>{field.label}</span>
           <Switch
@@ -1141,7 +1216,7 @@ function AiConfigFieldControl({
 
   if (field.inputType === "select") {
     return (
-      <label className="block space-y-1 rounded-md border border-border px-2 py-2 text-xs">
+      <label className="block space-y-1 rounded-md border border-border/70 px-2 py-2 text-xs">
         <span>{field.label}</span>
         <select
           className={controlClass}
@@ -1162,7 +1237,7 @@ function AiConfigFieldControl({
 
   if (field.inputType === "textarea" || field.inputType === "list") {
     return (
-      <label className="block space-y-1 rounded-md border border-border px-2 py-2 text-xs">
+      <label className="block space-y-1 rounded-md border border-border/70 px-2 py-2 text-xs">
         <span>{field.label}</span>
         <textarea
           className={`${controlClass} min-h-24 resize-y font-mono`}
@@ -1176,7 +1251,7 @@ function AiConfigFieldControl({
   }
 
   return (
-    <label className="block space-y-1 rounded-md border border-border px-2 py-2 text-xs">
+    <label className="block space-y-1 rounded-md border border-border/70 px-2 py-2 text-xs">
       <span>{field.label}</span>
       <input
         className={controlClass}
@@ -1296,7 +1371,7 @@ function SyntaxHighlightedEditor({
 function GlobalConfigPreview({ file }: { file: AiConfigFile }) {
   const { t } = useLanguage();
   return (
-    <details className="rounded-md border border-border bg-background px-3 py-2 text-sm">
+    <details className="rounded-md border border-border/70 bg-background px-3 py-2 text-sm">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
         <span className="min-w-0 truncate font-mono text-xs">{file.relativePath}</span>
         <Badge variant={file.exists ? "secondary" : "outline"}>
@@ -1340,61 +1415,65 @@ function ProjectActivityList({
 }) {
   const { t } = useLanguage();
 
-  if (activities.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <ProjectActivityFilter
-            agents={agents}
-            selectedAgentId={selectedAgentId}
-            onSelectedAgentIdChange={onSelectedAgentIdChange}
-          />
-        </CardHeader>
-        <CardContent className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
-          <Activity className="size-5" />
-          {t("sessions.noActivity")}
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Activity className="size-4 text-muted-foreground" />
-            {t("sessions.activity")}
-          </CardTitle>
-          <ProjectActivityFilter
-            agents={agents}
-            selectedAgentId={selectedAgentId}
-            onSelectedAgentIdChange={onSelectedAgentIdChange}
-          />
-        </div>
+    <Card className="of-animate-in overflow-hidden">
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+          <Activity className="size-4 text-brand" />
+          {t("sessions.activity")}
+        </CardTitle>
+        <ProjectActivityFilter
+          agents={agents}
+          selectedAgentId={selectedAgentId}
+          onSelectedAgentIdChange={onSelectedAgentIdChange}
+        />
       </CardHeader>
-      <CardContent>
-        <div className="divide-y divide-border">
+      {activities.length === 0 ? (
+        <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+          <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+            <Activity className="size-5" />
+          </div>
+          <div className="text-sm font-medium">{t("sessions.noActivity")}</div>
+        </CardContent>
+      ) : (
+        <div className="divide-y divide-border/70 border-t border-border/70">
           {activities.map((activity) => (
-            <div key={activity.id} className="grid gap-2 py-3 md:grid-cols-[160px_1fr_120px] md:items-center">
-              <Badge variant={activity.status === "error" ? "destructive" : "secondary"} className="w-fit">
-                {activity.type}
-              </Badge>
-              <div className="min-w-0">
+            <div
+              key={activity.id}
+              className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
+            >
+              <span
+                className={cn(
+                  "mt-1.5 size-2 shrink-0 rounded-full",
+                  activity.status === "error" ? "bg-red-400" : "bg-emerald-400"
+                )}
+              />
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge
+                    variant={activity.status === "error" ? "destructive" : "outline"}
+                    className="w-fit"
+                  >
+                    {activity.type}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {formatProjectActivityTime(activity.createdAt)}
+                  </span>
+                </div>
                 <p className="break-words text-sm text-foreground">{activity.message}</p>
                 {activity.sessionId && (
-                  <Link href={`/sessions/${activity.sessionId}`} className="text-xs text-muted-foreground hover:text-foreground">
+                  <Link
+                    href={`/sessions/${activity.sessionId}`}
+                    className="inline-block break-all font-mono text-xs text-muted-foreground transition-colors hover:text-brand"
+                  >
                     {activity.sessionId}
                   </Link>
                 )}
               </div>
-              <span className="text-xs text-muted-foreground md:text-right">
-                {formatProjectActivityTime(activity.createdAt)}
-              </span>
             </div>
           ))}
         </div>
-      </CardContent>
+      )}
     </Card>
   );
 }

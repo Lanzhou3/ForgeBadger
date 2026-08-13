@@ -11,10 +11,10 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
+import { CliBrandChip } from "@/components/cli-brand-chip";
 import {
   listProjects,
   listSessions,
@@ -85,18 +85,16 @@ export default function HistoryPage() {
   };
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-semibold">{t("snapshots.title")}</h1>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          {t("snapshots.subtitle")}
-        </p>
+        <h1 className="text-xl font-semibold tracking-tight">{t("snapshots.title")}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t("snapshots.subtitle")}</p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("snapshots.filters")}</CardTitle>
-          <CardDescription>{t("snapshots.noTerminalHistory")}</CardDescription>
+      <Card className="of-animate-in">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold">{t("snapshots.filters")}</CardTitle>
+          <p className="text-xs text-muted-foreground">{t("snapshots.noTerminalHistory")}</p>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2">
           <select
@@ -129,43 +127,56 @@ export default function HistoryPage() {
       </Card>
 
       {restoreMutation.error instanceof Error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive of-animate-in">
+          <span className="size-1.5 shrink-0 rounded-full bg-red-400" />
           {restoreMutation.error.message}
         </div>
       )}
 
       {isLoading ? (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+        <Card className="of-animate-in">
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("snapshots.loading")}
           </CardContent>
         </Card>
       ) : snapshots.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <Clock3 className="size-10 text-muted-foreground" />
-            <h2 className="mt-4 text-lg font-medium">{t("snapshots.emptyTitle")}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("snapshots.emptyDescription")}
-            </p>
+        <Card className="of-animate-in">
+          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+            <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+              <Clock3 className="size-5" />
+            </div>
+            <div>
+              <div className="text-sm font-medium">{t("snapshots.emptyTitle")}</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("snapshots.emptyDescription")}
+              </p>
+            </div>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/sessions">{t("snapshots.viewSession")}</Link>
+            </Button>
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3">
-          {snapshots.map((snapshot) => (
-            <SnapshotCard
+        <div className="space-y-3">
+          {snapshots.map((snapshot, index) => (
+            <div
               key={snapshot.id}
-              snapshot={snapshot}
-              session={snapshot.sessionId ? sessionById.get(snapshot.sessionId) : undefined}
-              projectName={snapshot.projectId ? projectById.get(snapshot.projectId)?.name : undefined}
-              canRestore={canRestoreSnapshot(snapshot)}
-              restoring={restoreMutation.isPending}
-              onRestore={() => {
-                if (window.confirm(t("snapshots.restoreConfirm"))) {
-                  restoreMutation.mutate(snapshot.id);
-                }
-              }}
-            />
+              className="of-animate-in"
+              style={{ animationDelay: `${index * 40}ms` }}
+            >
+              <SnapshotCard
+                snapshot={snapshot}
+                session={snapshot.sessionId ? sessionById.get(snapshot.sessionId) : undefined}
+                projectName={snapshot.projectId ? projectById.get(snapshot.projectId)?.name : undefined}
+                canRestore={canRestoreSnapshot(snapshot)}
+                restoring={restoreMutation.isPending}
+                onRestore={() => {
+                  if (window.confirm(t("snapshots.restoreConfirm"))) {
+                    restoreMutation.mutate(snapshot.id);
+                  }
+                }}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -191,7 +202,7 @@ function SnapshotCard({
   const { t } = useLanguage();
 
   return (
-    <Card>
+    <Card className="transition-colors duration-200 hover:border-brand/30">
       <CardContent className="grid gap-4 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -199,6 +210,7 @@ function SnapshotCard({
               <TerminalSquare className="size-3" />
               {session?.name || snapshot.sessionId || t("snapshots.session")}
             </Badge>
+            {session?.aiTool && <CliBrandChip aiTool={session.aiTool} />}
             {projectName && (
               <Badge variant="outline" className="gap-1">
                 <FolderOpen className="size-3" />
@@ -218,14 +230,18 @@ function SnapshotCard({
         </div>
         <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
           {snapshot.projectId && (
-            <Button asChild variant="outline" size="sm">
+            <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
               <Link href={`/projects/${snapshot.projectId}`}>
                 {t("snapshots.viewProject")}
               </Link>
             </Button>
           )}
           {snapshot.sessionId && (
-            <Button asChild size="sm">
+            <Button
+              asChild
+              size="sm"
+              className="bg-brand text-brand-foreground hover:bg-brand/90"
+            >
               <Link href={`/sessions/${snapshot.sessionId}`}>
                 {t("snapshots.viewSession")}
               </Link>
@@ -238,7 +254,7 @@ function SnapshotCard({
             disabled={!canRestore || restoring}
             onClick={onRestore}
           >
-            <RotateCcw className="size-3" />
+            <RotateCcw className="size-3.5" />
             {restoring ? t("snapshots.restoring") : t("snapshots.restore")}
           </Button>
         </div>

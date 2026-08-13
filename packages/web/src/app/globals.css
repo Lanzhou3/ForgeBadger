@@ -123,6 +123,29 @@
   }
 }
 
+@keyframes of-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer utilities {
+  .of-animate-in {
+    animation: of-fade-up 0.35s ease-out both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .of-animate-in {
+      animation: none;
+    }
+  }
+}
+
 @layer base {
   * {
     @apply border-border;

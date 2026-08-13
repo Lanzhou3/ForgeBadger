@@ -3,7 +3,7 @@ import { isAdapterLaunchable } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 
-export type ActivationStepId = "runtime" | "adapter" | "model" | "project" | "template" | "session";
+export type ActivationStepId = "runtime" | "adapter" | "model" | "project" | "session";
 
 type LaunchableAdapterLike = Pick<AdapterDiscovery, "available" | "launchEnabled">;
 
@@ -31,9 +31,6 @@ export interface ActivationReadinessInput {
   modelsLoading?: boolean;
   modelsError?: boolean;
   projectCount: number;
-  projectConfigCompliant?: boolean;
-  projectConfigLoading?: boolean;
-  projectConfigError?: boolean;
   sessionCount: number;
   firstProjectId?: string;
 }
@@ -60,10 +57,6 @@ export function buildActivationReadiness(input: ActivationReadinessInput): Activ
   // launch blocker for Claude, OpenCode, or Codex CLI defaults.
   const modelReady = !input.modelsLoading && !input.modelsError;
   const projectReady = input.projectCount > 0;
-  const templateReady = projectReady
-    && !input.projectConfigLoading
-    && !input.projectConfigError
-    && input.projectConfigCompliant === true;
   const sessionReady = input.sessionCount > 0;
   const firstProjectHref = input.firstProjectId ? `/projects/${input.firstProjectId}` : "/projects";
 
@@ -97,13 +90,6 @@ export function buildActivationReadiness(input: ActivationReadinessInput): Activ
       action: { href: "/projects/new", labelKey: "projects.create" },
     },
     {
-      id: "template",
-      labelKey: "dashboard.activationTemplate",
-      detailKey: templateDetailKey(input, templateReady),
-      done: templateReady,
-      action: { href: firstProjectHref, labelKey: "dashboard.activationReviewTemplate" },
-    },
-    {
       id: "session",
       labelKey: "dashboard.activationSession",
       detailKey: sessionReady ? "dashboard.firstRunSessionReady" : "dashboard.firstRunSessionMissing",
@@ -125,16 +111,6 @@ export function buildActivationReadiness(input: ActivationReadinessInput): Activ
       ? [{ href: "/projects/import", labelKey: "projects.import" }]
       : [],
   };
-}
-
-function templateDetailKey(
-  input: Pick<ActivationReadinessInput, "projectCount" | "projectConfigCompliant" | "projectConfigError" | "projectConfigLoading">,
-  ready: boolean
-): TranslationKey {
-  if (input.projectCount === 0) return "dashboard.activationTemplateMissing";
-  if (input.projectConfigLoading) return "dashboard.activationTemplateLoading";
-  if (input.projectConfigError) return "dashboard.activationTemplateUnavailable";
-  return ready ? "dashboard.activationTemplateReady" : "dashboard.activationTemplateNeedsAttention";
 }
 
 function runtimeDetailKey(

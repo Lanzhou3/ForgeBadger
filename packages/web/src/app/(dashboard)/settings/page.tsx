@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Bell, Cpu, Download, FlaskConical, Globe2, KeyRound, MessageSquare, Palette, RefreshCw, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Bell, Cpu, Download, FlaskConical, Globe2, KeyRound, Palette, RefreshCw, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CliBrandChip } from "@/components/cli-brand-chip";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
+import { FeishuIntegrationSettings } from "@/components/settings/FeishuIntegrationSettings";
 import {
   Card,
   CardContent,
@@ -34,14 +36,13 @@ import {
   discoverAdapters,
   exportDiagnostics,
   getDependencies,
-  getFeishuIntegrationStatus,
   listAuditLogs,
   type AdapterDiscovery,
-  type FeishuIntegrationStatus,
   type LocalDiagnosticsExport
 } from "@/lib/api";
-import type { Language, TranslationKey } from "@/lib/i18n";
+import type { Language } from "@/lib/i18n";
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
+import { cn } from "@/lib/utils";
 
 const languageOptions = [
   { code: "zh-CN", label: "简体中文" },
@@ -80,14 +81,6 @@ export default function SettingsPage() {
   } = useQuery({
     queryKey: ["dependencies"],
     queryFn: getDependencies,
-  });
-  const {
-    data: feishuStatus,
-    isLoading: feishuStatusLoading,
-    isError: feishuStatusError
-  } = useQuery({
-    queryKey: ["feishu-integration-status"],
-    queryFn: getFeishuIntegrationStatus,
   });
   const { data: auditData, isLoading: auditLoading } = useQuery({
     queryKey: ["audit-logs", "settings"],
@@ -142,26 +135,22 @@ export default function SettingsPage() {
   const discoveryRefreshing = adaptersFetching || dependenciesFetching;
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-semibold">{t("settings.title")}</h1>
-        <p className="mt-1 text-muted-foreground">
+        <h1 className="text-xl font-semibold tracking-tight">{t("settings.title")}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           {t("settings.subtitle")}
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Globe2 className="size-4 text-muted-foreground" />
-                <CardTitle>{t("settings.language")}</CardTitle>
-              </div>
-              <CardDescription>
-                {t("settings.languageDescription")}
-              </CardDescription>
-            </CardHeader>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-6">
+          <Card className="of-animate-in">
+            <SettingsCardHeader
+              icon={<Globe2 className="size-4" />}
+              title={t("settings.language")}
+              description={t("settings.languageDescription")}
+            />
             <CardContent>
               <div className="flex flex-wrap gap-2">
                 {languageOptions.map((option) => (
@@ -170,6 +159,7 @@ export default function SettingsPage() {
                     type="button"
                     variant={language === option.code ? "default" : "outline"}
                     size="sm"
+                    className={language === option.code ? "bg-brand text-brand-foreground hover:bg-brand/90" : undefined}
                     onClick={() => setLanguage(option.code as Language)}
                   >
                     {option.label}
@@ -179,16 +169,12 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Palette className="size-4 text-muted-foreground" />
-                <CardTitle>{t("settings.theme")}</CardTitle>
-              </div>
-              <CardDescription>
-                {t("settings.themeDescription")}
-              </CardDescription>
-            </CardHeader>
+          <Card className="of-animate-in" style={{ animationDelay: "40ms" }}>
+            <SettingsCardHeader
+              icon={<Palette className="size-4" />}
+              title={t("settings.theme")}
+              description={t("settings.themeDescription")}
+            />
             <CardContent>
               <div className="flex flex-wrap gap-2">
                 {ACCENT_THEMES.map((theme) => {
@@ -202,11 +188,11 @@ export default function SettingsPage() {
                       className={
                         selected
                           ? "flex items-center gap-2 rounded-md border border-brand/60 bg-brand/10 px-3 py-2 text-sm text-foreground transition-colors duration-150"
-                          : "flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors duration-150 hover:border-border/80 hover:bg-white/[0.03] hover:text-foreground"
+                          : "flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors duration-150 hover:border-brand/40 hover:bg-muted/40 hover:text-foreground"
                       }
                     >
                       <span
-                        className="size-3.5 rounded-full ring-1 ring-white/20"
+                        className="size-3.5 rounded-full ring-1 ring-border"
                         style={{ backgroundColor: theme.swatch }}
                         aria-hidden="true"
                       />
@@ -218,17 +204,13 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Settings2 className="size-4 text-muted-foreground" />
-                <CardTitle>{t("settings.console")}</CardTitle>
-              </div>
-              <CardDescription>
-                {t("settings.consoleDescription")}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <Card className="of-animate-in" style={{ animationDelay: "80ms" }}>
+            <SettingsCardHeader
+              icon={<Settings2 className="size-4" />}
+              title={t("settings.console")}
+              description={t("settings.consoleDescription")}
+            />
+            <CardContent className="space-y-2">
               <SettingRow
                 title={t("settings.autoReconnect")}
                 description={t("settings.autoReconnectDescription")}
@@ -254,39 +236,37 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <Cpu className="size-4 text-muted-foreground" />
-                    <CardTitle>{t("settings.adapters")}</CardTitle>
-                  </div>
-                  <CardDescription className="mt-2">
-                    {t("settings.adaptersDescription")}
-                  </CardDescription>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleDependencyRefresh()}
-                  disabled={discoveryRefreshing}
-                >
-                  <RefreshCw className={`mr-2 size-3.5 ${discoveryRefreshing ? "animate-spin" : ""}`} />
-                  {discoveryRefreshing ? t("settings.discoveryRefreshing") : t("settings.discoveryRefresh")}
-                </Button>
+          <Card className="of-animate-in" style={{ animationDelay: "120ms" }}>
+            <CardHeader className="flex flex-wrap items-center gap-3 space-y-0">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+                <Cpu className="size-4" />
               </div>
+              <div className="min-w-0 flex-1">
+                <CardTitle className="text-sm font-semibold">{t("settings.adapters")}</CardTitle>
+                <CardDescription className="mt-1 text-xs">
+                  {t("settings.adaptersDescription")}
+                </CardDescription>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleDependencyRefresh()}
+                disabled={discoveryRefreshing}
+              >
+                <RefreshCw className={cn("size-3.5", discoveryRefreshing && "animate-spin")} />
+                {discoveryRefreshing ? t("settings.discoveryRefreshing") : t("settings.discoveryRefresh")}
+              </Button>
             </CardHeader>
             <CardContent className="space-y-3">
               {dependenciesLoading ? (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {t("settings.dependenciesLoading")}
                 </p>
               ) : dependenciesError ? (
                 <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
                   <div className="flex items-start gap-2">
-                    <AlertTriangle className="mt-0.5 size-4 text-destructive" />
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-destructive">
                         {t("settings.dependenciesLoadFailed")}
@@ -298,11 +278,19 @@ export default function SettingsPage() {
                   </div>
                 </div>
               ) : (
-                <div className="rounded-md border border-border bg-muted/20 p-3">
+                <div className="rounded-md border border-border/70 bg-muted/20 p-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="font-medium">{t("settings.terminalRuntimeReadiness")}</div>
-                      <p className="mt-1 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "size-1.5 shrink-0 rounded-full",
+                            terminalSetupGuidance.blocked ? "bg-red-400" : "bg-emerald-400"
+                          )}
+                        />
+                        <span className="text-sm font-medium">{t("settings.terminalRuntimeReadiness")}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
                         {t(terminalSetupGuidance.descriptionKey)}
                       </p>
                       {(tmuxDependency?.version || tmuxDependency?.error) && (
@@ -325,13 +313,13 @@ export default function SettingsPage() {
                 </div>
               )}
               {adaptersLoading ? (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {t("settings.discoveryLoading")}
                 </p>
               ) : adaptersError ? (
                 <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
                   <div className="flex items-start gap-2">
-                    <AlertTriangle className="mt-0.5 size-4 text-destructive" />
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-destructive">
                         {t("settings.discoveryLoadFailed")}
@@ -348,7 +336,7 @@ export default function SettingsPage() {
                     className="mt-3"
                     onClick={() => void refetchAdapters()}
                   >
-                    <RefreshCw className="mr-2 size-3.5" />
+                    <RefreshCw className="size-3.5" />
                     {t("settings.discoveryRetry")}
                   </Button>
                 </div>
@@ -357,117 +345,99 @@ export default function SettingsPage() {
                   <p className="text-xs text-muted-foreground">
                     {t("settings.adapterReadinessNotice")}
                   </p>
-                  {adapterData?.adapters.map((adapter) => (
-                    <AdapterItem key={adapter.id} adapter={adapter} />
-                  ))}
+                  <div className="space-y-2">
+                    {adapterData?.adapters.map((adapter) => (
+                      <AdapterItem key={adapter.id} adapter={adapter} />
+                    ))}
+                  </div>
                 </>
               )}
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <MessageSquare className="size-4 text-muted-foreground" />
-                <CardTitle>{t("settings.feishuIntegration")}</CardTitle>
-              </div>
-              <CardDescription>
-                {t("settings.feishuIntegrationDescription")}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {feishuStatusLoading ? (
-                <p className="text-sm text-muted-foreground">
-                  {t("settings.feishuStatusLoading")}
-                </p>
-              ) : feishuStatusError ? (
-                <p className="text-sm text-muted-foreground">
-                  {t("settings.feishuStatusLoadFailed")}
-                </p>
-              ) : feishuStatus ? (
-                <FeishuIntegrationItem status={feishuStatus} />
-              ) : null}
-            </CardContent>
-          </Card>
+          <div className="of-animate-in" style={{ animationDelay: "160ms" }}>
+            <FeishuIntegrationSettings />
+          </div>
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <FlaskConical className="size-4 text-muted-foreground" />
-                <CardTitle>{t("settings.experimentalFeatures")}</CardTitle>
-              </div>
-              <CardDescription>
-                {t("settings.experimentalFeaturesDescription")}
-              </CardDescription>
-            </CardHeader>
+          <Card className="of-animate-in" style={{ animationDelay: "200ms" }}>
+            <SettingsCardHeader
+              icon={<FlaskConical className="size-4" />}
+              title={t("settings.experimentalFeatures")}
+              description={t("settings.experimentalFeaturesDescription")}
+            />
             <CardContent>
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-3 transition-colors hover:bg-muted/40">
                 <div className="flex min-w-0 items-start gap-3">
-                  <ServerCog className="mt-0.5 size-4 text-muted-foreground" />
+                  <ServerCog className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
-                    <div className="font-medium">{t("settings.codexAppServerExperiment")}</div>
-                    <div className="mt-1 text-sm text-muted-foreground">
+                    <div className="text-sm font-medium">{t("settings.codexAppServerExperiment")}</div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
                       {t("settings.codexAppServerExperimentDescription")}
                     </div>
                   </div>
                 </div>
                 <Button asChild variant="outline" size="sm">
-                  <Link href="/codex-app-server">{t("common.open")}</Link>
+                  <Link href="/codex-app-server">
+                    {t("common.open")}
+                    <ArrowUpRight className="size-3.5" />
+                  </Link>
                 </Button>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="size-4 text-muted-foreground" />
-                <CardTitle>{t("settings.securityBaseline")}</CardTitle>
+        <div className="space-y-6">
+          <Card className="of-animate-in" style={{ animationDelay: "80ms" }}>
+            <SettingsCardHeader
+              icon={<ShieldCheck className="size-4" />}
+              title={t("settings.securityBaseline")}
+              description={t("settings.securityDescription")}
+            />
+            <CardContent className="space-y-3">
+              <div className="divide-y divide-border/70 overflow-hidden rounded-md border border-border/70">
+                <SecurityItem label={t("settings.jwtAuth")} value={t("settings.enabled")} />
+                <SecurityItem label={t("settings.tenantIsolation")} value={t("settings.enabled")} />
+                <SecurityItem label={t("settings.apiKeyEncryption")} value="AES-256-GCM" />
+                <SecurityItem label={t("settings.terminalPersistence")} value="tmux" />
               </div>
-              <CardDescription>
-                {t("settings.securityDescription")}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <SecurityItem label={t("settings.jwtAuth")} value={t("settings.enabled")} />
-              <SecurityItem label={t("settings.tenantIsolation")} value={t("settings.enabled")} />
-              <SecurityItem label={t("settings.apiKeyEncryption")} value="AES-256-GCM" />
-              <SecurityItem label={t("settings.terminalPersistence")} value="tmux" />
-              <div className="flex items-center gap-2 rounded-md border border-border p-3">
-                <KeyRound className="size-4 text-muted-foreground" />
-                <span className="text-muted-foreground">
-                  {t("settings.secretsNotice")}
-                </span>
+              <div className="flex items-start gap-2.5 rounded-md border border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
+                <KeyRound className="mt-0.5 size-3.5 shrink-0" />
+                <span>{t("settings.secretsNotice")}</span>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Download className="size-4 text-muted-foreground" />
-                <CardTitle>{t("settings.diagnostics")}</CardTitle>
-              </div>
-              <CardDescription>
-                {t("settings.diagnosticsDescription")}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
+          <Card className="of-animate-in" style={{ animationDelay: "120ms" }}>
+            <SettingsCardHeader
+              icon={<Download className="size-4" />}
+              title={t("settings.diagnostics")}
+              description={t("settings.diagnosticsDescription")}
+            />
+            <CardContent className="space-y-3">
               <Button
                 type="button"
                 variant="outline"
+                size="sm"
                 className="w-full justify-start"
                 onClick={handleDiagnosticsExport}
                 disabled={diagnosticsState === "exporting"}
               >
-                <Download className="mr-2 size-4" />
+                <Download className="size-4" />
                 {diagnosticsState === "exporting"
                   ? t("settings.diagnosticsExporting")
                   : t("settings.diagnosticsExport")}
               </Button>
-              <p className="text-xs text-muted-foreground">
+              <p
+                className={cn(
+                  "text-xs",
+                  diagnosticsState === "success"
+                    ? "text-emerald-400"
+                    : diagnosticsState === "error"
+                      ? "text-destructive"
+                      : "text-muted-foreground"
+                )}
+              >
                 {diagnosticsState === "success"
                   ? t("settings.diagnosticsExported")
                   : diagnosticsState === "error"
@@ -477,33 +447,36 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <ScrollText className="size-4 text-muted-foreground" />
-                <CardTitle>{t("settings.auditHistory")}</CardTitle>
-              </div>
-              <CardDescription>
-                {t("settings.auditDescription")}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
+          <Card className="of-animate-in" style={{ animationDelay: "160ms" }}>
+            <SettingsCardHeader
+              icon={<ScrollText className="size-4" />}
+              title={t("settings.auditHistory")}
+              description={t("settings.auditDescription")}
+            />
+            <CardContent>
               {auditLoading ? (
-                <p className="text-muted-foreground">{t("settings.auditLoading")}</p>
+                <p className="text-xs text-muted-foreground">{t("settings.auditLoading")}</p>
               ) : (auditData?.auditLogs.length ?? 0) === 0 ? (
-                <p className="text-muted-foreground">{t("settings.auditEmpty")}</p>
-              ) : (
-                auditData?.auditLogs.map((entry) => (
-                  <div key={entry.id} className="rounded-md border border-border p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-medium">{entry.action}</span>
-                      <Badge variant="outline">{entry.resourceType}</Badge>
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {new Date(entry.createdAt).toLocaleString()}
-                    </div>
+                <div className="flex flex-col items-center gap-2.5 py-6 text-center">
+                  <div className="flex size-9 items-center justify-center rounded-md bg-brand/10 text-brand">
+                    <ScrollText className="size-4" />
                   </div>
-                ))
+                  <p className="text-xs text-muted-foreground">{t("settings.auditEmpty")}</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border/70 overflow-hidden rounded-md border border-border/70">
+                  {auditData?.auditLogs.map((entry) => (
+                    <div key={entry.id} className="px-3 py-2.5 transition-colors hover:bg-muted/40">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="truncate text-sm font-medium">{entry.action}</span>
+                        <Badge variant="outline">{entry.resourceType}</Badge>
+                      </div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        {new Date(entry.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -511,69 +484,6 @@ export default function SettingsPage() {
       </div>
     </div>
   );
-}
-
-function FeishuIntegrationItem({ status }: { status: FeishuIntegrationStatus }) {
-  const { t } = useLanguage();
-  const enabledState = status.emergencyDisabled
-    ? t("settings.feishuEmergencyDisabled")
-    : status.enabled
-      ? t("settings.feishuEnabled")
-      : t("settings.feishuDisabled");
-
-  return (
-    <div className="rounded-md border border-border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="font-medium">{t("settings.feishuIntegration")}</div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            {t("settings.feishuPhaseOneNotice")}
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge variant={status.available ? "secondary" : "outline"}>
-            {status.available ? t("settings.feishuCliAvailable") : t("settings.feishuCliMissing")}
-          </Badge>
-          <Badge variant={status.enabled ? "secondary" : "outline"}>
-            {enabledState}
-          </Badge>
-        </div>
-      </div>
-      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-        <StatusField label={t("settings.feishuVersion")} value={status.version ?? "-"} />
-        <StatusField label={t("settings.feishuAuthState")} value={formatFeishuAuthState(status.authState, t)} />
-        <StatusField label={t("settings.feishuIdentityMode")} value={formatFeishuIdentityMode(status.identityMode, t)} />
-        <StatusField label={t("settings.feishuEnabledState")} value={enabledState} />
-      </div>
-    </div>
-  );
-}
-
-function StatusField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="truncate text-right font-medium">{value}</span>
-    </div>
-  );
-}
-
-function formatFeishuAuthState(
-  authState: FeishuIntegrationStatus["authState"],
-  t: (key: TranslationKey) => string
-): string {
-  if (authState === "authenticated") return t("settings.feishuAuthAuthenticated");
-  if (authState === "unauthenticated") return t("settings.feishuAuthUnauthenticated");
-  return t("settings.feishuAuthUnknown");
-}
-
-function formatFeishuIdentityMode(
-  identityMode: FeishuIntegrationStatus["identityMode"],
-  t: (key: TranslationKey) => string
-): string {
-  if (identityMode === "user") return t("settings.feishuIdentityUser");
-  if (identityMode === "bot") return t("settings.feishuIdentityBot");
-  return t("settings.feishuIdentityUnknown");
 }
 
 function downloadDiagnosticsReport(report: LocalDiagnosticsExport) {
@@ -589,19 +499,47 @@ function downloadDiagnosticsReport(report: LocalDiagnosticsExport) {
   URL.revokeObjectURL(url);
 }
 
+function SettingsCardHeader({
+  icon,
+  title,
+  description,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <CardHeader className="flex flex-row items-center gap-3 space-y-0">
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+        <CardDescription className="mt-1 text-xs">{description}</CardDescription>
+      </div>
+    </CardHeader>
+  );
+}
+
 function AdapterItem({ adapter }: { adapter: AdapterDiscovery }) {
   const { t } = useLanguage();
 
   return (
-    <div className="rounded-md border border-border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="font-medium">{adapter.label}</div>
-          <div className="mt-1 font-mono text-xs text-muted-foreground">
+    <div className="rounded-md border border-border/70 p-3 transition-colors hover:bg-muted/40">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              adapter.available ? "bg-emerald-400" : "bg-red-400"
+            )}
+          />
+          <CliBrandChip aiTool={adapter.id} />
+          <span className="truncate font-mono text-xs text-muted-foreground">
             {adapter.command} --version
-          </div>
+          </span>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           <Badge variant={adapter.available ? "secondary" : "outline"}>
             {adapter.available ? t("settings.available") : t("settings.missing")}
           </Badge>
@@ -619,7 +557,7 @@ function AdapterItem({ adapter }: { adapter: AdapterDiscovery }) {
         {adapter.version ?? adapter.error ?? adapter.configDir}
       </div>
       {adapter.runtimeModes.length > 0 && (
-        <div className="mt-2 font-mono text-xs text-muted-foreground">
+        <div className="mt-1.5 font-mono text-xs text-muted-foreground">
           {adapter.runtimeModes.join(" / ")}
         </div>
       )}
@@ -643,12 +581,12 @@ function SettingRow({
   icon?: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+    <div className="flex items-center justify-between gap-4 rounded-md border border-border/70 px-3 py-3 transition-colors hover:bg-muted/40">
       <div className="flex min-w-0 items-start gap-3">
-        {icon}
+        {icon ? <span className="mt-0.5 shrink-0">{icon}</span> : null}
         <div className="min-w-0">
-          <div className="font-medium">{title}</div>
-          <div className="mt-1 text-sm text-muted-foreground">{description}</div>
+          <div className="text-sm font-medium">{title}</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
         </div>
       </div>
       <Switch
@@ -663,7 +601,7 @@ function SettingRow({
 
 function SecurityItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+    <div className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <Badge variant="secondary">{value}</Badge>
     </div>

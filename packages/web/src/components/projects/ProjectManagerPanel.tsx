@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Table2,
   Trash2,
+  type LucideIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -729,10 +730,10 @@ export function ProjectManagerPanel({
     <div className="space-y-4" data-testid="project-manager-panel">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h2 className="text-base font-semibold leading-tight">{t("projects.projectManager")}</h2>
+          <h2 className="text-sm font-semibold">{t("projects.projectManager")}</h2>
           <p className="text-xs text-muted-foreground">{t("projects.projectManagerDisabledActionHint")}</p>
         </div>
-        <Button size="sm" onClick={refresh} disabled={isRefreshing || !canLoad}>
+        <Button size="sm" variant="outline" onClick={refresh} disabled={isRefreshing || !canLoad}>
           <RefreshCw className={cn("mr-2 size-4", isRefreshing && "animate-spin")} />
           {t("projects.projectManagerRefresh")}
         </Button>
@@ -957,8 +958,8 @@ function ProjectManagerGoalCard({
   return (
     <Card>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <BriefcaseBusiness className="size-4" />
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+          <BriefcaseBusiness className="size-4 text-brand" />
           {t("projects.projectManagerGoal")}
         </CardTitle>
         {!isEditing && (
@@ -1024,7 +1025,11 @@ function ProjectManagerGoalCard({
               <Button variant="outline" onClick={onCancel} disabled={isSaving}>
                 {t("projects.projectManagerCancel")}
               </Button>
-              <Button onClick={onSave} disabled={isSaving}>
+              <Button
+                className="bg-brand text-brand-foreground hover:bg-brand/90"
+                onClick={onSave}
+                disabled={isSaving}
+              >
                 {t("projects.projectManagerSaveGoal")}
               </Button>
             </div>
@@ -1033,6 +1038,7 @@ function ProjectManagerGoalCard({
           <EmptyState
             title={t("projects.projectManagerNoGoalTitle")}
             body={t("projects.projectManagerNoGoalBody")}
+            icon={BriefcaseBusiness}
           />
         ) : (
           <>
@@ -1126,8 +1132,8 @@ function ProjectManagerWorkItemsCard({
   return (
     <Card>
       <CardHeader className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <ClipboardList className="size-4" />
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+          <ClipboardList className="size-4 text-brand" />
           {t("projects.projectManagerWorkItems")}
         </CardTitle>
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -1135,6 +1141,7 @@ function ProjectManagerWorkItemsCard({
             <Button
               size="sm"
               variant={viewMode === "board" ? "default" : "ghost"}
+              className={viewMode === "board" ? "bg-brand text-brand-foreground hover:bg-brand/90" : undefined}
               aria-pressed={viewMode === "board"}
               onClick={() => onViewModeChange("board")}
             >
@@ -1144,6 +1151,7 @@ function ProjectManagerWorkItemsCard({
             <Button
               size="sm"
               variant={viewMode === "table" ? "default" : "ghost"}
+              className={viewMode === "table" ? "bg-brand text-brand-foreground hover:bg-brand/90" : undefined}
               aria-pressed={viewMode === "table"}
               onClick={() => onViewModeChange("table")}
             >
@@ -1153,6 +1161,7 @@ function ProjectManagerWorkItemsCard({
             <Button
               size="sm"
               variant={viewMode === "queue" ? "default" : "ghost"}
+              className={viewMode === "queue" ? "bg-brand text-brand-foreground hover:bg-brand/90" : undefined}
               aria-pressed={viewMode === "queue"}
               onClick={() => onViewModeChange("queue")}
             >
@@ -1179,7 +1188,11 @@ function ProjectManagerWorkItemsCard({
               ))}
             </select>
           </div>
-          <Button size="sm" onClick={onCreate}>
+          <Button
+            size="sm"
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            onClick={onCreate}
+          >
             <Plus className="mr-2 size-4" />
             {t("projects.projectManagerCreateWorkItem")}
           </Button>
@@ -1204,6 +1217,7 @@ function ProjectManagerWorkItemsCard({
             body={isFilterEmpty
               ? t("projects.projectManagerFilterEmptyBody")
               : t("projects.projectManagerNoWorkItemsBody")}
+            icon={ClipboardList}
           />
         ) : viewMode === "board" ? (
           <ProjectManagerWorkItemBoard
@@ -1230,6 +1244,7 @@ function ProjectManagerWorkItemsCard({
             <EmptyState
               title={t("projects.projectManagerFilterEmptyTitle")}
               body={t("projects.projectManagerFilterEmptyBody")}
+              icon={ClipboardList}
             />
           ) : (
             <ProjectManagerWorkItemTable
@@ -1325,6 +1340,7 @@ function ProjectManagerWorkItemBoard({
           </div>
           <Button
             size="sm"
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
             onClick={onBatchStatusSubmit}
             disabled={batchStatusPending || selectedWorkItemCount === 0 || !batchTargetStatus}
           >
@@ -1418,8 +1434,8 @@ function ProjectManagerBoardCard({
     <article
       className={cn(
         "rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs",
-        highlighted && "border-primary/60 bg-primary/5",
-        selected && "ring-2 ring-primary/35"
+        highlighted && "border-brand/50 bg-brand/5",
+        selected && "ring-2 ring-brand/40"
       )}
       data-testid={`project-manager-board-card-${item.id}`}
     >
@@ -1427,7 +1443,7 @@ function ProjectManagerBoardCard({
         <label className="mt-1 inline-flex items-center">
           <input
             type="checkbox"
-            className="size-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="size-4 rounded border-border text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             checked={selected}
             aria-label={t("projects.projectManagerSelectWorkItem")}
             onChange={(event) => onToggleSelection(item, event.target.checked)}
@@ -1506,7 +1522,7 @@ function ProjectManagerWorkItemTable({
           <TableRow
             key={item.id}
             className={cn(
-              item.id === highlightedWorkItemId && "border-primary/60 bg-primary/5"
+              item.id === highlightedWorkItemId && "border-brand/50 bg-brand/5"
             )}
           >
             <TableCell className="max-w-[240px] whitespace-normal break-words font-medium">
@@ -1590,6 +1606,7 @@ function ProjectManagerTaskQueue({
       <EmptyState
         title={t("projects.projectManagerTaskQueueEmptyTitle")}
         body={t("projects.projectManagerTaskQueueEmptyBody")}
+        icon={ListChecks}
       />
     );
   }
@@ -1661,7 +1678,7 @@ function ProjectManagerTaskQueueCard({
     <article
       className={cn(
         "rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs",
-        highlighted && "border-primary/60 bg-primary/5"
+        highlighted && "border-brand/50 bg-brand/5"
       )}
       data-testid={`project-manager-task-queue-card-${taskPacket.workItemId}`}
     >
@@ -1942,7 +1959,12 @@ function ProjectManagerWorkItemDetailSheet({
                 </p>
               )}
               <div className="flex justify-end">
-                <Button size="sm" onClick={onAttachEvidence} disabled={isEvidenceSaving}>
+                <Button
+                  size="sm"
+                  className="bg-brand text-brand-foreground hover:bg-brand/90"
+                  onClick={onAttachEvidence}
+                  disabled={isEvidenceSaving}
+                >
                   <Plus className="mr-2 size-4" />
                   {t("projects.projectManagerAttachEvidence")}
                 </Button>
@@ -2044,14 +2066,19 @@ function ProjectManagerTaskPacketSection({
           />
           {taskPacket.sessionLink && (
             <a
-              className="inline-flex text-xs font-medium text-primary hover:underline"
+              className="inline-flex text-xs font-medium text-brand hover:underline"
               href={taskPacket.sessionLink.href}
             >
               {t("projects.projectManagerTaskPacketOpenSession")}
             </a>
           )}
           {!taskPacket.sessionLink && (
-            <Button size="sm" className="w-fit" onClick={onStart} disabled={!canStartTask}>
+            <Button
+              size="sm"
+              className="w-fit bg-brand text-brand-foreground hover:bg-brand/90"
+              onClick={onStart}
+              disabled={!canStartTask}
+            >
               {isStarting
                 ? t("projects.projectManagerTaskPacketStarting")
                 : t("projects.projectManagerTaskPacketStart")}
@@ -2080,7 +2107,12 @@ function ProjectManagerTaskPacketSection({
                 </option>
               ))}
             </select>
-            <Button size="sm" onClick={onSessionLink} disabled={!canLinkSession}>
+            <Button
+              size="sm"
+              className="bg-brand text-brand-foreground hover:bg-brand/90"
+              onClick={onSessionLink}
+              disabled={!canLinkSession}
+            >
               {t("projects.projectManagerTaskPacketLinkSession")}
             </Button>
           </div>
@@ -2242,7 +2274,11 @@ function CreateWorkItemDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             {t("projects.projectManagerCancel")}
           </Button>
-          <Button onClick={onSave} disabled={isSaving}>
+          <Button
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            onClick={onSave}
+            disabled={isSaving}
+          >
             {t("projects.projectManagerCreateWorkItem")}
           </Button>
         </DialogFooter>
@@ -2338,7 +2374,11 @@ function EditWorkItemDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             {t("projects.projectManagerCancel")}
           </Button>
-          <Button onClick={onSave} disabled={isSaving}>
+          <Button
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            onClick={onSave}
+            disabled={isSaving}
+          >
             {t("projects.projectManagerSaveWorkItem")}
           </Button>
         </DialogFooter>
@@ -2553,7 +2593,11 @@ function DoneReasonDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             {t("projects.projectManagerCancel")}
           </Button>
-          <Button onClick={onConfirm} disabled={isSaving}>
+          <Button
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            onClick={onConfirm}
+            disabled={isSaving}
+          >
             {t("projects.projectManagerConfirmStatusChange")}
           </Button>
         </DialogFooter>
@@ -2599,8 +2643,8 @@ function ProjectManagerLedgerCard({
   return (
     <Card className="xl:col-span-2" data-testid="project-manager-ledger">
       <CardHeader className="space-y-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <History className="size-4" />
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+          <History className="size-4 text-brand" />
           {t("projects.projectManagerLedger")}
         </CardTitle>
         <div className="flex flex-wrap gap-2">
@@ -2609,6 +2653,7 @@ function ProjectManagerLedgerCard({
               key={option.value}
               size="sm"
               variant={filter === option.value ? "default" : "outline"}
+              className={filter === option.value ? "bg-brand text-brand-foreground hover:bg-brand/90" : undefined}
               onClick={() => onFilterChange(option.value)}
             >
               {t(option.labelKey)}
@@ -2638,11 +2683,13 @@ function ProjectManagerLedgerCard({
           <EmptyState
             title={t("projects.projectManagerNoLedgerTitle")}
             body={t("projects.projectManagerNoLedgerBody")}
+            icon={History}
           />
         ) : events.length === 0 ? (
           <EmptyState
             title={t("projects.projectManagerLedgerFilteredEmptyTitle")}
             body={t("projects.projectManagerLedgerFilteredEmptyBody")}
+            icon={History}
           />
         ) : (
           <div className="space-y-3">
@@ -2733,18 +2780,25 @@ function LedgerTraceGrid({ trace, t }: { trace: ProjectManagerLedgerTrace; t: Tr
 
 function LedgerDatum({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="rounded-md border border-border/50 bg-background/40 px-2 py-2">
+    <div className="rounded-md border border-border/70 bg-background/40 px-2 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 break-all font-mono text-xs tabular-nums">{value}</div>
     </div>
   );
 }
 
-function EmptyState({ title, body }: { title: string; body: string }) {
+function EmptyState({ title, body, icon: Icon }: { title: string; body: string; icon?: LucideIcon }) {
   return (
-    <div className="py-4 text-center">
-      <div className="text-sm font-medium">{title}</div>
-      <p className="mt-1 text-sm text-muted-foreground">{body}</p>
+    <div className="flex flex-col items-center gap-3 py-10 text-center">
+      {Icon ? (
+        <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+          <Icon className="size-5" />
+        </div>
+      ) : null}
+      <div>
+        <div className="text-sm font-medium">{title}</div>
+        <p className="mt-1 text-xs text-muted-foreground">{body}</p>
+      </div>
     </div>
   );
 }

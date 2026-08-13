@@ -13,18 +13,20 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("Settings shows read-only Feishu integration status", async ({ page }) => {
+test("Settings allows entering and saving Feishu bot credentials", async ({ page }) => {
   await mockSettingsApis(page);
 
   await page.goto("/settings");
 
   await expect(page.getByText("Feishu Integration").first()).toBeVisible();
-  await expect(page.getByText("CLI available")).toBeVisible();
-  await expect(page.getByText("lark-cli 1.2.3")).toBeVisible();
-  await expect(page.getByText("Authenticated")).toBeVisible();
-  await expect(page.getByText("User")).toBeVisible();
-  await expect(page.getByText("Disabled").first()).toBeVisible();
-  await expect(page.getByText("Phase 1 is read-only diagnostics; remote control is not enabled yet.")).toBeVisible();
+  const appId = page.getByLabel("App ID");
+  const appSecret = page.getByLabel("App Secret");
+  await expect(appId).toBeEditable();
+  await expect(appSecret).toBeEditable();
+  await appId.fill("cli_test_app");
+  await appSecret.fill("test-secret");
+  await page.getByRole("button", { name: "Save Feishu configuration" }).click();
+  await expect(page.getByText("Feishu configuration saved")).toBeVisible();
 });
 
 async function mockSettingsApis(page: Page) {
@@ -70,6 +72,43 @@ async function mockSettingsApis(page: Page) {
           },
         }),
       });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/integrations/feishu/account") {
+      if (route.request().method() === "PUT") {
+        await route.fulfill({
+          json: envelope({
+            account: {
+              appId: "cli_test_app",
+              enabled: false,
+              secretConfigured: true,
+            },
+          }),
+        });
+        return;
+      }
+      await route.fulfill({ json: envelope({ account: null }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/integrations/feishu/config") {
+      await route.fulfill({
+        json: envelope({
+          config: {
+            enabled: false,
+            emergencyDisabled: false,
+            identityMode: "bot",
+            allowedChatIds: [],
+            commandPrefix: "/openforge",
+          },
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/integrations/feishu/user-mappings") {
+      await route.fulfill({ json: envelope({ mappings: [] }) });
       return;
     }
 

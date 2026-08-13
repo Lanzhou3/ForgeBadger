@@ -57,9 +57,16 @@ export function RegisterForm() {
   };
 
   return (
-    <form method="post" onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="email">Email</Label>
+    <form
+      method="post"
+      onSubmit={handleSubmit(onSubmit)}
+      className="of-animate-in flex flex-col gap-4"
+      style={{ animationDelay: "60ms" }}
+    >
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="email" className="text-xs font-medium">
+          Email
+        </Label>
         <Input
           id="email"
           type="email"
@@ -67,11 +74,13 @@ export function RegisterForm() {
           {...register("email")}
         />
         {errors.email && (
-          <p className="text-sm text-destructive">{errors.email.message}</p>
+          <p className="text-xs text-destructive">{errors.email.message}</p>
         )}
       </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="password">Password</Label>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="password" className="text-xs font-medium">
+          Password
+        </Label>
         <Input
           id="password"
           type="password"
@@ -79,11 +88,13 @@ export function RegisterForm() {
           {...register("password")}
         />
         {errors.password && (
-          <p className="text-sm text-destructive">{errors.password.message}</p>
+          <p className="text-xs text-destructive">{errors.password.message}</p>
         )}
       </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="confirmPassword">Confirm Password</Label>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="confirmPassword" className="text-xs font-medium">
+          Confirm Password
+        </Label>
         <Input
           id="confirmPassword"
           type="password"
@@ -91,24 +102,26 @@ export function RegisterForm() {
           {...register("confirmPassword")}
         />
         {errors.confirmPassword && (
-          <p className="text-sm text-destructive">
+          <p className="text-xs text-destructive">
             {errors.confirmPassword.message}
           </p>
         )}
       </div>
       {errors.root && (
-        <p className="text-sm text-destructive">{errors.root.message}</p>
+        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {errors.root.message}
+        </p>
       )}
       <Button
         type="submit"
         disabled={!isHydrated || isSubmitting}
-        className="bg-brand text-brand-foreground hover:bg-brand/90"
+        className="mt-1 bg-brand text-brand-foreground hover:bg-brand/90"
       >
         {isSubmitting ? "Creating account..." : "Create account"}
       </Button>
-      <p className="text-sm text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         Already have an account?{" "}
-        <Link href="/login" className="text-brand underline">
+        <Link href="/login" className="font-medium text-brand underline-offset-4 hover:underline">
           Sign in
         </Link>
       </p>

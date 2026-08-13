@@ -63,7 +63,7 @@ export function WorkspaceContextPanel({
   return (
     <Card
       data-testid="workspace-context-panel"
-      className={cn("overflow-hidden border-border/70 bg-card/80", className)}
+      className={cn("of-animate-in overflow-hidden", className)}
     >
       <CardHeader className="space-y-3 px-4 pb-0">
         <div className="flex items-start justify-between gap-3">
@@ -110,7 +110,7 @@ export function WorkspaceContextPanel({
         ) : rows.length === 0 ? (
           <WorkspaceNotice message={t("projects.workspaceEmpty")} />
         ) : (
-          <div className="max-h-56 overflow-auto rounded-md border border-border bg-background/60 p-1 [scrollbar-width:thin]">
+          <div className="max-h-56 overflow-auto rounded-md border border-border/70 bg-background/60 p-1 [scrollbar-width:thin]">
             {rows.map(({ entry, depth }) => (
               <WorkspaceTreeButton
                 key={entry.path}
@@ -123,8 +123,8 @@ export function WorkspaceContextPanel({
           </div>
         )}
 
-        <div className="rounded-md border border-border bg-background/70">
-          <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div className="rounded-md border border-border/70 bg-background/70">
+          <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3 py-2">
             <div className="min-w-0 text-xs font-medium">
               {selectedPath || t("projects.workspaceSelectFile")}
             </div>
@@ -163,8 +163,8 @@ function WorkspaceTreeButton({
     <button
       type="button"
       className={cn(
-        "flex h-8 w-full items-center gap-2 rounded px-2 text-left text-xs transition-colors hover:bg-muted",
-        selectedPath === entry.path && "bg-primary/10 text-primary",
+        "flex h-8 w-full items-center gap-2 rounded px-2 text-left text-xs transition-colors hover:bg-muted/40",
+        selectedPath === entry.path && "bg-brand/10 text-brand",
         !isFile && "cursor-default text-muted-foreground"
       )}
       style={{ paddingLeft: `${8 + depth * 14}px` }}

@@ -78,22 +78,23 @@ export default function NewProjectPage() {
   }
 
   return (
-    <div className="p-6 space-y-4 max-w-2xl">
-      <Button variant="ghost" size="sm" onClick={() => router.push("/projects")}>
-        <ArrowLeft className="mr-2 size-4" />
-        {t("projects.back")}
-      </Button>
-
-      <div>
-        <h1 className="text-2xl font-semibold">{t("projects.create")}</h1>
-        <p className="mt-1 text-muted-foreground">
-          {t("projects.newSubtitle")}
-        </p>
+    <div className="mx-auto max-w-2xl space-y-6 p-6">
+      <div className="space-y-3">
+        <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={() => router.push("/projects")}>
+          <ArrowLeft className="size-4" />
+          {t("projects.back")}
+        </Button>
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">{t("projects.create")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("projects.newSubtitle")}
+          </p>
+        </div>
       </div>
 
-      <Card>
+      <Card className="of-animate-in">
         <CardHeader>
-          <CardTitle>{t("projects.details")}</CardTitle>
+          <CardTitle className="text-sm font-semibold">{t("projects.details")}</CardTitle>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -199,15 +200,21 @@ export default function NewProjectPage() {
                 </p>
               )}
 
-              <div className="flex justify-end gap-3">
+              <div className="flex justify-end gap-2 border-t border-border/70 pt-4">
                 <Button
                   type="button"
                   variant="outline"
+                  size="sm"
                   onClick={() => router.push("/projects")}
                 >
                   {t("common.cancel")}
                 </Button>
-                <Button type="submit" disabled={mutation.isPending}>
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="bg-brand text-brand-foreground hover:bg-brand/90"
+                  disabled={mutation.isPending}
+                >
                   {mutation.isPending ? t("projects.creating") : t("projects.create")}
                 </Button>
               </div>

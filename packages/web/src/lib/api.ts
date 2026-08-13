@@ -510,6 +510,47 @@ export interface FeishuIntegrationStatus {
   error?: string;
 }
 
+export interface FeishuAppAccount {
+  appId: string;
+  enabled: boolean;
+  secretConfigured: boolean;
+}
+
+export interface FeishuChannelAccount extends FeishuAppAccount {
+  id: string;
+  connectionState: string;
+  configRevision: number;
+  updatedAt: string;
+}
+
+export interface FeishuConnectionHealth {
+  state: "disabled" | "connecting" | "connected" | "reconnecting" | "unhealthy" | "stopped" | string;
+  accountId: string | null;
+  configRevision: number | null;
+  reconnectAttempt: number;
+  lastConnectedAt: string | null;
+  lastErrorMessage: string | null;
+}
+
+export type FeishuConversationScope =
+  | { type: "unbound" }
+  | { type: "workspace" }
+  | { type: "project"; id: string };
+
+export interface FeishuConversationBinding {
+  id: string;
+  accountId: string;
+  chatId: string;
+  threadKey: string;
+  conversationId: string;
+  scope: FeishuConversationScope;
+}
+
+export interface FeishuQueueSummary {
+  inbox: Record<string, number>;
+  outbox: Record<string, number>;
+}
+
 export interface FeishuIntegrationConfig {
   enabled: boolean;
   emergencyDisabled: boolean;
@@ -1092,6 +1133,51 @@ export interface UsageRate {
   hourlyRateUsd: number;
 }
 
+export interface TokenUsageBucket {
+  key: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  requestCount: number;
+  cacheHitRate: number | null;
+}
+
+export interface TokenUsageSummary {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheWriteTokens: number;
+  totalReasoningTokens: number;
+  totalTokens: number;
+  requestCount: number;
+  cacheHitRate: number | null;
+  byAdapter: TokenUsageBucket[];
+  byProject: TokenUsageBucket[];
+  byModel: TokenUsageBucket[];
+}
+
+export interface TokenDailyPoint {
+  day: string;
+  group: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+export interface UsageSyncResultItem {
+  adapter: "claude" | "opencode";
+  scanned: number;
+  inserted: number;
+}
+
+export interface UsageSyncResult {
+  byAdapter: UsageSyncResultItem[];
+  totalInserted: number;
+}
+
 export interface AdapterDiscovery {
   id: "claude" | "opencode" | "codex" | "kimi";
   label: string;
@@ -1482,6 +1568,96 @@ export async function getFeishuIntegrationStatus(): Promise<FeishuIntegrationSta
   return data.status;
 }
 
+export async function getFeishuAppAccount(): Promise<FeishuAppAccount | null> {
+  const data = await fetchJson<{ account: FeishuAppAccount | null }>("/api/v1/integrations/feishu/account", {
+    cache: "no-store"
+  });
+  return data.account;
+}
+
+export async function saveFeishuAppAccount(input: {
+  appId: string;
+  appSecret?: string;
+  enabled: boolean;
+}): Promise<FeishuAppAccount> {
+  const data = await fetchJson<{ account: FeishuAppAccount }>("/api/v1/integrations/feishu/account", {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
+  return data.account;
+}
+
+export async function getFeishuChannelAccount(): Promise<FeishuChannelAccount | null> {
+  const data = await fetchJson<{ account: FeishuChannelAccount | null }>("/api/v1/integrations/feishu/account", {
+    cache: "no-store"
+  });
+  return data.account;
+}
+
+export async function saveFeishuChannelAccount(input: {
+  appId: string;
+  appSecret?: string;
+  enabled: boolean;
+}): Promise<FeishuChannelAccount> {
+  const data = await fetchJson<{ account: FeishuChannelAccount }>("/api/v1/integrations/feishu/account", {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
+  return data.account;
+}
+
+export async function getFeishuConnectionHealth(): Promise<FeishuConnectionHealth> {
+  const data = await fetchJson<{ health: FeishuConnectionHealth }>("/api/v1/integrations/feishu/health", {
+    cache: "no-store"
+  });
+  return data.health;
+}
+
+export async function listFeishuConversationBindings(): Promise<FeishuConversationBinding[]> {
+  const data = await fetchJson<{ bindings: FeishuConversationBinding[] }>("/api/v1/integrations/feishu/bindings", {
+    cache: "no-store"
+  });
+  return data.bindings;
+}
+
+export async function createFeishuConversationBinding(input: {
+  chatId: string;
+  threadKey?: string;
+  scope: Exclude<FeishuConversationScope, { type: "unbound" }>;
+}): Promise<FeishuConversationBinding> {
+  const data = await fetchJson<{ binding: FeishuConversationBinding }>("/api/v1/integrations/feishu/bindings", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+  return data.binding;
+}
+
+export async function updateFeishuConversationBinding(
+  id: string,
+  scope: Exclude<FeishuConversationScope, { type: "unbound" }>
+): Promise<FeishuConversationBinding> {
+  const data = await fetchJson<{ binding: FeishuConversationBinding }>(
+    `/api/v1/integrations/feishu/bindings/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(scope) }
+  );
+  return data.binding;
+}
+
+export async function deleteFeishuConversationBinding(id: string): Promise<void> {
+  await fetchJson(`/api/v1/integrations/feishu/bindings/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function getFeishuQueueSummary(): Promise<FeishuQueueSummary> {
+  const data = await fetchJson<{ queues: FeishuQueueSummary }>("/api/v1/integrations/feishu/queue-summary", {
+    cache: "no-store"
+  });
+  return data.queues;
+}
+
+export async function emergencyStopFeishu(): Promise<void> {
+  await fetchJson("/api/v1/integrations/feishu/emergency-stop", { method: "POST", body: "{}" });
+}
+
 export async function getFeishuIntegrationConfig(): Promise<FeishuIntegrationConfig> {
   const data = await fetchJson<{ config: FeishuIntegrationConfig }>("/api/v1/integrations/feishu/config", {
     cache: "no-store"
@@ -1590,6 +1766,38 @@ export async function restoreSnapshot(id: string): Promise<SnapshotRestoreResult
 
 export async function getUsageSummary(): Promise<{ summary: UsageSummary }> {
   return fetchJson("/api/v1/usage/summary") as Promise<{ summary: UsageSummary }>;
+}
+
+export async function getTokenUsageSummary(params: {
+  from?: string;
+  to?: string;
+} = {}): Promise<{ summary: TokenUsageSummary }> {
+  const searchParams = new URLSearchParams();
+  if (params.from) searchParams.set("from", params.from);
+  if (params.to) searchParams.set("to", params.to);
+  const query = searchParams.toString();
+  return fetchJson(`/api/v1/usage/token-summary${query ? `?${query}` : ""}`) as Promise<{
+    summary: TokenUsageSummary;
+  }>;
+}
+
+export async function getProjectActivity(params: {
+  from?: string;
+  to?: string;
+} = {}): Promise<{ series: TokenDailyPoint[] }> {
+  const searchParams = new URLSearchParams();
+  if (params.from) searchParams.set("from", params.from);
+  if (params.to) searchParams.set("to", params.to);
+  const query = searchParams.toString();
+  return fetchJson(`/api/v1/usage/project-activity${query ? `?${query}` : ""}`) as Promise<{
+    series: TokenDailyPoint[];
+  }>;
+}
+
+export async function syncUsageTokens(): Promise<{ result: UsageSyncResult }> {
+  return fetchJson("/api/v1/usage/sync", { method: "POST" }) as Promise<{
+    result: UsageSyncResult;
+  }>;
 }
 
 export async function listUsageRates(): Promise<{ rates: UsageRate[] }> {

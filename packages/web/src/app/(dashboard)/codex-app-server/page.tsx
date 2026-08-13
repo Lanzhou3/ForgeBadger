@@ -21,6 +21,7 @@ import {
 } from "@/lib/api";
 import { describeCodexAppServerActivity } from "@/lib/codex-app-server-activity";
 import { useLanguage } from "@/hooks/use-language";
+import { cn } from "@/lib/utils";
 
 const CODEX_APP_SERVER_ACTIVITY_TYPES = [
   "codex_app_server_started",
@@ -128,52 +129,59 @@ export default function CodexAppServerPage() {
   const canStart = selectedProjectId.length > 0 && !startMutation.isPending;
 
   return (
-    <div className="space-y-4 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold">{t("codexAppServer.title")}</h1>
-            <Badge variant="secondary">{t("codexAppServer.experimental")}</Badge>
+            <h1 className="text-xl font-semibold tracking-tight">{t("codexAppServer.title")}</h1>
+            <Badge variant="secondary" className="rounded-full">
+              {t("codexAppServer.experimental")}
+            </Badge>
           </div>
-          <p className="mt-1 text-muted-foreground">{t("codexAppServer.subtitle")}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t("codexAppServer.subtitle")}</p>
         </div>
-        <Button variant="outline" onClick={refreshAppServers}>
-          <RefreshCcw className="mr-2 size-4" />
+        <Button variant="outline" size="sm" onClick={refreshAppServers}>
+          <RefreshCcw className="size-4" />
           {t("codexAppServer.refresh")}
         </Button>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <Card>
+      <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <Card className="of-animate-in">
           <CardHeader>
-            <div className="flex items-center gap-2">
-              <ServerCog className="size-4 text-muted-foreground" />
-              <CardTitle>{t("codexAppServer.launch")}</CardTitle>
+            <div className="flex items-center gap-2.5">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+                <ServerCog className="size-4" />
+              </div>
+              <CardTitle className="text-sm font-semibold">{t("codexAppServer.launch")}</CardTitle>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div
               aria-label={t("codexAppServer.capabilityStateAria")}
-              className="rounded-md border border-border bg-muted/30 p-3 text-sm"
+              className="rounded-md border border-border/70 bg-muted/30 p-3"
             >
               <div className="flex items-center justify-between gap-3">
-                <span className="flex items-center gap-2 font-medium">
+                <span className="flex items-center gap-2 text-sm font-medium">
                   <ShieldCheck className="size-4 text-muted-foreground" />
                   {t("codexAppServer.capabilityState")}
                 </span>
-                <Badge variant={capabilities.turnInputEnabled ? "default" : "secondary"}>
+                <Badge
+                  variant={capabilities.turnInputEnabled ? "default" : "secondary"}
+                  className="rounded-full"
+                >
                   {capabilities.turnInputEnabled
                     ? t("codexAppServer.turnEnabled")
                     : t("codexAppServer.turnDisabled")}
                 </Badge>
               </div>
-              <div className="mt-2 text-muted-foreground">
+              <div className="mt-2 text-xs text-muted-foreground">
                 {t("codexAppServer.transcriptOff")}
               </div>
             </div>
 
-            <label className="block space-y-2 text-sm">
-              <span className="font-medium">{t("common.project")}</span>
+            <label className="block space-y-1.5 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">{t("common.project")}</span>
               <select
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 value={selectedProjectId}
@@ -192,8 +200,8 @@ export default function CodexAppServerPage() {
               </select>
             </label>
 
-            <label className="block space-y-2 text-sm">
-              <span className="font-medium">{t("codexAppServer.runtimeMode")}</span>
+            <label className="block space-y-1.5 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">{t("codexAppServer.runtimeMode")}</span>
               <select
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 value={runtimeMode}
@@ -205,119 +213,158 @@ export default function CodexAppServerPage() {
             </label>
 
             <Button
-              className="w-full"
+              className="w-full bg-brand text-brand-foreground hover:bg-brand/90"
+              size="sm"
               disabled={!canStart}
               onClick={() => {
                 setProjectId(selectedProjectId);
                 startMutation.mutate({ projectId: selectedProjectId, runtimeMode });
               }}
             >
-              <Play className="mr-2 size-4" />
+              <Play className="size-4" />
               {startMutation.isPending ? t("codexAppServer.starting") : t("common.start")}
             </Button>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="of-animate-in" style={{ animationDelay: "40ms" }}>
           <CardHeader>
             <div className="flex items-center justify-between gap-3">
-              <CardTitle>{t("codexAppServer.sessions")}</CardTitle>
-              <Badge variant="secondary">{sessions.length}</Badge>
+              <CardTitle className="text-sm font-semibold">{t("codexAppServer.sessions")}</CardTitle>
+              <Badge variant="secondary" className="rounded-full tabular-nums">
+                {sessions.length}
+              </Badge>
             </div>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent>
             {sessionsLoading ? (
               <div className="py-8 text-center text-sm text-muted-foreground">{t("common.loading")}</div>
             ) : sessions.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                {t("codexAppServer.empty")}
+              <div className="flex flex-col items-center gap-3 py-10 text-center">
+                <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                  <ServerCog className="size-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-medium">{t("codexAppServer.empty")}</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("codexAppServer.subtitle")}
+                  </p>
+                </div>
               </div>
             ) : (
-              sessions.map((session) => (
-                <div key={session.id} className="rounded-md border border-border p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <Badge variant={session.status === "running" ? "default" : "secondary"}>
-                          {session.status}
-                        </Badge>
-                        <Badge variant={session.features?.turnInputEnabled ? "default" : "secondary"}>
-                          {session.features?.turnInputEnabled
-                            ? t("codexAppServer.turnEnabled")
-                            : t("codexAppServer.turnDisabled")}
-                        </Badge>
-                        <span className="font-mono text-xs text-muted-foreground">{session.runtimeMode}</span>
-                      </div>
-                      <div className="mt-2 truncate font-mono text-xs text-muted-foreground">
-                        {session.projectRoot}
-                      </div>
-                      <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-                        <CodexSessionMetric label={t("codexAppServer.endpoint")} value={session.listen} />
-                        <CodexSessionMetric label={t("codexAppServer.processId")} value={session.pid ? String(session.pid) : "-"} />
-                        <CodexSessionMetric label={t("codexAppServer.updatedAt")} value={formatCodexActivityTime(session.updatedAt)} />
-                      </div>
-                      {session.errorMessage && (
-                        <div className="mt-2 break-words text-xs text-destructive">
-                          {safeCodexAppServerErrorMessage(session.errorMessage, t("codexAppServer.processError"))}
+              <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border/70">
+                {sessions.map((session, index) => (
+                  <div
+                    key={session.id}
+                    className="of-animate-in px-4 py-3"
+                    style={{ animationDelay: `${index * 40}ms` }}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={cn(
+                              "size-2 shrink-0 rounded-full",
+                              session.status === "running"
+                                ? "animate-pulse bg-emerald-400"
+                                : session.status === "error"
+                                  ? "bg-red-400"
+                                  : "bg-muted-foreground/40"
+                            )}
+                          />
+                          <Badge variant={session.status === "running" ? "default" : "secondary"}>
+                            {session.status}
+                          </Badge>
+                          <Badge variant={session.features?.turnInputEnabled ? "default" : "secondary"}>
+                            {session.features?.turnInputEnabled
+                              ? t("codexAppServer.turnEnabled")
+                              : t("codexAppServer.turnDisabled")}
+                          </Badge>
+                          <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
+                            {session.runtimeMode}
+                          </span>
                         </div>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={initializeMutation.isPending}
-                        onClick={() => initializeMutation.mutate(session.id)}
-                      >
-                        <CheckCircle2 className="mr-2 size-3" />
-                        {t("codexAppServer.initialize")}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={threadMutation.isPending}
-                        onClick={() => threadMutation.mutate(session)}
-                      >
-                        <GitBranch className="mr-2 size-3" />
-                        {t("codexAppServer.createThread")}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={stopMutation.isPending}
-                        onClick={() => stopMutation.mutate(session.id)}
-                      >
-                        <Square className="mr-2 size-3" />
-                        {t("common.stop")}
-                      </Button>
+                        <div className="mt-2 truncate font-mono text-xs text-muted-foreground">
+                          {session.projectRoot}
+                        </div>
+                        <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+                          <CodexSessionMetric label={t("codexAppServer.endpoint")} value={session.listen} />
+                          <CodexSessionMetric label={t("codexAppServer.processId")} value={session.pid ? String(session.pid) : "-"} />
+                          <CodexSessionMetric label={t("codexAppServer.updatedAt")} value={formatCodexActivityTime(session.updatedAt)} />
+                        </div>
+                        {session.errorMessage && (
+                          <div className="mt-2 break-words text-xs text-destructive">
+                            {safeCodexAppServerErrorMessage(session.errorMessage, t("codexAppServer.processError"))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={initializeMutation.isPending}
+                          onClick={() => initializeMutation.mutate(session.id)}
+                        >
+                          <CheckCircle2 className="size-3.5" />
+                          {t("codexAppServer.initialize")}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={threadMutation.isPending}
+                          onClick={() => threadMutation.mutate(session)}
+                        >
+                          <GitBranch className="size-3.5" />
+                          {t("codexAppServer.createThread")}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground"
+                          disabled={stopMutation.isPending}
+                          onClick={() => stopMutation.mutate(session.id)}
+                        >
+                          <Square className="size-3.5" />
+                          {t("common.stop")}
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>
       </div>
 
-      <Card aria-label={t("codexAppServer.activityFeedAria")}>
+      <Card aria-label={t("codexAppServer.activityFeedAria")} className="of-animate-in" style={{ animationDelay: "80ms" }}>
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Activity className="size-4 text-muted-foreground" />
-              <CardTitle>{t("codexAppServer.recentActivity")}</CardTitle>
+            <div className="flex items-center gap-2.5">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+                <Activity className="size-4" />
+              </div>
+              <CardTitle className="text-sm font-semibold">{t("codexAppServer.recentActivity")}</CardTitle>
             </div>
-            <Badge variant="secondary">{activities.length}</Badge>
+            <Badge variant="secondary" className="rounded-full tabular-nums">
+              {activities.length}
+            </Badge>
           </div>
         </CardHeader>
         <CardContent>
           {activitiesLoading ? (
             <div className="py-6 text-center text-sm text-muted-foreground">{t("common.loading")}</div>
           ) : activities.length === 0 ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">{t("codexAppServer.noActivity")}</div>
+            <div className="flex flex-col items-center gap-3 py-10 text-center">
+              <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                <Activity className="size-5" />
+              </div>
+              <div className="text-sm font-medium">{t("codexAppServer.noActivity")}</div>
+            </div>
           ) : (
-            <div className="divide-y divide-border">
-              {activities.map((activity) => (
-                <CodexAppServerActivityRow key={activity.id} activity={activity} />
+            <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border/70">
+              {activities.map((activity, index) => (
+                <CodexAppServerActivityRow key={activity.id} activity={activity} index={index} />
               ))}
             </div>
           )}
@@ -325,16 +372,16 @@ export default function CodexAppServerPage() {
       </Card>
 
       {(operationError || operationResult) && (
-        <Card>
+        <Card className="of-animate-in">
           <CardContent className="space-y-3 p-4">
             {operationError && (
               <div className="flex items-start gap-2 text-sm text-destructive">
-                <CircleAlert className="mt-0.5 size-4" />
+                <CircleAlert className="mt-0.5 size-4 shrink-0" />
                 <span>{operationError}</span>
               </div>
             )}
             {operationResult && (
-              <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs text-muted-foreground">
+              <pre className="max-h-64 overflow-auto rounded-md border border-border/70 bg-muted/50 p-3 text-xs text-muted-foreground">
                 {operationResult}
               </pre>
             )}
@@ -354,17 +401,20 @@ function CodexSessionMetric({ label, value }: { label: string; value: string }) 
   );
 }
 
-function CodexAppServerActivityRow({ activity }: { activity: SessionActivity }) {
+function CodexAppServerActivityRow({ activity, index }: { activity: SessionActivity; index: number }) {
   const { t } = useLanguage();
   const presentation = describeCodexAppServerActivity(activity);
 
   return (
-    <div className="grid gap-2 py-3 md:grid-cols-[180px_minmax(0,1fr)_120px] md:items-center">
+    <div
+      className="of-animate-in grid gap-2 px-4 py-3 transition-colors hover:bg-muted/40 md:grid-cols-[180px_minmax(0,1fr)_120px] md:items-center"
+      style={{ animationDelay: `${index * 40}ms` }}
+    >
       <Badge variant={presentation.variant} className="w-fit">
         {t(presentation.labelKey)}
       </Badge>
       <div className="min-w-0 space-y-1">
-        <p className="break-words text-sm text-muted-foreground">{presentation.message}</p>
+        <p className="break-words text-sm">{presentation.message}</p>
         {presentation.detail && (
           <p className="break-words font-mono text-xs text-muted-foreground">{presentation.detail}</p>
         )}

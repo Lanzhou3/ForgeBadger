@@ -13,7 +13,7 @@ export default function CopilotPage() {
   const source = normalizeSource(launchContext.source);
 
   return (
-    <div className="flex h-[calc(100vh-2rem)] min-h-[680px] flex-col p-4">
+    <div className="mx-auto flex h-[calc(100vh-3rem)] min-h-[680px] w-full max-w-7xl flex-col p-6">
       <CopilotChatPanel
         variant="page"
         className="min-h-0 flex-1"

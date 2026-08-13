@@ -28,6 +28,7 @@ import {
   type ScanResult,
 } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
+import { cn } from "@/lib/utils";
 
 const pathSchema = z.object({
   path: z.string().min(1, "Path is required"),
@@ -44,6 +45,8 @@ const confirmSchema = z.object({
 type ConfirmValues = z.infer<typeof confirmSchema>;
 
 type Step = "path" | "scan" | "confirm";
+
+const STEP_ORDER: Step[] = ["path", "scan", "confirm"];
 
 const BUILTIN_TEMPLATES = [
   { id: "builtin-claude-code", name: "Claude Code" },
@@ -125,23 +128,38 @@ export default function ImportProjectPage() {
     }
   }
 
-  return (
-    <div className="p-6 space-y-4 max-w-2xl">
-      <Button variant="ghost" size="sm" onClick={() => router.push("/projects")}>
-        <ArrowLeft className="mr-2 size-4" />
-        {t("projects.back")}
-      </Button>
+  const activeStepIndex = STEP_ORDER.indexOf(step);
 
-      <div>
-        <h1 className="text-2xl font-semibold">{t("projects.importTitle")}</h1>
-        <p className="mt-1 text-muted-foreground">
-          {t("projects.importSubtitle")}
-        </p>
+  return (
+    <div className="mx-auto max-w-2xl space-y-6 p-6">
+      <div className="space-y-3">
+        <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={() => router.push("/projects")}>
+          <ArrowLeft className="size-4" />
+          {t("projects.back")}
+        </Button>
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">{t("projects.importTitle")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("projects.importSubtitle")}
+          </p>
+        </div>
       </div>
 
-      <Card>
+      <div className="of-animate-in flex items-center gap-1.5">
+        {STEP_ORDER.map((stepId, index) => (
+          <div
+            key={stepId}
+            className={cn(
+              "h-1.5 flex-1 rounded-full transition-colors duration-300",
+              index <= activeStepIndex ? "bg-brand" : "bg-muted"
+            )}
+          />
+        ))}
+      </div>
+
+      <Card className="of-animate-in" style={{ animationDelay: "40ms" }}>
         <CardHeader>
-          <CardTitle>
+          <CardTitle className="text-sm font-semibold">
             {step === "path" && t("projects.importStepPath")}
             {step === "scan" && t("projects.importStepScan")}
             {step === "confirm" && t("projects.importStepConfirm")}
@@ -173,15 +191,21 @@ export default function ImportProjectPage() {
                   </p>
                 )}
 
-                <div className="flex justify-end gap-3">
+                <div className="flex justify-end gap-2 border-t border-border/70 pt-4">
                   <Button
                     type="button"
                     variant="outline"
+                    size="sm"
                     onClick={() => router.push("/projects")}
                   >
                     {t("common.cancel")}
                   </Button>
-                  <Button type="submit" disabled={scanMutation.isPending}>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    className="bg-brand text-brand-foreground hover:bg-brand/90"
+                    disabled={scanMutation.isPending}
+                  >
                     {scanMutation.isPending ? t("projects.scanning") : t("projects.scanDirectory")}
                   </Button>
                 </div>
@@ -193,11 +217,11 @@ export default function ImportProjectPage() {
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 {scanResult.exists && scanResult.isDirectory ? (
-                  <CheckCircle2 className="size-5 text-green-500" />
+                  <CheckCircle2 className="size-4 shrink-0 text-emerald-400" />
                 ) : (
-                  <XCircle className="size-5 text-destructive" />
+                  <XCircle className="size-4 shrink-0 text-red-400" />
                 )}
-                <span className="text-sm">
+                <span className="text-sm font-medium">
                   {scanResult.exists && scanResult.isDirectory
                     ? t("projects.validDirectory")
                     : scanResult.exists
@@ -206,28 +230,28 @@ export default function ImportProjectPage() {
                 </span>
               </div>
 
-              <div className="rounded-md border bg-muted/50 p-3">
-                <p className="text-sm font-mono text-muted-foreground">
+              <div className="rounded-md border border-border/70 bg-muted/50 p-3">
+                <p className="break-all font-mono text-xs text-muted-foreground">
                   {scanResult.path}
                 </p>
               </div>
 
               {!scanResult.exists || !scanResult.isDirectory ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400" />
-                    <p className="text-sm text-amber-700 dark:text-amber-300">
-                      {t("projects.validDirectoryRequired")}
-                    </p>
-                  </div>
+                <div className="flex items-center gap-2 rounded-md border border-amber-400/30 bg-amber-400/10 p-3">
+                  <AlertTriangle className="size-4 shrink-0 text-amber-400" />
+                  <p className="text-sm text-amber-200">
+                    {t("projects.validDirectoryRequired")}
+                  </p>
                 </div>
               ) : null}
 
-              <div className="flex justify-between gap-3">
-                <Button type="button" variant="outline" onClick={goBack}>
+              <div className="flex justify-between gap-2 border-t border-border/70 pt-4">
+                <Button type="button" variant="outline" size="sm" onClick={goBack}>
                   {t("common.back")}
                 </Button>
                 <Button
+                  size="sm"
+                  className="bg-brand text-brand-foreground hover:bg-brand/90"
                   onClick={() => setStep("confirm")}
                   disabled={!scanResult.exists || !scanResult.isDirectory}
                 >
@@ -313,11 +337,16 @@ export default function ImportProjectPage() {
                   </p>
                 )}
 
-                <div className="flex justify-between gap-3">
-                  <Button type="button" variant="outline" onClick={goBack}>
+                <div className="flex justify-between gap-2 border-t border-border/70 pt-4">
+                  <Button type="button" variant="outline" size="sm" onClick={goBack}>
                     {t("common.back")}
                   </Button>
-                  <Button type="submit" disabled={importMutation.isPending}>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    className="bg-brand text-brand-foreground hover:bg-brand/90"
+                    disabled={importMutation.isPending}
+                  >
                     {importMutation.isPending ? t("projects.importing") : t("projects.importTitle")}
                   </Button>
                 </div>

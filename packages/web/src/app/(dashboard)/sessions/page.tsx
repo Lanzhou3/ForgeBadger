@@ -7,7 +7,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, FolderOpen, Play, Plus, RotateCcw, Search, Square, TerminalSquare, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -17,14 +16,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { deleteSession, getDependencies, listProjects, listSessions, startSession, stopSession } from "@/lib/api";
@@ -33,6 +24,7 @@ import { pruneSessionTabs, sessionToTab, upsertSessionTab } from "@/lib/session-
 import { normalizeSessionStatus, sessionMatchesStatusFilter } from "@/lib/session-status";
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { useLanguage } from "@/hooks/use-language";
+import { cn } from "@/lib/utils";
 
 export default function SessionsPage() {
   const { t } = useLanguage();
@@ -124,23 +116,27 @@ export default function SessionsPage() {
   }, [filteredSessions, t]);
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">{t("sessions.title")}</h1>
-          <p className="mt-1 text-muted-foreground">
+          <h1 className="text-xl font-semibold tracking-tight">{t("sessions.title")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             {t("sessions.subtitle")}
           </p>
         </div>
         {hasProjects ? (
-          <Button onClick={() => setProjectPickerOpen(true)}>
-            <Plus className="mr-2 size-4" />
+          <Button
+            size="sm"
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            onClick={() => setProjectPickerOpen(true)}
+          >
+            <Plus className="size-4" />
             {t("projects.newSession")}
           </Button>
         ) : (
-          <Button asChild>
+          <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
             <Link href="/projects/new">
-              <Plus className="mr-2 size-4" />
+              <Plus className="size-4" />
               {t("sessions.createProject")}
             </Link>
           </Button>
@@ -156,22 +152,29 @@ export default function SessionsPage() {
       ) : sessions.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center gap-4 py-12 text-center">
-            {runtimeBlocked ? (
-              <AlertTriangle className="size-10 text-destructive" />
-            ) : (
-              <TerminalSquare className="size-10 text-muted-foreground" />
-            )}
+            <div
+              className={cn(
+                "flex size-10 items-center justify-center rounded-md",
+                runtimeBlocked ? "bg-destructive/10 text-destructive" : "bg-brand/10 text-brand"
+              )}
+            >
+              {runtimeBlocked ? (
+                <AlertTriangle className="size-5" />
+              ) : (
+                <TerminalSquare className="size-5" />
+              )}
+            </div>
             <div className="space-y-1">
-              <h3 className="text-lg font-medium">
+              <h3 className="text-sm font-medium">
                 {runtimeBlocked ? t(terminalSetupGuidance.titleKey) : t("sessions.emptyTitle")}
               </h3>
-              <p className="mx-auto max-w-2xl text-sm text-muted-foreground">
+              <p className="mx-auto max-w-2xl text-xs text-muted-foreground">
                 {runtimeBlocked
                   ? t("sessions.runtimeBlockedDescription")
                   : t("sessions.emptyReadyDescription")}
               </p>
               {runtimeBlocked && (
-                <p className="mx-auto max-w-2xl text-sm text-muted-foreground">
+                <p className="mx-auto max-w-2xl text-xs text-muted-foreground">
                   {t(terminalSetupGuidance.descriptionKey)}
                 </p>
               )}
@@ -183,22 +186,26 @@ export default function SessionsPage() {
             )}
             <div className="flex flex-wrap justify-center gap-2">
               {runtimeBlocked && (
-                <Button asChild variant="outline">
+                <Button asChild size="sm" variant="outline">
                   <Link href="/settings">
-                    <AlertTriangle className="mr-2 size-4" />
+                    <AlertTriangle className="size-4" />
                     {t("sessions.openSettings")}
                   </Link>
                 </Button>
               )}
               {hasProjects ? (
-                <Button onClick={() => setProjectPickerOpen(true)}>
-                  <FolderOpen className="mr-2 size-4" />
+                <Button
+                  size="sm"
+                  className="bg-brand text-brand-foreground hover:bg-brand/90"
+                  onClick={() => setProjectPickerOpen(true)}
+                >
+                  <FolderOpen className="size-4" />
                   {t("sessions.createFromProject")}
                 </Button>
               ) : (
-                <Button asChild>
+                <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
                   <Link href="/projects/new">
-                    <Plus className="mr-2 size-4" />
+                    <Plus className="size-4" />
                     {t("sessions.createProject")}
                   </Link>
                 </Button>
@@ -209,7 +216,7 @@ export default function SessionsPage() {
       ) : (
         <>
           <Card>
-            <CardContent className="grid gap-3 p-4 md:grid-cols-[1fr_180px]">
+            <CardContent className="grid gap-3 p-3 md:grid-cols-[1fr_180px]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -235,115 +242,110 @@ export default function SessionsPage() {
 
           {filteredSessions.length === 0 ? (
             <Card>
-              <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-                <TerminalSquare className="size-8 text-muted-foreground" />
-                <h3 className="mt-3 text-base font-medium">{t("sessions.noMatchesTitle")}</h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t("sessions.noMatchesDescription")}
-                </p>
+              <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-center">
+                <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                  <TerminalSquare className="size-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-medium">{t("sessions.noMatchesTitle")}</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("sessions.noMatchesDescription")}
+                  </p>
+                </div>
               </CardContent>
             </Card>
           ) : (
-            <Card>
-              <CardContent className="p-0">
-                {groupedSessions.map((group) => (
-                  <div key={group.projectName} className="border-b last:border-b-0">
-                    <div className="flex items-center justify-between gap-3 bg-muted/30 px-4 py-3">
-                      <div>
-                        <h2 className="text-sm font-medium">{group.projectName}</h2>
-                        <p className="text-xs text-muted-foreground">{t("sessions.groupedByProject")}</p>
-                      </div>
-                      <Badge variant="secondary">{group.sessions.length}</Badge>
-                    </div>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{t("common.name")}</TableHead>
-                          <TableHead>{t("common.status")}</TableHead>
-                          <TableHead>{t("common.aiTool")}</TableHead>
-                          <TableHead className="w-[280px] text-right">{t("common.actions")}</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {group.sessions.map((session) => {
-                          const isRunning = session.status === "running";
-                          const canStart = !isRunning;
-                          return (
-                            <TableRow key={session.id}>
-                              <TableCell className="font-medium">
-                                {session.name || session.tmuxName || session.id}
-                              </TableCell>
-                              <TableCell>
-                                <SessionStatusBadge status={session.status} />
-                              </TableCell>
-                              <TableCell>
-                                {session.aiTool ? <CliBrandChip aiTool={session.aiTool} /> : "—"}
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex justify-end gap-1">
-                                  {isRunning ? (
-                                    <Button
-                                      asChild
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => {
-                                        upsertSessionTab(sessionToTab(session));
-                                        notifySessionTabsChanged();
-                                      }}
-                                    >
-                                      <Link href={`/sessions/${session.id}`}>
-                                        <Play className="mr-2 size-3" />
-                                        {t("common.connect")}
-                                      </Link>
-                                    </Button>
-                                  ) : (
-                                    <Button variant="ghost" size="sm" disabled>
-                                      <Play className="mr-2 size-3" />
-                                      {t("common.connect")}
-                                    </Button>
-                                  )}
-                                  {canStart ? (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => startMutation.mutate(session.id)}
-                                      disabled={startMutation.isPending}
-                                    >
-                                      <RotateCcw className="mr-2 size-3" />
-                                      {t("common.start")}
-                                    </Button>
-                                  ) : (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => stopMutation.mutate(session.id)}
-                                      disabled={stopMutation.isPending}
-                                    >
-                                      <Square className="mr-2 size-3" />
-                                      {t("common.stop")}
-                                    </Button>
-                                  )}
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="text-destructive"
-                                    onClick={() => deleteMutation.mutate(session.id)}
-                                    disabled={deleteMutation.isPending}
-                                    aria-label={`${t("sessions.deleteLabel")} ${session.name || session.id}`}
-                                  >
-                                    <Trash2 className="size-3" />
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
+            <div className="space-y-4">
+              {groupedSessions.map((group, groupIndex) => (
+                <section
+                  key={group.projectName}
+                  className="of-animate-in overflow-hidden rounded-lg border border-border bg-card"
+                  style={{ animationDelay: `${groupIndex * 40}ms` }}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-muted/30 px-4 py-2.5">
+                    <h2 className="truncate text-sm font-semibold">{group.projectName}</h2>
+                    <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs tabular-nums text-muted-foreground">
+                      {group.sessions.length}
+                    </span>
                   </div>
-                ))}
-              </CardContent>
-            </Card>
+                  <div className="divide-y divide-border/70">
+                    {group.sessions.map((session) => {
+                      const isRunning = session.status === "running";
+                      const canStart = !isRunning;
+                      return (
+                        <div
+                          key={session.id}
+                          className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
+                        >
+                          <SessionStatusDot status={session.status} />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium">
+                              {session.name || session.tmuxName || session.id}
+                            </div>
+                          </div>
+                          {session.aiTool ? <CliBrandChip aiTool={session.aiTool} /> : null}
+                          <SessionStatusText status={session.status} />
+                          <div className="flex shrink-0 items-center justify-end gap-1">
+                            {isRunning ? (
+                              <Button
+                                asChild
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  upsertSessionTab(sessionToTab(session));
+                                  notifySessionTabsChanged();
+                                }}
+                              >
+                                <Link href={`/sessions/${session.id}`}>
+                                  <Play className="size-3.5" />
+                                  {t("common.connect")}
+                                </Link>
+                              </Button>
+                            ) : (
+                              <Button variant="ghost" size="sm" disabled>
+                                <Play className="size-3.5" />
+                                {t("common.connect")}
+                              </Button>
+                            )}
+                            {canStart ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => startMutation.mutate(session.id)}
+                                disabled={startMutation.isPending}
+                              >
+                                <RotateCcw className="size-3.5" />
+                                {t("common.start")}
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => stopMutation.mutate(session.id)}
+                                disabled={stopMutation.isPending}
+                              >
+                                <Square className="size-3.5" />
+                                {t("common.stop")}
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => deleteMutation.mutate(session.id)}
+                              disabled={deleteMutation.isPending}
+                              aria-label={`${t("sessions.deleteLabel")} ${session.name || session.id}`}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
           )}
         </>
       )}
@@ -385,9 +387,9 @@ export default function SessionsPage() {
                 <p className="text-sm text-muted-foreground">
                   {t("sessions.chooseProjectEmpty")}
                 </p>
-                <Button asChild>
+                <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
                   <Link href="/projects/new">
-                    <Plus className="mr-2 size-4" />
+                    <Plus className="size-4" />
                     {t("sessions.createProject")}
                   </Link>
                 </Button>
@@ -400,18 +402,41 @@ export default function SessionsPage() {
   );
 }
 
-function SessionStatusBadge({ status }: { status: string }) {
+function SessionStatusDot({ status }: { status: string }) {
+  const normalized = normalizeSessionStatus(status);
+  return (
+    <span
+      className={cn(
+        "size-2 shrink-0 rounded-full",
+        normalized === "running"
+          ? "animate-pulse bg-emerald-400"
+          : normalized === "error"
+            ? "bg-red-400"
+            : "bg-muted-foreground/40"
+      )}
+    />
+  );
+}
+
+function SessionStatusText({ status }: { status: string }) {
   const { t } = useLanguage();
-  const normalizedStatus = normalizeSessionStatus(status);
-  if (normalizedStatus === "running") {
-    return (
-      <Badge variant="default" className="bg-green-600 hover:bg-green-600">
-        {t("sessions.running")}
-      </Badge>
-    );
-  }
-  if (normalizedStatus === "error") {
-    return <Badge variant="destructive">{t("sessions.error")}</Badge>;
-  }
-  return <Badge variant="secondary">{t("sessions.stopped")}</Badge>;
+  const normalized = normalizeSessionStatus(status);
+  return (
+    <span
+      className={cn(
+        "shrink-0 text-xs",
+        normalized === "running"
+          ? "text-emerald-400"
+          : normalized === "error"
+            ? "text-red-400"
+            : "text-muted-foreground"
+      )}
+    >
+      {normalized === "running"
+        ? t("sessions.running")
+        : normalized === "error"
+          ? t("sessions.error")
+          : t("sessions.stopped")}
+    </span>
+  );
 }

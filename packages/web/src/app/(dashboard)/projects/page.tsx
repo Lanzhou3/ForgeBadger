@@ -2,18 +2,11 @@
 
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, FolderOpen, Download, Trash2 } from "lucide-react";
+import { ArrowUpRight, Download, FolderOpen, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
+import { CliBrandChip } from "@/components/cli-brand-chip";
 import { deleteProject, listProjects } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
 
@@ -40,102 +33,94 @@ export default function ProjectsPage() {
   const projects = data?.projects ?? [];
 
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">{t("projects.title")}</h1>
-          <p className="mt-1 text-muted-foreground">
-            {t("projects.subtitle")}
-          </p>
+          <h1 className="text-xl font-semibold tracking-tight">{t("projects.title")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("projects.subtitle")}</p>
         </div>
-        <div className="flex gap-2">
-          <Link href="/projects/import">
-            <Button variant="outline">
-              <Download className="mr-2 size-4" />
-              {t("common.import")}
-            </Button>
-          </Link>
-          <Link href="/projects/new">
-            <Button>
-              <Plus className="mr-2 size-4" />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+            <Link href="/projects/new">
+              <Plus className="size-4" />
               {t("projects.new")}
-            </Button>
-          </Link>
+            </Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/projects/import">
+              <Download className="size-4" />
+              {t("common.import")}
+            </Link>
+          </Button>
         </div>
       </div>
 
       {isLoading ? (
         <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("projects.loading")}
           </CardContent>
         </Card>
       ) : projects.length === 0 ? (
         <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <FolderOpen className="size-10 text-muted-foreground" />
-            <h3 className="mt-4 text-lg font-medium">{t("projects.emptyTitle")}</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("projects.emptyDescription")}
-            </p>
-            <Link href="/projects/new" className="mt-4">
-              <Button>
-                <Plus className="mr-2 size-4" />
+          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+            <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+              <FolderOpen className="size-5" />
+            </div>
+            <div>
+              <div className="text-sm font-medium">{t("projects.emptyTitle")}</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("projects.emptyDescription")}
+              </p>
+            </div>
+            <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+              <Link href="/projects/new">
+                <Plus className="size-4" />
                 {t("projects.create")}
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </CardContent>
         </Card>
       ) : (
-        <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("common.name")}</TableHead>
-                <TableHead>{t("common.path")}</TableHead>
-                <TableHead>{t("common.status")}</TableHead>
-                <TableHead className="text-right">{t("common.actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {projects.map((project) => (
-                <TableRow key={project.id}>
-                  <TableCell className="font-medium">
-                    <Link
-                      href={`/projects/${project.id}`}
-                      className="hover:underline"
-                    >
-                      {project.name}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="max-w-xs truncate">
+        <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+          {projects.map((project, index) => (
+            <div
+              key={project.id}
+              className="of-animate-in flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
+              style={{ animationDelay: `${index * 40}ms` }}
+            >
+              <Link
+                href={`/projects/${project.id}`}
+                className="group flex min-w-0 flex-1 items-center gap-3"
+              >
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+                  <FolderOpen className="size-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{project.name}</div>
+                  <div className="mt-0.5 truncate text-xs text-muted-foreground">
                     {project.path ?? project.rootPath}
-                  </TableCell>
-                  <TableCell>{project.status ?? "—"}</TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-1">
-                      <Button asChild variant="ghost" size="sm">
-                        <Link href={`/projects/${project.id}`}>
-                          {t("common.open")}
-                        </Link>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive"
-                        onClick={() => handleDelete(project.id)}
-                        disabled={deleteMutation.isPending}
-                        aria-label={`${t("projects.deleteRecord")} ${project.name}`}
-                      >
-                        <Trash2 className="size-3" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
+                  </div>
+                </div>
+                {project.aiTool ? <CliBrandChip aiTool={project.aiTool} /> : null}
+                <span className="hidden w-20 shrink-0 truncate text-right text-xs text-muted-foreground sm:inline">
+                  {project.status ?? "—"}
+                </span>
+                <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-brand" />
+              </Link>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 text-muted-foreground hover:text-destructive"
+                onClick={() => handleDelete(project.id)}
+                disabled={deleteMutation.isPending}
+                aria-label={`${t("projects.deleteRecord")} ${project.name}`}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
