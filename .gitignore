@@ -30,6 +30,7 @@ CLAUDE.md
 AGENT.md
 AGENTS.md
 MEMORY.md
+CONTEXT.md
 openspec/changes/
 openspec/config.yaml
 docs/*
@@ -52,6 +53,14 @@ docs/*
 !docs/TROUBLESHOOTING.md
 !docs/assets/
 !docs/assets/openforge-wordmark.png
+!docs/adr/
+docs/adr/*
+!docs/adr/0001-replace-legacy-copilot-with-portfolio-operations.md
+!docs/superpowers/
+docs/superpowers/specs/*
+!docs/superpowers/plans/
+docs/superpowers/plans/*
+!docs/superpowers/plans/2026-08-13-portfolio-operations-clean-break.md
 
 # Local AI CLI config, personal project overrides, and repository agent notes.
 .codex
