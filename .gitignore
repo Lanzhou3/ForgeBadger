@@ -1,4 +1,13 @@
 node_modules/
+
+# pnpm content-addressable package store (build/install cache — never committed).
+.pnpm-store/
+
+# Drizzle-kit schema snapshots are intermediate diff artifacts; only the
+# migration SQL + journal are committed (0001/0002 snapshots stay tracked).
+packages/gateway/src/db/migrations/meta/*_snapshot.json
+!packages/gateway/src/db/migrations/meta/0001_snapshot.json
+!packages/gateway/src/db/migrations/meta/0002_snapshot.json
 dist/
 .next/
 coverage/
