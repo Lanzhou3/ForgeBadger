@@ -123,7 +123,7 @@ describe("plugin module retirement", () => {
     assert.match(installBody.message ?? "", /Unsupported catalog item type/);
   });
 
-  it("seeds three builtin skills on first skill list read, idempotently, without overwriting user edits", async () => {
+  it("seeds the builtin skills on first skill list read, idempotently, without overwriting user edits", async () => {
     const token = await register("retire-builtin@example.com");
     const headers = jsonHeaders(token);
 
@@ -132,7 +132,7 @@ describe("plugin module retirement", () => {
     assert.equal(firstRes.status, 200);
     assert.ok(firstBody.data);
     const builtins = firstBody.data.skills.filter((s) => s.source === "builtin");
-    assert.equal(builtins.length, 3);
+    assert.equal(builtins.length, builtinSkillSeeds.length);
     assert.deepEqual(
       builtins.map((s) => s.name).sort(),
       builtinSkillSeeds.map((s) => s.name).sort()
@@ -143,7 +143,7 @@ describe("plugin module retirement", () => {
     const secondRes = await fetch(`${baseUrl}/api/v1/skills`, { headers });
     const secondBody = (await secondRes.json()) as SkillBody;
     assert.ok(secondBody.data);
-    assert.equal(secondBody.data.skills.filter((s) => s.source === "builtin").length, 3);
+    assert.equal(secondBody.data.skills.filter((s) => s.source === "builtin").length, builtinSkillSeeds.length);
 
     // Editing a builtin skill is preserved across a later seed.
     const edited = builtins[0];

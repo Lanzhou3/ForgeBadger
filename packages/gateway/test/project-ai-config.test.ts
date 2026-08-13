@@ -129,7 +129,7 @@ describe("project AI config routes", () => {
       aiTool: "opencode"
     });
 
-    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config`, {
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config?aiTool=opencode`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const body = (await res.json()) as AiConfigResponseBody;
@@ -158,7 +158,7 @@ describe("project AI config routes", () => {
       aiTool: "kimi"
     });
 
-    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config`, {
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config?aiTool=kimi`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const body = (await res.json()) as AiConfigResponseBody;
@@ -264,7 +264,7 @@ describe("project AI config routes", () => {
     assert.equal(unsafeBody.code, 1);
   });
 
-  it("stores the matching built-in template id when no template is provided", async () => {
+  it("leaves the project untracked when no template is provided at import", async () => {
     const token = await register("ai-config-template-default@test.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-default-"));
 
@@ -285,7 +285,7 @@ describe("project AI config routes", () => {
     };
 
     assert.equal(res.status, 201, JSON.stringify(body));
-    assert.equal(body.data.project.templateId, "builtin-opencode");
+    assert.equal(body.data.project.templateId, null);
   });
 
   it("does not expose another user's project config", async () => {
@@ -327,7 +327,7 @@ describe("project AI config routes", () => {
     process.env.OPENCODE_CONFIG_DIR = opencodeConfigDir;
 
     try {
-      const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config/global`, {
+      const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config/global?aiTool=opencode`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const body = (await res.json()) as AiConfigResponseBody;
@@ -409,7 +409,7 @@ describe("project AI config routes", () => {
     process.env.KIMI_CODE_HOME = kimiHome;
 
     try {
-      const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config/global`, {
+      const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config/global?aiTool=kimi`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const body = (await res.json()) as AiConfigResponseBody;

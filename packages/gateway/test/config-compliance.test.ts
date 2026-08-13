@@ -291,7 +291,19 @@ describe("project config compliance", () => {
     });
     const body = (await res.json()) as ProjectResponseBody;
     assert.equal(res.status, 201, JSON.stringify(body));
-    return body.data.project.id as string;
+    const projectId = body.data.project.id as string;
+
+    // Creation no longer binds a template; bind explicitly to keep the fixture tracked.
+    const bindRes = await fetch(`${baseUrl}/api/v1/projects/${projectId}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ templateId: input.templateId })
+    });
+    assert.equal(bindRes.status, 200);
+    return projectId;
   }
 
   async function getCompliance(token: string, projectId: string, templateId?: string): Promise<{
