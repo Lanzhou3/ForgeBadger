@@ -39,9 +39,7 @@ const createProjectSchema = z.object({
   name: z.string().min(1),
   path: z.string().min(1),
   description: z.string().optional(),
-  techStack: z.string().optional(),
-  aiTool: aiToolSchema.optional(),
-  templateId: z.string().optional()
+  techStack: z.string().optional()
 });
 
 const updateProjectTemplateSchema = z.object({
@@ -69,6 +67,10 @@ const aiConfigWriteSchema = z.object({
   relativePath: z.string().min(1).max(512),
   content: z.string().max(128 * 1024)
 });
+
+const aiConfigQuerySchema = z.object({
+  aiTool: aiToolSchema.optional()
+}).strict();
 
 const workspaceTreeQuerySchema = z.object({
   path: z.string().max(512).optional(),
@@ -116,18 +118,15 @@ export function createProjectRoutes(
     }
 
     try {
-      const { name, path: rawPath, description, techStack, templateId } = parseResult.data;
-      const projectConfigHint = parseResult.data.aiTool ?? legacyProjectConfigHint;
+      const { name, path: rawPath, description, techStack } = parseResult.data;
       const rootPath = await prepareCreatedProjectRoot(rawPath);
-      const resolvedTemplateId = resolveProjectTemplateId(db, userId, projectConfigHint, templateId);
       const repo = new ProjectRepository(db, userId);
       const project = repo.create({
         name,
         path: rootPath,
         description,
         techStack,
-        aiTool: projectConfigHint,
-        templateId: resolvedTemplateId
+        aiTool: legacyProjectConfigHint
       });
       res.status(201).json({
         code: 0,
@@ -281,18 +280,15 @@ export function createProjectRoutes(
     }
 
     try {
-      const { name, path: rawPath, description, techStack, templateId } = parseResult.data;
-      const projectConfigHint = parseResult.data.aiTool ?? legacyProjectConfigHint;
+      const { name, path: rawPath, description, techStack } = parseResult.data;
       const rootPath = await prepareImportedProjectRoot(rawPath);
-      const resolvedTemplateId = resolveProjectTemplateId(db, userId, projectConfigHint, templateId);
       const repo = new ProjectRepository(db, userId);
       const project = repo.import({
         name,
         path: rootPath,
         description,
         techStack,
-        aiTool: projectConfigHint,
-        templateId: resolvedTemplateId
+        aiTool: legacyProjectConfigHint
       });
       res.status(201).json({
         code: 0,
@@ -690,8 +686,17 @@ export function createProjectRoutes(
       return;
     }
 
+    const parseResult = aiConfigQuerySchema.safeParse(req.query ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
     try {
-      const config = await readProjectAiConfig(project.path, aiToolSchema.parse(project.aiTool));
+      const config = await readProjectAiConfig(
+        project.path,
+        parseResult.data.aiTool ?? aiToolSchema.parse(project.aiTool)
+      );
       res.json({
         code: 0,
         data: config,
@@ -714,8 +719,16 @@ export function createProjectRoutes(
       return;
     }
 
+    const parseResult = aiConfigQuerySchema.safeParse(req.query ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
     try {
-      const config = await readGlobalAiConfig(aiToolSchema.parse(project.aiTool));
+      const config = await readGlobalAiConfig(
+        parseResult.data.aiTool ?? aiToolSchema.parse(project.aiTool)
+      );
       res.json({
         code: 0,
         data: config,

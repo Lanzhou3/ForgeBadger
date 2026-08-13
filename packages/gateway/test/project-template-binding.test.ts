@@ -190,7 +190,7 @@ describe("project <-> template binding lifecycle", () => {
     assert.equal(res.status, 400);
   });
 
-  it("binds the template initially and leaves it unchanged when templateId is omitted", async () => {
+  it("binds the template via PATCH and leaves it unchanged when templateId is omitted", async () => {
     const token = await register("patch-omitted@test.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-binding-omitted-"));
     const projectId = await createProject(token, {
@@ -198,6 +198,10 @@ describe("project <-> template binding lifecycle", () => {
       path: rootPath,
       templateId: "builtin-claude-code"
     });
+
+    const bindRes = await patchTemplate(token, projectId, { templateId: "builtin-claude-code" });
+    assert.equal(bindRes.status, 200);
+    assert.equal(bindRes.body.data?.project?.templateId, "builtin-claude-code");
 
     const res = await patchTemplate(token, projectId, {});
     assert.equal(res.status, 200);
@@ -261,6 +265,7 @@ describe("project <-> template binding lifecycle", () => {
       path: rootPath,
       templateId: "builtin-claude-code"
     });
+    await patchTemplate(token, projectId, { templateId: "builtin-claude-code" });
 
     const res = await patchTemplate(token, projectId, { templateId: "does-not-exist" });
     assert.equal(res.status, 404);
@@ -291,6 +296,7 @@ describe("project <-> template binding lifecycle", () => {
       path: rootPath,
       templateId: "builtin-claude-code"
     });
+    await patchTemplate(token, projectId, { templateId: "builtin-claude-code" });
 
     const usageBeforeRes = await fetch(`${baseUrl}/api/v1/templates/builtin-claude-code/usage`, {
       headers: { Authorization: `Bearer ${token}` }

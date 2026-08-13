@@ -105,7 +105,7 @@ describe("session adapter decoupling", () => {
     await gateway.close();
   });
 
-  it("creates project records without runtime CLI fields using a legacy config hint", async () => {
+  it("creates project records without runtime CLI or template binding", async () => {
     const token = await register("adapter-project-default@example.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-project-default-"));
 
@@ -121,10 +121,10 @@ describe("session adapter decoupling", () => {
 
     assert.equal(projectRes.status, 201);
     assert.equal(projectData.data.project.aiTool, "claude");
-    assert.equal(projectData.data.project.templateId, "builtin-claude-code");
+    assert.equal(projectData.data.project.templateId, null);
   });
 
-  it("keeps legacy project create/import adapter fields compatible", async () => {
+  it("ignores legacy runtime CLI/template fields on project create/import", async () => {
     const token = await register("adapter-project-legacy@example.com");
     const createPath = await mkdtemp(path.join(tmpdir(), "openforge-project-legacy-create-"));
     const importPath = await mkdtemp(path.join(tmpdir(), "openforge-project-legacy-import-"));
@@ -146,17 +146,18 @@ describe("session adapter decoupling", () => {
       body: JSON.stringify({
         name: "Legacy OpenCode Project",
         path: importPath,
-        aiTool: "opencode"
+        aiTool: "opencode",
+        templateId: "builtin-opencode"
       })
     });
     const importData = await importRes.json() as ProjectResponseBody;
 
     assert.equal(createRes.status, 201);
-    assert.equal(createData.data.project.aiTool, "codex");
-    assert.equal(createData.data.project.templateId, "builtin-codex");
+    assert.equal(createData.data.project.aiTool, "claude");
+    assert.equal(createData.data.project.templateId, null);
     assert.equal(importRes.status, 201);
-    assert.equal(importData.data.project.aiTool, "opencode");
-    assert.equal(importData.data.project.templateId, "builtin-opencode");
+    assert.equal(importData.data.project.aiTool, "claude");
+    assert.equal(importData.data.project.templateId, null);
   });
 
   it("launches a requested session adapter instead of the project default adapter", async () => {
