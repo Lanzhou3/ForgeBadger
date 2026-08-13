@@ -134,13 +134,36 @@
   }
 }
 
+@keyframes of-robot-nudge {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  30% {
+    transform: translateY(-4px) rotate(-5deg);
+  }
+  60% {
+    transform: translateY(1px) rotate(2deg);
+  }
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+}
+
 @layer utilities {
   .of-animate-in {
     animation: of-fade-up 0.35s ease-out both;
   }
 
+  .of-robot-nudge {
+    animation: of-robot-nudge 0.45s ease-out;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .of-animate-in {
+      animation: none;
+    }
+
+    .of-robot-nudge {
       animation: none;
     }
   }

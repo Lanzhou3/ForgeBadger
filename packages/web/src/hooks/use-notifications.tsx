@@ -11,7 +11,6 @@ import {
   useState,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
 
 import { getToken } from "@/lib/auth";
 import {
@@ -20,11 +19,7 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
 } from "@/lib/api";
-import {
-  shouldTriggerBrowserNotification,
-  showBrowserNotification,
-} from "@/lib/browser-notifications";
-import { showNotificationToast } from "@/lib/notification-toast";
+import { showBrowserNotification } from "@/lib/browser-notifications";
 import {
   createNotificationFromEvent,
   mergeNotifications,
@@ -60,7 +55,6 @@ const codexAppServerActivityTypes = new Set([
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { t } = useLanguage();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const [notifications, setNotifications] = useState<StoredNotification[]>([]);
   const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -141,16 +135,6 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           const title = [t(notification.titleKey), context].filter(Boolean).join(" · ");
           updateNotifications((current) => mergeNotifications(current, notification));
           showBrowserNotification(title, notification, message);
-          if (shouldTriggerBrowserNotification(message, notification)) {
-            showNotificationToast(t(notification.titleKey), notification, message, {
-              onOpen: () => {
-                markRead(notification.id);
-                router.push(notification.href);
-              },
-              openLabel: t("notifications.openSession"),
-              context,
-            });
-          }
         }
         scheduleEventQueryInvalidation(invalidationTimerRef, queryClient, message);
       } catch {
@@ -165,7 +149,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         invalidationTimerRef.current = null;
       }
     };
-  }, [markRead, queryClient, router, t, updateNotifications, user]);
+  }, [queryClient, t, updateNotifications, user]);
 
   const value = useMemo<NotificationContextValue>(
     () => ({

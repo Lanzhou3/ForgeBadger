@@ -1,9 +1,7 @@
 "use client";
 
-import { Bot } from "lucide-react";
-
 import { CopilotChatPanel } from "@/components/copilot/copilot-chat-panel";
-import { Button } from "@/components/ui/button";
+import { RobotWidget } from "@/components/copilot/robot-widget";
 import {
   Sheet,
   SheetContent,
@@ -24,16 +22,7 @@ export function CopilotDrawer({ open, onOpenChange, context }: CopilotDrawerProp
   const { t } = useLanguage();
   return (
     <>
-      {!open && (
-        <Button
-          type="button"
-          className="fixed bottom-5 right-5 z-40 h-11 w-11 rounded-full bg-brand text-brand-foreground shadow-lg shadow-brand/20 hover:bg-brand/90"
-          onClick={() => onOpenChange(true)}
-          aria-label={t("copilot.openDrawer")}
-        >
-          <Bot className="size-5" aria-hidden="true" />
-        </Button>
-      )}
+      <RobotWidget onActivate={() => onOpenChange(true)} suppressBubbles={open} />
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent className="w-[min(720px,calc(100vw-1rem))] gap-0 p-0 sm:max-w-none" side="right">
           <SheetHeader className="sr-only">
