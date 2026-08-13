@@ -1,10 +1,10 @@
 /**
  * Builtin skills seeded once per user when the skill list is first read.
  *
- * These three skills previously shipped as the builtin Claude Code plugins
- * (claude-code-review / claude-safe-edits / claude-github-context). The plugin
- * module is retired; their markdown content survives here as ordinary skills
- * with `source: "builtin"` so users keep managing them through the Skills page.
+ * These skills previously shipped as the builtin Claude Code plugins
+ * (claude-code-review / claude-safe-edits). The plugin module is retired;
+ * their markdown content survives here as ordinary skills with
+ * `source: "builtin"` so users keep managing them through the Skills page.
  *
  * Seeding is idempotent (`createIfMissing`) and never overwrites user edits.
  */
@@ -44,21 +44,6 @@ export const builtinSkillSeeds: BuiltinSkillSeed[] = [
       "",
       "Review file edits and shell commands for path traversal, destructive operations, secret exposure, and tenant isolation risk.",
       "Prefer minimal scoped changes. Do not overwrite unrelated user changes or run destructive git commands unless explicitly requested.",
-    ].join("\n"),
-  },
-  {
-    name: "github-context",
-    description:
-      "Summarize GitHub issue, pull request, and CI context before implementation work. (Builtin, formerly the Claude GitHub Context plugin)",
-    content: [
-      "---",
-      "description: Gather and summarize GitHub issue, pull request, and CI context.",
-      "---",
-      "",
-      "# GitHub Context",
-      "",
-      "Before implementing GitHub-linked work, identify the relevant issue or pull request, summarize acceptance criteria, review comments, and CI status.",
-      "Use repository-native evidence and keep implementation recommendations scoped to the requested change.",
     ].join("\n"),
   },
 ];

@@ -23,6 +23,7 @@ export interface CopilotRun {
   modelProfileName: string | null;
   source: string;
   sourceRefId: string | null;
+  sourceIdempotencyKey: string | null;
   goal: string;
   stepCount: number;
   maxSteps: number;
@@ -96,6 +97,7 @@ export interface CreateCopilotRunInput {
   modelProfileId?: string | null;
   source: string;
   sourceRefId?: string | null;
+  sourceIdempotencyKey?: string | null;
   goal: string;
   maxSteps?: number;
 }
@@ -155,6 +157,7 @@ interface CopilotRunRow {
   model_profile_name: string | null;
   source: string;
   source_ref_id: string | null;
+  source_idempotency_key: string | null;
   goal: string;
   step_count: number;
   max_steps: number;
@@ -315,6 +318,43 @@ export class CopilotRepository {
     return this.getConversationMessage(id) as CopilotMessage;
   }
 
+  persistConversationTurn(conversationId: string, input: {
+    runId: string;
+    userContent: string;
+    userPayload?: Record<string, unknown>;
+    assistantMessages: string[];
+  }): void {
+    const persist = this.db.transaction(() => {
+      if (!this.getConversation(conversationId)) throw new Error("Copilot conversation not found");
+      const now = Date.now();
+      this.insertConversationTurnMessage({
+        id: `turn:${conversationId}:${input.runId}:user`,
+        conversationId,
+        runId: input.runId,
+        role: "user",
+        content: input.userContent,
+        payload: input.userPayload ?? {},
+        createdAt: now
+      });
+      input.assistantMessages.forEach((content, index) => {
+        this.insertConversationTurnMessage({
+          id: `turn:${conversationId}:${input.runId}:assistant:${index}`,
+          conversationId,
+          runId: input.runId,
+          role: "assistant",
+          content,
+          payload: { source: "feishu" },
+          createdAt: now + index + 1
+        });
+      });
+      this.db.prepare(`
+        UPDATE copilot_conversations SET last_message_at = ?, updated_at = ?
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+      `).run(now, now, conversationId, this.userId);
+    });
+    persist();
+  }
+
   listConversationMessages(conversationId: string): CopilotMessage[] {
     if (!this.getConversation(conversationId)) return [];
     const rows = this.db.prepare(`
@@ -361,8 +401,8 @@ export class CopilotRepository {
       this.db.prepare(`
         INSERT INTO copilot_runs (
           id, user_id, status, provider_profile_id, model_profile_id, source,
-          source_ref_id, goal, step_count, max_steps, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+          source_ref_id, source_idempotency_key, goal, step_count, max_steps, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
       `).run(
         id,
         this.userId,
@@ -371,6 +411,7 @@ export class CopilotRepository {
         input.modelProfileId ?? null,
         input.source,
         input.sourceRefId ?? null,
+        input.sourceIdempotencyKey ?? null,
         input.goal,
         input.maxSteps ?? DEFAULT_COPILOT_MAX_STEPS,
         now,
@@ -383,6 +424,29 @@ export class CopilotRepository {
       throw error;
     }
     return this.getRun(id) as CopilotRun;
+  }
+
+  createOrGetRun(input: CreateCopilotRunInput): { created: boolean; run: CopilotRun } {
+    if (!input.sourceIdempotencyKey) return { created: true, run: this.createRun(input) };
+    const existing = this.findRunBySourceIdempotencyKey(input.source, input.sourceIdempotencyKey);
+    if (existing) return { created: false, run: existing };
+    try {
+      return { created: true, run: this.createRun(input) };
+    } catch (error) {
+      // A concurrent adopter may win the unique source key after our preflight read.
+      const adopted = this.findRunBySourceIdempotencyKey(input.source, input.sourceIdempotencyKey);
+      if (adopted) return { created: false, run: adopted };
+      throw error;
+    }
+  }
+
+  findRunBySourceIdempotencyKey(source: string, key: string): CopilotRun | undefined {
+    const row = this.db.prepare(`
+      ${copilotRunSelectSql()}
+      WHERE cr.user_id = ? AND cr.source = ? AND cr.source_idempotency_key = ?
+      LIMIT 1
+    `).get(this.userId, source, key) as CopilotRunRow | undefined;
+    return row ? toRun(row) : undefined;
   }
 
   getRun(id: string): CopilotRun | undefined {
@@ -589,6 +653,22 @@ export class CopilotRepository {
     return rows.map(toPendingAction);
   }
 
+  listPendingActionsByConversation(conversationId: string): CopilotPendingAction[] {
+    if (!this.getConversation(conversationId)) return [];
+    const rows = this.db.prepare(`
+      SELECT DISTINCT cpa.*
+      FROM copilot_pending_actions cpa
+      INNER JOIN copilot_messages cm
+        ON cm.run_id = cpa.run_id AND cm.user_id = cpa.user_id
+      INNER JOIN copilot_runs cr
+        ON cr.id = cpa.run_id AND cr.user_id = cpa.user_id
+      WHERE cm.conversation_id = ? AND cm.user_id = ? AND cm.deleted_at IS NULL
+        AND cpa.status = 'pending' AND cr.status = 'waiting_for_approval'
+      ORDER BY cpa.created_at ASC
+    `).all(conversationId, this.userId) as CopilotPendingActionRow[];
+    return rows.map(toPendingAction);
+  }
+
   createPendingAction(runId: string, input: CreatePendingActionInput): CopilotPendingAction {
     if (!this.getRun(runId)) throw new Error("Copilot run not found");
     const id = randomUUID();
@@ -712,6 +792,24 @@ export class CopilotRepository {
     return row ? toMessage(row) : undefined;
   }
 
+  private insertConversationTurnMessage(input: {
+    id: string;
+    conversationId: string;
+    runId: string;
+    role: string;
+    content: string;
+    payload: Record<string, unknown>;
+    createdAt: number;
+  }): void {
+    this.db.prepare(`
+      INSERT INTO copilot_messages (
+        id, user_id, conversation_id, run_id, role, content, payload_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO NOTHING
+    `).run(input.id, this.userId, input.conversationId, input.runId, input.role,
+      input.content, JSON.stringify(input.payload), input.createdAt);
+  }
+
 }
 
 function toRun(row: CopilotRunRow): CopilotRun {
@@ -725,6 +823,7 @@ function toRun(row: CopilotRunRow): CopilotRun {
     modelProfileName: row.model_profile_name,
     source: row.source,
     sourceRefId: row.source_ref_id,
+    sourceIdempotencyKey: row.source_idempotency_key,
     goal: row.goal,
     stepCount: row.step_count,
     maxSteps: row.max_steps,
@@ -828,5 +927,5 @@ function isLiveRunConstraintError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const code = (error as { code?: unknown }).code;
   return code === "SQLITE_CONSTRAINT_UNIQUE" &&
-    error.message.includes("copilot_runs.user_id");
+    error.message.endsWith("UNIQUE constraint failed: copilot_runs.user_id");
 }

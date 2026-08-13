@@ -59,6 +59,27 @@ describe("CopilotRepository", () => {
     assert.equal(listed[0]?.id, run.id);
   });
 
+  it("reuses a tenant-scoped source idempotency key without creating another run", () => {
+    const first = repo.createRun({
+      status: "completed",
+      source: "feishu",
+      sourceIdempotencyKey: "account-1:message-1",
+      goal: "Reply once"
+    });
+
+    const reused = repo.createOrGetRun({
+      status: "running",
+      source: "feishu",
+      sourceIdempotencyKey: "account-1:message-1",
+      goal: "Must not create a second run"
+    });
+
+    assert.equal(reused.created, false);
+    assert.equal(reused.run.id, first.id);
+    assert.equal(repo.listRuns().length, 1);
+    assert.equal(otherRepo.findRunBySourceIdempotencyKey("feishu", "account-1:message-1"), undefined);
+  });
+
   it("rejects a second live run for the same user and exposes the active run", () => {
     const active = repo.createRun({
       status: "waiting_for_approval",
@@ -191,6 +212,29 @@ describe("CopilotRepository", () => {
     assert.equal(messages[1]?.runId, run.id);
     assert.deepEqual(messages[1]?.payload, { status: "completed" });
     assert.equal(repo.getConversation(conversation.id)?.lastMessageAt, assistantMessage.createdAt);
+  });
+
+  it("persists one conversation turn idempotently for a recovered run", () => {
+    const conversation = repo.createConversation({ title: "Feishu", source: "feishu" });
+    const run = repo.createRun({ status: "completed", source: "feishu", goal: "Reply once" });
+
+    repo.persistConversationTurn(conversation.id, {
+      runId: run.id,
+      userContent: "status?",
+      userPayload: { messageId: "message-1" },
+      assistantMessages: ["done"]
+    });
+    repo.persistConversationTurn(conversation.id, {
+      runId: run.id,
+      userContent: "status?",
+      userPayload: { messageId: "message-1" },
+      assistantMessages: ["done"]
+    });
+
+    assert.deepEqual(
+      repo.listConversationMessages(conversation.id).map((message) => [message.role, message.content]),
+      [["user", "status?"], ["assistant", "done"]]
+    );
   });
 
   it("soft deletes conversations and individual messages", () => {

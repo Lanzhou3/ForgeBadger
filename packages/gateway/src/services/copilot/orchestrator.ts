@@ -57,6 +57,7 @@ export interface RunCopilotTextInput {
   modelProfileId?: string;
   source: "dashboard" | "project" | "session" | "settings" | "copilot" | "models" | "feishu";
   sourceRefId?: string;
+  sourceIdempotencyKey?: string;
   maxSteps?: number;
 }
 
@@ -90,7 +91,9 @@ export class CopilotOrchestrator {
     const redactedConversationContext = input.conversationContext
       ? redactCopilotText(input.conversationContext)
       : null;
-    let run = repo.createRun(toCreateRunInput({ ...input, prompt: redactedPrompt }));
+    const adoption = repo.createOrGetRun(toCreateRunInput({ ...input, prompt: redactedPrompt }));
+    if (!adoption.created) return restoreAdoptedRun(repo, adoption.run);
+    let run = adoption.run;
     const control = this.runControls.start(run.id);
     try {
       this.options.onRunStarted?.(run);
@@ -573,8 +576,35 @@ function toCreateRunInput(input: RunCopilotTextInput) {
     modelProfileId: input.modelProfileId ?? null,
     source: input.source,
     sourceRefId: input.sourceRefId ?? null,
+    sourceIdempotencyKey: input.sourceIdempotencyKey ?? null,
     goal: input.prompt,
     maxSteps: input.maxSteps ?? DEFAULT_COPILOT_MAX_STEPS
+  };
+}
+
+function restoreAdoptedRun(repo: CopilotRepository, run: CopilotRun): RunCopilotTextResult {
+  const events = repo.listEvents(run.id);
+  if (run.status === "completed" || run.status === "waiting_for_approval") {
+    return { ok: true, run, events };
+  }
+  if (run.status === "queued" || run.status === "running") {
+    return {
+      ok: false,
+      status: 409,
+      error: { code: "COPILOT_BUSY", message: "The adopted Copilot run is still active" },
+      run,
+      events
+    };
+  }
+  return {
+    ok: false,
+    status: 409,
+    error: {
+      code: run.errorCode ?? "COPILOT_ADOPTED_RUN_TERMINAL",
+      message: run.errorMessage ?? "The adopted Copilot run already reached a terminal state"
+    },
+    run,
+    events
   };
 }
 

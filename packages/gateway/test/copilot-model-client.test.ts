@@ -661,6 +661,36 @@ describe("copilot model client", () => {
     }
   });
 
+  it("adopts a source-idempotent completed run without invoking the model twice", async () => {
+    createProvider("openai", "openai");
+    let modelCalls = 0;
+    const orchestrator = new CopilotOrchestrator({
+      db,
+      masterKey,
+      modelClientFactory: () => ({
+        async createResponse() {
+          modelCalls += 1;
+          return [{ type: "assistant_message" as const, text: "Recovered answer" }];
+        }
+      })
+    });
+    const input = {
+      userId,
+      prompt: "hello from Feishu",
+      source: "feishu" as const,
+      sourceIdempotencyKey: "account-1:message-1"
+    };
+
+    const first = await orchestrator.runText(input);
+    const recovered = await orchestrator.runText(input);
+
+    assert.equal(first.ok, true);
+    assert.equal(recovered.ok, true);
+    assert.equal(modelCalls, 1);
+    assert.equal(recovered.run.id, first.run.id);
+    assert.equal(recovered.events.filter((event) => event.type === "assistant_message").length, 1);
+  });
+
   it("classifies OpenAI provider HTTP failures without leaking provider error secrets", async () => {
     const authFailure = new OpenAiResponsesClient({
       baseUrl: "https://api.openai.com/v1",

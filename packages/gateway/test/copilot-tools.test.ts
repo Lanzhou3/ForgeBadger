@@ -1705,6 +1705,50 @@ describe("copilot tools", () => {
     assert.deepEqual(actions[0]?.input, { sessionId: session.id, input: "pwd\\n", submit: true });
   });
 
+  it("allows an approval proposal that only submits Enter to the current terminal prompt", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge-enter-only",
+      aiTool: "opencode"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const created = sessionRepo.create({
+      projectId: project.id,
+      name: "OpenCode",
+      aiTool: "opencode",
+      workingDir: "/tmp/openforge-enter-only",
+      tmuxSession: "of-enter-only"
+    });
+    const session = sessionRepo.updateStatus(created.id, "running") ?? created;
+    const copilot = new CopilotRepository(db, userId);
+    const run = copilot.createRun({ status: "running", source: "feishu", goal: "允许当前选项" });
+    const toolContext = {
+      ...context(userId, run.id),
+      sessionManager: { async captureHistory() { return "Allow once\nenter confirm"; } }
+    };
+
+    const enterOnly = await executeCopilotTool(
+      registry,
+      "openforge.propose_session_input",
+      { sessionId: session.id, input: "", submit: true },
+      toolContext
+    );
+    const emptyWithoutSubmit = await executeCopilotTool(
+      registry,
+      "openforge.propose_session_input",
+      { sessionId: session.id, input: "", submit: false },
+      toolContext
+    );
+
+    assert.equal(enterOnly.ok, true);
+    assert.equal(emptyWithoutSubmit.ok, false);
+    assert.deepEqual(copilot.listPendingActions(run.id)[0]?.input, {
+      sessionId: session.id,
+      input: "",
+      submit: true
+    });
+  });
+
   it("creates session-stop proposals as pending actions without stopping sessions", async () => {
     const project = new ProjectRepository(db, userId).create({
       name: "OpenForge",

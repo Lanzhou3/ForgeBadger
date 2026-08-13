@@ -12,6 +12,10 @@ export interface CopilotToolContext {
   userId: string;
   masterKey: string;
   runId?: string;
+  automationAuthority?: {
+    mode: "observe" | "operate";
+    toolNames: string[];
+  };
   adapterCommandRunner?: CommandRunner;
   sessionManager?: {
     captureHistory(sessionId: string): Promise<string>;
@@ -28,6 +32,7 @@ export interface CopilotToolDefinition {
   description: string;
   risk: CopilotToolRisk;
   requiresApproval: boolean;
+  resolveApproval?: (output: unknown) => boolean;
   inputSchema: z.ZodType<unknown>;
   modelInputSchema?: Record<string, unknown>;
   execute(input: unknown, context: CopilotToolContext): Promise<unknown>;
@@ -91,7 +96,7 @@ export async function executeCopilotTool(
   return {
     ok: true,
     output: redactedOutput,
-    requiresApproval: tool.requiresApproval
+    requiresApproval: tool.resolveApproval?.(redactedOutput) ?? tool.requiresApproval
   };
 }
 

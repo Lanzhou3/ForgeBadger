@@ -1653,6 +1653,43 @@ describe("copilot routes", () => {
     ));
   });
 
+  it("keeps an Enter-only terminal proposal waiting instead of failing tool validation", async () => {
+    createOpenAiProvider();
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge-enter-run",
+      aiTool: "opencode"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const session = sessionRepo.create({
+      projectId: project.id,
+      name: "OpenCode",
+      aiTool: "opencode",
+      workingDir: "/tmp/openforge-enter-run",
+      tmuxSession: "of-enter-run"
+    });
+    sessionRepo.update(session.id, { status: "running" });
+    modelEvents = [{
+      type: "tool_call_requested",
+      id: "tool-call-enter-only",
+      name: "openforge.propose_session_input",
+      input: { sessionId: session.id, input: "", submit: true }
+    }];
+
+    const res = await makeRequest(app, "POST", "/api/v1/copilot/runs", {
+      prompt: "Approve the currently highlighted Allow once option",
+      source: "copilot"
+    }, authHeaders());
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.data.run.status, "waiting_for_approval");
+    assert.deepEqual(res.body.data.pendingActions[0]?.input, {
+      sessionId: session.id,
+      input: "",
+      submit: true
+    });
+  });
+
   it("keeps session-stop tool runs waiting for approval", async () => {
     createOpenAiProvider();
     const project = new ProjectRepository(db, userId).create({
@@ -4060,6 +4097,40 @@ describe("copilot routes", () => {
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.action.result.submitted, true);
     assert.deepEqual(sentSessionInputs, [{ sessionId: session.id, data: "pwd\n" }]);
+  });
+
+  it("submits a newline for an approved Enter-only session action", async () => {
+    const project = new ProjectRepository(db, userId).create({
+      name: "OpenForge",
+      path: "/tmp/openforge-enter-approval",
+      aiTool: "opencode"
+    });
+    const sessionRepo = new SessionRepository(db, userId);
+    const session = sessionRepo.create({
+      projectId: project.id,
+      name: "OpenCode",
+      aiTool: "opencode",
+      workingDir: "/tmp/openforge-enter-approval",
+      tmuxSession: "of-enter-approval"
+    });
+    sessionRepo.update(session.id, { status: "running" });
+    const { runId, actionId } = createPendingAction(userId, "openforge.propose_session_input", {
+      sessionId: session.id,
+      input: "",
+      submit: true
+    });
+
+    const res = await makeRequest(
+      app,
+      "POST",
+      `/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`,
+      undefined,
+      authHeaders()
+    );
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.code, 0);
+    assert.deepEqual(sentSessionInputs, [{ sessionId: session.id, data: "\n" }]);
   });
 
   it("tracks approved session input until terminal output stabilizes", async () => {

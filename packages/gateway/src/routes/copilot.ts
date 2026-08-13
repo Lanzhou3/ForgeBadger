@@ -42,7 +42,9 @@ import { recordActivity } from "../services/activity-events.js";
 import { buildLocalDiagnosticsExport } from "../services/diagnostics.js";
 import { loadProviderCatalog as loadProviderCatalogFromSource, type ProviderCatalogPreset } from "../services/model-catalog.js";
 import { approveCopilotMemoryDelete, approveCopilotMemoryWrite } from "../services/copilot/memory.js";
+import { buildCopilotConversationContext } from "../services/copilot/conversation-context.js";
 import { CopilotOrchestrator, CopilotRunControlRegistry, type CopilotOrchestratorOptions } from "../services/copilot/orchestrator.js";
+import { executeCopilotSessionInput } from "../services/copilot/session-input-approval.js";
 import { selectCopilotProvider } from "../services/copilot/provider-selection.js";
 import { createCopilotReadTools } from "../services/copilot/read-tools.js";
 import { redactCopilotPayload, redactCopilotText, sanitizeCopilotAssistantText } from "../services/copilot/redaction.js";
@@ -165,11 +167,6 @@ const projectConfigSyncApprovalSchema = z.object({
   templateId: z.string().min(1).optional(),
   credentialMode: z.enum(["host_environment", "stored_encrypted_key"]).default("host_environment"),
   decisions: z.record(z.enum(["skip", "overwrite"])).optional()
-}).strict();
-const sessionInputApprovalSchema = z.object({
-  sessionId: z.string().min(1),
-  input: z.string().min(1).max(8_000),
-  submit: z.boolean().default(true)
 }).strict();
 const sessionStartApprovalSchema = z.object({
   sessionId: z.string().min(1),
@@ -306,7 +303,6 @@ const projectManagerAttachEvidenceApprovalSchema = z.object({
 }).strict();
 const defaultStaleCopilotRunTimeoutMs = 15 * 60 * 1000;
 const defaultStaleCopilotApprovalTimeoutMs = 24 * 60 * 60 * 1000;
-const defaultSessionInputTrackingDelaysMs = [1_500, 2_500, 4_000, 6_000];
 
 export interface CopilotRoutesOptions extends CopilotOrchestratorOptions {
   db: Database;
@@ -474,7 +470,7 @@ export function createCopilotRoutes(options: CopilotRoutesOptions): Router {
     // The DB live-run constraint is the source of truth; clear stale process locks after recovery.
     if (activeRunUsers.has(userId)) activeRunUsers.delete(userId);
     activeRunUsers.add(userId);
-    const conversationContext = buildConversationContext(repo.listConversationMessages(req.params.id));
+    const conversationContext = buildCopilotConversationContext(repo.listConversationMessages(req.params.id));
     const userMessage = repo.createConversationMessage(req.params.id, {
       role: "user",
       content: parseResult.data.prompt,
@@ -986,36 +982,6 @@ function messagesEnvelope(
     },
     message: ""
   };
-}
-
-const maxConversationContextMessages = 8;
-const maxConversationContextMessageChars = 1_200;
-const maxConversationContextChars = 6_000;
-
-function buildConversationContext(messages: CopilotMessage[]): string | undefined {
-  const contextMessages = messages
-    .filter((message) => message.role === "user" || message.role === "assistant")
-    .filter((message) => message.content.trim().length > 0)
-    .slice(-maxConversationContextMessages)
-    .map(toConversationContextLine)
-    .filter((line) => line.length > 0);
-  if (contextMessages.length === 0) return undefined;
-  const context = contextMessages.join("\n");
-  return context.length > maxConversationContextChars
-    ? context.slice(context.length - maxConversationContextChars)
-    : context;
-}
-
-function toConversationContextLine(message: CopilotMessage): string {
-  const role = message.role === "assistant" ? "assistant" : "user";
-  const content = redactCopilotText(message.content)
-    .replace(/\s+/gu, " ")
-    .trim();
-  if (!content) return "";
-  const truncated = content.length > maxConversationContextMessageChars
-    ? `${content.slice(0, maxConversationContextMessageChars)}...`
-    : content;
-  return `${role}: ${truncated}`;
 }
 
 function memoryItemEnvelope(type: CopilotMemoryItemType, item: CopilotMemoryEntry | CopilotMemoryNote) {
@@ -2459,123 +2425,14 @@ async function approveCopilotSessionInput(
   options: CopilotRoutesOptions,
   userId: string
 ): Promise<Record<string, unknown>> {
-  const parsed = sessionInputApprovalSchema.safeParse(action.input);
-  if (!parsed.success) {
-    return sessionInputApprovalError(
-      "copilot_session_input_invalid",
-      "Copilot session input payload is invalid"
-    );
-  }
-  const session = new SessionRepository(options.db, userId).getById(parsed.data.sessionId);
-  if (!session || session.status !== "running" || !session.tmuxSession) {
-    return sessionInputApprovalError(
-      "copilot_session_input_invalid",
-      "Copilot session input target is not a running terminal session"
-    );
-  }
-  if (!options.sessionManager) {
-    return sessionInputApprovalError(
-      "copilot_session_input_unavailable",
-      "Copilot terminal input is not available"
-    );
-  }
-  const shouldSubmit = parsed.data.submit !== false;
-  const trackingDelaysMs = options.sessionInputTrackingDelaysMs ?? defaultSessionInputTrackingDelaysMs;
-  const before = shouldSubmit && trackingDelaysMs.length > 0
-    ? await captureApprovedSessionInputHistory(options, session)
-    : null;
-  const data = buildApprovedSessionInput(parsed.data.input, shouldSubmit);
-  await options.sessionManager.sendInput(session.id, data);
-  new SessionRepository(options.db, userId).update(session.id, { lastActive: new Date() });
-  const terminal = shouldSubmit
-    ? await trackApprovedSessionInputHistory(options, session, before?.text, trackingDelaysMs)
-    : await captureApprovedSessionInputHistory(options, session);
-  return {
-    sessionId: session.id,
-    submitted: shouldSubmit,
-    bytes: Buffer.byteLength(data, "utf8"),
-    terminal
-  };
-}
-
-async function trackApprovedSessionInputHistory(
-  options: CopilotRoutesOptions,
-  session: Session,
-  previousText: string | undefined,
-  delays: number[]
-): Promise<{ available: boolean; text?: string; truncated?: boolean; reason?: string; tracking?: Record<string, unknown> }> {
-  let latest = await captureApprovedSessionInputHistory(options, session);
-  let latestText = latest.text ?? "";
-  let changed = latest.available && (previousText === undefined || latestText !== previousText);
-  let samples = 1;
-  if (delays.length === 0) {
-    return { ...latest, tracking: { status: changed ? "changed" : "single_sample", samples } };
-  }
-  for (const delayMs of delays) {
-    await sleep(delayMs);
-    const next = await captureApprovedSessionInputHistory(options, session);
-    samples += 1;
-    const nextText = next.text ?? "";
-    const nextChanged = next.available && (previousText === undefined || nextText !== previousText);
-    if (changed && next.available && nextText === latestText) {
-      return { ...next, tracking: { status: "stable", samples, waitedMs: sumDelays(delays, samples - 1) } };
-    }
-    if (next.available) {
-      latest = next;
-      latestText = nextText;
-      changed = changed || nextChanged;
-    }
-  }
-  return {
-    ...latest,
-    tracking: {
-      status: changed ? "changed_timeout" : "unchanged_timeout",
-      samples,
-      waitedMs: sumDelays(delays, delays.length)
-    }
-  };
-}
-
-async function captureApprovedSessionInputHistory(
-  options: CopilotRoutesOptions,
-  session: Session
-): Promise<{ available: boolean; text?: string; truncated?: boolean; reason?: string }> {
-  if (!options.sessionManager?.captureHistory) {
-    return { available: false, reason: "terminal_history_unavailable" };
-  }
-  try {
-    const raw = await options.sessionManager.captureHistory(session.id);
-    const redacted = redactCopilotText(stripTerminalControlSequences(raw));
-    const maxLength = 4_000;
-    const truncated = redacted.length > maxLength;
-    const text = truncated ? redacted.slice(redacted.length - maxLength) : redacted;
-    return { available: true, text, truncated };
-  } catch {
-    return { available: false, reason: "terminal_history_capture_failed" };
-  }
-}
-
-function sessionInputApprovalError(code: string, message: string): Record<string, unknown> {
-  return {
-    error: { code, message }
-  };
-}
-
-function stripTerminalControlSequences(text: string): string {
-  return text
-    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/gu, "")
-    .replace(/\[(?:\d{1,3}(?:;\d{1,3})*)?[A-Za-z]/gu, "")
-    .replace(/(^|\s)(?:\d{1,3};)*\d{1,3}m(?=\s|$)/gu, "$1")
-    .replace(/\r/gu, "");
-}
-
-function sleep(ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function sumDelays(delays: number[], count: number): number {
-  return delays.slice(0, count).reduce((total, delay) => total + delay, 0);
+  return await executeCopilotSessionInput(action, {
+    db: options.db,
+    userId,
+    ...(options.sessionManager ? { sessionManager: options.sessionManager } : {}),
+    ...(options.sessionInputTrackingDelaysMs
+      ? { trackingDelaysMs: options.sessionInputTrackingDelaysMs }
+      : {})
+  });
 }
 
 async function approveCopilotSessionStart(
@@ -3677,13 +3534,6 @@ function modelProviderApplyApprovalError(code: string, message: string): Record<
   return {
     error: { code, message }
   };
-}
-
-function buildApprovedSessionInput(input: string, submit: boolean): string {
-  if (!submit || input.endsWith("\n") || input.endsWith("\r")) {
-    return input;
-  }
-  return `${input}\n`;
 }
 
 function approveCopilotTroubleshootingSteps(action: CopilotPendingAction): Record<string, unknown> {

@@ -26,7 +26,9 @@ import { discoverAdapters } from "../adapter-discovery.js";
 import { getDashboardSummary } from "../dashboard-summary.js";
 import { buildLocalDiagnosticsExport } from "../diagnostics.js";
 import { createCopilotMemoryTools } from "./memory.js";
+import { createCopilotAutomationTools } from "./automation-tools.js";
 import { selectCopilotProvider } from "./provider-selection.js";
+import { copilotSessionInputSchema } from "./session-input-approval.js";
 import { CopilotToolValidationError, type CopilotToolContext, type CopilotToolDefinition } from "./tool-registry.js";
 import { redactCopilotPayload } from "./redaction.js";
 
@@ -124,11 +126,7 @@ const proposeProjectConfigSyncInput = z.object({
   credentialMode: z.enum(["host_environment", "stored_encrypted_key"]).default("host_environment"),
   decisions: z.record(z.enum(["skip", "overwrite"])).optional()
 }).strict();
-const proposeSessionInputInput = z.object({
-  sessionId: z.string().min(1),
-  input: z.string().min(1).max(8_000),
-  submit: z.boolean().default(true)
-}).strict();
+const proposeSessionInputInput = copilotSessionInputSchema;
 const proposeSessionStartInput = z.object({
   sessionId: z.string().min(1),
   reason: z.string().min(1).optional()
@@ -473,7 +471,11 @@ const proposeSessionInputModelInputSchema = {
   type: "object",
   properties: {
     sessionId: { type: "string", minLength: 1 },
-    input: { type: "string", minLength: 1, maxLength: 8_000 },
+    input: {
+      type: "string",
+      maxLength: 8_000,
+      description: "Raw terminal input. Use an empty string only with submit=true to press Enter on the current prompt."
+    },
     submit: { type: "boolean" }
   },
   required: ["sessionId", "input"],
@@ -1087,7 +1089,7 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
     {
       name: "openforge.propose_session_input",
       description:
-        "Prepare raw terminal input for an existing running OpenForge session for user approval. Use submit=true only when the user explicitly asked to send/execute it.",
+        "Prepare raw terminal input for an existing running OpenForge session for user approval. Use input='' with submit=true to press Enter on a currently selected prompt; otherwise provide non-empty input.",
       risk: "prepare",
       requiresApproval: true,
       inputSchema: proposeSessionInputInput,
@@ -1327,7 +1329,8 @@ export function createCopilotReadTools(): CopilotToolDefinition[] {
       execute: async (input, context) =>
         createPendingProposal(context, "openforge.propose_troubleshooting_steps", input)
     },
-    ...createCopilotMemoryTools()
+    ...createCopilotMemoryTools(),
+    ...createCopilotAutomationTools()
   ];
 }
 
