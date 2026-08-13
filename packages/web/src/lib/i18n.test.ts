@@ -44,7 +44,6 @@ describe("i18n", () => {
     expect(getTranslation("en", "projects.checkCompliance")).toBe("Check Compliance");
     expect(getTranslation("zh-CN", "projects.untrackedConfigTitle")).toBe("独立配置");
     expect(getTranslation("en", "projects.stopTrackingTemplate")).toBe("Stop tracking template");
-    expect(getTranslation("zh-TW", "projects.templateSeedHint")).toContain("初始化種子");
     expect(getTranslation("zh-CN", "templates.governedTitle")).toBe("治理中的模板");
     expect(getTranslation("en", "templates.seedTitle")).toBe("Seed-only Templates");
     expect(getTranslation("zh-CN", "templates.catalogInstall")).toBe("从目录安装");

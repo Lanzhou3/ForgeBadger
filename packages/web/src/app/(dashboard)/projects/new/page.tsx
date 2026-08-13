@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -18,29 +18,16 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  createProjectWithConfig,
-  defaultTemplateForAiTool,
-  listTemplates,
-  type RuntimeAdapterId,
-} from "@/lib/api";
+import { createProject } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
 
 const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
   path: z.string().min(1, "Path is required"),
   description: z.string().optional(),
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]),
-  templateId: z.string().min(1, "Template is required"),
 });
 
 type FormValues = z.infer<typeof formSchema>;
-
-const BUILTIN_TEMPLATES = [
-  { id: "builtin-claude-code", name: "Claude Code" },
-  { id: "builtin-opencode", name: "OpenCode" },
-  { id: "builtin-codex", name: "Codex CLI" },
-];
 
 export default function NewProjectPage() {
   const router = useRouter();
@@ -52,24 +39,13 @@ export default function NewProjectPage() {
       name: "",
       path: "",
       description: "",
-      aiTool: "claude",
-      templateId: "builtin-claude-code",
     },
   });
-  const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: listTemplates });
-  const templates = templatesQuery.data?.templates ?? [];
-  const templateOptions = [
-    ...BUILTIN_TEMPLATES,
-    ...templates.filter((template) => !BUILTIN_TEMPLATES.some((builtin) => builtin.id === template.id)),
-  ];
 
   const mutation = useMutation({
-    mutationFn: createProjectWithConfig,
+    mutationFn: createProject,
     onSuccess: (result) => {
-      const configStatus = result.configStatus === "needs_review" || result.configStatus === "failed"
-        ? `?configStatus=${result.configStatus}`
-        : "";
-      router.push(`/projects/${result.project.id}${configStatus}`);
+      router.push(`/projects/${result.project.id}`);
     },
   });
 
@@ -108,57 +84,6 @@ export default function NewProjectPage() {
                     <FormControl>
                       <Input placeholder="My Project" {...field} />
                     </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="aiTool"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t("projects.runtimeCli")}</FormLabel>
-                    <FormControl>
-                      <select
-                        id="project-ai-tool"
-                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                        {...field}
-                        onChange={(event) => {
-                          const aiTool = event.target.value as RuntimeAdapterId;
-                          field.onChange(aiTool);
-                          form.setValue("templateId", defaultTemplateForAiTool(aiTool));
-                        }}
-                      >
-                        <option value="claude">Claude Code</option>
-                        <option value="opencode">OpenCode</option>
-                        <option value="codex">Codex CLI</option>
-                        <option value="kimi">Kimi Code</option>
-                      </select>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="templateId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t("projects.configTemplate")}</FormLabel>
-                    <FormControl>
-                      <select id="config-template" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" {...field}>
-                        {templateOptions.map((template) => (
-                          <option key={template.id} value={template.id}>{template.name}</option>
-                        ))}
-                      </select>
-                    </FormControl>
-                    <p className="text-xs text-muted-foreground">{t("projects.configTemplateDescription")}</p>
-                    <p className="text-xs text-muted-foreground">{t("projects.templateSeedHint")}</p>
-                    {templatesQuery.isError && (
-                      <p className="text-xs text-destructive">{t("projects.failedLoadTemplates")}</p>
-                    )}
                     <FormMessage />
                   </FormItem>
                 )}

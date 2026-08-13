@@ -10,10 +10,10 @@ import {
   cloneTemplate,
   approveCopilotPendingAction,
   cancelCopilotRun,
-  createProjectWithConfig,
   createCopilotConversation,
   createCopilotConversationMessage,
   createCopilotRun,
+  createProject,
   createSkill,
   createModel,
   createTemplate,
@@ -68,7 +68,7 @@ import {
   listAgentTemplates,
   installSkill,
   importTemplate,
-  importProjectWithConfig,
+  importProject,
   installCatalogTemplate,
   installCatalogSkill,
   getUsageSummary,
@@ -1604,7 +1604,7 @@ describe("api client", () => {
     );
   });
 
-  it("imports a project, previews config, and applies only missing files", async () => {
+  it("creates a plain project without runtime CLI or template binding", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: () =>
@@ -1613,6 +1613,45 @@ describe("api client", () => {
           data: {
             project: {
               id: "project-1",
+              name: "Runtime Agnostic Project",
+              path: "/tmp/runtime-agnostic",
+            },
+          },
+          message: "",
+        }),
+    } as Response);
+
+    const result = await createProject({
+      path: "/tmp/runtime-agnostic",
+      name: "Runtime Agnostic Project",
+      description: "No binding",
+    });
+
+    expect(result.project.id).toBe("project-1");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/projects",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          path: "/tmp/runtime-agnostic",
+          name: "Runtime Agnostic Project",
+          description: "No binding",
+        }),
+      })
+    );
+  });
+
+  it("imports a project without runtime CLI or template binding", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          code: 0,
+          data: {
+            project: {
+              id: "project-2",
               name: "Existing",
               path: "/tmp/existing",
             },
@@ -1621,46 +1660,13 @@ describe("api client", () => {
         }),
     } as Response);
 
-    vi.mocked(fetch).mockImplementationOnce(() => mockEnvelope({
-      plan: { dryRun: true, files: [{ relativePath: ".claude/CLAUDE.md", sha256: "abc" }] },
-      conflicts: [],
-      summary: {
-        templateId: "builtin-claude-code",
-        totalFiles: 1,
-        missingFiles: [".claude/CLAUDE.md"],
-        identicalFiles: [],
-        modifiedFiles: [],
-        unsafeFiles: [],
-        requiresDecision: [],
-      },
-    }));
-    vi.mocked(fetch).mockImplementationOnce(() => mockEnvelope({
-      result: {
-        writtenFiles: [".claude/CLAUDE.md"],
-        skippedFiles: [],
-        backupPath: "/tmp/backup",
-        conflicts: [],
-        rollbackAvailable: false,
-      },
-      summary: {
-        templateId: "builtin-claude-code",
-        totalFiles: 1,
-        missingFiles: [".claude/CLAUDE.md"],
-        identicalFiles: [],
-        modifiedFiles: [],
-        unsafeFiles: [],
-        requiresDecision: [],
-      },
-    }));
-
-    const result = await importProjectWithConfig({
+    const result = await importProject({
       path: "/tmp/existing",
       name: "Existing",
     });
 
-    expect(result.project.id).toBe("project-1");
-    expect(result.configStatus).toBe("applied");
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(result.project.id).toBe("project-2");
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       "http://127.0.0.1:48731/api/v1/projects/import",
@@ -1670,67 +1676,6 @@ describe("api client", () => {
           path: "/tmp/existing",
           name: "Existing",
         }),
-      })
-    );
-  });
-
-  it("returns needs_review after project creation when config is modified or unsafe", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            code: 0,
-            data: {
-              project: {
-                id: "project-3",
-                name: "Runtime Agnostic Project",
-                path: "/tmp/runtime-agnostic",
-              },
-            },
-            message: "",
-          }),
-      } as Response);
-
-    vi.mocked(fetch).mockImplementationOnce(() => mockEnvelope({
-      plan: { dryRun: true, files: [{ relativePath: "AGENTS.md", sha256: "abc" }] },
-      conflicts: [{ relativePath: "AGENTS.md", conflictType: "modified", allowedActions: ["skip", "overwrite"] }],
-      summary: {
-        templateId: "builtin-codex",
-        totalFiles: 1,
-        missingFiles: [],
-        identicalFiles: [],
-        modifiedFiles: ["AGENTS.md"],
-        unsafeFiles: [],
-        requiresDecision: ["AGENTS.md"],
-      },
-    }));
-
-    const result = await createProjectWithConfig({
-      path: "/tmp/runtime-agnostic",
-      name: "Runtime Agnostic Project",
-      aiTool: "codex",
-    });
-
-    expect(result.configStatus).toBe("needs_review");
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:48731/api/v1/projects",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          path: "/tmp/runtime-agnostic",
-          name: "Runtime Agnostic Project",
-          aiTool: "codex",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/projects/project-3/config/sync/preview",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ credentialMode: "host_environment", templateId: "builtin-codex" }),
       })
     );
   });

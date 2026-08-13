@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -20,11 +20,8 @@ import {
 } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  defaultTemplateForAiTool,
-  importProjectWithConfig,
-  listTemplates,
+  importProject,
   scanProject,
-  type RuntimeAdapterId,
   type ScanResult,
 } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
@@ -38,8 +35,6 @@ type PathValues = z.infer<typeof pathSchema>;
 
 const confirmSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]),
-  templateId: z.string().min(1, "Template is required"),
 });
 
 type ConfirmValues = z.infer<typeof confirmSchema>;
@@ -47,12 +42,6 @@ type ConfirmValues = z.infer<typeof confirmSchema>;
 type Step = "path" | "scan" | "confirm";
 
 const STEP_ORDER: Step[] = ["path", "scan", "confirm"];
-
-const BUILTIN_TEMPLATES = [
-  { id: "builtin-claude-code", name: "Claude Code" },
-  { id: "builtin-opencode", name: "OpenCode" },
-  { id: "builtin-codex", name: "Codex CLI" },
-];
 
 export default function ImportProjectPage() {
   const router = useRouter();
@@ -72,16 +61,8 @@ export default function ImportProjectPage() {
     resolver: zodResolver(confirmSchema),
     defaultValues: {
       name: "",
-      aiTool: "claude",
-      templateId: "builtin-claude-code",
     },
   });
-  const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: listTemplates });
-  const templates = templatesQuery.data?.templates ?? [];
-  const templateOptions = [
-    ...BUILTIN_TEMPLATES,
-    ...templates.filter((template) => !BUILTIN_TEMPLATES.some((builtin) => builtin.id === template.id)),
-  ];
 
   const scanMutation = useMutation({
     mutationFn: scanProject,
@@ -95,19 +76,14 @@ export default function ImportProjectPage() {
   });
 
   const importMutation = useMutation({
-    mutationFn: async (values: ConfirmValues) => {
-      return importProjectWithConfig({
+    mutationFn: (values: ConfirmValues) => {
+      return importProject({
         path: scannedPath,
         name: values.name,
-        aiTool: values.aiTool,
-        templateId: values.templateId,
       });
     },
     onSuccess: (result) => {
-      const configStatus = result.configStatus === "needs_review" || result.configStatus === "failed"
-        ? `?configStatus=${result.configStatus}`
-        : "";
-      router.push(`/projects/${result.project.id}${configStatus}`);
+      router.push(`/projects/${result.project.id}`);
     },
   });
 
@@ -273,57 +249,6 @@ export default function ImportProjectPage() {
                       <FormControl>
                         <Input placeholder="My Project" {...field} />
                       </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={confirmForm.control}
-                  name="aiTool"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t("projects.runtimeCli")}</FormLabel>
-                      <FormControl>
-                        <select
-                          id="project-ai-tool"
-                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                          {...field}
-                          onChange={(event) => {
-                            const aiTool = event.target.value as RuntimeAdapterId;
-                            field.onChange(aiTool);
-                            confirmForm.setValue("templateId", defaultTemplateForAiTool(aiTool));
-                          }}
-                        >
-                          <option value="claude">Claude Code</option>
-                          <option value="opencode">OpenCode</option>
-                          <option value="codex">Codex CLI</option>
-                          <option value="kimi">Kimi Code</option>
-                        </select>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={confirmForm.control}
-                  name="templateId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t("projects.configTemplate")}</FormLabel>
-                      <FormControl>
-                        <select id="config-template" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" {...field}>
-                          {templateOptions.map((template) => (
-                            <option key={template.id} value={template.id}>{template.name}</option>
-                          ))}
-                        </select>
-                      </FormControl>
-                      <p className="text-xs text-muted-foreground">{t("projects.configTemplateDescription")}</p>
-                      <p className="text-xs text-muted-foreground">{t("projects.templateSeedHint")}</p>
-                      {templatesQuery.isError && (
-                        <p className="text-xs text-destructive">{t("projects.failedLoadTemplates")}</p>
-                      )}
                       <FormMessage />
                     </FormItem>
                   )}

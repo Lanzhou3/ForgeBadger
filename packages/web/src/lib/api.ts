@@ -1842,13 +1842,6 @@ export async function createGateASession(cwd: string): Promise<GateASession> {
 }
 
 // Projects
-export function defaultTemplateForAiTool(aiTool?: string | null): string {
-  if (aiTool === "opencode") return "builtin-opencode";
-  if (aiTool === "codex") return "builtin-codex";
-  if (aiTool === "kimi") return "builtin-kimi";
-  return "builtin-claude-code";
-}
-
 export function isAdapterLaunchable(adapter: Pick<AdapterDiscovery, "available" | "launchEnabled">): boolean {
   return adapter.available && adapter.launchEnabled;
 }
@@ -1879,9 +1872,7 @@ export async function listProjects(): Promise<{ projects: Project[] }> {
 export async function createProject(data: {
   name: string;
   path: string;
-  aiTool?: RuntimeAdapterId;
   description?: string;
-  templateId?: string;
 }): Promise<{ project: Project }> {
   return fetchJson("/api/v1/projects", {
     method: "POST",
@@ -2807,19 +2798,7 @@ export async function scanProject(path: string): Promise<ScanResult> {
 export interface ImportProjectInput {
   path: string;
   name: string;
-  aiTool?: RuntimeAdapterId;
-  templateId?: string;
-  skipConfigGeneration?: boolean;
 }
-
-export interface ProjectWithConfigResult {
-  project: Project;
-  configStatus: "applied" | "needs_review" | "failed" | "skipped";
-  configError?: string;
-  configSummary?: ConfigSyncSummary;
-}
-
-export type ImportProjectWithConfigResult = ProjectWithConfigResult;
 
 export async function importProject(input: ImportProjectInput): Promise<{ project: Project }> {
   return fetchJson("/api/v1/projects/import", {
@@ -2827,74 +2806,8 @@ export async function importProject(input: ImportProjectInput): Promise<{ projec
     body: JSON.stringify({
       path: input.path,
       name: input.name,
-      ...(input.aiTool ? { aiTool: input.aiTool } : {}),
-      ...(input.templateId ? { templateId: input.templateId } : {}),
     }),
   }) as Promise<{ project: Project }>;
-}
-
-export async function importProjectWithConfig(
-  input: ImportProjectInput
-): Promise<ImportProjectWithConfigResult> {
-  const { project } = await importProject(input);
-  return configureCreatedProject(project, input);
-}
-
-export async function createProjectWithConfig(
-  input: {
-    path: string;
-    name: string;
-    aiTool?: RuntimeAdapterId;
-    description?: string;
-    templateId?: string;
-    skipConfigGeneration?: boolean;
-  }
-): Promise<ProjectWithConfigResult> {
-  const { project } = await createProject(input);
-  return configureCreatedProject(project, input);
-}
-
-async function configureCreatedProject(
-  project: Project,
-  input: Pick<ImportProjectInput, "aiTool" | "skipConfigGeneration" | "templateId">
-): Promise<ProjectWithConfigResult> {
-  if (input.skipConfigGeneration) return { project, configStatus: "skipped" };
-
-  const templateId = input.templateId ?? project.templateId ?? defaultTemplateForAiTool(input.aiTool ?? project.aiTool);
-  try {
-    const preview = await previewConfigSync(project.id, templateId);
-    if (configSyncRequiresReview(preview.summary)) {
-      return {
-        project,
-        configStatus: "needs_review",
-        configError: "Configuration has modified or unsafe files requiring an explicit decision.",
-        configSummary: preview.summary,
-      };
-    }
-    if (preview.summary.missingFiles.length === 0) {
-      return { project, configStatus: "skipped", configSummary: preview.summary };
-    }
-
-    // Only a conflict-free, missing-file plan may write during creation/import.
-    const applied = await applyConfigSync(project.id, {}, templateId);
-    return {
-      project,
-      configStatus: applied.result.writtenFiles.length > 0 ? "applied" : "skipped",
-      configSummary: applied.summary,
-    };
-  } catch (error) {
-    return {
-      project,
-      configStatus: "failed",
-      configError: error instanceof Error ? error.message : "Config generation failed",
-    };
-  }
-}
-
-function configSyncRequiresReview(summary: ConfigSyncSummary): boolean {
-  return summary.modifiedFiles.length > 0
-    || summary.unsafeFiles.length > 0
-    || summary.requiresDecision.length > 0;
 }
 
 // Templates
