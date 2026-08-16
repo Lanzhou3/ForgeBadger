@@ -14,6 +14,8 @@ import type { Database } from "./db/types.js";
 import type { CommandRunner } from "./lib/dependency-check.js";
 import type { FeishuChannelRuntime } from "./services/integrations/feishu-channel-runtime.js";
 import { createPortfolioApiFacade, createPortfolioEventFacade, type PortfolioApiFacade } from "./services/portfolio/portfolio-api-service.js";
+import { attachCopilotReactiveLoop } from "./services/agent/reactive-loop.js";
+import { buildAgentStack } from "./services/agent/agent-stack.js";
 
 import { mountRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -135,6 +137,11 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   attachNotificationPersistence({ db: options.db, eventBus });
   attachTerminalWebSocket({ server, sessionManager, jwtSecret });
   attachEventsWebSocket({ server, eventBus, jwtSecret });
+  // Proactive copilot: wake on platform events, report in fresh conversations.
+  const reactiveLoop = attachCopilotReactiveLoop({
+    deps: { db: options.db, masterKey: options.masterKey, eventBus, portfolioApi },
+    buildAgentStack
+  });
 
   return {
     app,
@@ -151,6 +158,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
       closed = true;
 
       try {
+        reactiveLoop.stop();
         await options.operationsRuntime?.stop();
         await options.feishuChannelRuntime?.stop();
         await closeServerIfListening(server);

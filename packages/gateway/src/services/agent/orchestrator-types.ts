@@ -34,6 +34,9 @@ export interface AgentLlmClient {
     messages: AgentLlmMessage[];
     tools: AgentLlmToolSchema[];
     modelId?: string;
+    system?: string;
     onEvent: (event: AgentLlmStreamEvent) => void;
   }): Promise<{ message: string }>;
+  /** Fold a message list into a concise summary (context compression). */
+  summarize(input: { messages: AgentLlmMessage[]; modelId?: string }): Promise<string>;
 }

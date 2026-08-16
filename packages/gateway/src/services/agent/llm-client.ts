@@ -40,6 +40,8 @@ export interface AgentLlmRequest {
   tools: AgentToolSchema[];
   maxSteps?: number;
   modelId?: string;
+  /** System prompt override; defaults to the Copilot agent prompt. */
+  system?: string;
   signal?: AbortSignal;
   onEvent: (event: AgentLlmStreamEvent) => void;
 }
@@ -123,8 +125,35 @@ export function createAgentLlmClient(input: {
     }
   }
 
-  return { resolveProvider, stream };
+  /** Fold a message list into a concise summary (non-streaming; used for context compression). */
+  async function summarize(input: { messages: AgentLlmMessage[]; modelId?: string }): Promise<string> {
+    let text = "";
+    await stream({
+      messages: input.messages,
+      tools: [],
+      system: SUMMARY_SYSTEM_PROMPT,
+      ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+      onEvent: (event) => {
+        if (event.type === "text_delta") text += event.text ?? "";
+      }
+    });
+    return text.trim();
+  }
+
+  return { resolveProvider, stream, summarize };
 }
+
+const SUMMARY_SYSTEM_PROMPT = [
+  "You are the conversation summarizer for Copilot, the OpenForge platform agent.",
+  "Produce a concise but complete summary of the conversation so far, preserving:",
+  "- key decisions and their reasons",
+  "- project/session state facts and progress",
+  "- open questions and pending actions",
+  "- the user's goals and preferences",
+  "If a previous summary is included in the messages, merge it with the new messages",
+  "rather than repeating it. Keep the summary under 800 characters and use the",
+  "same language as the conversation."
+].join("\n");
 
 function pickBaseUrl(format: ProviderApiFormat, anthropicUrl: string | null, openaiUrl: string | null): string | null {
   if (format === "anthropic") return anthropicUrl ?? openaiUrl;
@@ -147,7 +176,7 @@ async function streamAnthropic(
   signal: AbortSignal,
   timeoutMs: number | undefined
 ): Promise<{ message: string }> {
-  const system = buildSystemPrompt();
+  const system = request.system ?? buildSystemPrompt();
   const apiMessages = request.messages
     .filter((m) => m.role !== "tool")
     .map((m) => (m.role === "assistant"
@@ -203,7 +232,7 @@ async function streamOpenAi(
   signal: AbortSignal,
   timeoutMs: number | undefined
 ): Promise<{ message: string }> {
-  const apiMessages = request.messages.map((m) => {
+  const mapped = request.messages.map((m) => {
     if (m.role === "tool") {
       return { role: "tool" as const, tool_call_id: m.toolCallId, content: m.content };
     }
@@ -216,6 +245,9 @@ async function streamOpenAi(
     }
     return { role: m.role as "user" | "assistant", content: m.content };
   });
+  const apiMessages = request.system
+    ? [{ role: "system" as const, content: request.system }, ...mapped]
+    : mapped;
 
   const body: Record<string, unknown> = {
     model: resolution.modelId,

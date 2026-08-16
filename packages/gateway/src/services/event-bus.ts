@@ -87,6 +87,8 @@ export interface CopilotRunUpdatedEvent {
   runId: string;
   conversationId: string;
   status: string;
+  /** "user" = the owner typed a message; "reactive" = the proactive loop woke the agent. */
+  source?: "user" | "reactive" | undefined;
   textDelta?: string | undefined;
   toolName?: string | undefined;
   pendingActionId?: string | undefined;

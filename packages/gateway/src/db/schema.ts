@@ -1107,6 +1107,11 @@ export const copilotConversations = sqliteTable("copilot_conversations", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   title: text("title"),
   status: text("status").notNull().default("active"),
+  // Rolling context-compression summary (see migration 0042): accumulated digest
+  // of messages up to summaryCoveredSequence, used to keep long chats in context.
+  summary: text("summary"),
+  summaryCoveredSequence: integer("summary_covered_sequence"),
+  lastSummaryAt: integer("last_summary_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 }, (table) => ({ userLookup: index("idx_copilot_conversations_user_updated").on(table.userId, table.updatedAt) }));

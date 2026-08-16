@@ -24,7 +24,6 @@ import {
  */
 export function CopilotChat() {
   const { t } = useLanguage();
-  const { active, startRun, approveAction, clearActive } = useCopilotRun();
 
   const [conversations, setConversations] = useState<CopilotConversation[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -52,6 +51,12 @@ export function CopilotChat() {
   useEffect(() => {
     void refreshConversations();
   }, [refreshConversations]);
+
+  // Refresh the conversation list when the reactive loop opens a fresh
+  // "Copilot 主动更新" conversation, so proactive reports become visible.
+  const { active, startRun, approveAction, clearActive } = useCopilotRun({
+    onReactiveUpdate: refreshConversations,
+  });
 
   const selectConversation = useCallback(async (id: string) => {
     setConversationId(id);

@@ -288,6 +288,13 @@
       "when": 1787011200000,
       "tag": "0041_copilot_runtime",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1787097600000,
+      "tag": "0042_copilot_compression",
+      "breakpoints": true
     }
   ]
 }

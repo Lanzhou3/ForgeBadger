@@ -22,6 +22,9 @@ interface ConversationRow {
   user_id: string;
   title: string | null;
   status: string;
+  summary: string | null;
+  summary_covered_sequence: number | null;
+  last_summary_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -91,6 +94,16 @@ export class CopilotConversationLog {
 
   getConversation(id: string): ConversationRow | undefined {
     return this.db.prepare(`SELECT * FROM copilot_conversations WHERE id = ? AND user_id = ?`).get(id, this.userId) as ConversationRow | undefined;
+  }
+
+  /** Persist the rolling context-compression summary up to a message sequence. */
+  updateConversationSummary(id: string, input: { summary: string; coveredSequence: number }): boolean {
+    const result = this.db.prepare(`
+      UPDATE copilot_conversations
+      SET summary = ?, summary_covered_sequence = ?, last_summary_at = ?, updated_at = ?
+      WHERE id = ? AND user_id = ?
+    `).run(input.summary, input.coveredSequence, Date.now(), Date.now(), id, this.userId);
+    return result.changes > 0;
   }
 
   renameConversation(id: string, title: string): boolean {

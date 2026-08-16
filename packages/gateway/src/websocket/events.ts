@@ -187,6 +187,7 @@ function buildPayload(event: OpenForgeEvent): Record<string, unknown> {
         run_id: event.runId,
         conversation_id: event.conversationId,
         status: event.status,
+        ...(event.source !== undefined ? { source: event.source } : {}),
         ...(event.textDelta !== undefined ? { text_delta: event.textDelta } : {}),
         ...(event.toolName ? { tool_name: event.toolName } : {}),
         ...(event.pendingActionId ? { pending_action_id: event.pendingActionId } : {}),

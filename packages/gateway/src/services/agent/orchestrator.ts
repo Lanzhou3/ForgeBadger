@@ -20,9 +20,9 @@ import { createHash } from "node:crypto";
 import { OpenForgeEventBus } from "../event-bus.js";
 import type { AgentToolRegistry, AgentToolContext } from "./tool-registry.js";
 import { executeAgentTool } from "./tool-registry.js";
-import type { AgentLlmClient, AgentLlmMessage, AgentToolCall } from "./orchestrator-types.js";
+import type { AgentLlmClient, AgentToolCall } from "./orchestrator-types.js";
 import { CopilotConversationLog } from "./conversation-log.js";
-import type { AgentMessage } from "./types.js";
+import { buildCompressedContext } from "./context.js";
 import { redactAgentValue } from "./redaction.js";
 import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js";
 
@@ -47,14 +47,16 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     return new CopilotConversationLog(deps.db, userId);
   }
 
-  /** Run one user turn. Returns the run id. Emits streaming events. */
+  /** Run one user turn (or a proactive reactive-loop turn). Returns the run id. */
   async function runTurn(input: {
     userId: string;
     conversationId: string;
     userText: string;
     modelId?: string;
+    source?: "user" | "reactive";
   }): Promise<string> {
     const userId = input.userId;
+    const source = input.source ?? "user";
     const log = logFor(userId);
     log.appendMessage(input.conversationId, { role: "user", kind: "text", content: input.userText });
     const run = log.createRun(input.conversationId, {});
@@ -68,11 +70,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     };
 
     try {
-      // Reconstruct model-visible history from the log (text-only across turns;
-      // tool results are ephemeral per-run and carried in `messages` below).
-      const messages: AgentLlmMessage[] = log.listMessages(input.conversationId)
-        .filter((m) => m.kind === "text")
-        .map(toLlmMessage);
+      // Project model-visible history from the log, compressing older messages
+      // into a rolling summary when the conversation overflows the budget.
+      const { messages } = await buildCompressedContext(log, input.conversationId, deps.llm, input.modelId);
       let steps = 0;
       let finalText = "";
 
@@ -89,6 +89,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
               deps.eventBus.emitEvent({
                 type: "copilot_run_updated",
                 userId,
+                source,
                 runId: run.id,
                 conversationId: input.conversationId,
                 status: "running",
@@ -153,6 +154,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             deps.eventBus.emitEvent({
               type: "copilot_run_updated",
               userId,
+              source,
               runId: run.id,
               conversationId: input.conversationId,
               status: "running",
@@ -175,6 +177,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             deps.eventBus.emitEvent({
               type: "copilot_run_updated",
               userId,
+              source,
               runId: run.id,
               conversationId: input.conversationId,
               status: "awaiting_approval",
@@ -194,6 +197,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
           deps.eventBus.emitEvent({
             type: "copilot_run_updated",
             userId,
+            source,
             runId: run.id,
             conversationId: input.conversationId,
             status: "running",
@@ -214,6 +218,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
       deps.eventBus.emitEvent({
         type: "copilot_run_updated",
         userId,
+        source,
         runId: run.id,
         conversationId: input.conversationId,
         status: "completed",
@@ -227,6 +232,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
       deps.eventBus.emitEvent({
         type: "copilot_run_updated",
         userId,
+        source,
         runId: run.id,
         conversationId: input.conversationId,
         status: "failed",
@@ -312,12 +318,6 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
   }
 
   return { runTurn, resumeAfterApproval, cancelRun };
-}
-
-function toLlmMessage(message: AgentMessage): AgentLlmMessage {
-  // Only user/assistant text messages are reconstructed across turns; tool
-  // results are ephemeral per-run (carried in-memory during the loop).
-  return { role: message.role === "user" ? "user" : "assistant", content: message.content };
 }
 
 function safeParse(value: string): unknown {

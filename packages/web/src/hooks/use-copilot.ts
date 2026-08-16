@@ -24,21 +24,31 @@ interface CopilotRunUpdatedPayload {
   run_id?: string;
   conversation_id?: string;
   status?: string;
+  source?: "user" | "reactive";
   text_delta?: string;
   tool_name?: string;
   pending_action_id?: string;
   message?: string;
 }
 
+export interface UseCopilotRunOptions {
+  /** Fired when the proactive loop starts a report in a fresh conversation. */
+  onReactiveUpdate?: () => void;
+}
+
 /**
  * Live state for the currently-running Copilot turn. Subscribes to the shared
  * gateway event stream (dispatched by NotificationProvider's /ws/events socket)
  * and folds `copilot_run_updated` frames into a single ActiveCopilotRun.
+ * Proactive (`source: "reactive"`) runs are surfaced via onReactiveUpdate instead
+ * of being folded into the active user run.
  */
-export function useCopilotRun() {
+export function useCopilotRun(options?: UseCopilotRunOptions) {
   const [active, setActive] = useState<ActiveCopilotRun | null>(null);
   const activeRef = useRef<ActiveCopilotRun | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
+  const onReactiveUpdateRef = useRef<UseCopilotRunOptions["onReactiveUpdate"]>(options?.onReactiveUpdate);
+  onReactiveUpdateRef.current = options?.onReactiveUpdate;
 
   const setActiveSafe = useCallback((updater: (prev: ActiveCopilotRun | null) => ActiveCopilotRun | null) => {
     setActive((prev) => {
@@ -53,6 +63,11 @@ export function useCopilotRun() {
       const detail = (event as CustomEvent<{ type?: string; payload?: Record<string, unknown> }>).detail;
       if (!detail || detail.type !== "copilot_run_updated") return;
       const payload = (detail.payload ?? {}) as CopilotRunUpdatedPayload;
+      if (payload.source === "reactive") {
+        // A proactive report landed in a fresh conversation — let the UI refresh.
+        onReactiveUpdateRef.current?.();
+        return;
+      }
       const runId = payload.run_id;
       if (!runId) return;
       if (currentRunIdRef.current !== null && runId !== currentRunIdRef.current) return;
