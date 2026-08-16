@@ -692,7 +692,16 @@ context, audit details, and API response metadata. Free-form approval text such
 as `approve`, `批准`, or `/approve <id>` never approves pending actions; pending
 actions remain controlled by the OpenForge approval routes.
 
-### Platform AI Copilot
+### Retired Platform AI Copilot API (historical)
+
+> The legacy `/api/v1/copilot/**` contract is no longer mounted. The endpoint
+> inventory and behavior below are retained only as historical reference for
+> separately authorized backup/export and disposable restore work; they MUST
+> NOT be restored as a compatibility API, fallback reader, or dual-write path.
+> `/portfolio` is the primary Web workspace. `/copilot` remains only as a
+> Portfolio-only page alias, and the pet/companion drawer are Portfolio
+> presentation; none has a Copilot API/runtime/data dependency. Portfolio
+> browser and integrated acceptance verification are deferred.
 
 - `GET /api/v1/copilot/capabilities`
 - `GET /api/v1/copilot/conversations`
@@ -937,7 +946,9 @@ Explicit non-goals for this Copilot release:
 
 - no raw shell or host exec tool;
 - no arbitrary filesystem write tool outside validated OpenForge config/project workflows;
-- no Codex app-server prompt or `/turn` UI;
+- no Codex app-server prompt or `/turn` UI (the Codex app-server control-plane
+  prototype was removed on 2026-08-14; Codex runs as tmux-backed terminal
+  sessions only);
 - no unapproved terminal input;
 - no automatic tmux input or autonomous development loop.
 
@@ -945,14 +956,13 @@ Explicit non-goals for this Copilot release:
 
 - `GET /api/v1/adapters/discovery`
 
-Returns local AI CLI command discovery for Claude Code, OpenCode, and Codex.
-All three adapters are launch-supported when the corresponding local command is
-available. `launchEnabled` is false when the command check fails, and session
-creation/start returns `409` before tmux launch in that case. Each adapter also
-returns `runtimeModes`; Claude Code and OpenCode currently report `terminal`,
-while Codex reports `terminal`, `app-server-stdio`, and `app-server-websocket`.
-Codex app-server modes are exposed as a guarded Gateway prototype and are not
-mixed into `/ws/terminal/:sessionId`.
+Returns local AI CLI command discovery for Claude Code, OpenCode, Codex, and
+Kimi Code. All four adapters are launch-supported when the corresponding local
+command is available. `launchEnabled` is false when the command check fails, and
+session creation/start returns `409` before tmux launch in that case. Every
+adapter reports the `terminal` runtime mode; the former Codex
+`app-server-stdio`/`app-server-websocket` prototype modes were removed on
+2026-08-14.
 
 ### Projects
 
@@ -986,14 +996,13 @@ Import behavior:
 
 - `POST /api/v1/projects/import` registers an existing server directory as a
   project record. It does not delete, move, or rewrite the directory.
-- The Web console runs config generation immediately after project create or
-  import as a best-effort follow-up. If that follow-up returns a conflict, the
-  project record remains valid and the project detail page must guide the user
-  through preview/apply conflict handling.
-- When no explicit `templateId` is supplied, project create/import stores the
-  built-in template matching `aiTool`: Claude Code uses
-  `builtin-claude-code`, OpenCode uses `builtin-opencode`, and Codex uses
-  `builtin-codex`.
+- Project create/import never binds a runtime CLI or a template. Legacy
+  `aiTool`/`templateId` fields in the request body are ignored, `templateId`
+  starts as `null`, and the stored `aiTool` hint is empty until an explicit
+  designation exists. Use `PATCH /api/v1/projects/:id` to bind a template.
+- Config sync preview/apply, like compliance, returns `404` with
+  `TEMPLATE_NOT_TRACKED` when the project tracks no template and the request
+  supplies no explicit `templateId`.
 
 Project template binding:
 
@@ -1058,18 +1067,25 @@ Project config compliance:
 Project AI config management:
 
 - `GET /api/v1/projects/:id/ai-config` returns editable project-level config
-  files for the project's adapter, including existing discovered files under
-  `.claude`, `.opencode`, `.codex`, and supported root files such as
-  `CLAUDE.md`, `AGENTS.md`, `opencode.json`, and `AGENTS.override.md`.
+  files for the selected adapter. Only common root-level files are managed:
+  `CLAUDE.md`, `AGENTS.md`, `AGENTS.override.md`, `opencode.json`,
+  and `opencode.jsonc`. Files under `.claude`, `.opencode`, `.codex`, and
+  `.kimi-code` directories are not discovered, listed, or writable through this
+  API.
+- All three endpoints accept an optional `aiTool` query parameter (body field
+  for the write route) with values `claude` | `opencode` | `codex` | `kimi`.
+  For CLI-agnostic projects (the default for new records) the parameter is
+  required and Gateway returns `400` when it is missing.
 - `GET /api/v1/projects/:id/ai-config/global` returns read-only global config
   files from the matching local tool config root. Sensitive values are redacted
   before the response leaves Gateway.
 - `PUT /api/v1/projects/:id/ai-config/files` writes one approved project config
-  file by safe relative path. It never writes outside the project root and does
-  not modify global user config.
-- The response includes form metadata for common Claude Code, OpenCode, and
-  Codex settings. The Web console uses those fields to edit JSON/JSONC, simple
-  TOML, and instruction-file content while keeping the raw file editor visible.
+  file by safe relative path. Only root-level files listed above are accepted;
+  any other path (including traversal attempts and files under the CLI config
+  directories) is rejected with `400`. It never writes outside the project root
+  and does not modify global user config.
+- The response contains only the file list; it carries no form/field metadata.
+  The Web console renders each file with its raw content editor only.
 
 Project workspace context:
 
@@ -1169,14 +1185,13 @@ session row, and injects the provider model identifier as `ANTHROPIC_MODEL`
 in the tmux launch environment. Stored API keys are decrypted only in Gateway
 memory and injected as `ANTHROPIC_API_KEY`.
 
-For OpenCode projects, the session uses the project `aiTool` as the adapter and
-receives `opencode --model <provider/model>` when a model is selected. Codex and
-Kimi Code sessions are subscription-managed and do not receive provider
-model/API-key environment injection from the model-provider module; supplying
-`modelId`/`apiKeyId` for them is rejected. Codex app-server support
-is exposed as adapter capability metadata and Gateway launch/protocol helpers;
-interactive browser terminal sessions continue to use the existing tmux-backed
-TUI path instead of sending JSON-RPC frames over the terminal WebSocket.
+Sessions launch an explicitly selected runtime CLI: the request body carries
+`aiTool` (`claude` | `opencode` | `codex` | `kimi`), and projects without a
+stored adapter hint reject creation with `400` when `aiTool` is omitted.
+OpenCode sessions receive `opencode --model <provider/model>` when a model is
+selected. Codex and Kimi Code sessions are subscription-managed and do not
+receive provider model/API-key environment injection from the model-provider
+module; supplying `modelId`/`apiKeyId` for them is rejected.
 
 ### CLI Global Config
 
@@ -1190,6 +1205,8 @@ overrides are honored):
 - `GET /api/v1/cli-config/:adapter`
 - `GET /api/v1/cli-config/:adapter/file?path=<name>&reveal=1`
 - `PUT /api/v1/cli-config/:adapter/file` — raw file write (whitelisted file names, 128 KB cap, mode `0600`)
+- `GET /api/v1/cli-config/:adapter/fields` — curated field catalog (`fields`) plus current values (`values`); secret-typed fields only report a boolean presence flag, never the plaintext
+- `PATCH /api/v1/cli-config/:adapter/fields` — body `{ "updates": { "<fieldKey>": value | null } }`; `null` deletes the key, unknown keys / enum / type mismatches are rejected before any write, and an empty `updates` object is a no-op that does not rewrite (and reformat) the file
 - `PUT /api/v1/cli-config/:adapter/providers/:providerId`
 - `DELETE /api/v1/cli-config/:adapter/providers/:providerId`
 - `PUT /api/v1/cli-config/:adapter/models` — body carries `alias` (Kimi only; aliases may contain `/`)
@@ -1199,63 +1216,7 @@ overrides are honored):
 Secrets are redacted in responses unless `reveal=1` is passed. Deleting a Kimi
 provider cascades to its model aliases and clears a dangling `default_model`.
 
-### Codex App-Server Prototype
-
-- `GET /api/v1/codex/app-server`
-- `POST /api/v1/codex/app-server`
-- `POST /api/v1/codex/app-server/:id/initialize`
-- `POST /api/v1/codex/app-server/:id/thread`
-- `POST /api/v1/codex/app-server/:id/turn`
-- `POST /api/v1/codex/app-server/:id/stop`
-
-These endpoints are authenticated and tenant scoped. They are a guarded control
-plane for `codex app-server`, separate from tmux-backed terminal sessions.
-
-`POST /api/v1/codex/app-server` accepts:
-
-```json
-{
-  "projectId": "project-id",
-  "runtimeMode": "app-server-websocket",
-  "credentialMode": "host_environment"
-}
-```
-
-`runtimeMode` is `app-server-stdio` or `app-server-websocket`. WebSocket mode
-binds loopback and uses a Gateway-created capability token file with `0600`
-permissions. API responses return process metadata and lifecycle state but do
-not expose capability tokens or token file paths. The start route rejects
-`stored_encrypted_key`, `apiKeyId`, and `modelId`; Codex app-server is
-subscription-managed and does not apply provider credentials or model
-overrides. The manager enforces per-user process limits and emits activity rows
-for start/stop/initialize/thread operations.
-
-`initialize` and `thread` use the Gateway-owned Codex app-server client for the
-managed app-server session. The routes validate request payloads, enforce tenant
-ownership through the manager, and return the app-server result envelope without
-persisting prompt or response transcript content. Codex app-server notifications
-are normalized into `codex_app_server_notification` activity rows and broadcast
-through the existing activity event path. Notification `message`/`text` payloads
-from the Codex protocol are not stored as activity messages; Gateway stores a
-type-level summary and safe identifiers such as method, notification type, and
-thread id. Malformed inbound app-server frames close the app-server client
-transport with a protocol error. The Gateway sends Codex protocol frames as
-`{ id, method, params }` according to the generated `codex-cli 0.130.0`
-app-server bindings.
-If the managed child process exits or emits an error outside an explicit route
-action, Gateway retains the safe stopped/error session state long enough for the
-control plane to display it and records `codex_app_server_stopped` or
-`codex_app_server_error` activity with safe operational metadata only. Process
-errors are collapsed to single-line summaries and downgraded to a generic
-message when they contain stack/path/secret-like content.
-
-`POST /api/v1/codex/app-server/:id/turn` is present for the guarded prototype
-but disabled by default to avoid accidental model usage. It returns `403` unless
-Gateway is started with `OPENFORGE_CODEX_APP_SERVER_TURN_ENABLED=1`. When
-enabled, `turn/start` remains rate-limited per user and managed app-server
-session, and prompt/response transcript content is not persisted by Gateway.
-The current Web prototype does not expose prompt/turn controls and does not call
-this route.
+### Codex Terminal Notes
 
 For Claude Code sessions, both create and restart paths merge OpenForge command
 hooks into `.claude/settings.local.json` before tmux launch.
@@ -1266,44 +1227,13 @@ Codex adapter instead of accepting values that would later be ignored.
 
 ### Models
 
-- `GET /api/v1/models`
-- `GET /api/v1/models/presets`
-- `GET /api/v1/models/groups`
-- `POST /api/v1/models`
-- `GET /api/v1/models/:id`
-- `PUT /api/v1/models/:id`
-- `DELETE /api/v1/models/:id`
-- `POST /api/v1/models/:id/set-default`
-- `POST /api/v1/models/:id/check`
-- `POST /api/v1/models/:id/check-endpoint`
-
-`GET /api/v1/models/presets` is kept for compatibility but returns an empty
-list. Built-in model presets are deprecated; new model/provider setup should
-use `/api/v1/model-providers/catalog`, which is now provider-preset driven and
-prioritizes Claude Code-compatible presets inspired by cc-switch.
-
-Create body:
-
-```json
-{
-  "name": "Local Gateway",
-  "provider": "local-gateway",
-  "modelId": "local-model",
-  "endpoint": "https://gateway.example.com/v1"
-}
-```
-
-Update body accepts any subset of `name`, `provider`, `modelId`, and
-`endpoint`. Model rows are tenant scoped by `user_id`.
-
-`POST /api/v1/models/:id/check` performs a local configuration health check.
-It verifies the current user's model row has provider/model identifiers and is
-not disabled. It does not call external provider APIs during MVP-1, so the
-result represents console readiness rather than third-party network health.
-
-`POST /api/v1/models/:id/check-endpoint` performs a timeout-bounded external
-endpoint probe and reports health, latency, HTTP status when available, and the
-timeout used by the check.
+The legacy `/api/v1/models` endpoint and its flat `models` table were removed
+in the two-model-system unification. `model_profiles` (owned by a provider
+profile) is now the single source of truth for models, and every table that
+references a model (`sessions.model_id`, `user_settings.model_id`,
+`model_cost_rates.model_id`) points at `model_profiles.id`. Manage models
+through the Model Providers API below; `GET /api/v1/model-providers` returns
+the full provider/profile/model/credential inventory.
 
 ### Model Providers
 
@@ -1682,7 +1612,7 @@ Query parameters:
 
 Activities are tenant-scoped structured operation rows for session launch,
 start, stop, reconnect, delete, model switch, config write, permission prompt,
-permission denial, adapter error events, and Codex app-server lifecycle events.
+permission denial, and adapter error events.
 They intentionally do not store terminal scrollback; terminal pane history
 remains in tmux.
 

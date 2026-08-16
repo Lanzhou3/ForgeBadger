@@ -116,7 +116,7 @@ pnpm install --frozen-lockfile
 Run release candidate checks:
 
 ```bash
-node --test scripts/smoke-codex-app-server.test.mjs scripts/smoke-local-release.test.mjs
+node --test scripts/smoke-local-release.test.mjs
 pnpm -r typecheck
 pnpm -r test
 pnpm -r build
@@ -176,9 +176,6 @@ A release candidate is acceptable only when:
 - Manual smoke in `docs/SMOKE-TEST.md` passes for auth, projects, config sync,
   sessions, terminal attach, notifications, Templates, Skills, plugins,
   usage, and snapshots.
-- `pnpm smoke:codex-app-server` passes on a host with Codex CLI, or the release
-  keeps the explicit caveat that real app-server process smoke was not
-  available for that candidate.
 - Windows native/WSL evidence is recorded from a physical Windows host before
   removing the current platform caveat.
 - Existing projects can still render config previews and apply config sync with
@@ -195,11 +192,9 @@ runtime scope. The first Phase C backlog should prioritize:
 - clearer CLI availability and provider-configuration recovery paths;
 - diagnostics export review and feedback intake;
 - Windows/WSL terminal remediation based on physical host evidence;
-- retained Codex app-server stopped/error record pagination or TTL if real
-  usage shows unbounded growth.
 
-Do not expose Codex app-server prompt/turn input in Web until a separate
-retention, quota, transcript, and user-facing prompt design is accepted.
+The Codex app-server control-plane prototype was removed on 2026-08-14; Codex
+runs exclusively as tmux-backed terminal sessions.
 
 ## 9. Rollback
 

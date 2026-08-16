@@ -20,8 +20,9 @@ OpenForge 处于 MVP / 本地优先发布候选开发阶段。核心 Gateway、W
 终端链路、认证、加密 API Key 存储、项目设置、适配器发现和管理界面已经具备本地
 用户测试条件，并已支持模型服务商 Profile 和在线模型同步。
 
-Codex app-server 生命周期能力仍属于实验功能，并有意隐藏在 Web 控制台的实验功能
-区域。托管协作、计费、云部署和自主远程执行不属于当前本地优先 MVP 范围。
+Codex app-server 控制面原型已于 2026-08-14 下线；Codex 会话仅以 tmux 后端
+终端会话方式运行。托管协作、计费、云部署和自主远程执行不属于当前本地优先 MVP
+范围。
 
 ## 首次用户试用
 
@@ -156,8 +157,7 @@ pnpm verify:npm
 pnpm smoke:npm
 ```
 
-Codex Background Tasks 的发布验收还需要在已安装 Codex CLI 的主机上运行
-`pnpm smoke:codex-app-server`。Beta 阶段 Web 原型会继续隐藏 prompt/turn 输入。
+
 
 ## 文档
 

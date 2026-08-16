@@ -17,7 +17,7 @@ Replace OpenForge's generic chat Copilot with a **Portfolio Operations Manager**
 7. Every user request becomes a Portfolio Request. Clear, single-project, in-boundary requests may create a `todo` Work Item; ambiguous or scope-changing requests require an Intake Decision and owner confirmation.
 8. Project Observation Profiles collect platform facts and project Git state in V1. Optional test/build/CI Probes are declared, bounded, and evidence-producing; model-created arbitrary shell commands are prohibited.
 9. Work Item lifecycle is evidence-driven: `todo` → `in_progress` → `ready_for_review` → `done`; `blocked` requires blocker evidence; `cancelled` is owner-only by default. A Risk Signal never changes lifecycle state by itself.
-10. This is a Clean Cutover. The Legacy Copilot is discarded rather than migrated or kept in a compatibility layer.
+10. This is a Clean Cutover. Legacy Copilot Gateway logic is discarded rather than migrated or kept in a compatibility layer; `/portfolio` is the complete workspace, `/copilot` is its Portfolio-only alias, and the pet opens a floating Portfolio Dialog that creates Requests and reports persisted safe Request status with no legacy data/runtime dependency.
 
 ### Constraints
 
@@ -66,7 +66,7 @@ Web / bound Feishu request
 
 - `packages/gateway/src/services/copilot/**`
 - `packages/gateway/src/routes/copilot.ts` and the `/api/v1/copilot/**` contract
-- Legacy Copilot conversations, runs, memories, pending actions, provider tool loop, generic automation implementation, and their Web chat/drawer components
+- Legacy Copilot conversations, runs, memories, pending actions, provider tool loop, generic automation implementation, and their Web chat/provider clients; the Portfolio-owned `/copilot` alias and pet-triggered floating companion Dialog are retained presentation components
 - Legacy Copilot-specific EventBus events, API types, copy, tests, and database tables after an independently confirmed backup
 
 ### Reference-project lessons
@@ -98,7 +98,7 @@ Web / bound Feishu request
 
 ### Gate 4 — Web and Feishu operations surfaces
 
-- [ ] Replace the Copilot page/drawer with a Portfolio Operations workspace: portfolio overview, Request Inbox, Project Dossier, workflow-enhanced Project Manager board, Attempt timeline, evidence, risk, forecast, and authorization queue. → Vitest state/UI tests and responsive visual review.
+- [ ] Make `/portfolio` the complete primary Portfolio Operations workspace while retaining `/copilot` as a Portfolio-only alias and the pet-triggered floating companion Dialog as Portfolio experience: the Dialog submits a Portfolio Request and reports only persisted safe Request status using Portfolio i18n, while the workspace provides the portfolio overview, Request Inbox, Project Dossier, workflow-enhanced Project Manager board, Attempt timeline, evidence, risk, forecast, and authorization queue. → Focused UI/browser verification remains deferred.
 - [ ] Add settings for per-user Heartbeat enablement/cadence and per-project Observation Profiles. Global Heartbeat starts disabled. → API and UI validation tests.
 - [ ] Rebuild Feishu as the first native Channel Connector: authenticated binding, allowlisted conversation scope, durable inbound Request capture, signed single-use action cards, and Outbox delivery. → Ingress auth, replay, invalid signature, tenant isolation, outbox idempotency, and card-approval tests.
 - [ ] Publish an event contract for WebSocket clients that contains only safe portfolio projections. → Event sequencing, reconnection, and redaction tests.
@@ -107,7 +107,7 @@ Web / bound Feishu request
 
 - [ ] Run the complete new-system acceptance suite against a disposable database and real local CLI evidence where safe. Required path: Request → Intake → Work Item → Attempt → approved dispatch → evidence → review → acceptance → Feishu/Web update. → Fresh Gateway, Web, E2E, and manual evidence reports.
 - [ ] Take and verify the legacy-data backup/export. → Restore test proves the backup is readable without loading it into Portfolio Operations.
-- [ ] In one reviewed change, unmount `/api/v1/copilot`, remove all Legacy Copilot services/UI/tests/types/events/tables, and switch navigation plus documentation to Portfolio Operations. Do not leave adapters, dual writes, or fallback reads. → `rg` proves no legacy imports/routes/mounts remain; migrations and full typecheck/build pass.
+- [ ] In one reviewed change, unmount `/api/v1/copilot`, remove all Legacy Copilot Gateway services/runtime/data access, provider clients/tests/types/events, and switch navigation plus documentation to Portfolio Operations. Retain only the Portfolio-owned `/copilot` alias and pet-triggered floating companion Dialog; it creates Portfolio Requests, uses persisted safe Request status and Portfolio i18n, and does not receive legacy data/runtime/model-chat or execution/terminal-write authority. Do not leave adapters, dual writes, fallback reads, or a restored legacy runtime. → `rg` proves the retained presentation has no legacy imports/routes/requests; migrations and full typecheck/build pass.
 - [ ] Validate first-user safety posture: disabled Heartbeat by default, no direct free-text channel terminal path, protected actions require owner confirmation, and no legacy data appears in new views. → Playwright and negative security E2E evidence.
 
 ## 4. API and event direction

@@ -767,17 +767,24 @@ Skill 内容按纯文本处理，不作为 HTML 执行。
 
 #### 模型管理
 
-| Method | Path | 描述 | 请求体 |
-|--------|------|------|--------|
-| GET | `/api/v1/models` | 模型列表 | — |
-| POST | `/api/v1/models` | 添加模型 | `{ name, provider, model_id, endpoint, api_key }` |
-| PUT | `/api/v1/models/:id` | 更新模型 | `{ name, endpoint, ... }` |
-| DELETE | `/api/v1/models/:id` | 删除模型 | — |
-| POST | `/api/v1/models/:id/set-default` | 设为默认 | — |
-| GET | `/api/v1/api-keys` | API Key 列表 | — |
-| POST | `/api/v1/api-keys` | 添加 API Key | `{ provider, name, plaintextKey }` |
-| POST | `/api/v1/api-keys/:id/rotate` | 轮换 API Key | `{ plaintextKey }` |
-| DELETE | `/api/v1/api-keys/:id` | 删除 API Key | — |
+旧的扁平 `models` 表与 `/api/v1/models` 接口已在两套模型系统统一时移除。
+`model_profiles`（隶属于某个 provider profile）成为模型的唯一事实来源，
+所有引用模型的表（`sessions.model_id`、`user_settings.model_id`、
+`model_cost_rates.model_id`）统一指向 `model_profiles.id`。模型管理统一走
+Model Providers 接口：
+
+| Method | Path | 描述 |
+|--------|------|------|
+| GET | `/api/v1/model-providers` | Provider / Model / Credential 全量清单 |
+| POST | `/api/v1/model-providers` | 创建 Provider（catalogId 或手动） |
+| POST | `/api/v1/model-providers/:id/models` | 添加模型 |
+| PATCH | `/api/v1/model-providers/:id/models/:modelId` | 更新模型 |
+| POST | `/api/v1/model-providers/:id/models/:modelId/set-default` | 设为默认 |
+| DELETE | `/api/v1/model-providers/:id/models/:modelId` | 删除模型 |
+| GET | `/api/v1/api-keys` | API Key 列表 |
+| POST | `/api/v1/api-keys` | 添加 API Key |
+| POST | `/api/v1/api-keys/:id/rotate` | 轮换 API Key |
+| DELETE | `/api/v1/api-keys/:id` | 删除 API Key |
 
 ### 3.2 WebSocket 接口
 

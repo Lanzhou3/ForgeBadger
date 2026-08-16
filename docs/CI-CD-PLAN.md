@@ -12,7 +12,7 @@ terminal.
 
 ```bash
 pnpm install --frozen-lockfile
-node --test scripts/validate-external-evidence-gates.test.mjs scripts/validate-trial-issue-routes.test.mjs scripts/validate-trial-readiness.test.mjs scripts/audit-trial-feedback-packet.test.mjs scripts/audit-trial-feedback-issue.test.mjs scripts/audit-trial-feedback-issues.test.mjs scripts/audit-feishu-bot-live-report.test.mjs scripts/create-feishu-bot-live-evidence-report.test.mjs scripts/create-trial-feedback-draft.test.mjs scripts/validate-trial-feedback-intake.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-codex-app-server.test.mjs scripts/smoke-feishu-bot-websocket.test.mjs scripts/smoke-feishu-bot-live.test.mjs scripts/smoke-local-release.test.mjs scripts/smoke-npm-package-runner.test.mjs scripts/verify-npm-package.test.mjs
+node --test scripts/validate-external-evidence-gates.test.mjs scripts/validate-trial-issue-routes.test.mjs scripts/validate-trial-readiness.test.mjs scripts/audit-trial-feedback-packet.test.mjs scripts/audit-trial-feedback-issue.test.mjs scripts/audit-trial-feedback-issues.test.mjs scripts/audit-feishu-bot-live-report.test.mjs scripts/create-feishu-bot-live-evidence-report.test.mjs scripts/create-trial-feedback-draft.test.mjs scripts/validate-trial-feedback-intake.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-feishu-bot-websocket.test.mjs scripts/smoke-feishu-bot-live.test.mjs scripts/smoke-local-release.test.mjs scripts/smoke-npm-package-runner.test.mjs scripts/verify-npm-package.test.mjs
 pnpm trial:intake-validate
 pnpm evidence:gates-validate
 pnpm -r typecheck
@@ -116,34 +116,10 @@ Known skip:
 
 ### Codex Background Task Gates
 
-The safe beta surface for Codex app-server is observable control plane only.
-
-```bash
-pnpm --dir packages/web exec playwright test e2e/codex-app-server.spec.ts --project=chromium --reporter=line
-pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line
-pnpm smoke:codex-app-server
-```
-
-Acceptance:
-
-- The Playwright smoke proves the Web page renders safe status/activity
-  metadata, hides prompt/turn/send controls, and does not request `/turn`.
-- Core `mvp1-smoke` Playwright stays required in CI for the product
-  control-plane happy path. Browser terminal `gate-d-smoke` remains
-  environment-gated until the CI image supplies a real AI CLI.
-- `pnpm smoke:codex-app-server` starts a real Codex app-server process, sends
-  only initialize/initialized messages, reports `promptOrTurnSent: false`, and
-  uses isolated temporary `HOME` and `CODEX_HOME`.
-- Host Codex config/auth fingerprints should be checked for final acceptance
-  when the real smoke is run manually.
-
-Known skip:
-
-- CI may not have Codex CLI installed. In that case, skip only the real
-  `pnpm smoke:codex-app-server` process check, record the skip reason, and keep
-  the Web zero-quota smoke required.
-- Do not replace the real process check with mocked Playwright evidence; they
-  prove different boundaries.
+The Codex app-server control-plane prototype (routes, manager, Web console,
+Playwright smoke, and `pnpm smoke:codex-app-server`) was removed on 2026-08-14.
+Codex sessions run exclusively as tmux-backed terminal sessions; the former
+dedicated gates no longer apply.
 
 ### E2E Smoke
 
@@ -281,8 +257,6 @@ Gate 2 - Automated verification:
 - CLI build passes.
 - Script harness tests pass.
 - Provider/Codex boundary regression passes.
-- Codex app-server Web smoke passes.
-- Real Codex app-server process smoke passes on a Codex-enabled host, or the
   candidate keeps the explicit environment caveat.
 - NPM package checks pass or have a documented npm registry/native dependency
   skip with exact stdout/stderr.
@@ -306,8 +280,6 @@ Gate 3 - Manual acceptance:
 | Workspace typecheck/test/build | Required | Re-run when cutting a candidate |
 | Provider/Codex boundary regression | Required | Re-run if model/provider code changed |
 | NPM build/verify/smoke | Required on Ubuntu CI with tmux | Re-run before publish or tag |
-| Codex app-server Web smoke | Required with mocked Gateway APIs | Re-run if Web control-plane UI changed |
-| Real Codex app-server initialize smoke | Conditional on `codex` CLI availability | Required before removing Codex process caveat |
 | Browser terminal end-to-end smoke | Environment-gated | Required on release host |
 | Real Claude Code permission prompt smoke | Environment-gated | Required when Claude behavior is in scope |
 | Physical Windows/WSL terminal smoke | Not covered by Ubuntu CI | Required before removing Windows caveat |

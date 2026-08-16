@@ -6,7 +6,9 @@ import {
   REQUIRED_GITHUB_FIELDS,
   REQUIRED_GITHUB_OPTIONS,
   REQUIRED_CAVEAT_OWNER_PHRASES,
+  REQUIRED_GITHUB_PORTFOLIO_PROMPTS,
   REQUIRED_MARKDOWN_PHRASES,
+  REQUIRED_MARKDOWN_PORTFOLIO_PROMPTS,
   REQUIRED_MARKDOWN_SECTIONS,
   REQUIRED_SAFETY_PHRASES,
   validateTrialFeedbackIntake
@@ -36,8 +38,8 @@ describe("validateTrialFeedbackIntake", () => {
     const githubIssueForm = buildIssueFormFixture()
       .replace("        - blocked", "        - blocked externally")
       .replace(
-        "        Confirmed no terminal/shell/Codex turn input in Copilot:\n    validations:\n      required: true",
-        "        Confirmed no terminal/shell/Codex turn input in Copilot:\n    validations:\n      required: false"
+        "        Confirmed no terminal/shell/Codex turn input in Portfolio:\n    validations:\n      required: true",
+        "        Confirmed no terminal/shell/Codex turn input in Portfolio:\n    validations:\n      required: false"
       );
     const markdownTemplate = buildMarkdownTemplateFixture();
 
@@ -48,7 +50,7 @@ describe("validateTrialFeedbackIntake", () => {
 
     assert.equal(result.ok, false);
     assert.match(result.errors.join("\n"), /result.*blocked/);
-    assert.match(result.errors.join("\n"), /copilot.*required: true/);
+    assert.match(result.errors.join("\n"), /portfolio.*required: true/);
   });
 
   it("rejects trial intake drift back to the old Feishu callback evidence route", () => {
@@ -246,12 +248,12 @@ describe("validateTrialFeedbackIntake", () => {
     );
   });
 
-  it("rejects intake materials that omit Copilot evidence prompts", () => {
+  it("rejects intake materials that omit Portfolio evidence prompts", () => {
     const result = validateTrialFeedbackIntake({
-      githubIssueForm: buildIssueFormFixture().replace("Prompt used:", "Prompt:"),
+      githubIssueForm: buildIssueFormFixture().replace("Portfolio route availability:", "Portfolio route:"),
       markdownTemplate: buildMarkdownTemplateFixture().replace(
-        "Copilot prompt used:",
-        "Copilot prompt:"
+        "Portfolio route availability:",
+        "Portfolio route:"
       ),
       trialRunbook: buildTrialRunbookFixture(),
       trialChecklist: buildTrialChecklistFixture(),
@@ -260,8 +262,8 @@ describe("validateTrialFeedbackIntake", () => {
     });
 
     assert.equal(result.ok, false);
-    assert.match(result.errors.join("\n"), /GitHub issue form.*Prompt used:/);
-    assert.match(result.errors.join("\n"), /Markdown trial feedback template.*Copilot prompt used:/);
+    assert.match(result.errors.join("\n"), /GitHub issue form.*Portfolio route availability:/);
+    assert.match(result.errors.join("\n"), /Markdown trial feedback template.*Portfolio route availability:/);
   });
 });
 
@@ -281,17 +283,10 @@ function buildIssueFormFixture() {
       for (const option of REQUIRED_GITHUB_OPTIONS[field]) {
         body.push(`        - ${option}`);
       }
-    } else if (field === "copilot") {
+    } else if (field === "portfolio") {
       body.push("    attributes:");
       body.push("      value: |");
-      body.push("        pnpm smoke:copilot-provider result:");
-      body.push("        Provider smoke skip or failure reason:");
-      body.push("        Provider with active model configured:");
-      body.push("        Prompt used:");
-      body.push("        Read-tool evidence observed:");
-      body.push("        Pending-action approve/reject result:");
-      body.push("        Memory write proposal tested:");
-      body.push("        Confirmed no terminal/shell/Codex turn input in Copilot:");
+      for (const phrase of REQUIRED_GITHUB_PORTFOLIO_PROMPTS) body.push(`        ${phrase}`);
     } else if (field === "safety") {
       body.push("    attributes:");
       body.push("      options:");
@@ -323,11 +318,7 @@ function buildMarkdownTemplateFixture() {
   for (const phrase of REQUIRED_MARKDOWN_PHRASES) {
     body.push(phrase);
   }
-  body.push("`pnpm smoke:copilot-provider` result:");
-  body.push("Provider smoke skip or failure reason:");
-  body.push("Copilot prompt used:");
-  body.push("Copilot read-tool evidence observed:");
-  body.push("Copilot memory write proposal tested:");
+  for (const phrase of REQUIRED_MARKDOWN_PORTFOLIO_PROMPTS) body.push(phrase);
   return `${body.join("\n")}\n`;
 }
 

@@ -28,7 +28,7 @@ export const REQUIRED_GITHUB_FIELDS = [
   "doctor",
   "startup_health",
   "core_trial",
-  "copilot",
+  "portfolio",
   "mapped_requirement",
   "category",
   "severity",
@@ -47,7 +47,7 @@ export const REQUIRED_GITHUB_OPTIONS = {
     "provider",
     "platform",
     "terminal",
-    "Copilot",
+    "Portfolio",
     "Feishu",
     "Project Manager",
     "docs",
@@ -57,7 +57,7 @@ export const REQUIRED_GITHUB_OPTIONS = {
   mapped_requirement: [
     "UX-01 dependency/runtime guidance",
     "UX-02 provider/model/credential recovery",
-    "UX-03 Copilot run and pending-action state coherence",
+    "UX-03 Portfolio request and owner-decision state coherence",
     "UX-04 reproducible feedback quality",
     "UX-05 active-run monotonic ordering",
     "UX-06 partial API/query failure recovery",
@@ -65,7 +65,7 @@ export const REQUIRED_GITHUB_OPTIONS = {
     "REL-* release evidence caveat",
     "other"
   ],
-  category: ["dependency", "provider", "CLI", "platform", "Copilot", "docs", "E2E", "other"],
+  category: ["dependency", "provider", "CLI", "platform", "Portfolio", "docs", "E2E", "other"],
   severity: ["blocker", "high", "medium", "low"]
 };
 
@@ -77,7 +77,7 @@ export const REQUIRED_GITHUB_FIELD_TYPES = {
   doctor: "textarea",
   startup_health: "textarea",
   core_trial: "textarea",
-  copilot: "textarea",
+  portfolio: "textarea",
   mapped_requirement: "dropdown",
   category: "dropdown",
   severity: "dropdown",
@@ -198,10 +198,10 @@ export const REQUIRED_MARKDOWN_PHRASES = [
   "Next action or no-action rationale:",
   "Caveat status:",
   "Redaction review completed:",
-  "`pnpm smoke:copilot-provider` result:",
-  "Copilot provider with active model configured:",
-  "Copilot pending-action approve/reject result:",
-  "Confirmed no terminal/shell/Codex turn input in Copilot:",
+  "Portfolio route availability:",
+  "Portfolio request lifecycle observed:",
+  "Owner decision result, if exercised:",
+  "Confirmed no terminal/shell/Codex turn input in Portfolio:",
   "Terminal attach result:",
   "Terminal input/output result summary, no raw transcript:",
   "Terminal resize result:",
@@ -212,26 +212,22 @@ export const REQUIRED_MARKDOWN_PHRASES = [
   "Web log summary, no raw log attachment:"
 ];
 
-export const REQUIRED_GITHUB_COPILOT_PROMPTS = [
-  "pnpm smoke:copilot-provider result:",
-  "Provider smoke skip or failure reason:",
-  "Provider with active model configured:",
-  "Prompt used:",
-  "Read-tool evidence observed:",
-  "Pending-action approve/reject result:",
-  "Memory write proposal tested:",
-  "Confirmed no terminal/shell/Codex turn input in Copilot:"
+export const REQUIRED_GITHUB_PORTFOLIO_PROMPTS = [
+  "Portfolio route availability:",
+  "Portfolio request lifecycle observed:",
+  "Owner decision result, if exercised:",
+  "Feishu Portfolio ingress disposition, if configured:",
+  "Visible Portfolio blocker, if any:",
+  "Confirmed no terminal/shell/Codex turn input in Portfolio:"
 ];
 
-export const REQUIRED_MARKDOWN_COPILOT_PROMPTS = [
-  "`pnpm smoke:copilot-provider` result:",
-  "Provider smoke skip or failure reason:",
-  "Copilot provider with active model configured:",
-  "Copilot prompt used:",
-  "Copilot read-tool evidence observed:",
-  "Copilot pending-action approve/reject result:",
-  "Copilot memory write proposal tested:",
-  "Confirmed no terminal/shell/Codex turn input in Copilot:"
+export const REQUIRED_MARKDOWN_PORTFOLIO_PROMPTS = [
+  "Portfolio route availability:",
+  "Portfolio request lifecycle observed:",
+  "Owner decision result, if exercised:",
+  "Feishu Portfolio ingress disposition, if configured:",
+  "Visible Portfolio blocker, if any:",
+  "Confirmed no terminal/shell/Codex turn input in Portfolio:"
 ];
 
 const UNSAFE_INTAKE_PATTERNS = [
@@ -415,11 +411,11 @@ function validateGithubIssueForm(source, errors) {
     }
   }
 
-  const copilotBlock = fieldBlocks.get("copilot");
-  if (copilotBlock !== undefined) {
-    for (const phrase of REQUIRED_GITHUB_COPILOT_PROMPTS) {
-      if (!copilotBlock.includes(phrase)) {
-        errors.push(`GitHub issue form Copilot evidence prompt is missing: ${phrase}`);
+  const portfolioBlock = fieldBlocks.get("portfolio");
+  if (portfolioBlock !== undefined) {
+    for (const phrase of REQUIRED_GITHUB_PORTFOLIO_PROMPTS) {
+      if (!portfolioBlock.includes(phrase)) {
+        errors.push(`GitHub issue form Portfolio evidence prompt is missing: ${phrase}`);
       }
     }
   }
@@ -491,7 +487,7 @@ function validateMarkdownTemplate(source, errors) {
 
   for (const phrase of [
     ...REQUIRED_MARKDOWN_PHRASES,
-    ...REQUIRED_MARKDOWN_COPILOT_PROMPTS,
+    ...REQUIRED_MARKDOWN_PORTFOLIO_PROMPTS,
     ...REQUIRED_SAFETY_PHRASES.markdown
   ]) {
     if (!source.includes(phrase)) {
