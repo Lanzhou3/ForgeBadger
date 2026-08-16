@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  applyCliConfigFieldPatch,
   readCliConfig,
+  readCliConfigFieldValues,
   readCliConfigFile,
   removeCliModel,
   removeCliProvider,
@@ -14,6 +16,7 @@ import {
   upsertCliProvider,
   writeCliConfigFile
 } from "../src/services/cli-config.js";
+import { cliConfigFieldCatalog, listCliConfigFields } from "../src/services/cli-config-fields.js";
 
 type EnvKey = "KIMI_CODE_HOME" | "CODEX_HOME" | "CLAUDE_CONFIG_DIR" | "OPENCODE_CONFIG_DIR";
 
@@ -246,6 +249,171 @@ describe("cli-config service", () => {
         writeCliConfigFile("kimi", "config.toml", "x".repeat(129 * 1024)),
         /exceeds maximum size/
       );
+    });
+  });
+
+  describe("field catalog", () => {
+    const adapters = ["claude", "opencode", "codex", "kimi"] as const;
+
+    it("keeps unique keys and enum values per adapter", () => {
+      for (const adapter of adapters) {
+        const fields = listCliConfigFields(adapter);
+        assert.ok(fields.length > 0, `${adapter} has no curated fields`);
+        const keys = fields.map((field) => field.key);
+        assert.equal(new Set(keys).size, keys.length, `${adapter} has duplicate field keys`);
+        for (const field of fields) {
+          assert.ok(field.path.length > 0);
+          assert.ok(field.label.length > 0);
+          if (field.type === "enum") {
+            assert.ok((field.values?.length ?? 0) > 0, `${adapter}.${field.key} enum has no values`);
+          }
+        }
+        assert.equal(listCliConfigFields(adapter), cliConfigFieldCatalog[adapter]);
+      }
+    });
+
+    it("reads current field values from codex config.toml", async () => {
+      await useConfigRoot("CODEX_HOME", "openforge-fields-codex-read-");
+      await writeCliConfigFile("codex", "config.toml", [
+        'model = "kimi-k2.5"',
+        'model_provider = "gateway"',
+        'approval_policy = "on-request"',
+        "",
+        "[model_providers.gateway]",
+        'name = "Gateway"',
+        'base_url = "https://api.example.com/v1"',
+        'wire_api = "chat"',
+        ""
+      ].join("\n"));
+
+      const values = await readCliConfigFieldValues("codex");
+      assert.equal(values.model, "kimi-k2.5");
+      assert.equal(values.modelProvider, "gateway");
+      assert.equal(values.approvalPolicy, "on-request");
+    });
+
+    it("reports claude secret fields as a presence flag only", async () => {
+      await useConfigRoot("CLAUDE_CONFIG_DIR", "openforge-fields-claude-secret-");
+      await writeCliConfigFile("claude", "settings.json", JSON.stringify({
+        env: {
+          ANTHROPIC_AUTH_TOKEN: "sk-ant-secret",
+          ANTHROPIC_BASE_URL: "https://api.anthropic.com"
+        }
+      }, null, 2));
+
+      const values = await readCliConfigFieldValues("claude");
+      assert.equal(values.anthropicAuthToken, true);
+      assert.equal(values.anthropicBaseUrl, "https://api.anthropic.com");
+    });
+
+    it("patches curated codex fields and preserves unknown TOML sections", async () => {
+      const root = await useConfigRoot("CODEX_HOME", "openforge-fields-codex-patch-");
+      await writeCliConfigFile("codex", "config.toml", '[unknown_section]\nkeep = "me"\n');
+
+      const snapshot = await applyCliConfigFieldPatch("codex", {
+        model: "kimi-k2.5",
+        modelProvider: "gateway",
+        approvalPolicy: "on-request",
+        sandboxMode: "workspace-write"
+      });
+      assert.equal(snapshot.defaultModel, "kimi-k2.5");
+
+      const raw = await readFile(path.join(root, "config.toml"), "utf8");
+      assert.match(raw, /approval_policy = "on-request"/);
+      assert.match(raw, /sandbox_mode = "workspace-write"/);
+      assert.match(raw, /\[unknown_section\]/);
+      assert.match(raw, /keep = "me"/);
+    });
+
+    it("patches nested claude fields including numbers and enums", async () => {
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "openforge-fields-claude-patch-");
+      await applyCliConfigFieldPatch("claude", {
+        apiTimeoutMs: 600000,
+        permissionsDefaultMode: "acceptEdits",
+        anthropicBaseUrl: "https://api.anthropic.com"
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, unknown>;
+        permissions: Record<string, unknown>;
+      };
+      assert.equal(doc.env.API_TIMEOUT_MS, 600000);
+      assert.equal(doc.permissions.defaultMode, "acceptEdits");
+      assert.equal(doc.env.ANTHROPIC_BASE_URL, "https://api.anthropic.com");
+    });
+
+    it("patches opencode boolean fields", async () => {
+      const root = await useConfigRoot("OPENCODE_CONFIG_DIR", "openforge-fields-opencode-patch-");
+      await applyCliConfigFieldPatch("opencode", { autoupdate: false, theme: "dark" });
+
+      const doc = JSON.parse(await readFile(path.join(root, "opencode.json"), "utf8")) as Record<string, unknown>;
+      assert.equal(doc.autoupdate, false);
+      assert.equal(doc.theme, "dark");
+    });
+
+    it("patches kimi default_model", async () => {
+      const root = await useConfigRoot("KIMI_CODE_HOME", "openforge-fields-kimi-patch-");
+      const snapshot = await applyCliConfigFieldPatch("kimi", { defaultModel: "moonshot/kimi-k2.5" });
+
+      assert.equal(snapshot.defaultModel, "moonshot/kimi-k2.5");
+      assert.match(await readFile(path.join(root, "config.toml"), "utf8"), /default_model = /);
+    });
+
+    it("writes secret field values but never reads them back", async () => {
+      await useConfigRoot("CLAUDE_CONFIG_DIR", "openforge-fields-claude-write-secret-");
+      await applyCliConfigFieldPatch("claude", { anthropicAuthToken: "sk-new-secret" });
+
+      const values = await readCliConfigFieldValues("claude");
+      assert.equal(values.anthropicAuthToken, true);
+    });
+
+    it("deletes field keys with null", async () => {
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "openforge-fields-claude-delete-");
+      await applyCliConfigFieldPatch("claude", { apiTimeoutMs: 600000 });
+      await applyCliConfigFieldPatch("claude", { apiTimeoutMs: null });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, unknown>;
+      };
+      assert.equal(doc.env.API_TIMEOUT_MS, undefined);
+    });
+
+    it("rejects invalid patches without touching the file", async () => {
+      const root = await useConfigRoot("CODEX_HOME", "openforge-fields-codex-invalid-");
+      const original = 'model = "kimi-k2.5"\n';
+      await writeCliConfigFile("codex", "config.toml", original);
+
+      await assert.rejects(
+        applyCliConfigFieldPatch("codex", { nope: "x" }),
+        /Unknown codex config field/
+      );
+      await assert.rejects(
+        applyCliConfigFieldPatch("codex", { approvalPolicy: "always" }),
+        /approvalPolicy/
+      );
+      await assert.rejects(
+        applyCliConfigFieldPatch("codex", { model: 42 }),
+        /model/
+      );
+      await assert.rejects(
+        applyCliConfigFieldPatch("codex", { sandboxMode: null, model: true }),
+        /model/
+      );
+      assert.equal(await readFile(path.join(root, "config.toml"), "utf8"), original);
+    });
+
+    it("does not rewrite the file for an empty patch", async () => {
+      const root = await useConfigRoot("CODEX_HOME", "openforge-fields-codex-empty-");
+      const original = [
+        "# hand-written comment that must survive",
+        'model = "kimi-k2.5"',
+        ""
+      ].join("\n");
+      await writeCliConfigFile("codex", "config.toml", original);
+
+      const snapshot = await applyCliConfigFieldPatch("codex", {});
+      assert.equal(snapshot.defaultModel, "kimi-k2.5");
+      assert.equal(await readFile(path.join(root, "config.toml"), "utf8"), original);
     });
   });
 

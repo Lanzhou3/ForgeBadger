@@ -4,8 +4,10 @@ import { z } from "zod";
 import { authenticate } from "../auth/middleware.js";
 import { isAdapterId, type AdapterId } from "../services/adapter-discovery.js";
 import {
+  applyCliConfigFieldPatch,
   listCliConfigAdapters,
   readCliConfig,
+  readCliConfigFieldValues,
   readCliConfigFile,
   removeCliModel,
   removeCliProvider,
@@ -14,6 +16,7 @@ import {
   upsertCliProvider,
   writeCliConfigFile
 } from "../services/cli-config.js";
+import { listCliConfigFields } from "../services/cli-config-fields.js";
 
 const providerBodySchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
@@ -46,6 +49,10 @@ const fileBodySchema = z.object({
 const fileQuerySchema = z.object({
   path: z.string().trim().min(1).max(120),
   reveal: z.enum(["0", "1"]).optional()
+}).strict();
+
+const fieldPatchBodySchema = z.object({
+  updates: z.record(z.string(), z.unknown())
 }).strict();
 
 export function createCliConfigRoutes(): Router {
@@ -94,6 +101,34 @@ export function createCliConfigRoutes(): Router {
     }
     await handle(res, async () => ({
       snapshot: await writeCliConfigFile(adapter, body.data.path, body.data.content)
+    }));
+  });
+
+  router.get("/:adapter/fields", async (req, res) => {
+    const adapter = parseAdapter(req.params.adapter);
+    if (!adapter) {
+      res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
+      return;
+    }
+    await handle(res, async () => ({
+      fields: listCliConfigFields(adapter),
+      values: await readCliConfigFieldValues(adapter)
+    }));
+  });
+
+  router.patch("/:adapter/fields", async (req, res) => {
+    const adapter = parseAdapter(req.params.adapter);
+    if (!adapter) {
+      res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
+      return;
+    }
+    const body = fieldPatchBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ code: 1, message: "Invalid field patch payload" });
+      return;
+    }
+    await handle(res, async () => ({
+      snapshot: await applyCliConfigFieldPatch(adapter, body.data.updates)
     }));
   });
 

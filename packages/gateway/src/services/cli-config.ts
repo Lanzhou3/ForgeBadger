@@ -5,6 +5,11 @@ import path from "node:path";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 
 import type { AdapterId } from "./adapter-discovery.js";
+import {
+  findCliConfigField,
+  listCliConfigFields,
+  validateCliConfigFieldValue
+} from "./cli-config-fields.js";
 
 export interface CliConfigFileEntry {
   relativePath: string;
@@ -311,6 +316,93 @@ export async function setCliDefaultModel(
         doc.default_model = model;
       });
   }
+}
+
+export async function readCliConfigFieldValues(adapter: AdapterId): Promise<Record<string, unknown>> {
+  const meta = cliConfigMeta[adapter];
+  const content = await readFileIfExists(meta.configRoot(), meta.mainFile);
+  const doc = content !== undefined && content.trim() ? parseConfigDoc(meta.fileType, content) : {};
+  const values: Record<string, unknown> = {};
+  for (const field of listCliConfigFields(adapter)) {
+    const raw = getFieldAtPath(doc, field.path);
+    if (field.type === "secret") {
+      values[field.key] = typeof raw === "string" && raw.length > 0;
+      continue;
+    }
+    if (raw !== undefined) values[field.key] = raw;
+  }
+  return values;
+}
+
+export async function applyCliConfigFieldPatch(
+  adapter: AdapterId,
+  updates: Record<string, unknown>
+): Promise<CliConfigSnapshot> {
+  const entries = validateFieldUpdates(adapter, updates);
+  // An empty patch must not rewrite (and reformat) the file: TOML round-trips
+  // drop comments, so a no-op write would still destroy hand-written content.
+  if (entries.length === 0) return readCliConfig(adapter);
+  return mutateMainConfig(adapter, (doc) => {
+    for (const [key, value] of entries) {
+      const field = findCliConfigField(adapter, key);
+      if (!field) continue;
+      if (value === null) deleteFieldAtPath(doc, field.path);
+      else setFieldAtPath(doc, field.path, value);
+    }
+  });
+}
+
+function validateFieldUpdates(adapter: AdapterId, updates: Record<string, unknown>): Array<[string, unknown]> {
+  const entries = Object.entries(updates);
+  for (const [key, value] of entries) {
+    const field = findCliConfigField(adapter, key);
+    if (!field) {
+      const legal = listCliConfigFields(adapter).map((item) => item.key).join(", ");
+      throw new Error(`Unknown ${adapter} config field: ${key}. Supported fields: ${legal}`);
+    }
+    const error = validateCliConfigFieldValue(field, value);
+    if (error) throw new Error(error);
+  }
+  return entries;
+}
+
+function fieldPathSegments(fieldPath: string): string[] {
+  return fieldPath.split(".");
+}
+
+function getFieldAtPath(doc: ConfigDoc, fieldPath: string): unknown {
+  const segments = fieldPathSegments(fieldPath);
+  const leaf = segments[segments.length - 1];
+  if (leaf === undefined) return undefined;
+  let current: Record<string, unknown> | undefined = doc;
+  for (const segment of segments.slice(0, -1)) {
+    if (!current) break;
+    current = asRecord(current[segment]);
+  }
+  return current?.[leaf];
+}
+
+function setFieldAtPath(doc: ConfigDoc, fieldPath: string, value: unknown): void {
+  const segments = fieldPathSegments(fieldPath);
+  const leaf = segments[segments.length - 1];
+  if (leaf === undefined) return;
+  let current = doc;
+  for (const segment of segments.slice(0, -1)) {
+    current = ensureRecord(current, segment);
+  }
+  current[leaf] = value;
+}
+
+function deleteFieldAtPath(doc: ConfigDoc, fieldPath: string): void {
+  const segments = fieldPathSegments(fieldPath);
+  const leaf = segments[segments.length - 1];
+  if (leaf === undefined) return;
+  let current: Record<string, unknown> | undefined = doc;
+  for (const segment of segments.slice(0, -1)) {
+    if (!current) break;
+    current = asRecord(current[segment]);
+  }
+  delete current?.[leaf];
 }
 
 type ConfigDoc = Record<string, unknown>;
