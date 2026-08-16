@@ -258,6 +258,11 @@ describe("cli-config service", () => {
     it("keeps unique keys and enum values per adapter", () => {
       for (const adapter of adapters) {
         const fields = listCliConfigFields(adapter);
+        // opencode is a provider/model registry with no curated scalar fields.
+        if (adapter === "opencode") {
+          assert.equal(fields.length, 0);
+          continue;
+        }
         assert.ok(fields.length > 0, `${adapter} has no curated fields`);
         const keys = fields.map((field) => field.key);
         assert.equal(new Set(keys).size, keys.length, `${adapter} has duplicate field keys`);
@@ -340,15 +345,6 @@ describe("cli-config service", () => {
       assert.equal(doc.env.API_TIMEOUT_MS, 600000);
       assert.equal(doc.permissions.defaultMode, "acceptEdits");
       assert.equal(doc.env.ANTHROPIC_BASE_URL, "https://api.anthropic.com");
-    });
-
-    it("patches opencode boolean fields", async () => {
-      const root = await useConfigRoot("OPENCODE_CONFIG_DIR", "openforge-fields-opencode-patch-");
-      await applyCliConfigFieldPatch("opencode", { autoupdate: false, theme: "dark" });
-
-      const doc = JSON.parse(await readFile(path.join(root, "opencode.json"), "utf8")) as Record<string, unknown>;
-      assert.equal(doc.autoupdate, false);
-      assert.equal(doc.theme, "dark");
     });
 
     it("patches kimi default_model", async () => {

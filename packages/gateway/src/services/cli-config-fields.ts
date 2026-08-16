@@ -45,12 +45,12 @@ const claudeFields: CliConfigFieldSpec[] = [
   }
 ];
 
-const opencodeFields: CliConfigFieldSpec[] = [
-  { key: "model", path: "model", label: "Active model", type: "string" },
-  { key: "smallModel", path: "small_model", label: "Small model", type: "string" },
-  { key: "theme", path: "theme", label: "Theme", type: "string" },
-  { key: "autoupdate", path: "autoupdate", label: "Auto update", type: "boolean" }
-];
+// OpenCode's opencode.json is a provider/model registry (provider.<id>.models.*),
+// not a flat scalar config; top-level keys like model/theme/autoupdate are rarely
+// set by users (the active model lives in the session/model picker). Curated scalar
+// fields would render as misleading empties, so the fields card is omitted and the
+// provider + model views cover the real content.
+const opencodeFields: CliConfigFieldSpec[] = [];
 
 const codexFields: CliConfigFieldSpec[] = [
   { key: "model", path: "model", label: "Active model", type: "string" },
