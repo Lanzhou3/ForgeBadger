@@ -111,13 +111,9 @@ export function ProviderWorkspace({
             <Badge variant="outline">{provider.region ?? "-"}</Badge>
             <Badge variant="secondary">{productTypeLabel(provider.productType, t)}</Badge>
             <Badge variant="outline">{provider.authType}</Badge>
-            {applyTargetsForProvider(provider).map((adapter) =>
-              adapter === "openforge-copilot" ? (
-                <Badge key={adapter} variant="secondary">OpenForge Copilot</Badge>
-              ) : (
-                <CliBrandChip key={adapter} aiTool={adapter} />
-              )
-            )}
+            {applyTargetsForProvider(provider).map((adapter) => (
+              <CliBrandChip key={adapter} aiTool={adapter} />
+            ))}
           </div>
         </CardContent>
       </Card>

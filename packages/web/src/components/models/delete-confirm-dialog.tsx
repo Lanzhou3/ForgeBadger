@@ -34,7 +34,7 @@ export function DeleteConfirmDialog({
   onConfirm,
   t,
 }: DeleteConfirmDialogProps) {
-  const blocked = references.sessions.length > 0 || references.agents.length > 0;
+  const blocked = references.sessions.length > 0;
   const title =
     target?.kind === "model"
       ? t("models.deleteModelTitle")
@@ -84,24 +84,6 @@ export function DeleteConfirmDialog({
                       kindLabel={t("models.referencedSessions")}
                       href={`/sessions/${item.id}`}
                       linkLabel={t("models.viewSession")}
-                    />
-                  ))}
-                </div>
-              )}
-              {references.agents.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    <Layers3 className="size-3.5" />
-                    {t("models.referencedAgents")}（{references.agents.length}）
-                  </div>
-                  {references.agents.slice(0, 12).map((item) => (
-                    <ReferenceRow
-                      key={item.id}
-                      name={item.name}
-                      status={item.status}
-                      kindLabel={t("models.referencedAgents")}
-                      href="/projects"
-                      linkLabel={t("models.viewAgents")}
                     />
                   ))}
                 </div>

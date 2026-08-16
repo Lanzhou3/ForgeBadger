@@ -224,7 +224,6 @@ function SnapshotCard({
           <dl className="grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-4">
             <SnapshotField label={t("snapshots.tmuxSession")} value={snapshot.tmuxSession} />
             <SnapshotField label={t("snapshots.model")} value={snapshot.modelId} />
-            <SnapshotField label={t("snapshots.agent")} value={snapshot.agentId} />
             <SnapshotField label={t("snapshots.configVersion")} value={snapshot.configVersion} />
           </dl>
         </div>

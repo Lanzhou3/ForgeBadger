@@ -42,7 +42,6 @@ import {
   deleteProviderModel,
   deleteModelProvider,
   getCodexSubscriptionStatus,
-  listAgents,
   listModelProviders,
   listProviderCatalog,
   listSessions,
@@ -110,11 +109,6 @@ export default function ModelsPage() {
     queryFn: listSessions,
     staleTime: 30_000,
   });
-  const agentsQuery = useQuery({
-    queryKey: ["model-page-agents"],
-    queryFn: listAgents,
-    staleTime: 30_000,
-  });
   const providers = providerQuery.data?.providers ?? [];
   const models = providerQuery.data?.models ?? [];
   const credentials = providerQuery.data?.credentials ?? [];
@@ -123,7 +117,7 @@ export default function ModelsPage() {
   // modelId 直接按模型 profile id 匹配即可。
   const modelReferences = useMemo(() => {
     const map = new Map<string, ModelReferenceInfo>();
-    for (const model of models) map.set(model.id, { sessions: [], agents: [] });
+    for (const model of models) map.set(model.id, { sessions: [] });
     for (const session of sessionsQuery.data?.sessions ?? []) {
       if (!session.modelId) continue;
       const info = map.get(session.modelId);
@@ -135,19 +129,8 @@ export default function ModelsPage() {
         });
       }
     }
-    for (const agent of agentsQuery.data?.agents ?? []) {
-      if (!agent.modelId) continue;
-      const info = map.get(agent.modelId);
-      if (info) {
-        info.agents.push({
-          id: agent.id,
-          name: agent.name,
-          status: agent.status ?? "active",
-        });
-      }
-    }
     return map;
-  }, [models, sessionsQuery.data, agentsQuery.data]);
+  }, [models, sessionsQuery.data]);
   const filteredProviders = useMemo(() => {
     const query = providerQueryText.trim().toLowerCase();
     if (!query) return providers;
@@ -214,9 +197,7 @@ export default function ModelsPage() {
     if (deleteTarget.kind === "credential") return emptyModelReferences;
     const targetModels = models.filter((model) => model.providerProfileId === deleteTarget.providerId);
     const sessions: Array<{ id: string; name: string; status: string }> = [];
-    const agents: Array<{ id: string; name: string; status: string }> = [];
     const seenSessions = new Set<string>();
-    const seenAgents = new Set<string>();
     for (const model of targetModels) {
       const refs = modelReferences.get(model.id);
       if (!refs) continue;
@@ -226,14 +207,8 @@ export default function ModelsPage() {
           sessions.push(ref);
         }
       }
-      for (const ref of refs.agents) {
-        if (!seenAgents.has(ref.id)) {
-          seenAgents.add(ref.id);
-          agents.push(ref);
-        }
-      }
     }
-    return { sessions, agents };
+    return { sessions };
   }, [deleteTarget, models, modelReferences]);
 
   useEffect(() => {

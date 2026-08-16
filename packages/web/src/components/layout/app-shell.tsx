@@ -4,40 +4,31 @@ import { useEffect, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 
 import { CommandPalette } from "@/components/command-palette";
-import { CopilotDrawer } from "@/components/copilot/copilot-drawer";
+import { PortfolioCompanionPanel } from "@/components/portfolio/portfolio-companion-panel";
 import {
   globalShortcutContextFromEvent,
   isCommandPaletteShortcut,
-  isCopilotShortcut,
   isSidebarToggleShortcut,
-  shouldHandleCopilotShortcut,
   shouldHandleGlobalShortcut,
 } from "@/lib/keyboard-shortcuts";
 import { appShellContainerClassName, appShellMainClassName } from "@/lib/app-shell-layout";
-import { resolveCopilotRouteContext } from "@/lib/copilot-route-context";
 import { Sidebar } from "./sidebar";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [portfolioCompanionOpen, setPortfolioCompanionOpen] = useState(false);
   const isTerminalRoute = /^\/sessions\/[^/]+/u.test(pathname ?? "");
-  const isCopilotRoute = pathname === "/copilot";
-  const copilotRouteContext = resolveCopilotRouteContext(pathname);
+  const isPortfolioSurfaceRoute = pathname === "/portfolio" || pathname === "/copilot";
 
   useEffect(() => {
-    if (isCopilotRoute) setCopilotOpen(false);
-  }, [isCopilotRoute]);
+    if (isPortfolioSurfaceRoute) setPortfolioCompanionOpen(false);
+  }, [isPortfolioSurfaceRoute]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const shortcutContext = globalShortcutContextFromEvent(event, { isTerminalRoute });
-      if (!isCopilotRoute && isCopilotShortcut(event) && shouldHandleCopilotShortcut(shortcutContext)) {
-        event.preventDefault();
-        setCopilotOpen((current) => !current);
-        return;
-      }
       if (!shouldHandleGlobalShortcut(shortcutContext)) {
         return;
       }
@@ -55,7 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isCopilotRoute, isTerminalRoute]);
+  }, [isTerminalRoute]);
 
   return (
     <div className={appShellContainerClassName}>
@@ -82,13 +73,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
       />
-      {!isCopilotRoute && (
-        <CopilotDrawer
-          open={copilotOpen}
-          onOpenChange={setCopilotOpen}
-          context={copilotRouteContext}
+      {!isPortfolioSurfaceRoute ? (
+        <PortfolioCompanionPanel
+          open={portfolioCompanionOpen}
+          onOpenChange={setPortfolioCompanionOpen}
         />
-      )}
+      ) : null}
     </div>
   );
 }

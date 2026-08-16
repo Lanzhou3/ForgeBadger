@@ -4,13 +4,12 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRight,
-  Bot,
+  BriefcaseBusiness,
   CheckCircle2,
   ChevronRight,
   Circle,
   FolderOpen,
   Plus,
-  Sparkles,
   TerminalSquare,
   Wrench,
 } from "lucide-react";
@@ -28,7 +27,6 @@ import {
   listSessions,
 } from "@/lib/api";
 import { buildActivationReadiness } from "@/lib/activation-readiness";
-import { buildCopilotLaunchHref } from "@/lib/copilot";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import {
   getTerminalRuntimeRemediation,
@@ -78,9 +76,6 @@ export default function DashboardPage() {
       ? t("dashboard.dependenciesHealthUnavailable")
       : t(terminalRemediation.detailKey);
   const showRuntimeCommands = !dependenciesQuery.isLoading && terminalSetupGuidance.blocked;
-  const dashboardCopilotHref = buildCopilotLaunchHref({
-    source: "dashboard",
-  });
 
   const adapters = adaptersQuery.data?.adapters ?? [];
   const launchableAdapterCount = adapters.filter(isAdapterLaunchable).length;
@@ -115,12 +110,6 @@ export default function DashboardPage() {
       value: dashboardStats?.skills ?? 0,
       icon: Wrench,
       href: "/skills",
-    },
-    {
-      label: t("nav.agents"),
-      value: dashboardStats?.agents ?? 0,
-      icon: Bot,
-      href: "/projects",
     },
   ];
 
@@ -181,13 +170,6 @@ export default function DashboardPage() {
       href: "/sessions",
     },
     {
-      key: "agents",
-      label: t("dashboard.agentHealth"),
-      detail: dashboardHealth?.agents.message ?? t("dashboard.agentHealthDescription"),
-      healthy: dashboardHealth?.agents.healthy ?? false,
-      href: "/projects",
-    },
-    {
       key: "skills",
       label: t("dashboard.skillHealth"),
       detail: dashboardHealth?.skills.message ?? t("dashboard.skillHealthDescription"),
@@ -214,16 +196,16 @@ export default function DashboardPage() {
             <Link href="/projects/new">{t("projects.create")}</Link>
           </Button>
           <Button asChild size="sm" variant="ghost">
-            <Link href={dashboardCopilotHref}>
-              <Sparkles className="size-4" />
-              {t("copilot.askCopilot")}
+            <Link href="/portfolio">
+              <BriefcaseBusiness className="size-4" />
+              Portfolio Operations
             </Link>
           </Button>
         </div>
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         {stats.map((stat, index) => (
           <Link
             key={stat.label}

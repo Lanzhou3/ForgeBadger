@@ -29,6 +29,8 @@ import {
   type StoredNotification,
 } from "@/lib/notifications";
 import { dispatchGatewayEvent } from "@/lib/gateway-events";
+import { evaluatePortfolioEvent, isPortfolioProjectionEvent, type PortfolioEventState } from "@/lib/portfolio-events";
+import { portfolioQueryKeys } from "@/lib/portfolio-api";
 import { eventsWebSocketProtocols, eventsWebSocketUrl } from "@/lib/ws";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
@@ -43,21 +45,13 @@ interface NotificationContextValue {
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
-const codexAppServerActivityTypes = new Set([
-  "codex_app_server_started",
-  "codex_app_server_stopped",
-  "codex_app_server_error",
-  "codex_app_server_initialized",
-  "codex_app_server_thread_started",
-  "codex_app_server_notification",
-]);
-
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [notifications, setNotifications] = useState<StoredNotification[]>([]);
   const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const portfolioEventStateRef = useRef<PortfolioEventState>({ highestProjectionVersion: 0 });
 
   const updateNotifications = useCallback(
     (updater: (items: StoredNotification[]) => StoredNotification[]) => {
@@ -120,30 +114,64 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const ws = new WebSocket(eventsWebSocketUrl(), eventsWebSocketProtocols(token));
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data) as GatewayEvent;
-        dispatchGatewayEvent(message);
-        const notification = createNotificationFromEvent(message);
-        if (notification) {
-          const context = notificationContextParts(notification, {
-            project: t("notifications.projectContext"),
-            session: t("notifications.sessionContext"),
-            cli: t("notifications.cliContext"),
-          }).join(" · ");
-          const title = [t(notification.titleKey), context].filter(Boolean).join(" · ");
-          updateNotifications((current) => mergeNotifications(current, notification));
-          showBrowserNotification(title, notification, message);
+    portfolioEventStateRef.current = { highestProjectionVersion: 0 };
+
+    let closed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectDelayMs = 1_000;
+
+    const connect = () => {
+      socket = new WebSocket(eventsWebSocketUrl(), eventsWebSocketProtocols(token));
+      socket.onopen = () => {
+        reconnectDelayMs = 1_000;
+        // Re-fetch after every (re)connect because a server may have compacted old events.
+        void queryClient.invalidateQueries({ queryKey: portfolioQueryKeys.root });
+      };
+      socket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data) as GatewayEvent;
+          if (isPortfolioProjectionEvent(message)) {
+            const portfolioDisposition = evaluatePortfolioEvent(portfolioEventStateRef.current, message);
+            portfolioEventStateRef.current = portfolioDisposition.nextState;
+            if (portfolioDisposition.shouldInvalidate) {
+              void queryClient.invalidateQueries({ queryKey: portfolioQueryKeys.root });
+            }
+            return;
+          }
+
+          dispatchGatewayEvent(message);
+          const notification = createNotificationFromEvent(message);
+          if (notification) {
+            const context = notificationContextParts(notification, {
+              project: t("notifications.projectContext"),
+              session: t("notifications.sessionContext"),
+              cli: t("notifications.cliContext"),
+            }).join(" · ");
+            const title = [t(notification.titleKey), context].filter(Boolean).join(" · ");
+            updateNotifications((current) => mergeNotifications(current, notification));
+            showBrowserNotification(title, notification, message);
+          }
+          scheduleEventQueryInvalidation(invalidationTimerRef, queryClient, message);
+        } catch {
+          // Ignore malformed frames from the authenticated local event stream.
         }
-        scheduleEventQueryInvalidation(invalidationTimerRef, queryClient, message);
-      } catch {
-        // Ignore malformed frames from the authenticated local event stream.
-      }
+      };
+      socket.onclose = () => {
+        if (closed) return;
+        reconnectTimer = setTimeout(connect, reconnectDelayMs);
+        reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10_000);
+      };
     };
 
+    connect();
+
     return () => {
-      ws.close();
+      closed = true;
+      socket?.close();
+      if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer);
+      }
       if (invalidationTimerRef.current !== null) {
         clearTimeout(invalidationTimerRef.current);
         invalidationTimerRef.current = null;
@@ -214,24 +242,7 @@ export function eventQueryInvalidations(message: GatewayEvent): string[][] {
   ) {
     return [["sessions"], ["projects"], ["dashboard-summary"], ["activities"]];
   }
-  if (
-    type === "activity_created" &&
-    codexAppServerActivityTypes.has(getPayloadString(message.payload, "activity_type") ?? "")
-  ) {
-    return [["codex-app-server-activities"], ["codex-app-servers"]];
-  }
-  if (type === "copilot_run_updated") {
-    if (getPayloadString(message.payload, "event_type") === "assistant_delta") {
-      return [];
-    }
-    return [["copilot-runs"], ["copilot-conversations"], ["copilot-conversation-messages"]];
-  }
   return [];
-}
-
-function getPayloadString(payload: Record<string, unknown> | undefined, key: string): string | undefined {
-  const value = payload?.[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function invalidateEventQueries(

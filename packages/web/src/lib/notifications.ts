@@ -33,18 +33,22 @@ export interface NotificationContextLabels {
   cli: string;
 }
 
-const notificationTitleKeys = {
-  session_created: "notifications.sessionCreated",
-  session_status_changed: "notifications.sessionStatusChanged",
-  session_deleted: "notifications.sessionDeleted",
-  claude_notification: "notifications.claudeNotification",
-} satisfies Record<NotificationEventType, TranslationKey>;
+/** Only these CLI hook notification types surface as in-app notifications. */
+const NOTIFIED_CLI_NOTIFICATION_TYPES = new Set([
+  "permission_prompt",
+  "task_completed",
+  "task_interrupted",
+]);
 
 export function createNotificationFromEvent(
   event: GatewayEvent,
   now = new Date().toISOString()
 ): StoredNotification | null {
-  if (!isNotificationEventType(event.type)) {
+  if (event.type !== "claude_notification") {
+    return null;
+  }
+  const notificationType = getString(event.payload, "notification_type");
+  if (!notificationType || !NOTIFIED_CLI_NOTIFICATION_TYPES.has(notificationType)) {
     return null;
   }
 
@@ -53,24 +57,15 @@ export function createNotificationFromEvent(
     return null;
   }
 
-  const message = formatNotificationMessage(event.type, event.payload ?? {}, sessionId);
+  const message = formatNotificationMessage(event.payload ?? {});
   const serverId = getString(event.payload, "notification_id");
   const createdAt = getString(event.payload, "created_at") ?? now;
   const read = getBoolean(event.payload, "read") ?? false;
-  const statusSuffix =
-    event.type === "session_status_changed"
-      ? `:${getString(event.payload, "new_status") ?? "unknown"}`
-      : event.type === "claude_notification"
-        ? `:${getString(event.payload, "notification_type") ?? "unknown"}`
-      : "";
-  const notificationType = getString(event.payload, "notification_type");
   const adapter = getString(event.payload, "adapter");
-  const titleKey = event.type === "claude_notification"
-    ? cliNotificationTitleKey(notificationType, adapter)
-    : notificationTitleKeys[event.type];
+  const titleKey = cliNotificationTitleKey(notificationType, adapter);
 
   return {
-    id: serverId ?? `${event.type}:${sessionId}${statusSuffix}:${createdAt}`,
+    id: serverId ?? `${event.type}:${sessionId}:${notificationType}:${createdAt}`,
     type: event.type,
     titleKey,
     message,
@@ -114,32 +109,10 @@ export function trimNotifications(notifications: StoredNotification[], limit = 5
     .slice(0, limit);
 }
 
-function formatNotificationMessage(
-  type: NotificationEventType,
-  payload: Record<string, unknown>,
-  sessionId: string
-): string {
-  if (type === "session_status_changed") {
-    return `${sessionId}: ${getString(payload, "old_status") ?? "unknown"} -> ${getString(payload, "new_status") ?? "unknown"}`;
-  }
-  if (type === "session_created") {
-    return `${getString(payload, "name") ?? sessionId}`;
-  }
-  if (type === "claude_notification") {
-    const message = getString(payload, "message") ?? "Code CLI notification";
-    const toolName = getString(payload, "tool_name");
-    return toolName ? `${toolName}: ${message}` : message;
-  }
-  return sessionId;
-}
-
-function isNotificationEventType(type: string | undefined): type is NotificationEventType {
-  return (
-    type === "session_created" ||
-    type === "session_status_changed" ||
-    type === "session_deleted" ||
-    type === "claude_notification"
-  );
+function formatNotificationMessage(payload: Record<string, unknown>): string {
+  const message = getString(payload, "message") ?? "Code CLI notification";
+  const toolName = getString(payload, "tool_name");
+  return toolName ? `${toolName}: ${message}` : message;
 }
 
 function cliNotificationTitleKey(
@@ -153,10 +126,7 @@ function cliNotificationTitleKey(
     return "notifications.claudePermissionRequest";
   }
   if (notificationType === "task_completed") return "notifications.taskCompleted";
-  if (notificationType === "task_interrupted") return "notifications.taskInterrupted";
-  if (notificationType === "task_failed") return "notifications.taskFailed";
-  if (notificationType === "session_ended") return "notifications.sessionEnded";
-  return "notifications.cliNotification";
+  return "notifications.taskInterrupted";
 }
 
 function adapterLabel(adapter?: string): string | undefined {

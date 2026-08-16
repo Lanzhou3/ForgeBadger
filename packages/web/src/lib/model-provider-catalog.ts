@@ -1,6 +1,6 @@
 import type { ProviderCatalogPreset, ProviderProfile } from "./api";
 
-export type ProviderCatalogAdapterFilter = "all" | "claude" | "opencode" | "openforge-copilot";
+export type ProviderCatalogAdapterFilter = "all" | "claude" | "opencode";
 export type ProviderCatalogConfiguredFilter = "all" | "configured" | "not-configured";
 export type ProviderCatalogSourceFilter = "all" | "verified" | "models.dev";
 
@@ -69,10 +69,6 @@ export function sourceLabelForProvider(preset: ProviderCatalogPreset): string {
   return preset.modelSource;
 }
 
-export function isCopilotCompatibleProvider(preset: Pick<ProviderCatalogPreset, "apiFormat">): boolean {
-  return preset.apiFormat === "anthropic" || preset.apiFormat === "openai" || preset.apiFormat === "openai-compatible";
-}
-
 function matchesConfigured(result: ProviderCatalogResult, filter: ProviderCatalogConfiguredFilter): boolean {
   if (filter === "configured") return Boolean(result.configuredProvider);
   if (filter === "not-configured") return !result.configuredProvider;
@@ -87,7 +83,6 @@ function matchesSource(preset: ProviderCatalogPreset, filter: ProviderCatalogSou
 
 function matchesAdapter(result: ProviderCatalogResult, filter: ProviderCatalogAdapterFilter): boolean {
   if (filter === "all") return true;
-  if (filter === "openforge-copilot") return isCopilotCompatibleProvider(result);
   return result.supportedAdapters.includes(filter);
 }
 

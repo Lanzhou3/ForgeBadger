@@ -40,8 +40,6 @@ export interface ProjectManagerEvidenceRef {
   ref?: string;
   path?: string;
   sessionId?: string;
-  copilotRunId?: string;
-  pendingActionId?: string;
   feishuChatId?: string;
   feishuMessageId?: string;
   createdAt?: string;
@@ -181,14 +179,11 @@ export type ProjectManagerLedgerEventType =
   | "evidence_attached"
   | "blocker_recorded"
   | "blocker_resolved"
-  | "copilot_observation_recorded"
   | "feishu_reference_linked"
   | "next_step_proposed"
   | "manual_completion_recorded";
 
 export interface ProjectManagerLedgerTrace {
-  copilotRunId?: string;
-  pendingActionId?: string;
   actionType?: "create_work_item" | "update_work_item_status" | "attach_evidence" | string;
   targetType?: "project" | "work_item" | string;
   targetId?: string;
@@ -287,196 +282,6 @@ export interface Session {
   apiKeyId?: string | null;
 }
 
-export interface CodexAppServerSession {
-  id: string;
-  userId: string;
-  projectId: string;
-  projectRoot: string;
-  runtimeMode: "app-server-stdio" | "app-server-websocket";
-  status: "running" | "stopped" | "error";
-  command: string;
-  args: string[];
-  listen: string;
-  pid?: number;
-  errorMessage?: string;
-  features?: {
-    turnInputEnabled: boolean;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CodexAppServerCapabilities {
-  initializeEnabled: boolean;
-  threadCreationEnabled: boolean;
-  turnInputEnabled: boolean;
-  promptInputExposed: boolean;
-  transcriptPersistence: "disabled";
-}
-
-export interface CopilotCapabilities {
-  supportedProviderFormats: Array<"openai" | "openai-compatible" | "anthropic" | string>;
-  providerConfigured: boolean;
-  toolExecutionEnabled: boolean;
-  readTools?: string[];
-  prepareTools?: string[];
-  approvalRequiredForWrites?: boolean;
-  pendingActionApprovalEnabled?: boolean;
-}
-
-export interface CopilotRun {
-  id: string;
-  status: "queued" | "running" | "waiting_for_approval" | "completed" | "failed" | "cancelled" | string;
-  goal: string;
-  source: string;
-  sourceRefId?: string | null;
-  providerProfileId?: string | null;
-  providerProfileName?: string | null;
-  modelProfileId?: string | null;
-  modelProfileName?: string | null;
-  stepCount?: number | null;
-  maxSteps?: number | null;
-  errorCode?: string | null;
-  errorMessage?: string | null;
-  createdAt?: number | null;
-  updatedAt?: number | null;
-  completedAt?: number | null;
-}
-
-export interface CopilotRunEvent {
-  id: string;
-  runId: string;
-  type: string;
-  sequence: number;
-  message?: string | null;
-  payload?: Record<string, unknown>;
-  createdAt?: number | null;
-}
-
-export interface CopilotPendingAction {
-  id: string;
-  runId: string;
-  type: string;
-  status: "pending" | "approved" | "rejected" | string;
-  input?: Record<string, unknown>;
-  result?: Record<string, unknown> | null;
-  approvedBy?: string | null;
-  approvedAt?: number | null;
-  createdAt?: number | null;
-  updatedAt?: number | null;
-}
-
-export interface CopilotConversation {
-  id: string;
-  title: string;
-  source: string;
-  sourceRefId?: string | null;
-  status: "active" | "deleted" | string;
-  createdAt?: number | null;
-  updatedAt?: number | null;
-  lastMessageAt?: number | null;
-  deletedAt?: number | null;
-}
-
-export interface CopilotMessage {
-  id: string;
-  conversationId: string;
-  runId?: string | null;
-  role: "user" | "assistant" | "system" | string;
-  content: string;
-  payload?: Record<string, unknown>;
-  createdAt?: number | null;
-  deletedAt?: number | null;
-}
-
-export type CopilotMemoryItemType = "entry" | "note";
-export type CopilotMemoryScope = "global" | "project" | "session";
-
-export interface CopilotMemoryEntry {
-  id: string;
-  type?: "entry";
-  userId: string;
-  kind: string;
-  scope: CopilotMemoryScope | string;
-  projectId?: string | null;
-  sourceRunId?: string | null;
-  redactedText: string;
-  metadata?: Record<string, unknown>;
-  createdAt?: number | null;
-  updatedAt?: number | null;
-}
-
-export interface CopilotMemoryNote {
-  id: string;
-  type?: "note";
-  userId: string;
-  projectId?: string | null;
-  sessionId?: string | null;
-  sourceRunId?: string | null;
-  redactedText: string;
-  metadata?: Record<string, unknown>;
-  createdAt?: number | null;
-}
-
-export interface CopilotMemorySearchResult {
-  id: string;
-  type: CopilotMemoryItemType;
-  scope: CopilotMemoryScope | string;
-  projectId?: string | null;
-  snippet: string;
-  rank: number;
-}
-
-export interface CopilotPendingActionDecision {
-  action: CopilotPendingAction;
-  run?: CopilotRun;
-  events?: CopilotRunEvent[];
-  pendingActions?: CopilotPendingAction[];
-}
-
-export type CopilotSource = "dashboard" | "project" | "session" | "settings" | "copilot" | "models";
-
-export interface CreateCopilotRunInput {
-  prompt: string;
-  providerProfileId?: string;
-  modelProfileId?: string;
-  source?: CopilotSource;
-  sourceRefId?: string;
-  async?: boolean;
-}
-
-export interface CreateCopilotConversationInput {
-  title: string;
-  source?: CopilotSource;
-  sourceRefId?: string;
-}
-
-export interface UpdateCopilotConversationInput {
-  title: string;
-}
-
-export interface CreateCopilotConversationMessageInput extends CreateCopilotRunInput {}
-
-export interface ListCopilotMemoryEntriesInput {
-  scope?: CopilotMemoryScope;
-  projectId?: string;
-  limit?: number;
-}
-
-export interface ListCopilotMemoryNotesInput {
-  projectId?: string;
-  sessionId?: string;
-  limit?: number;
-}
-
-export interface SearchCopilotMemoryInput {
-  query: string;
-  scope?: CopilotMemoryScope;
-  projectId?: string;
-  includeNotes?: boolean;
-  limit?: number;
-}
-
 export interface DependencyStatus {
   name: string;
   available: boolean;
@@ -530,25 +335,6 @@ export interface FeishuConnectionHealth {
   reconnectAttempt: number;
   lastConnectedAt: string | null;
   lastErrorMessage: string | null;
-}
-
-export type FeishuConversationScope =
-  | { type: "unbound" }
-  | { type: "workspace" }
-  | { type: "project"; id: string };
-
-export interface FeishuConversationBinding {
-  id: string;
-  accountId: string;
-  chatId: string;
-  threadKey: string;
-  conversationId: string;
-  scope: FeishuConversationScope;
-}
-
-export interface FeishuQueueSummary {
-  inbox: Record<string, number>;
-  outbox: Record<string, number>;
 }
 
 export interface FeishuIntegrationConfig {
@@ -626,63 +412,10 @@ export interface LocalDiagnosticsExport {
       readyForUse: boolean;
     }>;
   };
-  copilot: {
-    capabilities: {
-      enabled: boolean;
-      toolExecutionEnabled: boolean;
-      approvalRequiredForWrites: boolean;
-      memoryEnabled: boolean;
-      memoryWritesRequireApproval: boolean;
-    };
-  };
   integrations?: {
     feishu?: FeishuIntegrationStatus;
   };
   environment: Record<string, unknown>;
-}
-
-export interface Agent {
-  id: string;
-  name: string;
-  projectId?: string;
-  projectName?: string;
-  description?: string | null;
-  modelId?: string | null;
-  model?: string;
-  tools?: string | null;
-  allowedDirs?: string | null;
-  customPrompt?: string | null;
-  status?: string;
-}
-
-export interface ProjectAgentSequenceItem {
-  userId?: string;
-  projectId: string;
-  agentId: string;
-  position: number;
-  name: string;
-  description?: string | null;
-  modelId?: string | null;
-  tools?: string | null;
-  allowedDirs?: string | null;
-  customPrompt?: string | null;
-  status: string;
-}
-
-export interface DefaultAgentPackResult {
-  agents: Agent[];
-  created: Agent[];
-  skipped: Agent[];
-  sequence: ProjectAgentSequenceItem[];
-}
-
-export interface AgentTemplate {
-  id: "planner" | "backend" | "frontend" | "reviewer" | "test-writer" | string;
-  name: string;
-  description: string;
-  tools: string;
-  allowedDirs: string;
-  customPrompt: string;
 }
 
 export interface Skill {
@@ -772,56 +505,9 @@ export interface ProjectSkill {
   selectionState?: "inherited_enabled" | "inherited_disabled" | "project_enabled" | "project_disabled";
 }
 
-export interface Model {
-  id: string;
-  name: string;
-  provider: string;
-  modelId: string;
-  endpoint?: string | null;
-  status?: string;
-  isDefault: boolean;
-}
-
-export interface ModelHealth {
-  healthy: boolean;
-  status: "ready" | "needs_attention";
-  message: string;
-  checkedAt: string;
-  checks: {
-    modelConfigured: boolean;
-    endpointConfigured: boolean;
-    defaultModel: boolean;
-  };
-}
-
-export interface ModelEndpointHealth {
-  healthy: boolean;
-  endpoint: string;
-  latencyMs: number;
-  timeoutMs: number;
-  statusCode?: number;
-  checkedAt: string;
-  error?: string;
-}
-
-export interface ModelPreset {
-  id: string;
-  label: string;
-  provider: string;
-  modelId: string;
-  endpoint: string;
-  tier: "performance" | "balanced" | "budget" | "local";
-}
-
-export interface ModelGroup {
-  provider: string;
-  count: number;
-  models: Model[];
-}
-
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderApplyAdapter = "claude" | "opencode" | "openforge-copilot" | "codex" | "kimi";
+export type ProviderApplyAdapter = "claude" | "opencode" | "codex" | "kimi";
 export type ProviderSupportedAdapter = "claude" | "opencode" | "kimi";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 export type ProviderReadinessAdapter = ProviderApplyAdapter;
@@ -1027,7 +713,6 @@ export interface SessionSnapshot {
   projectId?: string | null;
   tmuxSession?: string | null;
   modelId?: string | null;
-  agentId?: string | null;
   configVersion?: string | null;
   metadata?: unknown;
   createdAt: string;
@@ -1044,25 +729,10 @@ export interface AiConfigFile {
   sizeBytes: number;
 }
 
-export interface AiConfigFormField {
-  key: string;
-  label: string;
-  inputType: "text" | "textarea" | "select" | "number" | "boolean" | "list" | string;
-  path: string;
-  options?: string[];
-}
-
-export interface AiConfigForm {
-  filePath: string;
-  title: string;
-  fields: AiConfigFormField[];
-}
-
 export interface AiConfigSnapshot {
   adapter: "claude" | "opencode" | "codex" | "kimi" | string;
   projectRoot: string;
   files: AiConfigFile[];
-  forms: AiConfigForm[];
 }
 
 export interface WorkspaceTreeEntry {
@@ -1185,7 +855,7 @@ export interface AdapterDiscovery {
   supportLevel: "supported" | "prototype";
   launchEnabled: boolean;
   configDir: string;
-  runtimeModes: Array<"terminal" | "app-server-stdio" | "app-server-websocket" | string>;
+  runtimeModes: Array<"terminal" | string>;
   available: boolean;
   status: "available" | "missing";
   version?: string;
@@ -1195,41 +865,6 @@ export interface AdapterDiscovery {
 export type RuntimeAdapterId = AdapterDiscovery["id"];
 
 export type CredentialMode = "host_environment" | "stored_encrypted_key";
-
-export interface ModelInput {
-  name: string;
-  provider: string;
-  modelId: string;
-  endpoint?: string;
-}
-
-export interface ModelUpdateInput {
-  name?: string;
-  provider?: string;
-  modelId?: string;
-  endpoint?: string;
-}
-
-export interface AgentInput {
-  projectId?: string;
-  name: string;
-  description?: string;
-  modelId?: string;
-  tools?: string;
-  allowedDirs?: string;
-  customPrompt?: string;
-}
-
-export interface AgentUpdateInput {
-  projectId?: string;
-  name?: string;
-  description?: string;
-  modelId?: string;
-  tools?: string;
-  allowedDirs?: string;
-  customPrompt?: string;
-  status?: string;
-}
 
 export interface SkillInput {
   name: string;
@@ -1366,7 +1001,6 @@ export interface DashboardStats {
   projects: number;
   sessions: number;
   runningSessions: number;
-  agents: number;
   skills: number;
   models: number;
   apiKeys: number;
@@ -1386,7 +1020,6 @@ export interface DashboardHealth {
   models: DashboardHealthItem;
   credentials: DashboardHealthItem;
   sessions: DashboardHealthItem;
-  agents: DashboardHealthItem;
   skills: DashboardHealthItem;
 }
 
@@ -1418,8 +1051,6 @@ interface ApiEnvelope<T> {
 }
 
 const DEFAULT_API_TIMEOUT_MS = 30_000;
-const COPILOT_RUN_API_TIMEOUT_MS = 65_000;
-
 interface ApiRequestOptions extends RequestInit {
   timeoutMs?: number;
 }
@@ -1613,47 +1244,6 @@ export async function getFeishuConnectionHealth(): Promise<FeishuConnectionHealt
   return data.health;
 }
 
-export async function listFeishuConversationBindings(): Promise<FeishuConversationBinding[]> {
-  const data = await fetchJson<{ bindings: FeishuConversationBinding[] }>("/api/v1/integrations/feishu/bindings", {
-    cache: "no-store"
-  });
-  return data.bindings;
-}
-
-export async function createFeishuConversationBinding(input: {
-  chatId: string;
-  threadKey?: string;
-  scope: Exclude<FeishuConversationScope, { type: "unbound" }>;
-}): Promise<FeishuConversationBinding> {
-  const data = await fetchJson<{ binding: FeishuConversationBinding }>("/api/v1/integrations/feishu/bindings", {
-    method: "POST",
-    body: JSON.stringify(input)
-  });
-  return data.binding;
-}
-
-export async function updateFeishuConversationBinding(
-  id: string,
-  scope: Exclude<FeishuConversationScope, { type: "unbound" }>
-): Promise<FeishuConversationBinding> {
-  const data = await fetchJson<{ binding: FeishuConversationBinding }>(
-    `/api/v1/integrations/feishu/bindings/${encodeURIComponent(id)}`,
-    { method: "PATCH", body: JSON.stringify(scope) }
-  );
-  return data.binding;
-}
-
-export async function deleteFeishuConversationBinding(id: string): Promise<void> {
-  await fetchJson(`/api/v1/integrations/feishu/bindings/${encodeURIComponent(id)}`, { method: "DELETE" });
-}
-
-export async function getFeishuQueueSummary(): Promise<FeishuQueueSummary> {
-  const data = await fetchJson<{ queues: FeishuQueueSummary }>("/api/v1/integrations/feishu/queue-summary", {
-    cache: "no-store"
-  });
-  return data.queues;
-}
-
 export async function emergencyStopFeishu(): Promise<void> {
   await fetchJson("/api/v1/integrations/feishu/emergency-stop", { method: "POST", body: "{}" });
 }
@@ -1733,14 +1323,12 @@ export async function exportDiagnostics(): Promise<{ report: LocalDiagnosticsExp
 export async function listActivities(params: {
   sessionId?: string;
   projectId?: string;
-  agentId?: string;
   types?: string[];
   limit?: number;
 } = {}): Promise<{ activities: SessionActivity[] }> {
   const searchParams = new URLSearchParams();
   if (params.sessionId) searchParams.set("sessionId", params.sessionId);
   if (params.projectId) searchParams.set("projectId", params.projectId);
-  if (params.agentId) searchParams.set("agentId", params.agentId);
   if (params.types && params.types.length > 0) searchParams.set("type", params.types.join(","));
   if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
   const query = searchParams.toString();
@@ -1907,16 +1495,27 @@ export function isTemplateNotTrackedError(error: unknown): boolean {
   );
 }
 
-export async function getProjectAgentSequence(id: string): Promise<{ sequence: ProjectAgentSequenceItem[] }> {
-  return fetchJson(`/api/v1/projects/${id}/agent-sequence`) as Promise<{ sequence: ProjectAgentSequenceItem[] }>;
+
+function aiConfigQuery(aiTool?: string): string {
+  return aiTool ? `?aiTool=${encodeURIComponent(aiTool)}` : "";
 }
 
-export async function getProjectAiConfig(id: string): Promise<AiConfigSnapshot> {
-  return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/ai-config`) as Promise<AiConfigSnapshot>;
+export async function getProjectAiConfig(
+  id: string,
+  aiTool?: RuntimeAdapterId
+): Promise<AiConfigSnapshot> {
+  return fetchJson(
+    `/api/v1/projects/${encodeURIComponent(id)}/ai-config${aiConfigQuery(aiTool)}`
+  ) as Promise<AiConfigSnapshot>;
 }
 
-export async function getGlobalAiConfig(id: string): Promise<AiConfigSnapshot> {
-  return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/ai-config/global`) as Promise<AiConfigSnapshot>;
+export async function getGlobalAiConfig(
+  id: string,
+  aiTool?: RuntimeAdapterId
+): Promise<AiConfigSnapshot> {
+  return fetchJson(
+    `/api/v1/projects/${encodeURIComponent(id)}/ai-config/global${aiConfigQuery(aiTool)}`
+  ) as Promise<AiConfigSnapshot>;
 }
 
 // CLI global config (per-CLI config files such as ~/.kimi-code/config.toml)
@@ -2055,6 +1654,38 @@ export async function setCliDefaultModel(
 }
 
 
+export interface CliConfigFieldSpec {
+  key: string;
+  path: string;
+  label: string;
+  type: "string" | "enum" | "secret" | "number" | "boolean";
+  values?: string[];
+  description?: string;
+}
+
+export interface CliConfigFieldsResult {
+  fields: CliConfigFieldSpec[];
+  values: Record<string, unknown>;
+}
+
+export async function getCliConfigFields(
+  adapter: RuntimeAdapterId
+): Promise<CliConfigFieldsResult> {
+  return fetchJson(cliConfigPath(adapter, "/fields")) as Promise<CliConfigFieldsResult>;
+}
+
+export async function patchCliConfigFields(
+  adapter: RuntimeAdapterId,
+  updates: Record<string, unknown>
+): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
+    cliConfigPath(adapter, "/fields"),
+    { method: "PATCH", body: JSON.stringify({ updates }) }
+  );
+  return snapshot;
+}
+
+
 export async function getProjectWorkspaceTree(
   id: string,
   params: { path?: string; depth?: number; limit?: number } = {}
@@ -2126,29 +1757,15 @@ export async function getProjectGitFileDiff(
 export async function updateProjectAiConfigFile(
   id: string,
   relativePath: string,
-  content: string
+  content: string,
+  aiTool?: RuntimeAdapterId
 ): Promise<AiConfigSnapshot> {
   return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/ai-config/files`, {
     method: "PUT",
-    body: JSON.stringify({ relativePath, content }),
+    body: JSON.stringify({ relativePath, content, ...(aiTool ? { aiTool } : {}) }),
   }) as Promise<AiConfigSnapshot>;
 }
 
-export async function updateProjectAgentSequence(
-  id: string,
-  agentIds: string[]
-): Promise<{ sequence: ProjectAgentSequenceItem[] }> {
-  return fetchJson(`/api/v1/projects/${id}/agent-sequence`, {
-    method: "PUT",
-    body: JSON.stringify({ agentIds }),
-  }) as Promise<{ sequence: ProjectAgentSequenceItem[] }>;
-}
-
-export async function createDefaultAgentPack(id: string): Promise<DefaultAgentPackResult> {
-  return fetchJson(`/api/v1/projects/${id}/agents/default-pack`, {
-    method: "POST",
-  }) as Promise<DefaultAgentPackResult>;
-}
 
 export async function getProjectManagerGoal(
   projectId: string
@@ -2400,273 +2017,6 @@ export async function connectSession(id: string): Promise<{ session: Session }> 
   return fetchJson(`/api/v1/sessions/${id}/connect`, { method: "POST" }) as Promise<{ session: Session }>;
 }
 
-export async function listCodexAppServers(): Promise<{ sessions: CodexAppServerSession[] }> {
-  return fetchJson("/api/v1/codex/app-server") as Promise<{ sessions: CodexAppServerSession[] }>;
-}
-
-export async function getCodexAppServerCapabilities(): Promise<{ capabilities: CodexAppServerCapabilities }> {
-  return fetchJson("/api/v1/codex/app-server/capabilities") as Promise<{
-    capabilities: CodexAppServerCapabilities;
-  }>;
-}
-
-export async function startCodexAppServer(input: {
-  projectId: string;
-  runtimeMode: "app-server-stdio" | "app-server-websocket";
-  credentialMode?: "host_environment";
-}): Promise<{ session: CodexAppServerSession }> {
-  return fetchJson("/api/v1/codex/app-server", {
-    method: "POST",
-    body: JSON.stringify({
-      projectId: input.projectId,
-      runtimeMode: input.runtimeMode,
-      ...(input.credentialMode ? { credentialMode: input.credentialMode } : {}),
-    }),
-  }) as Promise<{ session: CodexAppServerSession }>;
-}
-
-export async function initializeCodexAppServer(id: string): Promise<{ result: unknown }> {
-  return fetchJson(`/api/v1/codex/app-server/${id}/initialize`, { method: "POST" }) as Promise<{
-    result: unknown;
-  }>;
-}
-
-export async function startCodexAppServerThread(
-  id: string,
-  input: {
-    cwd?: string;
-    model?: string;
-    approvalPolicy?: string;
-    sandbox?: string;
-  } = {}
-): Promise<{ result: unknown }> {
-  return fetchJson(`/api/v1/codex/app-server/${id}/thread`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  }) as Promise<{ result: unknown }>;
-}
-
-export async function startCodexAppServerTurn(
-  id: string,
-  input: { threadId: string; text: string }
-): Promise<{ result: unknown }> {
-  // Guarded prototype API only. The current Web surface intentionally does not
-  // expose prompt/turn controls unless Gateway enables turn input explicitly.
-  return fetchJson(`/api/v1/codex/app-server/${id}/turn`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  }) as Promise<{ result: unknown }>;
-}
-
-export async function stopCodexAppServer(id: string): Promise<{ session: CodexAppServerSession }> {
-  return fetchJson(`/api/v1/codex/app-server/${id}/stop`, { method: "POST" }) as Promise<{
-    session: CodexAppServerSession;
-  }>;
-}
-
-// Copilot
-export async function getCopilotCapabilities(): Promise<CopilotCapabilities> {
-  return fetchJson("/api/v1/copilot/capabilities") as Promise<CopilotCapabilities>;
-}
-
-export async function createCopilotRun(
-  input: CreateCopilotRunInput
-): Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }> {
-  return fetchJson("/api/v1/copilot/runs", {
-    method: "POST",
-    body: JSON.stringify(input),
-    timeoutMs: COPILOT_RUN_API_TIMEOUT_MS,
-  }) as Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }>;
-}
-
-export async function listCopilotRuns(limit?: number): Promise<{ runs: CopilotRun[] }> {
-  const query = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
-  return fetchJson(`/api/v1/copilot/runs${query}`) as Promise<{ runs: CopilotRun[] }>;
-}
-
-export async function listCopilotMemoryEntries(
-  input: ListCopilotMemoryEntriesInput = {}
-): Promise<{ entries: CopilotMemoryEntry[] }> {
-  const query = buildCopilotMemoryQuery(input);
-  return fetchJson(`/api/v1/copilot/memory/entries${query}`) as Promise<{ entries: CopilotMemoryEntry[] }>;
-}
-
-export async function listCopilotMemoryNotes(
-  input: ListCopilotMemoryNotesInput = {}
-): Promise<{ notes: CopilotMemoryNote[] }> {
-  const query = buildCopilotMemoryQuery(input);
-  return fetchJson(`/api/v1/copilot/memory/notes${query}`) as Promise<{ notes: CopilotMemoryNote[] }>;
-}
-
-export async function searchCopilotMemory(
-  input: SearchCopilotMemoryInput
-): Promise<{ results: CopilotMemorySearchResult[] }> {
-  const query = buildCopilotMemoryQuery(input);
-  return fetchJson(`/api/v1/copilot/memory/search${query}`) as Promise<{ results: CopilotMemorySearchResult[] }>;
-}
-
-export async function getCopilotMemoryItem(
-  type: CopilotMemoryItemType,
-  id: string
-): Promise<{ item: CopilotMemoryEntry | CopilotMemoryNote }> {
-  return fetchJson(`/api/v1/copilot/memory/${type}/${encodeURIComponent(id)}`) as Promise<{
-    item: CopilotMemoryEntry | CopilotMemoryNote;
-  }>;
-}
-
-export async function deleteCopilotMemoryItem(
-  type: CopilotMemoryItemType,
-  id: string
-): Promise<{ item: CopilotMemoryEntry | CopilotMemoryNote }> {
-  return fetchJson(`/api/v1/copilot/memory/${type}/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  }) as Promise<{ item: CopilotMemoryEntry | CopilotMemoryNote }>;
-}
-
-export async function listCopilotConversations(limit?: number): Promise<{ conversations: CopilotConversation[] }> {
-  const query = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
-  return fetchJson(`/api/v1/copilot/conversations${query}`) as Promise<{ conversations: CopilotConversation[] }>;
-}
-
-export async function createCopilotConversation(
-  input: CreateCopilotConversationInput
-): Promise<{ conversation: CopilotConversation }> {
-  return fetchJson("/api/v1/copilot/conversations", {
-    method: "POST",
-    body: JSON.stringify(input),
-  }) as Promise<{ conversation: CopilotConversation }>;
-}
-
-export async function updateCopilotConversation(
-  id: string,
-  input: UpdateCopilotConversationInput
-): Promise<{ conversation: CopilotConversation }> {
-  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(input),
-  }) as Promise<{ conversation: CopilotConversation }>;
-}
-
-export async function deleteCopilotConversation(id: string): Promise<{ conversation: CopilotConversation }> {
-  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  }) as Promise<{ conversation: CopilotConversation }>;
-}
-
-export async function listCopilotConversationMessages(
-  conversationId: string
-): Promise<{ messages: CopilotMessage[] }> {
-  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/messages`) as Promise<{
-    messages: CopilotMessage[];
-  }>;
-}
-
-export async function createCopilotConversationMessage(
-  conversationId: string,
-  input: CreateCopilotConversationMessageInput
-): Promise<{
-  messages: CopilotMessage[];
-  run: CopilotRun;
-  events: CopilotRunEvent[];
-  pendingActions?: CopilotPendingAction[];
-}> {
-  return fetchJson(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/messages`, {
-    method: "POST",
-    body: JSON.stringify(input),
-    timeoutMs: COPILOT_RUN_API_TIMEOUT_MS,
-  }) as Promise<{
-    messages: CopilotMessage[];
-    run: CopilotRun;
-    events: CopilotRunEvent[];
-    pendingActions?: CopilotPendingAction[];
-  }>;
-}
-
-export async function deleteCopilotMessage(id: string): Promise<{ message: CopilotMessage }> {
-  return fetchJson(`/api/v1/copilot/messages/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  }) as Promise<{ message: CopilotMessage }>;
-}
-
-export async function getCopilotRun(
-  id: string
-): Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions: CopilotPendingAction[] }> {
-  return fetchJson(`/api/v1/copilot/runs/${id}`) as Promise<{
-    run: CopilotRun;
-    events: CopilotRunEvent[];
-    pendingActions: CopilotPendingAction[];
-  }>;
-}
-
-export async function cancelCopilotRun(
-  id: string
-): Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }> {
-  return fetchJson(`/api/v1/copilot/runs/${id}/cancel`, {
-    method: "POST",
-  }) as Promise<{ run: CopilotRun; events: CopilotRunEvent[]; pendingActions?: CopilotPendingAction[] }>;
-}
-
-export async function approveCopilotPendingAction(
-  runId: string,
-  actionId: string
-): Promise<CopilotPendingActionDecision> {
-  return fetchJson(`/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/approve`, {
-    method: "POST",
-  }) as Promise<CopilotPendingActionDecision>;
-}
-
-export async function rejectCopilotPendingAction(
-  runId: string,
-  actionId: string
-): Promise<CopilotPendingActionDecision> {
-  return fetchJson(`/api/v1/copilot/runs/${runId}/pending-actions/${actionId}/reject`, {
-    method: "POST",
-  }) as Promise<CopilotPendingActionDecision>;
-}
-
-function buildCopilotMemoryQuery(
-  input: ListCopilotMemoryEntriesInput | ListCopilotMemoryNotesInput | SearchCopilotMemoryInput
-): string {
-  const searchParams = new URLSearchParams();
-  if ("query" in input) searchParams.set("query", input.query);
-  if ("scope" in input && input.scope) searchParams.set("scope", input.scope);
-  if ("projectId" in input && input.projectId) searchParams.set("projectId", input.projectId);
-  if ("sessionId" in input && input.sessionId) searchParams.set("sessionId", input.sessionId);
-  if ("includeNotes" in input && input.includeNotes !== undefined) {
-    searchParams.set("includeNotes", String(input.includeNotes));
-  }
-  if (input.limit !== undefined) searchParams.set("limit", String(input.limit));
-  const query = searchParams.toString();
-  return query ? `?${query}` : "";
-}
-
-// Agents
-export async function listAgents(): Promise<{ agents: Agent[] }> {
-  return fetchJson("/api/v1/agents") as Promise<{ agents: Agent[] }>;
-}
-
-export async function listAgentTemplates(): Promise<{ templates: AgentTemplate[] }> {
-  return fetchJson("/api/v1/agents/templates") as Promise<{ templates: AgentTemplate[] }>;
-}
-
-export async function createAgent(data: AgentInput): Promise<{ agent: Agent }> {
-  return fetchJson("/api/v1/agents", {
-    method: "POST",
-    body: JSON.stringify(data),
-  }) as Promise<{ agent: Agent }>;
-}
-
-export async function updateAgent(id: string, data: AgentUpdateInput): Promise<{ agent: Agent }> {
-  return fetchJson(`/api/v1/agents/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  }) as Promise<{ agent: Agent }>;
-}
-
-export async function deleteAgent(id: string): Promise<unknown> {
-  return fetchJson(`/api/v1/agents/${id}`, { method: "DELETE" });
-}
-
 // Skills
 export async function listSkills(): Promise<{ skills: Skill[]; discovery?: SkillDiscovery }> {
   return fetchJson("/api/v1/skills") as Promise<{ skills: Skill[]; discovery?: SkillDiscovery }>;
@@ -2874,59 +2224,6 @@ export async function updateTemplateFile(
 
 export async function deleteTemplate(id: string): Promise<unknown> {
   return fetchJson(`/api/v1/templates/${id}`, { method: "DELETE" });
-}
-
-// Models
-export async function listModels(): Promise<{ models: Model[] }> {
-  return fetchJson("/api/v1/models") as Promise<{ models: Model[] }>;
-}
-
-export async function listModelPresets(): Promise<{ presets: ModelPreset[] }> {
-  return fetchJson("/api/v1/models/presets") as Promise<{ presets: ModelPreset[] }>;
-}
-
-export async function listModelGroups(): Promise<{ groups: ModelGroup[] }> {
-  return fetchJson("/api/v1/models/groups") as Promise<{ groups: ModelGroup[] }>;
-}
-
-export async function createModel(data: ModelInput): Promise<{ model: Model }> {
-  return fetchJson("/api/v1/models", {
-    method: "POST",
-    body: JSON.stringify(data),
-  }) as Promise<{ model: Model }>;
-}
-
-export async function updateModel(id: string, data: ModelUpdateInput): Promise<{ model: Model }> {
-  return fetchJson(`/api/v1/models/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  }) as Promise<{ model: Model }>;
-}
-
-export async function deleteModel(id: string): Promise<unknown> {
-  return fetchJson(`/api/v1/models/${id}`, { method: "DELETE" });
-}
-
-export async function setDefaultModel(id: string): Promise<{ model: Model }> {
-  return fetchJson(`/api/v1/models/${id}/set-default`, {
-    method: "POST",
-  }) as Promise<{ model: Model }>;
-}
-
-export async function checkModelHealth(id: string): Promise<{ health: ModelHealth }> {
-  return fetchJson(`/api/v1/models/${id}/check`, {
-    method: "POST",
-  }) as Promise<{ health: ModelHealth }>;
-}
-
-export async function checkModelEndpointHealth(
-  id: string,
-  timeoutMs = 3000
-): Promise<{ health: ModelEndpointHealth }> {
-  return fetchJson(`/api/v1/models/${id}/check-endpoint`, {
-    method: "POST",
-    body: JSON.stringify({ timeoutMs }),
-  }) as Promise<{ health: ModelEndpointHealth }>;
 }
 
 export async function listProviderCatalog(): Promise<{ providers: ProviderCatalogPreset[] }> {

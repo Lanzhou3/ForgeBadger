@@ -1,9 +1,6 @@
 import { ExternalLink } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  isCopilotCompatibleProvider,
-} from "@/lib/model-provider-catalog";
 import type {
   ModelProviderReadiness,
   ProviderApplyAdapter,
@@ -37,7 +34,6 @@ export interface NamedReference {
 
 export interface ModelReferenceInfo {
   sessions: NamedReference[];
-  agents: NamedReference[];
 }
 
 export type DeleteTarget =
@@ -47,7 +43,7 @@ export type DeleteTarget =
 
 export type Translate = (key: any) => string;
 
-export const emptyModelReferences: ModelReferenceInfo = { sessions: [], agents: [] };
+export const emptyModelReferences: ModelReferenceInfo = { sessions: [] };
 
 export const emptyCustomProvider: CustomProviderForm = {
   name: "",
@@ -69,7 +65,6 @@ export const emptyModel: ModelForm = {
 export function adapterLabel(adapter: ProviderSupportedAdapter | ProviderApplyAdapter): string {
   if (adapter === "claude") return "Claude Code";
   if (adapter === "opencode") return "OpenCode";
-  if (adapter === "openforge-copilot") return "OpenForge Copilot";
   if (adapter === "codex") return "Codex";
   return adapter;
 }
@@ -103,9 +98,7 @@ export function formatCheckedAt(value: string): string {
 
 export function applyTargetsForProvider(provider: ProviderProfile | undefined): ProviderApplyAdapter[] {
   if (!provider) return [];
-  const targets: ProviderApplyAdapter[] = [...provider.supportedAdapters];
-  if (isCopilotCompatibleProfile(provider)) targets.push("openforge-copilot");
-  return targets;
+  return [...provider.supportedAdapters];
 }
 
 export function buildApplyPayload(
@@ -119,14 +112,10 @@ export function buildApplyPayload(
   return {
     adapter,
     scope,
-    ...(adapter !== "openforge-copilot" && scope === "project" && root ? { projectRoot: root } : {}),
+    ...(scope === "project" && root ? { projectRoot: root } : {}),
     ...(modelProfileId ? { modelProfileId } : {}),
     ...(credentialId ? { credentialId } : {}),
   };
-}
-
-export function isCopilotCompatibleProfile(provider: Pick<ProviderProfile, "apiFormat">): boolean {
-  return isCopilotCompatibleProvider(provider);
 }
 
 export function getApplyBlockedReason({
@@ -150,11 +139,10 @@ export function getApplyBlockedReason({
   preview: ProviderApplyPreview | null;
   t: Translate;
 }): string | null {
-  const isCopilotTarget = selectedAdapter === "openforge-copilot";
   if (!provider) return t("models.providerRequired");
   if (!supportedAdapters.includes(selectedAdapter)) return t("models.applyTargetUnsupported");
   if (!selectedModelId) return t("models.applyModelRequired");
-  if (!isCopilotTarget && scope === "project" && !projectRoot.trim()) return t("models.projectPathRequired");
+  if (scope === "project" && !projectRoot.trim()) return t("models.projectPathRequired");
   if (needsPreview && !preview) return t("models.previewRequiredBeforeApply");
   return null;
 }

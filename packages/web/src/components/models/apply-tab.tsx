@@ -65,7 +65,6 @@ export function ApplyTab({
   t,
 }: ApplyTabProps) {
   const supportedAdapters = applyTargetsForProvider(provider);
-  const isCopilotTarget = selectedAdapter === "openforge-copilot";
   const previewBlockedReason = getApplyBlockedReason({
     provider,
     supportedAdapters,
@@ -120,27 +119,20 @@ export function ApplyTab({
               ))}
             </select>
           </div>
-          {!isCopilotTarget && (
-            <div className="space-y-2">
-              <Label htmlFor="apply-scope">{t("models.applyScopeMode")}</Label>
-              <select
-                id="apply-scope"
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={applyScope}
-                onChange={(event) => onScopeChange(event.target.value as "project" | "user-global")}
-              >
-                <option value="project">{t("models.scopeProject")}</option>
-                <option value="user-global">{t("models.scopeUserGlobal")}</option>
-              </select>
-            </div>
-          )}
-        </div>
-        {isCopilotTarget && (
-          <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
-            {t("models.copilotInternalApplyDescription")}
+          <div className="space-y-2">
+            <Label htmlFor="apply-scope">{t("models.applyScopeMode")}</Label>
+            <select
+              id="apply-scope"
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={applyScope}
+              onChange={(event) => onScopeChange(event.target.value as "project" | "user-global")}
+            >
+              <option value="project">{t("models.scopeProject")}</option>
+              <option value="user-global">{t("models.scopeUserGlobal")}</option>
+            </select>
           </div>
-        )}
-        {!isCopilotTarget && applyScope === "project" && (
+        </div>
+        {applyScope === "project" && (
           <div className="space-y-2">
             <Label htmlFor="apply-root">{t("models.projectPath")}</Label>
             <Input
@@ -227,11 +219,6 @@ export function ApplyTab({
               </pre>
               {preview.backupPath && (
                 <div className="text-xs text-muted-foreground">{preview.backupPath}</div>
-              )}
-              {preview.internalDefault && (
-                <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                  {t("models.copilotDefaultPreview")}: {preview.internalDefault.providerName} / {preview.internalDefault.modelName}
-                </div>
               )}
             </div>
           )}

@@ -2,45 +2,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as apiModule from "./api";
 import {
-  createAgent,
   createApiKey,
-  checkModelHealth,
-  checkModelEndpointHealth,
   checkModelProviderReadiness,
   cloneTemplate,
-  approveCopilotPendingAction,
-  cancelCopilotRun,
-  createCopilotConversation,
-  createCopilotConversationMessage,
-  createCopilotRun,
   createProject,
   createSkill,
-  createModel,
   createTemplate,
   createSession,
   deleteProviderCredential,
-  deleteCopilotConversation,
-  deleteCopilotMemoryItem,
-  deleteCopilotMessage,
   deleteModelProvider,
   deleteProviderModel,
   chooseDefaultRuntimeAdapter,
   isAdapterLaunchable,
-  deleteModel,
-  deleteAgent,
   deleteSkill,
   deleteTemplate,
   defaultConfigConflictDecisions,
   discoverAdapters,
   exportDiagnostics,
   exportTemplate,
-  getCopilotCapabilities,
-  getCopilotMemoryItem,
-  getCopilotRun,
-  listCopilotConversationMessages,
-  listCopilotConversations,
-  listCopilotMemoryEntries,
-  listCopilotMemoryNotes,
   getDashboardSummary,
   getDependencies,
   getFeishuIntegrationConfig,
@@ -58,14 +37,11 @@ import {
   removeCliModel,
   setCliDefaultModel,
   getGlobalAiConfig,
-  getProjectAgentSequence,
   getProjectAiConfig,
   getProjectWorkspaceFile,
   getProjectWorkspaceTree,
-  createDefaultAgentPack,
   createGateASession,
   listAdminUsers,
-  listAgentTemplates,
   installSkill,
   importTemplate,
   importProject,
@@ -76,7 +52,6 @@ import {
   listAuditLogs,
   listCatalogItems,
   listCatalogSources,
-  listCopilotRuns,
   listNotifications,
   listSessions,
   listSnapshots,
@@ -85,7 +60,6 @@ import {
   listSkillSources,
   syncLocalSkills,
   syncProviderModels,
-  searchCopilotMemory,
   rotateProviderCredential,
   setDefaultProviderModel,
   updateProviderModel,
@@ -95,42 +69,25 @@ import {
   setUsageRate,
   listTemplateVersions,
   listApiKeys,
-  listModelGroups,
-  listModelPresets,
   listProjectSkills,
   applyConfigSync,
   previewConfig,
   previewConfigSync,
   previewSkillSource,
   rotateApiKey,
-  rejectCopilotPendingAction,
   markAllNotificationsRead,
   markNotificationRead,
   clearServerNotifications,
-  initializeCodexAppServer,
-  getCodexAppServerCapabilities,
-  listCodexAppServers,
-  setDefaultModel,
-  startCodexAppServer,
-  startCodexAppServerThread,
-  startCodexAppServerTurn,
   setProjectSkill,
-  stopCodexAppServer,
-  updateAgent,
   updateAdminUser,
-  updateCopilotConversation,
-  updateProjectAgentSequence,
   updateProjectAiConfigFile,
   updateSkill,
   updateTemplate,
   updateTemplateFile,
-  updateModel,
   updateProjectTemplate,
   isTemplateNotTrackedError,
   GatewayApiError,
   writeConfig,
-  type ProjectManagerEvidenceRef,
-  type ProjectManagerLedgerEvent,
   type AdapterDiscovery,
 } from "./api";
 
@@ -172,28 +129,6 @@ describe("api client", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({})));
-  });
-
-  it("creates models with provider model id and endpoint", async () => {
-    await createModel({
-      name: "Claude Sonnet",
-      provider: "anthropic",
-      modelId: "claude-sonnet-4-5",
-      endpoint: "https://api.anthropic.com",
-    });
-
-    expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/models",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          name: "Claude Sonnet",
-          provider: "anthropic",
-          modelId: "claude-sonnet-4-5",
-          endpoint: "https://api.anthropic.com",
-        }),
-      })
-    );
   });
 
   it("reports aborted gateway requests as a clear timeout error", async () => {
@@ -317,15 +252,6 @@ describe("api client", () => {
         counts: { projects: 1 },
         dashboardHealth: {},
         adapters: [{ id: "claude", command: "claude", runtimeModes: ["terminal"] }],
-        copilot: {
-          capabilities: {
-            enabled: true,
-            toolExecutionEnabled: true,
-            approvalRequiredForWrites: true,
-            memoryEnabled: true,
-            memoryWritesRequireApproval: true,
-          },
-        },
         environment: { OPENFORGE_PORT: "48731" },
       },
     })));
@@ -337,177 +263,7 @@ describe("api client", () => {
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(result.report.app.name).toBe("OpenForge");
-    expect(result.report.copilot.capabilities.memoryWritesRequireApproval).toBe(true);
     expect(result.report.environment.OPENFORGE_PORT).toBe("48731");
-  });
-
-  it("calls Copilot REST helpers", async () => {
-    await getCopilotCapabilities();
-    await createCopilotRun({ prompt: "Summarize Gateway health" });
-    await listCopilotRuns();
-    await getCopilotRun("run-1");
-    await cancelCopilotRun("run-1");
-    await approveCopilotPendingAction("run-1", "action-1");
-    await rejectCopilotPendingAction("run-1", "action-1");
-    await listCopilotConversations();
-    await createCopilotConversation({ title: "Terminal help", source: "session", sourceRefId: "session-1" });
-    await updateCopilotConversation("conversation-1", { title: "Updated help" });
-    await listCopilotConversationMessages("conversation-1");
-    await createCopilotConversationMessage("conversation-1", {
-      prompt: "解释这个错误",
-      source: "session",
-      sourceRefId: "session-1",
-    });
-    await deleteCopilotMessage("message-1");
-    await deleteCopilotConversation("conversation-1");
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:48731/api/v1/copilot/capabilities",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/copilot/runs",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ prompt: "Summarize Gateway health" }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      3,
-      "http://127.0.0.1:48731/api/v1/copilot/runs",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      4,
-      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      5,
-      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1/cancel",
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      6,
-      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1/pending-actions/action-1/approve",
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      7,
-      "http://127.0.0.1:48731/api/v1/copilot/runs/run-1/pending-actions/action-1/reject",
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      8,
-      "http://127.0.0.1:48731/api/v1/copilot/conversations",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      9,
-      "http://127.0.0.1:48731/api/v1/copilot/conversations",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ title: "Terminal help", source: "session", sourceRefId: "session-1" }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      10,
-      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1",
-      expect.objectContaining({
-        method: "PATCH",
-        body: JSON.stringify({ title: "Updated help" }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      11,
-      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1/messages",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      12,
-      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1/messages",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ prompt: "解释这个错误", source: "session", sourceRefId: "session-1" }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      13,
-      "http://127.0.0.1:48731/api/v1/copilot/messages/message-1",
-      expect.objectContaining({ method: "DELETE" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      14,
-      "http://127.0.0.1:48731/api/v1/copilot/conversations/conversation-1",
-      expect.objectContaining({ method: "DELETE" })
-    );
-  });
-
-  it("calls Copilot memory management REST helpers", async () => {
-    await listCopilotMemoryEntries({ scope: "project", projectId: "project-1", limit: 20 });
-    await listCopilotMemoryNotes({ projectId: "project-1", sessionId: "session-1", limit: 10 });
-    await searchCopilotMemory({ query: "provider catalog", includeNotes: true, limit: 5 });
-    await getCopilotMemoryItem("entry", "memory-1");
-    await deleteCopilotMemoryItem("note", "memory-2");
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:48731/api/v1/copilot/memory/entries?scope=project&projectId=project-1&limit=20",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/copilot/memory/notes?projectId=project-1&sessionId=session-1&limit=10",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      3,
-      "http://127.0.0.1:48731/api/v1/copilot/memory/search?query=provider+catalog&includeNotes=true&limit=5",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      4,
-      "http://127.0.0.1:48731/api/v1/copilot/memory/entry/memory-1",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      5,
-      "http://127.0.0.1:48731/api/v1/copilot/memory/note/memory-2",
-      expect.objectContaining({ method: "DELETE" })
-    );
-  });
-
-  it("preserves Gateway error details for Copilot requests", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(() =>
-        Promise.resolve({
-          ok: false,
-          status: 400,
-          json: () => Promise.resolve({
-            code: 1,
-            message: "Configure an OpenAI or Anthropic model provider first.",
-            details: { code: "copilot_provider_not_configured" },
-          }),
-        } as Response)
-      )
-    );
-
-    await expect(createCopilotRun({ prompt: "Summarize Gateway health" })).rejects.toMatchObject({
-      message: "Configure an OpenAI or Anthropic model provider first.",
-      status: 400,
-      details: { code: "copilot_provider_not_configured" },
-    });
-  });
-
-  it("lets Copilot run creation outlive the Gateway model timeout", async () => {
-    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
-
-    await createCopilotRun({ prompt: "Summarize Gateway health" });
-
-    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 65_000);
   });
 
   it("creates Gate A sessions with the current login token", async () => {
@@ -592,13 +348,12 @@ describe("api client", () => {
   it("lists filtered activity events", async () => {
     await listActivities({
       sessionId: "session-1",
-      agentId: "agent-1",
-      types: ["codex_app_server_started", "codex_app_server_notification"],
+      types: ["session_started", "session_ended"],
       limit: 20,
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/activities?sessionId=session-1&agentId=agent-1&type=codex_app_server_started%2Ccodex_app_server_notification&limit=20",
+      "http://127.0.0.1:48731/api/v1/activities?sessionId=session-1&type=session_started%2Csession_ended&limit=20",
       expect.objectContaining({ headers: expect.any(Object) })
     );
   });
@@ -705,52 +460,6 @@ describe("api client", () => {
     );
   });
 
-  it("updates, defaults, and deletes models", async () => {
-    await updateModel("model-1", { name: "Claude Opus" });
-    await setDefaultModel("model-1");
-    await listModelPresets();
-    await listModelGroups();
-    await checkModelEndpointHealth("model-1", 5000);
-    await deleteModel("model-1");
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:48731/api/v1/models/model-1",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({ name: "Claude Opus" }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/models/model-1/set-default",
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      3,
-      "http://127.0.0.1:48731/api/v1/models/presets",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      4,
-      "http://127.0.0.1:48731/api/v1/models/groups",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      5,
-      "http://127.0.0.1:48731/api/v1/models/model-1/check-endpoint",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ timeoutMs: 5000 }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      6,
-      "http://127.0.0.1:48731/api/v1/models/model-1",
-      expect.objectContaining({ method: "DELETE" })
-    );
-  });
-
   it("creates, lists, and rotates API keys without response plaintext expectations", async () => {
     await listApiKeys();
     await createApiKey({
@@ -811,82 +520,6 @@ describe("api client", () => {
     );
   });
 
-  it("calls Codex app-server lifecycle and guarded RPC endpoints", async () => {
-    await getCodexAppServerCapabilities();
-    await listCodexAppServers();
-    await startCodexAppServer({
-      projectId: "project-1",
-      runtimeMode: "app-server-stdio",
-      credentialMode: "host_environment",
-    });
-    await initializeCodexAppServer("app-1");
-    await startCodexAppServerThread("app-1", {
-      cwd: "/tmp/project",
-      approvalPolicy: "never",
-      sandbox: "read-only",
-    });
-    await startCodexAppServerTurn("app-1", {
-      threadId: "thr_123",
-      text: "Summarize the repo",
-    });
-    await stopCodexAppServer("app-1");
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:48731/api/v1/codex/app-server/capabilities",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/codex/app-server",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      3,
-      "http://127.0.0.1:48731/api/v1/codex/app-server",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          projectId: "project-1",
-          runtimeMode: "app-server-stdio",
-          credentialMode: "host_environment",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      4,
-      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/initialize",
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      5,
-      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/thread",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          cwd: "/tmp/project",
-          approvalPolicy: "never",
-          sandbox: "read-only",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      6,
-      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/turn",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          threadId: "thr_123",
-          text: "Summarize the repo",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      7,
-      "http://127.0.0.1:48731/api/v1/codex/app-server/app-1/stop",
-      expect.objectContaining({ method: "POST" })
-    );
-  });
 
   it("chooses only launchable runtime adapters from discovery", () => {
     const adapters: AdapterDiscovery[] = [
@@ -931,77 +564,6 @@ describe("api client", () => {
     expect(chooseDefaultRuntimeAdapter(adapters)).toBe("codex");
     expect(chooseDefaultRuntimeAdapter(adapters, "codex")).toBe("codex");
     expect(chooseDefaultRuntimeAdapter(adapters, "claude")).toBe("codex");
-  });
-
-  it("manages agents through REST", async () => {
-    await listAgentTemplates();
-    await createAgent({
-      name: "Code Reviewer",
-      projectId: "project-1",
-      modelId: "model-1",
-      tools: "Read,Edit",
-      customPrompt: "Review diffs only.",
-    });
-    await updateAgent("agent-1", { status: "disabled" });
-    await deleteAgent("agent-1");
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:48731/api/v1/agents/templates",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/agents",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          name: "Code Reviewer",
-          projectId: "project-1",
-          modelId: "model-1",
-          tools: "Read,Edit",
-          customPrompt: "Review diffs only.",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      3,
-      "http://127.0.0.1:48731/api/v1/agents/agent-1",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({ status: "disabled" }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      4,
-      "http://127.0.0.1:48731/api/v1/agents/agent-1",
-      expect.objectContaining({ method: "DELETE" })
-    );
-  });
-
-  it("manages project Agent orchestration sequence through REST", async () => {
-    await getProjectAgentSequence("project-1");
-    await updateProjectAgentSequence("project-1", ["agent-2", "agent-1"]);
-    await createDefaultAgentPack("project-1");
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/agent-sequence",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/agent-sequence",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({ agentIds: ["agent-2", "agent-1"] }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      3,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/agents/default-pack",
-      expect.objectContaining({ method: "POST" })
-    );
   });
 
   it("reads workspace context routes through REST", async () => {
@@ -1189,60 +751,6 @@ describe("api client", () => {
       "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/ledger?eventType=work_item_status_changed&limit=10",
       expect.objectContaining({ headers: expect.any(Object) })
     );
-  });
-
-  it("supports Project Manager Copilot trace DTO fields", () => {
-    const evidenceRef: ProjectManagerEvidenceRef = {
-      kind: "test",
-      label: "Focused Web lib tests",
-      status: "verified",
-      ref: "vitest",
-      sessionId: "session-123",
-      copilotRunId: "run-123",
-      pendingActionId: "action-123",
-    };
-    const ledgerEvent: ProjectManagerLedgerEvent = {
-      id: "ledger-123",
-      projectId: "project-123",
-      workItemId: "work-item-123",
-      eventType: "evidence_attached",
-      status: "ready_for_review",
-      evidenceRefCount: 1,
-      feishuRefCount: 0,
-      trace: {
-        copilotRunId: "run-123",
-        pendingActionId: "action-123",
-        actionType: "attach_evidence",
-        targetType: "work_item",
-        targetId: "work-item-123",
-        evidenceRefCount: 1,
-        approvalStatus: "approved",
-        executionStatus: "succeeded",
-      },
-      createdAt: 1779464282,
-    };
-
-    expect(evidenceRef.pendingActionId).toBe("action-123");
-    expect(ledgerEvent.trace).toEqual({
-      copilotRunId: "run-123",
-      pendingActionId: "action-123",
-      actionType: "attach_evidence",
-      targetType: "work_item",
-      targetId: "work-item-123",
-      evidenceRefCount: 1,
-      approvalStatus: "approved",
-      executionStatus: "succeeded",
-    });
-    expect(Object.keys(ledgerEvent.trace ?? {}).sort()).toEqual([
-      "actionType",
-      "approvalStatus",
-      "copilotRunId",
-      "evidenceRefCount",
-      "executionStatus",
-      "pendingActionId",
-      "targetId",
-      "targetType",
-    ]);
   });
 
   it("loads and links project-manager task packets through REST", async () => {
@@ -1880,15 +1388,6 @@ describe("api client", () => {
 
     await expect(getDashboardSummary()).rejects.toThrow("Gateway request failed with HTTP 500");
     await expect(getDashboardSummary()).rejects.not.toThrow("/tmp/openforge");
-  });
-
-  it("checks model health through REST", async () => {
-    await checkModelHealth("model-1");
-
-    expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/models/model-1/check",
-      expect.objectContaining({ method: "POST" })
-    );
   });
 
   it("manages CLI global config through REST", async () => {

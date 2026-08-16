@@ -71,7 +71,7 @@ export function ModelsTab({
         <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
           {models.map((model, index) => {
             const refs = references.get(model.id);
-            const referenceCount = (refs?.sessions.length ?? 0) + (refs?.agents.length ?? 0);
+            const referenceCount = refs?.sessions.length ?? 0;
             return (
               <div
                 key={model.id}

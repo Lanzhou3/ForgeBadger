@@ -5,7 +5,7 @@ import type { UIEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Bot, FileCode2, FileText, Globe2, History, ListOrdered, Plus, Power, Save, ShieldCheck, Sparkles, TerminalSquare, Trash2, Wrench } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, BriefcaseBusiness, Eye, FileCode2, FileText, Globe2, History, Pencil, Plus, Save, ShieldCheck, TerminalSquare, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,54 +20,35 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getProject,
-  getProjectAgentSequence,
   getGlobalAiConfig,
   getProjectAiConfig,
   getDependencies,
   discoverAdapters,
   listSessions,
   createSession,
-  createDefaultAgentPack,
-  deleteAgent,
-  listAgents,
   listActivities,
   deleteProject,
   listProjectSkills,
   listSkills,
   setProjectSkill,
-  updateAgent,
   updateProjectAiConfigFile,
-  updateProjectAgentSequence,
   chooseDefaultRuntimeAdapter,
   isAdapterLaunchable,
   type RuntimeAdapterId,
-  type Agent,
   type AiConfigFile,
-  type AiConfigFormField,
-  type AiConfigForm,
   type AiConfigSnapshot,
   type SessionActivity,
 } from "@/lib/api";
-import {
-  formValueToText,
-  readAiConfigFieldValue,
-  textToFormValue,
-  updateAiConfigDraft,
-  type AiConfigFormValue,
-} from "@/lib/ai-config-forms";
 import { useLanguage } from "@/hooks/use-language";
-import { buildCopilotLaunchHref } from "@/lib/copilot";
-import { activityFiltersForProject } from "@/lib/snapshot-filters";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highlight";
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
+import { MarkdownRenderer } from "@/components/projects/markdown-renderer";
 
 const PROJECT_DETAIL_TABS = [
   "sessions",
   "project-manager",
-  "agents",
-  "orchestration",
   "skills",
   "config",
   "activity",
@@ -88,8 +69,6 @@ export default function ProjectDetailPage() {
   const [selectedRuntimeAdapter, setSelectedRuntimeAdapter] = useState<RuntimeAdapterId | "">("");
   const [selectedConfigPath, setSelectedConfigPath] = useState("");
   const [configDraft, setConfigDraft] = useState("");
-  const [agentSequenceIds, setAgentSequenceIds] = useState<string[]>([]);
-  const [activityAgentId, setActivityAgentId] = useState("");
   const [syncPending, setSyncPending] = useState({ preview: false, compliance: false });
   const configSyncRef = useRef<ConfigSyncPanelHandle>(null);
 
@@ -106,20 +85,9 @@ export default function ProjectDetailPage() {
   });
 
   const { data: activitiesData } = useQuery({
-    queryKey: ["activities", { projectId: id, agentId: activityAgentId || undefined }],
-    queryFn: () => listActivities(activityFiltersForProject(id, activityAgentId)),
+    queryKey: ["activities", { projectId: id }],
+    queryFn: () => listActivities({ projectId: id }),
     enabled: !!id && activeTab === "activity",
-  });
-
-  const { data: agentsData } = useQuery({
-    queryKey: ["agents"],
-    queryFn: listAgents,
-  });
-
-  const { data: agentSequenceData } = useQuery({
-    queryKey: ["project-agent-sequence", id],
-    queryFn: () => getProjectAgentSequence(id),
-    enabled: !!id,
   });
 
   const { data: skillsData } = useQuery({
@@ -144,15 +112,15 @@ export default function ProjectDetailPage() {
   });
 
   const { data: projectAiConfigData, isLoading: projectAiConfigLoading } = useQuery({
-    queryKey: ["project-ai-config", id],
-    queryFn: () => getProjectAiConfig(id),
-    enabled: !!id,
+    queryKey: ["project-ai-config", id, selectedRuntimeAdapter],
+    queryFn: () => getProjectAiConfig(id, selectedRuntimeAdapter || undefined),
+    enabled: !!id && !!selectedRuntimeAdapter,
   });
 
   const { data: globalAiConfigData, isLoading: globalAiConfigLoading } = useQuery({
-    queryKey: ["project-ai-config-global", id],
-    queryFn: () => getGlobalAiConfig(id),
-    enabled: !!id,
+    queryKey: ["project-ai-config-global", id, selectedRuntimeAdapter],
+    queryFn: () => getGlobalAiConfig(id, selectedRuntimeAdapter || undefined),
+    enabled: !!id && !!selectedRuntimeAdapter,
   });
 
   const createSessionMutation = useMutation({
@@ -178,34 +146,6 @@ export default function ProjectDetailPage() {
     },
   });
 
-  const agentStatusMutation = useMutation({
-    mutationFn: ({ agentId, status }: { agentId: string; status: string }) =>
-      updateAgent(agentId, { status }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
-  });
-
-  const agentDeleteMutation = useMutation({
-    mutationFn: deleteAgent,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["agents"] });
-      queryClient.invalidateQueries({ queryKey: ["project-agent-sequence", id] });
-    },
-  });
-
-  const agentSequenceMutation = useMutation({
-    mutationFn: () => updateProjectAgentSequence(id, agentSequenceIds),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project-agent-sequence", id] }),
-  });
-
-  const defaultAgentPackMutation = useMutation({
-    mutationFn: () => createDefaultAgentPack(id),
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["agents"] });
-      queryClient.invalidateQueries({ queryKey: ["project-agent-sequence", id] });
-      setAgentSequenceIds(result.sequence.map((item) => item.agentId));
-    },
-  });
-
   const projectSkillMutation = useMutation({
     mutationFn: ({ skillId, enabled }: { skillId: string; enabled: boolean }) =>
       setProjectSkill(id, skillId, enabled),
@@ -215,19 +155,16 @@ export default function ProjectDetailPage() {
   });
 
   const updateAiConfigMutation = useMutation({
-    mutationFn: () => updateProjectAiConfigFile(id, selectedConfigPath, configDraft),
+    mutationFn: () =>
+      updateProjectAiConfigFile(id, selectedConfigPath, configDraft, selectedRuntimeAdapter || undefined),
     onSuccess: (snapshot) => {
-      queryClient.setQueryData(["project-ai-config", id], snapshot);
+      queryClient.setQueryData(["project-ai-config", id, selectedRuntimeAdapter], snapshot);
       queryClient.invalidateQueries({ queryKey: ["activities"] });
     },
   });
 
   const project = projectData?.project;
-  const projectCopilotHref = buildCopilotLaunchHref({
-    source: "project",
-    sourceRefId: id,
-    intent: "project_readiness",
-  });
+  const projectPortfolioHref = `/portfolio?projectId=${encodeURIComponent(id)}`;
   const projectSessions = useMemo(
     () => sessionsData?.sessions ?? [],
     [sessionsData?.sessions]
@@ -236,17 +173,6 @@ export default function ProjectDetailPage() {
     () => activitiesData?.activities ?? [],
     [activitiesData?.activities]
   );
-  const projectAgents = useMemo(
-    () => agentsData?.agents?.filter((a) => a.projectId === id) ?? [],
-    [agentsData?.agents, id]
-  );
-  const projectAgentMap = useMemo(
-    () => new Map(projectAgents.map((agent) => [agent.id, agent])),
-    [projectAgents]
-  );
-  const orderedProjectAgents = agentSequenceIds
-    .map((agentId) => projectAgentMap.get(agentId))
-    .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent));
   const skills = skillsData?.skills ?? [];
   const projectSkills = projectSkillsData?.skills ?? [];
   const projectSkillById = useMemo(
@@ -315,16 +241,6 @@ export default function ProjectDetailPage() {
   }, [adapterDiscoveryData?.adapters, selectedRuntimeAdapter]);
 
   useEffect(() => {
-    const projectAgentIds = new Set(projectAgents.map((agent) => agent.id));
-    const savedIds = agentSequenceData?.sequence?.map((item) => item.agentId).filter((agentId) => projectAgentIds.has(agentId)) ?? [];
-    const missingIds = projectAgents
-      .map((agent) => agent.id)
-      .filter((agentId) => !savedIds.includes(agentId));
-    const nextIds = [...savedIds, ...missingIds];
-    setAgentSequenceIds((current) => sameStringArray(current, nextIds) ? current : nextIds);
-  }, [agentSequenceData?.sequence, projectAgents]);
-
-  useEffect(() => {
     const files = projectAiConfig?.files ?? [];
     if (files.length === 0) return;
     const preferred = files.find((file) => file.exists && file.role === "instructions") ?? files[0];
@@ -339,28 +255,12 @@ export default function ProjectDetailPage() {
     setConfigDraft((current) => current === nextDraft ? current : nextDraft);
   }, [selectedConfigFile?.content, selectedConfigFile?.relativePath]);
 
-  const moveAgentInSequence = (agentId: string, direction: "up" | "down") => {
-    setAgentSequenceIds((current) => {
-      const index = current.indexOf(agentId);
-      const target = direction === "up" ? index - 1 : index + 1;
-      if (index < 0 || target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target]!, next[index]!];
-      return next;
-    });
-  };
-
   const projectStats = [
     {
       label: t("nav.sessions"),
       value: projectSessions.length,
       sub: t("dashboard.runningNow").replace("{count}", String(runningSessionCount)),
       icon: TerminalSquare,
-    },
-    {
-      label: t("nav.agents"),
-      value: projectAgents.length,
-      icon: Bot,
     },
     {
       label: t("nav.skills"),
@@ -418,9 +318,9 @@ export default function ProjectDetailPage() {
                 {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
               </Button>
               <Button asChild size="sm" variant="outline">
-                <Link href={projectCopilotHref}>
-                  <Sparkles className="size-4" />
-                  {t("copilot.askCopilot")}
+                <Link href={projectPortfolioHref}>
+                  <BriefcaseBusiness className="size-4" />
+                  Portfolio Operations
                 </Link>
               </Button>
               {!isUntrackedTemplate && (
@@ -550,7 +450,7 @@ export default function ProjectDetailPage() {
                       <Link href="/settings">{t("projects.openSettings")}</Link>
                     </Button>
                     <Button asChild variant="ghost" size="sm">
-                      <Link href={projectCopilotHref}>{t("projects.askCopilotReadiness")}</Link>
+                      <Link href={projectPortfolioHref}>Open Portfolio Operations</Link>
                     </Button>
                   </div>
                 </div>
@@ -620,8 +520,6 @@ export default function ProjectDetailPage() {
             <TabsList className="min-w-max">
               <TabsTrigger value="sessions">{t("nav.sessions")}</TabsTrigger>
               <TabsTrigger value="project-manager">{t("projects.projectManager")}</TabsTrigger>
-              <TabsTrigger value="agents">{t("nav.agents")}</TabsTrigger>
-              <TabsTrigger value="orchestration">{t("projects.orchestration")}</TabsTrigger>
               <TabsTrigger value="skills">{t("nav.skills")}</TabsTrigger>
               <TabsTrigger value="config">{t("projects.aiConfig")}</TabsTrigger>
               <TabsTrigger value="activity">{t("sessions.activity")}</TabsTrigger>
@@ -680,175 +578,6 @@ export default function ProjectDetailPage() {
                 enabled={activeTab === "project-manager"}
                 selectedWorkItemId={projectManagerWorkItemId}
               />
-            </TabsContent>
-
-            <TabsContent value="agents" className="mt-4 space-y-3">
-              <div className="flex justify-end">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => defaultAgentPackMutation.mutate()}
-                  disabled={defaultAgentPackMutation.isPending}
-                >
-                  <Sparkles className="size-4" />
-                  {defaultAgentPackMutation.isPending
-                    ? t("projects.creatingAgentPack")
-                    : t("projects.createAgentPack")}
-                </Button>
-              </div>
-              {projectAgents.length === 0 ? (
-                <Card className="of-animate-in">
-                  <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-                    <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-                      <Bot className="size-5" />
-                    </div>
-                    <div className="text-sm font-medium">{t("projects.noAgents")}</div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => defaultAgentPackMutation.mutate()}
-                      disabled={defaultAgentPackMutation.isPending}
-                    >
-                      <Sparkles className="size-4" />
-                      {defaultAgentPackMutation.isPending
-                        ? t("projects.creatingAgentPack")
-                        : t("projects.createAgentPack")}
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
-                  {projectAgents.map((agent, index) => (
-                    <div
-                      key={agent.id}
-                      className="flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40"
-                      style={{ animationDelay: `${index * 40}ms` }}
-                    >
-                      <AgentStatusDot status={agent.status} />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium">{agent.name}</div>
-                        <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                          {agent.model ?? "—"}
-                        </div>
-                      </div>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {agent.status ?? "idle"}
-                      </span>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() =>
-                            agentStatusMutation.mutate({
-                              agentId: agent.id,
-                              status: agent.status === "disabled" ? "active" : "disabled",
-                            })
-                          }
-                        >
-                          <Power className="size-4" />
-                          <span className="sr-only">{t("agents.toggleStatus")}</span>
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => {
-                            if (window.confirm(t("agents.deleteConfirm"))) {
-                              agentDeleteMutation.mutate(agent.id);
-                            }
-                          }}
-                        >
-                          <Trash2 className="size-4" />
-                          <span className="sr-only">{t("common.delete")}</span>
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {defaultAgentPackMutation.isError && (
-                <p className="text-sm text-destructive">
-                  {defaultAgentPackMutation.error instanceof Error
-                    ? defaultAgentPackMutation.error.message
-                    : t("projects.failedAgentPack")}
-                </p>
-              )}
-            </TabsContent>
-
-            <TabsContent value="orchestration" className="mt-4 space-y-3">
-              {orderedProjectAgents.length === 0 ? (
-                <Card className="of-animate-in">
-                  <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-                    <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-                      <ListOrdered className="size-5" />
-                    </div>
-                    <div className="text-sm font-medium">{t("projects.noOrchestrationAgents")}</div>
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card className="of-animate-in overflow-hidden">
-                  <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pb-3">
-                    <CardTitle className="text-sm font-semibold">{t("projects.agentSequence")}</CardTitle>
-                    <Button
-                      size="sm"
-                      className="bg-brand text-brand-foreground hover:bg-brand/90"
-                      onClick={() => agentSequenceMutation.mutate()}
-                      disabled={agentSequenceMutation.isPending}
-                    >
-                      <Save className="size-4" />
-                      {agentSequenceMutation.isPending
-                        ? t("projects.savingSequence")
-                        : t("projects.saveSequence")}
-                    </Button>
-                  </CardHeader>
-                  <div className="divide-y divide-border/70 border-t border-border/70">
-                    {orderedProjectAgents.map((agent, index) => (
-                      <div
-                        key={agent.id}
-                        className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
-                      >
-                        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/60 font-mono text-xs text-muted-foreground tabular-nums">
-                          {index + 1}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium">{agent.name}</div>
-                        </div>
-                        <AgentStatusDot status={agent.status} />
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {agent.status ?? "active"}
-                        </span>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => moveAgentInSequence(agent.id, "up")}
-                            disabled={index === 0}
-                          >
-                            <ArrowUp className="size-4" />
-                            <span className="sr-only">{t("projects.moveAgentUp")}</span>
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => moveAgentInSequence(agent.id, "down")}
-                            disabled={index === orderedProjectAgents.length - 1}
-                          >
-                            <ArrowDown className="size-4" />
-                            <span className="sr-only">{t("projects.moveAgentDown")}</span>
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
-              {agentSequenceMutation.isError && (
-                <p className="text-sm text-destructive">
-                  {agentSequenceMutation.error instanceof Error
-                    ? agentSequenceMutation.error.message
-                    : t("projects.failedSaveSequence")}
-                </p>
-              )}
             </TabsContent>
 
             <TabsContent value="skills" className="mt-4">
@@ -920,12 +649,7 @@ export default function ProjectDetailPage() {
             </TabsContent>
 
             <TabsContent value="activity" className="mt-4">
-              <ProjectActivityList
-                activities={projectActivities}
-                agents={projectAgents}
-                selectedAgentId={activityAgentId}
-                onSelectedAgentIdChange={setActivityAgentId}
-              />
+              <ProjectActivityList activities={projectActivities} />
             </TabsContent>
           </Tabs>
         </>
@@ -973,21 +697,6 @@ function SessionStatusText({ status }: { status: string }) {
   );
 }
 
-function AgentStatusDot({ status }: { status?: string | null }) {
-  return (
-    <span
-      className={cn(
-        "size-2 shrink-0 rounded-full",
-        status === "active"
-          ? "bg-emerald-400"
-          : status === "error"
-            ? "bg-red-400"
-            : "bg-muted-foreground/40"
-      )}
-    />
-  );
-}
-
 function projectSkillStateLabel(
   state: string | undefined,
   t: (key: "projects.skillProjectEnabled" | "projects.skillProjectDisabled" | "projects.skillInheritedDisabled" | "projects.skillInheritedEnabled") => string
@@ -1024,26 +733,15 @@ function ProjectConfigPanel({
   onSave: () => void;
 }) {
   const { t } = useLanguage();
-  const [formEditError, setFormEditError] = useState("");
   const projectFiles = projectConfig?.files ?? [];
   const globalFiles = globalConfig?.files ?? [];
   const selectedFile = projectFiles.find((file) => file.relativePath === selectedPath);
-  const matchingForms = formsForFile(projectConfig?.forms ?? [], selectedPath);
+  const isMarkdown = selectedFile?.fileType === "markdown";
+  const [editingMarkdown, setEditingMarkdown] = useState(false);
 
   useEffect(() => {
-    setFormEditError("");
-  }, [selectedPath]);
-
-  function updateDraftFromForm(field: AiConfigFormField, value: AiConfigFormValue) {
-    if (!selectedFile) return;
-    const result = updateAiConfigDraft(draft, selectedFile.fileType, field, value);
-    if (result.error) {
-      setFormEditError(result.error);
-      return;
-    }
-    setFormEditError("");
-    onDraftChange(result.content);
-  }
+    setEditingMarkdown(false);
+  }, [selectedPath, isMarkdown]);
 
   if (projectLoading) {
     return (
@@ -1095,49 +793,56 @@ function ProjectConfigPanel({
           <CardTitle className="min-w-0 truncate font-mono text-sm font-semibold">
             {selectedFile?.relativePath ?? t("projects.selectConfigFile")}
           </CardTitle>
-          <Button
-            size="sm"
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
-            onClick={onSave}
-            disabled={!selectedFile || isSaving}
-          >
-            <Save className="size-4" />
-            {isSaving ? t("projects.savingConfig") : t("common.save")}
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {matchingForms.length > 0 && (
-            <div className="space-y-3 rounded-md border border-border/70 bg-muted/20 p-3">
-              <div className="text-sm font-medium">{t("projects.formFields")}</div>
-              {matchingForms.map((form) => (
-                <div key={form.filePath} className="space-y-2">
-                  <div className="text-xs text-muted-foreground">{form.title}</div>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    {form.fields.map((field) => (
-                      <AiConfigFieldControl
-                        key={field.key}
-                        field={field}
-                        fileType={selectedFile?.fileType ?? "text"}
-                        draft={draft}
-                        disabled={!selectedFile}
-                        onChange={(value) => updateDraftFromForm(field, value)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-              {formEditError && (
-                <p className="text-xs text-destructive">{formEditError}</p>
+          {selectedFile && isMarkdown && !editingMarkdown ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setEditingMarkdown(true)}
+              disabled={!selectedFile}
+            >
+              <Pencil className="size-4" />
+              {t("projects.editFile")}
+            </Button>
+          ) : (
+            <div className="flex items-center gap-2">
+              {selectedFile && isMarkdown && editingMarkdown && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setEditingMarkdown(false)}
+                  disabled={!selectedFile}
+                >
+                  <Eye className="size-4" />
+                  {t("projects.previewFile")}
+                </Button>
               )}
+              <Button
+                size="sm"
+                className="bg-brand text-brand-foreground hover:bg-brand/90"
+                onClick={onSave}
+                disabled={!selectedFile || isSaving}
+              >
+                <Save className="size-4" />
+                {isSaving ? t("projects.savingConfig") : t("common.save")}
+              </Button>
             </div>
           )}
-          <SyntaxHighlightedEditor
-            content={draft}
-            fileType={selectedFile?.fileType ?? "text"}
-            disabled={!selectedFile}
-            ariaLabel={selectedFile?.relativePath ?? t("projects.selectConfigFile")}
-            onChange={onDraftChange}
-          />
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {selectedFile && isMarkdown && !editingMarkdown ? (
+            <MarkdownRenderer
+              content={draft}
+              className="max-h-[560px] min-h-[200px] space-y-3 overflow-y-auto rounded-md border border-border/70 bg-background p-4 text-sm leading-relaxed text-foreground/90"
+            />
+          ) : (
+            <SyntaxHighlightedEditor
+              content={draft}
+              fileType={selectedFile?.fileType ?? "text"}
+              disabled={!selectedFile}
+              ariaLabel={selectedFile?.relativePath ?? t("projects.selectConfigFile")}
+              onChange={onDraftChange}
+            />
+          )}
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             {selectedFile && (
               <>
@@ -1177,90 +882,6 @@ function ProjectConfigPanel({
         </Card>
       </div>
     </div>
-  );
-}
-
-function AiConfigFieldControl({
-  field,
-  fileType,
-  draft,
-  disabled,
-  onChange
-}: {
-  field: AiConfigFormField;
-  fileType: string;
-  draft: string;
-  disabled: boolean;
-  onChange: (value: AiConfigFormValue) => void;
-}) {
-  const value = readAiConfigFieldValue(draft, fileType, field);
-  const textValue = formValueToText(value);
-  const controlClass =
-    "w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
-
-  if (field.inputType === "boolean") {
-    return (
-      <div className="rounded-md border border-border/70 px-2 py-2 text-xs">
-        <div className="flex items-center justify-between gap-3">
-          <span>{field.label}</span>
-          <Switch
-            checked={value === true}
-            onCheckedChange={(checked) => onChange(checked)}
-            disabled={disabled}
-            aria-label={field.label}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (field.inputType === "select") {
-    return (
-      <label className="block space-y-1 rounded-md border border-border/70 px-2 py-2 text-xs">
-        <span>{field.label}</span>
-        <select
-          className={controlClass}
-          value={textValue}
-          onChange={(event) => onChange(event.target.value)}
-          disabled={disabled}
-        >
-          <option value="" />
-          {(field.options ?? []).map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-      </label>
-    );
-  }
-
-  if (field.inputType === "textarea" || field.inputType === "list") {
-    return (
-      <label className="block space-y-1 rounded-md border border-border/70 px-2 py-2 text-xs">
-        <span>{field.label}</span>
-        <textarea
-          className={`${controlClass} min-h-24 resize-y font-mono`}
-          value={textValue}
-          onChange={(event) => onChange(textToFormValue(event.target.value, field))}
-          disabled={disabled}
-          spellCheck={false}
-        />
-      </label>
-    );
-  }
-
-  return (
-    <label className="block space-y-1 rounded-md border border-border/70 px-2 py-2 text-xs">
-      <span>{field.label}</span>
-      <input
-        className={controlClass}
-        type={field.inputType === "number" ? "number" : "text"}
-        value={textValue}
-        onChange={(event) => onChange(textToFormValue(event.target.value, field))}
-        disabled={disabled}
-      />
-    </label>
   );
 }
 
@@ -1398,21 +1019,7 @@ function GlobalConfigPreview({ file }: { file: AiConfigFile }) {
   );
 }
 
-function formsForFile(forms: AiConfigForm[], filePath: string): AiConfigForm[] {
-  return forms.filter((form) => form.filePath === filePath);
-}
-
-function ProjectActivityList({
-  activities,
-  agents,
-  selectedAgentId,
-  onSelectedAgentIdChange
-}: {
-  activities: SessionActivity[];
-  agents: Agent[];
-  selectedAgentId: string;
-  onSelectedAgentIdChange: (agentId: string) => void;
-}) {
+function ProjectActivityList({ activities }: { activities: SessionActivity[] }) {
   const { t } = useLanguage();
 
   return (
@@ -1422,11 +1029,6 @@ function ProjectActivityList({
           <Activity className="size-4 text-brand" />
           {t("sessions.activity")}
         </CardTitle>
-        <ProjectActivityFilter
-          agents={agents}
-          selectedAgentId={selectedAgentId}
-          onSelectedAgentIdChange={onSelectedAgentIdChange}
-        />
       </CardHeader>
       {activities.length === 0 ? (
         <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
@@ -1476,38 +1078,6 @@ function ProjectActivityList({
       )}
     </Card>
   );
-}
-
-function ProjectActivityFilter({
-  agents,
-  selectedAgentId,
-  onSelectedAgentIdChange
-}: {
-  agents: Agent[];
-  selectedAgentId: string;
-  onSelectedAgentIdChange: (agentId: string) => void;
-}) {
-  const { t } = useLanguage();
-
-  return (
-    <select
-      className="h-9 min-w-48 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-      value={selectedAgentId}
-      onChange={(event) => onSelectedAgentIdChange(event.target.value)}
-      aria-label={t("sessions.filterByAgent")}
-    >
-      <option value="">{t("sessions.allAgents")}</option>
-      {agents.map((agent) => (
-        <option key={agent.id} value={agent.id}>
-          {agent.name}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function sameStringArray(left: string[], right: string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function readProjectDetailTab(value: string | null): ProjectDetailTab | null {

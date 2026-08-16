@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  activityFiltersForProject,
   canRestoreSnapshot,
   snapshotFiltersFromSearchParams
 } from "./snapshot-filters";
@@ -30,15 +29,5 @@ describe("snapshot filters", () => {
     expect(canRestoreSnapshot({ projectId: "project-1" })).toBe(true);
     expect(canRestoreSnapshot({ projectId: null })).toBe(false);
     expect(canRestoreSnapshot({})).toBe(false);
-  });
-
-  it("builds project activity filters with optional agent scope", () => {
-    expect(activityFiltersForProject("project-1", "")).toEqual({
-      projectId: "project-1"
-    });
-    expect(activityFiltersForProject("project-1", "agent-1")).toEqual({
-      projectId: "project-1",
-      agentId: "agent-1"
-    });
   });
 });

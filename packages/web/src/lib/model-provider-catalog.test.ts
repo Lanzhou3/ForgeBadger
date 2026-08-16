@@ -123,15 +123,6 @@ describe("provider catalog browser", () => {
       }).map((provider) => provider.id)
     ).toEqual(["openrouter"]);
 
-    expect(
-      filterProviderCatalog(catalog, configured, {
-        query: "",
-        adapter: "openforge-copilot",
-        apiFormat: "all",
-        source: "all",
-        configured: "not-configured",
-      }).map((provider) => provider.id)
-    ).toEqual(["anthropic"]);
   });
 
   it("deduplicates the same provider product across verified and models.dev catalog sources", () => {

@@ -65,10 +65,6 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await page.getByRole("link", { name: projectName }).click();
   await expect(page).toHaveURL(/\/projects\/.+/);
 
-  // Agents are managed inside the project detail page (Agents tab).
-  await page.getByRole("tab", { name: "Agents" }).click();
-  await page.getByRole("button", { name: "Create default Agent pack" }).click();
-  await expect(page.getByText("Code Reviewer").first()).toBeVisible();
   await page.getByRole("tab", { name: "Skills" }).click();
   await page.getByRole("row", { name: /safe-review/ }).getByRole("switch").check();
 
@@ -76,12 +72,9 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await expect(page.getByText("Config Preview")).toBeVisible();
   await page.getByRole("button", { name: "Apply Config" }).click();
 
-  const agentPath = join(projectPath, ".claude", "agents", "code-reviewer.md");
   const skillPath = join(projectPath, ".claude", "skills", "safe-review", "SKILL.md");
 
-  await expect.poll(() => fileExists(agentPath)).toBe(true);
   await expect.poll(() => fileExists(skillPath)).toBe(true);
-  await expect(await readFile(agentPath, "utf8")).toContain("You are a code reviewer");
   await expect(await readFile(skillPath, "utf8")).toContain("Treat payloads as text.");
 });
 

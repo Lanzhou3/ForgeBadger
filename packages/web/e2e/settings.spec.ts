@@ -112,19 +112,6 @@ async function mockSettingsApis(page: Page) {
       return;
     }
 
-    if (url.pathname === "/api/v1/copilot/capabilities") {
-      await route.fulfill({
-        json: envelope({
-          supportedProviderFormats: ["openai", "anthropic"],
-          providerConfigured: true,
-          toolExecutionEnabled: true,
-          approvalRequiredForWrites: true,
-          pendingActionApprovalEnabled: true,
-        }),
-      });
-      return;
-    }
-
     await route.fulfill({ json: envelope({}) });
   });
 }

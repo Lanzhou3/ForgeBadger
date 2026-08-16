@@ -148,7 +148,6 @@ export function AddProviderDialog({
                   ["all", t("common.all")],
                   ["claude", "Claude Code"],
                   ["opencode", "OpenCode"],
-                  ["openforge-copilot", "OpenForge Copilot"],
                 ]}
               />
               <CatalogSelect

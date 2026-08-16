@@ -32,17 +32,21 @@ import {
 } from "@/components/ui/table";
 import {
   getCliConfig,
+  getCliConfigFields,
   getCliConfigFile,
+  patchCliConfigFields,
   removeCliModel,
   removeCliProvider,
   setCliDefaultModel,
   upsertCliModel,
   upsertCliProvider,
   writeCliConfigFile,
+  type CliConfigFieldSpec,
   type CliConfigSnapshot,
   type RuntimeAdapterId,
 } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
+import { getTranslation, type Language, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const cliAdapters: RuntimeAdapterId[] = ["claude", "opencode", "codex", "kimi"];
@@ -74,7 +78,7 @@ interface ModelFormState {
 const emptyModelForm: ModelFormState = { alias: "", provider: "", modelId: "" };
 
 export default function CliConfigPage() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const queryClient = useQueryClient();
   const [adapter, setAdapter] = useState<RuntimeAdapterId>("kimi");
   const [providerForm, setProviderForm] = useState<ProviderFormState>(emptyProviderForm);
@@ -84,10 +88,16 @@ export default function CliConfigPage() {
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [fileDraft, setFileDraft] = useState("");
   const [fileRevealed, setFileRevealed] = useState(false);
+  const [fieldDrafts, setFieldDrafts] = useState<Record<string, string>>({});
 
   const { data: snapshot, isLoading, error } = useQuery({
     queryKey: ["cli-config", adapter],
     queryFn: () => getCliConfig(adapter),
+  });
+
+  const { data: fieldData, refetch: refetchFields } = useQuery({
+    queryKey: ["cli-config-fields", adapter],
+    queryFn: () => getCliConfigFields(adapter),
   });
 
   const invalidate = (next: CliConfigSnapshot) => {
@@ -147,6 +157,21 @@ export default function CliConfigPage() {
     onSuccess: invalidate,
   });
 
+  const fieldMutation = useMutation({
+    mutationFn: (updates: Record<string, unknown>) => patchCliConfigFields(adapter, updates),
+    onSuccess: (next) => {
+      invalidate(next);
+      refetchFields();
+    },
+  });
+
+  const commonFields = useMemo(() => fieldData?.fields ?? [], [fieldData?.fields]);
+  const fieldValues = useMemo(() => fieldData?.values ?? {}, [fieldData?.values]);
+  const fieldUpdates = useMemo(
+    () => buildFieldUpdates(commonFields, fieldValues, fieldDrafts),
+    [commonFields, fieldValues, fieldDrafts]
+  );
+
   const files = useMemo(() => snapshot?.files ?? [], [snapshot?.files]);
   const providers = useMemo(() => snapshot?.providers ?? [], [snapshot?.providers]);
   const models = useMemo(() => snapshot?.models ?? [], [snapshot?.models]);
@@ -174,6 +199,21 @@ export default function CliConfigPage() {
     setFileDraft(selectedFile?.content ?? "");
     setFileRevealed(false);
   }, [selectedFile?.content, selectedFile?.relativePath]);
+
+  useEffect(() => {
+    if (!fieldData) return;
+    const next: Record<string, string> = {};
+    for (const field of fieldData.fields) {
+      if (field.type === "boolean") {
+        next[field.key] = String(Boolean(fieldData.values[field.key]));
+      } else if (field.type === "secret") {
+        next[field.key] = "";
+      } else {
+        next[field.key] = fieldData.values[field.key] === undefined ? "" : String(fieldData.values[field.key]);
+      }
+    }
+    setFieldDrafts(next);
+  }, [fieldData]);
 
   const revealFileMutation = useMutation({
     mutationFn: (reveal: boolean) => getCliConfigFile(adapter, selectedFilePath, reveal),
@@ -488,7 +528,7 @@ export default function CliConfigPage() {
             </CardContent>
           </Card>
 
-          {adapter === "kimi" && (
+          {(adapter === "kimi" || adapter === "opencode") && (
             <Card className="of-animate-in" style={{ animationDelay: "120ms" }}>
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold">{t("cliConfig.models")}</CardTitle>
@@ -509,7 +549,9 @@ export default function CliConfigPage() {
                           <TableHead>{t("cliConfig.modelAlias")}</TableHead>
                           <TableHead>{t("cliConfig.providerId")}</TableHead>
                           <TableHead>{t("cliConfig.modelId")}</TableHead>
-                          <TableHead className="text-right">{t("common.actions")}</TableHead>
+                          {adapter === "kimi" && (
+                            <TableHead className="text-right">{t("common.actions")}</TableHead>
+                          )}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -518,27 +560,31 @@ export default function CliConfigPage() {
                             <TableCell className="font-mono text-xs">{model.alias}</TableCell>
                             <TableCell className="font-mono text-xs">{model.provider}</TableCell>
                             <TableCell className="font-mono text-xs">{model.modelId}</TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-destructive hover:bg-destructive/10"
-                                onClick={() => {
-                                  if (window.confirm(t("cliConfig.deleteModelConfirm"))) {
-                                    removeModelMutation.mutate(model.alias);
-                                  }
-                                }}
-                              >
-                                <Trash2 className="size-4" />
-                                <span className="sr-only">{t("common.delete")}</span>
-                              </Button>
-                            </TableCell>
+                            {adapter === "kimi" && (
+                              <TableCell className="text-right">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="text-destructive hover:bg-destructive/10"
+                                  onClick={() => {
+                                    if (window.confirm(t("cliConfig.deleteModelConfirm"))) {
+                                      removeModelMutation.mutate(model.alias);
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="size-4" />
+                                  <span className="sr-only">{t("common.delete")}</span>
+                                </Button>
+                              </TableCell>
+                            )}
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
                   </div>
                 )}
+                {adapter === "kimi" && (
+                <>
                 <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-3 md:grid-cols-4">
                   <div className="space-y-2">
                     <Label htmlFor="model-alias">{t("cliConfig.modelAlias")}</Label>
@@ -596,6 +642,8 @@ export default function CliConfigPage() {
                       ? modelMutation.error.message
                       : t("cliConfig.saveFailed")}
                   </p>
+                )}
+                </>
                 )}
               </CardContent>
             </Card>
@@ -668,6 +716,93 @@ export default function CliConfigPage() {
               )}
             </CardContent>
           </Card>
+
+          {commonFields.length > 0 && (
+            <Card className="of-animate-in" style={{ animationDelay: "180ms" }}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold">{t("cliConfig.commonFields")}</CardTitle>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {t("cliConfig.commonFieldsDescription")}
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  {commonFields.map((field) => (
+                    <div key={field.key} className="space-y-2">
+                      <Label htmlFor={`field-${field.key}`}>
+                        {localizedFieldLabel(language, adapter, field)}
+                        <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">{field.path}</span>
+                      </Label>
+                      {field.type === "enum" || field.type === "boolean" ? (
+                        <select
+                          id={`field-${field.key}`}
+                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                          value={fieldDrafts[field.key] ?? ""}
+                          onChange={(event) =>
+                            setFieldDrafts((drafts) => ({ ...drafts, [field.key]: event.target.value }))
+                          }
+                        >
+                          {field.type === "boolean" ? (
+                            <>
+                              <option value="false">false</option>
+                              <option value="true">true</option>
+                            </>
+                          ) : (
+                            <>
+                              <option value="">{t("cliConfig.fieldNotSet")}</option>
+                              {(field.values ?? []).map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </>
+                          )}
+                        </select>
+                      ) : (
+                        <Input
+                          id={`field-${field.key}`}
+                          type={field.type === "secret" ? "password" : field.type === "number" ? "number" : "text"}
+                          autoComplete="off"
+                          value={fieldDrafts[field.key] ?? ""}
+                          placeholder={
+                            field.type === "secret" && fieldValues[field.key] === true
+                              ? t("cliConfig.secretReplacePlaceholder")
+                              : ""
+                          }
+                          onChange={(event) =>
+                            setFieldDrafts((drafts) => ({ ...drafts, [field.key]: event.target.value }))
+                          }
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button
+                    size="sm"
+                    onClick={() => fieldMutation.mutate(fieldUpdates)}
+                    disabled={fieldMutation.isPending || Object.keys(fieldUpdates).length === 0}
+                  >
+                    <Save className="size-4" />
+                    {fieldMutation.isPending ? t("common.saving") : t("common.save")}
+                  </Button>
+                  {fieldMutation.isSuccess && !fieldMutation.isPending && (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span className="size-1.5 rounded-full bg-emerald-400" />
+                      {t("cliConfig.saved")}
+                    </span>
+                  )}
+                </div>
+                {fieldMutation.isError && (
+                  <p className="text-sm text-destructive">
+                    {fieldMutation.error instanceof Error
+                      ? fieldMutation.error.message
+                      : t("cliConfig.saveFailed")}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="of-animate-in" style={{ animationDelay: "200ms" }}>
             <CardHeader className="pb-3">
@@ -756,4 +891,49 @@ function defaultModelPlaceholderFor(adapter: RuntimeAdapterId): string {
   if (adapter === "opencode") return "provider/model-id";
   if (adapter === "codex") return "gpt-5.1-codex";
   return "provider/model-alias";
+}
+
+function localizedFieldLabel(
+  language: Language,
+  adapter: RuntimeAdapterId,
+  field: CliConfigFieldSpec
+): string {
+  const key = `cliConfig.fields.${adapter}.${field.key}` as TranslationKey;
+  const localized = getTranslation(language, key);
+  // Fall back to the catalog's English label when a locale entry is missing.
+  return localized === key ? field.label : localized;
+}
+
+function buildFieldUpdates(
+  fields: CliConfigFieldSpec[],
+  values: Record<string, unknown>,
+  drafts: Record<string, string>
+): Record<string, unknown> {
+  const updates: Record<string, unknown> = {};
+  for (const field of fields) {
+    const draft = drafts[field.key];
+    if (draft === undefined) continue;
+    const trimmed = draft.trim();
+    const current = values[field.key];
+    if (field.type === "secret") {
+      if (trimmed) updates[field.key] = trimmed;
+      continue;
+    }
+    if (field.type === "boolean") {
+      const next = draft === "true";
+      if (Boolean(current) !== next) updates[field.key] = next;
+      continue;
+    }
+    if (trimmed === "") {
+      if (current !== undefined && current !== "") updates[field.key] = null;
+      continue;
+    }
+    if (field.type === "number") {
+      const parsed = Number(trimmed);
+      if (Number.isFinite(parsed) && parsed !== current) updates[field.key] = parsed;
+      continue;
+    }
+    if (String(current ?? "") !== trimmed) updates[field.key] = trimmed;
+  }
+  return updates;
 }

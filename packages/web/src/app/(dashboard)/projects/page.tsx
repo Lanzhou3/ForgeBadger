@@ -1,13 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, Download, FolderOpen, Plus, Trash2 } from "lucide-react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowUpRight, Download, FolderOpen, GitBranch, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { CliBrandChip } from "@/components/cli-brand-chip";
-import { deleteProject, listProjects } from "@/lib/api";
+import { deleteProject, getProjectGitChanges, listProjects } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function ProjectsPage() {
@@ -31,6 +30,20 @@ export default function ProjectsPage() {
   };
 
   const projects = data?.projects ?? [];
+
+  const branchResults = useQueries({
+    queries: projects.map((project) => ({
+      queryKey: ["project", project.id, "git-branch"],
+      queryFn: () => getProjectGitChanges(project.id),
+      enabled: projects.length > 0,
+      staleTime: 60_000,
+    })),
+  });
+
+  const branchFor = (index: number): string | null => {
+    const git = branchResults[index]?.data;
+    return git && git.isGitRepo && git.branch ? git.branch : null;
+  };
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6">
@@ -102,7 +115,15 @@ export default function ProjectsPage() {
                     {project.path ?? project.rootPath}
                   </div>
                 </div>
-                {project.aiTool ? <CliBrandChip aiTool={project.aiTool} /> : null}
+                {branchFor(index) ? (
+                  <span
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/60 bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                    title={branchFor(index) ?? undefined}
+                  >
+                    <GitBranch className="size-3" />
+                    {branchFor(index)}
+                  </span>
+                ) : null}
                 <span className="hidden w-20 shrink-0 truncate text-right text-xs text-muted-foreground sm:inline">
                   {project.status ?? "—"}
                 </span>

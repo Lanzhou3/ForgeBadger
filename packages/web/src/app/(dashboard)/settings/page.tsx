@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUpRight, Bell, Cpu, Download, FlaskConical, Globe2, KeyRound, Palette, RefreshCw, ScrollText, ServerCog, Settings2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Bell, Cpu, Download, Globe2, KeyRound, Palette, RefreshCw, ScrollText, Settings2, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -358,33 +357,6 @@ export default function SettingsPage() {
           <div className="of-animate-in" style={{ animationDelay: "160ms" }}>
             <FeishuIntegrationSettings />
           </div>
-
-          <Card className="of-animate-in" style={{ animationDelay: "200ms" }}>
-            <SettingsCardHeader
-              icon={<FlaskConical className="size-4" />}
-              title={t("settings.experimentalFeatures")}
-              description={t("settings.experimentalFeaturesDescription")}
-            />
-            <CardContent>
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-3 transition-colors hover:bg-muted/40">
-                <div className="flex min-w-0 items-start gap-3">
-                  <ServerCog className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{t("settings.codexAppServerExperiment")}</div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {t("settings.codexAppServerExperimentDescription")}
-                    </div>
-                  </div>
-                </div>
-                <Button asChild variant="outline" size="sm">
-                  <Link href="/codex-app-server">
-                    {t("common.open")}
-                    <ArrowUpRight className="size-3.5" />
-                  </Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         <div className="space-y-6">

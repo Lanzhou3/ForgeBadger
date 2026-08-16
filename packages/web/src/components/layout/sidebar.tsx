@@ -5,9 +5,9 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   LayoutDashboard,
+  Bot,
   FolderKanban,
   TerminalSquare,
-  Sparkles,
   Wrench,
   LayoutTemplate,
   Brain,
@@ -47,7 +47,7 @@ export const navItems = [
   { labelKey: "nav.dashboard", href: "/", icon: LayoutDashboard, group: "workspace" },
   { labelKey: "nav.projects", href: "/projects", icon: FolderKanban, group: "workspace" },
   { labelKey: "nav.sessions", href: "/sessions", icon: TerminalSquare, group: "workspace" },
-  { labelKey: "nav.copilot", href: "/copilot", icon: Sparkles, group: "workspace" },
+  { labelKey: "nav.copilot", href: "/copilot", icon: Bot, group: "workspace" },
   { labelKey: "nav.skills", href: "/skills", icon: Wrench, group: "resources" },
   { labelKey: "nav.templates", href: "/templates", icon: LayoutTemplate, group: "resources" },
   { labelKey: "nav.models", href: "/models", icon: Brain, group: "resources" },

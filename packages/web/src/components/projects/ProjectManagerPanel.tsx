@@ -1777,7 +1777,7 @@ function ProjectManagerWorkItemDetailSheet({
   taskPacketSessionId: string;
   taskPacketSessions: Session[];
 }) {
-  const traceMarkers = item ? workItemCopilotTraceMarkers(item, ledgerEvents) : [];
+  const traceMarkers = item ? workItemTraceMarkers(item, ledgerEvents) : [];
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -1854,7 +1854,7 @@ function ProjectManagerWorkItemDetailSheet({
               )}
             </DetailField>
             {traceMarkers.length > 0 && (
-              <DetailField label={t("projects.projectManagerCopilotTrace")}>
+              <DetailField label={t("projects.projectManagerLedger")}>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {traceMarkers.map((marker) => (
                     <LedgerDatum
@@ -2763,7 +2763,7 @@ function LedgerTraceGrid({ trace, t }: { trace: ProjectManagerLedgerTrace; t: Tr
   return (
     <div className="mt-3 rounded-md border border-border/70 bg-background/40 p-3">
       <div className="text-xs font-medium uppercase text-muted-foreground">
-        {t("projects.projectManagerCopilotTrace")}
+        {t("projects.projectManagerLedger")}
       </div>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         {markers.map((marker) => (
@@ -3044,7 +3044,7 @@ interface TraceMarker {
   value: string | number;
 }
 
-function workItemCopilotTraceMarkers(
+function workItemTraceMarkers(
   item: ProjectManagerWorkItem,
   ledgerEvents: ProjectManagerLedgerEvent[]
 ): TraceMarker[] {
@@ -3056,10 +3056,6 @@ function workItemCopilotTraceMarkers(
   const trace = ledgerTraceEvent?.trace;
   const markers: TraceMarker[] = [];
 
-  const runId = trace?.copilotRunId ?? evidenceTrace?.copilotRunId;
-  const actionId = trace?.pendingActionId ?? evidenceTrace?.pendingActionId;
-  if (runId) markers.push({ labelKey: "projects.projectManagerTraceRun", value: runId });
-  if (actionId) markers.push({ labelKey: "projects.projectManagerTraceAction", value: actionId });
   if (evidenceTrace) {
     markers.push({ labelKey: "projects.projectManagerTraceEvidence", value: formatEvidenceRef(evidenceTrace) });
   }
@@ -3075,8 +3071,6 @@ function workItemCopilotTraceMarkers(
 
 function ledgerTraceMarkers(trace: ProjectManagerLedgerTrace): TraceMarker[] {
   const markers: Array<TraceMarker | null> = [
-    trace.copilotRunId ? { labelKey: "projects.projectManagerTraceRun", value: trace.copilotRunId } : null,
-    trace.pendingActionId ? { labelKey: "projects.projectManagerTraceAction", value: trace.pendingActionId } : null,
     trace.actionType ? { labelKey: "projects.projectManagerTraceActionType", value: trace.actionType } : null,
     trace.targetId ? { labelKey: "projects.projectManagerTraceTarget", value: trace.targetId } : null,
     typeof trace.evidenceRefCount === "number"
@@ -3117,7 +3111,7 @@ function isTrustedEvidenceRef(ref: ProjectManagerEvidenceRef): boolean {
 }
 
 function hasEvidenceTrace(ref: ProjectManagerEvidenceRef): boolean {
-  return Boolean(ref.copilotRunId || ref.pendingActionId || ref.sessionId);
+  return Boolean(ref.sessionId || ref.feishuMessageId);
 }
 
 function ledgerEventNote(eventType: ProjectManagerLedgerEventType, t: Translate) {
@@ -3141,8 +3135,6 @@ function formatEvidenceRef(ref: ProjectManagerEvidenceRef) {
     ref.ref,
     ref.path,
     ref.sessionId,
-    ref.copilotRunId,
-    ref.pendingActionId,
     ref.feishuMessageId,
   ]
     .map((part) => part?.trim())
@@ -3213,7 +3205,6 @@ function eventLabel(eventType: ProjectManagerLedgerEventType, t: Translate) {
     evidence_attached: "projects.projectManagerEventEvidenceAttached",
     blocker_recorded: "projects.projectManagerEventBlockerRecorded",
     blocker_resolved: "projects.projectManagerEventBlockerResolved",
-    copilot_observation_recorded: "projects.projectManagerEventCopilotObservationRecorded",
     feishu_reference_linked: "projects.projectManagerEventFeishuReferenceLinked",
     next_step_proposed: "projects.projectManagerEventNextStepProposed",
     manual_completion_recorded: "projects.projectManagerEventManualCompletionRecorded",

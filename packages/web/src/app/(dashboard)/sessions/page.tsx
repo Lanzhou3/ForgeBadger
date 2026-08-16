@@ -361,17 +361,17 @@ export default function SessionsPage() {
               <Button
                 key={project.id}
                 variant="outline"
-                className="h-auto justify-start gap-3 px-3 py-2.5"
+                className="h-auto w-full min-w-0 justify-start gap-3 px-3 py-2.5"
                 onClick={() => {
                   setProjectPickerOpen(false);
                   router.push(`/projects/${project.id}?tab=sessions`);
                 }}
               >
                 <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-                <span className="flex min-w-0 flex-col items-start gap-0.5">
-                  <span className="truncate text-sm font-medium">{project.name}</span>
+                <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                  <span className="max-w-full truncate text-sm font-medium">{project.name}</span>
                   {project.path && (
-                    <span className="truncate font-mono text-xs text-muted-foreground">
+                    <span className="max-w-full truncate font-mono text-xs text-muted-foreground">
                       {project.path}
                     </span>
                   )}

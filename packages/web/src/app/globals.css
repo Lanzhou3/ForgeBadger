@@ -158,6 +158,18 @@
     animation: of-robot-nudge 0.45s ease-out;
   }
 
+  /* Pixel comic bubble for the robot companion: hard 2px outline, square
+     corners and an offset block shadow instead of a soft rounded card. */
+  .of-pixel-bubble {
+    border: 2px solid hsl(var(--foreground) / 0.85);
+    border-radius: 0;
+    box-shadow: 4px 4px 0 0 hsl(var(--brand) / 0.4);
+  }
+
+  .of-pixel-font {
+    font-family: ui-monospace, "Cascadia Mono", "SF Mono", "Courier New", monospace;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .of-animate-in {
       animation: none;

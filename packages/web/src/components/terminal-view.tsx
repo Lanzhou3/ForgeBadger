@@ -26,6 +26,9 @@ type ConnectionStatus =
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000];
+/** Fonts and dev-mode CSS can settle right after the socket opens; re-fit once
+ * shortly after connect so the server-side window converges to the real pane. */
+const RESIZE_SETTLE_DELAY_MS = 400;
 
 function getReconnectDelay(attempt: number): number {
   const index = Math.min(attempt, RECONNECT_DELAYS.length - 1);
@@ -56,6 +59,7 @@ export function TerminalView({
   const inputDisposableRef = useRef<DisposableInputListener | null>(null);
   const resizeHandlerRef = useRef<(() => void) | null>(null);
   const promptCaptureRef = useRef(createTerminalPromptCapture());
+  const lastSentSizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const mountedRef = useRef(true);
 
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
@@ -66,6 +70,36 @@ export function TerminalView({
     if (reconnectTimerRef.current !== null) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Fit xterm to the host and push the size to the gateway when it changed.
+   * Fitting still happens with a closed socket so the canvas always matches
+   * the pane; `force` resends even when the dimensions look unchanged (used
+   * right after connect, when an earlier fit may have run before layout/CSS
+   * had fully settled and its resize message was dropped).
+   */
+  const fitAndSendResize = useCallback((force = false) => {
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (!terminal || !fitAddon) return;
+
+    fitAddon.fit();
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
+    const last = lastSentSizeRef.current;
+    const changed = !last || last.cols !== terminal.cols || last.rows !== terminal.rows;
+    if (!force && !changed) return;
+
+    const resizeMessage = createTerminalResizeMessage({
+      cols: terminal.cols,
+      rows: terminal.rows
+    });
+    if (resizeMessage) {
+      socket.send(resizeMessage);
+      lastSentSizeRef.current = { cols: terminal.cols, rows: terminal.rows };
     }
   }, []);
 
@@ -89,18 +123,13 @@ export function TerminalView({
       setAttemptCount(0);
       setStatus("connected");
 
-      const terminal = terminalRef.current;
-      const fitAddon = fitAddonRef.current;
-      if (terminal && fitAddon) {
-        fitAddon.fit();
-        const resizeMessage = createTerminalResizeMessage({
-          cols: terminal.cols,
-          rows: terminal.rows
-        });
-        if (resizeMessage) {
-          socket.send(resizeMessage);
-        }
-      }
+      lastSentSizeRef.current = null;
+      fitAndSendResize(true);
+      // Layout can settle right after open (fonts, dev-mode CSS); re-fit once
+      // and push any correction so the tmux window converges to the real pane.
+      window.setTimeout(() => {
+        if (mountedRef.current) fitAndSendResize();
+      }, RESIZE_SETTLE_DELAY_MS);
     });
 
     socket.addEventListener("message", (event) => {
@@ -162,7 +191,7 @@ export function TerminalView({
       });
       replaceTerminalInputListener(inputDisposableRef, disposable);
     }
-  }, [sessionId, authToken, attachToken, terminalReady]);
+  }, [sessionId, authToken, attachToken, terminalReady, fitAndSendResize]);
 
   const handleManualReconnect = useCallback(() => {
     clearReconnectTimer();
@@ -278,26 +307,16 @@ export function TerminalView({
       return;
     }
 
-    const resize = () => {
-      const fitAddon = fitAddonRef.current;
-      const socket = socketRef.current;
-      const terminal = terminalRef.current;
-      if (!fitAddon || !terminal) return;
-
-      fitAddon.fit();
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        const resizeMessage = createTerminalResizeMessage({
-          cols: terminal.cols,
-          rows: terminal.rows
-        });
-        if (resizeMessage) {
-          socket.send(resizeMessage);
-        }
-      }
+    const resize = () => fitAndSendResize();
+    const onVisibilityChange = () => {
+      // ResizeObserver does not fire while the tab is hidden; catch up when
+      // the page becomes visible again so the gateway learns the real size.
+      if (document.visibilityState === "visible") fitAndSendResize();
     };
 
     resize();
     window.addEventListener("resize", resize);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     resizeHandlerRef.current = resize;
     const resizeObserver =
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
@@ -311,10 +330,11 @@ export function TerminalView({
 
     return () => {
       window.removeEventListener("resize", resize);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       resizeObserver?.disconnect();
       resizeHandlerRef.current = null;
     };
-  }, [terminalReady]);
+  }, [terminalReady, fitAndSendResize]);
 
   const showReconnectingOverlay = status === "reconnecting";
   const showFailedOverlay = status === "failed";
@@ -364,11 +384,15 @@ export function TerminalView({
           {t("terminal.missingCredentials")}
         </div>
       ) : null}
-      <div className="relative h-full min-h-0 overflow-hidden">
+      {/* Padding lives on the wrapper, NOT on the xterm host: FitAddon reads
+          the host's computed width/height (border-box under Tailwind preflight)
+          without subtracting host padding, so padding here would overshoot
+          cols/rows and clip the rightmost character column. */}
+      <div className="relative h-full min-h-0 overflow-hidden p-2">
         <div
           ref={hostRef}
           data-testid="terminal-host"
-          className="h-full min-h-0 p-2 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
+          className="h-full min-h-0 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
         />
         {historyOpen && (
           <SessionOutputHistory

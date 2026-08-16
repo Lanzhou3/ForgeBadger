@@ -9,27 +9,20 @@ import {
 } from "./notifications";
 
 describe("notifications", () => {
-  it("creates a session status notification from a Gateway event", () => {
-    const notification = createNotificationFromEvent(
-      {
+  it("ignores session lifecycle events", () => {
+    // Arrange / Act / Assert
+    expect(
+      createNotificationFromEvent({
         type: "session_status_changed",
-        payload: {
-          session_id: "session-1",
-          old_status: "starting",
-          new_status: "running",
-        },
-      },
-      "2026-04-30T12:00:00.000Z"
-    );
-
-    expect(notification).toMatchObject({
-      id: "session_status_changed:session-1:running:2026-04-30T12:00:00.000Z",
-      type: "session_status_changed",
-      titleKey: "notifications.sessionStatusChanged",
-      message: "session-1: starting -> running",
-      href: "/sessions/session-1",
-      read: false,
-    });
+        payload: { session_id: "session-1", old_status: "starting", new_status: "running" },
+      })
+    ).toBeNull();
+    expect(
+      createNotificationFromEvent({
+        type: "session_created",
+        payload: { session_id: "session-1", name: "Session 1" },
+      })
+    ).toBeNull();
   });
 
   it("creates a Claude Code permission notification from a hook event", () => {
@@ -109,19 +102,40 @@ describe("notifications", () => {
     });
   });
 
-  it("uses the generic CLI notification title for unclassified adapter notifications", () => {
+  it("ignores CLI notifications outside the allowlist", () => {
+    // Arrange / Act / Assert
+    for (const notificationType of ["status", "task_failed", "session_ended", "permission_denied"]) {
+      expect(
+        createNotificationFromEvent({
+          type: "claude_notification",
+          payload: {
+            session_id: "session-6",
+            notification_type: notificationType,
+            adapter: "opencode",
+            message: "filtered out",
+          },
+        })
+      ).toBeNull();
+    }
+  });
+
+  it("creates a task completion notification", () => {
+    // Arrange / Act
     const notification = createNotificationFromEvent({
       type: "claude_notification",
       payload: {
-        session_id: "session-6",
-        notification_type: "status",
-        adapter: "opencode",
-        message: "OpenCode is idle",
+        session_id: "session-8",
+        notification_type: "task_completed",
+        adapter: "codex",
+        message: "Codex finished the task",
       },
     });
 
+    // Assert
     expect(notification).toMatchObject({
-      titleKey: "notifications.cliNotification",
+      titleKey: "notifications.taskCompleted",
+      notificationType: "task_completed",
+      adapter: "codex",
     });
   });
 

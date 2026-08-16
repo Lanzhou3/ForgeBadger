@@ -3,10 +3,6 @@ export interface SnapshotFilters {
   sessionId?: string;
 }
 
-export interface ProjectActivityFilters {
-  projectId: string;
-  agentId?: string;
-}
 
 interface SearchParamsReader {
   get(name: string): string | null;
@@ -26,14 +22,4 @@ function readSearchParam(params: SearchParamsReader, key: keyof SnapshotFilters)
 
 export function canRestoreSnapshot(snapshot: { projectId?: string | null }): boolean {
   return Boolean(snapshot.projectId);
-}
-
-export function activityFiltersForProject(
-  projectId: string,
-  agentId: string
-): ProjectActivityFilters {
-  return {
-    projectId,
-    ...(agentId ? { agentId } : {})
-  };
 }

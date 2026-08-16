@@ -81,11 +81,6 @@ async function mockWorkspaceApis(page: Page) {
       return;
     }
 
-    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/agent-sequence` && method === "GET") {
-      await route.fulfill({ json: envelope({ sequence: [] }) });
-      return;
-    }
-
     if (
       (url.pathname === `/api/v1/projects/${PROJECT_ID}/ai-config` ||
         url.pathname === `/api/v1/projects/${PROJECT_ID}/ai-config/global`) &&
@@ -177,18 +172,8 @@ async function mockWorkspaceApis(page: Page) {
       return;
     }
 
-    if (url.pathname === "/api/v1/agents" && method === "GET") {
-      await route.fulfill({ json: envelope({ agents: [] }) });
-      return;
-    }
-
     if (url.pathname === "/api/v1/skills" && method === "GET") {
       await route.fulfill({ json: envelope({ skills: [] }) });
-      return;
-    }
-
-    if (url.pathname === "/api/v1/models" && method === "GET") {
-      await route.fulfill({ json: envelope({ models: [] }) });
       return;
     }
 
