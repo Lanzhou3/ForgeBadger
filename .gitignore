@@ -31,7 +31,11 @@ AGENT.md
 AGENTS.md
 MEMORY.md
 CONTEXT.md
-openspec/changes/
+!openspec/
+!openspec/changes/
+openspec/changes/*
+!openspec/changes/replace-copilot-with-portfolio-operations/
+!openspec/changes/replace-copilot-with-portfolio-operations/**
 openspec/config.yaml
 docs/*
 !docs/EXTERNAL-EVIDENCE-GATES.md
@@ -57,7 +61,9 @@ docs/*
 docs/adr/*
 !docs/adr/0001-replace-legacy-copilot-with-portfolio-operations.md
 !docs/superpowers/
+!docs/superpowers/specs/
 docs/superpowers/specs/*
+!docs/superpowers/specs/2026-08-13-portfolio-operations-architecture.md
 !docs/superpowers/plans/
 docs/superpowers/plans/*
 !docs/superpowers/plans/2026-08-13-portfolio-operations-clean-break.md
@@ -85,3 +91,10 @@ packages/web/*probe.mjs
 # Local macOS metadata and generated CodeGraph indexes are never repository inputs.
 .DS_Store
 .codegraph/
+
+# One-off local debugging scripts (never tracked).
+packages/gateway/copilot-smoke.tmp.ts
+packages/gateway/mig-test.mts
+packages/gateway/pf-repro.mts
+packages/gateway/verify-copilot-mig.mts
+packages/gateway/tables.mts

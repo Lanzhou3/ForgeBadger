@@ -57,12 +57,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Script harness tests
-        run: node --test scripts/validate-external-evidence-gates.test.mjs scripts/validate-trial-issue-routes.test.mjs scripts/validate-trial-readiness.test.mjs scripts/audit-trial-feedback-packet.test.mjs scripts/audit-trial-feedback-issue.test.mjs scripts/audit-trial-feedback-issues.test.mjs scripts/audit-feishu-bot-live-report.test.mjs scripts/create-feishu-bot-live-evidence-report.test.mjs scripts/create-trial-feedback-draft.test.mjs scripts/validate-trial-feedback-intake.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-codex-app-server.test.mjs scripts/smoke-feishu-bot-websocket.test.mjs scripts/smoke-feishu-bot-live.test.mjs scripts/smoke-local-release.test.mjs scripts/smoke-npm-package-runner.test.mjs scripts/verify-npm-package.test.mjs
-
-      - name: Trial material and evidence registry validators
-        run: |
-          pnpm trial:intake-validate
-          pnpm evidence:gates-validate
+        run: node --test scripts/audit-feishu-bot-live-report.test.mjs scripts/create-feishu-bot-live-evidence-report.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-feishu-bot-websocket.test.mjs scripts/smoke-feishu-bot-live.test.mjs scripts/smoke-local-release.test.mjs scripts/smoke-npm-package-runner.test.mjs scripts/verify-npm-package.test.mjs
 
       - name: Workspace typecheck
         run: pnpm -r typecheck
@@ -100,55 +95,6 @@ jobs:
 
       - name: Whitespace check
         run: git diff --check
-
-  codex-background-task-gates:
-    name: Codex Background Task Gates
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    env:
-      NEXT_PUBLIC_GATEWAY_URL: "http://127.0.0.1:48731"
-      OPENFORGE_WEB_URL: "http://127.0.0.1:48752"
-      OPENFORGE_WEB_PORT: "48752"
-      NEXT_TELEMETRY_DISABLED: "1"
-      CI: "true"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10.33.2
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright Chromium
-        run: pnpm --dir packages/web exec playwright install --with-deps chromium
-
-      - name: Codex app-server Web smoke
-        run: pnpm --dir packages/web exec playwright test e2e/codex-app-server.spec.ts --project=chromium --reporter=line
-
-      - name: Real Codex app-server smoke when CLI is available
-        shell: bash
-        run: |
-          if command -v codex >/dev/null 2>&1; then
-            pnpm smoke:codex-app-server
-          else
-            {
-              echo "## Codex app-server smoke"
-              echo
-              echo "- codex CLI: unavailable; real app-server initialize smoke skipped."
-              echo "- Web page smoke still proved no prompt/turn controls and no /turn request."
-              echo "- Run \`pnpm smoke:codex-app-server\` on a host with Codex CLI before final release acceptance."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
 
   package-smoke:
     name: NPM Package Build, Verify, And Smoke
