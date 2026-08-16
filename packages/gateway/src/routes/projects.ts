@@ -15,7 +15,6 @@ import {
 import { validateProjectRoot } from "../lib/safe-resolve.js";
 import { AuditLogRepository } from "../db/repositories/audit-log-repository.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
-import { ProjectAgentSequenceRepository } from "../db/repositories/project-agent-sequence-repository.js";
 import { SessionRepository } from "../db/repositories/session-repository.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
 import type { Database } from "../db/types.js";
@@ -26,7 +25,6 @@ import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } fro
 import { listWorkspaceTree, readWorkspaceFile } from "../services/workspace-context.js";
 import { getProjectGitChanges, getProjectGitFileDiff } from "../services/project-git.js";
 import { recordActivity } from "../services/activity-events.js";
-import { createDefaultAgentPack } from "../services/default-agent-pack.js";
 import { buildConfigSyncSummary, buildProjectConfigRenderPlan } from "../services/project-config-render.js";
 export {
   buildConfigSyncSummary,
@@ -65,7 +63,8 @@ const configComplianceQuerySchema = z.object({
 
 const aiConfigWriteSchema = z.object({
   relativePath: z.string().min(1).max(512),
-  content: z.string().max(128 * 1024)
+  content: z.string().max(128 * 1024),
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional()
 });
 
 const aiConfigQuerySchema = z.object({
@@ -87,18 +86,15 @@ const gitDiffQuerySchema = z.object({
   untracked: z.enum(["0", "1"]).optional()
 }).strict();
 
-const agentSequenceSchema = z.object({
-  agentIds: z.array(z.string().min(1)).max(50)
-});
+// Projects are created CLI-agnostic: ai_tool stays an empty sentinel until an
+// explicit designation exists (e.g. a project draft naming an adapter).
+// Legacy rows still carry "claude" and keep working through explicit overrides.
+const unboundProjectAiTool = "";
 
-const defaultTemplateId = "builtin-claude-code";
-const legacyProjectConfigHint = "claude";
-const defaultTemplateIdsByAiTool: Record<z.infer<typeof aiToolSchema>, string> = {
-  claude: defaultTemplateId,
-  opencode: "builtin-opencode",
-  codex: "builtin-codex",
-  kimi: "builtin-kimi"
-};
+function parseAiToolHint(value: string | null | undefined): z.infer<typeof aiToolSchema> | undefined {
+  const parsed = aiToolSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
 const rootInstructionFileNames = ["AGENT.md", "AGENTS.md", "CLAUDE.md"] as const;
 
 export function createProjectRoutes(
@@ -126,7 +122,7 @@ export function createProjectRoutes(
         path: rootPath,
         description,
         techStack,
-        aiTool: legacyProjectConfigHint
+        aiTool: unboundProjectAiTool
       });
       res.status(201).json({
         code: 0,
@@ -165,78 +161,6 @@ export function createProjectRoutes(
       data: { project },
       message: ""
     });
-  });
-
-  router.get("/:id/agent-sequence", (req, res) => {
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const projectRepo = new ProjectRepository(db, userId);
-    const project = projectRepo.getById(req.params.id);
-    if (!project) {
-      res.status(404).json({ code: 1, message: "Project not found" });
-      return;
-    }
-
-    const sequence = new ProjectAgentSequenceRepository(db, userId).list(project.id);
-    res.json({
-      code: 0,
-      data: { sequence },
-      message: ""
-    });
-  });
-
-  router.put("/:id/agent-sequence", (req, res) => {
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const parseResult = agentSequenceSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({ code: 1, message: "Invalid input" });
-      return;
-    }
-
-    const projectRepo = new ProjectRepository(db, userId);
-    const project = projectRepo.getById(req.params.id);
-    if (!project) {
-      res.status(404).json({ code: 1, message: "Project not found" });
-      return;
-    }
-
-    try {
-      const sequence = new ProjectAgentSequenceRepository(db, userId).replace(
-        project.id,
-        parseResult.data.agentIds
-      );
-      res.json({
-        code: 0,
-        data: { sequence },
-        message: ""
-      });
-    } catch (error) {
-      res.status(400).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "Agent sequence update failed"
-      });
-    }
-  });
-
-  router.post("/:id/agents/default-pack", (req, res) => {
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    try {
-      const result = createDefaultAgentPack(db, userId, req.params.id);
-      if (!result) {
-        res.status(404).json({ code: 1, message: "Project not found" });
-        return;
-      }
-
-      res.status(result.created.length > 0 ? 201 : 200).json({
-        code: 0,
-        data: result,
-        message: ""
-      });
-    } catch (error) {
-      res.status(400).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "Default Agent pack creation failed"
-      });
-    }
   });
 
   router.post("/scan", async (req, res) => {
@@ -288,7 +212,7 @@ export function createProjectRoutes(
         path: rootPath,
         description,
         techStack,
-        aiTool: legacyProjectConfigHint
+        aiTool: unboundProjectAiTool
       });
       res.status(201).json({
         code: 0,
@@ -511,7 +435,15 @@ export function createProjectRoutes(
         return;
       }
 
-      const templateId = parseResult.data.templateId ?? project.templateId ?? defaultTemplateIdForAiTool(project.aiTool);
+      const templateId = parseResult.data.templateId ?? project.templateId ?? null;
+      if (!templateId) {
+        res.status(404).json({
+          code: 1,
+          message: "Project is not tracking any template",
+          details: { code: "TEMPLATE_NOT_TRACKED" }
+        });
+        return;
+      }
       const plan = await buildProjectConfigRenderPlan(
         db,
         userId,
@@ -552,7 +484,15 @@ export function createProjectRoutes(
         return;
       }
 
-      const templateId = parseResult.data.templateId ?? project.templateId ?? defaultTemplateIdForAiTool(project.aiTool);
+      const templateId = parseResult.data.templateId ?? project.templateId ?? null;
+      if (!templateId) {
+        res.status(404).json({
+          code: 1,
+          message: "Project is not tracking any template",
+          details: { code: "TEMPLATE_NOT_TRACKED" }
+        });
+        return;
+      }
       const plan = await buildProjectConfigRenderPlan(
         db,
         userId,
@@ -693,10 +633,15 @@ export function createProjectRoutes(
     }
 
     try {
-      const config = await readProjectAiConfig(
-        project.path,
-        parseResult.data.aiTool ?? aiToolSchema.parse(project.aiTool)
-      );
+      const aiTool = parseResult.data.aiTool ?? parseAiToolHint(project.aiTool);
+      if (!aiTool) {
+        res.status(400).json({
+          code: 1,
+          message: "An explicit aiTool query parameter is required for CLI-agnostic projects"
+        });
+        return;
+      }
+      const config = await readProjectAiConfig(project.path, aiTool);
       res.json({
         code: 0,
         data: config,
@@ -726,9 +671,15 @@ export function createProjectRoutes(
     }
 
     try {
-      const config = await readGlobalAiConfig(
-        parseResult.data.aiTool ?? aiToolSchema.parse(project.aiTool)
-      );
+      const aiTool = parseResult.data.aiTool ?? parseAiToolHint(project.aiTool);
+      if (!aiTool) {
+        res.status(400).json({
+          code: 1,
+          message: "An explicit aiTool query parameter is required for CLI-agnostic projects"
+        });
+        return;
+      }
+      const config = await readGlobalAiConfig(aiTool);
       res.json({
         code: 0,
         data: config,
@@ -758,11 +709,19 @@ export function createProjectRoutes(
     }
 
     try {
+      const aiTool = parseResult.data.aiTool ?? parseAiToolHint(project.aiTool);
+      if (!aiTool) {
+        res.status(400).json({
+          code: 1,
+          message: "An explicit aiTool is required for CLI-agnostic projects"
+        });
+        return;
+      }
       const config = await writeProjectAiConfigFile(
         project.path,
         parseResult.data.relativePath,
         parseResult.data.content,
-        aiToolSchema.parse(project.aiTool)
+        aiTool
       );
       recordActivity({
         db,
@@ -983,23 +942,20 @@ export async function prepareCreatedProjectRoot(projectRoot: string): Promise<st
   return rootPath;
 }
 
-function defaultTemplateIdForAiTool(aiTool: string | null | undefined): string {
-  const parsed = aiToolSchema.safeParse(aiTool);
-  return parsed.success ? defaultTemplateIdsByAiTool[parsed.data] : defaultTemplateId;
-}
-
+/**
+ * Validates an explicitly supplied template id. Projects never get an implicit
+ * default template anymore; callers bind one only when the request names it.
+ */
 export function resolveProjectTemplateId(
   db: Database,
   userId: string,
-  aiTool: string,
-  templateId: string | undefined
+  templateId: string
 ): string {
-  const resolvedTemplateId = templateId ?? defaultTemplateIdForAiTool(aiTool);
-  const template = new TemplateRepository(db, userId).getById(resolvedTemplateId);
+  const template = new TemplateRepository(db, userId).getById(templateId);
   if (!template) {
     throw new Error("Template not found");
   }
-  return resolvedTemplateId;
+  return templateId;
 }
 
 export async function prepareImportedProjectRoot(projectRoot: string): Promise<string> {

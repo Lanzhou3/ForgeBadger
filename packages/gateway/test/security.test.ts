@@ -365,7 +365,25 @@ describe("security hardening", () => {
     const registerData = await registerRes.json();
     const token = registerData.data.token;
 
-    const createRes = await fetch(`${baseUrl}/api/v1/models`, {
+    const providerRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        name: "Anthropic",
+        providerKey: "anthropic",
+        baseUrl: "https://api.anthropic.com",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"]
+      })
+    });
+    const providerData = await providerRes.json();
+    const providerId = providerData.data.provider.id;
+
+    const createRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerId}/models`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -373,17 +391,16 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         name: "Claude Sonnet",
-        provider: "anthropic",
-        modelId: "claude-sonnet-4-5",
-        endpoint: "https://api.anthropic.com"
+        modelId: "claude-sonnet-4-5"
       })
     });
     const createData = await createRes.json();
     assert.equal(createRes.status, 201);
     assert.equal(createData.data.model.modelId, "claude-sonnet-4-5");
+    const modelId = createData.data.model.id;
 
-    const updateRes = await fetch(`${baseUrl}/api/v1/models/${createData.data.model.id}`, {
-      method: "PUT",
+    const updateRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerId}/models/${modelId}`, {
+      method: "PATCH",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json"
@@ -394,7 +411,7 @@ describe("security hardening", () => {
     assert.equal(updateRes.status, 200);
     assert.equal(updateData.data.model.name, "Claude Sonnet Default");
 
-    const defaultRes = await fetch(`${baseUrl}/api/v1/models/${createData.data.model.id}/set-default`, {
+    const defaultRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerId}/models/${modelId}/set-default`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -402,25 +419,16 @@ describe("security hardening", () => {
     assert.equal(defaultRes.status, 200);
     assert.equal(defaultData.data.model.isDefault, true);
 
-    const listRes = await fetch(`${baseUrl}/api/v1/models`, {
+    const listRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const listData = await listRes.json();
     assert.equal(listData.data.models.some(
       (model: { id: string; isDefault: boolean }) =>
-        model.id === createData.data.model.id && model.isDefault
+        model.id === modelId && model.isDefault
     ), true);
 
-    const healthRes = await fetch(`${baseUrl}/api/v1/models/${createData.data.model.id}/check`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const healthData = await healthRes.json();
-    assert.equal(healthRes.status, 200);
-    assert.equal(healthData.data.health.healthy, true);
-    assert.equal(healthData.data.health.checks.modelConfigured, true);
-
-    const deleteRes = await fetch(`${baseUrl}/api/v1/models/${createData.data.model.id}`, {
+    const deleteRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerId}/models/${modelId}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -455,7 +463,25 @@ describe("security hardening", () => {
     });
     const projectData = await projectRes.json();
 
-    const modelRes = await fetch(`${baseUrl}/api/v1/models`, {
+    const providerRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        name: "Anthropic",
+        providerKey: "anthropic",
+        baseUrl: "https://api.anthropic.com",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"]
+      })
+    });
+    const providerData = await providerRes.json();
+    const providerId = providerData.data.provider.id;
+
+    const modelRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerId}/models`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -463,7 +489,6 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         name: "Claude Sonnet",
-        provider: "anthropic",
         modelId: "claude-sonnet-4-5"
       })
     });
@@ -491,6 +516,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
+        aiTool: "claude",
         credentialMode: "stored_encrypted_key",
         apiKeyId: keyData.data.apiKey.id,
         modelId: modelData.data.model.id
@@ -520,7 +546,25 @@ describe("security hardening", () => {
     const ownerData = await ownerRes.json();
     const ownerToken = ownerData.data.token;
 
-    const modelRes = await fetch(`${baseUrl}/api/v1/models`, {
+    const ownerProviderRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ownerToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        name: "Anthropic",
+        providerKey: "anthropic",
+        baseUrl: "https://api.anthropic.com",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"]
+      })
+    });
+    const ownerProviderData = await ownerProviderRes.json();
+    const ownerProviderId = ownerProviderData.data.provider.id;
+
+    const modelRes = await fetch(`${baseUrl}/api/v1/model-providers/${ownerProviderId}/models`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${ownerToken}`,
@@ -528,7 +572,6 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         name: "Owner Model",
-        provider: "anthropic",
         modelId: "claude-owner"
       })
     });
@@ -568,6 +611,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
+        aiTool: "claude",
         credentialMode: "host_environment",
         modelId: modelData.data.model.id
       })
@@ -613,6 +657,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
+        aiTool: "claude",
         credentialMode: "host_environment"
       })
     });
@@ -677,6 +722,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
+        aiTool: "claude",
         credentialMode: "host_environment"
       })
     });
@@ -740,6 +786,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
+        aiTool: "claude",
         credentialMode: "host_environment"
       })
     });
@@ -799,6 +846,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
+        aiTool: "claude",
         credentialMode: "host_environment"
       })
     });
@@ -856,6 +904,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
+        aiTool: "claude",
         credentialMode: "host_environment"
       })
     });
@@ -1022,7 +1071,7 @@ describe("security hardening", () => {
     assert.equal(deleteRes.status, 200);
   });
 
-  it("injects project agents and skills into generated config", async () => {
+  it("injects project skills into generated config", async () => {
     const registerRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1048,21 +1097,6 @@ describe("security hardening", () => {
       })
     });
     const projectData = await projectRes.json();
-
-    const agentRes = await fetch(`${baseUrl}/api/v1/agents`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        projectId: projectData.data.project.id,
-        name: "Code Reviewer",
-        customPrompt: "Review diffs only."
-      })
-    });
-    const agentData = await agentRes.json();
-    assert.equal(agentRes.status, 201);
 
     const skillRes = await fetch(`${baseUrl}/api/v1/skills`, {
       method: "POST",
@@ -1109,13 +1143,10 @@ describe("security hardening", () => {
 
     assert.equal(writeRes.status, 200);
     assert.ok(writeData.data.result.writtenFiles.includes("CLAUDE.md"));
-    assert.ok(writeData.data.result.writtenFiles.some((file: string) => file.startsWith(".claude/agents/")));
     assert.ok(writeData.data.result.writtenFiles.some((file: string) => file.startsWith(".claude/skills/")));
 
     const generatedPaths = writeData.data.result.writtenFiles as string[];
-    assert.equal(generatedPaths.includes(".claude/agents/code-reviewer.md"), true);
     assert.equal(generatedPaths.includes(".claude/skills/safe-review/SKILL.md"), true);
-    assert.equal(agentData.data.agent.projectId, projectData.data.project.id);
   });
 
   it("previews and applies project template sync using the project's selected template", async () => {
@@ -1150,6 +1181,19 @@ describe("security hardening", () => {
     });
     const projectData = await projectRes.json();
     assert.equal(projectRes.status, 201);
+
+    const bindRes = await fetch(
+      `${baseUrl}/api/v1/projects/${projectData.data.project.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ templateId: "builtin-claude-code" })
+      }
+    );
+    assert.equal(bindRes.status, 200);
 
     const previewMissingRes = await fetch(
       `${baseUrl}/api/v1/projects/${projectData.data.project.id}/config/sync/preview`,

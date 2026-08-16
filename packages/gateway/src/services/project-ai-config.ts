@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { safeResolve, validateProjectRoot } from "../lib/safe-resolve.js";
@@ -16,29 +16,14 @@ export interface ProjectAiConfigFile {
   sizeBytes: number;
 }
 
-export interface AiConfigForm {
-  filePath: string;
-  title: string;
-  fields: Array<{
-    key: string;
-    label: string;
-    inputType: "text" | "textarea" | "select" | "number" | "boolean" | "list";
-    path: string;
-    options?: string[] | undefined;
-  }>;
-}
-
 export interface ProjectAiConfigSnapshot {
   adapter: AdapterId;
   projectRoot: string;
   files: ProjectAiConfigFile[];
-  forms: AiConfigForm[];
 }
 
 const maxConfigFileBytes = 128 * 1024;
 const maxConfigWriteBytes = 128 * 1024;
-const maxDiscoveredFiles = 100;
-const maxDiscoveryDepth = 8;
 
 const allowedRootFiles = new Set([
   "AGENTS.md",
@@ -47,8 +32,6 @@ const allowedRootFiles = new Set([
   "opencode.json",
   "opencode.jsonc"
 ]);
-
-const allowedConfigRoots = [".claude", ".opencode", ".codex", ".kimi-code"];
 
 export async function readProjectAiConfig(
   projectRoot: string,
@@ -62,8 +45,7 @@ export async function readProjectAiConfig(
   return {
     adapter,
     projectRoot: approvedRoot,
-    files,
-    forms: formsForAdapter(adapter)
+    files
   };
 }
 
@@ -80,8 +62,7 @@ export async function readGlobalAiConfig(adapter: AdapterId): Promise<ProjectAiC
   return {
     adapter,
     projectRoot: root,
-    files,
-    forms: formsForAdapter(adapter)
+    files
   };
 }
 
@@ -113,7 +94,6 @@ function projectCandidateFilesForAdapter(adapter: AdapterId, discoveredFiles: st
     if (!hasInstructionFile(discoveredFiles, adapter)) {
       candidates.add("CLAUDE.md");
     }
-    candidates.delete(".claude/CLAUDE.md");
     return [...candidates];
   }
 
@@ -135,38 +115,21 @@ function primaryInstructionFilesForAdapter(adapter: AdapterId): string[] {
 
 function candidateFilesForAdapter(adapter: AdapterId): string[] {
   if (adapter === "claude") {
-    return [
-      "CLAUDE.md",
-      ".claude/settings.json",
-      ".claude/settings.local.json",
-      ".claude/hooks/openforge-guard.mjs"
-    ];
+    return ["CLAUDE.md"];
   }
   if (adapter === "opencode") {
     return [
       "AGENTS.md",
       "opencode.json",
-      "opencode.jsonc",
-      ".opencode/agents/code-reviewer.md",
-      ".opencode/commands/review.md",
-      ".opencode/commands/verify.md"
+      "opencode.jsonc"
     ];
   }
   if (adapter === "kimi") {
-    return [
-      "AGENTS.md",
-      ".kimi-code/AGENTS.md",
-      ".kimi-code/mcp.json",
-      ".kimi-code/agents/code-reviewer.md",
-      ".kimi-code/agents/planner.md"
-    ];
+    return ["AGENTS.md"];
   }
   return [
     "AGENTS.md",
-    "AGENTS.override.md",
-    ".codex/config.toml",
-    ".codex/agents/code-reviewer.md",
-    ".codex/agents/planner.md"
+    "AGENTS.override.md"
   ];
 }
 
@@ -177,42 +140,7 @@ async function discoverExistingConfigFiles(projectRoot: string): Promise<string[
       found.push(rootFile);
     }
   }
-  for (const root of allowedConfigRoots) {
-    const rootPath = safeResolve(projectRoot, root);
-    if (await isDirectory(rootPath)) {
-      await walkConfigTree(projectRoot, root, 0, found);
-    }
-  }
   return found;
-}
-
-async function walkConfigTree(
-  projectRoot: string,
-  relativeDir: string,
-  depth: number,
-  found: string[]
-): Promise<void> {
-  if (depth > maxDiscoveryDepth || found.length >= maxDiscoveredFiles) {
-    return;
-  }
-
-  const directory = safeResolve(projectRoot, relativeDir);
-  const entries = await readdir(directory, { withFileTypes: true });
-  for (const entry of entries) {
-    if (found.length >= maxDiscoveredFiles) {
-      return;
-    }
-
-    const relativePath = path.posix.join(relativeDir, entry.name);
-    const absolutePath = safeResolve(projectRoot, relativePath);
-    if (entry.isDirectory()) {
-      await walkConfigTree(projectRoot, relativePath, depth + 1, found);
-      continue;
-    }
-    if (entry.isFile()) {
-      found.push(relativePath);
-    }
-  }
 }
 
 async function readProjectConfigFile(projectRoot: string, relativePath: string): Promise<ProjectAiConfigFile> {
@@ -320,93 +248,6 @@ function candidateGlobalFilesForAdapter(adapter: AdapterId): string[] {
   return ["AGENTS.md", "AGENTS.override.md", "config.toml"];
 }
 
-function formsForAdapter(adapter: AdapterId): AiConfigForm[] {
-  if (adapter === "claude") {
-    return [
-      {
-        filePath: ".claude/settings.json",
-        title: "Claude Code Settings",
-        fields: [
-          { key: "permissions.allow", label: "Allowed Tools", inputType: "list", path: "permissions.allow" },
-          { key: "permissions.deny", label: "Denied Tools", inputType: "list", path: "permissions.deny" },
-          { key: "hooks.PermissionRequest", label: "Permission Request Hooks", inputType: "textarea", path: "hooks.PermissionRequest" }
-        ]
-      },
-      {
-        filePath: "CLAUDE.md",
-        title: "Claude Instructions",
-        fields: [
-          { key: "content", label: "Instructions", inputType: "textarea", path: "$content" }
-        ]
-      }
-    ];
-  }
-  if (adapter === "opencode") {
-    return [
-      {
-        filePath: "opencode.json",
-        title: "OpenCode Config",
-        fields: [
-          { key: "model", label: "Default Model", inputType: "text", path: "model" },
-          { key: "default_agent", label: "Default Agent", inputType: "text", path: "default_agent" },
-          { key: "share", label: "Sharing", inputType: "select", path: "share", options: ["manual", "auto", "disabled"] },
-          { key: "instructions", label: "Instruction Files", inputType: "list", path: "instructions" }
-        ]
-      },
-      {
-        filePath: "AGENTS.md",
-        title: "OpenCode Instructions",
-        fields: [
-          { key: "content", label: "Instructions", inputType: "textarea", path: "$content" }
-        ]
-      }
-    ];
-  }
-  if (adapter === "kimi") {
-    return [
-      {
-        filePath: "AGENTS.md",
-        title: "Kimi Code Instructions",
-        fields: [
-          { key: "content", label: "Instructions", inputType: "textarea", path: "$content" }
-        ]
-      }
-    ];
-  }
-  return [
-    {
-      filePath: ".codex/config.toml",
-      title: "Codex Config",
-      fields: [
-        { key: "model", label: "Default Model", inputType: "text", path: "model" },
-        {
-          key: "approval_policy",
-          label: "Approval Policy",
-          inputType: "select",
-          path: "approval_policy",
-          options: ["untrusted", "on-request", "on-failure", "never"]
-        },
-        {
-          key: "sandbox_mode",
-          label: "Sandbox Mode",
-          inputType: "select",
-          path: "sandbox_mode",
-          options: ["read-only", "workspace-write", "danger-full-access"]
-        },
-        { key: "project_doc_max_bytes", label: "Project Doc Max Bytes", inputType: "number", path: "project_doc_max_bytes" },
-        { key: "features.web_search_request", label: "Web Search", inputType: "boolean", path: "features.web_search_request" }
-      ]
-    },
-    {
-      filePath: "AGENTS.md",
-      title: "Codex Instructions",
-      fields: [
-        { key: "content", label: "Instructions", inputType: "textarea", path: "$content" }
-      ]
-    }
-  ];
-}
-
 function redactSensitiveContent(content: string): string {
   return content
     .replace(/("(?:api[_-]?key|token|secret|password|authorization)"\s*:\s*")[^"]*(")/giu, "$1[REDACTED]$2")
@@ -415,20 +256,14 @@ function redactSensitiveContent(content: string): string {
 }
 
 function isAllowedProjectConfigPath(relativePath: string): boolean {
-  if (allowedRootFiles.has(relativePath)) {
-    return true;
-  }
-  return allowedConfigRoots.some((root) => relativePath.startsWith(`${root}/`));
+  return allowedRootFiles.has(relativePath);
 }
 
 function roleFor(relativePath: string): ProjectAiConfigFile["role"] {
-  if (relativePath === "AGENTS.md" || relativePath === "AGENTS.override.md" || relativePath.endsWith("CLAUDE.md")) {
+  if (relativePath === "AGENTS.md" || relativePath === "AGENTS.override.md") {
     return "instructions";
   }
-  if (relativePath.includes("/agents/")) return "agent";
-  if (relativePath.includes("/commands/")) return "command";
-  if (relativePath.includes("/skills/")) return "skill";
-  if (relativePath.includes("/hooks/")) return "hook";
+  if (relativePath.endsWith("CLAUDE.md")) return "instructions";
   if (relativePath.endsWith(".json") || relativePath.endsWith(".jsonc") || relativePath.endsWith(".toml")) {
     return "settings";
   }
@@ -448,15 +283,6 @@ function fileTypeFor(filePath: string): string {
 async function isFile(pathname: string): Promise<boolean> {
   try {
     return (await stat(pathname)).isFile();
-  } catch (error) {
-    if (errorCode(error) === "ENOENT") return false;
-    throw error;
-  }
-}
-
-async function isDirectory(pathname: string): Promise<boolean> {
-  try {
-    return (await stat(pathname)).isDirectory();
   } catch (error) {
     if (errorCode(error) === "ENOENT") return false;
     throw error;

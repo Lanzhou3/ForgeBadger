@@ -124,7 +124,6 @@ async function restoreSnapshot(input: RestoreSnapshotInput): Promise<{
     aiTool: project.aiTool,
     workingDir: project.path,
     ...(input.snapshot.modelId ? { modelId: input.snapshot.modelId } : {}),
-    ...(input.snapshot.agentId ? { agentId: input.snapshot.agentId } : {}),
     credentialMode: "host_environment"
   });
   if (baseSession.status === "running") {
@@ -141,11 +140,9 @@ async function restoreSnapshot(input: RestoreSnapshotInput): Promise<{
   }
 
   const nextModelId = input.snapshot.modelId ?? baseSession.modelId ?? undefined;
-  const nextAgentId = input.snapshot.agentId ?? baseSession.agentId ?? undefined;
-  if (nextModelId || nextAgentId) {
+  if (nextModelId) {
     sessionRepo.update(baseSession.id, {
-      modelId: nextModelId ?? null,
-      ...(nextAgentId !== undefined ? { agentId: nextAgentId } : {})
+      modelId: nextModelId
     });
   }
   const pluginDirs = await prepareAdapterLaunchExtras(
@@ -244,7 +241,6 @@ function toSnapshotPayload(snapshot: SessionSnapshot) {
     projectId: snapshot.projectId,
     tmuxSession: snapshot.tmuxSession,
     modelId: snapshot.modelId,
-    agentId: snapshot.agentId,
     configVersion: snapshot.configVersion,
     metadata: parseMetadata(snapshot.metadata),
     createdAt: snapshot.createdAt.toISOString()

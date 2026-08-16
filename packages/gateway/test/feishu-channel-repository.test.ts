@@ -88,7 +88,7 @@ describe("FeishuChannelRepository", () => {
 
     repo.failInbox(recovered!.id, recovered!.claimToken!, {
       retryable: true,
-      errorCode: "COPILOT_BUSY",
+      errorCode: "FEISHU_INBOX_BUSY",
       retryAt: new Date(startedAt + 100)
     });
     assert.equal(repo.claimNextInbox(new Date(startedAt + 99), 50), undefined);

@@ -11,8 +11,7 @@ import { createGatewayApp } from "../src/server.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { SessionSnapshotRepository } from "../src/db/repositories/session-snapshot-repository.js";
-import { ModelRepository } from "../src/db/repositories/model-repository.js";
-import { AgentRepository } from "../src/db/repositories/agent-repository.js";
+import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import type { TmuxCreateOptions } from "../src/services/tmux.js";
@@ -167,22 +166,25 @@ describe("session snapshot restore", () => {
     });
     mkdirSync(project.path, { recursive: true });
     const sessionRepo = new SessionRepository(db, auth.userId);
-    const model = new ModelRepository(db, auth.userId).create({
-      name: "Snapshot Model",
-      provider: "anthropic",
-      modelId: "claude-test"
+    const providerRepo = new ModelProviderRepository(db, auth.userId, masterKey);
+    const provider = providerRepo.createProviderProfile({
+      providerKey: "anthropic",
+      name: "Anthropic",
+      authType: "api_key",
+      apiFormat: "anthropic",
+      supportedAdapters: ["claude"]
     });
-    const agent = new AgentRepository(db, auth.userId).create({
-      projectId: project.id,
-      name: "Snapshot Agent"
+    const model = providerRepo.createModelProfile({
+      providerProfileId: provider.id,
+      name: "Snapshot Model",
+      modelId: "claude-test"
     });
     const session = sessionRepo.create({
       projectId: project.id,
       name: "Snapshot Session",
       aiTool: "claude",
       workingDir: project.path,
-      modelId: model.id,
-      agentId: agent.id
+      modelId: model.id
     });
     sessionRepo.update(session.id, {
       status: "stopped",
@@ -194,7 +196,6 @@ describe("session snapshot restore", () => {
       projectId: project.id,
       tmuxSession,
       modelId: model.id,
-      agentId: agent.id,
       metadata: { reason: "test" }
     });
     return { sessionId: session.id, snapshotId: snapshot.id };

@@ -32,6 +32,28 @@ describe("InMemorySessionManager", () => {
     assert.deepEqual(calls, ["create:of-user_123-session_abcdef"]);
   });
 
+  it("clears NO_COLOR so CLI colors render in the Web terminal", async () => {
+    let capturedEnv: Record<string, string> | undefined;
+    const manager = new InMemorySessionManager({
+      ...fakeTmux([]),
+      async createSession(options) {
+        capturedEnv = options.env;
+      }
+    });
+
+    await manager.createSession({
+      userId: "user_123456",
+      sessionId: "session_abcdef",
+      launchPlan: launchPlan()
+    });
+
+    // The Web terminal renders ANSI colors, so a host-leaked NO_COLOR=1
+    // (inherited from the tmux server global environment) must be overridden
+    // to an empty value — CLI TUI (e.g. Claude Code) then renders in color.
+    assert.equal(capturedEnv?.NO_COLOR, "");
+    assert.equal(capturedEnv?.["OPENFORGE_ATTACH_TOKEN"]?.length, 36);
+  });
+
   it("marks a session exited when stopped", async () => {
     const calls: string[] = [];
     const manager = new InMemorySessionManager(fakeTmux(calls));

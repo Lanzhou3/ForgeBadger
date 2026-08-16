@@ -6,7 +6,14 @@ import {
 } from "../lib/dependency-check.js";
 
 export type AdapterId = "claude" | "opencode" | "codex" | "kimi";
-export type AdapterRuntimeMode = "terminal" | "app-server-stdio" | "app-server-websocket";
+export type AdapterRuntimeMode = "terminal";
+export type PortfolioWorkerReadiness = "claude_session_start" | "unsupported";
+
+/** Phase 4 keeps every adapter input-disabled pending Task 8.2 evidence. */
+export interface PortfolioWorkerCapability {
+  readiness: PortfolioWorkerReadiness;
+  inputRuntime: "unverified_no_input";
+}
 
 export interface AdapterDefinition {
   id: AdapterId;
@@ -17,6 +24,7 @@ export interface AdapterDefinition {
   launchEnabled: boolean;
   configDir: string;
   runtimeModes: AdapterRuntimeMode[];
+  portfolioWorker: PortfolioWorkerCapability;
 }
 
 export interface AdapterDiscoveryResult extends AdapterDefinition {
@@ -35,7 +43,8 @@ const adapterDefinitions: AdapterDefinition[] = [
     supportLevel: "supported",
     launchEnabled: true,
     configDir: ".claude",
-    runtimeModes: ["terminal"]
+    runtimeModes: ["terminal"],
+    portfolioWorker: { readiness: "claude_session_start", inputRuntime: "unverified_no_input" }
   },
   {
     id: "opencode",
@@ -45,7 +54,8 @@ const adapterDefinitions: AdapterDefinition[] = [
     supportLevel: "supported",
     launchEnabled: true,
     configDir: ".opencode",
-    runtimeModes: ["terminal"]
+    runtimeModes: ["terminal"],
+    portfolioWorker: { readiness: "unsupported", inputRuntime: "unverified_no_input" }
   },
   {
     id: "codex",
@@ -55,7 +65,8 @@ const adapterDefinitions: AdapterDefinition[] = [
     supportLevel: "supported",
     launchEnabled: true,
     configDir: ".codex",
-    runtimeModes: ["terminal", "app-server-stdio", "app-server-websocket"]
+    runtimeModes: ["terminal"],
+    portfolioWorker: { readiness: "unsupported", inputRuntime: "unverified_no_input" }
   },
   {
     id: "kimi",
@@ -65,14 +76,16 @@ const adapterDefinitions: AdapterDefinition[] = [
     supportLevel: "supported",
     launchEnabled: true,
     configDir: ".kimi-code",
-    runtimeModes: ["terminal"]
+    runtimeModes: ["terminal"],
+    portfolioWorker: { readiness: "unsupported", inputRuntime: "unverified_no_input" }
   }
 ];
 
 export function listAdapterDefinitions(): AdapterDefinition[] {
   return adapterDefinitions.map((definition) => ({
     ...definition,
-    runtimeModes: [...definition.runtimeModes]
+    runtimeModes: [...definition.runtimeModes],
+    portfolioWorker: { ...definition.portfolioWorker }
   }));
 }
 
@@ -85,7 +98,11 @@ export function getAdapterDefinition(adapterId: AdapterId): AdapterDefinition {
   if (!definition) {
     throw new Error(`Unknown adapter: ${adapterId}`);
   }
-  return { ...definition, runtimeModes: [...definition.runtimeModes] };
+  return {
+    ...definition,
+    runtimeModes: [...definition.runtimeModes],
+    portfolioWorker: { ...definition.portfolioWorker }
+  };
 }
 
 export async function getAdapterLaunchStatus(
@@ -136,6 +153,7 @@ function toAdapterDiscoveryResult(
   return {
     ...definition,
     runtimeModes: [...definition.runtimeModes],
+    portfolioWorker: { ...definition.portfolioWorker },
     launchEnabled: definition.launchEnabled && status.available && terminalLaunchSupported,
     available: status.available,
     status: status.available ? "available" : "missing",

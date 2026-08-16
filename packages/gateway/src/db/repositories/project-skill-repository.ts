@@ -37,7 +37,11 @@ export class ProjectSkillRepository {
       .from(skills)
       .leftJoin(
         projectSkills,
-        and(eq(projectSkills.skillId, skills.id), eq(projectSkills.projectId, projectId))
+        and(
+          eq(projectSkills.userId, this.userId),
+          eq(projectSkills.skillId, skills.id),
+          eq(projectSkills.projectId, projectId)
+        )
       )
       .where(readableVisibility)
       .all() as Array<{
@@ -73,21 +77,33 @@ export class ProjectSkillRepository {
     const existing = this.drizzle
       .select()
       .from(projectSkills)
-      .where(and(eq(projectSkills.projectId, projectId), eq(projectSkills.skillId, skillId)))
+      .where(
+        and(
+          eq(projectSkills.userId, this.userId),
+          eq(projectSkills.projectId, projectId),
+          eq(projectSkills.skillId, skillId)
+        )
+      )
       .get();
 
     if (existing) {
       return this.drizzle
         .update(projectSkills)
         .set({ isEnabled: enabled })
-        .where(and(eq(projectSkills.projectId, projectId), eq(projectSkills.skillId, skillId)))
+        .where(
+          and(
+            eq(projectSkills.userId, this.userId),
+            eq(projectSkills.projectId, projectId),
+            eq(projectSkills.skillId, skillId)
+          )
+        )
         .returning()
         .get() as { projectId: string; skillId: string; isEnabled: boolean } | undefined;
     }
 
     return this.drizzle
       .insert(projectSkills)
-      .values({ projectId, skillId, isEnabled: enabled })
+      .values({ userId: this.userId, projectId, skillId, isEnabled: enabled })
       .returning()
       .get() as { projectId: string; skillId: string; isEnabled: boolean } | undefined;
   }

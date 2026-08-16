@@ -11,7 +11,7 @@ export interface CreateProjectInput {
   description?: string | undefined;
   techStack?: string | undefined;
   aiTool: string;
-  templateId?: string | undefined;
+  templateId?: string | null | undefined;
 }
 
 export interface Project {

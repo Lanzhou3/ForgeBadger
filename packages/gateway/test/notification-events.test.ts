@@ -24,27 +24,51 @@ function createTestDb(): Database {
 }
 
 describe("notification event persistence", () => {
-  it("persists session events and annotates the emitted event with notification metadata", () => {
+  it("does not persist session lifecycle events as notifications", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("event-notify@example.com", "hash");
     const eventBus = new OpenForgeEventBus();
     attachNotificationPersistence({ db, eventBus });
 
-    const event = {
+    eventBus.emitEvent({
       type: "session_created" as const,
       userId: user.id,
       sessionId: "session-1",
       projectId: "project-1",
       name: "Session 1"
-    };
-    eventBus.emitEvent(event);
+    });
+    eventBus.emitEvent({
+      type: "session_status_changed" as const,
+      userId: user.id,
+      sessionId: "session-1",
+      oldStatus: "starting",
+      newStatus: "running"
+    });
 
     const notifications = new NotificationRepository(db, user.id).list();
-    assert.equal(notifications.length, 1);
-    assert.equal(notifications[0]!.type, "session_created");
-    assert.equal(notifications[0]!.message, "Session 1");
-    assert.equal(event.notificationId, notifications[0]!.id);
-    assert.ok(event.notificationCreatedAt);
+    assert.equal(notifications.length, 0);
+    db.close();
+  });
+
+  it("does not persist CLI notifications outside the allowlist", () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("filtered-notify@example.com", "hash");
+    const eventBus = new OpenForgeEventBus();
+    attachNotificationPersistence({ db, eventBus });
+
+    for (const notificationType of ["task_failed", "session_ended", "status"]) {
+      eventBus.emitEvent({
+        type: "claude_notification",
+        userId: user.id,
+        sessionId: "session-9",
+        hookEventName: "Notification",
+        notificationType,
+        message: "filtered out"
+      });
+    }
+
+    const notifications = new NotificationRepository(db, user.id).list();
+    assert.equal(notifications.length, 0);
     db.close();
   });
 

@@ -7,12 +7,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  AgentRepository,
   ActivityRepository,
   ApiKeyRepository,
-  ModelRepository,
   NotificationRepository,
-  ProjectAgentSequenceRepository,
   ProjectRepository,
   SessionRepository,
   SkillRepository,
@@ -190,27 +187,17 @@ describe("db repositories", () => {
         path: "/tmp/activity",
         aiTool: "claude"
       });
-      const agentA = new AgentRepository(db, userA.id).create({
-        projectId: project.id,
-        name: "Agent A"
-      });
-      const agentB = new AgentRepository(db, userA.id).create({
-        projectId: project.id,
-        name: "Agent B"
-      });
       const session = new SessionRepository(db, userA.id).create({
         projectId: project.id,
         name: "Activity Session",
         aiTool: "claude",
-        workingDir: project.path,
-        agentId: agentA.id
+        workingDir: project.path
       });
       const otherSession = new SessionRepository(db, userA.id).create({
         projectId: project.id,
         name: "Other Activity Session",
         aiTool: "claude",
-        workingDir: project.path,
-        agentId: agentB.id
+        workingDir: project.path
       });
       const repoA = new ActivityRepository(db, userA.id);
       const repoB = new ActivityRepository(db, userB.id);
@@ -233,7 +220,6 @@ describe("db repositories", () => {
 
       assert.equal(repoA.list({ sessionId: session.id }).length, 1);
       assert.equal(repoA.list({ projectId: project.id }).length, 2);
-      assert.equal(repoA.list({ projectId: project.id, agentId: agentA.id }).length, 1);
       assert.equal(repoB.list({ projectId: project.id }).length, 0);
     });
 
@@ -675,68 +661,6 @@ describe("db repositories", () => {
     });
   });
 
-  describe("ModelRepository", () => {
-    it("creates and lists models", () => {
-      const user = userRepo.create("model-user@example.com", "hash");
-      const repo = new ModelRepository(db, user.id);
-
-      const model = repo.create({ name: "Claude Sonnet", provider: "anthropic", modelId: "claude-sonnet" });
-      assert.equal(model.name, "Claude Sonnet");
-      assert.equal(repo.list().length, 1);
-    });
-
-    it("sets default model", () => {
-      const user = userRepo.create("def-user@example.com", "hash");
-      const repo = new ModelRepository(db, user.id);
-      const m1 = repo.create({ name: "M1", provider: "p", modelId: "m1" });
-      const m2 = repo.create({ name: "M2", provider: "p", modelId: "m2" });
-
-      assert.ok(repo.setDefault(m1.id));
-      assert.ok(repo.setDefault(m2.id));
-
-      const updatedM1 = repo.getById(m1.id);
-      const updatedM2 = repo.getById(m2.id);
-      assert.equal(updatedM1!.isDefault, false);
-      assert.equal(updatedM2!.isDefault, true);
-    });
-
-    it("sets default for provider-backed models without legacy rows", () => {
-      const user = userRepo.create("provider-default@example.com", "hash");
-      const providerRepo = new ModelProviderRepository(db, user.id, "0123456789abcdef0123456789abcdef");
-      const provider = providerRepo.createProviderProfile({
-        name: "DeepSeek",
-        providerKey: "deepseek",
-        baseUrl: "https://api.deepseek.com",
-        authType: "api_key",
-        apiFormat: "openai-compatible",
-        supportedAdapters: ["opencode"]
-      });
-      const model = providerRepo.createModelProfile({
-        providerProfileId: provider.id,
-        name: "DeepSeek Chat",
-        modelId: "deepseek-chat",
-        mirrorLegacy: false
-      });
-      const repo = new ModelRepository(db, user.id);
-
-      const updated = repo.setDefault(model.id);
-
-      assert.ok(updated);
-      assert.equal(updated.id, model.id);
-      assert.equal(updated.isDefault, true);
-    });
-
-    it("enforces tenant isolation for models", () => {
-      const userA = userRepo.create("ma@example.com", "hash");
-      const userB = userRepo.create("mb@example.com", "hash");
-      const repoA = new ModelRepository(db, userA.id);
-      const repoB = new ModelRepository(db, userB.id);
-
-      const model = repoA.create({ name: "MA", provider: "p", modelId: "m" });
-      assert.equal(repoB.getById(model.id), undefined);
-    });
-  });
-
   describe("ApiKeyRepository", () => {
     it("creates and lists api keys without decrypted values", () => {
       const user = userRepo.create("key-user@example.com", "hash");
@@ -798,97 +722,6 @@ describe("db repositories", () => {
       assert.notEqual(repo.getById(key.id)!.keyEncrypted, before!.keyEncrypted);
       assert.equal(repo.decryptForLaunch(key.id), "test-api-key-new");
       assert.equal(JSON.stringify(repo.list()).includes("test-api-key-new"), false);
-    });
-  });
-
-  describe("AgentRepository", () => {
-    it("creates and lists agents", () => {
-      const user = userRepo.create("agent-user@example.com", "hash");
-      const repo = new AgentRepository(db, user.id);
-
-      const agent = repo.create({ name: "Coder" });
-      assert.equal(agent.name, "Coder");
-      assert.equal(repo.list().length, 1);
-    });
-
-    it("updates an agent", () => {
-      const user = userRepo.create("upd-agent@example.com", "hash");
-      const repo = new AgentRepository(db, user.id);
-      const agent = repo.create({ name: "Old Name" });
-
-      const updated = repo.update(agent.id, { name: "New Name" });
-      assert.ok(updated);
-      assert.equal(updated!.name, "New Name");
-    });
-
-    it("enforces tenant isolation for agents", () => {
-      const userA = userRepo.create("aa@example.com", "hash");
-      const userB = userRepo.create("ab@example.com", "hash");
-      const repoA = new AgentRepository(db, userA.id);
-      const repoB = new AgentRepository(db, userB.id);
-
-      const agent = repoA.create({ name: "A-Agent" });
-      assert.equal(repoB.getById(agent.id), undefined);
-    });
-
-    it("rejects project and model references from another user", () => {
-      const userA = userRepo.create("agent-owner@example.com", "hash");
-      const userB = userRepo.create("agent-other@example.com", "hash");
-      const projectA = new ProjectRepository(db, userA.id).create({
-        name: "A Project",
-        path: "/tmp/agent-a",
-        aiTool: "claude"
-      });
-      const modelA = new ModelRepository(db, userA.id).create({
-        name: "A Model",
-        provider: "anthropic",
-        modelId: "claude"
-      });
-      const repoB = new AgentRepository(db, userB.id);
-
-      assert.throws(() => repoB.create({ name: "Cross Project", projectId: projectA.id }), /Project not found/i);
-      assert.throws(() => repoB.create({ name: "Cross Model", modelId: modelA.id }), /Model not found/i);
-    });
-  });
-
-  describe("ProjectAgentSequenceRepository", () => {
-    it("stores ordered project Agents for the current user", () => {
-      const user = userRepo.create("agent-sequence@example.com", "hash");
-      const project = new ProjectRepository(db, user.id).create({
-        name: "Sequence Project",
-        path: "/tmp/agent-sequence",
-        aiTool: "claude"
-      });
-      const agentRepo = new AgentRepository(db, user.id);
-      const first = agentRepo.create({ name: "First", projectId: project.id });
-      const second = agentRepo.create({ name: "Second", projectId: project.id });
-      const sequenceRepo = new ProjectAgentSequenceRepository(db, user.id);
-
-      const sequence = sequenceRepo.replace(project.id, [second.id, first.id]);
-
-      assert.deepEqual(sequence.map((item) => [item.agentId, item.position]), [
-        [second.id, 0],
-        [first.id, 1]
-      ]);
-      assert.deepEqual(sequenceRepo.list(project.id).map((item) => item.name), ["Second", "First"]);
-    });
-
-    it("rejects another user's project or Agents", () => {
-      const userA = userRepo.create("agent-sequence-a@example.com", "hash");
-      const userB = userRepo.create("agent-sequence-b@example.com", "hash");
-      const projectA = new ProjectRepository(db, userA.id).create({
-        name: "A Project",
-        path: "/tmp/agent-sequence-a",
-        aiTool: "claude"
-      });
-      const agentA = new AgentRepository(db, userA.id).create({
-        name: "A Agent",
-        projectId: projectA.id
-      });
-      const sequenceRepoB = new ProjectAgentSequenceRepository(db, userB.id);
-
-      assert.throws(() => sequenceRepoB.replace(projectA.id, [agentA.id]), /Project not found/i);
-      assert.deepEqual(sequenceRepoB.list(projectA.id), []);
     });
   });
 

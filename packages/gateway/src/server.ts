@@ -1,19 +1,19 @@
 import express from "express";
 import { createServer as createHttpServer, type Server } from "node:http";
-import { homedir } from "node:os";
-import path from "node:path";
 
 import { InMemoryApiKeyStore } from "./secrets/api-key-store.js";
 import { InMemorySessionManager } from "./services/session-manager.js";
-import { CodexAppServerManager } from "./services/codex-app-server-manager.js";
 import { OpenForgeEventBus } from "./services/event-bus.js";
+import type { ClaudePortfolioWorker } from "./services/portfolio/claude-portfolio-worker.js";
+import type { OperationsRuntime } from "./services/portfolio/operations-runtime.js";
+import type { PortfolioExecutionRuntime } from "./services/startup.js";
 import { attachNotificationPersistence } from "./services/notification-events.js";
-import { attachCodexAppServerNotificationPersistence } from "./services/codex-app-server-events.js";
 import { attachTerminalWebSocket } from "./websocket/terminal.js";
 import { attachEventsWebSocket } from "./websocket/events.js";
 import type { Database } from "./db/types.js";
 import type { CommandRunner } from "./lib/dependency-check.js";
 import type { FeishuChannelRuntime } from "./services/integrations/feishu-channel-runtime.js";
+import { createPortfolioApiFacade, createPortfolioEventFacade, type PortfolioApiFacade } from "./services/portfolio/portfolio-api-service.js";
 
 import { mountRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -25,10 +25,23 @@ export interface ServerDeps {
   sessionManager: InMemorySessionManager;
   apiKeyStore: InMemoryApiKeyStore;
   eventBus: OpenForgeEventBus;
-  codexAppServerManager: CodexAppServerManager;
+  /** The only Portfolio object exposed to HTTP routes; no execution runtime leaks here. */
+  portfolioApi?: PortfolioApiFacade | undefined;
+  claudePortfolioWorker?: ClaudePortfolioWorker | undefined;
+  portfolioExecution?: PortfolioExecutionRuntime | undefined;
+  operationsRuntime?: Pick<OperationsRuntime, "stop"> | undefined;
   appVersion: string;
   adapterCommandRunner?: CommandRunner | undefined;
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
+}
+
+/**
+ * Process-only access to the composed Portfolio dispatcher. This is not
+ * exposed through Express, WebSocket, app.locals, or event dispatch; an
+ * in-process owner must explicitly obtain it to call core's launch boundary.
+ */
+export interface GatewayInternalServices {
+  getPortfolioExecution(): PortfolioExecutionRuntime;
 }
 
 export interface GatewayApp {
@@ -37,6 +50,7 @@ export interface GatewayApp {
   sessionManager: InMemorySessionManager;
   apiKeyStore: InMemoryApiKeyStore;
   eventBus: OpenForgeEventBus;
+  internalServices: GatewayInternalServices;
   recoveryReady: Promise<void>;
   close(): Promise<void>;
 }
@@ -48,7 +62,9 @@ export interface GatewayAppOptions {
   sessionManager: InMemorySessionManager;
   apiKeyStore: InMemoryApiKeyStore;
   eventBus?: OpenForgeEventBus;
-  codexAppServerManager?: CodexAppServerManager;
+  claudePortfolioWorker?: ClaudePortfolioWorker | undefined;
+  portfolioExecution?: PortfolioExecutionRuntime | undefined;
+  operationsRuntime?: Pick<OperationsRuntime, "stop"> | undefined;
   appVersion?: string;
   adapterCommandRunner?: CommandRunner | undefined;
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
@@ -66,7 +82,7 @@ export function createServer(deps: ServerDeps): express.Express {
       response.setHeader("vary", "Origin");
     }
     response.setHeader("access-control-allow-methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-    response.setHeader("access-control-allow-headers", "authorization,content-type");
+    response.setHeader("access-control-allow-headers", "authorization,content-type,idempotency-key");
     if (request.method === "OPTIONS") {
       response.status(204).end();
       return;
@@ -94,9 +110,8 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const sessionManager = options.sessionManager;
   const apiKeyStore = options.apiKeyStore;
   const eventBus = options.eventBus ?? new OpenForgeEventBus();
-  const codexAppServerManager = options.codexAppServerManager ?? new CodexAppServerManager({
-    runtimeRoot: defaultRuntimeRoot()
-  });
+  const internalServices = createGatewayInternalServices(options.portfolioExecution);
+  const portfolioApi = createPortfolioApiFacade({ db: options.db, events: createPortfolioEventFacade(eventBus) });
   const recoveryReady = Promise.resolve();
 
   const app = createServer({
@@ -106,7 +121,10 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     sessionManager,
     apiKeyStore,
     eventBus,
-    codexAppServerManager,
+    portfolioApi,
+    claudePortfolioWorker: options.claudePortfolioWorker,
+    portfolioExecution: options.portfolioExecution,
+    operationsRuntime: options.operationsRuntime,
     appVersion: options.appVersion ?? "0.0.0",
     adapterCommandRunner: options.adapterCommandRunner,
     feishuChannelRuntime: options.feishuChannelRuntime
@@ -115,11 +133,6 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const server = createHttpServer(app);
   let closed = false;
   attachNotificationPersistence({ db: options.db, eventBus });
-  attachCodexAppServerNotificationPersistence({
-    db: options.db,
-    manager: codexAppServerManager,
-    eventBus
-  });
   attachTerminalWebSocket({ server, sessionManager, jwtSecret });
   attachEventsWebSocket({ server, eventBus, jwtSecret });
 
@@ -129,6 +142,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     sessionManager,
     apiKeyStore,
     eventBus,
+    internalServices,
     recoveryReady,
     async close() {
       if (closed) {
@@ -137,14 +151,27 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
       closed = true;
 
       try {
+        await options.operationsRuntime?.stop();
         await options.feishuChannelRuntime?.stop();
-        codexAppServerManager.stopAll();
         await closeServerIfListening(server);
       } finally {
         options.db.close();
       }
     }
   };
+}
+
+function createGatewayInternalServices(
+  portfolioExecution: PortfolioExecutionRuntime | undefined
+): GatewayInternalServices {
+  return Object.freeze({
+    getPortfolioExecution(): PortfolioExecutionRuntime {
+      if (!portfolioExecution) {
+        throw new Error("PORTFOLIO_EXECUTION_RUNTIME_UNAVAILABLE");
+      }
+      return portfolioExecution;
+    }
+  });
 }
 
 async function closeServerIfListening(server: Server): Promise<void> {
@@ -161,10 +188,6 @@ async function closeServerIfListening(server: Server): Promise<void> {
       resolve();
     });
   });
-}
-
-function defaultRuntimeRoot(): string {
-  return path.join(process.env.OPENFORGE_STATE_DIR?.trim() || path.join(homedir(), ".openforge"), "runtime");
 }
 
 export function isAllowedLocalWebOrigin(origin: string | undefined): origin is string {

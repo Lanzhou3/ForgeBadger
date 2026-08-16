@@ -82,7 +82,6 @@ export interface CreateModelProfileInput {
   capabilities?: string[];
   contextWindow?: number | null;
   isDefault?: boolean;
-  mirrorLegacy?: boolean;
 }
 
 export interface UpdateModelProfileInput {
@@ -263,12 +262,6 @@ export class ModelProviderRepository {
   }
 
   deleteProviderProfile(id: string): boolean {
-    this.db.prepare(`
-      DELETE FROM models
-      WHERE user_id = ? AND id IN (
-        SELECT id FROM model_profiles WHERE provider_profile_id = ? AND user_id = ?
-      )
-    `).run(this.userId, id, this.userId);
     const result = this.db.prepare(`
       DELETE FROM model_provider_profiles WHERE id = ? AND user_id = ?
     `).run(id, this.userId);
@@ -298,16 +291,6 @@ export class ModelProviderRepository {
       now,
       now
     );
-    if (input.mirrorLegacy !== false) {
-      this.mirrorLegacyModel({
-        id,
-        provider,
-        name: input.name,
-        modelId: input.modelId,
-        isDefault: Boolean(input.isDefault),
-        now
-      });
-    }
     return this.getModelProfile(id) as ModelProfile;
   }
 
@@ -363,13 +346,6 @@ export class ModelProviderRepository {
       id,
       this.userId
     );
-    this.updateLegacyModelMirror({
-      id,
-      name: next.name,
-      modelId: next.modelId,
-      isDefault: next.isDefault,
-      now
-    });
     return this.getModelProfile(id);
   }
 
@@ -381,18 +357,12 @@ export class ModelProviderRepository {
     this.db.prepare(`
       UPDATE model_profiles SET is_default = 1, updated_at = ? WHERE id = ? AND user_id = ?
     `).run(now, id, this.userId);
-    this.db.prepare(`
-      UPDATE models SET is_default = 1, updated_at = ? WHERE id = ? AND user_id = ?
-    `).run(now, id, this.userId);
     return this.getModelProfile(id);
   }
 
   deleteModelProfile(id: string): boolean {
     const existing = this.getModelProfile(id);
     if (!existing) return false;
-    this.db.prepare(`
-      DELETE FROM models WHERE id = ? AND user_id = ?
-    `).run(id, this.userId);
     const result = this.db.prepare(`
       DELETE FROM model_profiles WHERE id = ? AND user_id = ?
     `).run(id, this.userId);
@@ -470,66 +440,7 @@ export class ModelProviderRepository {
     this.db.prepare(`
       UPDATE model_profiles SET is_default = 0, updated_at = ? WHERE user_id = ?
     `).run(Date.now(), this.userId);
-    this.db.prepare(`
-      UPDATE models SET is_default = 0, updated_at = ? WHERE user_id = ?
-    `).run(Date.now(), this.userId);
   }
-
-  private mirrorLegacyModel(input: {
-    id: string;
-    provider: ProviderProfile;
-    name: string;
-    modelId: string;
-    isDefault: boolean;
-    now: number;
-  }): void {
-    this.db.prepare(`
-      INSERT OR IGNORE INTO models (
-        id, user_id, name, provider, model_id, endpoint, status,
-        is_default, sort_order, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, 0, ?, ?)
-    `).run(
-      input.id,
-      this.userId,
-      input.name,
-      input.provider.providerKey,
-      input.modelId,
-      input.provider.baseUrl,
-      input.isDefault ? 1 : 0,
-      input.now,
-      input.now
-    );
-  }
-
-  private updateLegacyModelMirror(input: {
-    id: string;
-    name: string;
-    modelId: string;
-    isDefault: boolean;
-    now: number;
-  }): void {
-    this.db.prepare(`
-      UPDATE models
-      SET name = ?, model_id = ?, is_default = ?, updated_at = ?
-      WHERE id = ? AND user_id = ?
-    `).run(input.name, input.modelId, input.isDefault ? 1 : 0, input.now, input.id, this.userId);
-  }
-}
-
-export function toLegacyModel(profile: ModelProfile) {
-  return {
-    id: profile.id,
-    userId: profile.userId,
-    name: profile.name,
-    provider: profile.providerKey,
-    modelId: profile.modelId,
-    endpoint: profile.baseUrl,
-    status: profile.status,
-    isDefault: profile.isDefault,
-    sortOrder: profile.sortOrder,
-    createdAt: profile.createdAt,
-    updatedAt: profile.updatedAt
-  };
 }
 
 function toProviderProfile(row: ProviderProfileRow): ProviderProfile {

@@ -36,7 +36,7 @@ import {
   type FetchProviderModelsInput
 } from "../services/provider-model-fetch.js";
 
-const adapterSchema = z.enum(["claude", "opencode", "openforge-copilot", "codex", "kimi"]);
+const adapterSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
 const providerAdapterSchema = z.enum(["claude", "opencode", "kimi"]);
 const productTypeSchema = z.enum(["payg_api", "coding_plan", "token_plan", "subscription", "local"]);
 const createProviderSchema = z.object({
@@ -182,7 +182,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       if (isForeignKeyError(error)) {
         res.status(409).json({
           code: 1,
-          message: "Provider models are still referenced by a session or agent and cannot be deleted"
+          message: "Provider models are still referenced by a session and cannot be deleted"
         });
         return;
       }
@@ -360,7 +360,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       if (isForeignKeyError(error)) {
         res.status(409).json({
           code: 1,
-          message: "Model is still referenced by a session or agent and cannot be deleted"
+          message: "Model is still referenced by a session and cannot be deleted"
         });
         return;
       }
@@ -625,16 +625,6 @@ async function handleApplyRequest(input: {
     input.res.status(400).json({ code: 1, message: "Codex provider apply is disabled; Codex uses subscription SDK identity" });
     return;
   }
-  if (parseResult.data.adapter === "openforge-copilot") {
-    await handleCopilotApplyRequest({
-      repo,
-      provider,
-      modelProfileId: parseResult.data.modelProfileId,
-      res: input.res,
-      shouldApply: input.shouldApply
-    });
-    return;
-  }
   if (!provider.supportedAdapters.includes(parseResult.data.adapter)) {
     input.res.status(400).json({ code: 1, message: "Provider does not support the selected adapter" });
     return;
@@ -687,50 +677,6 @@ async function handleApplyRequest(input: {
     });
   }
 }
-
-async function handleCopilotApplyRequest(input: {
-  repo: ModelProviderRepository;
-  provider: ProviderProfile;
-  modelProfileId: string | undefined;
-  res: Response;
-  shouldApply: boolean;
-}): Promise<void> {
-  if (!isCopilotCompatibleProvider(input.provider)) {
-    input.res.status(400).json({ code: 1, message: "Provider does not support OpenForge Copilot" });
-    return;
-  }
-  const model = selectModel(input.repo, input.provider, input.modelProfileId);
-  if (!model) {
-    input.res.status(input.modelProfileId ? 400 : 404).json({
-      code: 1,
-      message: input.modelProfileId
-        ? "Model does not belong to the selected provider"
-        : "Provider model not found"
-    });
-    return;
-  }
-  const appliedModel = input.shouldApply ? input.repo.setDefaultModel(model.id) ?? model : model;
-  const result = {
-    adapter: "openforge-copilot",
-    env: {},
-    secretEnvNames: [],
-    files: [],
-    changedFiles: [],
-    internalDefault: {
-      scope: "user",
-      providerProfileId: input.provider.id,
-      modelProfileId: appliedModel.id,
-      providerName: input.provider.name,
-      modelName: appliedModel.name
-    }
-  };
-  input.res.json({ code: 0, data: input.shouldApply ? { result } : { preview: result }, message: "" });
-}
-
-function isCopilotCompatibleProvider(provider: ProviderProfile): boolean {
-  return provider.apiFormat === "anthropic" || provider.apiFormat === "openai" || provider.apiFormat === "openai-compatible";
-}
-
 
 function selectModel(
   repo: ModelProviderRepository,

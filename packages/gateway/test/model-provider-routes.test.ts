@@ -11,10 +11,8 @@ import { fileURLToPath } from "node:url";
 import { beforeEach, describe, it } from "node:test";
 
 import { signJwt } from "../src/auth/jwt.js";
-import { AgentRepository } from "../src/db/repositories/agent-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createModelProviderRoutes } from "../src/routes/model-providers.js";
-import { createModelRoutes } from "../src/routes/models.js";
 import { createCodexSubscriptionRoutes } from "../src/routes/codex-subscription.js";
 import type { ProviderCatalogPreset } from "../src/services/model-catalog.js";
 import type { FetchProviderModelsInput } from "../src/services/provider-model-fetch.js";
@@ -123,7 +121,6 @@ describe("model provider routes", () => {
     app = express();
     app.locals.jwtSecret = secret;
     app.use(express.json());
-    app.use("/api/v1/models", createModelRoutes(db));
     app.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
       loadProviderCatalog: async () => testProviderCatalog
     }));
@@ -321,42 +318,6 @@ describe("model provider routes", () => {
     assert.equal(opencodeConfig.provider.deepseek.options.baseURL, "https://api.deepseek.com");
   });
 
-  it("applies OpenForge Copilot as an internal runtime default without project file writes", async () => {
-    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
-    const provider = created.body.data.provider;
-    const model = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/models`, {
-      name: "DeepSeek Chat",
-      modelId: "deepseek-chat",
-      capabilities: ["chat", "code"]
-    }, authHeaders());
-
-    const preview = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/preview-apply`, {
-      adapter: "openforge-copilot",
-      modelProfileId: model.body.data.model.id
-    }, authHeaders());
-    const emptyRootPreview = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/preview-apply`, {
-      adapter: "openforge-copilot",
-      projectRoot: "",
-      modelProfileId: model.body.data.model.id
-    }, authHeaders());
-    const applied = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/apply`, {
-      adapter: "openforge-copilot",
-      modelProfileId: model.body.data.model.id
-    }, authHeaders());
-    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
-
-    assert.equal(preview.status, 200);
-    assert.equal(preview.body.data.preview.adapter, "openforge-copilot");
-    assert.deepEqual(preview.body.data.preview.files, []);
-    assert.deepEqual(preview.body.data.preview.changedFiles, []);
-    assert.equal(emptyRootPreview.status, 200);
-    assert.equal(emptyRootPreview.body.data.preview.adapter, "openforge-copilot");
-    assert.equal(applied.status, 200);
-    assert.equal(applied.body.data.result.internalDefault.modelProfileId, model.body.data.model.id);
-    assert.equal(listed.body.data.models.find((item: { id: string }) => item.id === model.body.data.model.id)?.isDefault, true);
-  });
 
   it("defaults manual custom providers to the Claude Code adapter", async () => {
     const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
@@ -896,7 +857,6 @@ describe("model provider routes", () => {
     const mismatchedDelete = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}/models/${foreignModel.body.data.model.id}`, undefined, authHeaders());
     const deleted = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}/models/${modelA.body.data.model.id}`, undefined, authHeaders());
     const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
-    const legacyModels = await makeRequest(app, "GET", "/api/v1/models", undefined, authHeaders());
 
     assert.equal(updated.status, 200);
     assert.equal(updated.body.data.model.name, "DeepSeek Reasoner Updated");
@@ -907,66 +867,7 @@ describe("model provider routes", () => {
     assert.match(mismatchedDelete.body.message, /provider/i);
     assert.equal(deleted.status, 200);
     assert.equal(listed.body.data.models.some((model: { id: string }) => model.id === modelA.body.data.model.id), false);
-    assert.equal(legacyModels.body.data.models.some((model: { id: string }) => model.id === modelA.body.data.model.id), false);
-    assert.equal(legacyModels.body.data.models.find((model: { id: string }) => model.id === modelB.body.data.model.id)?.isDefault, true);
-  });
-
-  it("rejects deleting a provider model that is still referenced by an agent", async () => {
-    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
-    const providerId = created.body.data.provider.id;
-    const model = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
-      name: "DeepSeek Chat",
-      modelId: "deepseek-chat"
-    }, authHeaders());
-    const agentRepo = new AgentRepository(db, userId);
-    agentRepo.create({ name: "Reference Agent", modelId: model.body.data.model.id });
-
-    const deleted = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}/models/${model.body.data.model.id}`, undefined, authHeaders());
-    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
-
-    assert.equal(deleted.status, 409);
-    assert.equal(deleted.body.code, 1);
-    assert.match(deleted.body.message, /referenced/i);
-    assert.equal(
-      listed.body.data.models.some((item: { id: string }) => item.id === model.body.data.model.id),
-      true
-    );
-
-    agentRepo.delete(agentRepo.list()[0].id);
-    const deletedAfterDereference = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}/models/${model.body.data.model.id}`, undefined, authHeaders());
-    assert.equal(deletedAfterDereference.status, 200);
-    assert.equal(deletedAfterDereference.body.code, 0);
-  });
-
-  it("rejects deleting a provider whose models are still referenced by an agent", async () => {
-    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
-    const providerId = created.body.data.provider.id;
-    const model = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
-      name: "DeepSeek Chat",
-      modelId: "deepseek-chat"
-    }, authHeaders());
-    const agentRepo = new AgentRepository(db, userId);
-    agentRepo.create({ name: "Reference Agent", modelId: model.body.data.model.id });
-
-    const deleted = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}`, undefined, authHeaders());
-    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
-
-    assert.equal(deleted.status, 409);
-    assert.equal(deleted.body.code, 1);
-    assert.match(deleted.body.message, /referenced/i);
-    assert.equal(
-      listed.body.data.providers.some((item: { id: string }) => item.id === providerId),
-      true
-    );
-
-    agentRepo.delete(agentRepo.list()[0].id);
-    const deletedAfterDereference = await makeRequest(app, "DELETE", `/api/v1/model-providers/${providerId}`, undefined, authHeaders());
-    assert.equal(deletedAfterDereference.status, 200);
-    assert.equal(deletedAfterDereference.body.code, 0);
+    assert.equal(listed.body.data.models.find((model: { id: string }) => model.id === modelB.body.data.model.id)?.isDefault, true);
   });
 
   it("deletes and rotates credentials only within the selected provider", async () => {

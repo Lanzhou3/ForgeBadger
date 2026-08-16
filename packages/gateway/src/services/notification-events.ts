@@ -2,20 +2,18 @@ import { NotificationRepository, type CreateNotificationInput } from "../db/repo
 import type { Database } from "../db/types.js";
 import type {
   ClaudeNotificationEvent,
-  ErrorEvent,
   OpenForgeEvent,
-  OpenForgeEventBus,
-  SessionCreatedEvent,
-  SessionDeletedEvent,
-  SessionStatusChangedEvent
+  OpenForgeEventBus
 } from "./event-bus.js";
 
-type PersistableNotificationEvent =
-  | SessionCreatedEvent
-  | SessionStatusChangedEvent
-  | SessionDeletedEvent
-  | ClaudeNotificationEvent
-  | ErrorEvent;
+type PersistableNotificationEvent = ClaudeNotificationEvent;
+
+/** Only these CLI hook notification types become in-app notifications. */
+const NOTIFIED_CLI_NOTIFICATION_TYPES = new Set([
+  "permission_prompt",
+  "task_completed",
+  "task_interrupted"
+]);
 
 export interface NotificationPersistenceOptions {
   db: Database;
@@ -40,55 +38,15 @@ export function attachNotificationPersistence(options: NotificationPersistenceOp
 }
 
 function isPersistableNotificationEvent(event: OpenForgeEvent): event is PersistableNotificationEvent {
-  return (
-    event.type === "session_created" ||
-    event.type === "session_status_changed" ||
-    event.type === "session_deleted" ||
-    event.type === "claude_notification" ||
-    event.type === "error"
-  );
+  return event.type === "claude_notification";
 }
 
 export function notificationInputFromEvent(event: OpenForgeEvent): CreateNotificationInput | undefined {
   switch (event.type) {
-    case "session_created":
-      return {
-        type: event.type,
-        titleKey: "notifications.sessionCreated",
-        message: event.name,
-        href: `/sessions/${encodeURIComponent(event.sessionId)}`,
-        sessionId: event.sessionId,
-        payload: {
-          session_id: event.sessionId,
-          project_id: event.projectId,
-          name: event.name
-        }
-      };
-    case "session_status_changed":
-      return {
-        type: event.type,
-        titleKey: "notifications.sessionStatusChanged",
-        message: `${event.sessionId}: ${event.oldStatus} -> ${event.newStatus}`,
-        href: `/sessions/${encodeURIComponent(event.sessionId)}`,
-        sessionId: event.sessionId,
-        payload: {
-          session_id: event.sessionId,
-          old_status: event.oldStatus,
-          new_status: event.newStatus
-        }
-      };
-    case "session_deleted":
-      return {
-        type: event.type,
-        titleKey: "notifications.sessionDeleted",
-        message: event.sessionId,
-        href: `/sessions/${encodeURIComponent(event.sessionId)}`,
-        sessionId: event.sessionId,
-        payload: {
-          session_id: event.sessionId
-        }
-      };
     case "claude_notification": {
+      if (!NOTIFIED_CLI_NOTIFICATION_TYPES.has(event.notificationType)) {
+        return undefined;
+      }
       const adapter = event.adapter ?? "claude";
       const titleKey = notificationTitleKey(event.notificationType, adapter);
       const message = event.toolName ? `${event.toolName}: ${event.message}` : event.message;
@@ -112,10 +70,10 @@ export function notificationInputFromEvent(event: OpenForgeEvent): CreateNotific
         }
       };
     }
+    case "session_created":
+    case "session_status_changed":
+    case "session_deleted":
     case "activity_created":
-      return undefined;
-    case "copilot_run_updated":
-      return undefined;
     case "error":
       return undefined;
   }
@@ -129,8 +87,5 @@ function notificationTitleKey(notificationType: string, adapter: string): string
     return "notifications.claudePermissionRequest";
   }
   if (notificationType === "task_completed") return "notifications.taskCompleted";
-  if (notificationType === "task_interrupted") return "notifications.taskInterrupted";
-  if (notificationType === "task_failed") return "notifications.taskFailed";
-  if (notificationType === "session_ended") return "notifications.sessionEnded";
-  return "notifications.cliNotification";
+  return "notifications.taskInterrupted";
 }

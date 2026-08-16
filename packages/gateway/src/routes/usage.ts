@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
-import { ModelRepository } from "../db/repositories/model-repository.js";
+import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import { TokenUsageRepository } from "../db/repositories/token-usage-repository.js";
 import { UsageRepository } from "../db/repositories/usage-repository.js";
 import { createUsageTokenSyncer } from "../services/usage/usage-token-syncer.js";
@@ -18,7 +18,7 @@ const dateParam = (value: unknown): Date | undefined => {
   return Number.isFinite(ms) ? new Date(ms) : undefined;
 };
 
-export function createUsageRoutes(db: Database): Router {
+export function createUsageRoutes(db: Database, masterKey: string): Router {
   const router = Router();
   router.use(authenticate);
 
@@ -84,7 +84,7 @@ export function createUsageRoutes(db: Database): Router {
       res.status(400).json({ code: 1, message: "Invalid input" });
       return;
     }
-    if (!new ModelRepository(db, userId).getById(req.params.modelId)) {
+    if (!new ModelProviderRepository(db, userId, masterKey).getModelProfile(req.params.modelId)) {
       res.status(404).json({ code: 1, message: "Model not found" });
       return;
     }

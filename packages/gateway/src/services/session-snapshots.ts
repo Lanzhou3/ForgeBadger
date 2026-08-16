@@ -16,7 +16,6 @@ export function recordSessionSnapshot(input: RecordSessionSnapshotInput): Sessio
     projectId: input.session.projectId,
     tmuxSession: input.session.tmuxSession,
     modelId: input.session.modelId,
-    agentId: input.session.agentId,
     configVersion: input.configVersion,
     metadata: input.metadata
   });

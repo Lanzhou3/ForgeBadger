@@ -10,7 +10,6 @@ export interface CreateSessionInput {
   name: string;
   aiTool: string;
   modelId?: string;
-  agentId?: string;
   workingDir: string;
   attachToken?: string;
   tmuxSession?: string;
@@ -27,7 +26,6 @@ export interface Session {
   name: string;
   aiTool: string;
   modelId: string | null;
-  agentId: string | null;
   status: string;
   attachToken: string;
   tmuxSession: string | null;
@@ -58,7 +56,6 @@ export class SessionRepository {
         name: input.name,
         aiTool: input.aiTool,
         modelId: input.modelId ?? null,
-        agentId: input.agentId ?? null,
         attachToken: input.attachToken ?? "",
         workingDir: input.workingDir,
         tmuxSession: input.tmuxSession ?? null,
@@ -111,7 +108,6 @@ export class SessionRepository {
 
   update(id: string, input: Partial<{
     modelId: string | null;
-    agentId: string | null;
     name: string;
     status: string;
     attachToken: string;
@@ -123,7 +119,6 @@ export class SessionRepository {
   }>): Session | undefined {
     const updateData: Record<string, unknown> = {};
     if (input.modelId !== undefined) updateData.modelId = input.modelId;
-    if (input.agentId !== undefined) updateData.agentId = input.agentId;
     if (input.name !== undefined) updateData.name = input.name;
     if (input.status !== undefined) updateData.status = input.status;
     if (input.attachToken !== undefined) updateData.attachToken = input.attachToken;
@@ -163,7 +158,6 @@ export class SessionRepository {
           name: record.name,
           aiTool: record.aiTool,
           modelId: record.modelId ?? null,
-          agentId: record.agentId ?? null,
           status: record.status,
           attachToken: record.attachToken,
           tmuxSession: record.tmuxSession ?? null,
@@ -188,7 +182,6 @@ export class SessionRepository {
         name: record.name,
         aiTool: record.aiTool,
         modelId: record.modelId ?? null,
-        agentId: record.agentId ?? null,
         status: record.status,
         attachToken: record.attachToken,
         tmuxSession: record.tmuxSession ?? null,

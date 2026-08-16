@@ -7,12 +7,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  ModelRepository,
   ProjectRepository,
   SessionRepository,
   UsageRepository,
   UserRepository
 } from "../src/db/repositories/index.js";
+import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
+
+const masterKey = "abcdef0123456789abcdef0123456789";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -35,9 +37,17 @@ describe("usage analytics", () => {
       path: "/tmp/usage",
       aiTool: "opencode"
     });
-    const model = new ModelRepository(db, user.id).create({
+    const providerRepo = new ModelProviderRepository(db, user.id, masterKey);
+    const provider = providerRepo.createProviderProfile({
+      providerKey: "anthropic",
+      name: "Anthropic",
+      authType: "api_key",
+      apiFormat: "anthropic",
+      supportedAdapters: ["claude"]
+    });
+    const model = providerRepo.createModelProfile({
+      providerProfileId: provider.id,
       name: "Usage Model",
-      provider: "anthropic",
       modelId: "claude-sonnet-4-5"
     });
     const session = new SessionRepository(db, user.id).create({

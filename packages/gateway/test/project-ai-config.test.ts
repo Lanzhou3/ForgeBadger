@@ -57,10 +57,6 @@ interface AiConfigResponseBody {
       content: string;
       sizeBytes: number;
     }>;
-    forms: Array<{
-      filePath: string;
-      fields: Array<{ key: string; label: string; inputType: string }>;
-    }>;
   };
 }
 
@@ -119,9 +115,11 @@ describe("project AI config routes", () => {
     const token = await register("ai-config-reader@test.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-read-"));
     await mkdir(path.join(rootPath, ".opencode", "agents"), { recursive: true });
+    await mkdir(path.join(rootPath, ".claude"), { recursive: true });
     await writeFile(path.join(rootPath, "AGENTS.md"), "# Existing Agents\n", "utf8");
     await writeFile(path.join(rootPath, "opencode.json"), "{\"instructions\":[\"AGENTS.md\"]}\n", "utf8");
     await writeFile(path.join(rootPath, ".opencode", "agents", "reviewer.md"), "# Reviewer\n", "utf8");
+    await writeFile(path.join(rootPath, ".claude", "settings.json"), "{}\n", "utf8");
     const canonicalRootPath = await realpath(rootPath);
     const projectId = await importProject(token, {
       name: "OpenCode Project",
@@ -137,12 +135,11 @@ describe("project AI config routes", () => {
     assert.equal(res.status, 200, JSON.stringify(body));
     assert.equal(body.data?.adapter, "opencode");
     assert.equal(body.data?.projectRoot, canonicalRootPath);
-    assert.ok(body.data?.forms.some((form) => form.filePath === "opencode.json"));
-    assert.ok(body.data?.forms.some((form) => form.fields.some((field) => field.key === "model")));
     assertFile(body, "AGENTS.md", true, "# Existing Agents\n");
     assertFile(body, "opencode.json", true, "{\"instructions\":[\"AGENTS.md\"]}\n");
-    assertFile(body, ".opencode/agents/reviewer.md", true, "# Reviewer\n");
-    assertFile(body, ".opencode/commands/review.md", false, "");
+    assertFile(body, "opencode.jsonc", false, "");
+    assertNoFile(body, ".opencode/agents/reviewer.md");
+    assertNoFile(body, ".claude/settings.json");
   });
 
   it("returns project-level config files for a Kimi Code project", async () => {
@@ -165,10 +162,9 @@ describe("project AI config routes", () => {
 
     assert.equal(res.status, 200, JSON.stringify(body));
     assert.equal(body.data?.adapter, "kimi");
-    assert.ok(body.data?.forms.some((form) => form.filePath === "AGENTS.md"));
     assertFile(body, "AGENTS.md", true, "# Existing Kimi Agents\n");
-    assertFile(body, ".kimi-code/mcp.json", true, "{}\n");
-    assertFile(body, ".kimi-code/agents/reviewer.md", true, "# Reviewer\n");
+    assertNoFile(body, ".kimi-code/mcp.json");
+    assertNoFile(body, ".kimi-code/agents/reviewer.md");
   });
 
   it("reports existing root instruction files when scanning an import directory", async () => {
@@ -206,7 +202,7 @@ describe("project AI config routes", () => {
       aiTool: "claude"
     });
 
-    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config`, {
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config?aiTool=claude`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const body = (await res.json()) as AiConfigResponseBody;
@@ -214,13 +210,12 @@ describe("project AI config routes", () => {
     assert.equal(res.status, 200, JSON.stringify(body));
     assert.equal(body.data?.adapter, "claude");
     assertFile(body, "CLAUDE.md", true, "# Root Claude\n");
-    assertFile(body, ".claude/settings.json", true, "{}\n");
+    assertNoFile(body, ".claude/settings.json");
+    assertNoFile(body, ".claude/hooks/openforge-guard.mjs");
     assert.equal(
       body.data?.files.some((file) => file.relativePath === ".claude/CLAUDE.md"),
       false
     );
-    assert.ok(body.data?.forms.some((form) => form.filePath === "CLAUDE.md"));
-    assert.ok(body.data?.forms.some((form) => form.filePath === ".claude/settings.json"));
   });
 
   it("updates allowed project config files and rejects unsafe paths", async () => {
@@ -240,7 +235,8 @@ describe("project AI config routes", () => {
       },
       body: JSON.stringify({
         relativePath: "AGENTS.md",
-        content: "# Updated Agents\n"
+        content: "# Updated Agents\n",
+        aiTool: "codex"
       })
     });
     const writeBody = (await writeRes.json()) as AiConfigResponseBody;
@@ -262,6 +258,72 @@ describe("project AI config routes", () => {
     const unsafeBody = (await unsafeRes.json()) as { code: number; message: string };
     assert.equal(unsafeRes.status, 400);
     assert.equal(unsafeBody.code, 1);
+  });
+
+  it("rejects writing to directory-based config files (root-level only)", async () => {
+    const token = await register("ai-config-root-only@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-root-only-"));
+    const projectId = await importProject(token, {
+      name: "Root Only Project",
+      path: rootPath,
+      aiTool: "codex"
+    });
+
+    for (const relativePath of [
+      ".codex/config.toml",
+      ".claude/settings.json",
+      ".kimi-code/mcp.json",
+      ".opencode/agents/code-reviewer.md"
+    ]) {
+      const writeRes = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config/files`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          relativePath,
+          content: "# Not Allowed\n",
+          aiTool: "codex"
+        })
+      });
+      const writeBody = (await writeRes.json()) as { code: number; message: string };
+      assert.equal(writeRes.status, 400, `${relativePath} should be rejected`);
+      assert.equal(writeBody.code, 1);
+    }
+  });
+
+  it("requires an explicit aiTool for CLI-agnostic projects", async () => {
+    const token = await register("ai-config-explicit@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-explicit-"));
+    const projectId = await importProject(token, {
+      name: "Unbound Project",
+      path: rootPath,
+      aiTool: "claude"
+    });
+
+    const readRes = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    assert.equal(readRes.status, 400);
+
+    const globalRes = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config/global`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    assert.equal(globalRes.status, 400);
+
+    const writeRes = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config/files`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        relativePath: "AGENTS.md",
+        content: "# Agents\n"
+      })
+    });
+    assert.equal(writeRes.status, 400);
   });
 
   it("leaves the project untracked when no template is provided at import", async () => {
@@ -339,7 +401,6 @@ describe("project AI config routes", () => {
       assert.equal(configFile.editable, false);
       assert.match(configFile.content, /REDACTED/);
       assert.doesNotMatch(configFile.content, /sk-secret-value/);
-      assert.ok(body.data?.forms.some((form) => form.filePath === "opencode.json"));
     } finally {
       if (previousConfigDir === undefined) {
         delete process.env.OPENCODE_CONFIG_DIR;
@@ -369,7 +430,7 @@ describe("project AI config routes", () => {
     process.env.CLAUDE_CONFIG_DIR = claudeConfigDir;
 
     try {
-      const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config/global`, {
+      const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/ai-config/global?aiTool=claude`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const body = (await res.json()) as AiConfigResponseBody;
@@ -456,6 +517,14 @@ describe("project AI config routes", () => {
     const body = (await res.json()) as ProjectResponseBody;
     assert.equal(res.status, 201, JSON.stringify(body));
     return body.data.project.id;
+  }
+
+  function assertNoFile(body: AiConfigResponseBody, relativePath: string): void {
+    assert.equal(
+      body.data?.files.some((candidate) => candidate.relativePath === relativePath),
+      false,
+      `Expected ${relativePath} to be absent from response`
+    );
   }
 
   function assertFile(

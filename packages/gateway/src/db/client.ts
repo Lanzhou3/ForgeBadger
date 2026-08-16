@@ -22,14 +22,24 @@ export function initializeDatabase(dbPath: string): Database {
   const dir = path.dirname(resolvedPath);
   mkdirSync(dir, { recursive: true });
 
-	  const db = new BetterSqlite3(resolvedPath);
-	  db.pragma("foreign_keys = ON");
-	  db.pragma("journal_mode = WAL");
-
+  const db = new BetterSqlite3(resolvedPath);
+  db.pragma("journal_mode = WAL");
   const drizzleDb = drizzle(db);
   const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations");
-  migrate(drizzleDb, { migrationsFolder });
 
+  db.pragma("foreign_keys = OFF");
+  try {
+    migrate(drizzleDb, { migrationsFolder });
+  } finally {
+    // Drizzle wraps migrations in a transaction, so this must happen outside it.
+    db.pragma("foreign_keys = ON");
+  }
+
+  const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check").all();
+  if (foreignKeyViolations.length > 0) {
+    db.close();
+    throw new Error("OPENFORGE_FOREIGN_KEY_CHECK_FAILED");
+  }
   dbInstance = db;
   return db;
 }

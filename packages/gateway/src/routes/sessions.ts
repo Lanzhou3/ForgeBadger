@@ -4,17 +4,11 @@ import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { createClaudeLaunchPlan, type LaunchPlan } from "../adapters/claude.js";
-import { createAdapterLaunchPlan, type AdapterModelSelection } from "../adapters/index.js";
-import {
-  getAdapterLaunchStatus,
-  isAdapterId,
-  type AdapterId
-} from "../services/adapter-discovery.js";
+import { getAdapterLaunchStatus } from "../services/adapter-discovery.js";
 import type { CommandRunner } from "../lib/dependency-check.js";
 import { validateProjectRoot } from "../lib/safe-resolve.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
 import { SessionRepository, type Session } from "../db/repositories/session-repository.js";
-import { ModelRepository } from "../db/repositories/model-repository.js";
 import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import { ApiKeyRepository } from "../db/repositories/api-key-repository.js";
 import type { Database } from "../db/types.js";
@@ -24,12 +18,26 @@ import type { OpenForgeEventBus } from "../services/event-bus.js";
 import type { CredentialMode } from "../config-generation/types.js";
 import { recordActivity } from "../services/activity-events.js";
 import { recordSessionSnapshot } from "../services/session-snapshots.js";
-import { ensureClaudeNotificationSettings } from "../services/claude-notification-settings.js";
-import { ensureOpenForgeOpenCodePlugin } from "../services/opencode-notification-settings.js";
 import {
-  ensureCodexNotificationSettings,
-  ensureKimiNotificationSettings
-} from "../services/cli-notification-settings.js";
+  createClaudePortfolioWorkerLaunchConfiguration,
+  createLaunchPlan,
+  normalizeAdapter,
+  prepareAdapterLaunchExtras,
+  prepareClaudePortfolioWorkerLaunch,
+  validateSelfManagedAdapterCredentialBoundary
+} from "../services/session-launch-plan.js";
+export {
+  createClaudePortfolioWorkerLaunchConfiguration,
+  createLaunchPlan,
+  normalizeAdapter,
+  prepareAdapterLaunchExtras,
+  prepareClaudePortfolioWorkerLaunch,
+  validateSelfManagedAdapterCredentialBoundary
+};
+export type {
+  ClaudePortfolioWorkerLaunchConfiguration,
+  LaunchPlanInput
+} from "../services/session-launch-plan.js";
 
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
@@ -104,6 +112,13 @@ export function createSessionRoutes(
       return;
     }
 
+    if (!aiTool && !project.aiTool) {
+      res.status(400).json({
+        code: 1,
+        message: "Runtime CLI selection is required for CLI-agnostic projects"
+      });
+      return;
+    }
     const adapter = normalizeAdapter(aiTool ?? project.aiTool);
     if (!adapter) {
       res.status(400).json({ code: 1, message: "Unsupported project adapter" });
@@ -121,8 +136,8 @@ export function createSessionRoutes(
     }
 
     if (modelId) {
-      const modelRepo = new ModelRepository(db, userId);
-      if (!modelRepo.getById(modelId)) {
+      const modelRepo = new ModelProviderRepository(db, userId, masterKey);
+      if (!modelRepo.getModelProfile(modelId)) {
         res.status(404).json({ code: 1, message: "Model not found" });
         return;
       }
@@ -545,8 +560,8 @@ export function createSessionRoutes(
     }
 
     const { modelId } = parseResult.data;
-    const modelRepo = new ModelRepository(db, userId);
-    const model = modelRepo.getById(modelId);
+    const modelRepo = new ModelProviderRepository(db, userId, masterKey);
+    const model = modelRepo.getModelProfile(modelId);
     if (!model) {
       res.status(404).json({ code: 1, message: "Model not found" });
       return;
@@ -646,153 +661,6 @@ function recordSessionActivity(
     message,
     metadata
   });
-}
-
-export interface LaunchPlanInput {
-  db: Database;
-  userId: string;
-  masterKey: string;
-  adapter: AdapterId;
-  projectRoot: string;
-  sessionId: string;
-  credentialMode: CredentialMode;
-  apiKeyId?: string;
-  modelId?: string;
-  pluginDirs?: string[];
-}
-
-export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
-  const credentialBoundary = validateSelfManagedAdapterCredentialBoundary(input);
-  if (!credentialBoundary.ok) {
-    throw new Error(credentialBoundary.message);
-  }
-
-  const env: Record<string, string> = {
-    OPENFORGE_SESSION_ID: input.sessionId,
-    OPENFORGE_GATEWAY_URL: getGatewayUrl()
-  };
-  const secretEnvNames: string[] = [];
-  let selectedModel: AdapterModelSelection | undefined;
-
-  if (input.credentialMode === "stored_encrypted_key" && input.adapter !== "codex") {
-    const credential = resolveStoredCredential(input);
-    env[credential.envName] = credential.secret;
-    secretEnvNames.push(credential.envName);
-  }
-
-  if (input.modelId && input.adapter !== "codex") {
-    const model = new ModelRepository(input.db, input.userId).getById(input.modelId);
-    if (!model) {
-      throw new Error("Model not found");
-    }
-    selectedModel = { provider: model.provider, modelId: model.modelId };
-    if (input.adapter === "claude") {
-      env.ANTHROPIC_MODEL = model.modelId;
-    } else if (input.adapter === "opencode") {
-      env.OPENCODE_MODEL = model.modelId.includes("/") ? model.modelId : `${model.provider}/${model.modelId}`;
-    }
-  }
-
-  return createAdapterLaunchPlan({
-    adapter: input.adapter,
-    projectRoot: input.projectRoot,
-    credentialMode: input.credentialMode,
-    env,
-    secretEnvNames,
-    model: selectedModel,
-    pluginDirs: input.pluginDirs
-  });
-}
-
-function resolveStoredCredential(input: LaunchPlanInput): { envName: string; secret: string } {
-  if (input.apiKeyId) {
-    const apiKeyRepo = new ApiKeyRepository(input.db, input.userId, input.masterKey);
-    const record = apiKeyRepo.getById(input.apiKeyId);
-    if (!record) {
-      throw new Error("API key not found");
-    }
-    return {
-      envName: apiKeyEnvName(record.provider),
-      secret: apiKeyRepo.decryptForLaunch(input.apiKeyId)
-    };
-  }
-
-  if (input.modelId) {
-    const providerRepo = new ModelProviderRepository(input.db, input.userId, input.masterKey);
-    const model = providerRepo.getModelProfile(input.modelId);
-    if (model) {
-      const credential = providerRepo.listCredentials(model.providerProfileId)[0];
-      if (!credential) {
-        throw new Error("Provider credential not found");
-      }
-      return {
-        envName: apiKeyEnvName(model.providerKey),
-        secret: providerRepo.decryptCredential(credential.id)
-      };
-    }
-  }
-
-  throw new Error("API key is required for stored credentials");
-}
-
-export async function prepareAdapterLaunchExtras(
-  db: Database,
-  userId: string,
-  adapter: AdapterId,
-  projectRoot: string,
-  sessionId: string
-): Promise<string[]> {
-  if (adapter === "opencode") {
-    await ensureOpenForgeOpenCodePlugin(projectRoot);
-    return [];
-  }
-  if (adapter === "codex") {
-    await ensureCodexNotificationSettings(projectRoot);
-    return [];
-  }
-  if (adapter === "kimi") {
-    await ensureKimiNotificationSettings(projectRoot);
-    return [];
-  }
-  await ensureClaudeNotificationSettings(projectRoot, getGatewayUrl(), sessionId);
-  return [];
-}
-
-export function normalizeAdapter(value: string): AdapterId | undefined {
-  return isAdapterId(value) ? value : undefined;
-}
-
-export function validateSelfManagedAdapterCredentialBoundary(input: {
-  adapter: AdapterId;
-  credentialMode: CredentialMode;
-  apiKeyId?: string | undefined;
-  modelId?: string | undefined;
-}): { ok: true } | { ok: false; message: string } {
-  if (
-    (input.adapter === "codex" || input.adapter === "kimi") &&
-    (input.credentialMode !== "host_environment" || input.apiKeyId || input.modelId)
-  ) {
-    return {
-      ok: false,
-      message: `${input.adapter === "kimi" ? "Kimi Code" : "Codex"} sessions are subscription-managed; provider credentials and model overrides are not supported`
-    };
-  }
-  return { ok: true };
-}
-
-function apiKeyEnvName(provider: string): string {
-  const normalized = provider.trim().toLowerCase();
-  if (normalized === "anthropic") return "ANTHROPIC_API_KEY";
-  if (normalized === "openai") return "OPENAI_API_KEY";
-  return `${normalized.replace(/[^a-z0-9]+/g, "_").toUpperCase()}_API_KEY`;
-}
-
-function getGatewayUrl(): string {
-  return (
-    process.env.OPENFORGE_GATEWAY_URL ||
-    process.env.NEXT_PUBLIC_GATEWAY_URL ||
-    `http://${process.env.OPENFORGE_HOST || "127.0.0.1"}:${process.env.OPENFORGE_PORT || "3000"}`
-  );
 }
 
 function toSessionPayload(session: Session, attachToken?: string): Omit<Session, "attachToken"> & {

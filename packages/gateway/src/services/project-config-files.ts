@@ -1,27 +1,18 @@
 import type { TemplateFileInput } from "../config-generation/types.js";
-import type { Agent } from "../db/repositories/agent-repository.js";
 import type { ProjectSkill } from "../db/repositories/project-skill-repository.js";
 import type { AdapterId } from "./adapter-discovery.js";
 
 export interface BuildProjectConfigFilesInput {
   adapter?: AdapterId | undefined;
   templateFiles: TemplateFileInput[];
-  agents?: Array<Pick<
-    Agent,
-    "id" | "name" | "description" | "modelId" | "tools" | "allowedDirs" | "customPrompt" | "status"
-  >>;
   skills?: ProjectSkill[];
 }
 
-type ProjectConfigAgent = NonNullable<BuildProjectConfigFilesInput["agents"]>[number];
 
 export function buildProjectConfigFiles(input: BuildProjectConfigFilesInput): TemplateFileInput[] {
   const adapter = input.adapter ?? "claude";
   return [
     ...adaptTemplateFiles(input.templateFiles, adapter),
-    ...(input.agents ?? [])
-      .filter((agent) => agent.status !== "disabled")
-      .map((agent) => agentToTemplateFile(agent, adapter)),
     ...(input.skills ?? [])
       .filter((skill) => skill.isEnabled)
       .map((skill) => skillToTemplateFile(skill, adapter))
@@ -66,27 +57,6 @@ function adaptTemplateFiles(
     }
     return [];
   });
-}
-
-function agentToTemplateFile(agent: ProjectConfigAgent, adapter: AdapterId): TemplateFileInput {
-  const content = [
-    "---",
-    `name: ${agent.name}`,
-    agent.description ? `description: ${agent.description}` : undefined,
-    agent.modelId ? `model: ${agent.modelId}` : undefined,
-    agent.tools ? `tools: ${agent.tools}` : undefined,
-    agent.allowedDirs ? `allowed_dirs: ${agent.allowedDirs}` : undefined,
-    "---",
-    "",
-    agent.customPrompt ?? "",
-    ""
-  ].filter((line): line is string => line !== undefined).join("\n");
-
-  return {
-    id: `agent:${agent.id}`,
-    relativePath: `${adapterConfigRoot(adapter)}/agents/${slugify(agent.name)}.md`,
-    content
-  };
 }
 
 function skillToTemplateFile(skill: ProjectSkill, adapter: AdapterId): TemplateFileInput {

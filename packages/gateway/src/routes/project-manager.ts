@@ -28,8 +28,6 @@ const evidenceRefSchema = z.object({
   ref: z.string().min(1).max(512).optional(),
   path: z.string().min(1).max(512).optional(),
   sessionId: z.string().min(1).max(128).optional(),
-  copilotRunId: z.string().min(1).max(128).optional(),
-  pendingActionId: z.string().min(1).max(128).optional(),
   feishuChatId: z.string().min(1).max(128).optional(),
   feishuMessageId: z.string().min(1).max(128).optional(),
   createdAt: z.string().min(1).max(64).optional()
@@ -101,8 +99,6 @@ const ledgerQuerySchema = z.object({
 }).strict();
 
 interface ProjectManagerLedgerTrace {
-  copilotRunId?: string;
-  pendingActionId?: string;
   actionType?: string;
   targetType?: string;
   targetId?: string;
@@ -124,8 +120,8 @@ interface ProjectManagerTaskPacket {
   expectedVerification: string[];
   evidenceRequirements: string[];
   runtime: {
-    adapter: string;
-    templateId: string;
+    adapter: string | null;
+    templateId: string | null;
   };
   sessionLink: {
     sessionId: string;
@@ -526,6 +522,7 @@ function buildTaskPacket(input: {
     prompt: buildTaskPacketPrompt({
       project: input.project,
       workItem: input.workItem,
+      runtimeAdapter: session?.aiTool || input.project.aiTool || null,
       promptFrame,
       expectedVerification,
       evidenceRequirements
@@ -534,8 +531,8 @@ function buildTaskPacket(input: {
     expectedVerification,
     evidenceRequirements,
     runtime: {
-      adapter: input.project.aiTool,
-      templateId: input.project.templateId ?? defaultTemplateIdForAiTool(input.project.aiTool)
+      adapter: session?.aiTool || input.project.aiTool || null,
+      templateId: input.project.templateId ?? null
     },
     sessionLink: session ? {
       sessionId: session.id,
@@ -559,15 +556,18 @@ function queueStatusForWorkItem(status: ProjectManagerWorkItemStatus): ProjectMa
 function buildTaskPacketPrompt(input: {
   project: Project;
   workItem: ProjectManagerWorkItem;
+  runtimeAdapter: string | null;
   promptFrame: string | undefined;
   expectedVerification: string[];
   evidenceRequirements: string[];
 }): string {
   const lines = [
     `Task: ${input.workItem.title}`,
-    `Project: ${input.project.name}`,
-    `Runtime CLI: ${input.project.aiTool}`
+    `Project: ${input.project.name}`
   ];
+  if (input.runtimeAdapter) {
+    lines.push(`Runtime CLI: ${input.runtimeAdapter}`);
+  }
   if (input.workItem.description) {
     lines.push("", "Context:", input.workItem.description);
   }
@@ -615,7 +615,7 @@ function withTaskPacketSessionLink(
       sessionId: session.id,
       sessionStatus: session.status,
       adapter: session.aiTool,
-      templateId: project.templateId ?? defaultTemplateIdForAiTool(project.aiTool),
+      templateId: project.templateId ?? null,
       linkedAt: new Date().toISOString(),
       ...context
     }
@@ -676,12 +676,6 @@ function isActiveSessionStatus(status: string): boolean {
   return status === "running" || status === "detached";
 }
 
-function defaultTemplateIdForAiTool(aiTool: string | null | undefined): string {
-  if (aiTool === "opencode") return "builtin-opencode";
-  if (aiTool === "codex") return "builtin-codex";
-  return "builtin-claude-code";
-}
-
 function toLedgerEventDto(event: ProjectManagerLedgerEvent) {
   const trace = toLedgerTraceDto(event.details);
   return {
@@ -705,8 +699,6 @@ function toEvidenceRefDto(ref: ProjectManagerEvidenceRef) {
     ref: ref.ref,
     path: ref.path,
     sessionId: ref.sessionId,
-    copilotRunId: ref.copilotRunId,
-    pendingActionId: ref.pendingActionId,
     feishuChatId: ref.feishuChatId,
     feishuMessageId: ref.feishuMessageId,
     createdAt: ref.createdAt
@@ -715,8 +707,6 @@ function toEvidenceRefDto(ref: ProjectManagerEvidenceRef) {
 
 function toLedgerTraceDto(details: Record<string, unknown>): ProjectManagerLedgerTrace | undefined {
   const trace: ProjectManagerLedgerTrace = {};
-  assignTraceString(trace, "copilotRunId", details.copilotRunId);
-  assignTraceString(trace, "pendingActionId", details.pendingActionId);
   assignTraceString(trace, "actionType", details.actionType);
   assignTraceString(trace, "targetType", details.targetType);
   assignTraceString(trace, "targetId", details.targetId);

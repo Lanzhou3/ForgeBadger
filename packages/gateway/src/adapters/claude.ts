@@ -23,10 +23,9 @@ export function createClaudeLaunchPlan(input: ClaudeLaunchPlanInput): LaunchPlan
     args: pluginDirArgs(input.pluginDirs ?? []),
     cwd: input.projectRoot,
     env: input.env ?? {},
-    secretEnvNames:
-      input.credentialMode === "stored_encrypted_key"
-        ? input.secretEnvNames ?? []
-        : [],
+    // A worker ACK capability is a process-local secret even when Claude uses
+    // host credentials, so secret classification cannot depend on credential mode.
+    secretEnvNames: input.secretEnvNames ?? [],
     credentialMode: input.credentialMode
   };
 }

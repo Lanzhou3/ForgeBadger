@@ -1,6 +1,5 @@
-import { AgentRepository } from "../db/repositories/agent-repository.js";
 import { ApiKeyRepository } from "../db/repositories/api-key-repository.js";
-import { ModelRepository } from "../db/repositories/model-repository.js";
+import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
 import { SessionRepository } from "../db/repositories/session-repository.js";
 import { SkillRepository } from "../db/repositories/skill-repository.js";
@@ -11,7 +10,6 @@ export interface DashboardStats {
   projects: number;
   sessions: number;
   runningSessions: number;
-  agents: number;
   skills: number;
   models: number;
   apiKeys: number;
@@ -31,7 +29,6 @@ export interface DashboardHealth {
   models: DashboardHealthItem;
   credentials: DashboardHealthItem;
   sessions: DashboardHealthItem;
-  agents: DashboardHealthItem;
   skills: DashboardHealthItem;
 }
 
@@ -47,9 +44,8 @@ export function getDashboardSummary(
 ): DashboardSummary {
   const projects = new ProjectRepository(db, userId).list();
   const sessions = new SessionRepository(db, userId).list();
-  const agents = new AgentRepository(db, userId).list();
   const skills = new SkillRepository(db, userId).list();
-  const models = new ModelRepository(db, userId).list();
+  const models = new ModelProviderRepository(db, userId, masterKey).listModelProfiles();
   const apiKeys = new ApiKeyRepository(db, userId, masterKey).list();
   const templateRepo = new TemplateRepository(db, userId);
   const templates = [...templateRepo.listBuiltIn(), ...templateRepo.list()];
@@ -59,7 +55,6 @@ export function getDashboardSummary(
     projects: projects.length,
     sessions: sessions.length,
     runningSessions: runningSessions.length,
-    agents: agents.length,
     skills: skills.length,
     models: models.length,
     apiKeys: apiKeys.length,
@@ -90,11 +85,6 @@ export function getDashboardSummary(
         healthy: stats.sessions > 0,
         count: stats.sessions,
         message: stats.sessions > 0 ? "Sessions exist" : "Create a session from a project"
-      },
-      agents: {
-        healthy: stats.agents > 0,
-        count: stats.agents,
-        message: stats.agents > 0 ? "Agents are configured" : "Create a project Agent"
       },
       skills: {
         healthy: stats.skills > 0,

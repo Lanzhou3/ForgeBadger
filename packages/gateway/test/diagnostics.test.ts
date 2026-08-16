@@ -8,7 +8,6 @@ import { describe, it } from "node:test";
 
 import { ApiKeyRepository } from "../src/db/repositories/api-key-repository.js";
 import { AuditLogRepository } from "../src/db/repositories/audit-log-repository.js";
-import { CopilotMemoryRepository } from "../src/db/repositories/copilot-memory-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { ProjectManagerRepository } from "../src/db/repositories/project-manager-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
@@ -96,16 +95,6 @@ describe("local diagnostics export", () => {
         resourceType: "diagnostics",
         details: { token: "abc" }
       });
-      const memory = new CopilotMemoryRepository(db, user.id);
-      memory.createEntry({
-        kind: "decision",
-        scope: "global",
-        text: "Remember token=secret-value"
-      });
-      memory.createNote({
-        text: "Working note with Bearer abc.def"
-      });
-
       const report = buildLocalDiagnosticsExport({
         db,
         userId: user.id,
@@ -122,8 +111,6 @@ describe("local diagnostics export", () => {
       assert.equal(report.app.version, "0.0.0-test");
       assert.equal(report.counts.apiKeys, 1);
       assert.equal(report.counts.auditLogs, 1);
-      assert.equal(report.counts.copilotMemoryEntries, 1);
-      assert.equal(report.counts.copilotMemoryNotes, 1);
       assert.equal(report.modelProviders.counts.providers, 2);
       assert.equal(report.modelProviders.counts.activeProviders, 1);
       assert.equal(report.modelProviders.counts.models, 1);
@@ -165,14 +152,11 @@ describe("local diagnostics export", () => {
           readyForUse: false
         }
       ]);
-      assert.equal(report.copilot.capabilities.memoryEnabled, true);
-      assert.equal(report.copilot.capabilities.memoryWritesRequireApproval, true);
       assert.equal("OPENFORGE_MASTER_KEY" in report.environment, false);
       assert.equal("OPENAI_API_KEY" in report.environment, false);
       assert.equal(JSON.stringify(report).includes("sk-test-secret"), false);
       assert.equal(JSON.stringify(report).includes("sk-provider-secret"), false);
       assert.equal(JSON.stringify(report).includes("Foreign Provider"), false);
-      assert.equal(JSON.stringify(report).includes("secret-value"), false);
     } finally {
       db.close();
     }

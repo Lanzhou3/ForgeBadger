@@ -113,7 +113,7 @@ describe("project-manager routes", () => {
     assert.equal(response.body.data.taskPacket.workItemId, item.id);
     assert.equal(response.body.data.taskPacket.projectId, projectId);
     assert.equal(response.body.data.taskPacket.runtime.adapter, "claude");
-    assert.equal(response.body.data.taskPacket.runtime.templateId, "builtin-claude-code");
+    assert.equal(response.body.data.taskPacket.runtime.templateId, null);
     assert.match(response.body.data.taskPacket.prompt, /Fix launch readiness/u);
     assert.deepEqual(response.body.data.taskPacket.acceptanceCriteria, [
       "Runtime blockers are visible",
@@ -481,67 +481,6 @@ describe("project-manager routes", () => {
     ));
   });
 
-  it("returns pending action evidence refs and bounded ledger trace without raw details", async () => {
-    const repo = new ProjectManagerRepository(db, owner.id);
-    const rawPromptKey = ["raw", "Prompt"].join("");
-    const providerPayloadKey = ["provider", "Payload"].join("");
-    const approvalDiffKey = ["approval", "Diff"].join("");
-    const executionSummaryKey = ["execution", "Summary"].join("");
-    const stdOutKey = ["std", "out"].join("");
-    const tokenKey = ["api", "Token"].join("");
-    const item = repo.createWorkItem(projectId, {
-      title: "Trace route item",
-      details: {
-        copilotRunId: "route-run-1",
-        pendingActionId: "route-pa-create-1",
-        actionType: "create_work_item",
-        targetType: "work_item",
-        targetId: "route-draft-item",
-        evidenceRefCount: 0,
-        approvalStatus: "approved",
-        executionStatus: "succeeded",
-        [rawPromptKey]: "summarize the terminal output",
-        [providerPayloadKey]: "{ model: 'unsafe' }",
-        [approvalDiffKey]: "+ secret diff",
-        [executionSummaryKey]: "full execution summary",
-        [stdOutKey]: "terminal output",
-        [tokenKey]: "fake-route-token"
-      }
-    });
-
-    const evidence = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/evidence`, {
-      evidenceRefs: [{
-        kind: "copilot_run",
-        label: "Approved Copilot action",
-        status: "verified",
-        ref: "copilot://runs/route-run-1/actions/route-pa-attach-1",
-        copilotRunId: "route-run-1",
-        pendingActionId: "route-pa-attach-1"
-      }]
-    });
-    const ledger = await request("GET", `/api/v1/projects/${projectId}/project-manager/ledger?limit=10`);
-    const traceEvent = ledger.body.data.events.find((event: { eventType: string }) => event.eventType === "work_item_created");
-    const serialized = JSON.stringify({ evidence: evidence.body, ledger: ledger.body });
-
-    assert.equal(evidence.status, 200);
-    assert.equal(evidence.body.code, 0);
-    assert.equal(evidence.body.data.workItem.evidenceRefs.at(-1).pendingActionId, "route-pa-attach-1");
-    assert.equal(ledger.status, 200);
-    assert.equal(ledger.body.code, 0);
-    assert.deepEqual(traceEvent.trace, {
-      copilotRunId: "route-run-1",
-      pendingActionId: "route-pa-create-1",
-      actionType: "create_work_item",
-      targetType: "work_item",
-      targetId: "route-draft-item",
-      evidenceRefCount: 0,
-      approvalStatus: "approved",
-      executionStatus: "succeeded"
-    });
-    assert.equal("details" in traceEvent, false);
-    assertRawRouteDataExcluded(serialized);
-  });
-
   it("keeps cross-tenant ledger trace markers inaccessible", async () => {
     const foreignProject = new ProjectRepository(db, other.id).create({
       name: "Foreign trace",
@@ -551,8 +490,6 @@ describe("project-manager routes", () => {
     new ProjectManagerRepository(db, other.id).createWorkItem(foreignProject.id, {
       title: "Foreign trace item",
       details: {
-        copilotRunId: "foreign-run-1",
-        pendingActionId: "foreign-pa-1",
         actionType: "create_work_item",
         targetType: "work_item",
         targetId: "foreign-item",
@@ -567,8 +504,6 @@ describe("project-manager routes", () => {
 
     assert.equal(response.status, 404);
     assert.deepEqual(response.body, { code: 1, message: "Project not found" });
-    assert.equal(serialized.includes("foreign-run-1"), false);
-    assert.equal(serialized.includes("foreign-pa-1"), false);
   });
 
   it("redacts raw multiline evidence references before route responses", async () => {

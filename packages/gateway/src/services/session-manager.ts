@@ -4,6 +4,10 @@ import type { LaunchPlan } from "../adapters/claude.js";
 import type { TmuxClient } from "./tmux.js";
 import type { OpenForgeEventBus } from "./event-bus.js";
 import { SessionOutputRing } from "./session-output-buffer.js";
+import type {
+  PortfolioSessionInputGate,
+  PortfolioWorkerInputCapability
+} from "./portfolio/session-input-gate.js";
 
 export type SessionStatus = "pending" | "running" | "detached" | "exited" | "error";
 
@@ -64,6 +68,7 @@ export interface RecoveryResult {
 
 export interface SessionManagerOptions {
   tmuxPrefix?: string;
+  sessionInputGate?: PortfolioSessionInputGate;
 }
 
 /**
@@ -88,6 +93,7 @@ export class InMemorySessionManager {
   private readonly sessions = new Map<string, GateASession>();
   private readonly sessionOutputs = new Map<string, SessionOutputRing>();
   private readonly tmuxPrefix: string;
+  private readonly sessionInputGate: PortfolioSessionInputGate | undefined;
   private readonly sessionLocks = new Map<string, Promise<unknown>>();
   private correctionInterval: ReturnType<typeof setInterval> | undefined;
 
@@ -98,6 +104,7 @@ export class InMemorySessionManager {
     options: SessionManagerOptions = {}
   ) {
     this.tmuxPrefix = normalizeTmuxPrefix(options.tmuxPrefix);
+    this.sessionInputGate = options.sessionInputGate;
   }
 
   /**
@@ -148,7 +155,12 @@ export class InMemorySessionManager {
         args: input.launchPlan.args,
         env: {
           ...input.launchPlan.env,
-          OPENFORGE_ATTACH_TOKEN: session.attachToken
+          OPENFORGE_ATTACH_TOKEN: session.attachToken,
+          // The Web terminal renders ANSI colors, so a NO_COLOR=1 leaked from
+          // the host shell (inherited via the tmux server global environment)
+          // must be overridden to empty — CLI TUIs (e.g. Claude Code) then
+          // render in color instead of monochrome.
+          NO_COLOR: ""
         }
       });
       await this.recoveryStore.upsertSession({
@@ -361,12 +373,30 @@ export class InMemorySessionManager {
     await this.tmux.resizeWindow?.(session.tmuxName, cols, rows);
   }
 
-  async sendInput(id: string, data: string): Promise<void> {
+  /**
+   * Direct callers may write only when the session has no active Portfolio
+   * assignment. A worker must present the gate-issued, one-use capability.
+   */
+  async sendInput(
+    id: string,
+    data: string,
+    capability?: PortfolioWorkerInputCapability
+  ): Promise<void> {
     const session = this.requireSession(id);
+    if (capability) {
+      this.sessionInputGate?.assertWorkerInputAllowed(session, capability);
+    } else {
+      this.sessionInputGate?.assertDirectInputAllowed(session);
+    }
     if (!this.tmux.sendInput) {
       throw new Error("tmux input is not supported");
     }
     await this.tmux.sendInput(session.tmuxName, data);
+  }
+
+  assertBrowserInputAllowed(id: string): void {
+    const session = this.requireSession(id);
+    this.sessionInputGate?.assertBrowserInputAllowed(session);
   }
 
   async recoverOpenForgeSessions(input: RecoverSessionsInput): Promise<RecoveryResult> {

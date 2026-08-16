@@ -120,7 +120,7 @@ describe("session adapter decoupling", () => {
     const projectData = await projectRes.json() as ProjectResponseBody;
 
     assert.equal(projectRes.status, 201);
-    assert.equal(projectData.data.project.aiTool, "claude");
+    assert.equal(projectData.data.project.aiTool, "");
     assert.equal(projectData.data.project.templateId, null);
   });
 
@@ -153,11 +153,70 @@ describe("session adapter decoupling", () => {
     const importData = await importRes.json() as ProjectResponseBody;
 
     assert.equal(createRes.status, 201);
-    assert.equal(createData.data.project.aiTool, "claude");
+    assert.equal(createData.data.project.aiTool, "");
     assert.equal(createData.data.project.templateId, null);
     assert.equal(importRes.status, 201);
-    assert.equal(importData.data.project.aiTool, "claude");
+    assert.equal(importData.data.project.aiTool, "");
     assert.equal(importData.data.project.templateId, null);
+  });
+
+  it("requires an explicit runtime CLI when the project has no adapter hint", async () => {
+    const token = await register("adapter-explicit-required@example.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-adapter-explicit-"));
+
+    const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        name: "Explicit Adapter Project",
+        path: rootPath
+      })
+    });
+    const projectData = await projectRes.json();
+
+    const sessionRes = await fetch(`${baseUrl}/api/v1/sessions`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        projectId: projectData.data.project.id,
+        credentialMode: "host_environment"
+      })
+    });
+
+    assert.equal(sessionRes.status, 400);
+    const sessionBody = await sessionRes.json() as { message?: string };
+    assert.match(sessionBody.message ?? "", /Runtime CLI selection is required/);
+  });
+
+  it("rejects config sync for projects tracking no template", async () => {
+    const token = await register("adapter-sync-untracked@example.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-adapter-sync-untracked-"));
+
+    const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        name: "Untracked Sync Project",
+        path: rootPath
+      })
+    });
+    const projectData = await projectRes.json();
+
+    const previewRes = await fetch(`${baseUrl}/api/v1/projects/${projectData.data.project.id}/config/sync/preview`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({ credentialMode: "host_environment" })
+    });
+    const applyRes = await fetch(`${baseUrl}/api/v1/projects/${projectData.data.project.id}/config/sync/apply`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({ credentialMode: "host_environment" })
+    });
+    const previewBody = await previewRes.json() as { details?: { code?: string }; message?: string };
+
+    assert.equal(previewRes.status, 404);
+    assert.equal(applyRes.status, 404);
+    assert.equal(previewBody.details?.code, "TEMPLATE_NOT_TRACKED");
   });
 
   it("launches a requested session adapter instead of the project default adapter", async () => {
@@ -209,12 +268,26 @@ describe("session adapter decoupling", () => {
     const projectData = await projectRes.json() as ProjectResponseBody;
     assert.equal(projectRes.status, 201);
 
-    const modelRes = await fetch(`${baseUrl}/api/v1/models`, {
+    const providerRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        name: "OpenAI",
+        providerKey: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        authType: "api_key",
+        apiFormat: "openai",
+        supportedAdapters: ["opencode"]
+      })
+    });
+    const providerData = await providerRes.json() as { data: { provider: { id: string } } };
+    assert.equal(providerRes.status, 201);
+
+    const modelRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerData.data.provider.id}/models`, {
       method: "POST",
       headers: jsonAuthHeaders(token),
       body: JSON.stringify({
         name: "GPT Codex",
-        provider: "openai",
         modelId: "gpt-5.1-codex"
       })
     });
@@ -279,12 +352,26 @@ describe("session adapter decoupling", () => {
     const projectData = await projectRes.json() as ProjectResponseBody;
     assert.equal(projectRes.status, 201);
 
-    const modelRes = await fetch(`${baseUrl}/api/v1/models`, {
+    const providerRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        name: "Kimi",
+        providerKey: "kimi",
+        baseUrl: "https://api.moonshot.cn/anthropic",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["kimi"]
+      })
+    });
+    const providerData = await providerRes.json() as { data: { provider: { id: string } } };
+    assert.equal(providerRes.status, 201);
+
+    const modelRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerData.data.provider.id}/models`, {
       method: "POST",
       headers: jsonAuthHeaders(token),
       body: JSON.stringify({
         name: "Kimi K2.5",
-        provider: "kimi",
         modelId: "kimi-k2.5"
       })
     });

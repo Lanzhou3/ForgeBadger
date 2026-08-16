@@ -21,7 +21,6 @@ export const PROJECT_MANAGER_LEDGER_EVENT_TYPES = [
   "evidence_attached",
   "blocker_recorded",
   "blocker_resolved",
-  "copilot_observation_recorded",
   "feishu_reference_linked",
   "next_step_proposed",
   "manual_completion_recorded",
@@ -38,8 +37,6 @@ export interface ProjectManagerEvidenceRef {
   ref?: string | undefined;
   path?: string | undefined;
   sessionId?: string | undefined;
-  copilotRunId?: string | undefined;
-  pendingActionId?: string | undefined;
   feishuChatId?: string | undefined;
   feishuMessageId?: string | undefined;
   createdAt?: string | undefined;
@@ -207,8 +204,6 @@ const evidenceRefKeys = new Set([
   "ref",
   "path",
   "sessionId",
-  "copilotRunId",
-  "pendingActionId",
   "feishuChatId",
   "feishuMessageId",
   "createdAt"

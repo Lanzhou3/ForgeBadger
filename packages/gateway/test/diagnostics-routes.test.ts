@@ -62,55 +62,9 @@ describe("diagnostics routes", () => {
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.report.app.version, "0.0.0-test");
     assert.equal(res.body.data.report.counts.apiKeys, 1);
-    assert.equal(res.body.data.report.copilot.capabilities.enabled, true);
-    assert.equal(res.body.data.report.copilot.capabilities.approvalRequiredForWrites, true);
-    assert.equal(res.body.data.report.copilot.capabilities.memoryEnabled, true);
-    assert.equal(res.body.data.report.copilot.providerReadiness.providerConfigured, false);
-    assert.deepEqual(res.body.data.report.copilot.providerReadiness.supportedProviderFormats, [
-      "openai",
-      "openai-compatible",
-      "anthropic"
-    ]);
-    assert.equal(res.body.data.report.copilot.providerReadiness.counts.activeProviders, 0);
-    assert.equal(res.body.data.report.copilot.providerReadiness.counts.activeModels, 0);
-    assert.equal(res.body.data.report.copilot.providerReadiness.counts.activeCredentials, 0);
     assert.equal(JSON.stringify(res.body).includes("sk-route-secret"), false);
   });
 
-  it("marks Copilot provider readiness from Provider SSOT", async () => {
-    const providers = new ModelProviderRepository(db, userId, masterKey);
-    const provider = providers.createProviderProfile({
-      name: "OpenAI",
-      providerKey: "openai",
-      baseUrl: "https://api.openai.com/v1",
-      authType: "api_key",
-      apiFormat: "openai",
-      supportedAdapters: ["opencode"]
-    });
-    providers.createModelProfile({
-      providerProfileId: provider.id,
-      name: "GPT 5.1",
-      modelId: "gpt-5.1",
-      isDefault: true
-    });
-    providers.createCredential({
-      providerProfileId: provider.id,
-      label: "Disposable key",
-      plaintextSecret: "sk-provider-secret"
-    });
-
-    const res = await makeRequest(app, "GET", "/api/v1/diagnostics/export", undefined, {
-      Authorization: `Bearer ${token}`
-    });
-
-    assert.equal(res.status, 200);
-    assert.equal(res.body.data.report.copilot.providerReadiness.providerConfigured, true);
-    assert.equal(res.body.data.report.copilot.providerReadiness.counts.activeProviders, 1);
-    assert.equal(res.body.data.report.copilot.providerReadiness.counts.activeModels, 1);
-    assert.equal(res.body.data.report.copilot.providerReadiness.counts.activeCredentials, 1);
-    assert.equal(res.body.data.report.copilot.providerReadiness.counts.readyProviders, 1);
-    assert.equal(JSON.stringify(res.body).includes("sk-provider-secret"), false);
-  });
 });
 
 async function makeRequest(

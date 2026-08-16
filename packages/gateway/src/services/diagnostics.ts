@@ -3,12 +3,9 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { AnySQLiteColumn, AnySQLiteTable } from "drizzle-orm/sqlite-core";
 
 import {
-  agents,
   apiKeys,
   auditLogs,
-  copilotMemoryEntries,
-  copilotMemoryNotes,
-  models,
+  modelProfiles,
   notifications,
   projects,
   sessions,
@@ -51,16 +48,6 @@ export interface LocalDiagnosticsExport {
     runtimeModes: string[];
   }>;
   modelProviders: ModelProviderDiagnostics;
-  copilot: {
-    capabilities: {
-      enabled: boolean;
-      toolExecutionEnabled: boolean;
-      approvalRequiredForWrites: boolean;
-      memoryEnabled: boolean;
-      memoryWritesRequireApproval: boolean;
-    };
-    providerReadiness: CopilotProviderReadinessDiagnostics;
-  };
   integrations: {
     feishu: FeishuIntegrationDiagnostics;
   };
@@ -104,18 +91,6 @@ export interface ModelProviderDiagnostics {
   }>;
 }
 
-export interface CopilotProviderReadinessDiagnostics {
-  providerConfigured: boolean;
-  supportedProviderFormats: string[];
-  counts: {
-    activeProviders: number;
-    activeModels: number;
-    activeCredentials: number;
-    readyProviders: number;
-  };
-}
-
-const COPILOT_SUPPORTED_PROVIDER_FORMATS = ["openai", "openai-compatible", "anthropic"] as const;
 const sensitivePattern = /(secret|token|key|password|credential|authorization)/i;
 const sensitiveValuePattern = /(sk-[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._-]+)/i;
 
@@ -139,15 +114,12 @@ export function buildLocalDiagnosticsExport(
     counts: {
       projects: countTable(input.db, projects, projects.userId, input.userId),
       sessions: countTable(input.db, sessions, sessions.userId, input.userId),
-      agents: countTable(input.db, agents, agents.userId, input.userId),
       skills: countTable(input.db, skills, skills.userId, input.userId),
       templates: countTable(input.db, templates, templates.userId, input.userId),
-      models: countTable(input.db, models, models.userId, input.userId),
+      models: countTable(input.db, modelProfiles, modelProfiles.userId, input.userId),
       apiKeys: countTable(input.db, apiKeys, apiKeys.userId, input.userId),
       notifications: countTable(input.db, notifications, notifications.userId, input.userId),
-      auditLogs: countTable(input.db, auditLogs, auditLogs.userId, input.userId),
-      copilotMemoryEntries: countTable(input.db, copilotMemoryEntries, copilotMemoryEntries.userId, input.userId),
-      copilotMemoryNotes: countTable(input.db, copilotMemoryNotes, copilotMemoryNotes.userId, input.userId)
+      auditLogs: countTable(input.db, auditLogs, auditLogs.userId, input.userId)
     },
     dashboardHealth: summary.health,
     adapters: listAdapterDefinitions().map((adapter) => ({
@@ -156,16 +128,6 @@ export function buildLocalDiagnosticsExport(
       runtimeModes: [...adapter.runtimeModes]
     })),
     modelProviders: modelProviderDiagnostics,
-    copilot: {
-      capabilities: {
-        enabled: true,
-        toolExecutionEnabled: true,
-        approvalRequiredForWrites: true,
-        memoryEnabled: true,
-        memoryWritesRequireApproval: true
-      },
-      providerReadiness: buildCopilotProviderReadiness(modelProviderDiagnostics)
-    },
     integrations: {
       feishu: buildFeishuIntegrationDiagnostics(input.feishuStatus)
     },
@@ -235,24 +197,6 @@ function buildModelProviderDiagnostics(
         };
       })
       .sort((a, b) => Number(b.readyForUse) - Number(a.readyForUse) || a.name.localeCompare(b.name))
-  };
-}
-
-function buildCopilotProviderReadiness(
-  diagnostics: ModelProviderDiagnostics
-): CopilotProviderReadinessDiagnostics {
-  const supportedFormats = new Set<string>(COPILOT_SUPPORTED_PROVIDER_FORMATS);
-  const providers = diagnostics.providers.filter((provider) => supportedFormats.has(provider.apiFormat));
-  const readyProviders = providers.filter((provider) => provider.readyForUse);
-  return {
-    providerConfigured: readyProviders.length > 0,
-    supportedProviderFormats: [...COPILOT_SUPPORTED_PROVIDER_FORMATS],
-    counts: {
-      activeProviders: providers.filter((provider) => provider.status === "active").length,
-      activeModels: providers.reduce((sum, provider) => sum + provider.activeModelCount, 0),
-      activeCredentials: providers.reduce((sum, provider) => sum + provider.activeCredentialCount, 0),
-      readyProviders: readyProviders.length
-    }
   };
 }
 

@@ -11,9 +11,7 @@ describe("adapter discovery", () => {
     assert.equal(definitions.find((adapter) => adapter.id === "opencode")?.supportLevel, "supported");
     assert.equal(definitions.find((adapter) => adapter.id === "codex")?.supportLevel, "supported");
     assert.deepEqual(definitions.find((adapter) => adapter.id === "codex")?.runtimeModes, [
-      "terminal",
-      "app-server-stdio",
-      "app-server-websocket"
+      "terminal"
     ]);
     const kimi = definitions.find((adapter) => adapter.id === "kimi");
     assert.equal(kimi?.supportLevel, "supported");

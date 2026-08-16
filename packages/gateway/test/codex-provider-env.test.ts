@@ -6,7 +6,6 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 
-import { ModelRepository } from "../src/db/repositories/model-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { ApiKeyRepository } from "../src/db/repositories/api-key-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
@@ -67,11 +66,19 @@ describe("Codex provider env isolation", () => {
   it("rejects model or third-party API key selection for Codex terminal launches", () => {
     const db = createTestDb();
     const userId = new UserRepository(db).create("codex-env@example.com", "hash").id;
-    const model = new ModelRepository(db, userId).create({
+    const providerRepo = new ModelProviderRepository(db, userId, masterKey);
+    const provider = providerRepo.createProviderProfile({
+      providerKey: "openai",
+      name: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      authType: "api_key",
+      apiFormat: "openai",
+      supportedAdapters: ["codex"]
+    });
+    const model = providerRepo.createModelProfile({
+      providerProfileId: provider.id,
       name: "GPT Codex",
-      provider: "openai",
-      modelId: "gpt-5.1-codex",
-      endpoint: "https://api.openai.com/v1"
+      modelId: "gpt-5.1-codex"
     });
     const apiKey = new ApiKeyRepository(db, userId, masterKey).create({
       provider: "openai",

@@ -5,6 +5,7 @@ import { loadEnv } from "../config/env.js";
 import { createGatewayApp, type GatewayApp } from "../server.js";
 import { startupGateway } from "../services/startup.js";
 import type { TmuxClient } from "../services/tmux.js";
+import type { OperationsRuntimeFactory } from "../services/portfolio/operations-runtime.js";
 
 export interface StartedGateway extends GatewayApp {
   host: string;
@@ -14,6 +15,7 @@ export interface StartedGateway extends GatewayApp {
 /** @internal Test/runtime wiring hook; production callers should use the defaults. */
 export interface GatewayRuntimeOverrides {
   tmuxClient?: TmuxClient;
+  operationsRuntimeFactory?: OperationsRuntimeFactory;
 }
 
 export async function createGatewayRuntime(
@@ -21,9 +23,21 @@ export async function createGatewayRuntime(
   overrides: GatewayRuntimeOverrides = {}
 ): Promise<GatewayApp> {
   const env = resolveGatewayEnv(input);
-  const startupOptions =
-    overrides.tmuxClient === undefined ? { env } : { env, tmuxClient: overrides.tmuxClient };
-  const { db, sessionManager, apiKeyStore, eventBus, feishuChannelRuntime } = await startupGateway(startupOptions);
+  const startupOptions = {
+    env,
+    ...(overrides.tmuxClient === undefined ? {} : { tmuxClient: overrides.tmuxClient }),
+    ...(overrides.operationsRuntimeFactory === undefined ? {} : { operationsRuntimeFactory: overrides.operationsRuntimeFactory })
+  };
+  const {
+    db,
+    sessionManager,
+    apiKeyStore,
+    eventBus,
+    feishuChannelRuntime,
+    claudePortfolioWorker,
+    portfolioExecution,
+    operationsRuntime
+  } = await startupGateway(startupOptions);
   const runtime = createGatewayApp({
     jwtSecret: env.OPENFORGE_JWT_SECRET,
     masterKey: env.OPENFORGE_MASTER_KEY,
@@ -31,6 +45,9 @@ export async function createGatewayRuntime(
     sessionManager,
     apiKeyStore,
     eventBus,
+    claudePortfolioWorker,
+    portfolioExecution,
+    operationsRuntime,
     feishuChannelRuntime
   });
 

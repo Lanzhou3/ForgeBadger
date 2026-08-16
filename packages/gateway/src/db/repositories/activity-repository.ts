@@ -28,7 +28,6 @@ export interface CreateActivityInput {
 export interface ListActivityOptions {
   sessionId?: string | undefined;
   projectId?: string | undefined;
-  agentId?: string | undefined;
   types?: string[] | undefined;
   limit?: number | undefined;
 }
@@ -70,18 +69,6 @@ export class ActivityRepository {
     }
     if (options.types && options.types.length > 0) {
       filters.push(inArray(sessionActivities.type, options.types));
-    }
-    if (options.agentId) {
-      const sessionIds = this.drizzle
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(and(eq(sessions.userId, this.userId), eq(sessions.agentId, options.agentId)))
-        .all()
-        .map((session) => session.id);
-      if (sessionIds.length === 0) {
-        return [];
-      }
-      filters.push(inArray(sessionActivities.sessionId, sessionIds));
     }
 
     return this.drizzle

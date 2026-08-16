@@ -202,39 +202,6 @@ describe("events WebSocket", () => {
     await Promise.all([closeA, closeB]);
   });
 
-  it("delivers Copilot run update events to the owning user", async () => {
-    const token = signJwt({ userId: "user_a", email: "a@example.com" }, jwtSecret);
-    const ws = new WebSocket(`${serverUrl}/ws/events`, ["openforge-events", token]);
-
-    await new Promise<void>((resolve) => ws.once("open", resolve));
-
-    app.eventBus.emitEvent({
-      type: "copilot_run_updated",
-      userId: "user_a",
-      runId: "run_1",
-      status: "completed",
-      source: "copilot",
-      sourceRefId: "source_1",
-      conversationId: "conversation_1",
-      eventType: "completed"
-    });
-
-    const message = await waitForMessage(ws);
-    const parsed = JSON.parse(message);
-    assert.equal(parsed.type, "copilot_run_updated");
-    assert.deepEqual(parsed.payload, {
-      run_id: "run_1",
-      status: "completed",
-      source: "copilot",
-      source_ref_id: "source_1",
-      conversation_id: "conversation_1",
-      event_type: "completed"
-    });
-
-    const close = waitForClose(ws);
-    ws.close();
-    await close;
-  });
 
   it("does not authenticate from query token", async () => {
     const token = signJwt({ userId: "user_123", email: "test@example.com" }, jwtSecret);

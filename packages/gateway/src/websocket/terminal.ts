@@ -47,6 +47,14 @@ export class TerminalInputBuffer {
     }
     this.pendingInput.length = 0;
   }
+
+  hasPendingInput(): boolean {
+    return this.pendingInput.length > 0;
+  }
+
+  clear(): void {
+    this.pendingInput.length = 0;
+  }
 }
 
 export class TerminalResizeBuffer {
@@ -299,6 +307,9 @@ async function handleTerminalSocket(
           );
           return;
         }
+        // Raw browser input may never race ahead of a Portfolio lease. The
+        // gate is checked again before flushing any pre-attach buffer below.
+        sessionManager.assertBrowserInputAllowed(sessionId);
         inputBuffer.writeOrStore(pty, message.payload.data);
         return;
       }
@@ -342,7 +353,20 @@ async function handleTerminalSocket(
     return;
   }
   const activePty = pty;
-  inputBuffer.flush(activePty);
+  if (inputBuffer.hasPendingInput()) {
+    try {
+      sessionManager.assertBrowserInputAllowed(sessionId);
+      inputBuffer.flush(activePty);
+    } catch (error) {
+      inputBuffer.clear();
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "terminal_error",
+          payload: { message: formatTerminalClientError(error) }
+        }));
+      }
+    }
+  }
   resizeBuffer.flush(activePty);
 
   void sessionManager

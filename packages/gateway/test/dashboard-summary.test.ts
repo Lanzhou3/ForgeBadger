@@ -10,10 +10,9 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
-import { ModelRepository } from "../src/db/repositories/model-repository.js";
+import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { ApiKeyRepository } from "../src/db/repositories/api-key-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
-import { AgentRepository } from "../src/db/repositories/agent-repository.js";
 import { SkillRepository } from "../src/db/repositories/skill-repository.js";
 import { getDashboardSummary } from "../src/services/dashboard-summary.js";
 
@@ -42,7 +41,6 @@ describe("getDashboardSummary", () => {
       projects: 0,
       sessions: 0,
       runningSessions: 0,
-      agents: 0,
       skills: 0,
       models: 0,
       apiKeys: 0,
@@ -64,9 +62,17 @@ describe("getDashboardSummary", () => {
       path: projectRoot,
       aiTool: "claude"
     });
-    const model = new ModelRepository(db, user.id).create({
+    const providerRepo = new ModelProviderRepository(db, user.id, masterKey);
+    const provider = providerRepo.createProviderProfile({
+      providerKey: "anthropic",
+      name: "Anthropic",
+      authType: "api_key",
+      apiFormat: "anthropic",
+      supportedAdapters: ["claude"]
+    });
+    const model = providerRepo.createModelProfile({
+      providerProfileId: provider.id,
       name: "Sonnet",
-      provider: "anthropic",
       modelId: "claude-sonnet"
     });
     new ApiKeyRepository(db, user.id, masterKey).create({
@@ -81,10 +87,6 @@ describe("getDashboardSummary", () => {
       modelId: model.id,
       workingDir: projectRoot
     });
-    new AgentRepository(db, user.id).create({
-      projectId: project.id,
-      name: "reviewer"
-    });
     new SkillRepository(db, user.id).create({
       name: "safe-review",
       content: "# Safe Review"
@@ -94,7 +96,6 @@ describe("getDashboardSummary", () => {
 
     assert.equal(summary.stats.projects, 1);
     assert.equal(summary.stats.sessions, 1);
-    assert.equal(summary.stats.agents, 1);
     assert.equal(summary.stats.skills, 1);
     assert.equal(summary.stats.models, 1);
     assert.equal(summary.stats.apiKeys, 1);
@@ -102,7 +103,6 @@ describe("getDashboardSummary", () => {
     assert.equal(summary.health.models.healthy, true);
     assert.equal(summary.health.credentials.healthy, true);
     assert.equal(summary.health.sessions.healthy, true);
-    assert.equal(summary.health.agents.healthy, true);
     assert.equal(summary.health.skills.healthy, true);
   });
 });

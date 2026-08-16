@@ -8,7 +8,6 @@ import type { Database } from "../db/types.js";
 const listActivitiesSchema = z.object({
   sessionId: z.string().min(1).optional(),
   projectId: z.string().min(1).optional(),
-  agentId: z.string().min(1).optional(),
   type: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional()
 });
@@ -29,7 +28,6 @@ export function createActivityRoutes(db: Database): Router {
       .list({
         sessionId: parseResult.data.sessionId,
         projectId: parseResult.data.projectId,
-        agentId: parseResult.data.agentId,
         limit: parseResult.data.limit,
         types: parseActivityTypes(parseResult.data.type)
       })

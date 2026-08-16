@@ -203,7 +203,6 @@ export function createMvp0Api(options: Mvp0ApiOptions) {
         name: session.tmuxName,
         aiTool: "claude",
         modelId: null,
-        agentId: null,
         status: session.status,
         attachToken: session.attachToken,
         tmuxSession: session.tmuxName,

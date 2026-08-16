@@ -5,7 +5,7 @@ import type {
 } from "../db/repositories/model-provider-repository.js";
 import type { FetchedProviderModel, FetchProviderModelsInput } from "./provider-model-fetch.js";
 
-export type ProviderReadinessAdapter = "claude" | "opencode" | "openforge-copilot" | "codex" | "kimi";
+export type ProviderReadinessAdapter = "claude" | "opencode" | "codex" | "kimi";
 
 export type ProviderReadinessCode =
   | "ready"
@@ -247,9 +247,6 @@ function withResult(
 }
 
 function supportsAdapter(provider: ProviderProfile, adapter: ProviderReadinessAdapter): boolean {
-  if (adapter === "openforge-copilot") {
-    return provider.apiFormat === "anthropic" || provider.apiFormat === "openai" || provider.apiFormat === "openai-compatible";
-  }
   if (adapter === "codex") return false;
   return provider.supportedAdapters.includes(adapter);
 }

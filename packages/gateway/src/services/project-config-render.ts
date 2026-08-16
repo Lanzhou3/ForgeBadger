@@ -4,7 +4,6 @@ import { z } from "zod";
 
 import { createRenderPlan, detectConfigConflicts } from "../config-generation/index.js";
 import { type CredentialMode } from "../config-generation/types.js";
-import { AgentRepository } from "../db/repositories/agent-repository.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
 import { ProjectSkillRepository } from "../db/repositories/project-skill-repository.js";
 import { SkillRepository } from "../db/repositories/skill-repository.js";
@@ -14,6 +13,18 @@ import { buildProjectConfigFiles } from "./project-config-files.js";
 import { syncLocalSkills } from "./local-skills.js";
 
 const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
+
+// Config rendering derives the adapter from the bound template, never from the
+// project's ai_tool hint, so CLI-agnostic projects render correctly.
+const templateAdapterByBuiltinId: Record<string, z.infer<typeof aiToolSchema>> = {
+  "builtin-opencode": "opencode",
+  "builtin-codex": "codex",
+  "builtin-kimi": "kimi"
+};
+
+function adapterForTemplateId(templateId: string): z.infer<typeof aiToolSchema> {
+  return templateAdapterByBuiltinId[templateId] ?? "claude";
+}
 
 export type ProjectConfigSkillSync = (repo: Pick<SkillRepository, "create" | "getByName" | "update">) => unknown;
 
@@ -26,10 +37,11 @@ export function getGatewayUrl(): string {
 }
 
 export function normalizeTemplateFilesForProject(
-  project: { aiTool: string; isImported: boolean; path: string },
+  project: { isImported: boolean; path: string },
+  adapter: z.infer<typeof aiToolSchema>,
   files: Array<{ id: string; relativePath: string; content: string }>
 ): Array<{ id: string; relativePath: string; content: string }> {
-  if (project.aiTool !== "claude" || !project.isImported) {
+  if (adapter !== "claude" || !project.isImported) {
     return files;
   }
 
@@ -66,11 +78,11 @@ export async function buildProjectConfigRenderPlan(
     throw new Error("Template not found");
   }
 
-  const agentRepo = new AgentRepository(db, userId);
   const skillRepo = new ProjectSkillRepository(db, userId);
   // A plan must include the same locally discovered Skills as later compliance checks.
   (options.syncSkills ?? syncLocalSkills)(new SkillRepository(db, userId));
 
+  const adapter = adapterForTemplateId(template.id);
   return createRenderPlan({
     projectId: project.id,
     targetRoot: project.path,
@@ -81,13 +93,12 @@ export async function buildProjectConfigRenderPlan(
       gatewayUrl: getGatewayUrl()
     },
     templateFiles: buildProjectConfigFiles({
-      adapter: aiToolSchema.parse(project.aiTool),
-      templateFiles: normalizeTemplateFilesForProject(project, template.files.map((file) => ({
+      adapter,
+      templateFiles: normalizeTemplateFilesForProject(project, adapter, template.files.map((file) => ({
         id: String(file.id),
         relativePath: file.filePath,
         content: file.content
       }))),
-      agents: agentRepo.list().filter((agent) => agent.projectId === project.id),
       skills: skillRepo.listByProject(project.id)
     }),
     credentialMode,

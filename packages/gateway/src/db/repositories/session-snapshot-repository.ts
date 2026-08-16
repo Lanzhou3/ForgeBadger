@@ -11,7 +11,6 @@ export interface SessionSnapshot {
   projectId: string | null;
   tmuxSession: string | null;
   modelId: string | null;
-  agentId: string | null;
   configVersion: string | null;
   metadata: string | null;
   createdAt: Date;
@@ -22,7 +21,6 @@ export interface CreateSessionSnapshotInput {
   projectId: string;
   tmuxSession?: string | null | undefined;
   modelId?: string | null | undefined;
-  agentId?: string | null | undefined;
   configVersion?: string | null | undefined;
   metadata?: unknown;
 }
@@ -48,7 +46,6 @@ export class SessionSnapshotRepository {
         projectId: input.projectId,
         tmuxSession: input.tmuxSession ?? null,
         modelId: input.modelId ?? null,
-        agentId: input.agentId ?? null,
         configVersion: input.configVersion ?? null,
         metadata: input.metadata === undefined ? null : JSON.stringify(sanitizeMetadata(input.metadata))
       })
