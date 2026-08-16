@@ -8,16 +8,8 @@ interface FeishuRuntimeSupervisor {
   getHealth(userId: string): FeishuConnectionHealth;
 }
 
-interface FeishuRuntimeScheduler {
-  start(): Promise<void>;
-  stop(): void;
-  reconcile?(userId: string): Promise<void>;
-  runNow?(userId: string, automationId: string): Promise<unknown>;
-}
-
 interface FeishuChannelRuntimeDependencies {
   supervisor: FeishuRuntimeSupervisor;
-  scheduler?: FeishuRuntimeScheduler;
   workers?: Array<() => Promise<unknown>>;
   workerIntervalMs?: number;
   drainTimeoutMs?: number;
@@ -46,9 +38,6 @@ export class FeishuChannelRuntime {
     this.started = true;
     // Neither Feishu connectivity nor automation recovery may delay HTTP readiness.
     void Promise.resolve().then(() => this.dependencies.supervisor.start()).catch(() => undefined);
-    if (this.dependencies.scheduler) {
-      void Promise.resolve().then(() => this.dependencies.scheduler!.start()).catch(() => undefined);
-    }
     this.intervalHandle = this.setInterval(
       () => this.runWorkerCycle(),
       clamp(this.dependencies.workerIntervalMs ?? 250, 50, 60_000)
@@ -59,17 +48,6 @@ export class FeishuChannelRuntime {
     if (!this.started || this.stopped) throw new Error("FEISHU_RUNTIME_NOT_RUNNING");
     await this.dependencies.prepareAccount?.(userId);
     await this.dependencies.supervisor.reconcileAccount(userId);
-  }
-
-  async reconcileAutomations(userId: string): Promise<void> {
-    if (!this.started || this.stopped) throw new Error("FEISHU_RUNTIME_NOT_RUNNING");
-    await this.dependencies.scheduler?.reconcile?.(userId);
-  }
-
-  async runAutomationNow(userId: string, automationId: string): Promise<unknown> {
-    if (!this.started || this.stopped) throw new Error("FEISHU_RUNTIME_NOT_RUNNING");
-    if (!this.dependencies.scheduler?.runNow) throw new Error("AUTOMATION_SCHEDULER_UNAVAILABLE");
-    return this.dependencies.scheduler.runNow(userId, automationId);
   }
 
   getHealth(userId: string): FeishuConnectionHealth {
@@ -107,7 +85,6 @@ export class FeishuChannelRuntime {
       this.clearInterval(this.intervalHandle);
       this.intervalHandle = undefined;
     }
-    this.dependencies.scheduler?.stop();
     await this.dependencies.supervisor.stop();
     await this.drainWorkers();
   }

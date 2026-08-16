@@ -36,7 +36,6 @@ describe("FeishuChannelRuntime", () => {
 
   it("applies emergency stop and exposes only redacted health", async () => {
     let supervisorStops = 0;
-    let schedulerStops = 0;
     const runtime = new FeishuChannelRuntime({
       supervisor: {
         start: async () => undefined,
@@ -44,7 +43,6 @@ describe("FeishuChannelRuntime", () => {
         reconcileAccount: async () => undefined,
         getHealth: () => ({ ...health("unhealthy"), lastErrorMessage: "app_secret=plain-secret token=abc failure" })
       },
-      scheduler: { start: async () => undefined, stop: () => { schedulerStops += 1; } },
       setInterval: () => 1,
       clearInterval: () => undefined
     });
@@ -53,7 +51,6 @@ describe("FeishuChannelRuntime", () => {
     await runtime.emergencyStop();
 
     assert.equal(supervisorStops, 1);
-    assert.equal(schedulerStops, 1);
     assert.doesNotMatch(runtime.getHealth("user-1").lastErrorMessage ?? "", /plain-secret|token=abc/u);
   });
 
@@ -85,11 +82,11 @@ describe("FeishuChannelRuntime", () => {
     assert.equal(completed, true);
   });
 
-  it("acknowledges a card click inline only after durable admission", () => {
+  it("acknowledges a card click inline and records a durable rejection when no binding exists", () => {
     const db = createTestDb();
     const userId = new UserRepository(db).create("card-ack@example.com", "hash").id;
     const repository = new FeishuChannelRepository(db, userId, masterKey);
-    const account = repository.upsertAccount({
+    repository.upsertAccount({
       appId: "cli_card_ack",
       appSecret: "secret",
       enabled: true
@@ -104,12 +101,14 @@ describe("FeishuChannelRuntime", () => {
       action: { value: { action_id: actionId } }
     });
 
+    // The inline card acknowledgement prevents provider retries from becoming a
+    // second delivery channel, and the selector persists a durable rejection.
     assert.equal(response?.card.type, "raw");
     assert.match(response?.card.data.header.title.content ?? "", /已收到/);
-    const admitted = db.prepare(
-      "SELECT event_type, status FROM feishu_channel_inbox WHERE account_id = ?"
-    ).get(account.id) as { event_type: string; status: string };
-    assert.deepEqual(admitted, { event_type: "card_action", status: "pending" });
+    const ingress = db.prepare(
+      "SELECT handler_kind, state, rejection_code FROM portfolio_feishu_ingress_events"
+    ).all() as Array<{ handler_kind: string; state: string; rejection_code: string }>;
+    assert.deepEqual(ingress, [{ handler_kind: "portfolio", state: "denied", rejection_code: "PORTFOLIO_FEISHU_HANDLER_AMBIGUOUS" }]);
   });
 });
 

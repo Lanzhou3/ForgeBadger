@@ -5,7 +5,7 @@ import {
   type CommandResult,
   type CommandRunnerOptions
 } from "../../lib/dependency-check.js";
-import { redactCopilotPayload, redactCopilotText } from "../copilot/redaction.js";
+import { redactPayload, redactText } from "../redaction.js";
 
 export type FeishuCommandOperation =
   | "message_send"
@@ -220,7 +220,7 @@ export async function executeFeishuCommand(
   if (result.exitCode !== 0) {
     return commandError(definition.operation, "feishu_command_failed", "Feishu command failed", {
       exitCode: result.exitCode,
-      stderr: redactCopilotText(result.stderr).slice(0, 2_000)
+      stderr: redactText(result.stderr).slice(0, 2_000)
     });
   }
 
@@ -264,12 +264,12 @@ function parseCommandOutput(stdout: string): Record<string, unknown> {
   }
 
   return {
-    stdout: redactCopilotText(trimmed).slice(0, 8_000)
+    stdout: redactText(trimmed).slice(0, 8_000)
   };
 }
 
 function redactRecord(value: Record<string, unknown>): Record<string, unknown> {
-  const redacted = redactCopilotPayload(value);
+  const redacted = redactPayload(value);
   return isRecord(redacted) ? redacted : {};
 }
 

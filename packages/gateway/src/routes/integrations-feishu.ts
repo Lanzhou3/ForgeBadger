@@ -6,34 +6,20 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { AuditLogRepository } from "../db/repositories/audit-log-repository.js";
 import { FeishuChannelRepository } from "../db/repositories/feishu-channel-repository.js";
-import {
-  CopilotLiveRunConflictError,
-  CopilotRepository,
-  type CopilotConversation,
-  type CopilotRun,
-  type CopilotRunEvent
-} from "../db/repositories/copilot-repository.js";
+import { PortfolioFeishuChannelRepository } from "../db/repositories/portfolio-feishu-channel-repository.js";
+import { PortfolioFeishuRegistryRepository } from "../db/repositories/portfolio-feishu-registry-repository.js";
 import {
   FeishuIntegrationRepository,
   type FeishuIntegrationConfig,
   type FeishuUserMapping
 } from "../db/repositories/feishu-integration-repository.js";
-import { ProjectRepository } from "../db/repositories/project-repository.js";
 import type { Database } from "../db/types.js";
+import { getFeishuCliStatus, type FeishuCliStatus } from "../services/integrations/feishu-cli.js";
 import {
-  getFeishuCliStatus,
-  type FeishuCliStatus
-} from "../services/integrations/feishu-cli.js";
-import {
-  normalizeFeishuBotLongConnectionEvent,
-  recordFeishuBotConnectionEvent,
-  routeFeishuBotCommand
-} from "../services/integrations/feishu-bot-bridge.js";
-import {
-  CopilotOrchestrator,
-  type CopilotOrchestratorOptions
-} from "../services/copilot/orchestrator.js";
-import { redactCopilotText } from "../services/copilot/redaction.js";
+  createPortfolioIngressSelector,
+  handlePortfolioIngress
+} from "../services/integrations/feishu-runtime-factory.js";
+import { renderFeishuCardActionAcceptedResponse } from "../services/integrations/feishu-card-renderer.js";
 
 const feishuConfigSchema = z.object({
   enabled: z.boolean().optional(),
@@ -42,13 +28,11 @@ const feishuConfigSchema = z.object({
   allowedChatIds: z.array(z.string().max(128)).max(50).optional(),
   commandPrefix: z.string().min(2).max(32).regex(/^\/\S+$/).optional()
 }).strict();
-
 const feishuAccountSchema = z.object({
   appId: z.string().trim().min(1).max(128),
   appSecret: z.string().min(1).max(512).optional(),
   enabled: z.boolean()
 }).strict();
-
 const feishuUserMappingsSchema = z.object({
   mappings: z.array(z.object({
     feishuUserId: z.string().trim().min(1).max(128),
@@ -56,305 +40,110 @@ const feishuUserMappingsSchema = z.object({
     displayName: z.string().trim().min(1).max(128).nullable().optional()
   }).strict()).max(100)
 }).strict();
-const feishuBindingScopeSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("workspace") }).strict(),
-  z.object({ type: z.literal("project"), id: z.string().trim().min(1).max(128) }).strict()
-]);
-const createFeishuBindingSchema = z.object({
-  chatId: z.string().trim().min(1).max(128),
-  threadKey: z.string().trim().min(1).max(128).default("root"),
-  scope: feishuBindingScopeSchema.default({ type: "workspace" })
-}).strict();
-
-const inboundFeishuCommandSchema = z.object({
-  chatId: z.string().trim().min(1).max(128),
-  feishuUserId: z.string().trim().min(1).max(128),
-  text: z.string().trim().min(1).max(8_000),
-  messageId: z.string().trim().min(1).max(128).optional(),
-  projectId: z.string().trim().min(1).max(128).optional()
-}).strict();
-
-const botWebSocketEventSchema = z.object({
-  event: z.unknown()
-}).strict();
-
-const botWebSocketConnectionEventSchema = z.object({
-  state: z.enum(["connected", "reconnecting", "reconnected", "disconnected"]),
-  connectionId: z.string().trim().min(1).max(128).optional(),
-  attempt: z.number().int().min(0).max(1000).optional(),
-  eventSubscription: z.literal("im.message.receive_v1").optional(),
-  reason: z.string().trim().min(1).max(512).optional()
-}).strict();
-
-type InboundFeishuCommand = z.infer<typeof inboundFeishuCommandSchema>;
-const defaultStaleCopilotRunTimeoutMs = 15 * 60 * 1000;
-const defaultStaleCopilotApprovalTimeoutMs = 24 * 60 * 60 * 1000;
-const publicWebhookTimestampWindowMs = 5 * 60 * 1000;
 const publicWebhookReplayTtlMs = 5 * 60 * 1000;
 
 export interface FeishuIntegrationRoutesOptions {
   db?: Database;
   masterKey?: string;
   getStatus?: () => Promise<FeishuCliStatus>;
-  inboundRateLimit?: { max: number; windowMs: number };
   publicWebhookRateLimit?: { max: number; windowMs: number };
-  modelClientFactory?: CopilotOrchestratorOptions["modelClientFactory"];
-  modelRequestTimeoutMs?: CopilotOrchestratorOptions["modelRequestTimeoutMs"];
-  runControls?: CopilotOrchestratorOptions["runControls"];
-  sessionManager?: CopilotOrchestratorOptions["sessionManager"];
-  adapterCommandRunner?: CopilotOrchestratorOptions["adapterCommandRunner"];
-  staleRunTimeoutMs?: number;
-  staleApprovalTimeoutMs?: number;
   channelRuntime?: {
     reconcileAccount(userId: string): Promise<void>;
     getHealth(userId: string): unknown;
   };
 }
 
-export function createFeishuIntegrationRoutes(
-  options: FeishuIntegrationRoutesOptions = {}
-): Router {
+/** Feishu exposes only account control and one verified Portfolio ingress path. */
+export function createFeishuIntegrationRoutes(options: FeishuIntegrationRoutesOptions = {}): Router {
   const router = Router();
   const getStatus = options.getStatus ?? (() => getFeishuCliStatus({ env: process.env }));
-  const activeInboundUsers = new Set<string>();
-  const inboundRateWindows = new Map<string, { startedAt: number; count: number }>();
-  const inboundRateLimit = options.inboundRateLimit ?? { max: 20, windowMs: 60_000 };
   const publicWebhookRateLimit = options.publicWebhookRateLimit ?? { max: 20, windowMs: 60_000 };
 
-  router.post("/webhook/:publicId", async (req, res) => {
+  router.post("/webhook/:publicId", (req, res) => {
     const db = options.db;
-    if (!db) {
-      sendPublicWebhookError(res, 503, "feishu_webhook_unavailable");
-      return;
-    }
-    if (!options.masterKey) {
-      sendPublicWebhookError(res, 503, "feishu_webhook_unavailable");
-      return;
-    }
-
-    let config;
-    try {
-      config = new FeishuIntegrationRepository(db, "__public_webhook__", options.masterKey)
-        .findPublicWebhookConfig(req.params.publicId);
-    } catch {
-      sendPublicWebhookError(res, 403, "feishu_webhook_invalid_config");
-      return;
-    }
-    if (!config) {
-      sendPublicWebhookError(res, 404, "feishu_webhook_not_found");
-      return;
-    }
-    if (!config.publicWebhookEnabled) {
-      sendPublicWebhookError(res, 403, "feishu_webhook_disabled");
-      return;
-    }
-
+    if (!db || !options.masterKey) return sendPublicWebhookError(res, 503, "feishu_webhook_unavailable");
+    const config = findPublicWebhookConfig(db, options.masterKey, req.params.publicId, res);
+    if (!config) return;
     const body = req.body ?? {};
     if (isFeishuUrlVerification(body)) {
-      if (getFeishuBodyToken(body) !== config.verificationToken) {
-        sendPublicWebhookError(res, 401, "feishu_webhook_token_invalid");
-        return;
-      }
+      if (getFeishuBodyToken(body) !== config.verificationToken) return sendPublicWebhookError(res, 401, "feishu_webhook_token_invalid");
       res.status(200).json({ challenge: getFeishuChallenge(body) });
       return;
     }
+    const signature = verifyFeishuPublicSignature(req, getRawRequestBody(req), config.eventEncryptKey);
+    if (!signature.ok) return sendPublicWebhookError(res, 401, signature.code);
+    if (hasEncryptedFeishuPayload(body)) return sendPublicWebhookError(res, 400, "feishu_webhook_encrypted_payload_unsupported");
+    if (getFeishuBodyToken(body) !== config.verificationToken) return sendPublicWebhookError(res, 401, "feishu_webhook_token_invalid");
+    const normalized = normalizePublicFeishuIngress(body);
+    if (!normalized) return res.status(200).json({ msg: "ignored" });
 
-    const rawBody = getRawRequestBody(req);
-    const signature = verifyFeishuPublicSignature(req, rawBody, config.eventEncryptKey);
-    if (!signature.ok) {
-      sendPublicWebhookError(res, 401, signature.code);
-      return;
+    const integration = new FeishuIntegrationRepository(db, config.userId, options.masterKey);
+    if (!consumePublicReplayAndRate(integration, config, normalized, signature, publicWebhookRateLimit)) {
+      return res.status(200).json({ msg: "replayed" });
     }
-    if (hasEncryptedFeishuPayload(body)) {
-      sendPublicWebhookError(res, 400, "feishu_webhook_encrypted_payload_unsupported");
-      return;
+    const account = new FeishuChannelRepository(db, config.userId, options.masterKey).getAccount();
+    if (!account?.enabled || !config.enabled || config.emergencyDisabled) {
+      return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_channel_unavailable");
     }
-    if (getFeishuBodyToken(body) !== config.verificationToken) {
-      sendPublicWebhookError(res, 401, "feishu_webhook_token_invalid");
-      return;
-    }
-
-    const normalized = normalizePublicFeishuCommand(body);
-    if (!normalized) {
-      res.status(200).json({ msg: "ignored" });
-      return;
-    }
-
-    const publicRepo = new FeishuIntegrationRepository(db, config.userId, options.masterKey);
-    const replayKey = normalized.eventId
-      ? `event:${normalized.eventId}`
-      : normalized.messageId
-        ? `message:${normalized.messageId}`
-        : `signature:${signature.timestamp}:${signature.nonce}:${signature.signature}`;
-    const nonceReplayKey = `nonce:${signature.timestamp}:${signature.nonce}:${signature.signature}`;
-    if (
-      !publicRepo.consumePublicWebhookReplayKey({
-        userId: config.userId,
-        publicWebhookId: config.publicWebhookId,
-        replayKey,
-        ttlMs: publicWebhookReplayTtlMs
-      }) ||
-      !publicRepo.consumePublicWebhookReplayKey({
-        userId: config.userId,
-        publicWebhookId: config.publicWebhookId,
-        replayKey: nonceReplayKey,
-        ttlMs: publicWebhookReplayTtlMs
-      })
-    ) {
-      res.status(200).json({ msg: "replayed" });
-      return;
-    }
-
-    if (!config.enabled) {
-      return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_integration_disabled");
-    }
-    if (config.emergencyDisabled) {
-      return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_integration_emergency_disabled");
-    }
-    if (config.identityMode !== "user" && config.identityMode !== "bot") {
-      return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_identity_mode_required");
-    }
-    if (config.allowedChatIds.length === 0) {
-      return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_chat_allowlist_required");
-    }
-    if (!config.allowedChatIds.includes(normalized.chatId)) {
-      return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_chat_not_allowed");
-    }
-    const mappedUserId = findMappedOpenForgeUserId(publicRepo, normalized.feishuUserId);
-    if (mappedUserId !== config.userId) {
-      return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_user_not_mapped");
-    }
-    if (normalized.projectId && !new ProjectRepository(db, config.userId).getById(normalized.projectId)) {
-      return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_project_not_visible");
-    }
-    if (
-      !publicRepo.consumePublicWebhookRateWindow({
-        userId: config.userId,
-        publicWebhookId: config.publicWebhookId,
-        scope: "integration",
-        scopeId: config.publicWebhookId,
-        max: publicWebhookRateLimit.max,
-        windowMs: publicWebhookRateLimit.windowMs
-      }) ||
-      !publicRepo.consumePublicWebhookRateWindow({
-        userId: config.userId,
-        publicWebhookId: config.publicWebhookId,
-        scope: "chat",
-        scopeId: normalized.chatId,
-        max: publicWebhookRateLimit.max,
-        windowMs: publicWebhookRateLimit.windowMs
-      }) ||
-      !publicRepo.consumePublicWebhookRateWindow({
-        userId: config.userId,
-        publicWebhookId: config.publicWebhookId,
-        scope: "user",
-        scopeId: mappedUserId,
-        max: publicWebhookRateLimit.max,
-        windowMs: publicWebhookRateLimit.windowMs
-      })
-    ) {
-      return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_webhook_rate_limited");
-    }
-
-    const repo = new CopilotRepository(db, config.userId);
-    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs, options.staleApprovalTimeoutMs);
-    if (repo.findActiveRun()) {
-      return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "copilot_run_already_active");
-    }
-    if (activeInboundUsers.has(config.userId)) activeInboundUsers.delete(config.userId);
-
-    activeInboundUsers.add(config.userId);
     try {
-      const result = await new CopilotOrchestrator({
+      const registry = new PortfolioFeishuRegistryRepository(db);
+      ensurePortfolioHandler(registry, config.userId, account.appId);
+      const event = {
+        provider: "feishu" as const,
+        providerAccountId: account.appId,
+        providerEventId: normalized.eventId ?? `${normalized.kind}:${normalized.messageId ?? "unknown"}`,
+        transport: "webhook" as const,
+        signatureVerified: true,
+        externalIdentity: normalized.feishuUserId,
+        conversationId: normalized.chatId,
+        eventType: normalized.kind,
+        safeEventMetadata: { source: "webhook", eventType: normalized.kind }
+      };
+      const selector = createPortfolioIngressSelector(db, registry);
+      const selection = selector.select(event);
+      const admission = selector.admit(event, selection);
+      if (!admission.admitted) return res.status(200).json(normalized.kind === "card_action" ? renderFeishuCardActionAcceptedResponse() : { msg: "replayed" });
+      handlePortfolioIngress({
         db,
+        userId: selection.account.userId,
         masterKey: options.masterKey,
-        ...(options.modelClientFactory ? { modelClientFactory: options.modelClientFactory } : {}),
-        ...(options.modelRequestTimeoutMs ? { modelRequestTimeoutMs: options.modelRequestTimeoutMs } : {}),
-        ...(options.runControls ? { runControls: options.runControls } : {}),
-        ...(options.sessionManager ? { sessionManager: options.sessionManager } : {}),
-        ...(options.adapterCommandRunner ? { adapterCommandRunner: options.adapterCommandRunner } : {})
-      }).runText({
-        userId: config.userId,
-        prompt: normalized.text,
-        source: "feishu",
-        ...(normalized.projectId ? { sourceRefId: normalized.projectId } : {})
+        repository: new PortfolioFeishuChannelRepository(db, selection.account.userId),
+        selection,
+        event,
+        admission: admission.event,
+        ...(normalized.kind === "message" ? { text: normalized.text } : normalized.actionToken ? { actionToken: normalized.actionToken } : {})
       });
-      const pendingActions = repo.listPendingActions(result.run.id);
-      const conversation = repo.createConversation({
-        title: inboundConversationTitle(normalized.text),
-        source: "feishu",
-        ...(normalized.projectId ? { sourceRefId: normalized.projectId } : {})
-      });
-      repo.createConversationMessage(conversation.id, {
-        role: "user",
-        content: redactCopilotText(normalized.text),
-        runId: result.run.id,
-        payload: inboundMessagePayload(normalized)
-      });
-      storeInboundAssistantMessages(repo, conversation.id, result.run.id, result.events);
-      recordPublicWebhookAccept(
-        db,
-        config.userId,
-        req.ip,
-        config.publicWebhookId,
-        normalized,
-        result.run.id,
-        conversation.id,
-        pendingActions.length
-      );
-      res.status(200).json({ msg: "ok" });
-    } catch (error) {
-      if (error instanceof CopilotLiveRunConflictError) {
-        return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "copilot_run_already_active");
-      }
-      sendPublicWebhookError(res, 500, "feishu_webhook_run_failed");
-    } finally {
-      activeInboundUsers.delete(config.userId);
+      res.status(200).json(normalized.kind === "card_action" ? renderFeishuCardActionAcceptedResponse() : { msg: "ok" });
+    } catch {
+      sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_selector_rejected");
     }
   });
 
   router.use(authenticate);
-
   router.get("/account", (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db) return;
-    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const db = requireDb(options.db, res); if (!db) return;
+    const userId = userIdFor(req);
     const account = options.masterKey
       ? new FeishuChannelRepository(db, userId, options.masterKey).getAccount()
-      : new FeishuIntegrationRepository(db, userId, options.masterKey).getAppAccount();
+      : new FeishuIntegrationRepository(db, userId).getAppAccount();
     res.json({ code: 0, data: { account: account ?? null }, message: "" });
   });
-
   router.put("/account", async (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db) return;
-    if (!options.masterKey) {
-      res.status(503).json({ code: 1, message: "Feishu credential encryption is unavailable" });
-      return;
-    }
+    const db = requireDb(options.db, res); if (!db || !options.masterKey) return unavailable(res);
     const parsed = feishuAccountSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      res.status(400).json({ code: 1, message: "Invalid Feishu App credentials" });
-      return;
-    }
-
-    const userId = (req as unknown as AuthenticatedRequest).userId;
+    if (!parsed.success) return invalid(res, "Invalid Feishu App credentials");
+    const userId = userIdFor(req);
     try {
-      const legacyRepository = new FeishuIntegrationRepository(db, userId, options.masterKey);
-      legacyRepository.upsertAppAccount(parsed.data);
-      const account = new FeishuChannelRepository(db, userId, options.masterKey)
-        .upsertAccount({
-          appId: parsed.data.appId,
-          enabled: parsed.data.enabled,
-          ...(parsed.data.appSecret ? { appSecret: parsed.data.appSecret } : {})
-        });
-      legacyRepository.upsertConfig({
+      ensurePortfolioHandler(new PortfolioFeishuRegistryRepository(db), userId, parsed.data.appId);
+      const integrations = new FeishuIntegrationRepository(db, userId, options.masterKey);
+      integrations.upsertAppAccount(parsed.data);
+      const account = new FeishuChannelRepository(db, userId, options.masterKey).upsertAccount({
+        appId: parsed.data.appId,
         enabled: parsed.data.enabled,
-        emergencyDisabled: false,
-        identityMode: "bot"
+        ...(parsed.data.appSecret ? { appSecret: parsed.data.appSecret } : {})
       });
+      integrations.upsertConfig({ enabled: parsed.data.enabled, emergencyDisabled: false, identityMode: "bot" });
       await options.channelRuntime?.reconcileAccount(userId);
-      // Audit only safe metadata; App Secret is write-only and never logged or returned.
       new AuditLogRepository(db, userId).create({
         action: "feishu.account.update",
         resourceType: "feishu_integration",
@@ -363,886 +152,166 @@ export function createFeishuIntegrationRoutes(
       });
       res.json({ code: 0, data: { account }, message: "" });
     } catch (error) {
-      res.status(400).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "Failed to save Feishu App credentials"
-      });
+      invalid(res, error instanceof Error ? error.message : "Failed to save Feishu App credentials");
     }
   });
-
   router.get("/health", (req, res) => {
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const health = options.channelRuntime?.getHealth(userId) ?? {
-      state: "disabled",
-      accountId: null,
-      configRevision: null,
-      reconnectAttempt: 0,
-      lastConnectedAt: null,
-      lastErrorMessage: null
-    };
+    const health = options.channelRuntime?.getHealth(userIdFor(req)) ?? { state: "disabled", accountId: null, configRevision: null, reconnectAttempt: 0, lastConnectedAt: null, lastErrorMessage: null };
     res.json({ code: 0, data: { health }, message: "" });
   });
-
   router.get("/status", async (req, res) => {
     try {
       const status = await getStatus();
       const config = options.db ? repoFor(options.db, req).getConfig() : undefined;
-      res.json({
-        code: 0,
-        data: {
-          status: config
-            ? {
-                ...status,
-                enabled: config.enabled,
-                emergencyDisabled: config.emergencyDisabled,
-                identityMode: config.identityMode === "unknown" ? status.identityMode : config.identityMode
-              }
-            : status
-        },
-        message: ""
-      });
-    } catch {
-      res.status(500).json({
-        code: 1,
-        message: "Failed to check Feishu integration status"
-      });
-    }
+      res.json({ code: 0, data: { status: config ? { ...status, enabled: config.enabled, emergencyDisabled: config.emergencyDisabled, identityMode: config.identityMode === "unknown" ? status.identityMode : config.identityMode } : status }, message: "" });
+    } catch { res.status(500).json({ code: 1, message: "Failed to check Feishu integration status" }); }
   });
-
   router.get("/config", (req, res) => {
-    const repo = requireRepo(options.db, res);
-    if (!repo) return;
-
-    res.json({
-      code: 0,
-      data: { config: toConfigPayload(repoFor(repo, req).getConfig()) },
-      message: ""
-    });
+    const db = requireDb(options.db, res); if (!db) return;
+    res.json({ code: 0, data: { config: repoFor(db, req).getConfig() }, message: "" });
   });
-
   router.patch("/config", (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db) return;
-    const parseResult = feishuConfigSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({ code: 1, message: "Invalid Feishu integration config" });
-      return;
-    }
-
-    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const db = requireDb(options.db, res); if (!db) return;
+    const parsed = feishuConfigSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return invalid(res, "Invalid Feishu integration config");
+    const userId = userIdFor(req);
     try {
-      const config = new FeishuIntegrationRepository(db, userId).upsertConfig(parseResult.data);
-      new AuditLogRepository(db, userId).create({
-        action: "feishu.config.update",
-        resourceType: "feishu_integration",
-        details: {
-          enabled: config.enabled,
-          emergencyDisabled: config.emergencyDisabled,
-          identityMode: config.identityMode,
-          allowedChatIdCount: config.allowedChatIds.length,
-          commandPrefix: config.commandPrefix
-        },
-        ipAddress: req.ip
-      });
-      res.json({ code: 0, data: { config: toConfigPayload(config) }, message: "" });
-    } catch (error) {
-      res.status(400).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "Invalid Feishu integration config"
-      });
-    }
+      const config = new FeishuIntegrationRepository(db, userId).upsertConfig(parsed.data);
+      new AuditLogRepository(db, userId).create({ action: "feishu.config.update", resourceType: "feishu_integration", details: { enabled: config.enabled, emergencyDisabled: config.emergencyDisabled, identityMode: config.identityMode, allowedChatIdCount: config.allowedChatIds.length }, ipAddress: req.ip });
+      res.json({ code: 0, data: { config }, message: "" });
+    } catch (error) { invalid(res, error instanceof Error ? error.message : "Invalid Feishu integration config"); }
   });
-
   router.get("/user-mappings", (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db) return;
-
-    res.json({
-      code: 0,
-      data: { mappings: repoFor(db, req).listUserMappings().map(toMappingPayload) },
-      message: ""
-    });
+    const db = requireDb(options.db, res); if (!db) return;
+    res.json({ code: 0, data: { mappings: repoFor(db, req).listUserMappings().map(toMappingPayload) }, message: "" });
   });
-
   router.put("/user-mappings", (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db) return;
-    const parseResult = feishuUserMappingsSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({ code: 1, message: "Invalid Feishu user mappings" });
-      return;
-    }
-
-    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const db = requireDb(options.db, res); if (!db) return;
+    const parsed = feishuUserMappingsSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return invalid(res, "Invalid Feishu user mappings");
+    const userId = userIdFor(req);
     try {
-      const mappings = new FeishuIntegrationRepository(db, userId)
-        .replaceUserMappings(parseResult.data.mappings);
-      new AuditLogRepository(db, userId).create({
-        action: "feishu.user_mappings.replace",
-        resourceType: "feishu_integration",
-        details: { mappingCount: mappings.length },
-        ipAddress: req.ip
-      });
+      const mappings = new FeishuIntegrationRepository(db, userId).replaceUserMappings(parsed.data.mappings);
+      new AuditLogRepository(db, userId).create({ action: "feishu.user_mappings.replace", resourceType: "feishu_integration", details: { mappingCount: mappings.length }, ipAddress: req.ip });
       res.json({ code: 0, data: { mappings: mappings.map(toMappingPayload) }, message: "" });
-    } catch (error) {
-      res.status(400).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "Invalid Feishu user mappings"
-      });
-    }
+    } catch (error) { invalid(res, error instanceof Error ? error.message : "Invalid Feishu user mappings"); }
   });
-
-  router.get("/bindings", (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db || !options.masterKey) return;
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const bindings = new FeishuChannelRepository(db, userId, options.masterKey)
-      .listConversationBindings();
-    res.json({ code: 0, data: { bindings }, message: "" });
-  });
-
-  router.post("/bindings", (req, res) => {
-    const db = requireRepo(options.db, res);
-    const parsed = createFeishuBindingSchema.safeParse(req.body ?? {});
-    if (!db || !options.masterKey) return;
-    if (!parsed.success) {
-      res.status(400).json({ code: 1, message: "Invalid Feishu binding", details: {} });
-      return;
-    }
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    if (parsed.data.scope.type === "project" && !new ProjectRepository(db, userId).getById(parsed.data.scope.id)) {
-      res.status(404).json({ code: 1, message: "Project not found", details: {} });
-      return;
-    }
-    const channelRepository = new FeishuChannelRepository(db, userId, options.masterKey);
-    const account = channelRepository.getAccount();
-    if (!account) {
-      res.status(409).json({ code: 1, message: "Feishu account is not configured", details: {} });
-      return;
-    }
-    if (channelRepository.findConversationBinding({
-      accountId: account.id,
-      chatId: parsed.data.chatId,
-      threadKey: parsed.data.threadKey
-    })) {
-      res.status(409).json({ code: 1, message: "Feishu binding already exists", details: {} });
-      return;
-    }
-    const conversation = new CopilotRepository(db, userId).createConversation({
-      title: `Feishu ${parsed.data.chatId}`,
-      source: "feishu",
-      sourceRefId: parsed.data.chatId
-    });
-    const created = channelRepository.createConversationBinding({
-      accountId: account.id,
-      chatId: parsed.data.chatId,
-      threadKey: parsed.data.threadKey,
-      conversationId: conversation.id
-    });
-    const binding = channelRepository.updateConversationBindingScope(created.id, parsed.data.scope);
-    res.status(201).json({ code: 0, data: { binding }, message: "" });
-  });
-
-  router.patch("/bindings/:bindingId", (req, res) => {
-    const db = requireRepo(options.db, res);
-    const parsed = feishuBindingScopeSchema.safeParse(req.body ?? {});
-    if (!db || !options.masterKey) return;
-    if (!parsed.success) {
-      res.status(400).json({ code: 1, message: "Invalid Feishu binding scope", details: {} });
-      return;
-    }
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    try {
-      const binding = new FeishuChannelRepository(db, userId, options.masterKey)
-        .updateConversationBindingScope(req.params.bindingId, parsed.data);
-      res.json({ code: 0, data: { binding }, message: "" });
-    } catch {
-      res.status(404).json({ code: 1, message: "Feishu binding not found", details: {} });
-    }
-  });
-
-  router.delete("/bindings/:bindingId", (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db || !options.masterKey) return;
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const deleted = new FeishuChannelRepository(db, userId, options.masterKey)
-      .deleteConversationBinding(req.params.bindingId);
-    if (!deleted) {
-      res.status(404).json({ code: 1, message: "Feishu binding not found", details: {} });
-      return;
-    }
-    res.json({ code: 0, data: { deleted: true }, message: "" });
-  });
-
-  router.get("/queue-summary", (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db || !options.masterKey) return;
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const queues = new FeishuChannelRepository(db, userId, options.masterKey).getQueueSummary();
-    res.json({ code: 0, data: { queues }, message: "" });
-  });
-
   router.post("/emergency-stop", async (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db || !options.masterKey) return;
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const channelRepository = new FeishuChannelRepository(db, userId, options.masterKey);
-    const account = channelRepository.getAccount();
-    if (account) channelRepository.upsertAccount({ appId: account.appId, enabled: false });
-    new FeishuIntegrationRepository(db, userId, options.masterKey).upsertConfig({
-      enabled: false,
-      emergencyDisabled: true
-    });
+    const db = requireDb(options.db, res); if (!db || !options.masterKey) return unavailable(res);
+    const userId = userIdFor(req);
+    const accountRepository = new FeishuChannelRepository(db, userId, options.masterKey);
+    const account = accountRepository.getAccount();
+    if (account) accountRepository.upsertAccount({ appId: account.appId, enabled: false });
+    new FeishuIntegrationRepository(db, userId, options.masterKey).upsertConfig({ enabled: false, emergencyDisabled: true });
     await options.channelRuntime?.reconcileAccount(userId);
-    new AuditLogRepository(db, userId).create({
-      action: "feishu.channel.emergency_stop",
-      resourceType: "feishu_integration",
-      details: {},
-      ipAddress: req.ip
-    });
+    new AuditLogRepository(db, userId).create({ action: "feishu.channel.emergency_stop", resourceType: "feishu_integration", details: {}, ipAddress: req.ip });
     res.json({ code: 0, data: { stopped: true }, message: "" });
   });
-
-  router.post("/bot-websocket/events", (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db) return;
-    const parseResult = botWebSocketEventSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({
-        code: 1,
-        message: "Invalid Feishu bot WebSocket event",
-        details: { code: "feishu_bot_ws_invalid_payload" }
-      });
-      return;
-    }
-
-    const command = normalizeFeishuBotLongConnectionEvent(parseResult.data.event);
-    if (!command) {
-      res.status(400).json({
-        code: 1,
-        message: "Unsupported Feishu bot WebSocket event",
-        details: { code: "feishu_bot_ws_unsupported_event" }
-      });
-      return;
-    }
-
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const result = routeFeishuBotCommand({ db, userId, command, ipAddress: req.ip });
-    if (!result.ok) {
-      res.status(statusForBotWebSocketReject(result.reasonCode)).json({
-        code: 1,
-        message: "Feishu bot WebSocket event rejected",
-        details: { code: result.reasonCode },
-        ...(result.reply ? { data: { replyPlan: result.reply } } : {})
-      });
-      return;
-    }
-
-    res.json({
-      code: 0,
-      data: {
-        route: result.route,
-        replyPlan: result.reply
-      },
-      message: ""
-    });
-  });
-
-  router.post("/bot-websocket/connection-events", (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db) return;
-    const parseResult = botWebSocketConnectionEventSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({
-        code: 1,
-        message: "Invalid Feishu bot WebSocket connection event",
-        details: { code: "feishu_bot_ws_connection_invalid_payload" }
-      });
-      return;
-    }
-
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    recordFeishuBotConnectionEvent(db, userId, {
-      ...parseResult.data,
-      ipAddress: req.ip
-    });
-
-    res.json({
-      code: 0,
-      data: {
-        connection: {
-          state: parseResult.data.state,
-          connectionId: parseResult.data.connectionId ?? null,
-          attempt: parseResult.data.attempt ?? null,
-          eventSubscription: parseResult.data.eventSubscription ?? "im.message.receive_v1",
-          publicCallbackRequired: false
-        }
-      },
-      message: ""
-    });
-  });
-
-  router.post("/inbound", async (req, res) => {
-    const db = requireRepo(options.db, res);
-    if (!db) return;
-    const parseResult = inboundFeishuCommandSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({
-        code: 1,
-        message: "Invalid Feishu inbound command",
-        details: { code: "feishu_inbound_invalid_payload" }
-      });
-      return;
-    }
-
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const command = parseResult.data;
-    const config = new FeishuIntegrationRepository(db, userId).getConfig();
-    if (!config.enabled) {
-      return sendInboundReject(db, userId, req.ip, res, command, {
-        status: 403,
-        code: "feishu_integration_disabled",
-        message: "Feishu integration is disabled"
-      });
-    }
-    if (config.emergencyDisabled) {
-      return sendInboundReject(db, userId, req.ip, res, command, {
-        status: 403,
-        code: "feishu_integration_emergency_disabled",
-        message: "Feishu integration is emergency-disabled"
-      });
-    }
-    if (config.identityMode !== "user" && config.identityMode !== "bot") {
-      return sendInboundReject(db, userId, req.ip, res, command, {
-        status: 403,
-        code: "feishu_identity_mode_required",
-        message: "Feishu identity mode must be configured"
-      });
-    }
-    if (config.allowedChatIds.length === 0) {
-      return sendInboundReject(db, userId, req.ip, res, command, {
-        status: 403,
-        code: "feishu_chat_allowlist_required",
-        message: "Feishu inbound chat allowlist is required"
-      });
-    }
-    if (!config.allowedChatIds.includes(command.chatId)) {
-      return sendInboundReject(db, userId, req.ip, res, command, {
-        status: 403,
-        code: "feishu_chat_not_allowed",
-        message: "Feishu chat is not allowed"
-      });
-    }
-    if (command.messageId && isAcceptedInboundMessageReplay(db, userId, command.messageId)) {
-      return sendInboundReject(db, userId, req.ip, res, command, {
-        status: 409,
-        code: "feishu_message_replayed",
-        message: "Feishu inbound message was already accepted"
-      });
-    }
-    const mappedUserId = findMappedOpenForgeUserId(new FeishuIntegrationRepository(db, userId), command.feishuUserId);
-    if (mappedUserId !== userId) {
-      return sendInboundReject(db, userId, req.ip, res, command, {
-        status: 403,
-        code: "feishu_user_not_mapped",
-        message: "Feishu user is not mapped to the current OpenForge user"
-      });
-    }
-    if (command.projectId && !new ProjectRepository(db, userId).getById(command.projectId)) {
-      return sendInboundReject(db, userId, req.ip, res, command, {
-        status: 403,
-        code: "feishu_project_not_visible",
-        message: "Feishu inbound project is not visible to the mapped user"
-      });
-    }
-    if (!consumeInboundRateLimit(inboundRateWindows, inboundRateLimit, userId, command.chatId)) {
-      return sendInboundReject(db, userId, req.ip, res, command, {
-        status: 429,
-        code: "feishu_inbound_rate_limited",
-        message: "Feishu inbound command rate limit exceeded"
-      });
-    }
-    const repo = new CopilotRepository(db, userId);
-    recoverStaleCopilotRuns(repo, options.staleRunTimeoutMs, options.staleApprovalTimeoutMs);
-    const activeRun = repo.findActiveRun();
-    if (activeRun) {
-      return sendInboundReject(db, userId, req.ip, res, command, {
-        status: 409,
-        code: "copilot_run_already_active",
-        message: "A Copilot run is already active"
-      });
-    }
-    // The DB live-run constraint is the source of truth; clear stale process locks after recovery.
-    if (activeInboundUsers.has(userId)) activeInboundUsers.delete(userId);
-    if (!options.masterKey) {
-      res.status(503).json({
-        code: 1,
-        message: "Feishu inbound Copilot execution is unavailable",
-        details: { code: "feishu_inbound_copilot_unavailable" }
-      });
-      return;
-    }
-
-    activeInboundUsers.add(userId);
-    try {
-      const result = await new CopilotOrchestrator({
-        db,
-        masterKey: options.masterKey,
-        ...(options.modelClientFactory ? { modelClientFactory: options.modelClientFactory } : {}),
-        ...(options.modelRequestTimeoutMs ? { modelRequestTimeoutMs: options.modelRequestTimeoutMs } : {}),
-        ...(options.runControls ? { runControls: options.runControls } : {}),
-        ...(options.sessionManager ? { sessionManager: options.sessionManager } : {}),
-        ...(options.adapterCommandRunner ? { adapterCommandRunner: options.adapterCommandRunner } : {})
-      }).runText({
-        userId,
-        prompt: command.text,
-        source: "feishu",
-        ...(command.projectId ? { sourceRefId: command.projectId } : {})
-      });
-      const pendingActions = repo.listPendingActions(result.run.id);
-      const conversation = repo.createConversation({
-        title: inboundConversationTitle(command.text),
-        source: "feishu",
-        ...(command.projectId ? { sourceRefId: command.projectId } : {})
-      });
-      repo.createConversationMessage(conversation.id, {
-        role: "user",
-        content: redactCopilotText(command.text),
-        runId: result.run.id,
-        payload: inboundMessagePayload(command)
-      });
-      storeInboundAssistantMessages(repo, conversation.id, result.run.id, result.events);
-      recordInboundAccept(db, userId, req.ip, command, result.run.id, conversation.id, pendingActions.length);
-      res.status(result.ok ? 201 : result.status).json({
-        code: result.ok ? 0 : 1,
-        data: result.ok
-          ? inboundSuccessPayload(conversation, result.run, result.events.length, pendingActions.length)
-          : undefined,
-        message: result.ok ? "" : result.error.message,
-        ...(result.ok ? {} : { details: { code: result.error.code, runId: result.run.id } })
-      });
-    } catch (error) {
-      if (error instanceof CopilotLiveRunConflictError) {
-        return sendInboundReject(db, userId, req.ip, res, command, {
-          status: 409,
-          code: "copilot_run_already_active",
-          message: "A Copilot run is already active"
-        });
-      }
-      res.status(500).json({
-        code: 1,
-        message: "Failed to create Feishu inbound Copilot run",
-        details: { code: "feishu_inbound_run_failed" }
-      });
-    } finally {
-      activeInboundUsers.delete(userId);
-    }
-  });
-
   return router;
 }
 
-type PublicFeishuCommand = InboundFeishuCommand & {
-  eventId?: string | undefined;
-};
-
-type FeishuSignatureVerification =
-  | { ok: true; timestamp: string; nonce: string; signature: string }
-  | { ok: false; code: string };
-
-function isFeishuUrlVerification(body: unknown): boolean {
-  return isRecord(body) && body.type === "url_verification" && typeof body.challenge === "string";
+interface PublicFeishuIngress {
+  kind: "message" | "card_action";
+  chatId: string;
+  feishuUserId: string;
+  eventId?: string;
+  messageId?: string;
+  text: string;
+  actionToken?: string;
 }
 
-function getFeishuChallenge(body: unknown): string {
-  return isRecord(body) && typeof body.challenge === "string" ? body.challenge : "";
+function findPublicWebhookConfig(db: Database, masterKey: string, publicId: string, res: Response) {
+  try {
+    const config = new FeishuIntegrationRepository(db, "__public_webhook__", masterKey).findPublicWebhookConfig(publicId);
+    if (!config) sendPublicWebhookError(res, 404, "feishu_webhook_not_found");
+    else if (!config.publicWebhookEnabled) sendPublicWebhookError(res, 403, "feishu_webhook_disabled");
+    return config;
+  } catch { sendPublicWebhookError(res, 403, "feishu_webhook_invalid_config"); return undefined; }
 }
 
-function getFeishuBodyToken(body: unknown): string | undefined {
-  if (!isRecord(body)) return undefined;
-  if (typeof body.token === "string") return body.token;
-  const header = body.header;
-  return isRecord(header) && typeof header.token === "string" ? header.token : undefined;
+function consumePublicReplayAndRate(
+  repository: FeishuIntegrationRepository,
+  config: { userId: string; publicWebhookId: string },
+  event: PublicFeishuIngress,
+  signature: Extract<FeishuSignatureVerification, { ok: true }>,
+  limit: { max: number; windowMs: number }
+): boolean {
+  const replayKey = event.eventId ? `event:${event.eventId}` : event.messageId ? `message:${event.messageId}` : `signature:${signature.timestamp}:${signature.nonce}:${signature.signature}`;
+  return repository.consumePublicWebhookReplayKey({ userId: config.userId, publicWebhookId: config.publicWebhookId, replayKey, ttlMs: publicWebhookReplayTtlMs })
+    && repository.consumePublicWebhookReplayKey({ userId: config.userId, publicWebhookId: config.publicWebhookId, replayKey: `nonce:${signature.timestamp}:${signature.nonce}:${signature.signature}`, ttlMs: publicWebhookReplayTtlMs })
+    && repository.consumePublicWebhookRateWindow({ userId: config.userId, publicWebhookId: config.publicWebhookId, scope: "integration", scopeId: config.publicWebhookId, max: limit.max, windowMs: limit.windowMs });
 }
 
-function hasEncryptedFeishuPayload(body: unknown): boolean {
-  return isRecord(body) && typeof body.encrypt === "string";
+function ensurePortfolioHandler(registry: PortfolioFeishuRegistryRepository, userId: string, providerAccountId: string): void {
+  registry.register({ userId, provider: "feishu", providerAccountId });
 }
 
-function getRawRequestBody(req: Request): Buffer {
-  const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
-  if (Buffer.isBuffer(rawBody)) return rawBody;
-  return Buffer.from(JSON.stringify(req.body ?? {}), "utf8");
-}
+function isFeishuUrlVerification(body: unknown): boolean { return isRecord(body) && body.type === "url_verification"; }
+function getFeishuChallenge(body: unknown): string { return isRecord(body) && typeof body.challenge === "string" ? body.challenge : ""; }
+function getFeishuBodyToken(body: unknown): string | undefined { return isRecord(body) && typeof body.token === "string" ? body.token : isRecord(body) && isRecord(body.header) && typeof body.header.token === "string" ? body.header.token : undefined; }
+function hasEncryptedFeishuPayload(body: unknown): boolean { return isRecord(body) && typeof body.encrypt === "string"; }
+function getRawRequestBody(req: Request): Buffer { const raw = (req as Request & { rawBody?: Buffer }).rawBody; return raw ?? Buffer.from(JSON.stringify(req.body ?? {})); }
 
-function verifyFeishuPublicSignature(
-  req: Request,
-  rawBody: Buffer,
-  eventEncryptKey: string
-): FeishuSignatureVerification {
-  const timestamp = getHeaderValue(req, "x-lark-request-timestamp");
-  const nonce = getHeaderValue(req, "x-lark-request-nonce");
-  const signature = getHeaderValue(req, "x-lark-signature");
-  if (!timestamp || !nonce || !signature) {
-    return { ok: false, code: "feishu_webhook_signature_required" };
-  }
-  const timestampSeconds = Number.parseInt(timestamp, 10);
-  if (!Number.isSafeInteger(timestampSeconds)) {
-    return { ok: false, code: "feishu_webhook_timestamp_invalid" };
-  }
-  const ageMs = Math.abs(Date.now() - timestampSeconds * 1000);
-  if (ageMs > publicWebhookTimestampWindowMs) {
-    return { ok: false, code: "feishu_webhook_timestamp_stale" };
-  }
-  const expected = createHash("sha256")
-    .update(`${timestamp}${nonce}${eventEncryptKey}`, "utf8")
-    .update(rawBody)
-    .digest("hex");
-  if (!safeEqualHex(signature, expected)) {
-    return { ok: false, code: "feishu_webhook_signature_invalid" };
-  }
+type FeishuSignatureVerification = { ok: true; timestamp: string; nonce: string; signature: string } | { ok: false; code: string };
+function verifyFeishuPublicSignature(req: Request, rawBody: Buffer, secret: string | null): FeishuSignatureVerification {
+  if (!secret) return { ok: false, code: "feishu_webhook_signature_unconfigured" };
+  const timestamp = header(req, "x-lark-request-timestamp") ?? header(req, "x-feishu-request-timestamp");
+  const nonce = header(req, "x-lark-request-nonce") ?? header(req, "x-feishu-request-nonce");
+  const signature = header(req, "x-lark-signature") ?? header(req, "x-feishu-signature");
+  if (!timestamp || !nonce || !signature) return { ok: false, code: "feishu_webhook_signature_missing" };
+  const expected = createHash("sha256").update(`${timestamp}${nonce}${secret}${rawBody.toString("utf8")}`).digest("hex");
+  if (!safeEqualHex(signature, expected)) return { ok: false, code: "feishu_webhook_signature_invalid" };
   return { ok: true, timestamp, nonce, signature };
 }
 
-function normalizePublicFeishuCommand(body: unknown): PublicFeishuCommand | undefined {
+function normalizePublicFeishuIngress(body: unknown): PublicFeishuIngress | undefined {
   if (!isRecord(body)) return undefined;
-  const header = body.header;
-  const eventType = isRecord(header) && typeof header.event_type === "string" ? header.event_type : undefined;
-  if (eventType !== "im.message.receive_v1") return undefined;
-  const event = body.event;
-  if (!isRecord(event)) return undefined;
-  const message = event.message;
-  if (!isRecord(message)) return undefined;
-  if (typeof message.message_type === "string" && message.message_type !== "text") return undefined;
-
-  const sender = event.sender;
-  const senderId = isRecord(sender) ? sender.sender_id : undefined;
-  const feishuUserId = firstString(
-    isRecord(senderId) ? senderId.open_id : undefined,
-    isRecord(senderId) ? senderId.user_id : undefined,
-    isRecord(senderId) ? senderId.union_id : undefined
-  );
-  const command = inboundFeishuCommandSchema.safeParse({
-    chatId: message.chat_id,
-    feishuUserId,
-    text: parseFeishuTextContent(message.content),
-    messageId: message.message_id,
-    projectId: parseFeishuProjectId(message.content)
-  });
-  if (!command.success) return undefined;
-  const eventId = isRecord(header) && typeof header.event_id === "string" ? header.event_id : undefined;
-  return {
-    ...command.data,
-    ...(eventId ? { eventId } : {})
+  const event = isRecord(body.event) ? body.event : body;
+  const headerValue = isRecord(body.header) ? body.header : {};
+  const eventId = firstString(headerValue.event_id, event.event_id, event.eventId);
+  const sender = isRecord(event.sender) ? event.sender : {};
+  const senderId = isRecord(sender.sender_id) ? sender.sender_id : {};
+  const feishuUserId = firstString(senderId.open_id, event.open_id, event.sender_open_id);
+  const message = isRecord(event.message) ? event.message : {};
+  const chatId = firstString(message.chat_id, event.chat_id, event.open_chat_id);
+  if (!feishuUserId || !chatId) return undefined;
+  const action = isRecord(event.action) ? event.action : isRecord(body.action) ? body.action : undefined;
+  if (action) {
+    const actionToken = firstString(action.value, action.action_value, event.action_token);
+    const messageId = firstString(message.message_id, event.message_id);
+    return actionToken ? {
+      kind: "card_action", chatId, feishuUserId, text: "[card action]", actionToken,
+      ...(eventId ? { eventId } : {}),
+      ...(messageId ? { messageId } : {})
+    } : undefined;
+  }
+  const text = parseFeishuTextContent(message.content);
+  const messageId = firstString(message.message_id, event.message_id);
+  return text === undefined ? undefined : {
+    kind: "message", chatId, feishuUserId, text,
+    ...(eventId ? { eventId } : {}),
+    ...(messageId ? { messageId } : {})
   };
 }
 
 function parseFeishuTextContent(content: unknown): string | undefined {
-  if (typeof content !== "string") return undefined;
-  try {
-    const parsed = JSON.parse(content) as unknown;
-    return isRecord(parsed) && typeof parsed.text === "string" ? parsed.text : undefined;
-  } catch {
-    return undefined;
+  if (typeof content === "string") {
+    try { const parsed = JSON.parse(content); return isRecord(parsed) && typeof parsed.text === "string" ? parsed.text : content; } catch { return content; }
   }
+  return isRecord(content) && typeof content.text === "string" ? content.text : undefined;
 }
-
-function parseFeishuProjectId(content: unknown): string | undefined {
-  if (typeof content !== "string") return undefined;
-  try {
-    const parsed = JSON.parse(content) as unknown;
-    if (!isRecord(parsed)) return undefined;
-    return typeof parsed.projectId === "string" ? parsed.projectId : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function getHeaderValue(req: Request, name: string): string | undefined {
-  const value = req.headers[name];
-  if (typeof value === "string") return value;
-  return Array.isArray(value) ? value[0] : undefined;
-}
-
-function safeEqualHex(actual: string, expected: string): boolean {
-  const actualBuffer = Buffer.from(actual, "hex");
-  const expectedBuffer = Buffer.from(expected, "hex");
-  return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
-}
-
-function statusForBotWebSocketReject(reasonCode: string): number {
-  if (reasonCode === "feishu_bot_event_replayed") return 409;
-  if (reasonCode === "feishu_command_prefix_required" || reasonCode === "feishu_command_unsupported") return 400;
-  if (reasonCode === "feishu_terminal_input_rejected") return 403;
-  if (
-    reasonCode === "feishu_integration_disabled" ||
-    reasonCode === "feishu_integration_emergency_disabled" ||
-    reasonCode === "feishu_identity_mode_required" ||
-    reasonCode === "feishu_chat_allowlist_required" ||
-    reasonCode === "feishu_chat_not_allowed" ||
-    reasonCode === "feishu_user_not_mapped"
-  ) {
-    return 403;
-  }
-  return 400;
-}
-
-function sendPublicWebhookError(res: Response, status: number, code: string): void {
-  res.status(status).json({ msg: code });
-}
-
-function sendPublicWebhookPolicyReject(
-  db: Database,
-  userId: string,
-  ipAddress: string | undefined,
-  res: Response,
-  command: PublicFeishuCommand,
-  reasonCode: string
-): void {
-  new AuditLogRepository(db, userId).create({
-    action: "feishu.webhook.reject",
-    resourceType: "feishu_public_webhook",
-    resourceId: command.messageId ?? command.eventId ?? null,
-    details: {
-      reasonCode,
-      eventId: command.eventId ?? null,
-      chatId: command.chatId,
-      feishuUserId: command.feishuUserId,
-      messageId: command.messageId ?? null,
-      projectId: command.projectId ?? null,
-      textSummary: inboundTextSummary(command.text)
-    },
-    ipAddress
-  });
+function header(req: Request, name: string): string | undefined { const value = req.header(name); return value && value.trim() ? value.trim() : undefined; }
+function safeEqualHex(actual: string, expected: string): boolean { const left = Buffer.from(actual, "utf8"); const right = Buffer.from(expected, "utf8"); return left.length === right.length && timingSafeEqual(left, right); }
+function sendPublicWebhookError(res: Response, status: number, code: string): void { res.status(status).json({ msg: code }); }
+function sendPublicWebhookPolicyReject(db: Database, userId: string, ipAddress: string | undefined, res: Response, event: PublicFeishuIngress, reasonCode: string): void {
+  new AuditLogRepository(db, userId).create({ action: "feishu.webhook.reject", resourceType: "feishu_public_webhook", resourceId: event.messageId ?? event.eventId ?? null, details: { reasonCode, eventId: event.eventId ?? null, chatId: event.chatId, feishuUserId: event.feishuUserId }, ipAddress });
   res.status(200).json({ msg: "ignored" });
 }
-
-function recordPublicWebhookAccept(
-  db: Database,
-  userId: string,
-  ipAddress: string | undefined,
-  publicWebhookId: string,
-  command: PublicFeishuCommand,
-  runId: string,
-  conversationId: string,
-  pendingActionCount: number
-): void {
-  new AuditLogRepository(db, userId).create({
-    action: "feishu.webhook.accept",
-    resourceType: "feishu_public_webhook",
-    resourceId: command.messageId ?? command.eventId ?? null,
-    details: {
-      publicWebhookId,
-      eventId: command.eventId ?? null,
-      chatId: command.chatId,
-      feishuUserId: command.feishuUserId,
-      messageId: command.messageId ?? null,
-      projectId: command.projectId ?? null,
-      runId,
-      conversationId,
-      pendingActionCount,
-      textSummary: inboundTextSummary(command.text)
-    },
-    ipAddress
-  });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function firstString(...values: unknown[]): string | undefined {
-  return values.find((value): value is string => typeof value === "string" && value.trim().length > 0);
-}
-
-function repoFor(db: Database, req: unknown): FeishuIntegrationRepository {
-  return new FeishuIntegrationRepository(db, (req as AuthenticatedRequest).userId);
-}
-
-function requireRepo(db: Database | undefined, res: { status: (code: number) => { json: (body: unknown) => void } }): Database | undefined {
-  if (db) return db;
-  res.status(503).json({ code: 1, message: "Feishu integration persistence is unavailable" });
-  return undefined;
-}
-
-function toConfigPayload(config: FeishuIntegrationConfig): FeishuIntegrationConfig {
-  return config;
-}
-
-function toMappingPayload(mapping: FeishuUserMapping) {
-  return {
-    id: mapping.id,
-    feishuUserId: mapping.feishuUserId,
-    openforgeUserId: mapping.openforgeUserId,
-    displayName: mapping.displayName,
-    createdAt: new Date(mapping.createdAt).toISOString(),
-    updatedAt: new Date(mapping.updatedAt).toISOString()
-  };
-}
-
-function findMappedOpenForgeUserId(repo: FeishuIntegrationRepository, feishuUserId: string): string | null {
-  return repo.listUserMappings()
-    .find((mapping) => mapping.feishuUserId === feishuUserId)
-    ?.openforgeUserId ?? null;
-}
-
-function recoverStaleCopilotRuns(
-  repo: CopilotRepository,
-  timeoutMs = defaultStaleCopilotRunTimeoutMs,
-  approvalTimeoutMs = defaultStaleCopilotApprovalTimeoutMs
-): void {
-  const now = Date.now();
-  const timeout = Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : defaultStaleCopilotRunTimeoutMs;
-  const approvalTimeout = Number.isFinite(approvalTimeoutMs)
-    ? Math.max(0, approvalTimeoutMs)
-    : defaultStaleCopilotApprovalTimeoutMs;
-  repo.recoverStaleExecutionRuns(now - timeout, now);
-  repo.recoverStaleApprovalRuns(now - approvalTimeout, now);
-}
-
-function isAcceptedInboundMessageReplay(db: Database, userId: string, messageId: string): boolean {
-  return new AuditLogRepository(db, userId).list({
-    action: "feishu.inbound.accept",
-    resourceType: "feishu_inbound_command",
-    resourceId: messageId,
-    limit: 1
-  }).length > 0;
-}
-
-function consumeInboundRateLimit(
-  windows: Map<string, { startedAt: number; count: number }>,
-  limit: { max: number; windowMs: number },
-  userId: string,
-  chatId: string
-): boolean {
-  const key = `${userId}:${chatId}`;
-  const now = Date.now();
-  const current = windows.get(key);
-  if (!current || now - current.startedAt >= limit.windowMs) {
-    windows.set(key, { startedAt: now, count: 1 });
-    return true;
-  }
-  if (current.count >= limit.max) return false;
-  current.count += 1;
-  return true;
-}
-
-function inboundConversationTitle(text: string): string {
-  const summary = inboundTextSummary(text);
-  return summary.length > 80 ? `${summary.slice(0, 77)}...` : summary || "Feishu command";
-}
-
-function inboundMessagePayload(command: InboundFeishuCommand): Record<string, unknown> {
-  return {
-    source: "feishu",
-    chatId: command.chatId,
-    feishuUserId: command.feishuUserId,
-    messageId: command.messageId ?? null,
-    projectId: command.projectId ?? null,
-    textSummary: inboundTextSummary(command.text)
-  };
-}
-
-function storeInboundAssistantMessages(
-  repo: CopilotRepository,
-  conversationId: string,
-  runId: string,
-  events: CopilotRunEvent[]
-): void {
-  for (const event of events) {
-    if (event.type !== "assistant_message") continue;
-    const text = typeof event.payload.text === "string" ? event.payload.text : event.message;
-    if (!text) continue;
-    repo.createConversationMessage(conversationId, {
-      role: "assistant",
-      content: redactCopilotText(text),
-      runId,
-      payload: { source: "feishu" }
-    });
-  }
-}
-
-function recordInboundAccept(
-  db: Database,
-  userId: string,
-  ipAddress: string | undefined,
-  command: InboundFeishuCommand,
-  runId: string,
-  conversationId: string,
-  pendingActionCount: number
-): void {
-  new AuditLogRepository(db, userId).create({
-    action: "feishu.inbound.accept",
-    resourceType: "feishu_inbound_command",
-    resourceId: command.messageId ?? null,
-    details: {
-      chatId: command.chatId,
-      feishuUserId: command.feishuUserId,
-      messageId: command.messageId ?? null,
-      projectId: command.projectId ?? null,
-      runId,
-      conversationId,
-      pendingActionCount,
-      textSummary: inboundTextSummary(command.text)
-    },
-    ipAddress
-  });
-}
-
-function inboundSuccessPayload(
-  conversation: CopilotConversation,
-  run: CopilotRun,
-  eventCount: number,
-  pendingActionCount: number
-) {
-  return {
-    conversation: {
-      id: conversation.id,
-      source: conversation.source,
-      sourceRefId: conversation.sourceRefId,
-      status: conversation.status
-    },
-    run: {
-      id: run.id,
-      status: run.status,
-      source: run.source,
-      sourceRefId: run.sourceRefId
-    },
-    eventCount,
-    pendingActionCount
-  };
-}
-
-function sendInboundReject(
-  db: Database,
-  userId: string,
-  ipAddress: string | undefined,
-  res: { status: (code: number) => { json: (body: unknown) => void } },
-  command: InboundFeishuCommand,
-  error: { status: number; code: string; message: string }
-): void {
-  new AuditLogRepository(db, userId).create({
-    action: "feishu.inbound.reject",
-    resourceType: "feishu_inbound_command",
-    resourceId: command.messageId ?? null,
-    details: {
-      reasonCode: error.code,
-      chatId: command.chatId,
-      feishuUserId: command.feishuUserId,
-      messageId: command.messageId ?? null,
-      projectId: command.projectId ?? null,
-      textSummary: inboundTextSummary(command.text)
-    },
-    ipAddress
-  });
-  res.status(error.status).json({
-    code: 1,
-    message: error.message,
-    details: { code: error.code }
-  });
-}
-
-function inboundTextSummary(text: string): string {
-  const redacted = redactCopilotText(text).replace(/\s+/g, " ").trim();
-  return redacted.length > 160 ? `${redacted.slice(0, 157)}...` : redacted;
-}
+function userIdFor(req: unknown): string { return (req as AuthenticatedRequest).userId; }
+function repoFor(db: Database, req: unknown): FeishuIntegrationRepository { return new FeishuIntegrationRepository(db, userIdFor(req)); }
+function requireDb(db: Database | undefined, res: Response): Database | undefined { if (db) return db; res.status(503).json({ code: 1, message: "Feishu integration persistence is unavailable" }); return undefined; }
+function unavailable(res: Response): void { res.status(503).json({ code: 1, message: "Feishu credential encryption is unavailable" }); }
+function invalid(res: Response, message: string): void { res.status(400).json({ code: 1, message }); }
+function toMappingPayload(mapping: FeishuUserMapping) { return { id: mapping.id, feishuUserId: mapping.feishuUserId, openforgeUserId: mapping.openforgeUserId, displayName: mapping.displayName, createdAt: new Date(mapping.createdAt).toISOString(), updatedAt: new Date(mapping.updatedAt).toISOString() }; }
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function firstString(...values: unknown[]): string | undefined { return values.find((value): value is string => typeof value === "string" && value.trim().length > 0); }

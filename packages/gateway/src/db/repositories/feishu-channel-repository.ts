@@ -59,20 +59,6 @@ export interface FeishuOutboxItem {
   attemptCount: number;
 }
 
-export type FeishuConversationScope =
-  | { type: "unbound" }
-  | { type: "workspace" }
-  | { type: "project"; id: string };
-
-export interface FeishuConversationBinding {
-  id: string;
-  accountId: string;
-  chatId: string;
-  threadKey: string;
-  conversationId: string;
-  scope: FeishuConversationScope;
-}
-
 interface AccountRow {
   id: string;
   app_id: string;
@@ -113,16 +99,6 @@ interface CardActionRow {
   status: string;
   expires_at: number;
   card_message_id: string | null;
-}
-
-interface BindingRow {
-  id: string;
-  account_id: string;
-  chat_id: string;
-  thread_key: string;
-  conversation_id: string;
-  scope_type: string;
-  scope_id: string | null;
 }
 
 interface OutboxRow {
@@ -414,89 +390,6 @@ export class FeishuChannelRepository {
     return row ? toCardAction(row) : undefined;
   }
 
-  getConversationBinding(id: string): FeishuConversationBinding | undefined {
-    const row = this.db.prepare(`
-      SELECT * FROM feishu_conversation_bindings WHERE id = ? AND user_id = ?
-    `).get(id, this.userId) as BindingRow | undefined;
-    return row ? toBinding(row) : undefined;
-  }
-
-  findConversationBinding(input: {
-    accountId: string;
-    chatId: string;
-    threadKey: string;
-  }): FeishuConversationBinding | undefined {
-    const row = this.db.prepare(`
-      SELECT * FROM feishu_conversation_bindings
-      WHERE user_id = ? AND account_id = ? AND chat_id = ? AND thread_key = ?
-    `).get(this.userId, this.resolveAccountId(input.accountId), input.chatId, input.threadKey) as BindingRow | undefined;
-    return row ? toBinding(row) : undefined;
-  }
-
-  createConversationBinding(input: {
-    accountId: string;
-    chatId: string;
-    threadKey: string;
-    conversationId: string;
-    scope?: FeishuConversationScope;
-  }): FeishuConversationBinding {
-    const existing = this.findConversationBinding(input);
-    if (existing) return existing;
-    const scope = input.scope ?? { type: "unbound" };
-    const id = randomUUID();
-    const now = Date.now();
-    try {
-      this.db.prepare(`
-        INSERT INTO feishu_conversation_bindings (
-          id, user_id, account_id, chat_id, thread_key, conversation_id,
-          scope_type, scope_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, this.userId, this.resolveAccountId(input.accountId), input.chatId,
-        input.threadKey, input.conversationId, scope.type,
-        scope.type === "project" ? scope.id : null, now, now);
-    } catch (error) {
-      if (isUniqueViolation(error, "feishu_conversation_bindings")) {
-        return this.findConversationBinding(input) as FeishuConversationBinding;
-      }
-      throw error;
-    }
-    return this.getConversationBinding(id) as FeishuConversationBinding;
-  }
-
-  updateConversationBindingScope(id: string, scope: FeishuConversationScope): FeishuConversationBinding {
-    const result = this.db.prepare(`
-      UPDATE feishu_conversation_bindings SET scope_type = ?, scope_id = ?, updated_at = ?
-      WHERE id = ? AND user_id = ?
-    `).run(scope.type, scope.type === "project" ? scope.id : null, Date.now(), id, this.userId);
-    if (result.changes !== 1) throw new Error("FEISHU_BINDING_NOT_FOUND");
-    return this.getConversationBinding(id) as FeishuConversationBinding;
-  }
-
-  replaceConversationBindingConversation(
-    id: string,
-    expectedConversationId: string,
-    conversationId: string
-  ): FeishuConversationBinding | undefined {
-    // Compare-and-swap prevents concurrent ingress workers from replacing the same binding twice.
-    const result = this.db.prepare(`
-      UPDATE feishu_conversation_bindings SET conversation_id = ?, updated_at = ?
-      WHERE id = ? AND user_id = ? AND conversation_id = ?
-    `).run(conversationId, Date.now(), id, this.userId, expectedConversationId);
-    return result.changes === 1 ? this.getConversationBinding(id) : undefined;
-  }
-
-  listConversationBindings(): FeishuConversationBinding[] {
-    const rows = this.db.prepare(`
-      SELECT * FROM feishu_conversation_bindings WHERE user_id = ? ORDER BY created_at
-    `).all(this.userId) as BindingRow[];
-    return rows.map(toBinding);
-  }
-
-  deleteConversationBinding(id: string): boolean {
-    return this.db.prepare("DELETE FROM feishu_conversation_bindings WHERE id = ? AND user_id = ?")
-      .run(id, this.userId).changes === 1;
-  }
-
   getQueueSummary(): { inbox: Record<string, number>; outbox: Record<string, number> } {
     return {
       inbox: countStatuses(this.db, "feishu_channel_inbox", this.userId),
@@ -777,21 +670,6 @@ function toInbox(row: InboxRow): FeishuInboxItem {
     claimToken: row.claim_token,
     claimExpiresAt: row.claim_expires_at === null ? null : new Date(row.claim_expires_at),
     attemptCount: row.attempt_count
-  };
-}
-
-function toBinding(row: BindingRow): FeishuConversationBinding {
-  return {
-    id: row.id,
-    accountId: row.account_id,
-    chatId: row.chat_id,
-    threadKey: row.thread_key,
-    conversationId: row.conversation_id,
-    scope: row.scope_type === "project" && row.scope_id
-      ? { type: "project", id: row.scope_id }
-      : row.scope_type === "workspace"
-        ? { type: "workspace" }
-        : { type: "unbound" }
   };
 }
 
