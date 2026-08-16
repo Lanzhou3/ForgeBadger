@@ -169,18 +169,28 @@ function buildPayload(event: OpenForgeEvent): Record<string, unknown> {
         message: event.message,
         created_at: event.createdAt.toISOString()
       };
+    case "portfolio_projection_updated":
+      // Portfolio publishes only this projection allowlist; raw requests,
+      // terminal content, credentials, and worker material never reach ws.
+      return {
+        kind: event.kind,
+        record_id: event.recordId,
+        ...(event.projectId ? { project_id: event.projectId } : {}),
+        ...(event.state ? { state: event.state } : {}),
+        ...(event.projectionVersion !== undefined ? { projection_version: event.projectionVersion } : {}),
+        ...(event.correlationId ? { correlation_id: event.correlationId } : {}),
+        ...(event.summary ? { summary: event.summary } : {}),
+        occurred_at: event.occurredAt.toISOString()
+      };
     case "copilot_run_updated":
       return {
         run_id: event.runId,
+        conversation_id: event.conversationId,
         status: event.status,
-        source: event.source,
-        ...(event.sourceRefId ? { source_ref_id: event.sourceRefId } : {}),
-        ...(event.conversationId ? { conversation_id: event.conversationId } : {}),
-        event_type: event.eventType,
-        ...(event.runEventType ? { run_event_type: event.runEventType } : {}),
-        ...(typeof event.runEventSequence === "number" ? { run_event_sequence: event.runEventSequence } : {}),
-        ...(event.deltaText ? { delta_text: event.deltaText } : {}),
-        ...(event.errorCode ? { error_code: event.errorCode } : {})
+        ...(event.textDelta !== undefined ? { text_delta: event.textDelta } : {}),
+        ...(event.toolName ? { tool_name: event.toolName } : {}),
+        ...(event.pendingActionId ? { pending_action_id: event.pendingActionId } : {}),
+        ...(event.message !== undefined ? { message: event.message } : {})
       };
     case "error":
       return {
@@ -193,7 +203,7 @@ function buildPayload(event: OpenForgeEvent): Record<string, unknown> {
 }
 
 function buildNotificationMeta(event: OpenForgeEvent): Record<string, unknown> {
-  if (event.type === "activity_created" || event.type === "copilot_run_updated" || !event.notificationId) {
+  if (event.type === "activity_created" || event.type === "portfolio_projection_updated" || event.type === "copilot_run_updated" || !event.notificationId) {
     return {};
   }
   return {

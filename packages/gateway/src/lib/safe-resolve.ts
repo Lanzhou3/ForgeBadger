@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, resolve, sep } from "node:path";
 
-const DENIED_ROOTS = new Set([
+export const DENIED_ROOTS = new Set([
   "/",
   "/etc",
   "/private/etc",

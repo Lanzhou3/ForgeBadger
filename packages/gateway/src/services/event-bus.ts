@@ -57,19 +57,18 @@ export interface ActivityCreatedEvent {
   createdAt: Date;
 }
 
-export interface CopilotRunUpdatedEvent {
-  type: "copilot_run_updated";
+/** A redacted, ordered Portfolio projection suitable for user-facing push. */
+export interface PortfolioProjectionUpdatedEvent {
+  type: "portfolio_projection_updated";
   userId: string;
-  runId: string;
-  status: string;
-  source: string;
-  sourceRefId?: string | undefined;
-  conversationId?: string | undefined;
-  eventType: "started" | "completed" | "failed" | "cancelled" | "waiting_for_approval" | "event_appended" | "assistant_delta";
-  runEventType?: string | undefined;
-  runEventSequence?: number | undefined;
-  deltaText?: string | undefined;
-  errorCode?: string | undefined;
+  kind: "request" | "intake_decision" | "dossier" | "work_item" | "task_attempt" | "authorization" | "observation" | "risk" | "wakeup" | "heartbeat";
+  recordId: string;
+  projectId?: string | undefined;
+  state?: string | undefined;
+  projectionVersion?: number | undefined;
+  correlationId?: string | undefined;
+  summary?: string | undefined;
+  occurredAt: Date;
 }
 
 export interface ErrorEvent {
@@ -81,12 +80,27 @@ export interface ErrorEvent {
   notificationCreatedAt?: Date | undefined;
 }
 
+/** A redacted Copilot agent run update (streaming deltas + completion). */
+export interface CopilotRunUpdatedEvent {
+  type: "copilot_run_updated";
+  userId: string;
+  runId: string;
+  conversationId: string;
+  status: string;
+  textDelta?: string | undefined;
+  toolName?: string | undefined;
+  pendingActionId?: string | undefined;
+  message?: string | undefined;
+  occurredAt: Date;
+}
+
 export type OpenForgeEvent =
   | SessionStatusChangedEvent
   | SessionCreatedEvent
   | SessionDeletedEvent
   | ClaudeNotificationEvent
   | ActivityCreatedEvent
+  | PortfolioProjectionUpdatedEvent
   | CopilotRunUpdatedEvent
   | ErrorEvent;
 

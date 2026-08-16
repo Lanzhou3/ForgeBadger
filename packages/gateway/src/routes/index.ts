@@ -14,9 +14,7 @@ import { createProjectManagerRoutes } from "./project-manager.js";
 import { createSessionRoutes, createGateASessionRoutes } from "./sessions.js";
 import { createTemplateRoutes } from "./templates.js";
 import { createUsageRoutes } from "./usage.js";
-import { createModelRoutes } from "./models.js";
 import { createModelProviderRoutes } from "./model-providers.js";
-import { createAgentRoutes } from "./agents.js";
 import { createSkillRoutes } from "./skills.js";
 import { createApiKeyRoutes } from "./api-keys.js";
 import { createCliConfigRoutes } from "./cli-config.js";
@@ -24,15 +22,11 @@ import { createDashboardRoutes } from "./dashboard.js";
 import { createNotificationRoutes } from "./notifications.js";
 import { createSessionHookRoutes } from "./session-hooks.js";
 import { createSnapshotRoutes } from "./snapshots.js";
-import {
-  createCodexAppServerRoutes,
-  isCodexAppServerTurnInputEnabled
-} from "./codex-app-server.js";
 import { createCodexSubscriptionRoutes } from "./codex-subscription.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
-import { createCopilotRoutes } from "./copilot.js";
 import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
-import { createAutomationRoutes } from "./automations.js";
+import { createPortfolioRoutes } from "./portfolio.js";
+import { createCopilotRoutes } from "./copilot.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
@@ -41,7 +35,10 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/adapters", createAdapterRoutes());
   app.use("/api/v1/auth", createAuthRouter(new UserRepository(deps.db), deps.jwtSecret));
   app.use("/api/v1/admin/users", createAdminUserRoutes(deps.db));
-  app.use("/api/v1/session-hooks", createSessionHookRoutes(deps.db, deps.eventBus));
+  app.use(
+    "/api/v1/session-hooks",
+    createSessionHookRoutes(deps.db, deps.eventBus, deps.claudePortfolioWorker)
+  );
   app.use("/api/v1/activities", createActivityRoutes(deps.db));
   app.use("/api/v1/audit-logs", createAuditLogRoutes(deps.db));
   app.use("/api/v1/catalog", createCatalogRoutes(deps.db));
@@ -63,53 +60,31 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   ));
   app.use("/api/v1/gate-a/sessions", createGateASessionRoutes(deps.sessionManager));
   app.use("/api/v1/templates", createTemplateRoutes(deps.db, deps.eventBus));
-  app.use("/api/v1/usage", createUsageRoutes(deps.db));
-  app.use("/api/v1/models", createModelRoutes(deps.db));
+  app.use("/api/v1/usage", createUsageRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/model-providers", createModelProviderRoutes(deps.db, deps.masterKey));
-  app.use("/api/v1/agents", createAgentRoutes(deps.db));
   app.use("/api/v1", createSkillRoutes(deps.db));
   app.use("/api/v1/notifications", createNotificationRoutes(deps.db));
   app.use("/api/v1/api-keys", createApiKeyRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/cli-config", createCliConfigRoutes());
   app.use("/api/v1/dashboard", createDashboardRoutes(deps.db, deps.masterKey));
-  app.use("/api/v1/codex/app-server", createCodexAppServerRoutes({
+  app.use("/api/v1/codex/subscription", createCodexSubscriptionRoutes());
+  if (deps.portfolioApi) {
+    app.use("/api/v1/portfolio", createPortfolioRoutes(deps.portfolioApi));
+  }
+  app.use("/api/v1/copilot", createCopilotRoutes({
     db: deps.db,
-    manager: deps.codexAppServerManager,
     masterKey: deps.masterKey,
     eventBus: deps.eventBus,
-    turnInput: {
-      enabled: isCodexAppServerTurnInputEnabled()
-    }
+    ...(deps.portfolioApi ? { portfolioApi: deps.portfolioApi } : {})
   }));
-  app.use("/api/v1/codex/subscription", createCodexSubscriptionRoutes());
   app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
     db: deps.db,
     masterKey: deps.masterKey,
-    sessionManager: deps.sessionManager,
-    ...(deps.feishuChannelRuntime ? { channelRuntime: deps.feishuChannelRuntime } : {}),
-    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
+    ...(deps.feishuChannelRuntime ? { channelRuntime: deps.feishuChannelRuntime } : {})
   }));
-  app.use("/api/v1/automations", createAutomationRoutes(
-    deps.db,
-    deps.masterKey,
-    deps.feishuChannelRuntime ? {
-      scheduler: {
-        runNow: (userId, automationId) => deps.feishuChannelRuntime!.runAutomationNow(userId, automationId),
-        reconcile: (userId) => deps.feishuChannelRuntime!.reconcileAutomations(userId)
-      }
-    } : {}
-  ));
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
     db: deps.db,
     masterKey: deps.masterKey,
     appVersion: deps.appVersion
-  }));
-  app.use("/api/v1/copilot", createCopilotRoutes({
-    db: deps.db,
-    masterKey: deps.masterKey,
-    appVersion: deps.appVersion,
-    sessionManager: deps.sessionManager,
-    eventBus: deps.eventBus,
-    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
   }));
 }

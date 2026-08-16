@@ -1,0 +1,325 @@
+/**
+ * Copilot orchestrator — the turn/step loop.
+ *
+ * A run is one user turn plus its tool steps. The loop:
+ *   1. appends the user message to the conversation log
+ *   2. projects model-visible history from the log and calls the LLM
+ *   3. streams text deltas; collects tool calls
+ *   4. executes read tools; gates operate tools behind a pending action
+ *      (sets the run to awaiting_approval and stops — the approved action is
+ *      executed by a follow-up step, not autonomously)
+ *   5. loops until no tool is owed or the step budget is exhausted
+ *   6. persists the run and emits copilot_run_updated events
+ *
+ * It is deliberately provider-agnostic: provider resolution lives in
+ * llm-client, tool definitions in the registry, and all platform reads/writes
+ * go through the registered tool seams.
+ */
+import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
+import { OpenForgeEventBus } from "../event-bus.js";
+import type { AgentToolRegistry, AgentToolContext } from "./tool-registry.js";
+import { executeAgentTool } from "./tool-registry.js";
+import type { AgentLlmClient, AgentLlmMessage, AgentToolCall } from "./orchestrator-types.js";
+import { CopilotConversationLog } from "./conversation-log.js";
+import type { AgentMessage } from "./types.js";
+import { redactAgentValue } from "./redaction.js";
+import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js";
+
+export interface CopilotOrchestratorDependencies {
+  db: import("../../db/types.js").Database;
+  masterKey: string;
+  toolRegistry: AgentToolRegistry;
+  llm: AgentLlmClient;
+  eventBus: OpenForgeEventBus;
+  maxSteps?: number;
+  /** User-scoping facade; each run gets the scoped api for its owner. */
+  portfolioApi?: { forUser(userId: string): unknown };
+}
+
+const DEFAULT_MAX_STEPS = 16;
+
+export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies) {
+  const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
+  const securityPolicy = createSecurityPolicy();
+
+  function logFor(userId: string): CopilotConversationLog {
+    return new CopilotConversationLog(deps.db, userId);
+  }
+
+  /** Run one user turn. Returns the run id. Emits streaming events. */
+  async function runTurn(input: {
+    userId: string;
+    conversationId: string;
+    userText: string;
+    modelId?: string;
+  }): Promise<string> {
+    const userId = input.userId;
+    const log = logFor(userId);
+    log.appendMessage(input.conversationId, { role: "user", kind: "text", content: input.userText });
+    const run = log.createRun(input.conversationId, {});
+    log.updateRun(run.id, { status: "running", startedAt: new Date() });
+
+    const context: AgentToolContext = {
+      userId,
+      db: deps.db,
+      masterKey: deps.masterKey,
+      ...(deps.portfolioApi !== undefined ? { portfolioApi: deps.portfolioApi.forUser(userId) } : {})
+    };
+
+    try {
+      // Reconstruct model-visible history from the log (text-only across turns;
+      // tool results are ephemeral per-run and carried in `messages` below).
+      const messages: AgentLlmMessage[] = log.listMessages(input.conversationId)
+        .filter((m) => m.kind === "text")
+        .map(toLlmMessage);
+      let steps = 0;
+      let finalText = "";
+
+      while (steps < maxSteps) {
+        steps += 1;
+        const toolCalls: AgentToolCall[] = [];
+        await deps.llm.stream({
+          messages,
+          tools: deps.toolRegistry.toModelSchemas(),
+          ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+          onEvent: (event) => {
+            if (event.type === "text_delta") {
+              finalText += event.text ?? "";
+              deps.eventBus.emitEvent({
+                type: "copilot_run_updated",
+                userId,
+                runId: run.id,
+                conversationId: input.conversationId,
+                status: "running",
+                textDelta: event.text ?? "",
+                occurredAt: new Date()
+              });
+            } else if (event.type === "tool_call" && event.toolCall) {
+              toolCalls.push({ id: event.toolCall.id, name: event.toolCall.name, input: safeParse(event.toolCall.arguments) });
+            }
+          }
+        });
+
+        if (toolCalls.length === 0) {
+          // No tool owed — assistant finished.
+          break;
+        }
+
+        log.appendMessage(input.conversationId, {
+          role: "assistant",
+          kind: "text",
+          content: finalText
+        });
+        for (const tc of toolCalls) {
+          log.appendMessage(input.conversationId, {
+            role: "assistant",
+            kind: "tool_call",
+            content: tc.name,
+            toolName: tc.name,
+            toolInputJson: JSON.stringify(tc.input)
+          });
+        }
+
+        // Handle tool calls in order; operate tools stop the loop pending approval.
+        let operated = false;
+        for (const tc of toolCalls) {
+          const tool = deps.toolRegistry.tools.get(tc.name);
+          if (!tool) {
+            log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content: `Unknown tool: ${tc.name}`, toolName: tc.name });
+            messages.push({ role: "tool", toolCallId: tc.id, content: `Unknown tool: ${tc.name}` });
+            continue;
+          }
+          const decision = securityPolicy.evaluate({
+            userId,
+            toolName: tc.name,
+            toolRisk: tool.risk,
+            requiresApproval: tool.requiresApproval,
+            input: tc.input
+          });
+          logSecurityDecision({
+            db: deps.db,
+            userId,
+            operation: tc.name,
+            input: tc.input,
+            action: decision.action,
+            reason: decision.reason
+          });
+
+          if (decision.action === "deny") {
+            const content = `Denied by security policy: ${decision.reason}`;
+            log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content, toolName: tc.name });
+            messages.push({ role: "tool", toolCallId: tc.id, content });
+            deps.eventBus.emitEvent({
+              type: "copilot_run_updated",
+              userId,
+              runId: run.id,
+              conversationId: input.conversationId,
+              status: "running",
+              toolName: tc.name,
+              message: "denied",
+              occurredAt: new Date()
+            });
+            continue;
+          }
+
+          if (decision.action === "require_approval") {
+            const digest = createHash("sha256").update(JSON.stringify(tc.input)).digest("hex");
+            const action = log.createPendingAction({
+              runId: run.id,
+              tool: tc.name,
+              inputJson: JSON.stringify(tc.input),
+              inputDigest: digest
+            });
+            log.updateRun(run.id, { status: "awaiting_approval" });
+            deps.eventBus.emitEvent({
+              type: "copilot_run_updated",
+              userId,
+              runId: run.id,
+              conversationId: input.conversationId,
+              status: "awaiting_approval",
+              toolName: tc.name,
+              pendingActionId: action.id,
+              occurredAt: new Date()
+            });
+            operated = true;
+            break;
+          }
+
+          const result = await executeAgentTool(tool, tc.input, context);
+          const safeOutput = redactAgentValue(result.output);
+          const content = result.ok ? JSON.stringify(safeOutput) : `Tool error: ${result.error ?? "unknown"}`;
+          log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content, toolName: tc.name });
+          messages.push({ role: "tool", toolCallId: tc.id, content });
+          deps.eventBus.emitEvent({
+            type: "copilot_run_updated",
+            userId,
+            runId: run.id,
+            conversationId: input.conversationId,
+            status: "running",
+            toolName: tc.name,
+            message: result.ok ? "ok" : "error",
+            occurredAt: new Date()
+          });
+        }
+
+        if (operated) {
+          // Run is waiting for owner approval; do not continue autonomously.
+          return run.id;
+        }
+      }
+
+      log.appendMessage(input.conversationId, { role: "assistant", kind: "text", content: finalText });
+      log.updateRun(run.id, { status: "completed", completedAt: new Date(), steps });
+      deps.eventBus.emitEvent({
+        type: "copilot_run_updated",
+        userId,
+        runId: run.id,
+        conversationId: input.conversationId,
+        status: "completed",
+        message: finalText,
+        occurredAt: new Date()
+      });
+      return run.id;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Copilot run failed";
+      log.updateRun(run.id, { status: "failed", error: message });
+      deps.eventBus.emitEvent({
+        type: "copilot_run_updated",
+        userId,
+        runId: run.id,
+        conversationId: input.conversationId,
+        status: "failed",
+        message,
+        occurredAt: new Date()
+      });
+      throw error;
+    }
+  }
+
+  /** Resume a run that was awaiting_approval after the owner decides. */
+  async function resumeAfterApproval(input: { userId: string; runId: string; actionId: string; approved: boolean }): Promise<{ resumed: boolean; runId: string }> {
+    const log = logFor(input.userId);
+    const run = log.getRun(input.runId);
+    if (!run || run.status !== "awaiting_approval") return { resumed: false, runId: input.runId };
+    const action = log.getPendingAction(input.actionId);
+    if (!action || action.status !== "pending") return { resumed: false, runId: input.runId };
+    log.decidePendingAction(action.id, input.approved ? "approved" : "rejected");
+
+    if (input.approved) {
+      const tool = deps.toolRegistry.tools.get(action.tool);
+      const context: AgentToolContext = {
+        userId: input.userId,
+        db: deps.db,
+        masterKey: deps.masterKey,
+        ...(deps.portfolioApi !== undefined ? { portfolioApi: deps.portfolioApi.forUser(input.userId) } : {})
+      };
+      const rawInput = safeParse(action.inputJson);
+      if (tool) {
+        const result = await executeAgentTool(tool, rawInput, context);
+        const safeOutput = redactAgentValue(result.output);
+        const content = result.ok ? JSON.stringify(safeOutput) : `Tool error: ${result.error ?? "unknown"}`;
+        log.appendMessage(run.conversationId, { role: "tool", kind: "tool_result", content, toolName: action.tool });
+        log.updateRun(run.id, { status: "completed", completedAt: new Date() });
+        deps.eventBus.emitEvent({
+          type: "copilot_run_updated",
+          userId: input.userId,
+          runId: run.id,
+          conversationId: run.conversationId,
+          status: "completed",
+          toolName: action.tool,
+          message: content,
+          occurredAt: new Date()
+        });
+        return { resumed: true, runId: run.id };
+      }
+    }
+
+    log.updateRun(run.id, { status: "completed", completedAt: new Date() });
+    deps.eventBus.emitEvent({
+      type: "copilot_run_updated",
+      userId: input.userId,
+      runId: run.id,
+      conversationId: run.conversationId,
+      status: "completed",
+      message: input.approved ? "Action rejected" : "Action approved",
+      occurredAt: new Date()
+    });
+    return { resumed: true, runId: run.id };
+  }
+
+  /** Cancel a non-terminal run; its pending actions are rejected. */
+  async function cancelRun(input: { userId: string; runId: string }): Promise<{ cancelled: boolean; runId: string }> {
+    const log = logFor(input.userId);
+    const run = log.getRun(input.runId);
+    if (!run || run.status === "completed" || run.status === "cancelled" || run.status === "failed") {
+      return { cancelled: false, runId: input.runId };
+    }
+    for (const action of log.listPendingActions(run.id)) {
+      if (action.status === "pending") log.decidePendingAction(action.id, "rejected");
+    }
+    log.updateRun(run.id, { status: "cancelled", completedAt: new Date() });
+    deps.eventBus.emitEvent({
+      type: "copilot_run_updated",
+      userId: input.userId,
+      runId: run.id,
+      conversationId: run.conversationId,
+      status: "cancelled",
+      message: "Run cancelled",
+      occurredAt: new Date()
+    });
+    return { cancelled: true, runId: run.id };
+  }
+
+  return { runTurn, resumeAfterApproval, cancelRun };
+}
+
+function toLlmMessage(message: AgentMessage): AgentLlmMessage {
+  // Only user/assistant text messages are reconstructed across turns; tool
+  // results are ephemeral per-run (carried in-memory during the loop).
+  return { role: message.role === "user" ? "user" : "assistant", content: message.content };
+}
+
+function safeParse(value: string): unknown {
+  try { return JSON.parse(value); } catch { return {}; }
+}

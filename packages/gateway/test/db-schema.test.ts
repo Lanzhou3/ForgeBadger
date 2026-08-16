@@ -37,26 +37,26 @@ describe("db schema", () => {
   it("creates all expected tables after migration", () => {
     const tables = db
       .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle_%' AND name NOT GLOB 'copilot_memory_fts_*' ORDER BY name"
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle_%' ORDER BY name"
       )
       .all() as Array<{ name: string }>;
     const names = tables.map((t) => t.name);
     assert.deepEqual(names, [
-      "agents",
       "api_keys",
       "audit_logs",
       "catalog_items",
       "catalog_sources",
-      "copilot_automation_run_projects",
-      "copilot_automation_runs",
-      "copilot_automations",
       "copilot_conversations",
-      "copilot_memory_entries",
+      "copilot_memory",
       "copilot_memory_fts",
-      "copilot_memory_notes",
+      "copilot_memory_fts_config",
+      "copilot_memory_fts_content",
+      "copilot_memory_fts_data",
+      "copilot_memory_fts_docsize",
+      "copilot_memory_fts_idx",
       "copilot_messages",
+      "copilot_operation_log",
       "copilot_pending_actions",
-      "copilot_run_events",
       "copilot_runs",
       "feishu_card_actions",
       "feishu_channel_accounts",
@@ -71,9 +71,37 @@ describe("db schema", () => {
       "model_cost_rates",
       "model_profiles",
       "model_provider_profiles",
-      "models",
       "notifications",
-      "project_agent_sequences",
+      "portfolio_acceptance_decisions",
+      "portfolio_action_intents",
+      "portfolio_channel_actions",
+      "portfolio_channel_allowed_conversations",
+      "portfolio_channel_bindings",
+      "portfolio_commands",
+      "portfolio_completion_candidates",
+      "portfolio_delivery_records",
+      "portfolio_evidence",
+      "portfolio_execution_authorizations",
+      "portfolio_facts",
+      "portfolio_feishu_command_intents",
+      "portfolio_feishu_ingress_events",
+      "portfolio_heartbeat_settings",
+      "portfolio_intake_decisions",
+      "portfolio_observation_probes",
+      "portfolio_observation_profiles",
+      "portfolio_operation_records",
+      "portfolio_project_dossiers",
+      "portfolio_projects",
+      "portfolio_provider_accounts",
+      "portfolio_reconciliation_runs",
+      "portfolio_requests",
+      "portfolio_risk_signals",
+      "portfolio_session_assignments",
+      "portfolio_task_attempts",
+      "portfolio_task_packets",
+      "portfolio_work_items",
+      "portfolio_worker_signals",
+      "portfolio_workflow_wakeups",
       "project_manager_acceptance_results",
       "project_manager_commands",
       "project_manager_goals",
@@ -126,29 +154,6 @@ describe("db schema", () => {
       },
       /UNIQUE constraint failed/
     );
-  });
-
-  it("enforces one live Copilot run per user", () => {
-    db.prepare(
-      "INSERT INTO users (id, username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)"
-    ).run("u1", "alice", "alice@example.com", "hash", "user", "active");
-
-    db.prepare(
-      "INSERT INTO copilot_runs (id, user_id, status, source, goal, step_count, max_steps) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ).run("run-live-1", "u1", "running", "copilot", "First live run", 0, 8);
-
-    assert.throws(
-      () => {
-        db.prepare(
-          "INSERT INTO copilot_runs (id, user_id, status, source, goal, step_count, max_steps) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        ).run("run-live-2", "u1", "queued", "copilot", "Second live run", 0, 8);
-      },
-      /UNIQUE constraint failed/
-    );
-
-    db.prepare(
-      "INSERT INTO copilot_runs (id, user_id, status, source, goal, step_count, max_steps) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ).run("run-completed", "u1", "completed", "copilot", "Completed run", 0, 8);
   });
 
   it("cascades user deletion to projects", () => {
