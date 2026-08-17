@@ -185,6 +185,7 @@ export const projectManagerWorkItems = sqliteTable(
     evidenceRefsJson: text("evidence_refs_json").notNull().default("[]"),
     feishuRefsJson: text("feishu_refs_json").notNull().default("[]"),
     detailsJson: text("details_json").notNull().default("{}"),
+    stageId: text("stage_id"),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
     updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
   },
@@ -197,6 +198,69 @@ export const projectManagerWorkItems = sqliteTable(
       table.userId,
       table.projectId,
       table.status
+    ),
+    idx_project_manager_work_items_stage: index("idx_project_manager_work_items_stage").on(
+      table.userId,
+      table.projectId,
+      table.stageId
+    )
+  })
+);
+
+export const projectManagerStages = sqliteTable(
+  "project_manager_stages",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    position: integer("position").notNull().default(0),
+    status: text("status").notNull().default("active"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_project_manager_stages_user_project: index("idx_project_manager_stages_user_project").on(
+      table.userId,
+      table.projectId,
+      table.position
+    )
+  })
+);
+
+export const projectManagerWorkItemLinks = sqliteTable(
+  "project_manager_work_item_links",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    blockerWorkItemId: text("blocker_work_item_id")
+      .notNull()
+      .references(() => projectManagerWorkItems.id, { onDelete: "cascade" }),
+    blockedWorkItemId: text("blocked_work_item_id")
+      .notNull()
+      .references(() => projectManagerWorkItems.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date())
+  },
+  (table) => ({
+    idx_project_manager_work_item_links_pair: uniqueIndex("idx_project_manager_work_item_links_pair").on(
+      table.projectId,
+      table.blockerWorkItemId,
+      table.blockedWorkItemId
+    ),
+    idx_project_manager_work_item_links_blocked: index("idx_project_manager_work_item_links_blocked").on(
+      table.userId,
+      table.projectId,
+      table.blockedWorkItemId
     )
   })
 );

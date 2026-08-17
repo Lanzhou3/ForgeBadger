@@ -559,6 +559,99 @@ describe("project-manager routes", () => {
       Authorization: `Bearer ${token}`
     });
   }
+
+  it("manages stages through tenant-scoped routes and moves work items back to the backlog on delete", async () => {
+    const seeded = await request("POST", `/api/v1/projects/${projectId}/project-manager/stages/seed-template`);
+    assert.equal(seeded.status, 201);
+    assert.equal(seeded.body.data.stages.length, 5);
+    const firstStage = seeded.body.data.stages[0];
+
+    const reseed = await request("POST", `/api/v1/projects/${projectId}/project-manager/stages/seed-template`);
+    assert.equal(reseed.status, 400);
+
+    const created = await request("POST", `/api/v1/projects/${projectId}/project-manager/stages`, {
+      name: "灰度发布"
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.data.stage.position, 5);
+
+    const listed = await request("GET", `/api/v1/projects/${projectId}/project-manager/stages`);
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.data.stages.length, 6);
+
+    const renamed = await request("PATCH", `/api/v1/projects/${projectId}/project-manager/stages/${firstStage.id}`, {
+      name: "需求梳理",
+      status: "completed"
+    });
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.body.data.stage.name, "需求梳理");
+    assert.equal(renamed.body.data.stage.status, "completed");
+
+    const ids = listed.body.data.stages.map((stage: { id: string }) => stage.id).reverse();
+    const reordered = await request("POST", `/api/v1/projects/${projectId}/project-manager/stages/reorder`, { stageIds: ids });
+    assert.equal(reordered.status, 200);
+    assert.deepEqual(reordered.body.data.stages.map((stage: { id: string }) => stage.id), ids);
+
+    const badReorder = await request("POST", `/api/v1/projects/${projectId}/project-manager/stages/reorder`, {
+      stageIds: ids.slice(0, 2)
+    });
+    assert.equal(badReorder.status, 400);
+
+    const item = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items`, {
+      title: "阶段任务",
+      stageId: firstStage.id
+    });
+    assert.equal(item.status, 201);
+    assert.equal(item.body.data.workItem.stageId, firstStage.id);
+
+    const deleted = await request("DELETE", `/api/v1/projects/${projectId}/project-manager/stages/${firstStage.id}`);
+    assert.equal(deleted.status, 200);
+    const detail = await request("GET", `/api/v1/projects/${projectId}/project-manager/work-items/${item.body.data.workItem.id}`);
+    assert.equal(detail.body.data.workItem.stageId, null);
+
+    const missing = await request("PATCH", `/api/v1/projects/${projectId}/project-manager/stages/nope`, { name: "x" });
+    assert.equal(missing.status, 404);
+    const missingDelete = await request("DELETE", `/api/v1/projects/${projectId}/project-manager/stages/nope`);
+    assert.equal(missingDelete.status, 404);
+  });
+
+  it("manages work item dependencies through routes with cycle and duplicate protection", async () => {
+    const a = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items`, { title: "A" });
+    const b = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items`, { title: "B" });
+    const aId = a.body.data.workItem.id as string;
+    const bId = b.body.data.workItem.id as string;
+
+    const added = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${bId}/dependencies`, {
+      blockerWorkItemId: aId
+    });
+    assert.equal(added.status, 201);
+    assert.equal(added.body.data.link.blockerWorkItemId, aId);
+    assert.equal(added.body.data.link.blockedWorkItemId, bId);
+
+    const listed = await request("GET", `/api/v1/projects/${projectId}/project-manager/work-item-links`);
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.data.links.length, 1);
+
+    const duplicate = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${bId}/dependencies`, {
+      blockerWorkItemId: aId
+    });
+    assert.equal(duplicate.status, 400);
+    assert.match(duplicate.body.message, /already exists/);
+
+    const cycle = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${aId}/dependencies`, {
+      blockerWorkItemId: bId
+    });
+    assert.equal(cycle.status, 400);
+    assert.match(cycle.body.message, /cycle/);
+
+    const invalid = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items/${bId}/dependencies`, {});
+    assert.equal(invalid.status, 400);
+
+    const removed = await request("DELETE", `/api/v1/projects/${projectId}/project-manager/work-items/${bId}/dependencies/${aId}`);
+    assert.equal(removed.status, 200);
+    const afterRemove = await request("GET", `/api/v1/projects/${projectId}/project-manager/work-item-links`);
+    assert.equal(afterRemove.body.data.links.length, 0);
+  });
 });
 
 function assertRawRouteDataExcluded(serialized: string): void {

@@ -389,4 +389,146 @@ describe("ProjectManagerRepository", () => {
     assert.equal(details.taskPacket?.sessionId, "session-link-123", "sessionId must survive a status change");
     assert.equal(details.note, "moving along");
   });
+
+  describe("stages", () => {
+    it("creates, orders, updates, and deletes stages with tenant scoping", () => {
+      const repo = new ProjectManagerRepository(db, owner.id);
+      const otherRepo = new ProjectManagerRepository(db, other.id);
+
+      const first = repo.createStage(projectId, { name: "需求分析" });
+      const second = repo.createStage(projectId, { name: "编码实现", description: "build it" });
+      assert.equal(first.position, 0);
+      assert.equal(second.position, 1);
+      assert.deepEqual(repo.listStages(projectId).map((stage) => stage.id), [first.id, second.id]);
+
+      const updated = repo.updateStage(projectId, first.id, { name: "需求梳理", status: "completed" });
+      assert.equal(updated.name, "需求梳理");
+      assert.equal(updated.status, "completed");
+
+      assert.equal(otherRepo.listStages(projectId).length, 0);
+      assert.throws(() => otherRepo.updateStage(projectId, first.id, { name: "x" }), /not found/);
+
+      repo.deleteStage(projectId, second.id);
+      assert.deepEqual(repo.listStages(projectId).map((stage) => stage.id), [first.id]);
+      assert.throws(() => repo.deleteStage(projectId, second.id), /not found/);
+    });
+
+    it("seeds the SDLC template once and rejects a second seed", () => {
+      const repo = new ProjectManagerRepository(db, owner.id);
+      const stages = repo.seedStageTemplate(projectId);
+      assert.deepEqual(
+        stages.map((stage) => stage.name),
+        ["需求分析", "架构设计", "编码实现", "测试验证", "发布交付"]
+      );
+      assert.deepEqual(stages.map((stage) => stage.position), [0, 1, 2, 3, 4]);
+      assert.throws(() => repo.seedStageTemplate(projectId), /already/);
+    });
+
+    it("reorders stages with sequential positions and validates the id set", () => {
+      const repo = new ProjectManagerRepository(db, owner.id);
+      const seeded = repo.seedStageTemplate(projectId);
+      const ids = seeded.map((stage) => stage.id);
+      const reversed = [...ids].reverse();
+
+      const stages = repo.reorderStages(projectId, reversed);
+      assert.deepEqual(stages.map((stage) => stage.id), reversed);
+      assert.deepEqual(stages.map((stage) => stage.position), [0, 1, 2, 3, 4]);
+
+      assert.throws(() => repo.reorderStages(projectId, ids.slice(0, 2)), /exactly/);
+      assert.throws(() => repo.reorderStages(projectId, [...ids, "missing"]), /exactly/);
+    });
+
+    it("deleting a stage moves its work items back to the backlog", () => {
+      const repo = new ProjectManagerRepository(db, owner.id);
+      const stage = repo.createStage(projectId, { name: "编码实现" });
+      const item = repo.createWorkItem(projectId, { title: "实现", stageId: stage.id });
+      assert.equal(item.stageId, stage.id);
+
+      repo.deleteStage(projectId, stage.id);
+      assert.equal(repo.getWorkItem(projectId, item.id)?.stageId, null);
+    });
+
+    it("assigns work items to stages via create and update", () => {
+      const repo = new ProjectManagerRepository(db, owner.id);
+      const seeded = repo.seedStageTemplate(projectId);
+      const first = seeded[0];
+      const second = seeded[1];
+      assert.ok(first && second);
+
+      const item = repo.createWorkItem(projectId, { title: "任务", stageId: first.id });
+      assert.equal(item.stageId, first.id);
+
+      const moved = repo.updateWorkItem(projectId, item.id, { stageId: second.id });
+      assert.equal(moved.stageId, second.id);
+
+      const cleared = repo.updateWorkItem(projectId, item.id, { stageId: null });
+      assert.equal(cleared.stageId, null);
+    });
+
+    it("rejects work items referencing unknown stages", () => {
+      const repo = new ProjectManagerRepository(db, owner.id);
+      assert.throws(
+        () => repo.createWorkItem(projectId, { title: "任务", stageId: "missing-stage" }),
+        /stage not found/i
+      );
+      const item = repo.createWorkItem(projectId, { title: "任务" });
+      assert.throws(
+        () => repo.updateWorkItem(projectId, item.id, { stageId: "missing-stage" }),
+        /stage not found/i
+      );
+    });
+  });
+
+  describe("work item dependencies", () => {
+    it("adds, lists, and removes dependencies with ledger events", () => {
+      const repo = new ProjectManagerRepository(db, owner.id);
+      const design = repo.createWorkItem(projectId, { title: "设计" });
+      const build = repo.createWorkItem(projectId, { title: "实现" });
+
+      const link = repo.addWorkItemDependency(projectId, build.id, design.id);
+      assert.equal(link.blockerWorkItemId, design.id);
+      assert.equal(link.blockedWorkItemId, build.id);
+      assert.deepEqual(repo.listWorkItemLinks(projectId).map((entry) => entry.id), [link.id]);
+
+      const addedEvents = repo.listLedgerEvents(projectId, { workItemId: build.id });
+      assert.equal(addedEvents.at(-1)?.eventType, "dependency_added");
+
+      repo.removeWorkItemDependency(projectId, build.id, design.id);
+      assert.equal(repo.listWorkItemLinks(projectId).length, 0);
+      const removedEvents = repo.listLedgerEvents(projectId, { workItemId: build.id });
+      assert.equal(removedEvents.at(-1)?.eventType, "dependency_removed");
+    });
+
+    it("rejects self links, duplicates, and direct or transitive cycles", () => {
+      const repo = new ProjectManagerRepository(db, owner.id);
+      const a = repo.createWorkItem(projectId, { title: "A" });
+      const b = repo.createWorkItem(projectId, { title: "B" });
+      const c = repo.createWorkItem(projectId, { title: "C" });
+
+      assert.throws(() => repo.addWorkItemDependency(projectId, a.id, a.id), /itself/);
+      repo.addWorkItemDependency(projectId, b.id, a.id); // b blocked by a
+      assert.throws(() => repo.addWorkItemDependency(projectId, b.id, a.id), /already exists/);
+      repo.addWorkItemDependency(projectId, c.id, b.id); // c blocked by b
+      assert.throws(() => repo.addWorkItemDependency(projectId, a.id, b.id), /cycle/); // direct cycle
+      assert.throws(() => repo.addWorkItemDependency(projectId, a.id, c.id), /cycle/); // transitive cycle
+    });
+
+    it("rejects dependencies referencing unknown work items", () => {
+      const repo = new ProjectManagerRepository(db, owner.id);
+      const item = repo.createWorkItem(projectId, { title: "任务" });
+      assert.throws(() => repo.addWorkItemDependency(projectId, item.id, "missing"), /not found/);
+      assert.throws(() => repo.addWorkItemDependency(projectId, "missing", item.id), /not found/);
+      assert.throws(() => repo.removeWorkItemDependency(projectId, item.id, "missing"), /not found/);
+    });
+
+    it("removes dependency links when a work item is deleted", () => {
+      const repo = new ProjectManagerRepository(db, owner.id);
+      const a = repo.createWorkItem(projectId, { title: "A" });
+      const b = repo.createWorkItem(projectId, { title: "B" });
+      repo.addWorkItemDependency(projectId, b.id, a.id);
+
+      repo.deleteWorkItem(projectId, a.id, { confirm: true });
+      assert.equal(repo.listWorkItemLinks(projectId).length, 0);
+    });
+  });
 });

@@ -108,8 +108,10 @@ describe("db schema", () => {
       "project_manager_goals",
       "project_manager_ledger_events",
       "project_manager_session_assignments",
+      "project_manager_stages",
       "project_manager_task_attempts",
       "project_manager_wakeups",
+      "project_manager_work_item_links",
       "project_manager_work_items",
       "project_skills",
       "projects",
@@ -183,6 +185,8 @@ describe("db schema", () => {
     const expectedTables = [
       "project_manager_goals",
       "project_manager_work_items",
+      "project_manager_stages",
+      "project_manager_work_item_links",
       "project_manager_ledger_events"
     ];
 
@@ -208,10 +212,14 @@ describe("db schema", () => {
       "idx_project_manager_session_assignments_attempt",
       "idx_project_manager_session_assignments_project_active",
       "idx_project_manager_session_assignments_session_active",
+      "idx_project_manager_stages_user_project",
       "idx_project_manager_task_attempts_user_active",
       "idx_project_manager_task_attempts_work_item_number",
       "idx_project_manager_wakeups_attempt_due",
       "idx_project_manager_wakeups_pending",
+      "idx_project_manager_work_item_links_blocked",
+      "idx_project_manager_work_item_links_pair",
+      "idx_project_manager_work_items_stage",
       "idx_project_manager_work_items_status",
       "idx_project_manager_work_items_user_project"
     ]);

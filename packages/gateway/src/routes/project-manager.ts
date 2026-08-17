@@ -5,12 +5,15 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import {
   PROJECT_MANAGER_LEDGER_EVENT_TYPES,
+  PROJECT_MANAGER_STAGE_STATUSES,
   PROJECT_MANAGER_WORK_ITEM_STATUSES,
   ProjectManagerRepository,
   type ProjectManagerEvidenceRef,
   type ProjectManagerGoal,
   type ProjectManagerLedgerEvent,
+  type ProjectManagerStage,
   type ProjectManagerWorkItem,
+  type ProjectManagerWorkItemLink,
   type ProjectManagerWorkItemStatus
 } from "../db/repositories/project-manager-repository.js";
 import { ProjectRepository, type Project } from "../db/repositories/project-repository.js";
@@ -47,15 +50,36 @@ const workItemCreateSchema = z.object({
   priority: z.number().int().min(0).max(100).optional(),
   acceptanceCriteria: z.array(z.string().min(1).max(1_000)).max(50).optional(),
   evidenceRefs: z.array(evidenceRefSchema).max(20).optional(),
-  feishuRefs: z.array(evidenceRefSchema).max(20).optional()
+  feishuRefs: z.array(evidenceRefSchema).max(20).optional(),
+  stageId: z.string().min(1).max(128).nullable().optional()
 }).strict();
 
 const workItemUpdateSchema = z.object({
   title: z.string().min(1).max(256).optional(),
   description: z.string().min(1).max(4_000).nullable().optional(),
   priority: z.number().int().min(0).max(100).optional(),
-  acceptanceCriteria: z.array(z.string().min(1).max(1_000)).max(50).optional()
+  acceptanceCriteria: z.array(z.string().min(1).max(1_000)).max(50).optional(),
+  stageId: z.string().min(1).max(128).nullable().optional()
 }).strict().refine((value) => Object.keys(value).length > 0);
+
+const stageCreateSchema = z.object({
+  name: z.string().min(1).max(128),
+  description: z.string().min(1).max(1_000).nullable().optional()
+}).strict();
+
+const stageUpdateSchema = z.object({
+  name: z.string().min(1).max(128).optional(),
+  description: z.string().min(1).max(1_000).nullable().optional(),
+  status: z.enum(PROJECT_MANAGER_STAGE_STATUSES).optional()
+}).strict().refine((value) => Object.keys(value).length > 0);
+
+const stageReorderSchema = z.object({
+  stageIds: z.array(z.string().min(1).max(128)).min(1).max(50)
+}).strict();
+
+const dependencyBodySchema = z.object({
+  blockerWorkItemId: z.string().min(1).max(128)
+}).strict();
 
 const statusBodySchema = z.object({
   status: statusSchema,
@@ -411,6 +435,130 @@ export function createProjectManagerRoutes(db: Database): Router {
     }
   });
 
+  router.get("/:projectId/project-manager/stages", (req, res) => {
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const stages = new ProjectManagerRepository(db, userId)
+      .listStages(project.id)
+      .map(toStageDto);
+    res.json({ code: 0, data: { stages }, message: "" });
+  });
+
+  router.post("/:projectId/project-manager/stages", (req, res) => {
+    const parse = stageCreateSchema.safeParse(req.body ?? {});
+    if (!parse.success) return sendInvalidInput(res);
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    try {
+      const stage = new ProjectManagerRepository(db, userId).createStage(project.id, parse.data);
+      res.status(201).json({ code: 0, data: { stage: toStageDto(stage) }, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Stage creation failed");
+    }
+  });
+
+  router.post("/:projectId/project-manager/stages/seed-template", (req, res) => {
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    try {
+      const stages = new ProjectManagerRepository(db, userId)
+        .seedStageTemplate(project.id)
+        .map(toStageDto);
+      res.status(201).json({ code: 0, data: { stages }, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Stage template seeding failed");
+    }
+  });
+
+  router.post("/:projectId/project-manager/stages/reorder", (req, res) => {
+    const parse = stageReorderSchema.safeParse(req.body ?? {});
+    if (!parse.success) return sendInvalidInput(res);
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    try {
+      const stages = new ProjectManagerRepository(db, userId)
+        .reorderStages(project.id, parse.data.stageIds)
+        .map(toStageDto);
+      res.json({ code: 0, data: { stages }, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Stage reorder failed");
+    }
+  });
+
+  router.patch("/:projectId/project-manager/stages/:stageId", (req, res) => {
+    const parse = stageUpdateSchema.safeParse(req.body ?? {});
+    if (!parse.success) return sendInvalidInput(res);
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const repo = new ProjectManagerRepository(db, userId);
+    if (!repo.getStage(project.id, req.params.stageId)) return sendStageNotFound(res);
+    try {
+      const stage = repo.updateStage(project.id, req.params.stageId, parse.data);
+      res.json({ code: 0, data: { stage: toStageDto(stage) }, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Stage update failed");
+    }
+  });
+
+  router.delete("/:projectId/project-manager/stages/:stageId", (req, res) => {
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const repo = new ProjectManagerRepository(db, userId);
+    if (!repo.getStage(project.id, req.params.stageId)) return sendStageNotFound(res);
+    try {
+      const stage = repo.deleteStage(project.id, req.params.stageId);
+      res.json({ code: 0, data: { stage: toStageDto(stage) }, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Stage deletion failed");
+    }
+  });
+
+  router.get("/:projectId/project-manager/work-item-links", (req, res) => {
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const links = new ProjectManagerRepository(db, userId)
+      .listWorkItemLinks(project.id)
+      .map(toWorkItemLinkDto);
+    res.json({ code: 0, data: { links }, message: "" });
+  });
+
+  router.post("/:projectId/project-manager/work-items/:workItemId/dependencies", (req, res) => {
+    const parse = dependencyBodySchema.safeParse(req.body ?? {});
+    if (!parse.success) return sendInvalidInput(res);
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const repo = new ProjectManagerRepository(db, userId);
+    if (!repo.getWorkItem(project.id, req.params.workItemId)) return sendWorkItemNotFound(res);
+    try {
+      const link = repo.addWorkItemDependency(project.id, req.params.workItemId, parse.data.blockerWorkItemId);
+      res.status(201).json({ code: 0, data: { link: toWorkItemLinkDto(link) }, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Dependency creation failed");
+    }
+  });
+
+  router.delete("/:projectId/project-manager/work-items/:workItemId/dependencies/:blockerWorkItemId", (req, res) => {
+    const userId = userIdFor(req);
+    const project = requireProject(db, userId, req.params.projectId);
+    if (!project) return sendProjectNotFound(res);
+    const repo = new ProjectManagerRepository(db, userId);
+    if (!repo.getWorkItem(project.id, req.params.workItemId)) return sendWorkItemNotFound(res);
+    try {
+      repo.removeWorkItemDependency(project.id, req.params.workItemId, req.params.blockerWorkItemId);
+      res.json({ code: 0, data: {}, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Dependency removal failed");
+    }
+  });
+
   router.get("/:projectId/project-manager/ledger", (req, res) => {
     const parse = ledgerQuerySchema.safeParse(req.query ?? {});
     if (!parse.success) return sendInvalidInput(res);
@@ -464,8 +612,32 @@ function toWorkItemDto(workItem: ProjectManagerWorkItem) {
     evidenceRefCount: workItem.evidenceRefs.length,
     evidenceRefs: workItem.evidenceRefs.map(toEvidenceRefDto),
     feishuRefCount: workItem.feishuRefs.length,
+    stageId: workItem.stageId,
     createdAt: workItem.createdAt,
     updatedAt: workItem.updatedAt
+  };
+}
+
+function toStageDto(stage: ProjectManagerStage) {
+  return {
+    id: stage.id,
+    projectId: stage.projectId,
+    name: stage.name,
+    description: stage.description,
+    position: stage.position,
+    status: stage.status,
+    createdAt: stage.createdAt,
+    updatedAt: stage.updatedAt
+  };
+}
+
+function toWorkItemLinkDto(link: ProjectManagerWorkItemLink) {
+  return {
+    id: link.id,
+    projectId: link.projectId,
+    blockerWorkItemId: link.blockerWorkItemId,
+    blockedWorkItemId: link.blockedWorkItemId,
+    createdAt: link.createdAt
   };
 }
 
@@ -738,6 +910,10 @@ function sendProjectNotFound(res: { status(code: number): { json(body: unknown):
 
 function sendWorkItemNotFound(res: { status(code: number): { json(body: unknown): void } }): void {
   res.status(404).json({ code: 1, message: "Work item not found" });
+}
+
+function sendStageNotFound(res: { status(code: number): { json(body: unknown): void } }): void {
+  res.status(404).json({ code: 1, message: "Stage not found" });
 }
 
 function sendSessionNotFound(res: { status(code: number): { json(body: unknown): void } }): void {

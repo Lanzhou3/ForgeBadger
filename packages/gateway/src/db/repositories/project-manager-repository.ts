@@ -24,11 +24,27 @@ export const PROJECT_MANAGER_LEDGER_EVENT_TYPES = [
   "feishu_reference_linked",
   "next_step_proposed",
   "manual_completion_recorded",
-  "execution_state_changed"
+  "execution_state_changed",
+  "stage_created",
+  "stage_updated",
+  "stage_deleted",
+  "dependency_added",
+  "dependency_removed"
+] as const;
+
+export const PROJECT_MANAGER_STAGE_STATUSES = ["active", "completed", "archived"] as const;
+
+export const PROJECT_MANAGER_STAGE_TEMPLATE = [
+  "需求分析",
+  "架构设计",
+  "编码实现",
+  "测试验证",
+  "发布交付"
 ] as const;
 
 export type ProjectManagerWorkItemStatus = typeof PROJECT_MANAGER_WORK_ITEM_STATUSES[number];
 export type ProjectManagerLedgerEventType = typeof PROJECT_MANAGER_LEDGER_EVENT_TYPES[number];
+export type ProjectManagerStageStatus = typeof PROJECT_MANAGER_STAGE_STATUSES[number];
 
 export interface ProjectManagerEvidenceRef {
   kind?: string | undefined;
@@ -67,8 +83,30 @@ export interface ProjectManagerWorkItem {
   evidenceRefs: ProjectManagerEvidenceRef[];
   feishuRefs: ProjectManagerEvidenceRef[];
   details: Record<string, unknown>;
+  stageId: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface ProjectManagerStage {
+  id: string;
+  userId: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  position: number;
+  status: ProjectManagerStageStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProjectManagerWorkItemLink {
+  id: string;
+  userId: string;
+  projectId: string;
+  blockerWorkItemId: string;
+  blockedWorkItemId: string;
+  createdAt: number;
 }
 
 export interface ProjectManagerLedgerEvent {
@@ -111,6 +149,7 @@ export interface CreateProjectManagerWorkItemInput {
   evidenceRefs?: ProjectManagerEvidenceRef[] | undefined;
   feishuRefs?: ProjectManagerEvidenceRef[] | undefined;
   details?: Record<string, unknown> | undefined;
+  stageId?: string | null | undefined;
 }
 
 export interface UpdateProjectManagerWorkItemInput {
@@ -119,6 +158,18 @@ export interface UpdateProjectManagerWorkItemInput {
   priority?: number | undefined;
   acceptanceCriteria?: string[] | undefined;
   details?: Record<string, unknown> | undefined;
+  stageId?: string | null | undefined;
+}
+
+export interface CreateProjectManagerStageInput {
+  name: string;
+  description?: string | null | undefined;
+}
+
+export interface UpdateProjectManagerStageInput {
+  name?: string | undefined;
+  description?: string | null | undefined;
+  status?: ProjectManagerStageStatus | undefined;
 }
 
 export interface UpdateProjectManagerWorkItemStatusInput {
@@ -171,8 +222,30 @@ interface WorkItemRow {
   evidence_refs_json: string;
   feishu_refs_json: string;
   details_json: string;
+  stage_id: string | null;
   created_at: number;
   updated_at: number;
+}
+
+interface StageRow {
+  id: string;
+  user_id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  position: number;
+  status: string;
+  created_at: number;
+  updated_at: number;
+}
+
+interface WorkItemLinkRow {
+  id: string;
+  user_id: string;
+  project_id: string;
+  blocker_work_item_id: string;
+  blocked_work_item_id: string;
+  created_at: number;
 }
 
 interface LedgerEventRow {
@@ -289,10 +362,12 @@ export class ProjectManagerRepository {
     const now = Date.now();
     const status = normalizeStatus(input.status ?? "todo");
     const item = normalizeWorkItemInput(input);
+    const stageId = input.stageId ? this.requireStage(projectId, input.stageId).id : null;
     const eventDetails = mergeLedgerDetails({
       targetType: "work_item",
       targetId: id,
       status,
+      stageId,
       evidenceRefCount: item.evidenceRefs.length,
       acceptanceCriteriaCount: item.acceptanceCriteria.length
     }, item.details);
@@ -302,8 +377,8 @@ export class ProjectManagerRepository {
         INSERT INTO project_manager_work_items (
           id, user_id, project_id, title, description, status, priority,
           acceptance_criteria_json, evidence_refs_json, feishu_refs_json,
-          details_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          details_json, stage_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         this.userId,
@@ -316,6 +391,7 @@ export class ProjectManagerRepository {
         JSON.stringify(item.evidenceRefs),
         JSON.stringify(item.feishuRefs),
         JSON.stringify(item.details),
+        stageId,
         now,
         now
       );
@@ -379,11 +455,17 @@ export class ProjectManagerRepository {
       ? existing.acceptanceCriteria
       : normalizeTextList(input.acceptanceCriteria);
     const details = input.details === undefined ? existing.details : normalizeDetails(input.details);
+    const nextStageId = input.stageId === undefined
+      ? existing.stageId
+      : input.stageId === null
+        ? null
+        : this.requireStage(projectId, input.stageId).id;
     const changedFields = [
       nextTitle !== existing.title ? "title" : null,
       nextDescription !== existing.description ? "description" : null,
       nextPriority !== existing.priority ? "priority" : null,
-      JSON.stringify(nextAcceptanceCriteria) !== JSON.stringify(existing.acceptanceCriteria) ? "acceptanceCriteria" : null
+      JSON.stringify(nextAcceptanceCriteria) !== JSON.stringify(existing.acceptanceCriteria) ? "acceptanceCriteria" : null,
+      nextStageId !== existing.stageId ? "stageId" : null
     ].filter((field): field is string => Boolean(field));
     if (changedFields.length === 0 && input.details === undefined) {
       throw new Error("At least one work item field must change");
@@ -391,14 +473,15 @@ export class ProjectManagerRepository {
     const eventDetails = mergeLedgerDetails({
       targetType: "work_item",
       targetId: workItemId,
-      changedFields
+      changedFields,
+      stageId: nextStageId
     }, input.details === undefined ? {} : details);
     const now = Date.now();
 
     const write = this.db.transaction(() => {
       this.db.prepare(`
         UPDATE project_manager_work_items
-        SET title = ?, description = ?, priority = ?, acceptance_criteria_json = ?, details_json = ?, updated_at = ?
+        SET title = ?, description = ?, priority = ?, acceptance_criteria_json = ?, details_json = ?, stage_id = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(
         nextTitle,
@@ -406,6 +489,7 @@ export class ProjectManagerRepository {
         nextPriority,
         JSON.stringify(nextAcceptanceCriteria),
         JSON.stringify(details),
+        nextStageId,
         now,
         workItemId,
         this.userId,
@@ -549,6 +633,10 @@ export class ProjectManagerRepository {
     const write = this.db.transaction(() => {
       this.insertLedgerEvent(projectId, null, "work_item_deleted", existing.status, existing.evidenceRefs, existing.feishuRefs, eventDetails, now);
       this.db.prepare(`
+        DELETE FROM project_manager_work_item_links
+        WHERE user_id = ? AND project_id = ? AND (blocker_work_item_id = ? OR blocked_work_item_id = ?)
+      `).run(this.userId, projectId, workItemId, workItemId);
+      this.db.prepare(`
         DELETE FROM project_manager_work_items
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(workItemId, this.userId, projectId);
@@ -592,6 +680,244 @@ export class ProjectManagerRepository {
     });
     write();
     return this.getWorkItem(projectId, workItemId) as ProjectManagerWorkItem;
+  }
+
+  listStages(projectId: string): ProjectManagerStage[] {
+    return (this.db.prepare(`
+      SELECT *
+      FROM project_manager_stages
+      WHERE user_id = ? AND project_id = ?
+      ORDER BY position ASC, created_at ASC
+    `).all(this.userId, projectId) as StageRow[]).map(toStage);
+  }
+
+  createStage(projectId: string, input: CreateProjectManagerStageInput): ProjectManagerStage {
+    const id = randomUUID();
+    const now = Date.now();
+    const name = normalizeRequiredText(input.name, "stage name", 128);
+    const description = normalizeOptionalText(input.description, 1_000);
+    const position = this.nextStagePosition(projectId);
+
+    const write = this.db.transaction(() => {
+      this.insertStage(projectId, { id, name, description, position, status: "active" }, now);
+      this.writeAudit("project_manager.stage.create", "project_manager_stage", id, {
+        projectId,
+        position
+      });
+    });
+    write();
+    return this.requireStage(projectId, id);
+  }
+
+  updateStage(
+    projectId: string,
+    stageId: string,
+    input: UpdateProjectManagerStageInput
+  ): ProjectManagerStage {
+    const existing = this.requireStage(projectId, stageId);
+    const nextName = input.name === undefined
+      ? existing.name
+      : normalizeRequiredText(input.name, "stage name", 128);
+    const nextDescription = input.description === undefined
+      ? existing.description
+      : normalizeOptionalText(input.description, 1_000);
+    const nextStatus = input.status === undefined ? existing.status : normalizeStageStatus(input.status);
+    const changedFields = [
+      nextName !== existing.name ? "name" : null,
+      nextDescription !== existing.description ? "description" : null,
+      nextStatus !== existing.status ? "status" : null
+    ].filter((field): field is string => Boolean(field));
+    if (changedFields.length === 0) {
+      throw new Error("At least one stage field must change");
+    }
+    const now = Date.now();
+
+    const write = this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE project_manager_stages
+        SET name = ?, description = ?, status = ?, updated_at = ?
+        WHERE id = ? AND user_id = ? AND project_id = ?
+      `).run(nextName, nextDescription, nextStatus, now, stageId, this.userId, projectId);
+      this.insertLedgerEvent(projectId, null, "stage_updated", null, [], [], {
+        targetType: "stage",
+        targetId: stageId,
+        changedFields
+      }, now);
+      this.writeAudit("project_manager.stage.update", "project_manager_stage", stageId, {
+        projectId,
+        changedFields
+      });
+    });
+    write();
+    return this.requireStage(projectId, stageId);
+  }
+
+  deleteStage(projectId: string, stageId: string): ProjectManagerStage {
+    const existing = this.requireStage(projectId, stageId);
+    const now = Date.now();
+
+    const write = this.db.transaction(() => {
+      // Test databases run with foreign keys off, so work items are moved back
+      // to the backlog explicitly instead of relying on ON DELETE SET NULL.
+      this.db.prepare(`
+        UPDATE project_manager_work_items
+        SET stage_id = NULL, updated_at = ?
+        WHERE user_id = ? AND project_id = ? AND stage_id = ?
+      `).run(now, this.userId, projectId, stageId);
+      this.db.prepare(`
+        DELETE FROM project_manager_stages
+        WHERE id = ? AND user_id = ? AND project_id = ?
+      `).run(stageId, this.userId, projectId);
+      this.insertLedgerEvent(projectId, null, "stage_deleted", null, [], [], {
+        targetType: "stage",
+        targetId: stageId,
+        name: existing.name
+      }, now);
+      this.writeAudit("project_manager.stage.delete", "project_manager_stage", stageId, {
+        projectId,
+        name: existing.name
+      });
+    });
+    write();
+    return existing;
+  }
+
+  reorderStages(projectId: string, stageIds: string[]): ProjectManagerStage[] {
+    const existing = this.listStages(projectId);
+    const existingIds = new Set(existing.map((stage) => stage.id));
+    if (stageIds.length !== existing.length || !stageIds.every((id) => existingIds.has(id))) {
+      throw new Error("Stage order must list exactly the project's stages");
+    }
+    const now = Date.now();
+
+    const write = this.db.transaction(() => {
+      stageIds.forEach((id, index) => {
+        this.db.prepare(`
+          UPDATE project_manager_stages
+          SET position = ?, updated_at = ?
+          WHERE id = ? AND user_id = ? AND project_id = ?
+        `).run(index, now, id, this.userId, projectId);
+      });
+      this.insertLedgerEvent(projectId, null, "stage_updated", null, [], [], {
+        targetType: "stage",
+        action: "reorder",
+        stageCount: stageIds.length
+      }, now);
+      this.writeAudit("project_manager.stage.reorder", "project_manager_stage", projectId, {
+        projectId,
+        stageCount: stageIds.length
+      });
+    });
+    write();
+    return this.listStages(projectId);
+  }
+
+  seedStageTemplate(projectId: string): ProjectManagerStage[] {
+    if (this.listStages(projectId).length > 0) {
+      throw new Error("Stage template already seeded or stages already exist for this project");
+    }
+    const now = Date.now();
+
+    const write = this.db.transaction(() => {
+      PROJECT_MANAGER_STAGE_TEMPLATE.forEach((name, index) => {
+        this.insertStage(projectId, {
+          id: randomUUID(),
+          name,
+          description: null,
+          position: index,
+          status: "active"
+        }, now);
+      });
+      this.writeAudit("project_manager.stage.seed_template", "project_manager_stage", projectId, {
+        projectId,
+        stageCount: PROJECT_MANAGER_STAGE_TEMPLATE.length
+      });
+    });
+    write();
+    return this.listStages(projectId);
+  }
+
+  listWorkItemLinks(projectId: string): ProjectManagerWorkItemLink[] {
+    return (this.db.prepare(`
+      SELECT *
+      FROM project_manager_work_item_links
+      WHERE user_id = ? AND project_id = ?
+      ORDER BY created_at ASC, rowid ASC
+    `).all(this.userId, projectId) as WorkItemLinkRow[]).map(toWorkItemLink);
+  }
+
+  addWorkItemDependency(
+    projectId: string,
+    blockedWorkItemId: string,
+    blockerWorkItemId: string
+  ): ProjectManagerWorkItemLink {
+    if (blockedWorkItemId === blockerWorkItemId) {
+      throw new Error("A work item cannot depend on itself");
+    }
+    this.requireWorkItem(projectId, blockedWorkItemId);
+    this.requireWorkItem(projectId, blockerWorkItemId);
+    const links = this.listWorkItemLinks(projectId);
+    const duplicate = links.some(
+      (link) => link.blockedWorkItemId === blockedWorkItemId && link.blockerWorkItemId === blockerWorkItemId
+    );
+    if (duplicate) {
+      throw new Error("Dependency already exists");
+    }
+    if (this.dependencyWouldCycle(links, blockedWorkItemId, blockerWorkItemId)) {
+      throw new Error("Dependency would create a cycle");
+    }
+    const id = randomUUID();
+    const now = Date.now();
+
+    const write = this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO project_manager_work_item_links (
+          id, user_id, project_id, blocker_work_item_id, blocked_work_item_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `).run(id, this.userId, projectId, blockerWorkItemId, blockedWorkItemId, now);
+      this.insertLedgerEvent(projectId, blockedWorkItemId, "dependency_added", null, [], [], {
+        targetType: "work_item_link",
+        targetId: id,
+        blockerWorkItemId,
+        blockedWorkItemId
+      }, now);
+      this.writeAudit("project_manager.work_item.dependency_add", "project_manager_work_item", blockedWorkItemId, {
+        projectId,
+        blockerWorkItemId
+      });
+    });
+    write();
+    return this.listWorkItemLinks(projectId).find((link) => link.id === id) as ProjectManagerWorkItemLink;
+  }
+
+  removeWorkItemDependency(
+    projectId: string,
+    blockedWorkItemId: string,
+    blockerWorkItemId: string
+  ): void {
+    this.requireWorkItem(projectId, blockedWorkItemId);
+    this.requireWorkItem(projectId, blockerWorkItemId);
+    const now = Date.now();
+
+    const write = this.db.transaction(() => {
+      const result = this.db.prepare(`
+        DELETE FROM project_manager_work_item_links
+        WHERE user_id = ? AND project_id = ? AND blocker_work_item_id = ? AND blocked_work_item_id = ?
+      `).run(this.userId, projectId, blockerWorkItemId, blockedWorkItemId);
+      if (result.changes === 0) {
+        throw new Error("Dependency link not found");
+      }
+      this.insertLedgerEvent(projectId, blockedWorkItemId, "dependency_removed", null, [], [], {
+        targetType: "work_item_link",
+        blockerWorkItemId,
+        blockedWorkItemId
+      }, now);
+      this.writeAudit("project_manager.work_item.dependency_remove", "project_manager_work_item", blockedWorkItemId, {
+        projectId,
+        blockerWorkItemId
+      });
+    });
+    write();
   }
 
   listLedgerEvents(
@@ -660,6 +986,77 @@ export class ProjectManagerRepository {
     const item = this.getWorkItem(projectId, workItemId);
     if (!item) throw new Error("Project-manager work item not found");
     return item;
+  }
+
+  getStage(projectId: string, stageId: string): ProjectManagerStage | undefined {
+    const row = this.db.prepare(`
+      SELECT *
+      FROM project_manager_stages
+      WHERE id = ? AND user_id = ? AND project_id = ?
+    `).get(stageId, this.userId, projectId) as StageRow | undefined;
+    return row ? toStage(row) : undefined;
+  }
+
+  private requireStage(projectId: string, stageId: string): ProjectManagerStage {
+    const stage = this.getStage(projectId, stageId);
+    if (!stage) throw new Error("Project-manager stage not found");
+    return stage;
+  }
+
+  private nextStagePosition(projectId: string): number {
+    const row = this.db.prepare(`
+      SELECT COALESCE(MAX(position), -1) + 1 AS next_position
+      FROM project_manager_stages
+      WHERE user_id = ? AND project_id = ?
+    `).get(this.userId, projectId) as { next_position: number };
+    return row.next_position;
+  }
+
+  private insertStage(
+    projectId: string,
+    stage: { id: string; name: string; description: string | null; position: number; status: ProjectManagerStageStatus },
+    now: number
+  ): void {
+    this.db.prepare(`
+      INSERT INTO project_manager_stages (
+        id, user_id, project_id, name, description, position, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(stage.id, this.userId, projectId, stage.name, stage.description, stage.position, stage.status, now, now);
+    this.insertLedgerEvent(projectId, null, "stage_created", null, [], [], {
+      targetType: "stage",
+      targetId: stage.id,
+      name: stage.name,
+      position: stage.position
+    }, now);
+  }
+
+  /**
+   * Adding "blocked depends on blocker" creates a cycle when the blocker is
+   * itself transitively blocked by the blocked item. Walk the blocked-by graph
+   * from the blocker and fail if the walk reaches the blocked item.
+   */
+  private dependencyWouldCycle(
+    links: ProjectManagerWorkItemLink[],
+    blockedWorkItemId: string,
+    blockerWorkItemId: string
+  ): boolean {
+    const blockersByBlocked = new Map<string, string[]>();
+    for (const link of links) {
+      const blockers = blockersByBlocked.get(link.blockedWorkItemId) ?? [];
+      blockers.push(link.blockerWorkItemId);
+      blockersByBlocked.set(link.blockedWorkItemId, blockers);
+    }
+    const visited = new Set<string>();
+    const queue = [blockerWorkItemId];
+    while (queue.length > 0) {
+      const current = queue.pop();
+      if (current === undefined) break;
+      if (current === blockedWorkItemId) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      queue.push(...(blockersByBlocked.get(current) ?? []));
+    }
+    return false;
   }
 
   private insertLedgerEvent(
@@ -770,6 +1167,13 @@ function normalizeEventType(value: string): ProjectManagerLedgerEventType {
     return value as ProjectManagerLedgerEventType;
   }
   throw new Error(`Unsupported project-manager ledger event type: ${value}`);
+}
+
+function normalizeStageStatus(value: string): ProjectManagerStageStatus {
+  if (PROJECT_MANAGER_STAGE_STATUSES.includes(value as ProjectManagerStageStatus)) {
+    return value as ProjectManagerStageStatus;
+  }
+  throw new Error(`Unsupported project-manager stage status: ${value}`);
 }
 
 function validateTransition(from: ProjectManagerWorkItemStatus, to: ProjectManagerWorkItemStatus): void {
@@ -964,8 +1368,34 @@ function toWorkItem(row: WorkItemRow): ProjectManagerWorkItem {
     evidenceRefs: parseJsonArray<ProjectManagerEvidenceRef>(row.evidence_refs_json),
     feishuRefs: parseJsonArray<ProjectManagerEvidenceRef>(row.feishu_refs_json),
     details: parseJsonObject(row.details_json),
+    stageId: row.stage_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+function toStage(row: StageRow): ProjectManagerStage {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    projectId: row.project_id,
+    name: row.name,
+    description: row.description,
+    position: row.position,
+    status: normalizeStageStatus(row.status),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function toWorkItemLink(row: WorkItemLinkRow): ProjectManagerWorkItemLink {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    projectId: row.project_id,
+    blockerWorkItemId: row.blocker_work_item_id,
+    blockedWorkItemId: row.blocked_work_item_id,
+    createdAt: row.created_at
   };
 }
 
