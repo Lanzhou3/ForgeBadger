@@ -5,7 +5,7 @@ import type { UIEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, BriefcaseBusiness, Eye, FileCode2, FileText, Globe2, History, Pencil, Plus, Save, ShieldCheck, TerminalSquare, Trash2, Wrench } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Eye, FileCode2, FileText, Globe2, History, Pencil, Plus, Save, ShieldCheck, TerminalSquare, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -164,7 +164,6 @@ export default function ProjectDetailPage() {
   });
 
   const project = projectData?.project;
-  const projectPortfolioHref = `/portfolio?projectId=${encodeURIComponent(id)}`;
   const projectSessions = useMemo(
     () => sessionsData?.sessions ?? [],
     [sessionsData?.sessions]
@@ -317,12 +316,6 @@ export default function ProjectDetailPage() {
                 <Plus className="size-4" />
                 {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
               </Button>
-              <Button asChild size="sm" variant="outline">
-                <Link href={projectPortfolioHref}>
-                  <BriefcaseBusiness className="size-4" />
-                  Portfolio Operations
-                </Link>
-              </Button>
               {!isUntrackedTemplate && (
                 <Button
                   variant="outline"
@@ -448,9 +441,6 @@ export default function ProjectDetailPage() {
                   <div className="flex flex-wrap gap-2">
                     <Button asChild variant="outline" size="sm">
                       <Link href="/settings">{t("projects.openSettings")}</Link>
-                    </Button>
-                    <Button asChild variant="ghost" size="sm">
-                      <Link href={projectPortfolioHref}>Open Portfolio Operations</Link>
                     </Button>
                   </div>
                 </div>

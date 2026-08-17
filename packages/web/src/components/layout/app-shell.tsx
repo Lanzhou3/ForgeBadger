@@ -4,7 +4,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 
 import { CommandPalette } from "@/components/command-palette";
-import { PortfolioCompanionPanel } from "@/components/portfolio/portfolio-companion-panel";
 import {
   globalShortcutContextFromEvent,
   isCommandPaletteShortcut,
@@ -18,13 +17,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [portfolioCompanionOpen, setPortfolioCompanionOpen] = useState(false);
   const isTerminalRoute = /^\/sessions\/[^/]+/u.test(pathname ?? "");
-  const isPortfolioSurfaceRoute = pathname === "/portfolio" || pathname === "/copilot";
-
-  useEffect(() => {
-    if (isPortfolioSurfaceRoute) setPortfolioCompanionOpen(false);
-  }, [isPortfolioSurfaceRoute]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -73,12 +66,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
       />
-      {!isPortfolioSurfaceRoute ? (
-        <PortfolioCompanionPanel
-          open={portfolioCompanionOpen}
-          onOpenChange={setPortfolioCompanionOpen}
-        />
-      ) : null}
     </div>
   );
 }

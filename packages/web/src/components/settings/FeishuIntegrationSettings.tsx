@@ -1,9 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { ArrowUpRight, MessageSquare } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -14,8 +12,9 @@ import {
 import { useLanguage } from "@/hooks/use-language";
 
 /**
- * Feishu channel bindings are provisioned by Portfolio Operations, where the
- * required owner and provider-account context is available.
+ * Feishu channel bindings are provisioned through the Portfolio API; the web
+ * settings page only explains where chats route (bound chats -> portfolio
+ * requirement capture, unbound chats -> copilot conversation).
  */
 export function FeishuIntegrationSettings() {
   const { t } = useLanguage();
@@ -31,18 +30,13 @@ export function FeishuIntegrationSettings() {
           {t("settings.feishuIntegrationDescription")}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-2">
         <p className="text-sm text-muted-foreground">
-          Feishu channel provisioning is managed in Portfolio Operations. This
-          settings page does not collect credentials or create legacy
-          conversation bindings.
+          {t("settings.feishuRouting")}
         </p>
-        <Button asChild variant="outline">
-          <Link href="/portfolio">
-            Open Portfolio Operations
-            <ArrowUpRight className="ml-2 size-4" />
-          </Link>
-        </Button>
+        <p className="text-sm text-muted-foreground">
+          {t("settings.feishuCommands")}
+        </p>
       </CardContent>
     </Card>
   );

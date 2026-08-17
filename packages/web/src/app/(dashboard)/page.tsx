@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRight,
-  BriefcaseBusiness,
   CheckCircle2,
   ChevronRight,
   Circle,
@@ -194,12 +193,6 @@ export default function DashboardPage() {
           </Button>
           <Button asChild size="sm" variant="outline">
             <Link href="/projects/new">{t("projects.create")}</Link>
-          </Button>
-          <Button asChild size="sm" variant="ghost">
-            <Link href="/portfolio">
-              <BriefcaseBusiness className="size-4" />
-              Portfolio Operations
-            </Link>
           </Button>
         </div>
       </div>
