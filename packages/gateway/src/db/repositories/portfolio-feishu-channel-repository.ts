@@ -24,10 +24,13 @@ export interface PortfolioFeishuIngressEvent {
   providerAccountId: string;
   providerEventId: string;
   transport: PortfolioFeishuTransport;
-  handlerKind: "portfolio";
+  handlerKind: PortfolioFeishuIngressHandlerKind;
   eventDigest: string;
   state: PortfolioFeishuIngressState;
 }
+
+/** Handler kinds sharing one durable ingress ledger; copilot reuses it for provider-retry dedup. */
+export type PortfolioFeishuIngressHandlerKind = "portfolio" | "copilot";
 
 export interface PortfolioFeishuDeliveryRecord {
   id: string;
@@ -105,7 +108,7 @@ export class PortfolioFeishuChannelRepository {
     providerAccountId: string;
     providerEventId: string;
     transport: PortfolioFeishuTransport;
-    handlerKind: "portfolio";
+    handlerKind: PortfolioFeishuIngressHandlerKind;
     safeEnvelope: Record<string, unknown>;
     now?: Date;
   }): { admitted: true; event: PortfolioFeishuIngressEvent } | { admitted: false; reason: "duplicate_event" } {
@@ -116,7 +119,7 @@ export class PortfolioFeishuChannelRepository {
     providerAccountId: string;
     providerEventId: string;
     transport: PortfolioFeishuTransport;
-    handlerKind: "portfolio";
+    handlerKind: PortfolioFeishuIngressHandlerKind;
     safeEnvelope: Record<string, unknown>;
     rejectionCode: string;
     now?: Date;
@@ -128,7 +131,7 @@ export class PortfolioFeishuChannelRepository {
     providerAccountId: string;
     providerEventId: string;
     transport: PortfolioFeishuTransport;
-    handlerKind: "portfolio";
+    handlerKind: PortfolioFeishuIngressHandlerKind;
     safeEnvelope: Record<string, unknown>;
     now?: Date;
   }, state: "admitted" | "denied", rejectionCode?: string): { admitted: true; event: PortfolioFeishuIngressEvent } | { admitted: false; reason: "duplicate_event" } {
@@ -359,7 +362,7 @@ export class PortfolioFeishuChannelRepository {
   private getIngressEvent(id: string): PortfolioFeishuIngressEvent | undefined {
     const row = this.db.prepare("SELECT * FROM portfolio_feishu_ingress_events WHERE id = ? AND user_id = ?").get(id, this.userId) as Row | undefined;
     if (!row || stringValue(row, "handler_kind") !== "portfolio") return undefined;
-    return { id: stringValue(row, "id"), providerAccountId: stringValue(row, "provider_account_id"), providerEventId: stringValue(row, "provider_event_id"), transport: stringValue(row, "transport") as PortfolioFeishuTransport, handlerKind: "portfolio", eventDigest: stringValue(row, "event_digest"), state: stringValue(row, "state") as PortfolioFeishuIngressState };
+    return { id: stringValue(row, "id"), providerAccountId: stringValue(row, "provider_account_id"), providerEventId: stringValue(row, "provider_event_id"), transport: stringValue(row, "transport") as PortfolioFeishuTransport, handlerKind: stringValue(row, "handler_kind") as PortfolioFeishuIngressHandlerKind, eventDigest: stringValue(row, "event_digest"), state: stringValue(row, "state") as PortfolioFeishuIngressState };
   }
   private getDelivery(id: string): PortfolioFeishuDeliveryRecord | undefined {
     const row = this.db.prepare("SELECT * FROM portfolio_delivery_records WHERE id = ? AND user_id = ?").get(id, this.userId) as Row | undefined;

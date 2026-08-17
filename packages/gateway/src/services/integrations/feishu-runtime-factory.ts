@@ -23,6 +23,8 @@ import {
 import { PortfolioFeishuOutboxService } from "../portfolio/feishu/outbox-service.js";
 import { PortfolioFeishuRequirementCaptureService } from "../portfolio/feishu/requirement-capture-service.js";
 import { PortfolioFeishuOwnerDecisionService } from "../portfolio/feishu/owner-decision-service.js";
+import { buildAgentStack, type AgentStackDeps } from "../agent/agent-stack.js";
+import { createFeishuCopilotChannel, type FeishuCopilotChannel } from "./feishu-copilot-channel.js";
 
 interface AccountIdentityRow {
   id: string;
@@ -55,22 +57,28 @@ export function createProductionFeishuChannelRuntime(input: {
     accounts: createAccountSource(input.db, input.masterKey, providerRegistry),
     sdkFactory
   });
+  let runtime: FeishuChannelRuntime;
   const prepareAccount = (userId: string) => {
     supervisor.registerHandlers(userId, createFeishuSdkHandlers({
       db: input.db,
       masterKey: input.masterKey,
       userId,
-      providerRegistry
+      providerRegistry,
+      // Copilot routing is armed once the gateway app attaches agent deps.
+      resolveAgentDeps: () => runtime.getAgentDeps(),
+      buildAgentStack,
+      sdkFactory
     }));
   };
 
   for (const userId of listEnabledAccountUserIds(input.db)) prepareAccount(userId);
-  return new FeishuChannelRuntime({
+  runtime = new FeishuChannelRuntime({
     supervisor,
     prepareAccount,
     workers: [() => runPortfolioDeliveryCycle(input.db, input.masterKey, sdkFactory)],
     workerIntervalMs: 250
   });
+  return runtime;
 }
 
 function createAccountSource(
@@ -121,16 +129,43 @@ function createAccountSource(
   };
 }
 
-/** Long-connection ingress selects Portfolio once and has no inbox fallback. */
+/**
+ * Long-connection ingress: Portfolio-bound chats stay on the Portfolio flow;
+ * unbound chats route their messages into the Copilot conversation channel.
+ */
 export function createFeishuSdkHandlers(input: {
   db: Database;
   masterKey: string;
   userId: string;
   providerRegistry?: PortfolioFeishuRegistryRepository;
+  resolveAgentDeps?: () => AgentStackDeps | undefined;
+  buildAgentStack?: typeof buildAgentStack;
+  sdkFactory?: FeishuSdkFactory;
 }) {
   const credentialsRepository = new FeishuChannelRepository(input.db, input.userId, input.masterKey);
   const registry = input.providerRegistry ?? new PortfolioFeishuRegistryRepository(input.db);
   const selector = createPortfolioIngressSelector(input.db, registry);
+  const copilotChannel = (): FeishuCopilotChannel | undefined => {
+    const deps = input.resolveAgentDeps?.();
+    const account = credentialsRepository.getAccount();
+    const providerAccount = account ? registry.resolve("feishu", account.appId) : undefined;
+    if (!deps || !input.buildAgentStack || !input.sdkFactory || !account || !providerAccount) return undefined;
+    return createFeishuCopilotChannel({
+      deps,
+      buildAgentStack: input.buildAgentStack,
+      sendMessage: ({ chatId, text }) => sendFeishuChatText({
+        db: input.db,
+        masterKey: input.masterKey,
+        sdkFactory: input.sdkFactory as FeishuSdkFactory,
+        userId: input.userId,
+        chatId,
+        text
+      }),
+      userId: input.userId,
+      providerAccountId: providerAccount.id,
+      transport: "long_connection"
+    });
+  };
   const admit = (raw: unknown, eventType: "im.message.receive_v1" | "card.action.trigger") => {
     const account = credentialsRepository.getAccount();
     if (!account?.enabled) return;
@@ -139,24 +174,21 @@ export function createFeishuSdkHandlers(input: {
     try {
       ensurePortfolioHandler(registry, input.userId, account.appId);
       const event = toVerifiedPortfolioIngress(normalized, account.appId, "long_connection");
-      const selection = selector.select(event);
-      const admission = selector.admit(event, selection);
-      if (!admission.admitted) {
-        return normalized.kind === "card_action" ? renderFeishuCardActionAcceptedResponse() : undefined;
-      }
-      handlePortfolioIngress({
+      const channel = copilotChannel();
+      routeVerifiedFeishuIngress({
         db: input.db,
-        userId: selection.account.userId,
         masterKey: input.masterKey,
-        repository: new PortfolioFeishuChannelRepository(input.db, selection.account.userId),
-        selection,
+        userId: input.userId,
+        registry,
+        selector,
         event,
-        admission: admission.event,
-        ...(normalized.kind === "message" ? { text: normalized.text } : { actionToken: normalized.actionId })
+        kind: normalized.kind,
+        ...(normalized.kind === "message" ? { text: normalized.text } : { actionToken: normalized.actionId }),
+        ...(channel ? { copilotChannel: channel } : {})
       });
       return normalized.kind === "card_action" ? renderFeishuCardActionAcceptedResponse() : undefined;
     } catch {
-      // The selector persists a safe rejection. Card acknowledgement prevents
+      // The router persists a safe rejection. Card acknowledgement prevents
       // provider retries from becoming a second delivery channel.
       return normalized.kind === "card_action" ? renderFeishuCardActionAcceptedResponse() : undefined;
     }
@@ -165,6 +197,70 @@ export function createFeishuSdkHandlers(input: {
     onMessage: (raw: unknown) => admit(raw, "im.message.receive_v1"),
     onCardAction: (raw: unknown) => admit(raw, "card.action.trigger")
   };
+}
+
+/**
+ * Shared ingress router for both transports (long connection and webhook).
+ * An active Portfolio channel binding keeps the chat on the Portfolio flow;
+ * unbound messages go to the Copilot channel, and unbound card clicks remain
+ * durable no-ops so provider retries never become a second delivery channel.
+ */
+export function routeVerifiedFeishuIngress(input: {
+  db: Database;
+  masterKey: string;
+  userId: string;
+  registry: PortfolioFeishuRegistryRepository;
+  selector: PortfolioFeishuIngressSelector;
+  event: VerifiedFeishuIngress;
+  kind: "message" | "card_action";
+  text?: string;
+  actionToken?: string;
+  copilotChannel?: FeishuCopilotChannel;
+}): "portfolio" | "copilot" | "unhandled" {
+  const providerAccount = input.registry.resolve(input.event.provider, input.event.providerAccountId);
+  if (!providerAccount || providerAccount.lifecycleState !== "verified") throw new Error("PORTFOLIO_FEISHU_ACCOUNT_NOT_ELIGIBLE");
+  const channel = new PortfolioFeishuChannelRepository(input.db, input.userId);
+  const binding = channel.resolveActiveBinding({
+    providerAccountId: providerAccount.id,
+    externalIdentity: input.event.externalIdentity,
+    conversationId: input.event.conversationId
+  });
+  if (!binding) {
+    if (input.kind === "message" && input.copilotChannel) {
+      // A full Copilot turn must not block ingress acknowledgement.
+      void input.copilotChannel.routeMessage({
+        chatId: input.event.conversationId,
+        text: input.text ?? "",
+        providerEventId: input.event.providerEventId
+      }).catch(() => undefined);
+      return "copilot";
+    }
+    channel.denyIngress({
+      providerAccountId: providerAccount.id,
+      providerEventId: input.event.providerEventId,
+      transport: input.event.transport,
+      handlerKind: "portfolio",
+      rejectionCode: "PORTFOLIO_FEISHU_HANDLER_AMBIGUOUS",
+      safeEnvelope: { provider: input.event.provider, eventType: input.kind }
+    });
+    return "unhandled";
+  }
+  const selection: FeishuIngressSelection = { handlerKind: "portfolio", account: providerAccount, binding };
+  const admission = input.selector.admit(input.event, selection);
+  if (!admission.admitted) return "portfolio";
+  handlePortfolioIngress({
+    db: input.db,
+    userId: selection.account.userId,
+    masterKey: input.masterKey,
+    repository: new PortfolioFeishuChannelRepository(input.db, selection.account.userId),
+    selection,
+    event: input.event,
+    admission: admission.event,
+    ...(input.kind === "message"
+      ? (input.text !== undefined ? { text: input.text } : {})
+      : input.actionToken !== undefined ? { actionToken: input.actionToken } : {})
+  });
+  return "portfolio";
 }
 
 function ensurePortfolioHandler(
@@ -345,6 +441,22 @@ async function sendPortfolioText(
   });
   const messageId = readProviderMessageId(response);
   return { accepted: Boolean(response), ...(messageId ? { messageId } : {}) };
+}
+
+/** Send one text message to a chat as the user's enabled Feishu account (Copilot replies). */
+export async function sendFeishuChatText(input: {
+  db: Database;
+  masterKey: string;
+  sdkFactory: FeishuSdkFactory;
+  userId: string;
+  chatId: string;
+  text: string;
+}): Promise<void> {
+  const repository = new FeishuChannelRepository(input.db, input.userId, input.masterKey);
+  const account = repository.getAccount();
+  if (!account?.enabled) throw new Error("FEISHU_ACCOUNT_DISABLED");
+  const result = await sendPortfolioText(repository, input.sdkFactory, account.id, input.chatId, input.text);
+  if (!result.accepted) throw new Error("FEISHU_PROVIDER_NOT_ACCEPTED");
 }
 
 function listEnabledAccountUserIds(db: Database): string[] {

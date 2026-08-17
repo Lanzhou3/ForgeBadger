@@ -64,6 +64,7 @@ describe("db schema", () => {
       "feishu_channel_logical_claims",
       "feishu_channel_outbox",
       "feishu_conversation_bindings",
+      "feishu_copilot_channels",
       "integration_feishu_configs",
       "integration_feishu_user_mappings",
       "integration_feishu_webhook_rate_windows",

@@ -416,6 +416,18 @@ scope or a tenant-owned internal project ID; the Settings UI resolves that ID
 from a project-name selector. `PATCH /bindings/:bindingId` changes only the
 scope, while delete removes the binding without deleting project data.
 
+Feishu messages that arrive without a portfolio conversation binding are routed
+to a per-chat Copilot channel instead of being dropped. Each Feishu chat maps to
+exactly one `copilot_conversations` row (tracked in `feishu_copilot_channels`),
+so the chat keeps its own context and also appears in the web `/copilot`
+conversation list. Bot commands inside such chats: `/new` resets the chat to a
+fresh conversation, `/approve` / `/reject` resolve the latest Copilot
+pending action for that conversation, and `/help` lists the commands. Chats with
+an active portfolio binding keep the portfolio requirement-capture/card behavior
+unchanged. Ingress de-duplication for both flows uses the same durable
+`portfolio_feishu_ingress_events` ledger (`handler_kind` = `portfolio` |
+`copilot`), so provider retries never execute a turn twice.
+
 After an inbound message passes tenant, user, chat, and mention policy, the
 Inbox worker adds a transient Feishu `Typing` reaction to the original message.
 The reaction is removed after the assistant result is persisted and its final
@@ -531,8 +543,12 @@ webhook run. Only the minimum supported Feishu message events for the command
 bridge are actionable; unknown authentic event types are acknowledged without
 side effects.
 
-Public webhook text such as `approve`, `批准`, or `/approve <id>` is not an
-approval channel and must not approve pending actions. Public webhook events
+Plain webhook text such as `approve`, `批准`, or `/approve <id>` is not an
+approval channel for portfolio-bound flows and must not approve their pending
+actions. The only Feishu approval path is the per-chat Copilot channel's
+explicit `/approve` / `/reject` command, which resolves the latest pending
+action for that chat's own Copilot conversation after the same signature,
+timestamp, replay, and rate checks. Public webhook events
 also cannot send direct terminal input, run shell commands, create unattended
 development loops, or execute model-generated Feishu command strings. Accepted
 events may create a Copilot conversation/run with `source: "feishu"` only after

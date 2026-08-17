@@ -6,7 +6,6 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { AuditLogRepository } from "../db/repositories/audit-log-repository.js";
 import { FeishuChannelRepository } from "../db/repositories/feishu-channel-repository.js";
-import { PortfolioFeishuChannelRepository } from "../db/repositories/portfolio-feishu-channel-repository.js";
 import { PortfolioFeishuRegistryRepository } from "../db/repositories/portfolio-feishu-registry-repository.js";
 import {
   FeishuIntegrationRepository,
@@ -17,8 +16,12 @@ import type { Database } from "../db/types.js";
 import { getFeishuCliStatus, type FeishuCliStatus } from "../services/integrations/feishu-cli.js";
 import {
   createPortfolioIngressSelector,
-  handlePortfolioIngress
+  routeVerifiedFeishuIngress,
+  sendFeishuChatText
 } from "../services/integrations/feishu-runtime-factory.js";
+import { createFeishuCopilotChannel } from "../services/integrations/feishu-copilot-channel.js";
+import { FeishuSdkFactory } from "../services/integrations/feishu-sdk.js";
+import { buildAgentStack, type AgentStackDeps } from "../services/agent/agent-stack.js";
 import { renderFeishuCardActionAcceptedResponse } from "../services/integrations/feishu-card-renderer.js";
 
 const feishuConfigSchema = z.object({
@@ -42,6 +45,13 @@ const feishuUserMappingsSchema = z.object({
 }).strict();
 const publicWebhookReplayTtlMs = 5 * 60 * 1000;
 
+/** Lazily-shared SDK factory for webhook-originated Copilot replies. */
+let sharedWebhookSdkFactory: FeishuSdkFactory | undefined;
+function webhookSdkFactory(): FeishuSdkFactory {
+  sharedWebhookSdkFactory ??= new FeishuSdkFactory();
+  return sharedWebhookSdkFactory;
+}
+
 export interface FeishuIntegrationRoutesOptions {
   db?: Database;
   masterKey?: string;
@@ -51,6 +61,8 @@ export interface FeishuIntegrationRoutesOptions {
     reconcileAccount(userId: string): Promise<void>;
     getHealth(userId: string): unknown;
   };
+  /** Copilot harness deps for unbound-chat routing; absent disables the Copilot channel. */
+  resolveAgentDeps?: () => AgentStackDeps | undefined;
 }
 
 /** Feishu exposes only account control and one verified Portfolio ingress path. */
@@ -76,6 +88,7 @@ export function createFeishuIntegrationRoutes(options: FeishuIntegrationRoutesOp
     if (getFeishuBodyToken(body) !== config.verificationToken) return sendPublicWebhookError(res, 401, "feishu_webhook_token_invalid");
     const normalized = normalizePublicFeishuIngress(body);
     if (!normalized) return res.status(200).json({ msg: "ignored" });
+    const masterKey = options.masterKey;
 
     const integration = new FeishuIntegrationRepository(db, config.userId, options.masterKey);
     if (!consumePublicReplayAndRate(integration, config, normalized, signature, publicWebhookRateLimit)) {
@@ -99,21 +112,40 @@ export function createFeishuIntegrationRoutes(options: FeishuIntegrationRoutesOp
         eventType: normalized.kind,
         safeEventMetadata: { source: "webhook", eventType: normalized.kind }
       };
-      const selector = createPortfolioIngressSelector(db, registry);
-      const selection = selector.select(event);
-      const admission = selector.admit(event, selection);
-      if (!admission.admitted) return res.status(200).json(normalized.kind === "card_action" ? renderFeishuCardActionAcceptedResponse() : { msg: "replayed" });
-      handlePortfolioIngress({
+      const agentDeps = options.resolveAgentDeps?.();
+      const providerAccount = registry.resolve("feishu", account.appId);
+      const copilotChannel = agentDeps && providerAccount
+        ? createFeishuCopilotChannel({
+            deps: agentDeps,
+            buildAgentStack,
+            sendMessage: ({ chatId, text }) => sendFeishuChatText({
+              db,
+              masterKey,
+              sdkFactory: webhookSdkFactory(),
+              userId: config.userId,
+              chatId,
+              text
+            }),
+            userId: config.userId,
+            providerAccountId: providerAccount.id,
+            transport: "webhook"
+          })
+        : undefined;
+      const routed = routeVerifiedFeishuIngress({
         db,
-        userId: selection.account.userId,
-        masterKey: options.masterKey,
-        repository: new PortfolioFeishuChannelRepository(db, selection.account.userId),
-        selection,
+        masterKey,
+        userId: config.userId,
+        registry,
+        selector: createPortfolioIngressSelector(db, registry),
         event,
-        admission: admission.event,
-        ...(normalized.kind === "message" ? { text: normalized.text } : normalized.actionToken ? { actionToken: normalized.actionToken } : {})
+        kind: normalized.kind,
+        ...(normalized.kind === "message" ? { text: normalized.text } : normalized.actionToken ? { actionToken: normalized.actionToken } : {}),
+        ...(copilotChannel ? { copilotChannel } : {})
       });
-      res.status(200).json(normalized.kind === "card_action" ? renderFeishuCardActionAcceptedResponse() : { msg: "ok" });
+      const acknowledged = routed === "copilot" || routed === "portfolio";
+      res.status(200).json(normalized.kind === "card_action"
+        ? renderFeishuCardActionAcceptedResponse()
+        : { msg: acknowledged ? "ok" : "ignored" });
     } catch {
       sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_selector_rejected");
     }

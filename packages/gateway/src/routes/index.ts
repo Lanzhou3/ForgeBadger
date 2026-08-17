@@ -80,7 +80,13 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
     db: deps.db,
     masterKey: deps.masterKey,
-    ...(deps.feishuChannelRuntime ? { channelRuntime: deps.feishuChannelRuntime } : {})
+    ...(deps.feishuChannelRuntime ? { channelRuntime: deps.feishuChannelRuntime } : {}),
+    resolveAgentDeps: () => ({
+      db: deps.db,
+      masterKey: deps.masterKey,
+      eventBus: deps.eventBus,
+      ...(deps.portfolioApi ? { portfolioApi: deps.portfolioApi } : {})
+    })
   }));
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
     db: deps.db,

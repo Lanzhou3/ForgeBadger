@@ -142,6 +142,14 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     deps: { db: options.db, masterKey: options.masterKey, eventBus, portfolioApi },
     buildAgentStack
   });
+  // Feishu Copilot channel: the runtime is built in startup before the
+  // Portfolio facade exists, so its agent deps attach here once in scope.
+  options.feishuChannelRuntime?.attachAgentDeps({
+    db: options.db,
+    masterKey: options.masterKey,
+    eventBus,
+    portfolioApi
+  });
 
   return {
     app,

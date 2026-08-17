@@ -1178,3 +1178,14 @@ export const copilotOperationLog = sqliteTable("copilot_operation_log", {
   resultJson: text("result_json"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date())
 }, (table) => ({ idempotency: uniqueIndex("idx_copilot_operation_user_op_key").on(table.userId, table.operation, table.idempotencyKey) }));
+
+// Feishu Copilot channel: one row per (user, Feishu chat) pointing at the chat's
+// CURRENT Copilot conversation. Chats without a Portfolio channel binding route
+// messages into the Copilot harness; /new swaps the pointer to a fresh context.
+export const feishuCopilotChannels = sqliteTable("feishu_copilot_channels", {
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  chatId: text("chat_id").notNull(),
+  conversationId: text("conversation_id").notNull().references(() => copilotConversations.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+}, (table) => ({ chatIdentity: primaryKey({ columns: [table.userId, table.chatId], name: "feishu_copilot_channel_pk" }) }));

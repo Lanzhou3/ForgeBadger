@@ -295,6 +295,13 @@
       "when": 1787097600000,
       "tag": "0042_copilot_compression",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1787184000000,
+      "tag": "0043_feishu_copilot_channel",
+      "breakpoints": true
     }
   ]
 }
