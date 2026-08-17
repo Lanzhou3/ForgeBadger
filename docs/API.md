@@ -714,6 +714,34 @@ context, audit details, and API response metadata. Free-form approval text such
 as `approve`, `批准`, or `/approve <id>` never approves pending actions; pending
 actions remain controlled by the OpenForge approval routes.
 
+### Copilot Agent API
+
+- `GET /api/v1/copilot/capabilities`
+- `GET /api/v1/copilot/conversations`
+- `POST /api/v1/copilot/conversations`
+- `PATCH /api/v1/copilot/conversations/:id`
+- `DELETE /api/v1/copilot/conversations/:id`
+- `GET /api/v1/copilot/conversations/:id/messages`
+- `POST /api/v1/copilot/conversations/:id/messages`
+- `GET /api/v1/copilot/runs/:id`
+- `POST /api/v1/copilot/runs/:id/cancel`
+- `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/decide`
+- `GET /api/v1/copilot/memory/entries`
+- `POST /api/v1/copilot/memory/entries`
+- `GET /api/v1/copilot/memory/search`
+- `DELETE /api/v1/copilot/memory/entries/:id`
+
+These are the live endpoints of the self-built agent harness
+(`services/agent/*`), distinct from the retired historical contract below. All
+access is user scoped (repositories are constructed with the authenticated
+`userId`). `PATCH /conversations/:id` renames a conversation (title, 1–200
+chars); `DELETE /conversations/:id` removes it together with its messages,
+runs, and pending actions (foreign or already-deleted conversations 404).
+Posting a message runs a turn and returns the run id; streaming deltas and
+proactive reports arrive over `/ws/events` as `copilot_run_updated`. Operate
+tools pause the run as `awaiting_approval`; the pending-action decide route
+(body `{ "approved": true|false }`) resumes or rejects it.
+
 ### Retired Platform AI Copilot API (historical)
 
 > The legacy `/api/v1/copilot/**` contract is no longer mounted. The endpoint

@@ -94,6 +94,20 @@ export function createConversation(title?: string) {
   });
 }
 
+export function renameConversation(conversationId: string, title: string) {
+  return fetchJson<{ conversation: CopilotConversation }>(
+    `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}`,
+    { method: "PATCH", body: JSON.stringify({ title }) }
+  );
+}
+
+export function deleteConversation(conversationId: string) {
+  return fetchJson<{ deleted: boolean }>(
+    `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}`,
+    { method: "DELETE" }
+  );
+}
+
 export function listMessages(conversationId: string) {
   return fetchJson<{ messages: CopilotMessage[] }>(
     `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/messages`
