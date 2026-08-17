@@ -151,7 +151,34 @@ Authenticated REST endpoints are mounted under the project-scoped prefix
 - `PATCH /api/v1/projects/:projectId/project-manager/work-items/:workItemId/status`
 - `POST /api/v1/projects/:projectId/project-manager/work-items/:workItemId/evidence`
 - `DELETE /api/v1/projects/:projectId/project-manager/work-items/:workItemId`
+- `GET /api/v1/projects/:projectId/project-manager/stages`
+- `POST /api/v1/projects/:projectId/project-manager/stages`
+- `POST /api/v1/projects/:projectId/project-manager/stages/seed-template`
+- `POST /api/v1/projects/:projectId/project-manager/stages/reorder`
+- `PATCH /api/v1/projects/:projectId/project-manager/stages/:stageId`
+- `DELETE /api/v1/projects/:projectId/project-manager/stages/:stageId`
+- `GET /api/v1/projects/:projectId/project-manager/work-item-links`
+- `POST /api/v1/projects/:projectId/project-manager/work-items/:workItemId/dependencies`
+- `DELETE /api/v1/projects/:projectId/project-manager/work-items/:workItemId/dependencies/:blockerWorkItemId`
 - `GET /api/v1/projects/:projectId/project-manager/ledger`
+
+Development stages and work-item dependencies are durable state introduced by
+`packages/gateway/src/db/migrations/0045_dev_task_stages.sql`:
+
+- `project_manager_stages` — ordered SDLC lanes (`position`, status
+  `active` / `completed` / `archived`). `POST /stages/seed-template` creates
+  the standard 需求分析 → 架构设计 → 编码实现 → 测试验证 → 发布交付 flow once
+  per project; `POST /stages/reorder` requires the exact stage id set and
+  rewrites sequential positions; deleting a stage moves its work items back
+  to the backlog (`stage_id = NULL`).
+- `project_manager_work_items.stage_id` — optional stage assignment settable
+  through work-item create/patch (`stageId`, `null` clears).
+- `project_manager_work_item_links` — blocked-by edges
+  (`blocker_work_item_id` blocks `blocked_work_item_id`) with a unique pair
+  index. Self links, duplicates, and direct or transitive cycles are rejected
+  (`400`); deleting a work item removes its links. Stage and dependency
+  mutations write `stage_created` / `stage_updated` / `stage_deleted` /
+  `dependency_added` / `dependency_removed` ledger events.
 
 All Project Manager Ledger REST endpoints use the canonical OpenForge response
 envelope. Success responses return:
