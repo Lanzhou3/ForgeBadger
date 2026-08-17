@@ -13,7 +13,7 @@ import { PortfolioFeishuChannelRepository } from "../src/db/repositories/portfol
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
 import { buildAgentStack, type AgentStackDeps } from "../src/services/agent/agent-stack.js";
 import { OpenForgeEventBus } from "../src/services/event-bus.js";
-import { createFeishuCopilotChannel } from "../src/services/integrations/feishu-copilot-channel.js";
+import { createFeishuCopilotChannel, type FeishuCopilotChannelIngress } from "../src/services/integrations/feishu-copilot-channel.js";
 import {
   createFeishuSdkHandlers,
   routeVerifiedFeishuIngress,
@@ -50,7 +50,7 @@ interface TurnCall {
 function createStubAgentStackFactory(db: Database) {
   const turnCalls: TurnCall[] = [];
   const resumeCalls: Array<{ runId: string; actionId: string; approved: boolean }> = [];
-  let behavior: "completed" | "awaiting_approval" = "completed";
+  let behavior: "completed" | "awaiting_approval" | "fails" = "completed";
   let finalText = defaultReply;
 
   const factory = (_deps: AgentStackDeps, userId: string) => {
@@ -68,6 +68,10 @@ function createStubAgentStackFactory(db: Database) {
             log.createPendingAction({ runId: run.id, tool: "stub_operate_tool", inputJson: "{\"x\":1}", inputDigest: "digest" });
             log.updateRun(run.id, { status: "awaiting_approval" });
             return run.id;
+          }
+          if (behavior === "fails") {
+            log.updateRun(run.id, { status: "failed" });
+            throw new Error("sk-test-api-key token expired");
           }
           log.appendMessage(input.conversationId, { role: "assistant", kind: "text", content: finalText });
           log.updateRun(run.id, { status: "completed", completedAt: new Date() });
@@ -93,7 +97,7 @@ function createStubAgentStackFactory(db: Database) {
     factory: factory as unknown as typeof buildAgentStack,
     turnCalls,
     resumeCalls,
-    setBehavior(next: "completed" | "awaiting_approval") {
+    setBehavior(next: "completed" | "awaiting_approval" | "fails") {
       behavior = next;
     },
     setFinalText(next: string) {
@@ -121,12 +125,20 @@ function createHarness() {
     providerAccountId: providerAccount.id,
     transport: "long_connection"
   });
+  /** Mirrors the production ingress path: sync admission, then processing. */
+  const deliver = async (ingress: Omit<FeishuCopilotChannelIngress, "senderIdentity"> & Partial<Pick<FeishuCopilotChannelIngress, "senderIdentity">>) => {
+    const full: FeishuCopilotChannelIngress = { senderIdentity: "ou_owner", ...ingress };
+    if (!channel.admitMessage(full)) return "duplicate";
+    await channel.processMessage(full);
+    return "admitted";
+  };
   return {
     db,
     userId,
     providerAccount,
     deps,
     channel,
+    deliver,
     sent,
     stub,
     pointer(chatId: string): string | undefined {
@@ -146,7 +158,7 @@ describe("FeishuCopilotChannel", () => {
     const harness = createHarness();
 
     // Act
-    await harness.channel.routeMessage({ chatId: "oc_alpha", text: "帮我看下项目状态", providerEventId: "ev-1" });
+    await harness.deliver({ chatId: "oc_alpha", text: "帮我看下项目状态", providerEventId: "ev-1" });
 
     // Assert
     assert.equal(harness.sent.length, 1);
@@ -165,8 +177,8 @@ describe("FeishuCopilotChannel", () => {
     const harness = createHarness();
 
     // Act
-    await harness.channel.routeMessage({ chatId: "oc_alpha", text: "第一个聊天", providerEventId: "ev-a" });
-    await harness.channel.routeMessage({ chatId: "oc_beta", text: "第二个聊天", providerEventId: "ev-b" });
+    await harness.deliver({ chatId: "oc_alpha", text: "第一个聊天", providerEventId: "ev-a" });
+    await harness.deliver({ chatId: "oc_beta", text: "第二个聊天", providerEventId: "ev-b" });
 
     // Assert
     const alpha = harness.pointer("oc_alpha");
@@ -179,11 +191,11 @@ describe("FeishuCopilotChannel", () => {
   it("starts a fresh conversation on /new and swaps the chat pointer", async () => {
     // Arrange
     const harness = createHarness();
-    await harness.channel.routeMessage({ chatId: "oc_alpha", text: "旧上下文", providerEventId: "ev-1" });
+    await harness.deliver({ chatId: "oc_alpha", text: "旧上下文", providerEventId: "ev-1" });
     const first = harness.pointer("oc_alpha");
 
     // Act
-    await harness.channel.routeMessage({ chatId: "oc_alpha", text: "/new", providerEventId: "ev-2" });
+    await harness.deliver({ chatId: "oc_alpha", text: "/new", providerEventId: "ev-2" });
 
     // Assert
     const second = harness.pointer("oc_alpha");
@@ -198,12 +210,39 @@ describe("FeishuCopilotChannel", () => {
     const harness = createHarness();
 
     // Act
-    await harness.channel.routeMessage({ chatId: "oc_alpha", text: "只跑一次", providerEventId: "ev-dup" });
-    await harness.channel.routeMessage({ chatId: "oc_alpha", text: "只跑一次", providerEventId: "ev-dup" });
+    await harness.deliver({ chatId: "oc_alpha", text: "只跑一次", providerEventId: "ev-dup" });
+    await harness.deliver({ chatId: "oc_alpha", text: "只跑一次", providerEventId: "ev-dup" });
 
     // Assert
     assert.equal(harness.stub.turnCalls.length, 1);
     assert.equal(harness.sent.length, 1);
+  });
+
+  it("refuses messages from a sender who did not open the chat channel", async () => {
+    // Arrange
+    const harness = createHarness();
+    await harness.deliver({ chatId: "oc_alpha", text: "开场消息", providerEventId: "ev-1" });
+
+    // Act
+    await harness.deliver({ chatId: "oc_alpha", text: "以别人身份跑一轮", providerEventId: "ev-2", senderIdentity: "ou_intruder" });
+
+    // Assert
+    assert.equal(harness.stub.turnCalls.length, 1);
+    assert.match(harness.sent.at(-1)?.text ?? "", /其他飞书用户/u);
+  });
+
+  it("refuses /approve from a sender who did not open the chat channel", async () => {
+    // Arrange
+    const harness = createHarness();
+    harness.stub.setBehavior("awaiting_approval");
+    await harness.deliver({ chatId: "oc_alpha", text: "执行一个操作", providerEventId: "ev-1" });
+
+    // Act
+    await harness.deliver({ chatId: "oc_alpha", text: "/approve", providerEventId: "ev-2", senderIdentity: "ou_intruder" });
+
+    // Assert
+    assert.equal(harness.stub.resumeCalls.length, 0);
+    assert.match(harness.sent.at(-1)?.text ?? "", /其他飞书用户/u);
   });
 
   it("surfaces pending approval and resumes the run on /approve", async () => {
@@ -212,9 +251,9 @@ describe("FeishuCopilotChannel", () => {
     harness.stub.setBehavior("awaiting_approval");
 
     // Act
-    await harness.channel.routeMessage({ chatId: "oc_alpha", text: "执行一个操作", providerEventId: "ev-1" });
+    await harness.deliver({ chatId: "oc_alpha", text: "执行一个操作", providerEventId: "ev-1" });
     const approvalPrompt = harness.sent.at(-1)?.text ?? "";
-    await harness.channel.routeMessage({ chatId: "oc_alpha", text: "/approve", providerEventId: "ev-2" });
+    await harness.deliver({ chatId: "oc_alpha", text: "/approve", providerEventId: "ev-2" });
 
     // Assert
     assert.match(approvalPrompt, /stub_operate_tool/u);
@@ -228,10 +267,10 @@ describe("FeishuCopilotChannel", () => {
     // Arrange
     const harness = createHarness();
     harness.stub.setBehavior("awaiting_approval");
-    await harness.channel.routeMessage({ chatId: "oc_alpha", text: "执行一个操作", providerEventId: "ev-1" });
+    await harness.deliver({ chatId: "oc_alpha", text: "执行一个操作", providerEventId: "ev-1" });
 
     // Act
-    await harness.channel.routeMessage({ chatId: "oc_alpha", text: "/reject", providerEventId: "ev-2" });
+    await harness.deliver({ chatId: "oc_alpha", text: "/reject", providerEventId: "ev-2" });
 
     // Assert
     assert.equal(harness.stub.resumeCalls[0]?.approved, false);
@@ -243,33 +282,43 @@ describe("FeishuCopilotChannel", () => {
     const harness = createHarness();
 
     // Act
-    await harness.channel.routeMessage({ chatId: "oc_alpha", text: "/help", providerEventId: "ev-1" });
+    await harness.deliver({ chatId: "oc_alpha", text: "/help", providerEventId: "ev-1" });
 
     // Assert
     assert.match(harness.sent.at(-1)?.text ?? "", /\/new/u);
     assert.equal(harness.stub.turnCalls.length, 0);
   });
+
+  it("replies with a redacted reason when the Copilot run fails", async () => {
+    // Arrange
+    const harness = createHarness();
+    harness.stub.setBehavior("fails");
+
+    // Act
+    await harness.deliver({ chatId: "oc_alpha", text: "触发失败", providerEventId: "ev-1" });
+
+    // Assert
+    const failureReply = harness.sent.at(-1)?.text ?? "";
+    assert.match(failureReply, /Copilot 运行失败/u);
+    assert.doesNotMatch(failureReply, /sk-test-api-key/u);
+  });
 });
 
 describe("Feishu ingress routing", () => {
-  const messagePayload = (eventId: string, chatId: string, text: string) => ({
+  const messagePayload = (eventId: string, chatId: string, text: string, openId = "ou_owner") => ({
     header: { event_id: eventId, event_type: "im.message.receive_v1" },
     event: {
       message: { message_id: `om_${eventId}`, chat_id: chatId, message_type: "text", content: JSON.stringify({ text }) },
-      sender: { sender_id: { open_id: "ou_owner" } }
+      sender: { sender_id: { open_id: openId } }
     }
   });
 
   it("routes unbound long-connection messages into the Copilot channel", async () => {
     // Arrange
     const harness = createHarness();
-    const delivered: SentMessage[] = [];
     const fakeSdk = {
       createRestClient: () => ({
-        im: { message: { create: async (input: { data?: { receive_id?: string } }) => {
-          delivered.push({ chatId: input.data?.receive_id ?? "", text: "" });
-          return { data: { message_id: "om_stub" } };
-        } } }
+        im: { message: { create: async () => ({ data: { message_id: "om_stub" } }) } }
       })
     } as unknown as FeishuSdkFactory;
     const handlers = createFeishuSdkHandlers({
@@ -303,7 +352,11 @@ describe("Feishu ingress routing", () => {
     });
     let copilotCalled = false;
     const copilotChannel = {
-      routeMessage: async () => {
+      admitMessage: () => {
+        copilotCalled = true;
+        return true;
+      },
+      processMessage: async () => {
         copilotCalled = true;
       }
     };

@@ -227,12 +227,18 @@ export function routeVerifiedFeishuIngress(input: {
   });
   if (!binding) {
     if (input.kind === "message" && input.copilotChannel) {
-      // A full Copilot turn must not block ingress acknowledgement.
-      void input.copilotChannel.routeMessage({
+      const ingress = {
         chatId: input.event.conversationId,
         text: input.text ?? "",
-        providerEventId: input.event.providerEventId
-      }).catch(() => undefined);
+        providerEventId: input.event.providerEventId,
+        senderIdentity: input.event.externalIdentity
+      };
+      // Ledger admission runs synchronously on the ack path: a ledger failure
+      // throws, the delivery is rejected, and the provider retries instead of
+      // the message being silently dropped.
+      if (!input.copilotChannel.admitMessage(ingress)) return "copilot";
+      // A full Copilot turn must not block ingress acknowledgement.
+      void input.copilotChannel.processMessage(ingress).catch(() => undefined);
       return "copilot";
     }
     channel.denyIngress({

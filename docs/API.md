@@ -420,13 +420,19 @@ Feishu messages that arrive without a portfolio conversation binding are routed
 to a per-chat Copilot channel instead of being dropped. Each Feishu chat maps to
 exactly one `copilot_conversations` row (tracked in `feishu_copilot_channels`),
 so the chat keeps its own context and also appears in the web `/copilot`
-conversation list. Bot commands inside such chats: `/new` resets the chat to a
-fresh conversation, `/approve` / `/reject` resolve the latest Copilot
+conversation list. The channel belongs to the first Feishu sender who opened it
+(the row records the sender's open_id, mirroring the Portfolio binding's
+external-identity key); messages, commands, and approval decisions from any
+other sender in the chat receive a bounded refusal. Bot commands inside such
+chats: `/new` resets the chat to a fresh conversation, `/approve` / `/reject`
+resolve the latest Copilot
 pending action for that conversation, and `/help` lists the commands. Chats with
 an active portfolio binding keep the portfolio requirement-capture/card behavior
 unchanged. Ingress de-duplication for both flows uses the same durable
 `portfolio_feishu_ingress_events` ledger (`handler_kind` = `portfolio` |
-`copilot`), so provider retries never execute a turn twice.
+`copilot`); ledger admission runs synchronously on the acknowledgement path,
+so a ledger failure rejects the delivery and the provider retries instead of the
+message being silently dropped.
 
 After an inbound message passes tenant, user, chat, and mention policy, the
 Inbox worker adds a transient Feishu `Typing` reaction to the original message.

@@ -1186,6 +1186,7 @@ export const feishuCopilotChannels = sqliteTable("feishu_copilot_channels", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   chatId: text("chat_id").notNull(),
   conversationId: text("conversation_id").notNull().references(() => copilotConversations.id, { onDelete: "cascade" }),
+  senderIdentity: text("sender_identity"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 }, (table) => ({ chatIdentity: primaryKey({ columns: [table.userId, table.chatId], name: "feishu_copilot_channel_pk" }) }));

@@ -7,15 +7,24 @@
  * conversation with isolated context; /new swaps the chat's pointer to a fresh
  * conversation. Provider retries are deduplicated through the same durable
  * ingress ledger as the Portfolio channel.
+ *
+ * Sender ownership: the channel belongs to the first Feishu sender who opened
+ * it (mirroring the Portfolio binding's external-identity key). Messages,
+ * commands, and approval decisions from any other sender in the chat are
+ * refused, so a group member cannot run turns or approve pending actions as
+ * the OpenForge account owner.
  */
 import type { Database } from "../../db/types.js";
 import { PortfolioFeishuChannelRepository } from "../../db/repositories/portfolio-feishu-channel-repository.js";
 import type { PortfolioFeishuTransport } from "../portfolio/feishu/contracts.js";
 import { sha256 } from "../portfolio/feishu/codec.js";
+import { redactAgentErrorMessage } from "../agent/redaction.js";
 import type { AgentStack, AgentStackDeps } from "../agent/agent-stack.js";
 import type { AgentPendingAction } from "../agent/types.js";
 
 const REPLY_MAX_CHARS = 4_000;
+
+const SENDER_MISMATCH_TEXT = "该会话已由其他飞书用户开启，无法在此对话中操作。请让发起人继续，或由发起人发送 /new 重置。";
 
 const HELP_TEXT = [
   "可用命令：",
@@ -28,8 +37,23 @@ const HELP_TEXT = [
 
 type BuildAgentStack = (deps: AgentStackDeps, userId: string) => AgentStack;
 
+export interface FeishuCopilotChannelIngress {
+  chatId: string;
+  text: string;
+  providerEventId: string;
+  senderIdentity: string;
+}
+
 export interface FeishuCopilotChannel {
-  routeMessage(input: { chatId: string; text: string; providerEventId: string }): Promise<void>;
+  /**
+   * Synchronously record the event in the durable ingress ledger. Must run on
+   * the ingress acknowledgement path so ledger failures reject the delivery
+   * (and the provider retries) instead of silently dropping the message.
+   * Returns false for provider-retry duplicates.
+   */
+  admitMessage(ingress: FeishuCopilotChannelIngress): boolean;
+  /** Run the admitted message. Fire-and-forget; never blocks the ack. */
+  processMessage(ingress: FeishuCopilotChannelIngress): Promise<void>;
 }
 
 export function createFeishuCopilotChannel(input: {
@@ -42,63 +66,73 @@ export function createFeishuCopilotChannel(input: {
 }): FeishuCopilotChannel {
   const { deps, buildAgentStack, sendMessage, userId, providerAccountId, transport } = input;
 
-  async function routeMessage(message: { chatId: string; text: string; providerEventId: string }): Promise<void> {
+  function admitMessage(ingress: FeishuCopilotChannelIngress): boolean {
     // Dedup provider retries through the same durable ingress ledger.
     const ledger = new PortfolioFeishuChannelRepository(deps.db, userId);
     const admission = ledger.admitIngress({
       providerAccountId,
-      providerEventId: message.providerEventId,
+      providerEventId: ingress.providerEventId,
       transport,
       handlerKind: "copilot",
       safeEnvelope: {
         handler: "copilot",
         eventType: "message",
-        conversationDigest: sha256(message.chatId),
-        textLength: message.text.length
+        conversationDigest: sha256(ingress.chatId),
+        senderDigest: sha256(ingress.senderIdentity),
+        textLength: ingress.text.length
       }
     });
-    if (!admission.admitted) return;
+    return admission.admitted;
+  }
 
-    const text = message.text.trim();
+  async function processMessage(ingress: FeishuCopilotChannelIngress): Promise<void> {
+    const text = ingress.text.trim();
     if (!text) return;
     const stack = buildAgentStack(deps, userId);
 
+    const channel = chatChannel(deps.db, userId, ingress.chatId);
+    if (channel?.sender_identity && channel.sender_identity !== ingress.senderIdentity) {
+      // Admission is already recorded, so this bounded refusal must not throw:
+      // a throw would only feed the fire-and-forget catch, not the provider.
+      return reply(ingress.chatId, SENDER_MISMATCH_TEXT);
+    }
+
     const command = parseCommand(text);
-    if (command === "new") return handleNewConversation(stack, message.chatId);
-    if (command === "approve" || command === "reject") return handleDecision(stack, message.chatId, command === "approve");
-    if (command === "help") return reply(message.chatId, HELP_TEXT);
-    return runTurn(stack, message.chatId, text);
+    if (command === "new") return handleNewConversation(stack, ingress);
+    if (command === "approve" || command === "reject") return handleDecision(stack, ingress, command === "approve");
+    if (command === "help") return reply(ingress.chatId, HELP_TEXT);
+    return runTurn(stack, ingress, text);
   }
 
-  async function handleNewConversation(stack: AgentStack, chatId: string): Promise<void> {
-    const conversation = stack.log.createConversation(feishuConversationTitle(chatId));
-    pointChatAt(deps.db, userId, chatId, conversation.id);
-    await reply(chatId, "已开始新的会话，上下文已重置。");
+  async function handleNewConversation(stack: AgentStack, ingress: FeishuCopilotChannelIngress): Promise<void> {
+    const conversation = stack.log.createConversation(feishuConversationTitle(ingress.chatId));
+    pointChatAt(deps.db, userId, ingress.chatId, conversation.id, ingress.senderIdentity);
+    await reply(ingress.chatId, "已开始新的会话，上下文已重置。");
   }
 
-  async function handleDecision(stack: AgentStack, chatId: string, approved: boolean): Promise<void> {
-    const conversationId = chatConversation(deps.db, userId, chatId);
+  async function handleDecision(stack: AgentStack, ingress: FeishuCopilotChannelIngress, approved: boolean): Promise<void> {
+    const conversationId = chatConversation(deps.db, userId, ingress.chatId);
     if (!conversationId) {
-      return reply(chatId, "当前聊天还没有 Copilot 会话，直接发送消息即可开始。");
+      return reply(ingress.chatId, "当前聊天还没有 Copilot 会话，直接发送消息即可开始。");
     }
     const pending = latestPendingAction(stack, conversationId);
-    if (!pending) return reply(chatId, "没有等待审批的操作。");
+    if (!pending) return reply(ingress.chatId, "没有等待审批的操作。");
     const result = await stack.orchestrator.resumeAfterApproval({ userId, runId: pending.runId, actionId: pending.id, approved });
-    if (!result.resumed) return reply(chatId, "该操作已被处理过。");
-    if (!approved) return reply(chatId, "已拒绝该操作。");
+    if (!result.resumed) return reply(ingress.chatId, "该操作已被处理过。");
+    if (!approved) return reply(ingress.chatId, "已拒绝该操作。");
     const outcome = latestToolResult(stack, conversationId);
-    return reply(chatId, `已批准并执行 ${pending.tool}：\n${truncate(outcome ?? "（无输出）")}`);
+    return reply(ingress.chatId, `已批准并执行 ${pending.tool}：\n${truncate(outcome ?? "（无输出）")}`);
   }
 
-  async function runTurn(stack: AgentStack, chatId: string, text: string): Promise<void> {
-    const conversationId = resolveConversation(stack, deps.db, userId, chatId);
+  async function runTurn(stack: AgentStack, ingress: FeishuCopilotChannelIngress, text: string): Promise<void> {
+    const conversationId = resolveConversation(stack, deps.db, userId, ingress);
     try {
       const runId = await stack.orchestrator.runTurn({ userId, conversationId, userText: text, source: "user" });
       const run = stack.log.getRun(runId);
       if (run?.status === "awaiting_approval") {
         const pending = stack.log.listPendingActions(runId).find((action) => action.status === "pending");
         if (pending) {
-          return reply(chatId, [
+          return reply(ingress.chatId, [
             "Copilot 请求执行以下操作，需要你的审批：",
             `工具：${pending.tool}`,
             `输入：${truncate(pending.inputJson)}`,
@@ -108,11 +142,12 @@ export function createFeishuCopilotChannel(input: {
         }
       }
       const finalText = latestAssistantText(stack, conversationId);
-      if (finalText) await reply(chatId, truncate(finalText));
+      if (finalText) await reply(ingress.chatId, truncate(finalText));
     } catch (error) {
-      // runTurn rethrows after persisting the failed run; surface the reason.
-      const reason = error instanceof Error ? error.message : "Copilot run failed";
-      await reply(chatId, `Copilot 运行失败：${reason}`);
+      // runTurn rethrows after persisting the failed run. The Feishu reply only
+      // carries a redacted reason; the full run log stays on the web side.
+      const reason = redactAgentErrorMessage(error instanceof Error ? error.message : "Copilot run failed");
+      await reply(ingress.chatId, `Copilot 运行失败：${reason}`);
     }
   }
 
@@ -125,7 +160,7 @@ export function createFeishuCopilotChannel(input: {
     }
   }
 
-  return { routeMessage };
+  return { admitMessage, processMessage };
 }
 
 type FeishuCommand = "new" | "approve" | "reject" | "help";
@@ -142,27 +177,35 @@ function feishuConversationTitle(chatId: string): string {
 
 interface ChatChannelRow {
   conversation_id: string;
+  sender_identity: string | null;
+}
+
+function chatChannel(db: Database, userId: string, chatId: string): ChatChannelRow | undefined {
+  return db.prepare("SELECT conversation_id, sender_identity FROM feishu_copilot_channels WHERE user_id = ? AND chat_id = ?")
+    .get(userId, chatId) as ChatChannelRow | undefined;
 }
 
 function chatConversation(db: Database, userId: string, chatId: string): string | undefined {
-  const row = db.prepare("SELECT conversation_id FROM feishu_copilot_channels WHERE user_id = ? AND chat_id = ?")
-    .get(userId, chatId) as ChatChannelRow | undefined;
-  return row?.conversation_id;
+  return chatChannel(db, userId, chatId)?.conversation_id;
 }
 
-function pointChatAt(db: Database, userId: string, chatId: string, conversationId: string): void {
+function pointChatAt(db: Database, userId: string, chatId: string, conversationId: string, senderIdentity: string): void {
   const now = Date.now();
-  db.prepare(`INSERT INTO feishu_copilot_channels (user_id, chat_id, conversation_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(user_id, chat_id) DO UPDATE SET conversation_id = excluded.conversation_id, updated_at = excluded.updated_at`)
-    .run(userId, chatId, conversationId, now, now);
+  db.prepare(`INSERT INTO feishu_copilot_channels (user_id, chat_id, conversation_id, sender_identity, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, chat_id) DO UPDATE SET conversation_id = excluded.conversation_id, sender_identity = excluded.sender_identity, updated_at = excluded.updated_at`)
+    .run(userId, chatId, conversationId, senderIdentity, now, now);
 }
 
-function resolveConversation(stack: AgentStack, db: Database, userId: string, chatId: string): string {
-  const existing = chatConversation(db, userId, chatId);
-  if (existing && stack.log.getConversation(existing)) return existing;
-  const conversation = stack.log.createConversation(feishuConversationTitle(chatId));
-  pointChatAt(db, userId, chatId, conversation.id);
+function resolveConversation(stack: AgentStack, db: Database, userId: string, ingress: FeishuCopilotChannelIngress): string {
+  const existing = chatConversation(db, userId, ingress.chatId);
+  if (existing && stack.log.getConversation(existing)) {
+    // Claim sender ownership on first use of a pre-existing channel row.
+    pointChatAt(db, userId, ingress.chatId, existing, ingress.senderIdentity);
+    return existing;
+  }
+  const conversation = stack.log.createConversation(feishuConversationTitle(ingress.chatId));
+  pointChatAt(db, userId, ingress.chatId, conversation.id, ingress.senderIdentity);
   return conversation.id;
 }
 
