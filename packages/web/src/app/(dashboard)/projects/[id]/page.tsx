@@ -5,7 +5,7 @@ import type { UIEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Eye, FileCode2, FileText, Globe2, History, Pencil, Plus, Save, ShieldCheck, TerminalSquare, Trash2, Wrench } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Eye, FileCode2, FileText, Globe2, History, Link2, Pencil, Plus, Save, ShieldCheck, TerminalSquare, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -34,11 +34,14 @@ import {
   updateProjectAiConfigFile,
   chooseDefaultRuntimeAdapter,
   isAdapterLaunchable,
+  listProjectManagerTaskPackets,
   type RuntimeAdapterId,
   type AiConfigFile,
   type AiConfigSnapshot,
+  type ProjectManagerTaskPacket,
   type SessionActivity,
 } from "@/lib/api";
+import { findSessionTaskPacket, sessionTaskPacketProjectManagerHref } from "@/components/sessions/session-task-packet";
 import { useLanguage } from "@/hooks/use-language";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highlight";
@@ -83,7 +86,12 @@ export default function ProjectDetailPage() {
     queryFn: () => listSessions({ projectId: id }),
     enabled: !!id,
   });
-
+  const { data: taskPacketsData } = useQuery({
+    queryKey: ["project-manager", id, "task-packets", { limit: 50 }],
+    queryFn: () => listProjectManagerTaskPackets(id, { limit: 50 }),
+    enabled: !!id && activeTab === "sessions",
+    retry: false,
+  });
   const { data: activitiesData } = useQuery({
     queryKey: ["activities", { projectId: id }],
     queryFn: () => listActivities({ projectId: id }),
@@ -509,7 +517,7 @@ export default function ProjectDetailPage() {
             <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:thin]">
             <TabsList className="min-w-max">
               <TabsTrigger value="sessions">{t("nav.sessions")}</TabsTrigger>
-              <TabsTrigger value="project-manager">{t("projects.projectManager")}</TabsTrigger>
+              <TabsTrigger value="project-manager">{t("projects.devTasks")}</TabsTrigger>
               <TabsTrigger value="skills">{t("nav.skills")}</TabsTrigger>
               <TabsTrigger value="config">{t("projects.aiConfig")}</TabsTrigger>
               <TabsTrigger value="activity">{t("sessions.activity")}</TabsTrigger>
@@ -538,7 +546,9 @@ export default function ProjectDetailPage() {
                   </Card>
                 ) : (
                   <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
-                    {projectSessions.map((session, index) => (
+                    {projectSessions.map((session, index) => {
+                      const linkedTaskPacket = findSessionTaskPacket(taskPacketsData?.taskPackets ?? [], session.id);
+                      return (
                       <Link
                         key={session.id}
                         href={`/sessions/${session.id}`}
@@ -551,11 +561,13 @@ export default function ProjectDetailPage() {
                             {session.name || session.tmuxName || session.id}
                           </div>
                         </div>
+                        {linkedTaskPacket && <LinkedWorkItemChip packet={linkedTaskPacket} />}
                         <CliBrandChip aiTool={session.aiTool} />
                         <SessionStatusText status={session.status} />
                         <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-brand" />
                       </Link>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
                 <WorkspaceContextPanel projectId={id} enabled={activeTab === "sessions"} />
@@ -645,6 +657,33 @@ export default function ProjectDetailPage() {
         </>
       )}
     </div>
+  );
+}
+
+function LinkedWorkItemChip({ packet }: { packet: ProjectManagerTaskPacket }) {
+  const router = useRouter();
+  const { t } = useLanguage();
+  const href = sessionTaskPacketProjectManagerHref(packet);
+  const open = (event: { preventDefault(): void; stopPropagation(): void }) => {
+    event.preventDefault();
+    event.stopPropagation();
+    router.push(href);
+  };
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-label={t("projects.projectManagerLinkedSession")}
+      title={packet.title}
+      className="hidden max-w-44 items-center gap-1 rounded-md border border-border/70 px-1.5 py-0.5 text-xs text-brand hover:underline sm:inline-flex"
+      onClick={open}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") open(event);
+      }}
+    >
+      <Link2 className="size-3 shrink-0" />
+      <span className="truncate">{packet.title}</span>
+    </span>
   );
 }
 

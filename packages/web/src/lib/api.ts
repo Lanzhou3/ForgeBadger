@@ -90,6 +90,7 @@ export interface ProjectManagerWorkItem {
   evidenceRefCount: number;
   evidenceRefs: ProjectManagerEvidenceRef[];
   feishuRefCount: number;
+  stageId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -138,6 +139,7 @@ export interface ProjectManagerWorkItemInput {
   acceptanceCriteria?: string[];
   evidenceRefs?: ProjectManagerEvidenceRef[];
   feishuRefs?: ProjectManagerEvidenceRef[];
+  stageId?: string | null;
 }
 
 export interface ProjectManagerWorkItemUpdateInput {
@@ -145,6 +147,7 @@ export interface ProjectManagerWorkItemUpdateInput {
   description?: string | null;
   priority?: number;
   acceptanceCriteria?: string[];
+  stageId?: string | null;
 }
 
 export interface ProjectManagerWorkItemStatusInput {
@@ -181,7 +184,12 @@ export type ProjectManagerLedgerEventType =
   | "blocker_resolved"
   | "feishu_reference_linked"
   | "next_step_proposed"
-  | "manual_completion_recorded";
+  | "manual_completion_recorded"
+  | "stage_created"
+  | "stage_updated"
+  | "stage_deleted"
+  | "dependency_added"
+  | "dependency_removed";
 
 export interface ProjectManagerLedgerTrace {
   actionType?: "create_work_item" | "update_work_item_status" | "attach_evidence" | string;
@@ -1956,6 +1964,127 @@ export async function listProjectManagerLedger(
   return fetchJson(projectManagerPath(projectId, `/ledger${query ? `?${query}` : ""}`)) as Promise<{
     events: ProjectManagerLedgerEvent[];
   }>;
+}
+
+export type ProjectManagerStageStatus = "active" | "completed" | "archived";
+
+export interface ProjectManagerStage {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  position: number;
+  status: ProjectManagerStageStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProjectManagerStageInput {
+  name: string;
+  description?: string | null;
+}
+
+export interface ProjectManagerStageUpdateInput {
+  name?: string;
+  description?: string | null;
+  status?: ProjectManagerStageStatus;
+}
+
+export interface ProjectManagerWorkItemLink {
+  id: string;
+  projectId: string;
+  blockerWorkItemId: string;
+  blockedWorkItemId: string;
+  createdAt: number;
+}
+
+export async function listProjectManagerStages(
+  projectId: string
+): Promise<{ stages: ProjectManagerStage[] }> {
+  return fetchJson(projectManagerPath(projectId, "/stages")) as Promise<{ stages: ProjectManagerStage[] }>;
+}
+
+export async function createProjectManagerStage(
+  projectId: string,
+  input: ProjectManagerStageInput
+): Promise<{ stage: ProjectManagerStage }> {
+  return fetchJson(projectManagerPath(projectId, "/stages"), {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ stage: ProjectManagerStage }>;
+}
+
+export async function seedProjectManagerStageTemplate(
+  projectId: string
+): Promise<{ stages: ProjectManagerStage[] }> {
+  return fetchJson(projectManagerPath(projectId, "/stages/seed-template"), {
+    method: "POST",
+  }) as Promise<{ stages: ProjectManagerStage[] }>;
+}
+
+export async function reorderProjectManagerStages(
+  projectId: string,
+  stageIds: string[]
+): Promise<{ stages: ProjectManagerStage[] }> {
+  return fetchJson(projectManagerPath(projectId, "/stages/reorder"), {
+    method: "POST",
+    body: JSON.stringify({ stageIds }),
+  }) as Promise<{ stages: ProjectManagerStage[] }>;
+}
+
+export async function updateProjectManagerStage(
+  projectId: string,
+  stageId: string,
+  input: ProjectManagerStageUpdateInput
+): Promise<{ stage: ProjectManagerStage }> {
+  return fetchJson(projectManagerPath(projectId, `/stages/${encodeURIComponent(stageId)}`), {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  }) as Promise<{ stage: ProjectManagerStage }>;
+}
+
+export async function deleteProjectManagerStage(
+  projectId: string,
+  stageId: string
+): Promise<{ stage: ProjectManagerStage }> {
+  return fetchJson(projectManagerPath(projectId, `/stages/${encodeURIComponent(stageId)}`), {
+    method: "DELETE",
+  }) as Promise<{ stage: ProjectManagerStage }>;
+}
+
+export async function listProjectManagerWorkItemLinks(
+  projectId: string
+): Promise<{ links: ProjectManagerWorkItemLink[] }> {
+  return fetchJson(projectManagerPath(projectId, "/work-item-links")) as Promise<{
+    links: ProjectManagerWorkItemLink[];
+  }>;
+}
+
+export async function addProjectManagerWorkItemDependency(
+  projectId: string,
+  workItemId: string,
+  blockerWorkItemId: string
+): Promise<{ link: ProjectManagerWorkItemLink }> {
+  return fetchJson(projectManagerPath(
+    projectId,
+    `/work-items/${encodeURIComponent(workItemId)}/dependencies`
+  ), {
+    method: "POST",
+    body: JSON.stringify({ blockerWorkItemId }),
+  }) as Promise<{ link: ProjectManagerWorkItemLink }>;
+}
+
+export async function removeProjectManagerWorkItemDependency(
+  projectId: string,
+  workItemId: string,
+  blockerWorkItemId: string
+): Promise<Record<string, never>> {
+  return fetchJson(projectManagerPath(
+    projectId,
+    `/work-items/${encodeURIComponent(workItemId)}/dependencies/${encodeURIComponent(blockerWorkItemId)}`
+  ), {
+    method: "DELETE",
+  }) as Promise<Record<string, never>>;
 }
 
 export async function deleteProject(id: string): Promise<unknown> {

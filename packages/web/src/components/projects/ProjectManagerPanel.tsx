@@ -4,18 +4,25 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
   ArrowRightCircle,
   BriefcaseBusiness,
   ClipboardList,
   Eye,
   History,
+  Layers,
   LayoutDashboard,
+  Link2,
   ListChecks,
+  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
+  Sparkles,
   Table2,
   Trash2,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -56,20 +63,29 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useLanguage } from "@/hooks/use-language";
 import {
+  addProjectManagerWorkItemDependency,
   attachProjectManagerWorkItemEvidence,
   batchUpdateProjectManagerWorkItemStatuses,
+  createProjectManagerStage,
+  deleteProjectManagerStage,
   deleteProjectManagerWorkItem,
   GatewayApiError,
   getProjectManagerGoal,
   getProjectManagerTaskPacket,
   linkProjectManagerTaskPacketSession,
   listProjectManagerLedger,
+  listProjectManagerStages,
   listProjectManagerTaskPackets,
+  listProjectManagerWorkItemLinks,
   listSessions,
   listProjectManagerWorkItems,
   createProjectManagerWorkItem,
+  removeProjectManagerWorkItemDependency,
+  reorderProjectManagerStages,
+  seedProjectManagerStageTemplate,
   startProjectManagerTaskPacket,
   updateProjectManagerGoal,
+  updateProjectManagerStage,
   updateProjectManagerWorkItem,
   updateProjectManagerWorkItemStatus,
   type ProjectManagerEvidenceRef,
@@ -77,7 +93,9 @@ import {
   type ProjectManagerLedgerTrace,
   type ProjectManagerLedgerEventType,
   type ProjectManagerGoal,
+  type ProjectManagerStage,
   type ProjectManagerWorkItemInput,
+  type ProjectManagerWorkItemLink,
   type ProjectManagerWorkItemUpdateInput,
   type ProjectManagerGoalInput,
   type ProjectManagerTaskPacket,
@@ -255,6 +273,20 @@ export function ProjectManagerPanel({
     retry: false,
   });
 
+  const stagesQuery = useQuery({
+    queryKey: ["project-manager", projectId, "stages"],
+    queryFn: () => listProjectManagerStages(projectId),
+    enabled: canLoad,
+    retry: false,
+  });
+
+  const workItemLinksQuery = useQuery({
+    queryKey: ["project-manager", projectId, "work-item-links"],
+    queryFn: () => listProjectManagerWorkItemLinks(projectId),
+    enabled: canLoad,
+    retry: false,
+  });
+
   const ledgerQuery = useQuery({
     queryKey: ["project-manager", projectId, "ledger", { limit: ledgerLimit }],
     queryFn: () => listProjectManagerLedger(projectId, { limit: ledgerLimit }),
@@ -288,6 +320,8 @@ export function ProjectManagerPanel({
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "stages"] }),
+      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-item-links"] }),
     ]);
   };
   const updateWorkItemsCache = (updater: (items: ProjectManagerWorkItem[]) => ProjectManagerWorkItem[]) => {
@@ -471,6 +505,8 @@ export function ProjectManagerPanel({
   const isRefreshing = goalQuery.isFetching || workItemsQuery.isFetching || taskPacketsQuery.isFetching || ledgerQuery.isFetching;
   const workItems = workItemsQuery.data?.workItems ?? [];
   const taskPackets = taskPacketsQuery.data?.taskPackets ?? [];
+  const stages = stagesQuery.data?.stages ?? [];
+  const workItemLinks = workItemLinksQuery.data?.links ?? [];
   const tableWorkItems = filterWorkItemsForTable(workItems, workItemStatusFilter);
   const ledgerEvents = ledgerQuery.data?.events ?? [];
   const filteredLedgerEvents = filterLedgerEvents(ledgerEvents, ledgerFilter);
@@ -528,6 +564,8 @@ export function ProjectManagerPanel({
     void workItemsQuery.refetch();
     void taskPacketsQuery.refetch();
     void ledgerQuery.refetch();
+    void stagesQuery.refetch();
+    void workItemLinksQuery.refetch();
   };
 
   const refreshLedger = () => {
@@ -730,8 +768,8 @@ export function ProjectManagerPanel({
     <div className="space-y-4" data-testid="project-manager-panel">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h2 className="text-sm font-semibold">{t("projects.projectManager")}</h2>
-          <p className="text-xs text-muted-foreground">{t("projects.projectManagerDisabledActionHint")}</p>
+          <h2 className="text-sm font-semibold">{t("projects.devTasks")}</h2>
+          <p className="text-xs text-muted-foreground">{t("projects.devTasksDescription")}</p>
         </div>
         <Button size="sm" variant="outline" onClick={refresh} disabled={isRefreshing || !canLoad}>
           <RefreshCw className={cn("mr-2 size-4", isRefreshing && "animate-spin")} />
@@ -767,6 +805,18 @@ export function ProjectManagerPanel({
             onEdit={startGoalEdit}
             onSave={saveGoal}
           />
+          <div className="xl:col-span-2">
+            <ProjectManagerStagesCard
+              isFetching={stagesQuery.isFetching || workItemsQuery.isFetching}
+              links={workItemLinks}
+              onViewDetails={(item) => setSelectedWorkItemId(item.id)}
+              projectId={projectId}
+              stages={stages}
+              t={t}
+              taskPackets={taskPackets}
+              workItems={workItems}
+            />
+          </div>
           <ProjectManagerWorkItemsCard
             batchStatusError={batchStatusError}
             batchStatusPending={batchStatusMutation.isPending}
@@ -825,6 +875,7 @@ export function ProjectManagerPanel({
         isTaskPacketStarting={taskPacketStartMutation.isPending}
         item={selectedWorkItem}
         ledgerEvents={ledgerEvents}
+        links={workItemLinks}
         onAttachEvidence={attachEvidence}
         onEvidenceDraftChange={setEvidenceDraft}
         onOpenChange={(open) => {
@@ -835,6 +886,8 @@ export function ProjectManagerPanel({
         onTaskPacketSessionLink={linkTaskPacketSession}
         onTaskPacketStart={startTaskPacket}
         open={!!selectedWorkItem}
+        projectId={projectId}
+        stages={stages}
         statusMutationPending={statusMutation.isPending}
         t={t}
         taskPacket={taskPacket}
@@ -843,6 +896,7 @@ export function ProjectManagerPanel({
         taskPacketStartError={taskPacketStartError}
         taskPacketSessionId={taskPacketSessionId}
         taskPacketSessions={taskPacketSessions}
+        workItems={workItems}
       />
       <CreateWorkItemDialog
         draft={workItemDraft}
@@ -903,6 +957,768 @@ export function ProjectManagerPanel({
       />
     </div>
   );
+}
+
+function ProjectManagerStagesCard({
+  isFetching,
+  links,
+  onViewDetails,
+  projectId,
+  stages,
+  t,
+  taskPackets,
+  workItems,
+}: {
+  isFetching: boolean;
+  links: ProjectManagerWorkItemLink[];
+  onViewDetails: (item: ProjectManagerWorkItem) => void;
+  projectId: string;
+  stages: ProjectManagerStage[];
+  t: Translate;
+  taskPackets: ProjectManagerTaskPacket[];
+  workItems: ProjectManagerWorkItem[];
+}) {
+  const queryClient = useQueryClient();
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState({ name: "", description: "" });
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [renamingStage, setRenamingStage] = useState<ProjectManagerStage | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [deletingStage, setDeletingStage] = useState<ProjectManagerStage | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const invalidate = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["project-manager", projectId] });
+  };
+  const stageErrorMessage = (error: unknown) =>
+    projectManagerMutationMessage(error, t("projects.projectManagerStageMutationError"));
+
+  const createMutation = useMutation({
+    mutationFn: (input: { name: string; description?: string | null }) =>
+      createProjectManagerStage(projectId, input),
+    onSuccess: async () => {
+      setCreateError(null);
+      setIsCreateOpen(false);
+      setCreateDraft({ name: "", description: "" });
+      await invalidate();
+    },
+    onError: (error) => setCreateError(stageErrorMessage(error)),
+  });
+  const seedMutation = useMutation({
+    mutationFn: () => seedProjectManagerStageTemplate(projectId),
+    onSuccess: async () => {
+      setActionError(null);
+      await invalidate();
+    },
+    onError: (error) => setActionError(stageErrorMessage(error)),
+  });
+  const renameMutation = useMutation({
+    mutationFn: ({ name, stageId }: { name: string; stageId: string }) =>
+      updateProjectManagerStage(projectId, stageId, { name }),
+    onSuccess: async () => {
+      setRenameError(null);
+      setRenamingStage(null);
+      await invalidate();
+    },
+    onError: (error) => setRenameError(stageErrorMessage(error)),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: (stageId: string) => deleteProjectManagerStage(projectId, stageId),
+    onSuccess: async () => {
+      setDeleteError(null);
+      setDeletingStage(null);
+      await invalidate();
+    },
+    onError: (error) => setDeleteError(stageErrorMessage(error)),
+  });
+  const reorderMutation = useMutation({
+    mutationFn: (stageIds: string[]) => reorderProjectManagerStages(projectId, stageIds),
+    onSuccess: async () => {
+      setActionError(null);
+      await invalidate();
+    },
+    onError: (error) => setActionError(stageErrorMessage(error)),
+  });
+  const moveWorkItemMutation = useMutation({
+    mutationFn: ({ stageId, workItemId }: { stageId: string | null; workItemId: string }) =>
+      updateProjectManagerWorkItem(projectId, workItemId, { stageId }),
+    onSuccess: async () => {
+      setActionError(null);
+      await invalidate();
+    },
+    onError: (error) => setActionError(stageErrorMessage(error)),
+  });
+
+  const sessionByWorkItemId = useMemo(() => {
+    const map = new Map<string, NonNullable<ProjectManagerTaskPacket["sessionLink"]>>();
+    for (const packet of taskPackets) {
+      if (packet.sessionLink) map.set(packet.workItemId, packet.sessionLink);
+    }
+    return map;
+  }, [taskPackets]);
+
+  const dependencyCounts = useMemo(() => {
+    const blockedBy = new Map<string, number>();
+    const blocking = new Map<string, number>();
+    for (const link of links) {
+      blockedBy.set(link.blockedWorkItemId, (blockedBy.get(link.blockedWorkItemId) ?? 0) + 1);
+      blocking.set(link.blockerWorkItemId, (blocking.get(link.blockerWorkItemId) ?? 0) + 1);
+    }
+    return { blockedBy, blocking };
+  }, [links]);
+
+  const stagePending = createMutation.isPending || seedMutation.isPending || reorderMutation.isPending;
+
+  const moveStage = (stage: ProjectManagerStage, direction: -1 | 1) => {
+    const ids = stages.map((entry) => entry.id);
+    const index = ids.indexOf(stage.id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= ids.length) return;
+    const next = [...ids];
+    const current = next[index];
+    const swap = next[target];
+    if (current === undefined || swap === undefined) return;
+    next[index] = swap;
+    next[target] = current;
+    setActionError(null);
+    reorderMutation.mutate(next);
+  };
+
+  const submitCreate = () => {
+    const name = createDraft.name.trim();
+    if (!name) {
+      setCreateError(t("projects.projectManagerStageNameRequired"));
+      return;
+    }
+    setCreateError(null);
+    const description = createDraft.description.trim();
+    createMutation.mutate({ name, ...(description ? { description } : {}) });
+  };
+
+  const submitRename = () => {
+    if (!renamingStage) return;
+    const name = renameDraft.trim();
+    if (!name) {
+      setRenameError(t("projects.projectManagerStageNameRequired"));
+      return;
+    }
+    setRenameError(null);
+    renameMutation.mutate({ name, stageId: renamingStage.id });
+  };
+
+  return (
+    <Card data-testid="project-manager-stages-card">
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <Layers className="size-4 text-brand" />
+          <CardTitle className="text-sm font-semibold">{t("projects.projectManagerStages")}</CardTitle>
+          {isFetching && <RefreshCw className="size-3 animate-spin text-muted-foreground" />}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {stages.length === 0 && (
+            <Button
+              size="sm"
+              className="bg-brand text-brand-foreground hover:bg-brand/90"
+              onClick={() => {
+                setActionError(null);
+                seedMutation.mutate();
+              }}
+              disabled={stagePending}
+            >
+              <Sparkles className="mr-2 size-4" />
+              {t("projects.projectManagerStageSeedTemplate")}
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setCreateError(null);
+              setCreateDraft({ name: "", description: "" });
+              setIsCreateOpen(true);
+            }}
+            disabled={stagePending}
+          >
+            <Plus className="mr-2 size-4" />
+            {t("projects.projectManagerStageCreate")}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {actionError && (
+          <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {actionError}
+          </p>
+        )}
+        {stages.length === 0 ? (
+          <EmptyState
+            title={t("projects.projectManagerStageEmptyTitle")}
+            body={t("projects.projectManagerStageEmptyBody")}
+            icon={Layers}
+          />
+        ) : (
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            <ProjectManagerStageLane
+              dependencyCounts={dependencyCounts}
+              items={workItems.filter((item) => item.stageId === null)}
+              movePending={moveWorkItemMutation.isPending}
+              onMoveWorkItem={(item, stageId) => {
+                setActionError(null);
+                moveWorkItemMutation.mutate({ stageId, workItemId: item.id });
+              }}
+              onViewDetails={onViewDetails}
+              sessionByWorkItemId={sessionByWorkItemId}
+              stages={stages}
+              t={t}
+              title={t("projects.projectManagerStageBacklog")}
+            />
+            {stages.map((stage, index) => (
+              <ProjectManagerStageLane
+                key={stage.id}
+                dependencyCounts={dependencyCounts}
+                items={workItems.filter((item) => item.stageId === stage.id)}
+                movePending={moveWorkItemMutation.isPending}
+                onDelete={() => {
+                  setDeleteError(null);
+                  setDeletingStage(stage);
+                }}
+                onMove={index > 0 ? () => moveStage(stage, -1) : undefined}
+                onMoveBack={index < stages.length - 1 ? () => moveStage(stage, 1) : undefined}
+                onMoveWorkItem={(item, stageId) => {
+                  setActionError(null);
+                  moveWorkItemMutation.mutate({ stageId, workItemId: item.id });
+                }}
+                onRename={() => {
+                  setRenameError(null);
+                  setRenameDraft(stage.name);
+                  setRenamingStage(stage);
+                }}
+                onViewDetails={onViewDetails}
+                sessionByWorkItemId={sessionByWorkItemId}
+                stage={stage}
+                stages={stages}
+                t={t}
+                title={stage.name}
+              />
+            ))}
+          </div>
+        )}
+      </CardContent>
+      <ProjectManagerStageFormDialog
+        description={createDraft.description}
+        error={createError}
+        isSaving={createMutation.isPending}
+        name={createDraft.name}
+        onDescriptionChange={(description) => setCreateDraft((draft) => ({ ...draft, description }))}
+        onNameChange={(name) => setCreateDraft((draft) => ({ ...draft, name }))}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsCreateOpen(false);
+            setCreateError(null);
+          }
+        }}
+        onSave={submitCreate}
+        open={isCreateOpen}
+        t={t}
+        title={t("projects.projectManagerStageCreate")}
+      />
+      <ProjectManagerStageFormDialog
+        description=""
+        error={renameError}
+        isSaving={renameMutation.isPending}
+        name={renameDraft}
+        onNameChange={setRenameDraft}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRenamingStage(null);
+            setRenameError(null);
+          }
+        }}
+        onSave={submitRename}
+        open={!!renamingStage}
+        t={t}
+        title={t("projects.projectManagerStageRename")}
+      />
+      <Dialog
+        open={!!deletingStage}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeletingStage(null);
+            setDeleteError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("projects.projectManagerStageDelete")}</DialogTitle>
+            <DialogDescription>{t("projects.projectManagerStageDeleteConfirm")}</DialogDescription>
+          </DialogHeader>
+          {deletingStage && <p className="text-sm font-medium">{deletingStage.name}</p>}
+          {deleteError && (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {deleteError}
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingStage(null)} disabled={deleteMutation.isPending}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deletingStage && deleteMutation.mutate(deletingStage.id)}
+              disabled={deleteMutation.isPending}
+            >
+              {t("common.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+function ProjectManagerStageLane({
+  dependencyCounts,
+  items,
+  movePending,
+  onDelete,
+  onMove,
+  onMoveBack,
+  onMoveWorkItem,
+  onRename,
+  onViewDetails,
+  sessionByWorkItemId,
+  stage,
+  stages,
+  t,
+  title,
+}: {
+  dependencyCounts: { blockedBy: Map<string, number>; blocking: Map<string, number> };
+  items: ProjectManagerWorkItem[];
+  movePending: boolean;
+  onDelete?: () => void;
+  onMove?: () => void;
+  onMoveBack?: () => void;
+  onMoveWorkItem: (item: ProjectManagerWorkItem, stageId: string | null) => void;
+  onRename?: () => void;
+  onViewDetails: (item: ProjectManagerWorkItem) => void;
+  sessionByWorkItemId: Map<string, NonNullable<ProjectManagerTaskPacket["sessionLink"]>>;
+  stage?: ProjectManagerStage;
+  stages: ProjectManagerStage[];
+  t: Translate;
+  title: string;
+}) {
+  return (
+    <section
+      className="flex w-64 shrink-0 flex-col rounded-md border border-border/70 bg-background/40"
+      data-testid={stage ? `project-manager-stage-lane-${stage.id}` : "project-manager-stage-lane-backlog"}
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-medium">{title}</span>
+          <span className="font-mono text-xs text-muted-foreground tabular-nums">{items.length}</span>
+          {stage && stage.status !== "active" && (
+            <Badge variant="outline">{stageStatusLabel(stage.status, t)}</Badge>
+          )}
+        </div>
+        {stage && (onRename || onDelete) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="xs" variant="ghost" aria-label={title}>
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {onRename && (
+                <DropdownMenuItem onClick={onRename}>
+                  <Pencil className="mr-2 size-3" />
+                  {t("projects.projectManagerStageRename")}
+                </DropdownMenuItem>
+              )}
+              {onMove && (
+                <DropdownMenuItem onClick={onMove}>
+                  <ArrowLeft className="mr-2 size-3" />
+                  {t("projects.projectManagerStageMoveLeft")}
+                </DropdownMenuItem>
+              )}
+              {onMoveBack && (
+                <DropdownMenuItem onClick={onMoveBack}>
+                  <ArrowRight className="mr-2 size-3" />
+                  {t("projects.projectManagerStageMoveRight")}
+                </DropdownMenuItem>
+              )}
+              {onDelete && (
+                <DropdownMenuItem onClick={onDelete} className="text-destructive">
+                  <Trash2 className="mr-2 size-3" />
+                  {t("projects.projectManagerStageDelete")}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+      <div className="flex max-h-96 flex-col gap-2 overflow-y-auto p-2">
+        {items.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border/70 px-3 py-6 text-center text-xs text-muted-foreground">
+            {t("projects.projectManagerStageLaneEmpty")}
+          </div>
+        ) : (
+          items.map((item) => (
+            <ProjectManagerStageItemCard
+              dependencyCounts={dependencyCounts}
+              item={item}
+              key={item.id}
+              movePending={movePending}
+              onMoveWorkItem={onMoveWorkItem}
+              onViewDetails={onViewDetails}
+              sessionLink={sessionByWorkItemId.get(item.id) ?? null}
+              stages={stages}
+              t={t}
+            />
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ProjectManagerStageItemCard({
+  dependencyCounts,
+  item,
+  movePending,
+  onMoveWorkItem,
+  onViewDetails,
+  sessionLink,
+  stages,
+  t,
+}: {
+  dependencyCounts: { blockedBy: Map<string, number>; blocking: Map<string, number> };
+  item: ProjectManagerWorkItem;
+  movePending: boolean;
+  onMoveWorkItem: (item: ProjectManagerWorkItem, stageId: string | null) => void;
+  onViewDetails: (item: ProjectManagerWorkItem) => void;
+  sessionLink: NonNullable<ProjectManagerTaskPacket["sessionLink"]> | null;
+  stages: ProjectManagerStage[];
+  t: Translate;
+}) {
+  const blockedByCount = dependencyCounts.blockedBy.get(item.id) ?? 0;
+  const blockingCount = dependencyCounts.blocking.get(item.id) ?? 0;
+
+  return (
+    <article
+      className="rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs"
+      data-testid={`project-manager-stage-item-${item.id}`}
+    >
+      <button
+        type="button"
+        className="w-full break-words text-left text-sm font-medium leading-5 hover:text-brand"
+        onClick={() => onViewDetails(item)}
+      >
+        {item.title}
+      </button>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <Badge variant={statusBadgeVariant(item.status)}>{statusLabel(item.status, t)}</Badge>
+        {blockedByCount > 0 && (
+          <Badge variant="destructive">
+            {t("projects.projectManagerDependencyBlockedBy")}: {blockedByCount}
+          </Badge>
+        )}
+        {blockingCount > 0 && (
+          <Badge variant="secondary">
+            {t("projects.projectManagerDependencyBlocking")}: {blockingCount}
+          </Badge>
+        )}
+        {sessionLink && (
+          <a
+            className="inline-flex items-center gap-1 rounded-md border border-border/70 px-1.5 py-0.5 text-xs text-brand hover:underline"
+            href={sessionLink.href}
+          >
+            <Link2 className="size-3" />
+            {t("projects.projectManagerLinkedSession")}
+          </a>
+        )}
+      </div>
+      <div className="mt-2">
+        <select
+          aria-label={t("projects.projectManagerStageAssign")}
+          className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
+          value={item.stageId ?? ""}
+          disabled={movePending}
+          onChange={(event) => onMoveWorkItem(item, event.target.value || null)}
+        >
+          <option value="">{t("projects.projectManagerStageBacklog")}</option>
+          {stages.map((stage) => (
+            <option key={stage.id} value={stage.id}>
+              {stage.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    </article>
+  );
+}
+
+function ProjectManagerStageFormDialog({
+  description,
+  error,
+  isSaving,
+  name,
+  onDescriptionChange,
+  onNameChange,
+  onOpenChange,
+  onSave,
+  open,
+  t,
+  title,
+}: {
+  description?: string;
+  error: string | null;
+  isSaving: boolean;
+  name: string;
+  onDescriptionChange?: (value: string) => void;
+  onNameChange: (value: string) => void;
+  onOpenChange: (open: boolean) => void;
+  onSave: () => void;
+  open: boolean;
+  t: Translate;
+  title: string;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="project-manager-stage-name">{t("projects.projectManagerStageName")}</Label>
+            <Input
+              id="project-manager-stage-name"
+              value={name}
+              aria-invalid={!!error && name.trim().length === 0}
+              disabled={isSaving}
+              onChange={(event) => onNameChange(event.target.value)}
+            />
+          </div>
+          {onDescriptionChange && (
+            <div className="space-y-2">
+              <Label htmlFor="project-manager-stage-description">
+                {t("projects.projectManagerStageDescription")}
+              </Label>
+              <Textarea
+                id="project-manager-stage-description"
+                value={description ?? ""}
+                disabled={isSaving}
+                onChange={(event) => onDescriptionChange(event.target.value)}
+              />
+            </div>
+          )}
+          {error && (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            onClick={onSave}
+            disabled={isSaving}
+          >
+            {t("common.save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProjectManagerStageSelect({
+  item,
+  projectId,
+  stages,
+  t,
+}: {
+  item: ProjectManagerWorkItem;
+  projectId: string;
+  stages: ProjectManagerStage[];
+  t: Translate;
+}) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: (stageId: string | null) =>
+      updateProjectManagerWorkItem(projectId, item.id, { stageId }),
+    onSuccess: async () => {
+      setError(null);
+      await queryClient.invalidateQueries({ queryKey: ["project-manager", projectId] });
+    },
+    onError: (mutationError) =>
+      setError(projectManagerMutationMessage(mutationError, t("projects.projectManagerStageMutationError"))),
+  });
+
+  return (
+    <div className="space-y-2">
+      <select
+        aria-label={t("projects.projectManagerStageAssign")}
+        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
+        value={item.stageId ?? ""}
+        disabled={mutation.isPending}
+        onChange={(event) => mutation.mutate(event.target.value || null)}
+      >
+        <option value="">{t("projects.projectManagerStageBacklog")}</option>
+        {stages.map((stage) => (
+          <option key={stage.id} value={stage.id}>
+            {stage.name}
+          </option>
+        ))}
+      </select>
+      {error && (
+        <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ProjectManagerDependenciesSection({
+  item,
+  links,
+  projectId,
+  t,
+  workItems,
+}: {
+  item: ProjectManagerWorkItem;
+  links: ProjectManagerWorkItemLink[];
+  projectId: string;
+  t: Translate;
+  workItems: ProjectManagerWorkItem[];
+}) {
+  const queryClient = useQueryClient();
+  const [selection, setSelection] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const blockedBy = links.filter((link) => link.blockedWorkItemId === item.id);
+  const blocking = links.filter((link) => link.blockerWorkItemId === item.id);
+  const candidates = workItems.filter(
+    (workItem) => workItem.id !== item.id && !blockedBy.some((link) => link.blockerWorkItemId === workItem.id)
+  );
+  const titleFor = (workItemId: string) =>
+    workItems.find((workItem) => workItem.id === workItemId)?.title ?? workItemId;
+
+  const dependencyErrorMessage = (mutationError: unknown) =>
+    projectManagerMutationMessage(mutationError, t("projects.projectManagerDependencyMutationError"));
+  const addMutation = useMutation({
+    mutationFn: (blockerWorkItemId: string) =>
+      addProjectManagerWorkItemDependency(projectId, item.id, blockerWorkItemId),
+    onSuccess: async () => {
+      setError(null);
+      setSelection("");
+      await queryClient.invalidateQueries({ queryKey: ["project-manager", projectId] });
+    },
+    onError: (mutationError) => setError(dependencyErrorMessage(mutationError)),
+  });
+  const removeMutation = useMutation({
+    mutationFn: (blockerWorkItemId: string) =>
+      removeProjectManagerWorkItemDependency(projectId, item.id, blockerWorkItemId),
+    onSuccess: async () => {
+      setError(null);
+      await queryClient.invalidateQueries({ queryKey: ["project-manager", projectId] });
+    },
+    onError: (mutationError) => setError(dependencyErrorMessage(mutationError)),
+  });
+  const isPending = addMutation.isPending || removeMutation.isPending;
+
+  return (
+    <fieldset className="space-y-3 rounded-md border border-border/70 p-3">
+      <legend className="px-1 text-sm font-medium">{t("projects.projectManagerDependencies")}</legend>
+      {blockedBy.length === 0 && blocking.length === 0 && (
+        <p className="text-xs text-muted-foreground">{t("projects.projectManagerDependencyNone")}</p>
+      )}
+      {blockedBy.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-xs font-medium text-muted-foreground">
+            {t("projects.projectManagerDependencyBlockedBy")}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {blockedBy.map((link) => (
+              <Badge key={link.id} variant="destructive" className="gap-1">
+                {titleFor(link.blockerWorkItemId)}
+                <button
+                  type="button"
+                  aria-label={t("common.delete")}
+                  className="rounded-full hover:bg-destructive-foreground/20"
+                  disabled={isPending}
+                  onClick={() => removeMutation.mutate(link.blockerWorkItemId)}
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+      {blocking.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-xs font-medium text-muted-foreground">
+            {t("projects.projectManagerDependencyBlocking")}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {blocking.map((link) => (
+              <Badge key={link.id} variant="secondary">
+                {titleFor(link.blockedWorkItemId)}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <select
+          aria-label={t("projects.projectManagerDependencyAdd")}
+          className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
+          value={selection}
+          disabled={isPending || candidates.length === 0}
+          onChange={(event) => setSelection(event.target.value)}
+        >
+          <option value="">{t("projects.projectManagerDependencyAddPlaceholder")}</option>
+          {candidates.map((workItem) => (
+            <option key={workItem.id} value={workItem.id}>
+              {workItem.title}
+            </option>
+          ))}
+        </select>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={isPending || !selection}
+          onClick={() => selection && addMutation.mutate(selection)}
+        >
+          <Plus className="mr-2 size-4" />
+          {t("projects.projectManagerDependencyAdd")}
+        </Button>
+      </div>
+      {error && (
+        <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
+function stageStatusLabel(status: ProjectManagerStage["status"], t: Translate) {
+  const labels: Record<ProjectManagerStage["status"], TranslationKey> = {
+    active: "projects.projectManagerStageStatusActive",
+    completed: "projects.projectManagerStageStatusCompleted",
+    archived: "projects.projectManagerStageStatusArchived",
+  };
+  return t(labels[status]);
 }
 
 function ProjectManagerError({
@@ -1735,6 +2551,7 @@ function ProjectManagerWorkItemDetailSheet({
   isTaskPacketStarting,
   item,
   ledgerEvents,
+  links,
   onAttachEvidence,
   onEvidenceDraftChange,
   onOpenChange,
@@ -1743,6 +2560,8 @@ function ProjectManagerWorkItemDetailSheet({
   onTaskPacketSessionLink,
   onTaskPacketStart,
   open,
+  projectId,
+  stages,
   statusMutationPending,
   t,
   taskPacket,
@@ -1751,6 +2570,7 @@ function ProjectManagerWorkItemDetailSheet({
   taskPacketStartError,
   taskPacketSessionId,
   taskPacketSessions,
+  workItems,
 }: {
   evidenceDraft: EvidenceDraft;
   evidenceError: string | null;
@@ -1760,6 +2580,7 @@ function ProjectManagerWorkItemDetailSheet({
   isTaskPacketStarting: boolean;
   item: ProjectManagerWorkItem | null;
   ledgerEvents: ProjectManagerLedgerEvent[];
+  links: ProjectManagerWorkItemLink[];
   onAttachEvidence: () => void;
   onEvidenceDraftChange: (draft: EvidenceDraft) => void;
   onOpenChange: (open: boolean) => void;
@@ -1768,6 +2589,8 @@ function ProjectManagerWorkItemDetailSheet({
   onTaskPacketSessionLink: () => void;
   onTaskPacketStart: () => void;
   open: boolean;
+  projectId: string;
+  stages: ProjectManagerStage[];
   statusMutationPending: boolean;
   t: Translate;
   taskPacket: ProjectManagerTaskPacket | null;
@@ -1776,6 +2599,7 @@ function ProjectManagerWorkItemDetailSheet({
   taskPacketStartError: string | null;
   taskPacketSessionId: string;
   taskPacketSessions: Session[];
+  workItems: ProjectManagerWorkItem[];
 }) {
   const traceMarkers = item ? workItemTraceMarkers(item, ledgerEvents) : [];
 
@@ -1814,6 +2638,21 @@ function ProjectManagerWorkItemDetailSheet({
               <SummaryMetric label={t("projects.projectManagerEvidenceRefs")} value={item.evidenceRefCount} />
               <SummaryMetric label={t("projects.projectManagerFeishuRefs")} value={item.feishuRefCount} />
             </div>
+            <DetailField label={t("projects.projectManagerStageAssign")}>
+              <ProjectManagerStageSelect
+                item={item}
+                projectId={projectId}
+                stages={stages}
+                t={t}
+              />
+            </DetailField>
+            <ProjectManagerDependenciesSection
+              item={item}
+              links={links}
+              projectId={projectId}
+              t={t}
+              workItems={workItems}
+            />
             <DetailField label={t("projects.projectManagerAcceptanceCriteria")}>
               {item.acceptanceCriteria.length > 0 ? (
                 <ul className="list-disc space-y-1 pl-5">
@@ -3208,6 +4047,11 @@ function eventLabel(eventType: ProjectManagerLedgerEventType, t: Translate) {
     feishu_reference_linked: "projects.projectManagerEventFeishuReferenceLinked",
     next_step_proposed: "projects.projectManagerEventNextStepProposed",
     manual_completion_recorded: "projects.projectManagerEventManualCompletionRecorded",
+    stage_created: "projects.projectManagerEventStageCreated",
+    stage_updated: "projects.projectManagerEventStageUpdated",
+    stage_deleted: "projects.projectManagerEventStageDeleted",
+    dependency_added: "projects.projectManagerEventDependencyAdded",
+    dependency_removed: "projects.projectManagerEventDependencyRemoved",
   };
   return t(labels[eventType]);
 }
