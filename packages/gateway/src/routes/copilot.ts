@@ -17,6 +17,7 @@ import { buildAgentStack, type AgentStackDeps } from "../services/agent/agent-st
 
 const idSchema = z.string().trim().min(1).max(128);
 const titleSchema = z.string().trim().min(1).max(200).optional();
+const renameConversationSchema = z.object({ title: z.string().trim().min(1).max(200) }).strict();
 const modelIdSchema = z.string().trim().min(1).max(128).optional();
 const createConversationSchema = z.object({ title: titleSchema }).strict();
 const sendMessageSchema = z.object({
@@ -68,6 +69,24 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     const conversation = log.getConversation(id);
     if (!conversation) return notFound(res);
     res.json(ok({ messages: log.listMessages(id) }));
+  });
+
+  router.patch("/conversations/:id", (req, res) => {
+    const id = parseId(req.params.id, res); if (!id) return;
+    withBody(req.body, renameConversationSchema, res, (value) => {
+      const { log } = buildAgentStack(deps, userId(req));
+      if (!log.renameConversation(id, value.title)) return notFound(res);
+      res.json(ok({ conversation: log.getConversation(id) }));
+    });
+  });
+
+  // Idempotent delete: conversations owned by other users 404, and a repeat
+  // delete of an already-removed conversation also 404s (no leak, no error).
+  router.delete("/conversations/:id", (req, res) => {
+    const id = parseId(req.params.id, res); if (!id) return;
+    const { log } = buildAgentStack(deps, userId(req));
+    if (!log.deleteConversation(id)) return notFound(res);
+    res.json(ok({ deleted: true }));
   });
 
   // Run a turn: appends the user message, runs the step loop, and returns the
