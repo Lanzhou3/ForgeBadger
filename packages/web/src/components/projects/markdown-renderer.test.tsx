@@ -53,6 +53,21 @@ describe("MarkdownRenderer", () => {
     expect(screen.getByText("bold")).toBeTruthy();
   });
 
+  it("surfaces the fenced-code language and renders a copy control", () => {
+    render(<MarkdownRenderer content={"```ts\nconst x = 1;\n```"} />);
+    expect(screen.getByText("ts")).toBeTruthy();
+    expect(screen.getByText("const x = 1;")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /copy code/i })).toBeTruthy();
+  });
+
+  it("does not parse inline markdown inside a code block", () => {
+    render(<MarkdownRenderer content={"```\n*not bold* `not code`\n```"} />);
+    // The code body's verbatim text should appear; it must not be split into
+    // italic + code parts the way inline markdown would split it.
+    const pre = document.querySelector("pre");
+    expect(pre?.textContent).toContain("*not bold* `not code`");
+  });
+
 it("does not render raw HTML as markup", () => {
     render(<MarkdownRenderer content={"<script>alert(1)</script>\n\nplain <b>text"} />);
     expect(screen.queryByText("alert(1)")).toBeNull();

@@ -1,4 +1,5 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useCallback, useState, type ReactNode } from "react";
+import { Check, Copy } from "lucide-react";
 
 /**
  * Lightweight Markdown renderer for config-file previews.
@@ -112,7 +113,11 @@ interface MarkdownLine {
   type: "heading" | "codeblock" | "list" | "quote" | "hr" | "paragraph";
   text: string;
   level?: number;
+  /** Fenced-code language hint ("bash", "ts", ...); empty when the fence had no tag. */
+  language?: string;
 }
+
+const fenceOpenPattern = /^```([^\s`]*)\s*$/u;
 
 function parseLines(source: string): MarkdownLine[] {
   const lines: MarkdownLine[] = [];
@@ -121,14 +126,16 @@ function parseLines(source: string): MarkdownLine[] {
   for (let index = 0; index < rawLines.length; index += 1) {
     const line = rawLines[index]!;
 
-    if (line.startsWith("```")) {
+    const fenceOpen = line.match(fenceOpenPattern);
+    if (fenceOpen) {
+      const language = (fenceOpen[1] ?? "").trim();
       const content: string[] = [];
       index += 1;
       while (index < rawLines.length && !rawLines[index]!.startsWith("```")) {
         content.push(rawLines[index]!);
         index += 1;
       }
-      lines.push({ type: "codeblock", text: content.join("\n") });
+      lines.push({ type: "codeblock", text: content.join("\n"), language });
       continue;
     }
 
@@ -206,14 +213,7 @@ export function MarkdownRenderer({ content, className }: { content: string; clas
             );
           }
           case "codeblock":
-            return (
-              <pre
-                key={key}
-                className="overflow-x-auto rounded-md border border-border/70 bg-muted/40 p-3 font-mono text-xs leading-relaxed"
-              >
-                {block.text}
-              </pre>
-            );
+            return <CodeBlock key={key} text={block.text} language={block.language ?? ""} />;
           case "list":
             return (
               <div key={key} className="flex gap-2">
@@ -240,6 +240,49 @@ export function MarkdownRenderer({ content, className }: { content: string; clas
             );
         }
       })}
+    </div>
+  );
+}
+
+/**
+ * Chat-style fenced-code block: monospace body that scrolls horizontally when
+ * the line is wider than its container, with a header bar that surfaces the
+ * language hint (when the fence declared one) and a copy-to-clipboard button.
+ * Inline markdown is intentionally NOT applied to the body — code samples
+ * often contain backticks/asterisks/underscores that should render verbatim.
+ */
+function CodeBlock({ text, language }: { text: string; language: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard writes can be denied (permissions, sandboxed iframe). We
+      // intentionally swallow the error — the user can still select+copy.
+    }
+  }, [text]);
+  return (
+    <div className="overflow-hidden rounded-md border border-border/70 bg-muted/40">
+      <div className="flex items-center justify-between gap-2 border-b border-border/60 bg-muted/60 px-3 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+        <span className="font-mono normal-case tracking-normal text-foreground/80">
+          {language || "code"}
+        </span>
+        <button
+          type="button"
+          onClick={() => void onCopy()}
+          aria-label={copied ? "Copied" : "Copy code"}
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+      </div>
+      <pre className="overflow-x-auto p-3 font-mono text-xs leading-relaxed">
+        <code>{text}</code>
+      </pre>
     </div>
   );
 }
