@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowDown, CheckCircle2, Loader2, Pencil, Square, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowDown, Brain, CheckCircle2, ChevronDown, ChevronRight, Loader2, Pencil, Square, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -317,6 +317,9 @@ export function CopilotChat() {
                 />
               );
             })}
+            {active?.thinking ? (
+              <ThinkingSection text={active.thinking} />
+            ) : null}
             {active?.text ? (
               <StreamingMessage text={active.text} />
             ) : isRunning ? (
@@ -413,6 +416,38 @@ function StreamingMessage({ text }: { text: string }) {
         <MarkdownRenderer content={text} />
         <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-[1px] bg-foreground/70 align-text-bottom" />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Collapsible reasoning block. Streams the model's internal thinking (Anthropic
+ * extended thinking, OpenAI reasoning_content) separately from the final answer
+ * so the chat is not a wall of text. Default collapsed — the brain icon +
+ * character count is enough to confirm the model is reasoning without dumping
+ * the entire chain of thought into the viewport.
+ */
+function ThinkingSection({ text }: { text: string }) {
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const chars = text.length;
+  return (
+    <div className="rounded-md border border-dashed border-border/60 bg-muted/30 text-xs text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/60"
+      >
+        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        <Brain className="size-3" />
+        <span className="font-medium">{t("copilot.thinkingCount").replace("{chars}", String(chars))}</span>
+      </button>
+      {open && (
+        <pre className="max-h-40 overflow-auto whitespace-pre-wrap border-t border-border/60 bg-background/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground/80">
+          {text}
+        </pre>
+      )}
     </div>
   );
 }

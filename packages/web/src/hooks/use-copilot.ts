@@ -17,6 +17,8 @@ export interface ActiveCopilotRun {
   status: CopilotRunStatus;
   /** Accumulated assistant text for the active run. */
   text: string;
+  /** Accumulated reasoning/thinking content (Anthropic extended thinking, OpenAI reasoning_content). */
+  thinking: string;
   pendingAction: CopilotPendingAction | null;
   error?: string;
 }
@@ -27,6 +29,7 @@ interface CopilotRunUpdatedPayload {
   status?: string;
   source?: "user" | "reactive";
   text_delta?: string;
+  thinking_delta?: string;
   tool_name?: string;
   pending_action_id?: string;
   message?: string;
@@ -54,6 +57,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
   const currentRunIdRef = useRef<string | null>(null);
   const onReactiveUpdateRef = useRef<UseCopilotRunOptions["onReactiveUpdate"]>(options?.onReactiveUpdate);
   const onTitleUpdatedRef = useRef<UseCopilotRunOptions["onTitleUpdated"]>(options?.onTitleUpdated);
+  const clearActiveRef = useRef<(() => void) | null>(null);
   onReactiveUpdateRef.current = options?.onReactiveUpdate;
   onTitleUpdatedRef.current = options?.onTitleUpdated;
 
@@ -87,19 +91,34 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       if (currentRunIdRef.current !== null && runId !== currentRunIdRef.current) return;
 
       setActiveSafe((prev) => {
-        const current = prev ?? { runId, conversationId: payload.conversation_id ?? "", status: "running", text: "", pendingAction: null };
+        const current = prev ?? { runId, conversationId: payload.conversation_id ?? "", status: "running", text: "", thinking: "", pendingAction: null };
         return {
           ...current,
           runId,
           conversationId: payload.conversation_id ?? current.conversationId,
           status: (payload.status as CopilotRunStatus) ?? current.status,
           text: current.text + (payload.text_delta ?? ""),
+          thinking: (current.thinking ?? "") + (payload.thinking_delta ?? ""),
           pendingAction: payload.pending_action_id
             ? { id: payload.pending_action_id, runId, tool: payload.tool_name ?? "", inputJson: "", inputDigest: "", status: "pending", createdAt: "", updatedAt: "", conversationId: current.conversationId, userId: "" }
             : current.pendingAction,
           error: payload.message && (payload.status === "failed" || payload.status === "error") ? payload.message : undefined,
         };
       });
+
+      // When the run reaches a terminal state and there is no pending action
+      // waiting for owner approval, drop the active state entirely. The
+      // persisted assistant message is already in `messages` (reloadActive
+      // Conversation runs in the chat component after sendMessage returns),
+      // so keeping `active` around would re-render the streaming bubble and
+      // stack the same text on top of the persisted message — the chat would
+      // look like it was still "thinking" while showing the answer twice.
+      if (
+        (payload.status === "completed" || payload.status === "failed" || payload.status === "cancelled") &&
+        !payload.pending_action_id
+      ) {
+        clearActiveRef.current?.();
+      }
     };
     window.addEventListener(OPENFORGE_GATEWAY_EVENT, handler);
     return () => window.removeEventListener(OPENFORGE_GATEWAY_EVENT, handler);
@@ -109,7 +128,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
     async (conversationId: string, text: string, modelId?: string) => {
       const { runId } = await sendMessage(conversationId, text, modelId);
       currentRunIdRef.current = runId;
-      setActiveSafe(() => ({ runId, conversationId, status: "running", text: "", pendingAction: null }));
+      setActiveSafe(() => ({ runId, conversationId, status: "running", text: "", thinking: "", pendingAction: null }));
       return runId;
     },
     [setActiveSafe]
@@ -122,7 +141,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
     async (conversationId: string, messageId: string, content: string) => {
       const { runId } = await editMessage(conversationId, messageId, content);
       currentRunIdRef.current = runId;
-      setActiveSafe(() => ({ runId, conversationId, status: "running", text: "", pendingAction: null }));
+      setActiveSafe(() => ({ runId, conversationId, status: "running", text: "", thinking: "", pendingAction: null }));
       return runId;
     },
     [setActiveSafe]
@@ -140,6 +159,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
     currentRunIdRef.current = null;
     setActiveSafe(() => null);
   }, [setActiveSafe]);
+  clearActiveRef.current = clearActive;
 
   return { active, startRun, startEditedRun, approveAction, clearActive };
 }
