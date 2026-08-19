@@ -22,6 +22,8 @@ export interface AgentStackDeps {
   masterKey: string;
   eventBus: OpenForgeEventBus;
   portfolioApi?: PortfolioApiFacade | undefined;
+  /** Test-only fetch override; production callers omit it. */
+  llmFetch?: typeof fetch;
 }
 
 export interface AgentStack {
@@ -35,7 +37,10 @@ export function buildAgentStack(deps: AgentStackDeps, userId: string): AgentStac
   const log = new CopilotConversationLog(deps.db, userId);
   const memory = new AgentMemoryRepository(deps.db, userId);
   const modelRepo = new ModelProviderRepository(deps.db, userId, deps.masterKey);
-  const llm = createAgentLlmClient({ modelProviderRepository: modelRepo });
+  const llm = createAgentLlmClient({
+    modelProviderRepository: modelRepo,
+    ...(deps.llmFetch !== undefined ? { fetchImpl: deps.llmFetch } : {})
+  });
   const toolRegistry = createAgentToolRegistry(createPlatformTools());
   const orchestrator = createCopilotOrchestrator({
     db: deps.db,

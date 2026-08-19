@@ -89,6 +89,33 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     res.json(ok({ deleted: true }));
   });
 
+  // Edit a user message: rewrite it in place, drop everything after it, then
+  // run a fresh turn against the new prompt. The orchestrator is told to skip
+  // its own user-message append so the edited row remains the only one with
+  // the new content. Streaming deltas arrive over /ws/events.
+  const editMessageSchema = z.object({ messageId: idSchema, content: z.string().trim().min(1).max(32 * 1024) }).strict();
+  router.post("/conversations/:id/edit-message", (req, res) => {
+    const id = parseId(req.params.id, res); if (!id) return;
+    withBody(req.body, editMessageSchema, res, async (value) => {
+      const { log, orchestrator } = buildAgentStack(deps, userId(req));
+      if (!log.getConversation(id)) return notFound(res);
+      const truncated = log.truncateAfterMessage(value.messageId, value.content);
+      if (!truncated) return notFound(res);
+      try {
+        const runId = await orchestrator.runTurn({
+          userId: userId(req),
+          conversationId: id,
+          userText: value.content,
+          source: "user",
+          skipUserMessage: true
+        });
+        res.status(201).json(ok({ runId }));
+      } catch (error) {
+        domainError(res, error);
+      }
+    });
+  });
+
   // Run a turn: appends the user message, runs the step loop, and returns the
   // run id. Streaming deltas arrive over /ws/events (copilot_run_updated).
   router.post("/conversations/:id/messages", (req, res) => {

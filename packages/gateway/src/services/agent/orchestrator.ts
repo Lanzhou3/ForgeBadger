@@ -54,11 +54,19 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     userText: string;
     modelId?: string;
     source?: "user" | "reactive";
+    /**
+     * Skip the initial user-message append. Used by the edit-message flow,
+     * which has already rewritten the target message in place — appending a
+     * duplicate would split the conversation into two of the same prompt.
+     */
+    skipUserMessage?: boolean;
   }): Promise<string> {
     const userId = input.userId;
     const source = input.source ?? "user";
     const log = logFor(userId);
-    log.appendMessage(input.conversationId, { role: "user", kind: "text", content: input.userText });
+    if (!input.skipUserMessage) {
+      log.appendMessage(input.conversationId, { role: "user", kind: "text", content: input.userText });
+    }
     const run = log.createRun(input.conversationId, {});
     log.updateRun(run.id, { status: "running", startedAt: new Date() });
 

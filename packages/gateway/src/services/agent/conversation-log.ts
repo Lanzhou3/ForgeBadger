@@ -117,6 +117,33 @@ export class CopilotConversationLog {
     return result.changes > 0;
   }
 
+  /**
+   * Edit a message: rewrite its content in place and drop everything recorded
+   * after it (later messages, runs, pending actions). When `newContent` is
+   * omitted the edit target's row is removed along with its descendants.
+   * Returns the target's sequence, or undefined when the message does not
+   * belong to this user. The caller is responsible for starting a new run.
+   */
+  truncateAfterMessage(messageId: string, newContent?: string): { sequence: number } | undefined {
+    const row = this.db.prepare(`SELECT sequence, created_at, conversation_id FROM copilot_messages WHERE id = ? AND user_id = ?`)
+      .get(messageId, this.userId) as { sequence: number; created_at: number; conversation_id: string } | undefined;
+    if (!row) return undefined;
+    // Drop runs (and via FK their pending_actions) that were created at or
+    // after the edit target — their messages are about to disappear.
+    this.db.prepare(`DELETE FROM copilot_runs WHERE user_id = ? AND conversation_id = ? AND created_at >= ?`)
+      .run(this.userId, row.conversation_id, row.created_at);
+    if (newContent !== undefined) {
+      this.db.prepare(`UPDATE copilot_messages SET content = ? WHERE id = ? AND user_id = ?`)
+        .run(redactAgentText(newContent), messageId, this.userId);
+      this.db.prepare(`DELETE FROM copilot_messages WHERE user_id = ? AND conversation_id = ? AND sequence > ?`)
+        .run(this.userId, row.conversation_id, row.sequence);
+    } else {
+      this.db.prepare(`DELETE FROM copilot_messages WHERE user_id = ? AND conversation_id = ? AND sequence >= ?`)
+        .run(this.userId, row.conversation_id, row.sequence);
+    }
+    return { sequence: row.sequence };
+  }
+
   appendMessage(conversationId: string, input: {
     role: AgentMessage["role"];
     kind: AgentMessage["kind"];

@@ -1,5 +1,7 @@
 import type { Express } from "express";
 
+import { loadEnv } from "../config/env.js";
+
 import type { ServerDeps } from "../server.js";
 import { createHealthRoutes } from "./health.js";
 import { createDependencyRoutes } from "./dependencies.js";
@@ -33,7 +35,13 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/health", createHealthRoutes());
   app.use("/api/v1/gate-a/dependencies", createDependencyRoutes());
   app.use("/api/v1/adapters", createAdapterRoutes());
-  app.use("/api/v1/auth", createAuthRouter(new UserRepository(deps.db), deps.jwtSecret));
+  app.use(
+    "/api/v1/auth",
+    createAuthRouter(new UserRepository(deps.db), deps.jwtSecret, {
+      db: deps.db,
+      registrationMode: loadEnv().OPENFORGE_REGISTRATION
+    })
+  );
   app.use("/api/v1/admin/users", createAdminUserRoutes(deps.db));
   app.use(
     "/api/v1/session-hooks",
@@ -75,7 +83,8 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     db: deps.db,
     masterKey: deps.masterKey,
     eventBus: deps.eventBus,
-    ...(deps.portfolioApi ? { portfolioApi: deps.portfolioApi } : {})
+    ...(deps.portfolioApi ? { portfolioApi: deps.portfolioApi } : {}),
+    ...(deps.llmFetch ? { llmFetch: deps.llmFetch } : {})
   }));
   app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
     db: deps.db,

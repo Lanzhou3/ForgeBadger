@@ -35,6 +35,8 @@ export interface ServerDeps {
   appVersion: string;
   adapterCommandRunner?: CommandRunner | undefined;
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
+  /** Test-only: overrides the Copilot LLM client fetch so tests can stub model responses. */
+  llmFetch?: typeof fetch;
 }
 
 /**
@@ -70,6 +72,8 @@ export interface GatewayAppOptions {
   appVersion?: string;
   adapterCommandRunner?: CommandRunner | undefined;
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
+  /** Test-only: overrides the Copilot LLM client fetch so tests can stub model responses. */
+  llmFetch?: typeof fetch;
 }
 
 export function createServer(deps: ServerDeps): express.Express {
@@ -129,14 +133,15 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     operationsRuntime: options.operationsRuntime,
     appVersion: options.appVersion ?? "0.0.0",
     adapterCommandRunner: options.adapterCommandRunner,
-    feishuChannelRuntime: options.feishuChannelRuntime
+    feishuChannelRuntime: options.feishuChannelRuntime,
+    ...(options.llmFetch ? { llmFetch: options.llmFetch } : {})
   });
 
   const server = createHttpServer(app);
   let closed = false;
   attachNotificationPersistence({ db: options.db, eventBus });
-  attachTerminalWebSocket({ server, sessionManager, jwtSecret });
-  attachEventsWebSocket({ server, eventBus, jwtSecret });
+  attachTerminalWebSocket({ server, sessionManager, jwtSecret, db: options.db });
+  attachEventsWebSocket({ server, eventBus, jwtSecret, db: options.db });
   // Proactive copilot: wake on platform events, report in fresh conversations.
   const reactiveLoop = attachCopilotReactiveLoop({
     deps: { db: options.db, masterKey: options.masterKey, eventBus, portfolioApi },
