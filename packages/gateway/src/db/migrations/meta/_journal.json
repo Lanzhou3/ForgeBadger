@@ -1,321 +1,335 @@
 {
-  "version": "7",
-  "dialect": "sqlite",
-  "entries": [
-    {
-      "idx": 0,
-      "version": "6",
-      "when": 1777310065747,
-      "tag": "0001_initial",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1777385454909,
-      "tag": "0002_session_credentials",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1777536000000,
-      "tag": "0003_plugins",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1777651200000,
-      "tag": "0004_notifications",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1777654800000,
-      "tag": "0005_session_activities",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1777658400000,
-      "tag": "0006_remote_catalog",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1777662000000,
-      "tag": "0007_session_snapshots",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1777665600000,
-      "tag": "0008_usage_rates",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1777669200000,
-      "tag": "0009_library_visibility",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "6",
-      "when": 1777672800000,
-      "tag": "0010_agent_orchestration",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "6",
-      "when": 1777676400000,
-      "tag": "0011_remote_plugin_packages",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "6",
-      "when": 1778208000000,
-      "tag": "0012_model_provider_profiles",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "6",
-      "when": 1778544000000,
-      "tag": "0013_copilot",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "6",
-      "when": 1778547600000,
-      "tag": "0014_copilot_memory",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "6",
-      "when": 1778634000000,
-      "tag": "0015_opencode_provider_metadata",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "6",
-      "when": 1778716800000,
-      "tag": "0016_model_provider_adapter_normalization",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "6",
-      "when": 1778803200000,
-      "tag": "0017_model_provider_product_endpoints",
-      "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "6",
-      "when": 1778889600000,
-      "tag": "0018_copilot_conversations",
-      "breakpoints": true
-    },
-    {
-      "idx": 18,
-      "version": "6",
-      "when": 1778976000000,
-      "tag": "0019_feishu_integration",
-      "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "6",
-      "when": 1779062400000,
-      "tag": "0020_copilot_live_run_constraint",
-      "breakpoints": true
-    },
-    {
-      "idx": 20,
-      "version": "6",
-      "when": 1779148800000,
-      "tag": "0021_feishu_public_webhook",
-      "breakpoints": true
-    },
-    {
-      "idx": 21,
-      "version": "6",
-      "when": 1779235200000,
-      "tag": "0022_project_manager_ledger",
-      "breakpoints": true
-    },
-    {
-      "idx": 22,
-      "version": "6",
-      "when": 1786460075151,
-      "tag": "0023_retire_plugins",
-      "breakpoints": true
-    },
-    {
-      "idx": 23,
-      "version": "6",
-      "when": 1786464763517,
-      "tag": "0024_flippant_spitfire",
-      "breakpoints": true
-    },
-    {
-      "idx": 24,
-      "version": "6",
-      "when": 1786465045270,
-      "tag": "0025_flowery_elektra",
-      "breakpoints": true
-    },
-    {
-      "idx": 25,
-      "version": "6",
-      "when": 1786465500000,
-      "tag": "0026_project_manager_execution_control",
-      "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "6",
-      "when": 1786467600000,
-      "tag": "0027_feishu_app_credentials",
-      "breakpoints": true
-    },
-    {
-      "idx": 27,
-      "version": "6",
-      "when": 1786510000000,
-      "tag": "0028_feishu_channel_runtime",
-      "breakpoints": true
-    },
-    {
-      "idx": 28,
-      "version": "6",
-      "when": 1786510100000,
-      "tag": "0029_copilot_automations",
-      "breakpoints": true
-    },
-    {
-      "idx": 29,
-      "version": "6",
-      "when": 1786550400000,
-      "tag": "0030_copilot_source_idempotency",
-      "breakpoints": true
-    },
-    {
-      "idx": 30,
-      "version": "6",
-      "when": 1786579200000,
-      "tag": "0031_feishu_card_message_binding",
-      "breakpoints": true
-    },
-    {
-      "idx": 31,
-      "version": "6",
-      "when": 1786665568000,
-      "tag": "0032_portfolio_operations_foundation",
-      "breakpoints": true
-    },
-    {
-      "idx": 32,
-      "version": "6",
-      "when": 1786723077000,
-      "tag": "0033_portfolio_execution_fence",
-      "breakpoints": true
-    },
-    {
-      "idx": 33,
-      "version": "6",
-      "when": 1786760319677,
-      "tag": "0034_remove_agents",
-      "breakpoints": true
-    },
-    {
-      "idx": 34,
-      "version": "6",
-      "when": 1786760320000,
-      "tag": "0035_portfolio_observation_scheduler",
-      "breakpoints": true
-    },
-    {
-      "idx": 35,
-      "version": "6",
-      "when": 1786760321000,
-      "tag": "0036_portfolio_feishu_core",
-      "breakpoints": true
-    },
-    {
-      "idx": 36,
-      "version": "6",
-      "when": 1786851200000,
-      "tag": "0037_portfolio_unbound_request_facts",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "6",
-      "when": 1786881600000,
-      "tag": "0038_remove_copilot",
-      "breakpoints": true
-    },
-    {
-      "idx": 38,
-      "version": "6",
-      "when": 1786888800000,
-      "tag": "0039_schema_hardening",
-      "breakpoints": true
-    },
-    {
-      "idx": 39,
-      "version": "6",
-      "when": 1786924800000,
-      "tag": "0040_unify_models",
-      "breakpoints": true
-    },
-    {
-      "idx": 40,
-      "version": "6",
-      "when": 1787011200000,
-      "tag": "0041_copilot_runtime",
-      "breakpoints": true
-    },
-    {
-      "idx": 41,
-      "version": "6",
-      "when": 1787097600000,
-      "tag": "0042_copilot_compression",
-      "breakpoints": true
-    },
-    {
-      "idx": 42,
-      "version": "6",
-      "when": 1787184000000,
-      "tag": "0043_feishu_copilot_channel",
-      "breakpoints": true
-    },
-    {
-      "idx": 43,
-      "version": "6",
-      "when": 1787270400000,
-      "tag": "0044_feishu_copilot_sender_identity",
-      "breakpoints": true
-    },
-    {
-      "idx": 44,
-      "version": "6",
-      "when": 1787356800000,
-      "tag": "0045_dev_task_stages",
-      "breakpoints": true
-    }
-  ]
+    "version": "7",
+    "dialect": "sqlite",
+    "entries": [
+        {
+            "idx": 0,
+            "version": "6",
+            "when": 1777310065747,
+            "tag": "0001_initial",
+            "breakpoints": true
+        },
+        {
+            "idx": 1,
+            "version": "6",
+            "when": 1777385454909,
+            "tag": "0002_session_credentials",
+            "breakpoints": true
+        },
+        {
+            "idx": 2,
+            "version": "6",
+            "when": 1777536000000,
+            "tag": "0003_plugins",
+            "breakpoints": true
+        },
+        {
+            "idx": 3,
+            "version": "6",
+            "when": 1777651200000,
+            "tag": "0004_notifications",
+            "breakpoints": true
+        },
+        {
+            "idx": 4,
+            "version": "6",
+            "when": 1777654800000,
+            "tag": "0005_session_activities",
+            "breakpoints": true
+        },
+        {
+            "idx": 5,
+            "version": "6",
+            "when": 1777658400000,
+            "tag": "0006_remote_catalog",
+            "breakpoints": true
+        },
+        {
+            "idx": 6,
+            "version": "6",
+            "when": 1777662000000,
+            "tag": "0007_session_snapshots",
+            "breakpoints": true
+        },
+        {
+            "idx": 7,
+            "version": "6",
+            "when": 1777665600000,
+            "tag": "0008_usage_rates",
+            "breakpoints": true
+        },
+        {
+            "idx": 8,
+            "version": "6",
+            "when": 1777669200000,
+            "tag": "0009_library_visibility",
+            "breakpoints": true
+        },
+        {
+            "idx": 9,
+            "version": "6",
+            "when": 1777672800000,
+            "tag": "0010_agent_orchestration",
+            "breakpoints": true
+        },
+        {
+            "idx": 10,
+            "version": "6",
+            "when": 1777676400000,
+            "tag": "0011_remote_plugin_packages",
+            "breakpoints": true
+        },
+        {
+            "idx": 11,
+            "version": "6",
+            "when": 1778208000000,
+            "tag": "0012_model_provider_profiles",
+            "breakpoints": true
+        },
+        {
+            "idx": 12,
+            "version": "6",
+            "when": 1778544000000,
+            "tag": "0013_copilot",
+            "breakpoints": true
+        },
+        {
+            "idx": 13,
+            "version": "6",
+            "when": 1778547600000,
+            "tag": "0014_copilot_memory",
+            "breakpoints": true
+        },
+        {
+            "idx": 14,
+            "version": "6",
+            "when": 1778634000000,
+            "tag": "0015_opencode_provider_metadata",
+            "breakpoints": true
+        },
+        {
+            "idx": 15,
+            "version": "6",
+            "when": 1778716800000,
+            "tag": "0016_model_provider_adapter_normalization",
+            "breakpoints": true
+        },
+        {
+            "idx": 16,
+            "version": "6",
+            "when": 1778803200000,
+            "tag": "0017_model_provider_product_endpoints",
+            "breakpoints": true
+        },
+        {
+            "idx": 17,
+            "version": "6",
+            "when": 1778889600000,
+            "tag": "0018_copilot_conversations",
+            "breakpoints": true
+        },
+        {
+            "idx": 18,
+            "version": "6",
+            "when": 1778976000000,
+            "tag": "0019_feishu_integration",
+            "breakpoints": true
+        },
+        {
+            "idx": 19,
+            "version": "6",
+            "when": 1779062400000,
+            "tag": "0020_copilot_live_run_constraint",
+            "breakpoints": true
+        },
+        {
+            "idx": 20,
+            "version": "6",
+            "when": 1779148800000,
+            "tag": "0021_feishu_public_webhook",
+            "breakpoints": true
+        },
+        {
+            "idx": 21,
+            "version": "6",
+            "when": 1779235200000,
+            "tag": "0022_project_manager_ledger",
+            "breakpoints": true
+        },
+        {
+            "idx": 22,
+            "version": "6",
+            "when": 1786460075151,
+            "tag": "0023_retire_plugins",
+            "breakpoints": true
+        },
+        {
+            "idx": 23,
+            "version": "6",
+            "when": 1786464763517,
+            "tag": "0024_flippant_spitfire",
+            "breakpoints": true
+        },
+        {
+            "idx": 24,
+            "version": "6",
+            "when": 1786465045270,
+            "tag": "0025_flowery_elektra",
+            "breakpoints": true
+        },
+        {
+            "idx": 25,
+            "version": "6",
+            "when": 1786465500000,
+            "tag": "0026_project_manager_execution_control",
+            "breakpoints": true
+        },
+        {
+            "idx": 26,
+            "version": "6",
+            "when": 1786467600000,
+            "tag": "0027_feishu_app_credentials",
+            "breakpoints": true
+        },
+        {
+            "idx": 27,
+            "version": "6",
+            "when": 1786510000000,
+            "tag": "0028_feishu_channel_runtime",
+            "breakpoints": true
+        },
+        {
+            "idx": 28,
+            "version": "6",
+            "when": 1786510100000,
+            "tag": "0029_copilot_automations",
+            "breakpoints": true
+        },
+        {
+            "idx": 29,
+            "version": "6",
+            "when": 1786550400000,
+            "tag": "0030_copilot_source_idempotency",
+            "breakpoints": true
+        },
+        {
+            "idx": 30,
+            "version": "6",
+            "when": 1786579200000,
+            "tag": "0031_feishu_card_message_binding",
+            "breakpoints": true
+        },
+        {
+            "idx": 31,
+            "version": "6",
+            "when": 1786665568000,
+            "tag": "0032_portfolio_operations_foundation",
+            "breakpoints": true
+        },
+        {
+            "idx": 32,
+            "version": "6",
+            "when": 1786723077000,
+            "tag": "0033_portfolio_execution_fence",
+            "breakpoints": true
+        },
+        {
+            "idx": 33,
+            "version": "6",
+            "when": 1786760319677,
+            "tag": "0034_remove_agents",
+            "breakpoints": true
+        },
+        {
+            "idx": 34,
+            "version": "6",
+            "when": 1786760320000,
+            "tag": "0035_portfolio_observation_scheduler",
+            "breakpoints": true
+        },
+        {
+            "idx": 35,
+            "version": "6",
+            "when": 1786760321000,
+            "tag": "0036_portfolio_feishu_core",
+            "breakpoints": true
+        },
+        {
+            "idx": 36,
+            "version": "6",
+            "when": 1786851200000,
+            "tag": "0037_portfolio_unbound_request_facts",
+            "breakpoints": true
+        },
+        {
+            "idx": 37,
+            "version": "6",
+            "when": 1786881600000,
+            "tag": "0038_remove_copilot",
+            "breakpoints": true
+        },
+        {
+            "idx": 38,
+            "version": "6",
+            "when": 1786888800000,
+            "tag": "0039_schema_hardening",
+            "breakpoints": true
+        },
+        {
+            "idx": 39,
+            "version": "6",
+            "when": 1786924800000,
+            "tag": "0040_unify_models",
+            "breakpoints": true
+        },
+        {
+            "idx": 40,
+            "version": "6",
+            "when": 1787011200000,
+            "tag": "0041_copilot_runtime",
+            "breakpoints": true
+        },
+        {
+            "idx": 41,
+            "version": "6",
+            "when": 1787097600000,
+            "tag": "0042_copilot_compression",
+            "breakpoints": true
+        },
+        {
+            "idx": 42,
+            "version": "6",
+            "when": 1787184000000,
+            "tag": "0043_feishu_copilot_channel",
+            "breakpoints": true
+        },
+        {
+            "idx": 43,
+            "version": "6",
+            "when": 1787270400000,
+            "tag": "0044_feishu_copilot_sender_identity",
+            "breakpoints": true
+        },
+        {
+            "idx": 44,
+            "version": "6",
+            "when": 1787356800000,
+            "tag": "0045_dev_task_stages",
+            "breakpoints": true
+        },
+        {
+            "idx": 45,
+            "version": "6",
+            "when": 1787443200000,
+            "tag": "0046_auth_sessions_invites",
+            "breakpoints": true
+        },
+        {
+            "idx": 46,
+            "version": "6",
+            "when": 1787529600000,
+            "tag": "0047_copilot_message_tool_call_id",
+            "breakpoints": true
+        }
+    ]
 }

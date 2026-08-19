@@ -32,6 +32,8 @@ export interface CopilotMessage {
   content: string;
   toolName?: string;
   toolInputJson?: string;
+  /** Provider-assigned tool call id; pairs tool_call with tool_result. */
+  toolCallId?: string;
   sequence: number;
   createdAt: string;
 }
@@ -187,6 +189,13 @@ export function deleteMemoryEntry(id: string) {
   return fetchJson<{ deleted: boolean }>(
     `/api/v1/copilot/memory/entries/${encodeURIComponent(id)}`,
     { method: "DELETE" }
+  );
+}
+
+export function editMessage(conversationId: string, messageId: string, content: string) {
+  return fetchJson<{ runId: string }>(
+    `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/edit-message`,
+    { method: "POST", body: JSON.stringify({ messageId, content }) }
   );
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDown, Pencil, Square, Wrench } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ArrowDown, CheckCircle2, Loader2, Pencil, Square, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -246,6 +246,19 @@ export function CopilotChat() {
   const activeConversation = conversations.find((item) => item.id === conversationId);
   const isRunning = active && (active.status === "running" || active.status === "pending");
 
+  // Index tool_result rows by their provider toolCallId so MessageRow can pair
+  // them with the corresponding tool_call row and render a single status
+  // icon (running / ok / error / denied) instead of two loose <details>.
+  const toolResultById = useMemo(() => {
+    const map = new Map<string, CopilotMessage>();
+    for (const message of messages) {
+      if (message.kind === "tool_result" && message.toolCallId) {
+        map.set(message.toolCallId, message);
+      }
+    }
+    return map;
+  }, [messages]);
+
   return (
     <div className="mx-auto grid h-full max-w-7xl grid-cols-[280px_1fr] gap-4 p-6">
       <Card className="flex max-h-[calc(100vh-6rem)] flex-col overflow-hidden">
@@ -282,21 +295,28 @@ export function CopilotChat() {
             {!loadError && messages.length === 0 && !active && (
               <EmptyState onSuggestion={(text) => void send(text)} />
             )}
-            {messages.map((message) => (
-              <MessageRow
-                key={message.id}
-                message={message}
-                isEditing={editingMessageId === message.id}
-                editDraft={editDraft}
-                editError={editError}
-                editSubmitting={editSubmitting}
-                canEdit={!isRunning && editingMessageId === null}
-                onBeginEdit={beginEditMessage}
-                onChangeDraft={setEditDraft}
-                onSubmitEdit={submitEditMessage}
-                onCancelEdit={cancelEditMessage}
-              />
-            ))}
+            {messages.map((message) => {
+              const pairedResultId = message.toolCallId && toolResultById.has(message.toolCallId)
+                ? toolResultById.get(message.toolCallId)!.id
+                : null;
+              return (
+                <MessageRow
+                  key={message.id}
+                  message={message}
+                  pairedResult={pairedResultId === null ? null : (toolResultById.get(message.toolCallId!) ?? null)}
+                  suppressRender={pairedResultId === message.id}
+                  isEditing={editingMessageId === message.id}
+                  editDraft={editDraft}
+                  editError={editError}
+                  editSubmitting={editSubmitting}
+                  canEdit={!isRunning && editingMessageId === null}
+                  onBeginEdit={beginEditMessage}
+                  onChangeDraft={setEditDraft}
+                  onSubmitEdit={submitEditMessage}
+                  onCancelEdit={cancelEditMessage}
+                />
+              );
+            })}
             {active?.text ? (
               <StreamingMessage text={active.text} />
             ) : isRunning ? (
@@ -399,6 +419,8 @@ function StreamingMessage({ text }: { text: string }) {
 
 function MessageRow({
   message,
+  pairedResult,
+  suppressRender,
   isEditing,
   editDraft,
   editError,
@@ -410,6 +432,8 @@ function MessageRow({
   onCancelEdit,
 }: {
   message: CopilotMessage;
+  pairedResult: CopilotMessage | null;
+  suppressRender: boolean;
   isEditing: boolean;
   editDraft: string;
   editError: string | null;
@@ -423,15 +447,24 @@ function MessageRow({
   const { t } = useLanguage();
   const isUser = message.role === "user";
 
+  // tool_result rows that have been merged into their tool_call row above are
+  // suppressed; the merged card already shows the result.
+  if (suppressRender) return null;
+
   if (message.kind === "tool_call") {
+    const status = pairedResult ? deriveToolStatus(pairedResult.content) : "running";
     return (
       <details className="rounded-md border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
         <summary className="flex cursor-pointer items-center gap-1.5 font-medium">
+          <ToolStatusIcon status={status} />
           <Wrench className="size-3" />
-          {t("copilot.toolCall")}{message.toolName ? `：${message.toolName}` : ""}
+          <span>{t("copilot.toolCall")}{message.toolName ? `：${message.toolName}` : ""}</span>
         </summary>
         {message.toolInputJson && (
           <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[11px]">{message.toolInputJson}</pre>
+        )}
+        {pairedResult && (
+          <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[11px]">{pairedResult.content}</pre>
         )}
       </details>
     );
@@ -543,4 +576,27 @@ function PendingActionRow({
 function truncateContent(content: string): string {
   const max = 80;
   return content.length > max ? `${content.slice(0, max)}…` : content;
+}
+
+type ToolStatus = "running" | "ok" | "error" | "denied";
+
+function deriveToolStatus(resultContent: string): ToolStatus {
+  // The orchestrator prefixes tool_result content so the UI can detect the
+  // outcome without re-running security-policy or error parsing. Anything
+  // else (real tool JSON output) is treated as a successful read.
+  if (/^Denied by security policy:/u.test(resultContent)) return "denied";
+  if (/^Tool error:/u.test(resultContent) || /^Unknown tool:/u.test(resultContent)) return "error";
+  return "ok";
+}
+
+function ToolStatusIcon({ status }: { status: ToolStatus }) {
+  if (status === "running") {
+    return <Loader2 className="size-3 animate-spin text-muted-foreground" aria-label="running" />;
+  }
+  if (status === "ok") {
+    return <CheckCircle2 className="size-3 text-emerald-600 dark:text-emerald-400" aria-label="ok" />;
+  }
+  // denied + error both surface as a warning; color is uniform because the
+  // text body is the authoritative explanation.
+  return <AlertTriangle className="size-3 text-amber-600 dark:text-amber-400" aria-label={status} />;
 }

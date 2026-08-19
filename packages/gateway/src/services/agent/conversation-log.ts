@@ -38,6 +38,7 @@ interface MessageRow {
   content: string;
   tool_name: string | null;
   tool_input_json: string | null;
+  tool_call_id: string | null;
   sequence: number;
   created_at: number;
 }
@@ -150,15 +151,16 @@ export class CopilotConversationLog {
     content: string;
     toolName?: string;
     toolInputJson?: string;
+    toolCallId?: string;
   }): AgentMessage {
     const nextSequence = this.nextSequence(conversationId);
     const id = randomUUID();
     const now = Date.now();
     const content = redactAgentText(input.content);
     this.db.prepare(`
-      INSERT INTO copilot_messages (id, conversation_id, user_id, role, kind, content, tool_name, tool_input_json, sequence, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, conversationId, this.userId, input.role, input.kind, content, input.toolName ?? null, input.toolInputJson ?? null, nextSequence, now);
+      INSERT INTO copilot_messages (id, conversation_id, user_id, role, kind, content, tool_name, tool_input_json, tool_call_id, sequence, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, conversationId, this.userId, input.role, input.kind, content, input.toolName ?? null, input.toolInputJson ?? null, input.toolCallId ?? null, nextSequence, now);
     this.touchConversation(conversationId);
     return {
       id,
@@ -169,6 +171,7 @@ export class CopilotConversationLog {
       content,
       ...(input.toolName !== undefined ? { toolName: input.toolName } : {}),
       ...(input.toolInputJson !== undefined ? { toolInputJson: input.toolInputJson } : {}),
+      ...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
       sequence: nextSequence,
       createdAt: new Date(now)
     };
@@ -278,6 +281,7 @@ function toMessage(row: MessageRow): AgentMessage {
     content: row.content,
     ...(row.tool_name !== null ? { toolName: row.tool_name } : {}),
     ...(row.tool_input_json !== null ? { toolInputJson: row.tool_input_json } : {}),
+    ...(row.tool_call_id !== null ? { toolCallId: row.tool_call_id } : {}),
     sequence: row.sequence,
     createdAt: new Date(row.created_at)
   };

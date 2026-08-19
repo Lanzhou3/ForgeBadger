@@ -37,6 +37,8 @@ export interface AgentMessage {
   content: string;
   toolName?: string;
   toolInputJson?: string;
+  /** Provider-assigned tool call id; pairs tool_call with tool_result in the UI. */
+  toolCallId?: string;
   sequence: number;
   createdAt: Date;
 }

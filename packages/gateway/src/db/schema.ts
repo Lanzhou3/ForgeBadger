@@ -1189,9 +1189,11 @@ export const copilotMessages = sqliteTable("copilot_messages", {
   content: text("content").notNull(),
   toolName: text("tool_name"),
   toolInputJson: text("tool_input_json"),
+  /** Provider-assigned tool call id; pairs tool_call with tool_result in the UI. */
+  toolCallId: text("tool_call_id"),
   sequence: integer("sequence").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date())
-}, (table) => ({ conversationLookup: index("idx_copilot_messages_conversation_seq").on(table.conversationId, table.sequence), userLookup: index("idx_copilot_messages_user_created").on(table.userId, table.createdAt) }));
+}, (table) => ({ conversationLookup: index("idx_copilot_messages_conversation_seq").on(table.conversationId, table.sequence), userLookup: index("idx_copilot_messages_user_created").on(table.userId, table.createdAt), toolCallLookup: index("idx_copilot_messages_tool_call_id").on(table.toolCallId) }));
 
 export const copilotRuns = sqliteTable("copilot_runs", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -1254,3 +1256,37 @@ export const feishuCopilotChannels = sqliteTable("feishu_copilot_channels", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 }, (table) => ({ chatIdentity: primaryKey({ columns: [table.userId, table.chatId], name: "feishu_copilot_channel_pk" }) }));
+
+// Auth sessions replace the long-lived bearer JWT for console sign-in. The
+// token itself is opaque (random 256-bit, base64url); only its SHA-256 is
+// stored. Expiry slides with activity (expiresAt) and is hard-capped by
+// absoluteExpiresAt so a stolen token dies even under continuous use.
+export const authSessions = sqliteTable("auth_sessions", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  lastSeenAt: integer("last_seen_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  absoluteExpiresAt: integer("absolute_expires_at", { mode: "timestamp" }).notNull(),
+  userAgent: text("user_agent")
+}, (table) => ({
+  idx_auth_sessions_user: index("idx_auth_sessions_user").on(table.userId)
+}));
+
+// One-time invite codes for the invite-only registration mode. Codes are
+// short-lived plain values an admin hands to a teammate; redemption is
+// recorded by usedByUserId/usedAt.
+export const authInvites = sqliteTable("auth_invites", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  code: text("code").notNull().unique(),
+  createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  usedByUserId: text("used_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  usedAt: integer("used_at", { mode: "timestamp" })
+}, (table) => ({
+  idx_auth_invites_created_by: index("idx_auth_invites_created_by").on(table.createdByUserId)
+}));

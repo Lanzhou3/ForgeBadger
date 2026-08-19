@@ -126,7 +126,8 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             kind: "tool_call",
             content: tc.name,
             toolName: tc.name,
-            toolInputJson: JSON.stringify(tc.input)
+            toolInputJson: JSON.stringify(tc.input),
+            toolCallId: tc.id
           });
         }
 
@@ -135,7 +136,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         for (const tc of toolCalls) {
           const tool = deps.toolRegistry.tools.get(tc.name);
           if (!tool) {
-            log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content: `Unknown tool: ${tc.name}`, toolName: tc.name });
+            log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content: `Unknown tool: ${tc.name}`, toolName: tc.name, toolCallId: tc.id });
             messages.push({ role: "tool", toolCallId: tc.id, content: `Unknown tool: ${tc.name}` });
             continue;
           }
@@ -157,7 +158,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
 
           if (decision.action === "deny") {
             const content = `Denied by security policy: ${decision.reason}`;
-            log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content, toolName: tc.name });
+            log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content, toolName: tc.name, toolCallId: tc.id });
             messages.push({ role: "tool", toolCallId: tc.id, content });
             deps.eventBus.emitEvent({
               type: "copilot_run_updated",
@@ -200,7 +201,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
           const result = await executeAgentTool(tool, tc.input, context);
           const safeOutput = redactAgentValue(result.output);
           const content = result.ok ? JSON.stringify(safeOutput) : `Tool error: ${result.error ?? "unknown"}`;
-          log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content, toolName: tc.name });
+          log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content, toolName: tc.name, toolCallId: tc.id });
           messages.push({ role: "tool", toolCallId: tc.id, content });
           deps.eventBus.emitEvent({
             type: "copilot_run_updated",
