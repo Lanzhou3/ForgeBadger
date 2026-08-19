@@ -223,6 +223,23 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
 
       log.appendMessage(input.conversationId, { role: "assistant", kind: "text", content: finalText });
       log.updateRun(run.id, { status: "completed", completedAt: new Date(), steps });
+      // After the first completed user turn, the conversation still has a null
+      // title — fire-and-forget an LLM-generated title so the sidebar / chat
+      // header stop showing "未命名对话". Reactive-loop turns and subsequent
+      // user turns are left alone: rename conversation only when the title is
+      // still null, so we never overwrite a user-renamed title.
+      maybeAutoTitle({
+        log,
+        userId,
+        conversationId: input.conversationId,
+        userText: input.userText,
+        assistantText: finalText,
+        source,
+        runId: run.id,
+        eventBus: deps.eventBus,
+        llm: deps.llm,
+        ...(input.modelId !== undefined ? { modelId: input.modelId } : {})
+      }).catch(() => undefined);
       deps.eventBus.emitEvent({
         type: "copilot_run_updated",
         userId,
@@ -330,4 +347,47 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
 
 function safeParse(value: string): unknown {
   try { return JSON.parse(value); } catch { return {}; }
+}
+
+async function maybeAutoTitle(input: {
+  log: CopilotConversationLog;
+  userId: string;
+  conversationId: string;
+  userText: string;
+  assistantText: string;
+  source: "user" | "reactive";
+  runId: string;
+  eventBus: OpenForgeEventBus;
+  llm: AgentLlmClient;
+  modelId?: string;
+}): Promise<void> {
+  if (input.source !== "user") return;
+  const conversation = input.log.getConversation(input.conversationId);
+  if (!conversation || conversation.title !== null) return;
+  try {
+    const generated = await input.llm.generateTitle({
+      userText: input.userText,
+      assistantText: input.assistantText,
+      ...(input.modelId !== undefined ? { modelId: input.modelId } : {})
+    });
+    if (!generated) return;
+    // Re-check the title right before writing — a parallel rename from the
+    // owner (renameConversation endpoint) could have raced us between the
+    // check above and now. Never overwrite an owner-set title.
+    const fresh = input.log.getConversation(input.conversationId);
+    if (!fresh || fresh.title !== null) return;
+    input.log.renameConversation(input.conversationId, generated);
+    input.eventBus.emitEvent({
+      type: "copilot_run_updated",
+      userId: input.userId,
+      runId: input.runId,
+      conversationId: input.conversationId,
+      status: "completed",
+      titleUpdated: generated,
+      occurredAt: new Date()
+    });
+  } catch {
+    // Auto-title is best-effort. A model failure must not surface as a Copilot
+    // turn failure — the run already completed.
+  }
 }

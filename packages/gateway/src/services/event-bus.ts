@@ -93,6 +93,8 @@ export interface CopilotRunUpdatedEvent {
   toolName?: string | undefined;
   pendingActionId?: string | undefined;
   message?: string | undefined;
+  /** Set when the run triggered an auto-generated conversation title (first completed turn). */
+  titleUpdated?: string | undefined;
   occurredAt: Date;
 }
 

@@ -378,6 +378,57 @@ describe("copilot edit-message route", () => {
     }
   });
 
+  it("auto-generates the conversation title after the first completed turn", async () => {
+    const token = await register("copilot-autotitle@test.com");
+    return withSeededModel("copilot-autotitle@test.com", async () => {
+      const conversationId = await createConversation(token);
+      // Fire any first-turn: the LLM stub returns "stubbed answer", so the
+      // orchestrator should kick off the fire-and-forget title generation and
+      // persist a sanitized title. We poll briefly because the title call is
+      // async and not awaited by the route.
+      const send = await fetch(`${baseUrl}/api/v1/copilot/conversations/${conversationId}/messages`, {
+        method: "POST",
+        headers: authenticated(token),
+        body: JSON.stringify({ content: "我想排查 K8s pod 启动失败" })
+      });
+      assert.equal(send.status, 201);
+
+      let titledConversation: Awaited<ReturnType<CopilotConversationLog["getConversation"]>>;
+      for (let attempt = 0; attempt < 25; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        titledConversation = new CopilotConversationLog(db, deriveUserId("copilot-autotitle@test.com")).getConversation(conversationId);
+        if (titledConversation?.title) break;
+      }
+      assert.ok(titledConversation?.title, "auto-title should land on the conversation row");
+      assert.ok((titledConversation?.title ?? "").length > 0);
+      assert.ok((titledConversation?.title ?? "").length <= 24, "title respects the 24-char cap");
+    });
+  });
+
+  it("does not overwrite a user-renamed title on subsequent turns", async () => {
+    const token = await register("copilot-autotitle-rename@test.com");
+    return withSeededModel("copilot-autotitle-rename@test.com", async () => {
+      const conversationId = await createConversation(token);
+      // Owner renames before any run.
+      const renamed = await fetch(`${baseUrl}/api/v1/copilot/conversations/${conversationId}`, {
+        method: "PATCH",
+        headers: authenticated(token),
+        body: JSON.stringify({ title: "我手动起的标题" })
+      });
+      assert.equal(renamed.status, 200);
+      // First user turn — auto-title must NOT clobber the owner-set title.
+      const send = await fetch(`${baseUrl}/api/v1/copilot/conversations/${conversationId}/messages`, {
+        method: "POST",
+        headers: authenticated(token),
+        body: JSON.stringify({ content: "first question" })
+      });
+      assert.equal(send.status, 201);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const conversation = new CopilotConversationLog(db, deriveUserId("copilot-autotitle-rename@test.com")).getConversation(conversationId);
+      assert.equal(conversation?.title, "我手动起的标题");
+    });
+  });
+
   async function register(email: string): Promise<string> {
     const res = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: "POST",

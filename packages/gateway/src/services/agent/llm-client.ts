@@ -140,7 +140,31 @@ export function createAgentLlmClient(input: {
     return text.trim();
   }
 
-  return { resolveProvider, stream, summarize };
+  /**
+   * Generate a short conversation title from the first user message. Used after
+   * a conversation's first completed turn so the sidebar/header stop showing
+   * "未命名对话". Returns a sanitized 4–24 char title (Chinese-aware), or "" if
+   * the model returned nothing usable. Never throws — failures fall through to
+   * the empty result and the conversation keeps its null title.
+   */
+  async function generateTitle(input: { userText: string; assistantText: string; modelId?: string }): Promise<string> {
+    let text = "";
+    await stream({
+      messages: [
+        { role: "user", content: input.userText },
+        { role: "assistant", content: input.assistantText }
+      ],
+      tools: [],
+      system: TITLE_SYSTEM_PROMPT,
+      ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+      onEvent: (event) => {
+        if (event.type === "text_delta") text += event.text ?? "";
+      }
+    });
+    return sanitizeTitle(text);
+  }
+
+  return { resolveProvider, stream, summarize, generateTitle };
 }
 
 const SUMMARY_SYSTEM_PROMPT = [
@@ -311,4 +335,35 @@ async function readError(response: Response): Promise<string> {
 
 export function toolSchemaToModelFormat(tool: { name: string; description: string; inputSchema: Record<string, unknown> }): AgentToolSchema {
   return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema };
+}
+
+const TITLE_SYSTEM_PROMPT = [
+  "You generate the sidebar title for a single Copilot conversation.",
+  "Read the user message and the assistant's first reply, then return ONLY a",
+  "title of 4-12 Chinese characters, or 3-7 English words. No quotes, no",
+  "punctuation except the natural title style, no prefix, no explanation.",
+  "Capture the user's concrete goal (what they asked / what the assistant",
+  "helped with), not the topic. Examples:",
+  "- 用户问 K8s pod 启动失败排查 → 'K8s pod 启动排查'",
+  "- user asks for a haiku about autumn → 'Autumn haiku'",
+  "- 用户让 Copilot 总结最近一周项目状态 → '本周项目状态回顾'"
+].join("\n");
+
+const TITLE_MAX_CHARS = 24;
+
+function sanitizeTitle(raw: string): string {
+  // Strip code fences, quotes, "Title:" prefixes, and trailing punctuation.
+  const trimmed = raw
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/[`*_~>#]/g, "")
+    .replace(/^\s*(title[:：]?\s*|["'「『])|["'」』]\s*$/gi, "")
+    .replace(/^[\s\p{P}]+|[\s\p{P}]+$/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!trimmed) return "";
+  // Truncate to a sensible length while keeping whole word/char boundaries.
+  if (trimmed.length <= TITLE_MAX_CHARS) return trimmed;
+  const slice = trimmed.slice(0, TITLE_MAX_CHARS);
+  // Drop a trailing half-character so we don't return "你帮我做一个 K8s pod".
+  return slice.replace(/[\s\p{P}]$/u, "").trim() || trimmed.slice(0, TITLE_MAX_CHARS);
 }

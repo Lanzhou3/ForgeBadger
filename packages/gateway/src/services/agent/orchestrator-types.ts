@@ -39,4 +39,6 @@ export interface AgentLlmClient {
   }): Promise<{ message: string }>;
   /** Fold a message list into a concise summary (context compression). */
   summarize(input: { messages: AgentLlmMessage[]; modelId?: string }): Promise<string>;
+  /** Generate a short conversation title from the first user/assistant exchange. */
+  generateTitle(input: { userText: string; assistantText: string; modelId?: string }): Promise<string>;
 }

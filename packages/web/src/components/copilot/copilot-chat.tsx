@@ -89,6 +89,13 @@ export function CopilotChat() {
   // proactive conversation, so its report becomes visible.
   const { active, startRun, startEditedRun, approveAction, clearActive } = useCopilotRun({
     onReactiveUpdate: refreshConversations,
+    onTitleUpdated: ({ conversationId, title }) => {
+      // Patch the in-memory list first so the sidebar + header update without
+      // a roundtrip; the next refresh will reconcile any drift.
+      setConversations((current) =>
+        current.map((item) => (item.id === conversationId ? { ...item, title } : item))
+      );
+    },
   });
 
   const newConversation = useCallback(async () => {

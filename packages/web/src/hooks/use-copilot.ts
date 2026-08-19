@@ -30,11 +30,15 @@ interface CopilotRunUpdatedPayload {
   tool_name?: string;
   pending_action_id?: string;
   message?: string;
+  /** Set when the gateway auto-generated the conversation title after the first completed turn. */
+  title_updated?: string;
 }
 
 export interface UseCopilotRunOptions {
   /** Fired when the proactive loop starts a report in a fresh conversation. */
   onReactiveUpdate?: () => void;
+  /** Fired when the gateway finishes an auto-generated conversation title. */
+  onTitleUpdated?: (input: { conversationId: string; title: string }) => void;
 }
 
 /**
@@ -49,7 +53,9 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
   const activeRef = useRef<ActiveCopilotRun | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
   const onReactiveUpdateRef = useRef<UseCopilotRunOptions["onReactiveUpdate"]>(options?.onReactiveUpdate);
+  const onTitleUpdatedRef = useRef<UseCopilotRunOptions["onTitleUpdated"]>(options?.onTitleUpdated);
   onReactiveUpdateRef.current = options?.onReactiveUpdate;
+  onTitleUpdatedRef.current = options?.onTitleUpdated;
 
   const setActiveSafe = useCallback((updater: (prev: ActiveCopilotRun | null) => ActiveCopilotRun | null) => {
     setActive((prev) => {
@@ -68,6 +74,13 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
         // A proactive report landed in a fresh conversation — let the UI refresh.
         onReactiveUpdateRef.current?.();
         return;
+      }
+      // Auto-title: the gateway generated a title after a completed turn.
+      // The sidebar/header want to pick it up so the "未命名对话" placeholder
+      // disappears. Fires for both reactive and user runs so reports get named
+      // too, but the source check above already short-circuited reactive.
+      if (payload.title_updated && payload.conversation_id) {
+        onTitleUpdatedRef.current?.({ conversationId: payload.conversation_id, title: payload.title_updated });
       }
       const runId = payload.run_id;
       if (!runId) return;
