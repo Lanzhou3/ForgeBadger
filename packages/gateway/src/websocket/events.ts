@@ -1,7 +1,8 @@
 import type { Server } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 
-import { verifyJwt } from "../auth/jwt.js";
+import { resolveTokenUserId } from "../auth/resolve-token.js";
+import type { Database } from "../db/types.js";
 import type { OpenForgeEventBus, OpenForgeEvent } from "../services/event-bus.js";
 import { extractWsAuthToken } from "./auth.js";
 import { WebSocketConnectionLimits } from "./connection-limits.js";
@@ -16,6 +17,7 @@ export interface EventsWebSocketOptions {
   server: Server;
   eventBus: OpenForgeEventBus;
   jwtSecret: string;
+  db: Database;
   maxConnections?: number;
   maxConnectionsPerUser?: number;
 }
@@ -52,8 +54,11 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
 
     let userId: string;
     try {
-      const claims = verifyJwt(token, options.jwtSecret);
-      userId = claims.userId;
+      const resolved = resolveTokenUserId(options.db, token, options.jwtSecret);
+      if (!resolved) {
+        throw new Error("unauthorized");
+      }
+      userId = resolved;
     } catch {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
@@ -189,9 +194,11 @@ function buildPayload(event: OpenForgeEvent): Record<string, unknown> {
         status: event.status,
         ...(event.source !== undefined ? { source: event.source } : {}),
         ...(event.textDelta !== undefined ? { text_delta: event.textDelta } : {}),
+        ...(event.thinkingDelta !== undefined ? { thinking_delta: event.thinkingDelta } : {}),
         ...(event.toolName ? { tool_name: event.toolName } : {}),
         ...(event.pendingActionId ? { pending_action_id: event.pendingActionId } : {}),
-        ...(event.message !== undefined ? { message: event.message } : {})
+        ...(event.message !== undefined ? { message: event.message } : {}),
+        ...(event.titleUpdated !== undefined ? { title_updated: event.titleUpdated } : {})
       };
     case "error":
       return {

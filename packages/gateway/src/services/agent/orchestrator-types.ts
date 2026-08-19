@@ -17,7 +17,7 @@ export interface AgentLlmToolSchema {
 }
 
 export interface AgentLlmStreamEvent {
-  type: "text_delta" | "tool_call" | "done";
+  type: "text_delta" | "thinking_delta" | "tool_call" | "done";
   text?: string;
   toolCall?: { id: string; name: string; arguments: string };
   message?: string;

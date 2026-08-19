@@ -90,6 +90,8 @@ export interface CopilotRunUpdatedEvent {
   /** "user" = the owner typed a message; "reactive" = the proactive loop woke the agent. */
   source?: "user" | "reactive" | undefined;
   textDelta?: string | undefined;
+  /** Provider reasoning/thinking content (Anthropic extended thinking, OpenAI reasoning_content). */
+  thinkingDelta?: string | undefined;
   toolName?: string | undefined;
   pendingActionId?: string | undefined;
   message?: string | undefined;

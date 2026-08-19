@@ -29,7 +29,7 @@ export interface AgentToolSchema {
 }
 
 export interface AgentLlmStreamEvent {
-  type: "text_delta" | "tool_call" | "done";
+  type: "text_delta" | "thinking_delta" | "tool_call" | "done";
   text?: string;
   toolCall?: { id: string; name: string; arguments: string };
   message?: string;
@@ -231,12 +231,17 @@ async function streamAnthropic(
   if (!response.ok) throw new AgentError("AGENT_HTTP_ERROR", await readError(response));
 
   const data = await response.json() as {
-    content?: Array<{ type: string; text?: string; name?: string; id?: string; input?: unknown }>;
+    content?: Array<{ type: string; text?: string; thinking?: string; name?: string; id?: string; input?: unknown }>;
     stop_reason?: string;
   };
   let message = "";
   for (const block of data.content ?? []) {
-    if (block.type === "text" && block.text) {
+    if (block.type === "thinking" && block.thinking) {
+      // Anthropic extended thinking lives in its own content block — surface it
+      // to the UI as a dedicated thinking_delta so the chat can render it
+      // separately from the real answer text.
+      request.onEvent({ type: "thinking_delta", text: block.thinking });
+    } else if (block.type === "text" && block.text) {
       message += block.text;
       request.onEvent({ type: "text_delta", text: block.text });
     } else if (block.type === "tool_use" && block.name) {
@@ -293,10 +298,20 @@ async function streamOpenAi(
   if (!response.ok) throw new AgentError("AGENT_HTTP_ERROR", await readError(response));
 
   const data = await response.json() as {
-    choices?: Array<{ message?: { content?: string | null; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> } }>;
+    choices?: Array<{
+      message?: {
+        content?: string | null;
+        // OpenAI o-series / DeepSeek / o1-compat: a separate reasoning field
+        // that the chat UI surfaces as a dedicated "thinking" section.
+        reasoning_content?: string | null;
+        tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+      };
+    }>;
   };
   const choice = data.choices?.[0];
   let message = choice?.message?.content ?? "";
+  const reasoning = choice?.message?.reasoning_content ?? "";
+  if (reasoning) request.onEvent({ type: "thinking_delta", text: reasoning });
   for (const tc of choice?.message?.tool_calls ?? []) {
     request.onEvent({ type: "tool_call", toolCall: { id: tc.id, name: tc.function.name, arguments: tc.function.arguments } });
   }
