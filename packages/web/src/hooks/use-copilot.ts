@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { OPENFORGE_GATEWAY_EVENT } from "@/lib/gateway-events";
 import {
   decidePendingAction,
+  editMessage,
   sendMessage,
   type CopilotPendingAction,
   type CopilotRunStatus,
@@ -101,6 +102,19 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
     [setActiveSafe]
   );
 
+  // Edit/regenerate flow: the server truncates the target message in place and
+  // reruns the turn. Streaming deltas flow over /ws/events exactly like a fresh
+  // sendMessage, so we just hand off the returned runId to the same UI state.
+  const startEditedRun = useCallback(
+    async (conversationId: string, messageId: string, content: string) => {
+      const { runId } = await editMessage(conversationId, messageId, content);
+      currentRunIdRef.current = runId;
+      setActiveSafe(() => ({ runId, conversationId, status: "running", text: "", pendingAction: null }));
+      return runId;
+    },
+    [setActiveSafe]
+  );
+
   const approveAction = useCallback(
     async (runId: string, actionId: string, approved: boolean) => {
       await decidePendingAction(runId, actionId, approved);
@@ -114,5 +128,5 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
     setActiveSafe(() => null);
   }, [setActiveSafe]);
 
-  return { active, startRun, approveAction, clearActive };
+  return { active, startRun, startEditedRun, approveAction, clearActive };
 }

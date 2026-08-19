@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDown, Square, Wrench } from "lucide-react";
+import { ArrowDown, Pencil, Square, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,10 @@ export function CopilotChat() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sendError, setSendError] = useState(false);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastSentRef = useRef<string>("");
@@ -83,7 +87,7 @@ export function CopilotChat() {
 
   // Refresh the conversation list when the reactive loop opens a fresh
   // proactive conversation, so its report becomes visible.
-  const { active, startRun, approveAction, clearActive } = useCopilotRun({
+  const { active, startRun, startEditedRun, approveAction, clearActive } = useCopilotRun({
     onReactiveUpdate: refreshConversations,
   });
 
@@ -172,6 +176,48 @@ export function CopilotChat() {
     [active, approveAction, reloadActiveConversation]
   );
 
+  const beginEditMessage = useCallback((message: CopilotMessage) => {
+    setEditingMessageId(message.id);
+    setEditDraft(message.content);
+    setEditError(null);
+  }, []);
+
+  const cancelEditMessage = useCallback(() => {
+    setEditingMessageId(null);
+    setEditDraft("");
+    setEditError(null);
+  }, []);
+
+  const submitEditMessage = useCallback(async () => {
+    const id = conversationId;
+    const targetId = editingMessageId;
+    const content = editDraft.trim();
+    if (!id || !targetId || !content || editSubmitting) return;
+    setEditSubmitting(true);
+    setEditError(null);
+    clearActive();
+    try {
+      await startEditedRun(id, targetId, content);
+      setEditingMessageId(null);
+      setEditDraft("");
+      const id2 = conversationIdRef.current;
+      if (id2) await reloadActiveConversation(id2);
+    } catch {
+      setEditError(t("copilot.editFailed"));
+    } finally {
+      setEditSubmitting(false);
+    }
+  }, [
+    conversationId,
+    editingMessageId,
+    editDraft,
+    editSubmitting,
+    clearActive,
+    startEditedRun,
+    reloadActiveConversation,
+    t
+  ]);
+
   const onScroll = useCallback(() => {
     const node = scrollRef.current;
     if (!node) return;
@@ -230,7 +276,19 @@ export function CopilotChat() {
               <EmptyState onSuggestion={(text) => void send(text)} />
             )}
             {messages.map((message) => (
-              <MessageRow key={message.id} message={message} />
+              <MessageRow
+                key={message.id}
+                message={message}
+                isEditing={editingMessageId === message.id}
+                editDraft={editDraft}
+                editError={editError}
+                editSubmitting={editSubmitting}
+                canEdit={!isRunning && editingMessageId === null}
+                onBeginEdit={beginEditMessage}
+                onChangeDraft={setEditDraft}
+                onSubmitEdit={submitEditMessage}
+                onCancelEdit={cancelEditMessage}
+              />
             ))}
             {active?.text ? (
               <StreamingMessage text={active.text} />
@@ -332,7 +390,29 @@ function StreamingMessage({ text }: { text: string }) {
   );
 }
 
-function MessageRow({ message }: { message: CopilotMessage }) {
+function MessageRow({
+  message,
+  isEditing,
+  editDraft,
+  editError,
+  editSubmitting,
+  canEdit,
+  onBeginEdit,
+  onChangeDraft,
+  onSubmitEdit,
+  onCancelEdit,
+}: {
+  message: CopilotMessage;
+  isEditing: boolean;
+  editDraft: string;
+  editError: string | null;
+  editSubmitting: boolean;
+  canEdit: boolean;
+  onBeginEdit: (message: CopilotMessage) => void;
+  onChangeDraft: (value: string) => void;
+  onSubmitEdit: () => void;
+  onCancelEdit: () => void;
+}) {
   const { t } = useLanguage();
   const isUser = message.role === "user";
 
@@ -363,14 +443,60 @@ function MessageRow({ message }: { message: CopilotMessage }) {
     return <div className="text-sm text-destructive">{message.content}</div>;
   }
 
+  if (isUser && isEditing) {
+    return (
+      <div className="flex flex-col items-end gap-1">
+        <Textarea
+          value={editDraft}
+          onChange={(event) => onChangeDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void onSubmitEdit();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              onCancelEdit();
+            }
+          }}
+          className="max-w-[80%] min-h-[80px] resize-y"
+          rows={3}
+          disabled={editSubmitting}
+          autoFocus
+        />
+        <div className="flex items-center gap-2 text-xs">
+          <Button size="sm" onClick={() => void onSubmitEdit()} disabled={editSubmitting || !editDraft.trim()}>
+            {t("copilot.editSubmit")}
+          </Button>
+          <Button size="sm" variant="outline" onClick={onCancelEdit} disabled={editSubmitting}>
+            {t("copilot.editCancel")}
+          </Button>
+          {editError && <span className="text-destructive">{editError}</span>}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
-          isUser ? "whitespace-pre-wrap bg-primary text-primary-foreground" : "bg-muted"
-        }`}
-      >
-        {isUser ? message.content : <MarkdownRenderer content={message.content} />}
+    <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
+      <div className="relative max-w-[80%]">
+        <div
+          className={`rounded-lg px-3 py-2 text-sm ${
+            isUser ? "whitespace-pre-wrap bg-primary text-primary-foreground" : "bg-muted"
+          }`}
+        >
+          {isUser ? message.content : <MarkdownRenderer content={message.content} />}
+        </div>
+        {isUser && canEdit && (
+          <button
+            type="button"
+            aria-label={t("copilot.editPrompt")}
+            title={t("copilot.editPrompt")}
+            onClick={() => onBeginEdit(message)}
+            className="absolute -left-9 top-1.5 hidden size-7 items-center justify-center rounded-md border border-border/60 bg-background/80 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 md:flex"
+          >
+            <Pencil className="size-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );
