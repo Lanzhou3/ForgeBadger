@@ -64,6 +64,10 @@ export async function createGatewayRuntime(
     operationsRuntime,
     feishuChannelRuntime,
     copilotBridgeToken: bridgeToken,
+    dispatchConfirm: {
+      timeoutMs: env.OPENFORGE_DISPATCH_CONFIRM_TIMEOUT_MS,
+      intervalMs: env.OPENFORGE_DISPATCH_CONFIRM_INTERVAL_MS
+    },
     ...(dshEnabled
       ? {
         dshCopilot: {

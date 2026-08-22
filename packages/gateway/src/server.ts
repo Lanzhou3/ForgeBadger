@@ -19,6 +19,7 @@ import { buildAgentStack } from "./services/agent/agent-stack.js";
 import { DshProcessManager, type DshProcessManagerOptions } from "./services/dsh-copilot/process-manager.js";
 import { createDshCopilotBff, type DshCopilotBff } from "./services/dsh-copilot/bff-service.js";
 import { createCordisConfigRenderer } from "./services/dsh-copilot/dsh-config.js";
+import type { DispatchConfirmOptions } from "./services/copilot-bridge/delivery-confirm.js";
 
 import { mountRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -85,6 +86,8 @@ export interface GatewayAppOptions {
   llmFetch?: typeof fetch;
   /** M2: dsh copilot kernel process config; present only when the flag is on. */
   dshCopilot?: DshProcessManagerOptions | undefined;
+  /** Delivery read-back budget for the bridge dispatch path (from env in start-gateway). */
+  dispatchConfirm?: DispatchConfirmOptions | undefined;
 }
 
 export function createServer(deps: ServerDeps): express.Express {
@@ -149,7 +152,8 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
       processManager: dshProcessManager,
       sessionManager,
       portfolioApi,
-      ...(options.llmFetch ? { llmFetch: options.llmFetch } : {})
+      ...(options.llmFetch ? { llmFetch: options.llmFetch } : {}),
+      ...(options.dispatchConfirm ? { dispatchConfirm: options.dispatchConfirm } : {})
     })
     : undefined;
 

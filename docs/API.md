@@ -1915,8 +1915,13 @@ Base path: `/api/internal/v1/copilot-bridge`.
 - `POST /sessions/:id/dispatch` — body `{ "message": "..." }` (required, 1–4000
   chars after trim). Verifies the session belongs to the acting user (404
   otherwise), then injects the message plus a submitting newline into the
-  session terminal via the session-manager → tmux `send-keys` path. Returns
-  `{ dispatched: true, sessionId }`. Errors: 409
+  session terminal via the session-manager → tmux `send-keys` path, and confirms
+  delivery by polling `tmux capture-pane` until the injected text is observed on
+  the target pane (bounded budget). Returns
+  `{ dispatched: true, sessionId, delivery: "confirmed" }`. Errors: 409
   `BRIDGE_SESSION_NOT_ACTIVE` when the session is not live in this Gateway
   process; 409 `PORTFOLIO_WRITER_FENCE_REJECTED` when the session is leased to a
-  Portfolio worker.
+  Portfolio worker; 502 `BRIDGE_DELIVERY_UNCONFIRMED`
+  (`details.reason = "delivery_unconfirmed"`) when the text never appears on the
+  pane within the confirmation budget — typically a modal dialog (vim, prompt)
+  swallowing the input; the message explains the cause for the calling model.
