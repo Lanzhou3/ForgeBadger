@@ -1,0 +1,128 @@
+# Per-user dsh runtime composition for the OpenForge copilot.
+# Loaded by @openforge/dsh-bridge's launcher with this package as the bare-name
+# resolution base. stdout is reserved for JSON-RPC frames; do not add a
+# console logger or terminal UI.
+#
+# Environment contract:
+#   OPENFORGE_GATEWAY_URL / OPENFORGE_COPILOT_BRIDGE_TOKEN / OPENFORGE_USER_ID
+#     — bridge plugin (validated by the launcher before boot)
+#   OPENFORGE_BRIDGE_ENABLE_OPERATE
+#     — "1"/"true" registers the operate tools (advance/dispatch), gated behind
+#     the approval bridge below; the M3 Gateway sends "1" on the dsh path
+#   DSH_LLM_API_KEY (required; MINIMAX_API_KEY accepted as a legacy fallback)
+#     — LLM route credential, decrypted in Gateway memory and injected at spawn
+#   DSH_LLM_API (anthropic-messages | openai-completions | openai-responses,
+#     default anthropic-messages), DSH_LLM_BASE_URL, DSH_LLM_MODEL_ID,
+#     DSH_LLM_MODEL_NAME, DSH_LLM_CONTEXT_WINDOW, DSH_LLM_MAX_TOKENS
+#     — LLM route shape, injected per resolved model profile
+#   DSH_CWD (default: process cwd), DSH_SESSION_ROOT (default: ./.sessions)
+
+# Resume-aware SDK server: adopts persisted session logs on session/prompt,
+# which is what makes kill-and-resume work as the mid-turn-cancel substitute.
+- id: sdk-jsonrpc-server
+  name: '@openforge/dsh-bridge/server'
+
+# OpenForge platform tools (work items, session dispatch) over the Gateway
+# internal copilot-bridge API.
+- id: openforge-bridge
+  name: '@openforge/dsh-bridge/plugin'
+
+# Approval seam (M3): the bridge plugin's operate tools answer pre-execute with
+# `ask`; this service owns policy + the durable approval/asked|decided audit
+# pair, and the bridge's answerer forwards the question to the Gateway.
+- id: approval
+  name: '@deepseek-ai/dsh-user-approval'
+  config:
+    policy: ask
+
+# LLM route via pi-ai, fully parameterized from the spawn environment. The API
+# key is resolved per request from $DSH_LLM_API_KEY. Provider key "copilot" is
+# what the Gateway passes as `provider` in the initialize handshake.
+- id: llm
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      copilot:
+        displayName: !!js process.env.DSH_LLM_MODEL_NAME ?? 'OpenForge Copilot'
+        apiKeyEnv: DSH_LLM_API_KEY
+        api: !!js process.env.DSH_LLM_API ?? 'anthropic-messages'
+        baseURL: !!js process.env.DSH_LLM_BASE_URL ?? 'https://api.minimaxi.com/anthropic'
+        models:
+          - id: !!js process.env.DSH_LLM_MODEL_ID ?? 'MiniMax-M3'
+            name: !!js process.env.DSH_LLM_MODEL_NAME ?? process.env.DSH_LLM_MODEL_ID ?? 'MiniMax M3'
+            contextWindow: !!js Number(process.env.DSH_LLM_CONTEXT_WINDOW ?? 262144)
+            maxTokens: !!js Number(process.env.DSH_LLM_MAX_TOKENS ?? 8192)
+
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+
+- id: bash
+  name: '@deepseek-ai/dsh-bash-local'
+  config:
+    cwd: !!js process.env.DSH_CWD ?? process.cwd()
+    timeoutMs: 60000
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are the OpenForge copilot. Use the OpenForge platform tools (list_work_items, list_sessions) to answer project and session questions.'
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash:
+      enableRunInBackground: false
+    toolJobs: false
+
+- id: sessions
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions'
+
+- id: session-checkpoints
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'
+
+# @openforge-feature: subagents
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+
+- id: subagent-spawn-in-process
+  name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+  config:
+    providerName: spawn
+
+- id: tool-subagent
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: spawn
+    toolName: subagent
+    enableRunInBackground: false
+# @openforge-feature-end: subagents
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: fs-local
+  name: '@deepseek-ai/dsh-fs-local'
+  config:
+    cwd: !!js process.env.DSH_CWD ?? process.cwd()
+
+- id: fs-observation-policy
+  name: '@deepseek-ai/dsh-fs-observation-policy'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: token-meter
+  name: '@deepseek-ai/dsh-token-meter'
+
+# @openforge-feature: compaction
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
+  config:
+    thresholdRatio: 0.8
+    retainRatio: 0.16
+    maxTokens: 8192
+    compactionRetries: 1
+# @openforge-feature-end: compaction

@@ -1,0 +1,69 @@
+{
+  "name": "@openforge/dsh-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenForge platform bridge plugin + resume-aware JSON-RPC server + launcher for the DeepSeek Harness (dsh) copilot kernel.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "openforge-dsh-bridge": "dist/launcher.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./plugin": {
+      "types": "./dist/plugin.d.ts",
+      "default": "./dist/plugin.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    }
+  },
+  "files": [
+    "dist",
+    "templates",
+    "README.md"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test --import tsx",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "link:../../../github_project/deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-agent": "link:../../../github_project/deepseek-harness/packages/core/agent",
+    "@deepseek-ai/dsh-agent-spine-demo": "link:../../../github_project/deepseek-harness/packages/examples/agent-spine-demo",
+    "@deepseek-ai/dsh-app-boot": "link:../../../github_project/deepseek-harness/packages/boot/app-boot",
+    "@deepseek-ai/dsh-bash-local": "link:../../../github_project/deepseek-harness/packages/shell/bash-local",
+    "@deepseek-ai/dsh-compaction-basic": "link:../../../github_project/deepseek-harness/packages/compaction/compaction-basic",
+    "@deepseek-ai/dsh-fs-local": "link:../../../github_project/deepseek-harness/packages/fs/fs-local",
+    "@deepseek-ai/dsh-fs-observation-policy": "link:../../../github_project/deepseek-harness/packages/fs/fs-observation-policy",
+    "@deepseek-ai/dsh-llm": "link:../../../github_project/deepseek-harness/packages/llm/llm",
+    "@deepseek-ai/dsh-llm-pi-ai": "link:../../../github_project/deepseek-harness/packages/llm/llm-pi-ai",
+    "@deepseek-ai/dsh-sdk-protocol": "link:../../../github_project/deepseek-harness/packages/sdk/protocol",
+    "@deepseek-ai/dsh-session": "link:../../../github_project/deepseek-harness/packages/core/session",
+    "@deepseek-ai/dsh-session-checkpoint-policy": "link:../../../github_project/deepseek-harness/packages/session/session-checkpoint-policy",
+    "@deepseek-ai/dsh-session-persistence": "link:../../../github_project/deepseek-harness/packages/session/session-persistence",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "link:../../../github_project/deepseek-harness/packages/session/session-persistence-jsonl",
+    "@deepseek-ai/dsh-subagent": "link:../../../github_project/deepseek-harness/packages/subagent/subagent",
+    "@deepseek-ai/dsh-subagent-spawn-in-process": "link:../../../github_project/deepseek-harness/packages/subagent/subagent-spawn-in-process",
+    "@deepseek-ai/dsh-subprocess-local": "link:../../../github_project/deepseek-harness/packages/subprocess/subprocess-local",
+    "@deepseek-ai/dsh-token-meter": "link:../../../github_project/deepseek-harness/packages/llm/token-meter",
+    "@deepseek-ai/dsh-tool-fs": "link:../../../github_project/deepseek-harness/packages/fs/tool-fs",
+    "@deepseek-ai/dsh-tool-subagent": "link:../../../github_project/deepseek-harness/packages/subagent/tool-subagent",
+    "@deepseek-ai/dsh-tool-todo": "link:../../../github_project/deepseek-harness/packages/todo/tool-todo",
+    "@deepseek-ai/dsh-tools": "link:../../../github_project/deepseek-harness/packages/core/tools",
+    "@deepseek-ai/dsh-user-approval": "link:../../../github_project/deepseek-harness/packages/interaction/user-approval"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
