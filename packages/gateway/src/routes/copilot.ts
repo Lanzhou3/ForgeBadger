@@ -16,6 +16,13 @@ import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { buildAgentStack, type AgentStackDeps } from "../services/agent/agent-stack.js";
 import { AgentError } from "../services/agent/types.js";
 import type { DshCopilotBff } from "../services/dsh-copilot/bff-service.js";
+import {
+  DSH_AVAILABLE_PLUGINS,
+  getEffectiveDshConfig,
+  unknownPluginKeys
+} from "../services/dsh-copilot/dsh-config.js";
+import { CopilotDshConfigRepository } from "../db/repositories/copilot-dsh-config-repository.js";
+import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 
 const idSchema = z.string().trim().min(1).max(128);
 const titleSchema = z.string().trim().min(1).max(200).optional();
@@ -243,6 +250,69 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     const { memory } = buildAgentStack(deps, userId(req));
     if (!memory.delete(id)) return notFound(res);
     res.json(ok({ deleted: true }));
+  });
+
+  // M4: visual configuration of the per-user dsh kernel (rendered into a
+  // per-user cordis.yml at spawn). dsh-path only: with the flag off there is
+  // no kernel to configure, so both endpoints 404.
+  const dshConfigUpdateSchema = z.object({
+    defaultModelId: z.string().trim().min(1).max(128).nullable().optional(),
+    plugins: z.record(z.boolean()).optional()
+  }).strict();
+
+  const dshConfigPayload = (uid: string) => {
+    const effective = getEffectiveDshConfig(deps.db, uid);
+    return {
+      defaultModelId: effective.defaultModelId,
+      plugins: effective.plugins,
+      availablePlugins: DSH_AVAILABLE_PLUGINS,
+      runtime: { status: deps.dshBff ? deps.dshBff.getRuntimeStatus({ userId: uid }) : "off" }
+    };
+  };
+
+  router.get("/dsh-config", (req, res) => {
+    if (!deps.dshBff) return notFound(res);
+    res.json(ok(dshConfigPayload(userId(req))));
+  });
+
+  router.put("/dsh-config", (req, res) => {
+    if (!deps.dshBff) return notFound(res);
+    withBody(req.body, dshConfigUpdateSchema, res, (value) => {
+      const uid = userId(req);
+      if (value.plugins) {
+        const unknown = unknownPluginKeys(value.plugins);
+        if (unknown.length > 0) {
+          res.status(400).json({
+            code: 1,
+            message: `Unknown dsh plugin(s): ${unknown.join(", ")}`,
+            details: { code: "COPILOT_DSH_CONFIG_UNKNOWN_PLUGIN" }
+          });
+          return;
+        }
+      }
+      if (value.defaultModelId !== undefined && value.defaultModelId !== null) {
+        const profile = new ModelProviderRepository(deps.db, uid, deps.masterKey).getModelProfile(value.defaultModelId);
+        if (!profile || profile.status !== "active") {
+          res.status(400).json({
+            code: 1,
+            message: "defaultModelId must reference one of your active model profiles",
+            details: { code: "COPILOT_DSH_CONFIG_INVALID_MODEL" }
+          });
+          return;
+        }
+      }
+      const stored = new CopilotDshConfigRepository(deps.db, uid).upsert({
+        ...(value.defaultModelId !== undefined ? { defaultModelId: value.defaultModelId } : {}),
+        ...(value.plugins !== undefined ? { plugins: value.plugins } : {})
+      });
+      // The config applies on the next spawn; restart the idling runtime now
+      // when no run is active so the change takes effect on the next message.
+      void deps.dshBff!.applyConfigChanged({ userId: uid })
+        .then(({ runtimeRestarted }) => {
+          res.json(ok({ ...dshConfigPayload(uid), updatedAt: stored.updatedAt, runtimeRestarted }));
+        })
+        .catch((error) => domainError(res, error));
+    });
   });
 
   return router;

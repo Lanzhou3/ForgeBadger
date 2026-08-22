@@ -18,6 +18,7 @@ import { attachCopilotReactiveLoop } from "./services/agent/reactive-loop.js";
 import { buildAgentStack } from "./services/agent/agent-stack.js";
 import { DshProcessManager, type DshProcessManagerOptions } from "./services/dsh-copilot/process-manager.js";
 import { createDshCopilotBff, type DshCopilotBff } from "./services/dsh-copilot/bff-service.js";
+import { createCordisConfigRenderer } from "./services/dsh-copilot/dsh-config.js";
 
 import { mountRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -132,7 +133,14 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
 
   // M2 dsh copilot kernel: per-user runtime processes + BFF. Constructed only
   // when the flag is on; with it absent the copilot stack is byte-identical.
-  const dshProcessManager = options.dshCopilot ? new DshProcessManager(options.dshCopilot) : undefined;
+  const dshProcessManager = options.dshCopilot ? new DshProcessManager({
+    ...options.dshCopilot,
+    // M4: render the per-user cordis.yml (plugin toggles) at spawn. The
+    // template ships inside the dsh-bridge package next to the launcher; when
+    // it is absent (tests with a fake launcher) the runtime keeps the default
+    // composition.
+    renderConfig: createCordisConfigRenderer(options.db, options.dshCopilot.launcherPath, options.dshCopilot.configTemplatePath)
+  }) : undefined;
   const dshBff = dshProcessManager
     ? createDshCopilotBff({
       db: options.db,
