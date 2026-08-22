@@ -99,4 +99,27 @@ describe("loadEnv security configuration", () => {
 
     assert.equal(env.OPENFORGE_TMUX_PREFIX, "of-smoke-test-");
   });
+
+  it("gates the dsh copilot behind an explicit flag value", () => {
+    const base = { OPENFORGE_JWT_SECRET: jwtSecret, OPENFORGE_MASTER_KEY: masterKey };
+    assert.equal(loadEnv({ ...base }).OPENFORGE_DSH_COPILOT_ENABLED, false);
+    assert.equal(loadEnv({ ...base, OPENFORGE_DSH_COPILOT_ENABLED: "1" }).OPENFORGE_DSH_COPILOT_ENABLED, true);
+    assert.equal(loadEnv({ ...base, OPENFORGE_DSH_COPILOT_ENABLED: "true" }).OPENFORGE_DSH_COPILOT_ENABLED, true);
+    assert.equal(loadEnv({ ...base, OPENFORGE_DSH_COPILOT_ENABLED: "0" }).OPENFORGE_DSH_COPILOT_ENABLED, false);
+    assert.equal(loadEnv({ ...base, OPENFORGE_DSH_COPILOT_ENABLED: "false" }).OPENFORGE_DSH_COPILOT_ENABLED, false);
+    assert.throws(
+      () => loadEnv({ ...base, OPENFORGE_DSH_COPILOT_ENABLED: "yes" }),
+      /OPENFORGE_DSH_COPILOT_ENABLED|Invalid/i
+    );
+  });
+
+  it("defaults the dsh idle reap to 15 minutes and accepts an override", () => {
+    const base = { OPENFORGE_JWT_SECRET: jwtSecret, OPENFORGE_MASTER_KEY: masterKey };
+    assert.equal(loadEnv({ ...base }).OPENFORGE_DSH_IDLE_MS, 15 * 60 * 1000);
+    assert.equal(loadEnv({ ...base, OPENFORGE_DSH_IDLE_MS: "5000" }).OPENFORGE_DSH_IDLE_MS, 5000);
+    assert.throws(
+      () => loadEnv({ ...base, OPENFORGE_DSH_IDLE_MS: "-1" }),
+      /OPENFORGE_DSH_IDLE_MS|Invalid|positive/i
+    );
+  });
 });

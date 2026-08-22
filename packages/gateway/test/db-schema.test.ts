@@ -47,6 +47,7 @@ describe("db schema", () => {
       "catalog_items",
       "catalog_sources",
       "copilot_conversations",
+      "copilot_dsh_config",
       "copilot_memory",
       "copilot_memory_fts",
       "copilot_memory_fts_config",

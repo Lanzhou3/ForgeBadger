@@ -1,4 +1,7 @@
 import type { Server } from "node:http";
+import { randomBytes } from "node:crypto";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { GatewayEnv } from "../config/env.js";
 import { loadEnv } from "../config/env.js";
@@ -39,6 +42,16 @@ export async function createGatewayRuntime(
     operationsRuntime
   } = await startupGateway(startupOptions);
 
+  // M2 dsh copilot: when enabled without a configured bridge token, generate
+  // an ephemeral per-boot token that serves both the internal route mount and
+  // the child-process env injection. The value is never logged.
+  const dshEnabled = env.OPENFORGE_DSH_COPILOT_ENABLED;
+  let bridgeToken = env.OPENFORGE_COPILOT_BRIDGE_TOKEN;
+  if (dshEnabled && !bridgeToken) {
+    bridgeToken = randomBytes(32).toString("hex");
+    console.info("[gateway] dsh copilot enabled: generated an ephemeral copilot-bridge token for this boot");
+  }
+
   const runtime = createGatewayApp({
     jwtSecret: env.OPENFORGE_JWT_SECRET,
     masterKey: env.OPENFORGE_MASTER_KEY,
@@ -50,7 +63,18 @@ export async function createGatewayRuntime(
     portfolioExecution,
     operationsRuntime,
     feishuChannelRuntime,
-    copilotBridgeToken: env.OPENFORGE_COPILOT_BRIDGE_TOKEN
+    copilotBridgeToken: bridgeToken,
+    ...(dshEnabled
+      ? {
+        dshCopilot: {
+          launcherPath: env.OPENFORGE_DSH_BRIDGE_LAUNCHER ?? defaultDshLauncherPath(),
+          gatewayUrl: `http://${env.OPENFORGE_HOST}:${env.OPENFORGE_PORT}`,
+          bridgeToken: bridgeToken ?? "",
+          stateDir: env.OPENFORGE_STATE_DIR,
+          idleMs: env.OPENFORGE_DSH_IDLE_MS
+        }
+      }
+      : {})
   });
 
   await runtime.recoveryReady;
@@ -80,6 +104,11 @@ export async function startGateway(
 
 function resolveGatewayEnv(input: NodeJS.ProcessEnv | GatewayEnv): GatewayEnv {
   return loadEnv(input as NodeJS.ProcessEnv);
+}
+
+/** Default dsh launcher: the monorepo dsh-bridge build output. */
+function defaultDshLauncherPath(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "dsh-bridge", "dist", "launcher.js");
 }
 
 async function listen(server: Server, port: number, host: string): Promise<void> {

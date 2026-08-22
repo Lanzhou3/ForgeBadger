@@ -16,6 +16,8 @@ import type { FeishuChannelRuntime } from "./services/integrations/feishu-channe
 import { createPortfolioApiFacade, createPortfolioEventFacade, type PortfolioApiFacade } from "./services/portfolio/portfolio-api-service.js";
 import { attachCopilotReactiveLoop } from "./services/agent/reactive-loop.js";
 import { buildAgentStack } from "./services/agent/agent-stack.js";
+import { DshProcessManager, type DshProcessManagerOptions } from "./services/dsh-copilot/process-manager.js";
+import { createDshCopilotBff, type DshCopilotBff } from "./services/dsh-copilot/bff-service.js";
 
 import { mountRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -39,6 +41,8 @@ export interface ServerDeps {
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
   /** Test-only: overrides the Copilot LLM client fetch so tests can stub model responses. */
   llmFetch?: typeof fetch;
+  /** M2: constructed dsh copilot BFF; present only when the flag is on. */
+  dshBff?: DshCopilotBff | undefined;
 }
 
 /**
@@ -78,6 +82,8 @@ export interface GatewayAppOptions {
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
   /** Test-only: overrides the Copilot LLM client fetch so tests can stub model responses. */
   llmFetch?: typeof fetch;
+  /** M2: dsh copilot kernel process config; present only when the flag is on. */
+  dshCopilot?: DshProcessManagerOptions | undefined;
 }
 
 export function createServer(deps: ServerDeps): express.Express {
@@ -124,6 +130,21 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const portfolioApi = createPortfolioApiFacade({ db: options.db, events: createPortfolioEventFacade(eventBus) });
   const recoveryReady = Promise.resolve();
 
+  // M2 dsh copilot kernel: per-user runtime processes + BFF. Constructed only
+  // when the flag is on; with it absent the copilot stack is byte-identical.
+  const dshProcessManager = options.dshCopilot ? new DshProcessManager(options.dshCopilot) : undefined;
+  const dshBff = dshProcessManager
+    ? createDshCopilotBff({
+      db: options.db,
+      masterKey: options.masterKey,
+      eventBus,
+      processManager: dshProcessManager,
+      sessionManager,
+      portfolioApi,
+      ...(options.llmFetch ? { llmFetch: options.llmFetch } : {})
+    })
+    : undefined;
+
   const app = createServer({
     db: options.db,
     jwtSecret,
@@ -139,6 +160,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     appVersion: options.appVersion ?? "0.0.0",
     adapterCommandRunner: options.adapterCommandRunner,
     feishuChannelRuntime: options.feishuChannelRuntime,
+    ...(dshBff ? { dshBff } : {}),
     ...(options.llmFetch ? { llmFetch: options.llmFetch } : {})
   });
 
@@ -149,7 +171,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   attachEventsWebSocket({ server, eventBus, jwtSecret, db: options.db });
   // Proactive copilot: wake on platform events, report in fresh conversations.
   const reactiveLoop = attachCopilotReactiveLoop({
-    deps: { db: options.db, masterKey: options.masterKey, eventBus, portfolioApi },
+    deps: { db: options.db, masterKey: options.masterKey, eventBus, portfolioApi, ...(dshBff ? { dshBff } : {}) },
     buildAgentStack
   });
   // Feishu Copilot channel: the runtime is built in startup before the
@@ -158,7 +180,8 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     db: options.db,
     masterKey: options.masterKey,
     eventBus,
-    portfolioApi
+    portfolioApi,
+    ...(dshBff ? { dshBff } : {})
   });
 
   return {
@@ -177,6 +200,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
 
       try {
         reactiveLoop.stop();
+        await dshProcessManager?.disposeAll();
         await options.operationsRuntime?.stop();
         await options.feishuChannelRuntime?.stop();
         await closeServerIfListening(server);

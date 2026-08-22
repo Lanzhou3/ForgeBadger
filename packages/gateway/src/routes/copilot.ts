@@ -14,6 +14,8 @@ import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { buildAgentStack, type AgentStackDeps } from "../services/agent/agent-stack.js";
+import { AgentError } from "../services/agent/types.js";
+import type { DshCopilotBff } from "../services/dsh-copilot/bff-service.js";
 
 const idSchema = z.string().trim().min(1).max(128);
 const titleSchema = z.string().trim().min(1).max(200).optional();
@@ -35,7 +37,15 @@ const writeMemorySchema = z.object({
 const listMemorySchema = z.object({ scope: memoryScopeSchema.default("global"), projectId: z.string().max(128).optional(), limit: z.coerce.number().int().min(1).max(100).optional() }).strict();
 const searchMemorySchema = z.object({ q: z.string().trim().min(1).max(512), scope: memoryScopeSchema.default("global"), projectId: z.string().max(128).optional(), limit: z.coerce.number().int().min(1).max(50).optional() }).strict();
 
-export type CopilotRouteDeps = AgentStackDeps;
+export type CopilotRouteDeps = AgentStackDeps & {
+  /**
+   * M2/M3 dsh kernel BFF. Present only when OPENFORGE_DSH_COPILOT_ENABLED=1;
+   * the message/cancel/decide endpoints then delegate to it while every other
+   * endpoint (conversations CRUD, memory) keeps the in-process stack.
+   * edit-message is explicitly unsupported (501) on the dsh path.
+   */
+  dshBff?: DshCopilotBff | undefined;
+};
 
 export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   const router = Router();
@@ -93,10 +103,21 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   // run a fresh turn against the new prompt. The orchestrator is told to skip
   // its own user-message append so the edited row remains the only one with
   // the new content. Streaming deltas arrive over /ws/events.
+  // dsh path (M3): the kernel session log cannot be truncated/forked through
+  // the SDK surface yet, so editing is explicitly unsupported instead of
+  // silently diverging the projection from the kernel log (known limitation).
   const editMessageSchema = z.object({ messageId: idSchema, content: z.string().trim().min(1).max(32 * 1024) }).strict();
   router.post("/conversations/:id/edit-message", (req, res) => {
     const id = parseId(req.params.id, res); if (!id) return;
     withBody(req.body, editMessageSchema, res, async (value) => {
+      if (deps.dshBff) {
+        res.status(501).json({
+          code: 1,
+          message: "Editing messages is not supported yet on the dsh copilot path",
+          details: { code: "DSH_EDIT_MESSAGE_UNSUPPORTED" }
+        });
+        return;
+      }
       const { log, orchestrator } = buildAgentStack(deps, userId(req));
       if (!log.getConversation(id)) return notFound(res);
       const truncated = log.truncateAfterMessage(value.messageId, value.content);
@@ -118,18 +139,27 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
 
   // Run a turn: appends the user message, runs the step loop, and returns the
   // run id. Streaming deltas arrive over /ws/events (copilot_run_updated).
+  // When the dsh BFF is wired (OPENFORGE_DSH_COPILOT_ENABLED=1) the turn runs
+  // on the per-user dsh kernel process with an identical response contract.
   router.post("/conversations/:id/messages", (req, res) => {
     const id = parseId(req.params.id, res); if (!id) return;
     const { log, orchestrator } = buildAgentStack(deps, userId(req));
     if (!log.getConversation(id)) return notFound(res);
     withBody(req.body, sendMessageSchema, res, async (value) => {
       try {
-        const runId = await orchestrator.runTurn({
-          userId: userId(req),
-          conversationId: id,
-          userText: value.content,
-          ...(value.modelId !== undefined ? { modelId: value.modelId } : {})
-        });
+        const runId = deps.dshBff
+          ? await deps.dshBff.sendMessage({
+            userId: userId(req),
+            conversationId: id,
+            content: value.content,
+            ...(value.modelId !== undefined ? { modelId: value.modelId } : {})
+          })
+          : await orchestrator.runTurn({
+            userId: userId(req),
+            conversationId: id,
+            userText: value.content,
+            ...(value.modelId !== undefined ? { modelId: value.modelId } : {})
+          });
         res.status(201).json(ok({ runId }));
       } catch (error) {
         domainError(res, error);
@@ -147,6 +177,14 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
 
   router.post("/runs/:id/cancel", (req, res) => {
     const id = parseId(req.params.id, res); if (!id) return;
+    if (deps.dshBff) {
+      // dsh path: cancel = kill the user's runtime process (the SDK has no
+      // mid-turn cancel; kill-and-resume is the verified substitute).
+      void deps.dshBff.cancelRun({ userId: userId(req), runId: id })
+        .then((result) => res.json(ok(result)))
+        .catch((error) => domainError(res, error));
+      return;
+    }
     const { orchestrator } = buildAgentStack(deps, userId(req));
     const result = orchestrator.cancelRun({ userId: userId(req), runId: id });
     res.json(ok(result));
@@ -156,15 +194,19 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   router.post("/runs/:id/pending-actions/:actionId/decide", (req, res) => {
     const runId = parseId(req.params.id, res); if (!runId) return;
     const actionId = parseId(req.params.actionId, res); if (!actionId) return;
-    const { orchestrator } = buildAgentStack(deps, userId(req));
     withBody(req.body, approveSchema, res, async (value) => {
       try {
-        const result = await orchestrator.resumeAfterApproval({
-          userId: userId(req),
-          runId,
-          actionId,
-          approved: value.approved
-        });
+        // Identical contract on both paths: the dsh BFF bridges the decision
+        // back into the kernel's suspended tool call (or executes gateway-side
+        // when the runtime died while pending).
+        const result = deps.dshBff
+          ? await deps.dshBff.decidePendingAction({ userId: userId(req), runId, actionId, approved: value.approved })
+          : await buildAgentStack(deps, userId(req)).orchestrator.resumeAfterApproval({
+            userId: userId(req),
+            runId,
+            actionId,
+            approved: value.approved
+          });
         res.json(ok(result));
       } catch (error) {
         domainError(res, error);
@@ -230,6 +272,13 @@ function notFound(res: Response): void {
   res.status(404).json({ code: 1, message: "Copilot record not found", details: { code: "COPILOT_NOT_FOUND" } });
 }
 function domainError(res: Response, error: unknown): void {
+  // One active run per user on the dsh path: concurrent messages are a
+  // conflict, not a bad request. Only the dsh BFF raises this code, so the
+  // flag-off path is untouched.
+  if (error instanceof AgentError && error.code === "COPILOT_RUN_BUSY") {
+    res.status(409).json({ code: 1, message: error.message, details: { code: error.code } });
+    return;
+  }
   const code = error instanceof Error ? error.message : "COPILOT_OPERATION_FAILED";
   res.status(400).json({ code: 1, message: "Copilot operation rejected", details: { code } });
 }

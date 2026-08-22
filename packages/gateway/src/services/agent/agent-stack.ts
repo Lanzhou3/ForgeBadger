@@ -16,12 +16,19 @@ import { createAgentToolRegistry, type AgentToolRegistry } from "./tool-registry
 import { createPlatformTools } from "./tools/index.js";
 import { createCopilotOrchestrator } from "./orchestrator.js";
 import type { PortfolioApiFacade } from "../portfolio/portfolio-api-service.js";
+import type { DshCopilotBff } from "../dsh-copilot/bff-service.js";
 
 export interface AgentStackDeps {
   db: Database;
   masterKey: string;
   eventBus: OpenForgeEventBus;
   portfolioApi?: PortfolioApiFacade | undefined;
+  /**
+   * M3: present when OPENFORGE_DSH_COPILOT_ENABLED=1. Proactive (reactive-loop)
+   * and Feishu-channel turns then run on the dsh kernel BFF instead of the
+   * in-process orchestrator, with the same run/pending-action contract.
+   */
+  dshBff?: DshCopilotBff | undefined;
   /** Test-only fetch override; production callers omit it. */
   llmFetch?: typeof fetch;
 }

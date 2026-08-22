@@ -23,6 +23,8 @@ import type { AgentStack, AgentStackDeps } from "../agent/agent-stack.js";
 import type { AgentPendingAction } from "../agent/types.js";
 
 const REPLY_MAX_CHARS = 4_000;
+/** Bounded wait for an approved dsh kernel turn to land its tool result. */
+const DECIDE_SETTLE_TIMEOUT_MS = 20_000;
 
 const SENDER_MISMATCH_TEXT = "该会话已由其他飞书用户开启，无法在此对话中操作。请让发起人继续，或由发起人发送 /new 重置。";
 
@@ -117,9 +119,19 @@ export function createFeishuCopilotChannel(input: {
     }
     const pending = latestPendingAction(stack, conversationId);
     if (!pending) return reply(ingress.chatId, "没有等待审批的操作。");
-    const result = await stack.orchestrator.resumeAfterApproval({ userId, runId: pending.runId, actionId: pending.id, approved });
+    // Same contract on both paths; the dsh BFF bridges the decision into the
+    // suspended kernel tool call (or executes gateway-side after a runtime
+    // death), so Feishu approval works identically either way.
+    const result = deps.dshBff
+      ? await deps.dshBff.decidePendingAction({ userId, runId: pending.runId, actionId: pending.id, approved })
+      : await stack.orchestrator.resumeAfterApproval({ userId, runId: pending.runId, actionId: pending.id, approved });
     if (!result.resumed) return reply(ingress.chatId, "该操作已被处理过。");
     if (!approved) return reply(ingress.chatId, "已拒绝该操作。");
+    if (deps.dshBff) {
+      // Live-runtime approvals execute inside the still-running kernel turn;
+      // give it a bounded window to land the tool result before replying.
+      await waitForRunSettled(stack, pending.runId, DECIDE_SETTLE_TIMEOUT_MS);
+    }
     const outcome = latestToolResult(stack, conversationId);
     return reply(ingress.chatId, `已批准并执行 ${pending.tool}：\n${truncate(outcome ?? "（无输出）")}`);
   }
@@ -127,7 +139,9 @@ export function createFeishuCopilotChannel(input: {
   async function runTurn(stack: AgentStack, ingress: FeishuCopilotChannelIngress, text: string): Promise<void> {
     const conversationId = resolveConversation(stack, deps.db, userId, ingress);
     try {
-      const runId = await stack.orchestrator.runTurn({ userId, conversationId, userText: text, source: "user" });
+      const runId = deps.dshBff
+        ? await deps.dshBff.sendMessage({ userId, conversationId, content: text })
+        : await stack.orchestrator.runTurn({ userId, conversationId, userText: text, source: "user" });
       const run = stack.log.getRun(runId);
       if (run?.status === "awaiting_approval") {
         const pending = stack.log.listPendingActions(runId).find((action) => action.status === "pending");
@@ -236,4 +250,15 @@ function latestAssistantText(stack: AgentStack, conversationId: string): string 
 
 function truncate(text: string): string {
   return text.length > REPLY_MAX_CHARS ? `${text.slice(0, REPLY_MAX_CHARS)}\n…（已截断）` : text;
+}
+
+/** Poll until the run leaves non-terminal states (awaiting_approval/running). */
+async function waitForRunSettled(stack: AgentStack, runId: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const run = stack.log.getRun(runId);
+    if (!run || run.status === "completed" || run.status === "cancelled" || run.status === "failed") return;
+    if (Date.now() > deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
 }

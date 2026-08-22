@@ -1176,6 +1176,9 @@ export const copilotConversations = sqliteTable("copilot_conversations", {
   summary: text("summary"),
   summaryCoveredSequence: integer("summary_covered_sequence"),
   lastSummaryAt: integer("last_summary_at", { mode: "timestamp" }),
+  // dsh kernel session id bound to this conversation (M2 BFF path). Null for
+  // conversations that have only ever run on the in-process orchestrator.
+  dshSessionId: text("dsh_session_id"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 }, (table) => ({ userLookup: index("idx_copilot_conversations_user_updated").on(table.userId, table.updatedAt) }));
@@ -1244,6 +1247,16 @@ export const copilotOperationLog = sqliteTable("copilot_operation_log", {
   resultJson: text("result_json"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date())
 }, (table) => ({ idempotency: uniqueIndex("idx_copilot_operation_user_op_key").on(table.userId, table.operation, table.idempotencyKey) }));
+
+// M4: per-user dsh kernel configuration (visual config -> per-user cordis.yml).
+// pluginsJson is keyed by the availablePlugins whitelist; defaultModelId
+// overrides the system default model for dsh runs when a message names none.
+export const copilotDshConfig = sqliteTable("copilot_dsh_config", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  defaultModelId: text("default_model_id"),
+  pluginsJson: text("plugins_json").notNull().default("{}"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+});
 
 // Feishu Copilot channel: one row per (user, Feishu chat) pointing at the chat's
 // CURRENT Copilot conversation. Chats without a Portfolio channel binding route

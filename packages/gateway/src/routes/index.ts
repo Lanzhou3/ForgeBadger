@@ -99,6 +99,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     db: deps.db,
     masterKey: deps.masterKey,
     eventBus: deps.eventBus,
+    ...(deps.dshBff ? { dshBff: deps.dshBff } : {}),
     ...(deps.portfolioApi ? { portfolioApi: deps.portfolioApi } : {}),
     ...(deps.llmFetch ? { llmFetch: deps.llmFetch } : {})
   }));

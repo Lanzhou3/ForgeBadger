@@ -152,6 +152,75 @@ function createHarness() {
   };
 }
 
+/**
+ * dsh-path harness (M3): same stub stack, plus a stub dshBff on the deps. The
+ * BFF stub mirrors the orchestrator stub's projection writes so the channel's
+ * reply logic (pending card, tool result lookup) observes the same rows.
+ */
+function createDshHarness(behavior: "completed" | "awaiting_approval" = "completed") {
+  const db = createTestDb();
+  const userId = new UserRepository(db).create("feishu-copilot-dsh@example.com", "hash").id;
+  new FeishuChannelRepository(db, userId, masterKey).upsertAccount({ appId: "cli_copilot_test", appSecret: "secret", enabled: true });
+  const providerAccount = new PortfolioFeishuRegistryRepository(db)
+    .register({ userId, provider: "feishu", providerAccountId: "cli_copilot_test" });
+  const stub = createStubAgentStackFactory(db);
+  const sent: SentMessage[] = [];
+  const sendCalls: Array<{ conversationId: string; content: string }> = [];
+  const decideCalls: Array<{ runId: string; actionId: string; approved: boolean }> = [];
+  const dshBff = {
+    async sendMessage(input: { userId: string; conversationId: string; content: string }) {
+      sendCalls.push(input);
+      const log = new CopilotConversationLog(db, input.userId);
+      log.appendMessage(input.conversationId, { role: "user", kind: "text", content: input.content });
+      const run = log.createRun(input.conversationId, {});
+      if (behavior === "awaiting_approval") {
+        log.createPendingAction({ runId: run.id, tool: "stub_operate_tool", inputJson: "{\"x\":1}", inputDigest: "digest" });
+        log.updateRun(run.id, { status: "awaiting_approval" });
+        return run.id;
+      }
+      log.appendMessage(input.conversationId, { role: "assistant", kind: "text", content: defaultReply });
+      log.updateRun(run.id, { status: "completed", completedAt: new Date() });
+      return run.id;
+    },
+    async cancelRun() {
+      return { cancelled: false, runId: "" };
+    },
+    async decidePendingAction(input: { userId: string; runId: string; actionId: string; approved: boolean }) {
+      decideCalls.push(input);
+      const log = new CopilotConversationLog(db, input.userId);
+      const action = log.getPendingAction(input.actionId);
+      if (!action || action.status !== "pending") return { resumed: false, runId: input.runId };
+      log.decidePendingAction(action.id, input.approved ? "approved" : "rejected");
+      const run = log.getRun(input.runId);
+      if (run) {
+        if (input.approved) {
+          log.appendMessage(run.conversationId, { role: "tool", kind: "tool_result", content: "{\"ok\":true}", toolName: action.tool });
+        }
+        log.updateRun(run.id, { status: "completed", completedAt: new Date() });
+      }
+      return { resumed: true, runId: input.runId };
+    }
+  };
+  const deps: AgentStackDeps = { db, masterKey, eventBus: new OpenForgeEventBus(), dshBff };
+  const channel = createFeishuCopilotChannel({
+    deps,
+    buildAgentStack: stub.factory,
+    sendMessage: async ({ chatId, text }) => {
+      sent.push({ chatId, text });
+    },
+    userId,
+    providerAccountId: providerAccount.id,
+    transport: "long_connection"
+  });
+  const deliver = async (ingress: Omit<FeishuCopilotChannelIngress, "senderIdentity">) => {
+    const full: FeishuCopilotChannelIngress = { senderIdentity: "ou_owner", ...ingress };
+    if (!channel.admitMessage(full)) return "duplicate";
+    await channel.processMessage(full);
+    return "admitted";
+  };
+  return { db, userId, sent, stub, deliver, dsh: { sendCalls, decideCalls } };
+}
+
 describe("FeishuCopilotChannel", () => {
   it("runs a Copilot turn in a per-chat conversation and replies with the final text", async () => {
     // Arrange
@@ -301,6 +370,37 @@ describe("FeishuCopilotChannel", () => {
     const failureReply = harness.sent.at(-1)?.text ?? "";
     assert.match(failureReply, /Copilot 运行失败/u);
     assert.doesNotMatch(failureReply, /sk-test-api-key/u);
+  });
+
+  it("routes turns through the dsh BFF when wired (M3)", async () => {
+    // Arrange
+    const harness = createDshHarness();
+
+    // Act
+    await harness.deliver({ chatId: "oc_dsh", text: "你好", providerEventId: "ev-1" });
+
+    // Assert: the BFF drove the turn; the orchestrator was bypassed.
+    assert.equal(harness.dsh.sendCalls.length, 1);
+    assert.equal(harness.dsh.sendCalls[0]?.content, "你好");
+    assert.equal(harness.stub.turnCalls.length, 0);
+    assert.match(harness.sent.at(-1)?.text ?? "", new RegExp(defaultReply));
+  });
+
+  it("feishu /approve flows through the dsh decide path (M3)", async () => {
+    // Arrange
+    const harness = createDshHarness("awaiting_approval");
+
+    // Act
+    await harness.deliver({ chatId: "oc_dsh", text: "执行一个操作", providerEventId: "ev-1" });
+    const approvalPrompt = harness.sent.at(-1)?.text ?? "";
+    await harness.deliver({ chatId: "oc_dsh", text: "/approve", providerEventId: "ev-2" });
+
+    // Assert
+    assert.match(approvalPrompt, /stub_operate_tool/u);
+    assert.equal(harness.dsh.decideCalls.length, 1);
+    assert.equal(harness.dsh.decideCalls[0]?.approved, true);
+    assert.equal(harness.stub.resumeCalls.length, 0, "orchestrator resume is bypassed");
+    assert.match(harness.sent.at(-1)?.text ?? "", /已批准并执行 stub_operate_tool/u);
   });
 });
 

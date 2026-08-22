@@ -14,6 +14,7 @@
  * pending debounce never keeps the process alive in tests.
  */
 import type { OpenForgeEvent, OpenForgeEventBus } from "../event-bus.js";
+import { CopilotConversationLog } from "./conversation-log.js";
 import type { AgentStack, AgentStackDeps } from "./agent-stack.js";
 
 const DEFAULT_DEBOUNCE_MS = 20_000;
@@ -89,12 +90,27 @@ export function attachCopilotReactiveLoop(options: CopilotReactiveLoopOptions): 
     inFlight.add(userId);
     lastFireAt.set(userId, now);
     try {
+      const prompt = buildProactivePrompt(event);
+      if (options.deps.dshBff) {
+        // dsh path (M3): the proactive turn runs on the per-user kernel via the
+        // BFF with the same run contract; debounce/cooldown semantics above are
+        // unchanged. A parked approval (awaiting_approval) still ends fire().
+        const log = new CopilotConversationLog(options.deps.db, userId);
+        const conversation = log.createConversation(PROACTIVE_CONVERSATION_TITLE);
+        await options.deps.dshBff.sendMessage({
+          userId,
+          conversationId: conversation.id,
+          content: prompt,
+          source: "reactive"
+        });
+        return;
+      }
       const stack = options.buildAgentStack(options.deps, userId);
       const conversation = stack.log.createConversation(PROACTIVE_CONVERSATION_TITLE);
       await stack.orchestrator.runTurn({
         userId,
         conversationId: conversation.id,
-        userText: buildProactivePrompt(event),
+        userText: prompt,
         source: "reactive"
       });
     } catch {

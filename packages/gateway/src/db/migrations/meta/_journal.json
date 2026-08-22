@@ -330,6 +330,20 @@
             "when": 1787529600000,
             "tag": "0047_copilot_message_tool_call_id",
             "breakpoints": true
+        },
+        {
+            "idx": 47,
+            "version": "6",
+            "when": 1787616000000,
+            "tag": "0048_copilot_conversation_dsh_session",
+            "breakpoints": true
+        },
+        {
+            "idx": 48,
+            "version": "6",
+            "when": 1787702400000,
+            "tag": "0049_copilot_dsh_config",
+            "breakpoints": true
         }
     ]
 }
