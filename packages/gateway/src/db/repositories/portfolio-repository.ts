@@ -895,6 +895,18 @@ export class PortfolioRepository {
     return rows.map((row) => this.toWorkItem(row));
   }
 
+  /** Display-safe work item listing for the HTTP facade; always user-scoped. */
+  listWorkItems(input: { projectId?: string; status?: PortfolioWorkItemState; limit?: number }): PortfolioWorkItem[] {
+    const clauses = ["user_id = ?"];
+    const values: unknown[] = [this.userId];
+    if (input.projectId) { clauses.push("project_id = ?"); values.push(input.projectId); }
+    if (input.status) { clauses.push("state = ?"); values.push(input.status); }
+    values.push(Math.min(Math.max(input.limit ?? 100, 1), 500));
+    const rows = this.db.prepare(`SELECT * FROM portfolio_work_items WHERE ${clauses.join(" AND ")}
+      ORDER BY updated_at DESC, id LIMIT ?`).all(...values) as Row[];
+    return rows.map((row) => this.toWorkItem(row));
+  }
+
   createWorkItem(input: {
     projectId: string;
     requestId: string;
@@ -1068,6 +1080,13 @@ export class PortfolioRepository {
 
   getTaskAttempt(id: string): PortfolioTaskAttempt | undefined {
     const row = this.db.prepare("SELECT * FROM portfolio_task_attempts WHERE id = ? AND user_id = ?").get(id, this.userId) as Row | undefined;
+    return row ? this.toTaskAttempt(row) : undefined;
+  }
+
+  /** Latest attempt by attempt_number; used when a transition must name its attempt. */
+  getLatestTaskAttemptForWorkItem(workItemId: string): PortfolioTaskAttempt | undefined {
+    const row = this.db.prepare(`SELECT * FROM portfolio_task_attempts WHERE user_id = ? AND work_item_id = ?
+      ORDER BY attempt_number DESC, id DESC LIMIT 1`).get(this.userId, workItemId) as Row | undefined;
     return row ? this.toTaskAttempt(row) : undefined;
   }
 

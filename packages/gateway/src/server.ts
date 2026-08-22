@@ -29,6 +29,8 @@ export interface ServerDeps {
   eventBus: OpenForgeEventBus;
   /** The only Portfolio object exposed to HTTP routes; no execution runtime leaks here. */
   portfolioApi?: PortfolioApiFacade | undefined;
+  /** Service token guarding the internal copilot-bridge API; unset disables the route group. */
+  copilotBridgeToken?: string | undefined;
   claudePortfolioWorker?: ClaudePortfolioWorker | undefined;
   portfolioExecution?: PortfolioExecutionRuntime | undefined;
   operationsRuntime?: Pick<OperationsRuntime, "stop"> | undefined;
@@ -69,6 +71,8 @@ export interface GatewayAppOptions {
   claudePortfolioWorker?: ClaudePortfolioWorker | undefined;
   portfolioExecution?: PortfolioExecutionRuntime | undefined;
   operationsRuntime?: Pick<OperationsRuntime, "stop"> | undefined;
+  /** Service token guarding the internal copilot-bridge API; unset disables the route group. */
+  copilotBridgeToken?: string | undefined;
   appVersion?: string;
   adapterCommandRunner?: CommandRunner | undefined;
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
@@ -131,6 +135,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     claudePortfolioWorker: options.claudePortfolioWorker,
     portfolioExecution: options.portfolioExecution,
     operationsRuntime: options.operationsRuntime,
+    copilotBridgeToken: options.copilotBridgeToken,
     appVersion: options.appVersion ?? "0.0.0",
     adapterCommandRunner: options.adapterCommandRunner,
     feishuChannelRuntime: options.feishuChannelRuntime,

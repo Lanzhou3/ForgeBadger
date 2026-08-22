@@ -38,6 +38,7 @@ export async function createGatewayRuntime(
     portfolioExecution,
     operationsRuntime
   } = await startupGateway(startupOptions);
+
   const runtime = createGatewayApp({
     jwtSecret: env.OPENFORGE_JWT_SECRET,
     masterKey: env.OPENFORGE_MASTER_KEY,
@@ -48,7 +49,8 @@ export async function createGatewayRuntime(
     claudePortfolioWorker,
     portfolioExecution,
     operationsRuntime,
-    feishuChannelRuntime
+    feishuChannelRuntime,
+    copilotBridgeToken: env.OPENFORGE_COPILOT_BRIDGE_TOKEN
   });
 
   await runtime.recoveryReady;

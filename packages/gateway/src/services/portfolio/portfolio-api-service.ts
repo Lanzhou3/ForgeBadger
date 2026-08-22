@@ -1,7 +1,8 @@
 import type { Database } from "../../db/types.js";
 import {
   PortfolioRepository,
-  type PortfolioStateRecordType
+  type PortfolioStateRecordType,
+  type PortfolioWorkItemState
 } from "../../db/repositories/portfolio-repository.js";
 import { PortfolioSchedulerRepository } from "../../db/repositories/portfolio-scheduler-repository.js";
 import { OpenForgeEventBus } from "../event-bus.js";
@@ -55,6 +56,7 @@ export interface PortfolioUserApi {
   decideIntake(input: DecideIntakeInput): unknown;
   resolveOwnerDecision(input: ResolveOwnerDecisionInput): unknown;
   getWorkItem(workItemId: string): unknown;
+  listWorkItems(input: { projectId?: string; status?: PortfolioWorkItemState; limit?: number }): unknown[];
   prepareAttempt(input: { projectId: string; workItemId: string; adapter: string; idempotencyKey: string; skillVersion: string; toolIds: string[]; trackingEnabled?: boolean }): unknown;
   getAttempt(attemptId: string): unknown;
   getAuthorization(authorizationId: string): unknown;
@@ -120,6 +122,7 @@ export function createPortfolioApiFacade(input: {
           return outcome;
         },
         getWorkItem: (workItemId) => repository.getWorkItem(workItemId),
+        listWorkItems: (value) => repository.listWorkItems(value),
         prepareAttempt(value) {
           const prepared = packets.prepareAttempt({ ...value, createdBy: userId });
           publish({ kind: "task_attempt", recordId: prepared.attempt.id, projectId: prepared.attempt.projectId, state: prepared.attempt.state, projectionVersion: prepared.attempt.projectionVersion, summary: "attempt_prepared" });

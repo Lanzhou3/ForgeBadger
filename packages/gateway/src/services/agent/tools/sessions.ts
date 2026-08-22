@@ -2,9 +2,16 @@
  * Session tools for the Copilot harness — the "sessions" seam. Read tools
  * expose AI CLI session state; the operate tool (launch a session) is
  * approval-gated and only fires after the owner approves it.
+ *
+ * The read queries live in services/copilot-bridge/bridge-service.ts so the
+ * internal copilot-bridge HTTP API and these tools share one implementation.
  */
 import { z } from "zod";
-import { SessionRepository } from "../../../db/repositories/session-repository.js";
+import {
+  getSessionDetail,
+  listSessionSummaries
+} from "../../copilot-bridge/bridge-service.js";
+import type { Database } from "../../../db/types.js";
 import type { AgentTool, AgentToolContext } from "../tool-registry.js";
 
 const listSessionsInput = z.object({
@@ -16,8 +23,8 @@ const getSessionInput = z.object({
   sessionId: z.string().min(1).max(128)
 }).strict();
 
-function sessionsRepo(context: AgentToolContext): SessionRepository {
-  return new SessionRepository(context.db as import("../../../db/types.js").Database, context.userId as string);
+function toolDb(context: AgentToolContext): { db: Database; userId: string } {
+  return { db: context.db as Database, userId: context.userId as string };
 }
 
 export function createSessionTools(): AgentTool[] {
@@ -30,16 +37,11 @@ export function createSessionTools(): AgentTool[] {
       inputSchema: listSessionsInput,
       async execute(input, context) {
         const { projectId, limit } = listSessionsInput.parse(input);
-        const rows = projectId ? sessionsRepo(context).listByProject(projectId) : sessionsRepo(context).list();
-        const sessions = rows.slice(0, limit ?? 50).map((s) => ({
-          id: s.id,
-          name: s.name,
-          aiTool: s.aiTool,
-          status: s.status,
-          projectId: s.projectId,
-          projectName: s.projectName ?? null,
-          modelId: s.modelId
-        }));
+        const { db, userId } = toolDb(context);
+        const sessions = listSessionSummaries(db, userId, {
+          ...(projectId !== undefined ? { projectId } : {}),
+          ...(limit !== undefined ? { limit } : {})
+        });
         return { sessions, count: sessions.length };
       }
     },
@@ -51,21 +53,10 @@ export function createSessionTools(): AgentTool[] {
       inputSchema: getSessionInput,
       async execute(input, context) {
         const { sessionId } = getSessionInput.parse(input);
-        const s = sessionsRepo(context).getById(sessionId);
-        if (!s) return { found: false, session: null };
-        return {
-          found: true,
-          session: {
-            id: s.id,
-            name: s.name,
-            aiTool: s.aiTool,
-            status: s.status,
-            projectId: s.projectId,
-            workingDir: s.workingDir,
-            credentialMode: s.credentialMode,
-            errorMessage: s.errorMessage
-          }
-        };
+        const { db, userId } = toolDb(context);
+        const session = getSessionDetail(db, userId, sessionId);
+        if (!session) return { found: false, session: null };
+        return { found: true, session };
       }
     }
   ];

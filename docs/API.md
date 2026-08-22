@@ -769,6 +769,41 @@ proactive reports arrive over `/ws/events` as `copilot_run_updated`. Operate
 tools pause the run as `awaiting_approval`; the pending-action decide route
 (body `{ "approved": true|false }`) resumes or rejects it.
 
+#### Copilot dsh runtime config (guarded)
+
+Mounted only when `OPENFORGE_DSH_COPILOT_ENABLED=1`; otherwise both endpoints
+return 404 (treat 404 as "feature off"). JWT authenticated and user scoped.
+
+- `GET /api/v1/copilot/dsh-config` — returns the acting user's dsh runtime
+  config:
+
+  ```json
+  {"code":0,"data":{
+    "defaultModelId": "profile-uuid or null",
+    "plugins": {"compaction": true, "subagents": true},
+    "availablePlugins": [{"id":"compaction","label":"...","description":"..."},{"id":"subagents","label":"...","description":"..."}],
+    "runtime": {"status": "running|idle"}
+  }}
+  ```
+
+  Defaults: `defaultModelId=null` (system default model) and both plugins `true`.
+
+- `PUT /api/v1/copilot/dsh-config` — body
+  `{ "defaultModelId": "profile-uuid|null", "plugins": { "compaction": bool, "subagents": bool } }`,
+  all fields optional; omitted fields stay unchanged, `defaultModelId:null`
+  resets to the system default, plugins merge per key.
+  `defaultModelId` must reference one of the user's active model profiles,
+  otherwise 400 `COPILOT_DSH_CONFIG_INVALID_MODEL`; unknown plugin keys reject
+  with 400 `COPILOT_DSH_CONFIG_UNKNOWN_PLUGIN`. Success returns the GET shape
+  plus `updatedAt` and `runtimeRestarted: boolean`. Changes take effect on the
+  next runtime spawn: when no run is active (including approval-parked runs) the
+  idle runtime is restarted immediately (`runtimeRestarted:true`); while a run
+  is active the runtime is never hot-killed (`runtimeRestarted:false`) and the
+  config applies on the next spawn. The rendered per-user `cordis.yml` is
+  written to `stateDir/dsh-config/<userId>/cordis.yml` and injected via
+  `DSH_BRIDGE_CONFIG`; plugin toggles add/remove the corresponding
+  `dsh-compaction-basic` / `dsh-subagent` blocks.
+
 ### Retired Platform AI Copilot API (historical)
 
 > The legacy `/api/v1/copilot/**` contract is no longer mounted. The endpoint
@@ -1834,3 +1869,54 @@ MVP-0 must enforce:
 ## 6. API Shape Gate
 
 Before frontend implementation begins, `.claude/rules/api.md`, `CLAUDE.md`, `docs/TECH-ARCHITECTURE.md`, and this file must agree on the response envelope.
+
+## 7. Internal API — Copilot Bridge (dsh openforge-bridge plugin)
+
+Guarded internal surface consumed by the deepseek-harness `openforge-bridge`
+plugin over loopback HTTP (see `.planning/dsh-integration/PLAN.md`). The whole
+route group is mounted only when `OPENFORGE_COPILOT_BRIDGE_TOKEN` is set
+(optional env var, min 32 chars); without it every path below returns 404.
+
+Authentication and tenancy:
+
+- `Authorization: Bearer <OPENFORGE_COPILOT_BRIDGE_TOKEN>` — missing token
+  returns 401 (`BRIDGE_TOKEN_REQUIRED`), wrong token 403 (`BRIDGE_TOKEN_INVALID`).
+- `X-OpenForge-User-Id: <userId>` — required on every request (400
+  `BRIDGE_USER_ID_REQUIRED` otherwise). The header is trusted only after the
+  service token passes; all data access goes through per-user repositories and
+  the Portfolio facade, so `user_id` isolation is identical to the user API.
+- Responses use the standard envelope (`{code:0,data,message:""}` /
+  `{code:1,message,details}`).
+
+Base path: `/api/internal/v1/copilot-bridge`.
+
+- `GET /work-items?projectId=&status=&limit=` — the acting user's portfolio
+  work items. `status` is one of `todo|in_progress|blocked|ready_for_review|done|cancelled`.
+  Returns `{ workItems, count }`.
+- `GET /work-items/:id` — work item detail; 404 when missing or owned by
+  another user.
+- `POST /work-items/:id/advance` — body `{ "note": "optional progress note" }`.
+  Advances the work item one lifecycle step (`todo→in_progress`,
+  `in_progress→ready_for_review`, `blocked→in_progress`,
+  `ready_for_review→done`) through the same Portfolio State Gate the Copilot
+  `advance_work_item` tool uses, so all risk/approval preconditions (dispatch
+  receipts, verified completion evidence, accepted decisions, owner authority)
+  still apply and reject with 409 (`PORTFOLIO_PRECONDITION_FAILED`,
+  `PORTFOLIO_INVALID_TRANSITION`, …). Terminal states reject with 409. The
+  optional `note` is recorded as the transition's correlation id. Returns
+  `{ advanced: true, transition }`.
+- `GET /portfolio/overview` — portfolio overview for the acting user
+  (`{ overview }`, same payload as `GET /api/v1/portfolio/overview`).
+- `GET /sessions?projectId=&limit=` — the acting user's AI CLI sessions
+  (`{ sessions, count }`; id, name, aiTool, status, projectId, projectName,
+  modelId).
+- `GET /sessions/:id` — session detail; 404 when missing or owned by another
+  user.
+- `POST /sessions/:id/dispatch` — body `{ "message": "..." }` (required, 1–4000
+  chars after trim). Verifies the session belongs to the acting user (404
+  otherwise), then injects the message plus a submitting newline into the
+  session terminal via the session-manager → tmux `send-keys` path. Returns
+  `{ dispatched: true, sessionId }`. Errors: 409
+  `BRIDGE_SESSION_NOT_ACTIVE` when the session is not live in this Gateway
+  process; 409 `PORTFOLIO_WRITER_FENCE_REJECTED` when the session is leased to a
+  Portfolio worker.

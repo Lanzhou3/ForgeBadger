@@ -29,10 +29,26 @@ import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { createPortfolioRoutes } from "./portfolio.js";
 import { createCopilotRoutes } from "./copilot.js";
+import { createCopilotBridgeRoutes } from "./internal-copilot-bridge.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/health", createHealthRoutes());
+  // Guarded internal API for the deepseek-harness openforge-bridge plugin:
+  // mounted only when its service token is configured.
+  if (deps.copilotBridgeToken && deps.portfolioApi) {
+    const env = loadEnv();
+    app.use("/api/internal/v1/copilot-bridge", createCopilotBridgeRoutes({
+      db: deps.db,
+      sessionManager: deps.sessionManager,
+      portfolioApi: deps.portfolioApi,
+      bridgeToken: deps.copilotBridgeToken,
+      dispatchConfirm: {
+        timeoutMs: env.OPENFORGE_DISPATCH_CONFIRM_TIMEOUT_MS,
+        intervalMs: env.OPENFORGE_DISPATCH_CONFIRM_INTERVAL_MS
+      }
+    }));
+  }
   app.use("/api/v1/gate-a/dependencies", createDependencyRoutes());
   app.use("/api/v1/adapters", createAdapterRoutes());
   app.use(
