@@ -576,6 +576,8 @@ export default function ProjectDetailPage() {
                     return (
                       <div
                         key={skill.id}
+                        role="group"
+                        aria-label={skill.name}
                         className="flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
                         style={{ animationDelay: `${index * 40}ms` }}
                       >

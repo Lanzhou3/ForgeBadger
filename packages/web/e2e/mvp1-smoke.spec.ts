@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test("MVP-1 management console smoke", async ({ page }) => {
   const suffix = uniqueSuffix();
@@ -23,6 +23,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await expect(page).toHaveURL("/");
 
   await page.goto("/models");
+  await page.getByRole("button", { name: "Add provider" }).first().click();
   await page.getByText("Advanced: add a custom provider manually").click();
   await page.locator("#provider-name").fill(`E2E Provider ${suffix}`);
   await page.locator("#provider-key").fill(`e2e-provider-${suffix}`);
@@ -30,15 +31,17 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await page.getByRole("button", { name: "Add custom Claude-compatible provider" }).click();
   await expect(page.getByText(`E2E Provider ${suffix}`).first()).toBeVisible();
 
+  await page.getByRole("tab", { name: "API Keys" }).click();
   await page.locator("#credential-label").fill("Claude E2E Key");
   await page.locator("#credential-secret").fill("test-api-key-e2e-secret");
   await page.getByRole("button", { name: "Save credential" }).click();
-  await expect(page.getByRole("cell", { name: "Claude E2E Key" })).toBeVisible();
+  await expect(page.getByText("Claude E2E Key")).toBeVisible();
 
-  await page.getByText("Advanced: edit models manually").click();
-  await page.getByPlaceholder("Name").fill("Claude E2E");
-  await page.getByPlaceholder("Model ID").fill("claude-sonnet-e2e");
-  await page.getByPlaceholder("Capabilities").fill("chat,code");
+  await page.getByRole("tab", { name: "Models" }).click();
+  await page.getByRole("button", { name: "New model" }).click();
+  await page.locator("#model-form-name").fill("Claude E2E");
+  await page.locator("#model-form-model-id").fill("claude-sonnet-e2e");
+  await page.locator("#model-form-capabilities").fill("chat,code");
   await page.getByRole("button", { name: "Add Model" }).click();
   await expect(page.getByText("Claude E2E").first()).toBeVisible();
 
@@ -48,6 +51,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await page.getByRole("button", { name: "Create Project" }).click();
   await expect(page).toHaveURL(/\/projects\/.+/);
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
+  await bindProjectTemplate(page, "builtin-claude-code");
 
   await page.goto("/templates");
   await page.getByRole("button", { name: /Claude Code/ }).click();
@@ -66,7 +70,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await expect(page).toHaveURL(/\/projects\/.+/);
 
   await page.getByRole("tab", { name: "Skills" }).click();
-  await page.getByRole("row", { name: /safe-review/ }).getByRole("switch").check();
+  await page.getByRole("group", { name: "safe-review" }).getByRole("switch").check();
 
   await page.getByRole("tab", { name: "AI Config" }).click();
   await page.getByRole("button", { name: "Preview Config" }).click();
@@ -86,6 +90,20 @@ async function fileExists(pathname: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function bindProjectTemplate(page: Page, templateId: string): Promise<void> {
+  const token = await page.evaluate(() => window.localStorage.getItem("forgebadger.token"));
+  const projectId = new URL(page.url()).pathname.split("/").filter(Boolean).at(-1);
+  expect(token).toBeTruthy();
+  expect(projectId).toBeTruthy();
+
+  const gatewayUrl = process.env.FORGEBADGER_GATEWAY_URL ?? "http://127.0.0.1:48731";
+  const response = await page.request.patch(`${gatewayUrl}/api/v1/projects/${projectId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { templateId },
+  });
+  expect(response.ok()).toBeTruthy();
 }
 
 function uniqueSuffix(): string {
