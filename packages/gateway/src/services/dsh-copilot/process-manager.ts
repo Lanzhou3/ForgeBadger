@@ -228,7 +228,7 @@ export class DshProcessManager {
       setTimeout(() => {
         if (isChildAlive(child)) child.kill("SIGKILL");
         resolve();
-      }, Math.max(1, this.options.killGraceMs ?? 5_000)).unref?.();
+      }, Math.max(1, this.options.killGraceMs ?? 5_000));
     });
   }
 }
