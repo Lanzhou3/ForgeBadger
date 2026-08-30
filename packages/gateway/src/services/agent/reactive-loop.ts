@@ -3,10 +3,15 @@
  *
  * The platform event bus is the wake signal: on relevant project/session/
  * portfolio events the loop debounces per user, then starts a proactive
- * Copilot turn (source: "reactive") in a freshly-created conversation. The
- * agent reads current platform state with its read tools and reports a concise
+ * Copilot turn (source: "reactive") in a rolling "Copilot 主动更新"
+ * conversation — the most recent one updated within the rolling window is
+ * reused, and a fresh conversation is only created when none qualifies. The
+ * agent reads current platform state with its read tools and appends a concise
  * update to the owner. Operate tools stay behind the security-policy approval
  * gate, so the loop grants no new authority.
+ *
+ * Attachment itself is opt-in via OPENFORGE_COPILOT_REACTIVE_ENABLED (see
+ * server.ts): when off, no listener is attached at all.
  *
  * `copilot_run_updated` never wakes the loop (a proactive turn would otherwise
  * re-trigger itself); `claude_notification` is excluded as too noisy (permission/
@@ -20,6 +25,13 @@ import type { AgentStack, AgentStackDeps } from "./agent-stack.js";
 const DEFAULT_DEBOUNCE_MS = 20_000;
 const DEFAULT_COOLDOWN_MS = 60_000;
 export const PROACTIVE_CONVERSATION_TITLE = "Copilot 主动更新";
+/**
+ * Rolling conversation window: proactive reports append to the most recent
+ * "Copilot 主动更新" conversation updated within this window instead of
+ * creating one conversation per event, so history grows by at most one
+ * proactive thread per day per user.
+ */
+export const PROACTIVE_CONVERSATION_ROLLING_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /** Event types that wake the proactive loop. Tune here as the policy evolves. */
 const REACTIVE_TRIGGERS = new Set<string>([
@@ -91,25 +103,28 @@ export function attachCopilotReactiveLoop(options: CopilotReactiveLoopOptions): 
     lastFireAt.set(userId, now);
     try {
       const prompt = buildProactivePrompt(event);
+      // Rolling conversation: reuse the most recent proactive thread inside
+      // the window (same db rows for both paths, so dsh and in-process runs
+      // share identical rolling semantics).
+      const log = new CopilotConversationLog(options.deps.db, userId);
+      const reusable = findReusableProactiveConversation(log);
+      const conversationId = reusable ?? log.createConversation(PROACTIVE_CONVERSATION_TITLE).id;
       if (options.deps.dshBff) {
         // dsh path (M3): the proactive turn runs on the per-user kernel via the
         // BFF with the same run contract; debounce/cooldown semantics above are
         // unchanged. A parked approval (awaiting_approval) still ends fire().
-        const log = new CopilotConversationLog(options.deps.db, userId);
-        const conversation = log.createConversation(PROACTIVE_CONVERSATION_TITLE);
         await options.deps.dshBff.sendMessage({
           userId,
-          conversationId: conversation.id,
+          conversationId,
           content: prompt,
           source: "reactive"
         });
         return;
       }
       const stack = options.buildAgentStack(options.deps, userId);
-      const conversation = stack.log.createConversation(PROACTIVE_CONVERSATION_TITLE);
       await stack.orchestrator.runTurn({
         userId,
-        conversationId: conversation.id,
+        conversationId,
         userText: prompt,
         source: "reactive"
       });
@@ -119,6 +134,16 @@ export function attachCopilotReactiveLoop(options: CopilotReactiveLoopOptions): 
     } finally {
       inFlight.delete(userId);
     }
+  }
+
+  /** Latest proactive conversation updated within the rolling window, if any. */
+  function findReusableProactiveConversation(log: CopilotConversationLog): string | undefined {
+    const now = Date.now();
+    const match = log.listConversations().find((row) =>
+      row.title === PROACTIVE_CONVERSATION_TITLE &&
+      now - row.updated_at < PROACTIVE_CONVERSATION_ROLLING_WINDOW_MS
+    );
+    return match?.id;
   }
 
   function onEvent(event: OpenForgeEvent): void {

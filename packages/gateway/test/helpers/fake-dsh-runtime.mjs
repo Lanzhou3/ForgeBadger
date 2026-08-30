@@ -43,6 +43,12 @@ const LOG = process.env.DSH_FAKE_LOG;
 const OPERATE_TOOL = process.env.DSH_FAKE_OPERATE_TOOL ?? "dispatch_task_to_session";
 const OPERATE_ARGS = process.env.DSH_FAKE_OPERATE_ARGS ?? '{"sessionId":"sess-1","message":"修复登录页"}';
 
+if (SCENARIO === "stubborn") {
+  process.on("SIGTERM", () => {
+    record({ kind: "ignored-sigterm" });
+  });
+}
+
 function record(entry) {
   if (LOG) appendFileSync(LOG, JSON.stringify({ pid: process.pid, ...entry }) + "\n");
 }

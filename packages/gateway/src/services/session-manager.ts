@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
 
 import type { LaunchPlan } from "../adapters/claude.js";
+import { isAdapterId, type AdapterId } from "./adapter-discovery.js";
 import type { TmuxClient } from "./tmux.js";
 import type { OpenForgeEventBus } from "./event-bus.js";
 import { SessionOutputRing } from "./session-output-buffer.js";
@@ -8,6 +10,16 @@ import type {
   PortfolioSessionInputGate,
   PortfolioWorkerInputCapability
 } from "./portfolio/session-input-gate.js";
+import {
+  assertSafeProgrammaticMessage,
+  composerContainsStagedTask,
+  isProgrammaticComposerReady,
+  PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH,
+  PROGRAMMATIC_SUBMIT_INDETERMINATE,
+  PROGRAMMATIC_SUBMIT_NOT_READY,
+  PROGRAMMATIC_SUBMIT_STAGING_FAILED,
+  programmaticDeliveryNeedle
+} from "./programmatic-terminal-submit.js";
 
 export type SessionStatus = "pending" | "running" | "detached" | "exited" | "error";
 
@@ -69,7 +81,27 @@ export interface RecoveryResult {
 export interface SessionManagerOptions {
   tmuxPrefix?: string;
   sessionInputGate?: PortfolioSessionInputGate;
+  programmaticSubmitSettleMs?: Partial<Record<AdapterId, number>>;
+  sleep?: (ms: number) => Promise<void>;
 }
+
+export interface ProgrammaticTaskInput {
+  adapter: AdapterId;
+  message: string;
+}
+
+export interface ProgrammaticTaskStageReceipt {
+  adapter: AdapterId;
+  needle: string;
+  stagedPane: string;
+}
+
+const DEFAULT_PROGRAMMATIC_SETTLE_MS: Readonly<Record<AdapterId, number>> = Object.freeze({
+  claude: 150,
+  opencode: 150,
+  codex: 350,
+  kimi: 150
+});
 
 /**
  * Upper bound on the number of sessions whose terminal output is buffered at
@@ -94,6 +126,8 @@ export class InMemorySessionManager {
   private readonly sessionOutputs = new Map<string, SessionOutputRing>();
   private readonly tmuxPrefix: string;
   private readonly sessionInputGate: PortfolioSessionInputGate | undefined;
+  private readonly programmaticSubmitSettleMs: Readonly<Record<AdapterId, number>>;
+  private readonly sleep: (ms: number) => Promise<void>;
   private readonly sessionLocks = new Map<string, Promise<unknown>>();
   private correctionInterval: ReturnType<typeof setInterval> | undefined;
 
@@ -105,6 +139,11 @@ export class InMemorySessionManager {
   ) {
     this.tmuxPrefix = normalizeTmuxPrefix(options.tmuxPrefix);
     this.sessionInputGate = options.sessionInputGate;
+    this.programmaticSubmitSettleMs = {
+      ...DEFAULT_PROGRAMMATIC_SETTLE_MS,
+      ...options.programmaticSubmitSettleMs
+    };
+    this.sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   }
 
   /**
@@ -394,6 +433,58 @@ export class InMemorySessionManager {
     await this.tmux.sendInput(session.tmuxName, data);
   }
 
+  async submitProgrammaticTask(
+    id: string,
+    input: ProgrammaticTaskInput
+  ): Promise<ProgrammaticTaskStageReceipt> {
+    assertSafeProgrammaticMessage(input.message);
+    return this.runExclusive(id, async () => {
+      const session = this.requireSession(id);
+      this.sessionInputGate?.assertDirectInputAllowed(session);
+      const launchAdapter = adapterFromLaunchCommand(session.launchPlan.command);
+      if (launchAdapter !== input.adapter) {
+        throw new Error(PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH);
+      }
+      if (session.status !== "running" && session.status !== "detached") {
+        throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
+      }
+      if (!this.tmux.inspectPane || !this.tmux.stageProgrammaticInput || !this.tmux.pressEnter) {
+        throw new Error("tmux programmatic input is not supported");
+      }
+
+      const before = await this.tmux.inspectPane(session.tmuxName);
+      if (before.dead || before.inMode || !isProgrammaticComposerReady(input.adapter, before.content)) {
+        throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
+      }
+
+      const needle = programmaticDeliveryNeedle(input.message);
+      if (needle === "") {
+        throw new Error(PROGRAMMATIC_SUBMIT_STAGING_FAILED);
+      }
+      // Once staging starts, tmux may already have received some or all bytes.
+      // Any later failure is therefore indeterminate and must never be exposed
+      // as a safe-to-retry pre-write rejection.
+      try {
+        await this.tmux.stageProgrammaticInput(session.tmuxName, input.message);
+        await this.sleep(this.programmaticSubmitSettleMs[input.adapter]);
+
+        const staged = await this.tmux.inspectPane(session.tmuxName);
+        if (
+          staged.dead
+          || staged.inMode
+          || !composerContainsStagedTask(input.adapter, staged.content, input.message, needle)
+        ) {
+          throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
+        }
+
+        await this.tmux.pressEnter(session.tmuxName);
+        return { adapter: input.adapter, needle, stagedPane: staged.content };
+      } catch {
+        throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
+      }
+    });
+  }
+
   assertBrowserInputAllowed(id: string): void {
     const session = this.requireSession(id);
     this.sessionInputGate?.assertBrowserInputAllowed(session);
@@ -482,6 +573,11 @@ export class InMemorySessionManager {
     }
     return next;
   }
+}
+
+function adapterFromLaunchCommand(command: string): AdapterId | undefined {
+  const executable = basename(command);
+  return isAdapterId(executable) ? executable : undefined;
 }
 
 export function buildTmuxName(userId: string, sessionId: string, tmuxPrefix = "of-"): string {

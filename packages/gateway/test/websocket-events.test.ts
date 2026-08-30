@@ -30,6 +30,16 @@ function createTestDb(): Database {
   return db;
 }
 
+/** The events WS auth path re-checks that the JWT subject is an active user. */
+function seedActiveUsers(db: Database): void {
+  const insertUser = db.prepare(
+    "INSERT INTO users (id, username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)"
+  );
+  insertUser.run("user_123", "ws-events-123", "test@example.com", "hash", "user", "active");
+  insertUser.run("user_a", "ws-events-a", "a@example.com", "hash", "user", "active");
+  insertUser.run("user_b", "ws-events-b", "b@example.com", "hash", "user", "active");
+}
+
 function waitForMessage(ws: WebSocket, timeoutMs = 2000): Promise<string> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -61,6 +71,8 @@ describe("events WebSocket", () => {
 
   beforeEach(async () => {
     db = createTestDb();
+    // The events WS auth path re-checks that the JWT subject is an active user.
+    seedActiveUsers(db);
     const eventBus = new OpenForgeEventBus();
     const sessionManager = new InMemorySessionManager({
       async createSession() {},
@@ -226,6 +238,7 @@ describe("events websocket connection limits", () => {
 
   beforeEach(async () => {
     db = createTestDb();
+    seedActiveUsers(db);
     const eventBus = new OpenForgeEventBus();
     const sessionManager = new InMemorySessionManager({
       async createSession() {},
@@ -252,6 +265,7 @@ describe("events websocket connection limits", () => {
       server,
       eventBus,
       jwtSecret,
+      db,
       maxConnections: 1,
       maxConnectionsPerUser: 1
     });

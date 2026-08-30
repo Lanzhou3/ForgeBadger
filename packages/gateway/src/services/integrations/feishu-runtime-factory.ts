@@ -13,7 +13,7 @@ import {
 } from "./feishu-connection-supervisor.js";
 import { renderFeishuCardActionAcceptedResponse } from "./feishu-card-renderer.js";
 import { normalizeFeishuEvent } from "./feishu-event-normalizer.js";
-import { FeishuSdkFactory } from "./feishu-sdk.js";
+import { FeishuSdkFactory, type FeishuSdkEventContext } from "./feishu-sdk.js";
 import { PortfolioFeishuCardActionService } from "../portfolio/feishu/card-action-service.js";
 import {
   PortfolioFeishuIngressSelector,
@@ -38,9 +38,16 @@ interface FeishuRestClient {
     message?: {
       create?: (input: unknown) => Promise<unknown>;
       reply?: (input: unknown) => Promise<unknown>;
+      patch?: (input: unknown) => Promise<unknown>;
+    };
+    messageReaction?: {
+      create?: (input: unknown) => Promise<unknown>;
+      delete?: (input: unknown) => Promise<unknown>;
     };
   };
 }
+
+const FEISHU_CARD_MAX_BYTES = 30 * 1024;
 
 /**
  * One transport still owns Feishu connectivity, but its only workflow handler
@@ -150,26 +157,83 @@ export function createFeishuSdkHandlers(input: {
     const account = credentialsRepository.getAccount();
     const providerAccount = account ? registry.resolve("feishu", account.appId) : undefined;
     if (!deps || !input.buildAgentStack || !input.sdkFactory || !account || !providerAccount) return undefined;
+    const sdkFactory = input.sdkFactory as FeishuSdkFactory;
     return createFeishuCopilotChannel({
       deps,
       buildAgentStack: input.buildAgentStack,
+      providerAccountId: providerAccount.id,
       sendMessage: ({ chatId, text }) => sendFeishuChatText({
         db: input.db,
         masterKey: input.masterKey,
-        sdkFactory: input.sdkFactory as FeishuSdkFactory,
+        sdkFactory,
         userId: input.userId,
         chatId,
         text
       }),
+      cardTransport: {
+        sendCard: (chatId, card) => sendFeishuChatCard({
+          db: input.db,
+          masterKey: input.masterKey,
+          sdkFactory,
+          userId: input.userId,
+          chatId,
+          card
+        }),
+        updateCard: (messageId, card) => updateFeishuChatCard({
+          db: input.db,
+          masterKey: input.masterKey,
+          sdkFactory,
+          userId: input.userId,
+          messageId,
+          card
+        })
+      },
       userId: input.userId,
-      providerAccountId: providerAccount.id,
+      reactions: {
+        start: async (mid) => {
+          const repository = new FeishuChannelRepository(input.db, input.userId, input.masterKey);
+          const account = repository.getAccount();
+          if (!account?.enabled) return { reactionId: null };
+          const credentials = repository.decryptAccountCredentials(account.id);
+          const client = sdkFactory.createRestClient({
+            userId: "copilot-typing", accountId: account.id, appId: credentials.appId,
+            appSecret: credentials.appSecret, configRevision: account.configRevision
+          }) as FeishuRestClient;
+          const response = await client.im?.messageReaction?.create?.({
+            path: { message_id: mid },
+            data: { reaction_type: { emoji_type: "Typing" } }
+          });
+          const data = (response as { data?: { reaction_id?: string } } | undefined)?.data;
+          return { reactionId: data?.reaction_id ?? null };
+        },
+        stop: async (state) => {
+          if (!state.reactionId) return;
+          const repository = new FeishuChannelRepository(input.db, input.userId, input.masterKey);
+          const account = repository.getAccount();
+          if (!account?.enabled) return;
+          const credentials = repository.decryptAccountCredentials(account.id);
+          const client = sdkFactory.createRestClient({
+            userId: "copilot-typing", accountId: account.id, appId: credentials.appId,
+            appSecret: credentials.appSecret, configRevision: account.configRevision
+          }) as FeishuRestClient;
+          await client.im?.messageReaction?.delete?.({ path: { reaction_id: state.reactionId } });
+        }
+      },
       transport: "long_connection"
     });
   };
-  const admit = (raw: unknown, eventType: "im.message.receive_v1" | "card.action.trigger") => {
+  const admit = (
+    raw: unknown,
+    eventType: "im.message.receive_v1" | "card.action.trigger",
+    context?: FeishuSdkEventContext
+  ) => {
     const account = credentialsRepository.getAccount();
     if (!account?.enabled) return;
-    const normalized = normalizeFeishuEvent(raw, { accountId: account.id, eventType });
+    const normalized = normalizeFeishuEvent(raw, {
+      accountId: account.id,
+      eventType,
+      ...(context ? { botOpenId: context.botOpenId } : {})
+    });
     if (!normalized) return;
     try {
       ensurePortfolioHandler(registry, input.userId, account.appId);
@@ -183,7 +247,15 @@ export function createFeishuSdkHandlers(input: {
         selector,
         event,
         kind: normalized.kind,
-        ...(normalized.kind === "message" ? { text: normalized.text } : { actionToken: normalized.actionId }),
+        ...(normalized.kind === "message"
+          ? {
+              text: normalized.text,
+              ...(normalized.messageId ? { copilotMeta: { messageId: normalized.messageId, ...(normalized.chatType ? { chatType: normalized.chatType } : {}), mentionedBot: normalized.mentionedBot } } : {})
+            }
+          : { actionToken: normalized.actionId }),
+        ...(normalized.kind === "card_action" && normalized.value
+          ? { cardAction: { value: normalized.value, ...(normalized.messageId ? { messageId: normalized.messageId } : {}) } }
+          : {}),
         ...(channel ? { copilotChannel: channel } : {})
       });
       return normalized.kind === "card_action" ? renderFeishuCardActionAcceptedResponse() : undefined;
@@ -194,7 +266,8 @@ export function createFeishuSdkHandlers(input: {
     }
   };
   return {
-    onMessage: (raw: unknown) => admit(raw, "im.message.receive_v1"),
+    onMessage: (raw: unknown, context?: FeishuSdkEventContext) =>
+      admit(raw, "im.message.receive_v1", context),
     onCardAction: (raw: unknown) => admit(raw, "card.action.trigger")
   };
 }
@@ -215,6 +288,10 @@ export function routeVerifiedFeishuIngress(input: {
   kind: "message" | "card_action";
   text?: string;
   actionToken?: string;
+  /** Button value payload + origin message id for copilot approval cards. */
+  cardAction?: { value: Record<string, unknown>; messageId?: string };
+  /** Message-scoped metadata for the copilot channel (typing + group gate). */
+  copilotMeta?: { messageId: string; chatType?: string; mentionedBot?: boolean };
   copilotChannel?: FeishuCopilotChannel;
 }): "portfolio" | "copilot" | "unhandled" {
   const providerAccount = input.registry.resolve(input.event.provider, input.event.providerAccountId);
@@ -231,14 +308,40 @@ export function routeVerifiedFeishuIngress(input: {
         chatId: input.event.conversationId,
         text: input.text ?? "",
         providerEventId: input.event.providerEventId,
-        senderIdentity: input.event.externalIdentity
+        senderIdentity: input.event.externalIdentity,
+        ...(input.copilotMeta ?? {})
       };
       // Ledger admission runs synchronously on the ack path: a ledger failure
       // throws, the delivery is rejected, and the provider retries instead of
       // the message being silently dropped.
       if (!input.copilotChannel.admitMessage(ingress)) return "copilot";
       // A full Copilot turn must not block ingress acknowledgement.
-      void input.copilotChannel.processMessage(ingress).catch(() => undefined);
+      void input.copilotChannel.processMessage(ingress).catch(() => {
+        console.error("[feishu-copilot] background processing failed", {
+          code: "FEISHU_COPILOT_PROCESS_FAILED",
+          transport: input.event.transport
+        });
+      });
+      return "copilot";
+    }
+    if (input.kind === "card_action" && input.copilotChannel && input.cardAction) {
+      // Copilot decision buttons carry their routing payload inside the card
+      // value; admission dedups provider retries of the same callback event.
+      const admitted = input.copilotChannel.admitCardAction({
+        chatId: input.event.conversationId,
+        senderIdentity: input.event.externalIdentity,
+        providerEventId: input.event.providerEventId,
+        value: input.cardAction.value
+      });
+      if (!admitted) return "copilot";
+      void input.copilotChannel
+        .handleCardAction({
+          chatId: input.event.conversationId,
+          senderIdentity: input.event.externalIdentity,
+          value: input.cardAction.value,
+          ...(input.cardAction.messageId ? { messageId: input.cardAction.messageId } : {})
+        })
+        .catch(() => undefined);
       return "copilot";
     }
     channel.denyIngress({
@@ -445,8 +548,11 @@ async function sendPortfolioText(
     params: { receive_id_type: "chat_id" },
     data: { receive_id: chatId, msg_type: "text", content: JSON.stringify({ text }) }
   });
-  const messageId = readProviderMessageId(response);
-  return { accepted: Boolean(response), ...(messageId ? { messageId } : {}) };
+  const accepted = Boolean(response)
+    && typeof response === "object"
+    && (response as { code?: unknown }).code === 0;
+  const messageId = accepted ? readProviderMessageId(response) : undefined;
+  return { accepted, ...(messageId ? { messageId } : {}) };
 }
 
 /** Send one text message to a chat as the user's enabled Feishu account (Copilot replies). */
@@ -463,6 +569,95 @@ export async function sendFeishuChatText(input: {
   if (!account?.enabled) throw new Error("FEISHU_ACCOUNT_DISABLED");
   const result = await sendPortfolioText(repository, input.sdkFactory, account.id, input.chatId, input.text);
   if (!result.accepted) throw new Error("FEISHU_PROVIDER_NOT_ACCEPTED");
+}
+
+/** Send one interactive card to a chat; returns the provider message id for in-place updates. */
+export async function sendFeishuChatCard(input: {
+  db: Database;
+  masterKey: string;
+  sdkFactory: FeishuSdkFactory;
+  userId: string;
+  chatId: string;
+  card: unknown;
+}): Promise<string | undefined> {
+  const repository = new FeishuChannelRepository(input.db, input.userId, input.masterKey);
+  const account = repository.getAccount();
+  if (!account?.enabled) throw new Error("FEISHU_ACCOUNT_DISABLED");
+  const credentials = repository.decryptAccountCredentials(account.id);
+  const content = serializeFeishuCard(input.card, "FEISHU_CARD_SEND_FAILED");
+  const client = input.sdkFactory.createRestClient({
+    userId: "copilot-cards",
+    accountId: account.id,
+    appId: credentials.appId,
+    appSecret: credentials.appSecret,
+    configRevision: account.configRevision
+  }) as FeishuRestClient;
+  const messageApi = client.im?.message;
+  if (!messageApi?.create) throw new Error("FEISHU_CARD_SEND_FAILED");
+  try {
+    const response = await messageApi.create({
+      params: { receive_id_type: "chat_id" },
+      data: { receive_id: input.chatId, msg_type: "interactive", content }
+    });
+    if (!response || typeof response !== "object" || (response as { code?: unknown }).code !== 0) {
+      throw new Error("FEISHU_CARD_SEND_FAILED");
+    }
+    const messageId = readProviderMessageId(response)?.trim();
+    if (!messageId) throw new Error("FEISHU_CARD_SEND_FAILED");
+    return messageId;
+  } catch {
+    throw new Error("FEISHU_CARD_SEND_FAILED");
+  }
+}
+
+/** Update an interactive card's content in place (streaming/finalize/resolved). */
+export async function updateFeishuChatCard(input: {
+  db: Database;
+  masterKey: string;
+  sdkFactory: FeishuSdkFactory;
+  userId: string;
+  messageId: string;
+  card: unknown;
+}): Promise<void> {
+  const repository = new FeishuChannelRepository(input.db, input.userId, input.masterKey);
+  const account = repository.getAccount();
+  if (!account?.enabled) throw new Error("FEISHU_ACCOUNT_DISABLED");
+  const credentials = repository.decryptAccountCredentials(account.id);
+  const content = serializeFeishuCard(input.card, "FEISHU_CARD_UPDATE_FAILED");
+  const client = input.sdkFactory.createRestClient({
+    userId: "copilot-cards",
+    accountId: account.id,
+    appId: credentials.appId,
+    appSecret: credentials.appSecret,
+    configRevision: account.configRevision
+  }) as FeishuRestClient;
+  const messageApi = client.im?.message;
+  if (!messageApi?.patch) throw new Error("FEISHU_CARD_UPDATE_FAILED");
+  try {
+    const response = await messageApi.patch({
+      path: { message_id: input.messageId },
+      data: { content }
+    });
+    if (!response || typeof response !== "object" || (response as { code?: unknown }).code !== 0) {
+      throw new Error("FEISHU_CARD_UPDATE_FAILED");
+    }
+  } catch {
+    // Provider details can contain request metadata. Keep the channel-facing
+    // failure stable and redacted so callers can safely choose a fallback.
+    throw new Error("FEISHU_CARD_UPDATE_FAILED");
+  }
+}
+
+function serializeFeishuCard(card: unknown, errorCode: string): string {
+  try {
+    const content = JSON.stringify(card);
+    if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > FEISHU_CARD_MAX_BYTES) {
+      throw new Error(errorCode);
+    }
+    return content;
+  } catch {
+    throw new Error(errorCode);
+  }
 }
 
 function listEnabledAccountUserIds(db: Database): string[] {

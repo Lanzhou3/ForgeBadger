@@ -15,11 +15,13 @@ import type { CommandRunner } from "./lib/dependency-check.js";
 import type { FeishuChannelRuntime } from "./services/integrations/feishu-channel-runtime.js";
 import { createPortfolioApiFacade, createPortfolioEventFacade, type PortfolioApiFacade } from "./services/portfolio/portfolio-api-service.js";
 import { attachCopilotReactiveLoop } from "./services/agent/reactive-loop.js";
-import { buildAgentStack } from "./services/agent/agent-stack.js";
+import { buildAgentStack, type AgentStackDeps } from "./services/agent/agent-stack.js";
 import { DshProcessManager, type DshProcessManagerOptions } from "./services/dsh-copilot/process-manager.js";
 import { createDshCopilotBff, type DshCopilotBff } from "./services/dsh-copilot/bff-service.js";
 import { createCordisConfigRenderer } from "./services/dsh-copilot/dsh-config.js";
 import type { DispatchConfirmOptions } from "./services/copilot-bridge/delivery-confirm.js";
+import type { FeishuSdkFactory } from "./services/integrations/feishu-sdk.js";
+import { drainFeishuCopilotChatQueues } from "./services/integrations/feishu-copilot-channel.js";
 
 import { mountRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -45,6 +47,10 @@ export interface ServerDeps {
   llmFetch?: typeof fetch;
   /** M2: constructed dsh copilot BFF; present only when the flag is on. */
   dshBff?: DshCopilotBff | undefined;
+  /** One production-composed dependency set shared by HTTP and Feishu transports. */
+  agentDeps?: AgentStackDeps | undefined;
+  /** Test-only external SDK boundary for signed Feishu webhook delivery. */
+  feishuWebhookSdkFactory?: FeishuSdkFactory | undefined;
 }
 
 /**
@@ -64,6 +70,11 @@ export interface GatewayApp {
   eventBus: OpenForgeEventBus;
   internalServices: GatewayInternalServices;
   recoveryReady: Promise<void>;
+  /**
+   * Proactive Copilot reactive loop handle; present only when opted in via
+   * OPENFORGE_COPILOT_REACTIVE_ENABLED. close() stops it automatically.
+   */
+  reactiveLoop?: ReturnType<typeof attachCopilotReactiveLoop> | undefined;
   close(): Promise<void>;
 }
 
@@ -86,6 +97,14 @@ export interface GatewayAppOptions {
   llmFetch?: typeof fetch;
   /** M2: dsh copilot kernel process config; present only when the flag is on. */
   dshCopilot?: DshProcessManagerOptions | undefined;
+  /** Test-only external SDK boundary for signed Feishu webhook delivery. */
+  feishuWebhookSdkFactory?: FeishuSdkFactory | undefined;
+  /**
+   * Opt-in (OPENFORGE_COPILOT_REACTIVE_ENABLED, default off): attach the
+   * proactive Copilot reactive loop. When off, Copilot never self-starts
+   * report conversations.
+   */
+  copilotReactiveEnabled?: boolean | undefined;
   /** Delivery read-back budget for the bridge dispatch path (from env in start-gateway). */
   dispatchConfirm?: DispatchConfirmOptions | undefined;
 }
@@ -156,6 +175,16 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
       ...(options.dispatchConfirm ? { dispatchConfirm: options.dispatchConfirm } : {})
     })
     : undefined;
+  const agentDeps: AgentStackDeps = {
+    db: options.db,
+    masterKey: options.masterKey,
+    eventBus,
+    portfolioApi,
+    sessionManager,
+    ...(options.adapterCommandRunner ? { adapterCommandRunner: options.adapterCommandRunner } : {}),
+    ...(dshBff ? { dshBff } : {}),
+    ...(options.llmFetch ? { llmFetch: options.llmFetch } : {})
+  };
 
   const app = createServer({
     db: options.db,
@@ -172,6 +201,8 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     appVersion: options.appVersion ?? "0.0.0",
     adapterCommandRunner: options.adapterCommandRunner,
     feishuChannelRuntime: options.feishuChannelRuntime,
+    agentDeps,
+    ...(options.feishuWebhookSdkFactory ? { feishuWebhookSdkFactory: options.feishuWebhookSdkFactory } : {}),
     ...(dshBff ? { dshBff } : {}),
     ...(options.llmFetch ? { llmFetch: options.llmFetch } : {})
   });
@@ -181,19 +212,21 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   attachNotificationPersistence({ db: options.db, eventBus });
   attachTerminalWebSocket({ server, sessionManager, jwtSecret, db: options.db });
   attachEventsWebSocket({ server, eventBus, jwtSecret, db: options.db });
-  // Proactive copilot: wake on platform events, report in fresh conversations.
-  const reactiveLoop = attachCopilotReactiveLoop({
-    deps: { db: options.db, masterKey: options.masterKey, eventBus, portfolioApi, ...(dshBff ? { dshBff } : {}) },
-    buildAgentStack
-  });
+  // Proactive copilot: opt-in via OPENFORGE_COPILOT_REACTIVE_ENABLED. When
+  // off, no listener is attached — Copilot never wakes itself on events.
+  const reactiveLoop = options.copilotReactiveEnabled
+    ? attachCopilotReactiveLoop({
+      deps: agentDeps,
+      buildAgentStack
+    })
+    : undefined;
   // Feishu Copilot channel: the runtime is built in startup before the
   // Portfolio facade exists, so its agent deps attach here once in scope.
-  options.feishuChannelRuntime?.attachAgentDeps({
-    db: options.db,
-    masterKey: options.masterKey,
-    eventBus,
-    portfolioApi,
-    ...(dshBff ? { dshBff } : {})
+  options.feishuChannelRuntime?.attachAgentDeps(agentDeps);
+  // Opening the provider connection is intentionally last: an inbound event
+  // can only arrive after the complete shared AgentStackDeps are visible.
+  void options.feishuChannelRuntime?.start().catch(() => {
+    console.error("[feishu-runtime] startup failed", { code: "FEISHU_RUNTIME_START_FAILED" });
   });
 
   return {
@@ -204,23 +237,45 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     eventBus,
     internalServices,
     recoveryReady,
+    reactiveLoop,
     async close() {
       if (closed) {
         return;
       }
       closed = true;
 
-      try {
-        reactiveLoop.stop();
-        await dshProcessManager?.disposeAll();
-        await options.operationsRuntime?.stop();
-        await options.feishuChannelRuntime?.stop();
-        await closeServerIfListening(server);
-      } finally {
-        options.db.close();
+      const failures: unknown[] = [];
+      const httpCloseResult = beginServerClose(server).then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error })
+      );
+      await runShutdownStage(failures, () => options.feishuChannelRuntime?.stop());
+      const httpResult = await httpCloseResult;
+      if (!httpResult.ok) {
+        failures.push(httpResult.error);
+      }
+      await runShutdownStage(failures, () => drainFeishuCopilotChatQueues(options.db));
+      await runShutdownStage(failures, () => reactiveLoop?.stop());
+      await runShutdownStage(failures, () => options.operationsRuntime?.stop());
+      await runShutdownStage(failures, () => dshProcessManager?.disposeAll());
+      await runShutdownStage(failures, () => options.db.close());
+
+      if (failures.length > 0) {
+        throw new AggregateError(failures, "GATEWAY_SHUTDOWN_FAILED");
       }
     }
   };
+}
+
+async function runShutdownStage(
+  failures: unknown[],
+  stage: () => unknown | Promise<unknown>
+): Promise<void> {
+  try {
+    await stage();
+  } catch (error) {
+    failures.push(error);
+  }
 }
 
 function createGatewayInternalServices(
@@ -236,18 +291,30 @@ function createGatewayInternalServices(
   });
 }
 
-async function closeServerIfListening(server: Server): Promise<void> {
+function beginServerClose(server: Server, timeoutMs = 5_000): Promise<void> {
   if (!server.listening) {
-    return;
+    return Promise.resolve();
   }
 
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(() => {
+      server.closeAllConnections?.();
+      finish();
+    }, Math.max(1, timeoutMs));
     server.close((error) => {
       if (error) {
-        reject(error);
+        finish(error);
         return;
       }
-      resolve();
+      finish();
     });
   });
 }

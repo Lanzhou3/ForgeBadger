@@ -113,6 +113,21 @@ describe("loadEnv security configuration", () => {
     );
   });
 
+  it("gates the copilot reactive loop behind an explicit flag value, default off", () => {
+    const base = { OPENFORGE_JWT_SECRET: jwtSecret, OPENFORGE_MASTER_KEY: masterKey };
+    // Default off: Copilot never self-starts report conversations unless the
+    // operator explicitly opts in.
+    assert.equal(loadEnv({ ...base }).OPENFORGE_COPILOT_REACTIVE_ENABLED, false);
+    assert.equal(loadEnv({ ...base, OPENFORGE_COPILOT_REACTIVE_ENABLED: "1" }).OPENFORGE_COPILOT_REACTIVE_ENABLED, true);
+    assert.equal(loadEnv({ ...base, OPENFORGE_COPILOT_REACTIVE_ENABLED: "true" }).OPENFORGE_COPILOT_REACTIVE_ENABLED, true);
+    assert.equal(loadEnv({ ...base, OPENFORGE_COPILOT_REACTIVE_ENABLED: "0" }).OPENFORGE_COPILOT_REACTIVE_ENABLED, false);
+    assert.equal(loadEnv({ ...base, OPENFORGE_COPILOT_REACTIVE_ENABLED: "false" }).OPENFORGE_COPILOT_REACTIVE_ENABLED, false);
+    assert.throws(
+      () => loadEnv({ ...base, OPENFORGE_COPILOT_REACTIVE_ENABLED: "yes" }),
+      /OPENFORGE_COPILOT_REACTIVE_ENABLED|Invalid/i
+    );
+  });
+
   it("defaults the dsh idle reap to 15 minutes and accepts an override", () => {
     const base = { OPENFORGE_JWT_SECRET: jwtSecret, OPENFORGE_MASTER_KEY: masterKey };
     assert.equal(loadEnv({ ...base }).OPENFORGE_DSH_IDLE_MS, 15 * 60 * 1000);

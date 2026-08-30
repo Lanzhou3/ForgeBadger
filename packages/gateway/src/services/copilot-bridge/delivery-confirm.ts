@@ -9,6 +9,8 @@
  * Pure helpers are exported for unit tests; the polling loop injects `sleep`
  * so tests never wait in real time.
  */
+import type { AdapterId } from "../adapter-discovery.js";
+import { isProgrammaticTaskConsumed } from "../programmatic-terminal-submit.js";
 
 /** Thrown (as the message of an Error) when the read-back never observes the input. */
 export const DISPATCH_DELIVERY_UNCONFIRMED = "BRIDGE_DELIVERY_UNCONFIRMED";
@@ -65,6 +67,24 @@ export async function confirmDelivery(
   for (;;) {
     const pane = normalizePaneText(await capture());
     if (pane.includes(needle)) return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(options.intervalMs);
+  }
+}
+
+export async function confirmProgrammaticTaskConsumed(
+  capture: () => Promise<string>,
+  adapter: AdapterId,
+  stagedPane: string,
+  needle: string,
+  options: DispatchConfirmOptions
+): Promise<boolean> {
+  if (needle === "") return false;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const deadline = Date.now() + options.timeoutMs;
+  for (;;) {
+    const pane = await capture();
+    if (isProgrammaticTaskConsumed(adapter, stagedPane, pane, needle)) return true;
     if (Date.now() >= deadline) return false;
     await sleep(options.intervalMs);
   }

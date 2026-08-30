@@ -150,7 +150,6 @@ export async function startupGateway(options: {
     db,
     masterKey: options.env.OPENFORGE_MASTER_KEY
   });
-  await feishuChannelRuntime.start();
 
   return {
     db,

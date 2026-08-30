@@ -350,6 +350,9 @@ describe("terminal websocket authentication", () => {
 
   it("accepts secure header auth and rejects missing terminal session with not found", async () => {
     const db = createTestDb();
+    db.prepare(
+      "INSERT INTO users (id, username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("user_123", "ws-tester", "test@example.com", "hash", "user", "active");
     const eventBus = new OpenForgeEventBus();
     const sessionManager = new InMemorySessionManager({
       async createSession() {},

@@ -14,14 +14,17 @@ import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { buildAgentStack, type AgentStackDeps } from "../services/agent/agent-stack.js";
+import { createPlatformTools } from "../services/agent/tools/index.js";
 import { AgentError } from "../services/agent/types.js";
 import type { DshCopilotBff } from "../services/dsh-copilot/bff-service.js";
+import { dshToolSurface } from "../services/dsh-copilot/dsh-tool-surface.js";
 import {
   DSH_AVAILABLE_PLUGINS,
   getEffectiveDshConfig,
   unknownPluginKeys
 } from "../services/dsh-copilot/dsh-config.js";
 import { CopilotDshConfigRepository } from "../db/repositories/copilot-dsh-config-repository.js";
+import { CopilotToolPreferenceRepository } from "../db/repositories/copilot-tool-preference-repository.js";
 import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 
 const idSchema = z.string().trim().min(1).max(128);
@@ -43,6 +46,7 @@ const writeMemorySchema = z.object({
 }).strict();
 const listMemorySchema = z.object({ scope: memoryScopeSchema.default("global"), projectId: z.string().max(128).optional(), limit: z.coerce.number().int().min(1).max(100).optional() }).strict();
 const searchMemorySchema = z.object({ q: z.string().trim().min(1).max(512), scope: memoryScopeSchema.default("global"), projectId: z.string().max(128).optional(), limit: z.coerce.number().int().min(1).max(50).optional() }).strict();
+const toolEnabledSchema = z.object({ enabled: z.boolean() }).strict();
 
 export type CopilotRouteDeps = AgentStackDeps & {
   /**
@@ -58,16 +62,39 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   const router = Router();
   router.use(authenticate);
 
+  // Known tool names across both execution paths — the whitelist for toggles.
+  const KNOWN_TOOL_NAMES = new Set<string>([
+    ...dshToolSurface().map((t) => t.name),
+    ...createPlatformTools().map((t) => t.name)
+  ]);
+
   router.get("/capabilities", (req, res) => {
-    const { toolRegistry } = buildAgentStack(deps, userId(req));
-    const tools = Array.from(toolRegistry.tools.values()).map((t) => ({
-      name: t.name,
-      description: t.description,
-      risk: t.risk,
-      requiresApproval: t.requiresApproval
+    const actingUser = userId(req);
+    const preferences = new CopilotToolPreferenceRepository(deps.db, actingUser);
+    // dsh path (M2+): the runtime's tool surface comes from the openforge-bridge
+    // plugin, not the in-process registry — report the dsh manifest instead.
+    const tools = deps.dshBff
+      ? dshToolSurface()
+      : Array.from(buildAgentStack(deps, actingUser).toolRegistry.tools.values()).map((t) => ({
+        name: t.name,
+        description: t.description,
+        risk: t.risk,
+        requiresApproval: t.requiresApproval
+      }));
+    res.json(ok({
+      tools: tools.map((t) => ({ ...t, enabled: preferences.isEnabled(t.name) }))
     }));
-    res.json(ok({ tools }));
   });
+
+  router.put("/capabilities/:toolName/enabled", (req, res) => withBody(req.body, toolEnabledSchema, res, (value) => {
+    const toolName = req.params.toolName ?? "";
+    if (!KNOWN_TOOL_NAMES.has(toolName)) {
+      res.status(404).json({ code: 1, message: `Unknown tool: ${toolName}`, details: { code: "COPILOT_TOOL_UNKNOWN" } });
+      return;
+    }
+    new CopilotToolPreferenceRepository(deps.db, userId(req)).setEnabled(toolName, value.enabled);
+    res.json(ok({ toolName, enabled: value.enabled }));
+  }));
 
   router.post("/conversations", (req, res) => withBody(req.body, createConversationSchema, res, (value) => {
     const { log } = buildAgentStack(deps, userId(req));

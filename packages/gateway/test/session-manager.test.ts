@@ -145,6 +145,192 @@ describe("InMemorySessionManager", () => {
     ]);
   });
 
+  it("stages one programmatic task, settles, and presses Enter exactly once", async () => {
+    const calls: string[] = [];
+    let pane = "› Ask Codex to do anything\n\nmodel · cwd";
+    const plan = { ...launchPlan(), command: "codex" };
+    const manager = new InMemorySessionManager({
+      ...fakeTmux(calls),
+      async inspectPane() {
+        calls.push("inspect");
+        return { content: pane, dead: false, inMode: false };
+      },
+      async stageProgrammaticInput(_name, data) {
+        calls.push(`stage:${data}`);
+        pane = `› ${data}\n\nmodel · cwd`;
+      },
+      async pressEnter() {
+        calls.push("enter");
+      }
+    }, undefined, undefined, {
+      programmaticSubmitSettleMs: { codex: 0 },
+      sleep: async () => calls.push("settle")
+    });
+    const session = await manager.createSession({
+      userId: "user_123456",
+      sessionId: "session_programmatic",
+      launchPlan: plan
+    });
+
+    const receipt = await manager.submitProgrammaticTask(session.id, {
+      adapter: "codex",
+      message: "第一行\n第二行"
+    });
+
+    assert.equal(receipt.adapter, "codex");
+    assert.deepEqual(calls.filter((call) => call === "enter"), ["enter"]);
+    assert.deepEqual(calls.slice(1), ["inspect", "stage:第一行\n第二行", "settle", "inspect", "enter"]);
+  });
+
+  it("submits a Codex large-paste placeholder after matching its character count", async () => {
+    const calls: string[] = [];
+    const message = "请".repeat(2032);
+    let pane = "› Ask Codex to do anything\n\nmodel · cwd";
+    const manager = new InMemorySessionManager({
+      ...fakeTmux(calls),
+      async inspectPane() {
+        calls.push("inspect");
+        return { content: pane, dead: false, inMode: false };
+      },
+      async stageProgrammaticInput() {
+        calls.push("stage");
+        pane = "› [Pasted Content 2032 chars]\n\nmodel · cwd";
+      },
+      async pressEnter() {
+        calls.push("enter");
+      }
+    }, undefined, undefined, {
+      programmaticSubmitSettleMs: { codex: 0 },
+      sleep: async () => calls.push("settle")
+    });
+    const session = await manager.createSession({
+      userId: "user_123456",
+      sessionId: "session_large_paste",
+      launchPlan: { ...launchPlan(), command: "codex" }
+    });
+
+    await manager.submitProgrammaticTask(session.id, { adapter: "codex", message });
+
+    assert.deepEqual(calls.slice(1), ["inspect", "stage", "settle", "inspect", "enter"]);
+  });
+
+  it("rejects an adapter mismatch before writing to tmux", async () => {
+    const writes: string[] = [];
+    const manager = new InMemorySessionManager({
+      ...fakeTmux([]),
+      async inspectPane() {
+        writes.push("inspect");
+        return { content: "", dead: false, inMode: false };
+      },
+      async stageProgrammaticInput() {
+        writes.push("stage");
+      },
+      async pressEnter() {
+        writes.push("enter");
+      }
+    });
+    const session = await manager.createSession({
+      userId: "user_123456",
+      sessionId: "session_mismatch",
+      launchPlan: { ...launchPlan(), command: "codex" }
+    });
+
+    await assert.rejects(
+      () => manager.submitProgrammaticTask(session.id, { adapter: "claude", message: "hello" }),
+      /PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH/
+    );
+    assert.deepEqual(writes, []);
+  });
+
+  it("rejects unsafe terminal control characters before reading or writing tmux", async () => {
+    const terminalCalls: string[] = [];
+    const manager = new InMemorySessionManager({
+      ...fakeTmux([]),
+      async inspectPane() {
+        terminalCalls.push("inspect");
+        return { content: "", dead: false, inMode: false };
+      },
+      async stageProgrammaticInput() {
+        terminalCalls.push("stage");
+      },
+      async pressEnter() {
+        terminalCalls.push("enter");
+      }
+    });
+
+    await assert.rejects(
+      () => manager.submitProgrammaticTask("unknown", {
+        adapter: "codex",
+        message: "hello\u001b[201~\rInjected command"
+      }),
+      /PROGRAMMATIC_SUBMIT_UNSAFE_INPUT/
+    );
+    assert.deepEqual(terminalCalls, []);
+  });
+
+  it("marks a partially failed stage as indeterminate without resending", async () => {
+    const terminalCalls: string[] = [];
+    const manager = new InMemorySessionManager({
+      ...fakeTmux([]),
+      async inspectPane() {
+        terminalCalls.push("inspect");
+        return { content: "› Ask Codex to do anything\n\nmodel · cwd", dead: false, inMode: false };
+      },
+      async stageProgrammaticInput(_name, data) {
+        terminalCalls.push(`stage:${data}`);
+        throw new Error("control stream closed after a partial write");
+      },
+      async pressEnter() {
+        terminalCalls.push("enter");
+      }
+    });
+    const session = await manager.createSession({
+      userId: "user_123456",
+      sessionId: "session_partial_stage",
+      launchPlan: { ...launchPlan(), command: "codex" }
+    });
+
+    await assert.rejects(
+      () => manager.submitProgrammaticTask(session.id, { adapter: "codex", message: "hello" }),
+      /PROGRAMMATIC_SUBMIT_INDETERMINATE/
+    );
+    assert.deepEqual(terminalCalls, ["inspect", "stage:hello"]);
+  });
+
+  it("marks an Enter failure as indeterminate without restaging or resubmitting", async () => {
+    const terminalCalls: string[] = [];
+    let pane = "› Ask Codex to do anything\n\nmodel · cwd";
+    const manager = new InMemorySessionManager({
+      ...fakeTmux([]),
+      async inspectPane() {
+        terminalCalls.push("inspect");
+        return { content: pane, dead: false, inMode: false };
+      },
+      async stageProgrammaticInput(_name, data) {
+        terminalCalls.push(`stage:${data}`);
+        pane = `› ${data}\n\nmodel · cwd`;
+      },
+      async pressEnter() {
+        terminalCalls.push("enter");
+        throw new Error("control stream closed after Enter may have been written");
+      }
+    }, undefined, undefined, {
+      programmaticSubmitSettleMs: { codex: 0 },
+      sleep: async () => terminalCalls.push("settle")
+    });
+    const session = await manager.createSession({
+      userId: "user_123456",
+      sessionId: "session_enter_failure",
+      launchPlan: { ...launchPlan(), command: "codex" }
+    });
+
+    await assert.rejects(
+      () => manager.submitProgrammaticTask(session.id, { adapter: "codex", message: "hello" }),
+      /PROGRAMMATIC_SUBMIT_INDETERMINATE/
+    );
+    assert.deepEqual(terminalCalls, ["inspect", "stage:hello", "settle", "inspect", "enter"]);
+  });
+
   it("marks launch failures as errors", async () => {
     const manager = new InMemorySessionManager({
       async createSession() {

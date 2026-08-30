@@ -22,6 +22,8 @@ export interface FeishuInboundCardAction {
   messageId?: string;
   senderOpenId: string;
   actionId: string;
+  /** Full button-value payload from the interactive card (copilot decisions ride here). */
+  value?: Record<string, unknown>;
   laneKey: string;
 }
 
@@ -115,6 +117,7 @@ function normalizeCardAction(
     ...(messageId ? { messageId } : {}),
     senderOpenId,
     actionId,
+    ...(value ? { value } : {}),
     laneKey: `${chatId}:card`
   };
 }

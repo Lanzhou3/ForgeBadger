@@ -21,11 +21,19 @@ const envSchema = z.object({
   OPENFORGE_DB_PATH: z.string().default(path.join(homedir(), ".openforge", "openforge.db")),
   OPENFORGE_JWT_SECRET: z.string().min(32),
   OPENFORGE_TMUX_PREFIX: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("of-"),
+  // open: anyone may register (personal/local default). off: registration
+  // closed (admin-managed users only). invite: registration requires a valid
+  // one-time invite code. The first user bootstrap is always allowed.
+  OPENFORGE_REGISTRATION: z.enum(["open", "off", "invite"]).default("open"),
   OPENFORGE_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: strictEnvBoolean,
   // M2: run the Copilot message/run endpoints on the dsh (deepseek-harness)
   // kernel via a per-user child process instead of the in-process orchestrator.
   // Off by default; when off the copilot behavior is byte-identical to M1.
   OPENFORGE_DSH_COPILOT_ENABLED: featureFlagBoolean,
+  // Proactive Copilot reactive loop: platform-event wake-ups that start
+  // report turns in a rolling "Copilot 主动更新" conversation. Opt-in and off
+  // by default — when off, Copilot never self-starts conversations.
+  OPENFORGE_COPILOT_REACTIVE_ENABLED: featureFlagBoolean,
   // Idle reap for the per-user dsh runtime process; the session log persists,
   // so the next message transparently resumes after a kill.
   OPENFORGE_DSH_IDLE_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),

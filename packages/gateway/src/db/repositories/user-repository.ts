@@ -91,4 +91,14 @@ export class UserRepository {
       .get();
     return result as User | undefined;
   }
+
+  updatePassword(id: string, passwordHash: string): User | undefined {
+    const result = this.drizzle
+      .update(users)
+      .set({ passwordHash })
+      .where(eq(users.id, id))
+      .returning()
+      .get();
+    return result as User | undefined;
+  }
 }

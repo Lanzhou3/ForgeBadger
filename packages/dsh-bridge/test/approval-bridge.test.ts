@@ -39,10 +39,14 @@ describe("registerApprovalBridge", () => {
     const preExecute = handlers.get("tools/pre-execute");
     assert.ok(preExecute);
 
-    const operate = await preExecute({ name: "dispatch_task_to_session", callId: "c1", arguments: { sessionId: "s" } }, async () => ({ kind: "allow" })) as { kind: string };
-    assert.equal(operate.kind, "ask");
-    const read = await preExecute({ name: "list_sessions", callId: "c2", arguments: {} }, async () => ({ kind: "allow" })) as { kind: string };
-    assert.equal(read.kind, "allow", "read tools delegate to next()");
+    for (const name of ["dispatch_task_to_session", "advance_work_item", "create_project", "write_memory"]) {
+      const operate = await preExecute({ name, callId: `c-${name}`, arguments: { sessionId: "s" } }, async () => ({ kind: "allow" })) as { kind: string };
+      assert.equal(operate.kind, "ask", `${name} must park on owner approval`);
+    }
+    for (const name of ["list_sessions", "list_projects", "search_memory", "portfolio_overview"]) {
+      const read = await preExecute({ name, callId: `c-${name}`, arguments: {} }, async () => ({ kind: "allow" })) as { kind: string };
+      assert.equal(read.kind, "allow", `${name} delegates to next()`);
+    }
   });
 
   it("forwards the question with stashed args and maps the grant", async () => {

@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, describe, it } from "node:test";
+import { spawn, type ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -14,6 +17,7 @@ import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import type { OpenForgeEvent } from "../src/services/event-bus.js";
+import { DshProcessManager } from "../src/services/dsh-copilot/process-manager.js";
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
@@ -23,6 +27,164 @@ process.env.OPENFORGE_JWT_SECRET = jwtSecret;
 process.env.OPENFORGE_MASTER_KEY = masterKey;
 
 const FAKE_LAUNCHER = path.join(path.dirname(fileURLToPath(import.meta.url)), "helpers", "fake-dsh-runtime.mjs");
+
+function createControlledDshChild(): {
+  child: ChildProcess;
+  exit(signal?: NodeJS.Signals): void;
+} {
+  const events = new EventEmitter();
+  const stdin = new PassThrough();
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const mutable = Object.assign(events, {
+    stdin,
+    stdout,
+    stderr,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    killed: false,
+    kill(_signal?: NodeJS.Signals | number): boolean {
+      mutable.killed = true;
+      return true;
+    }
+  });
+  let inputBuffer = "";
+  stdin.on("data", (chunk: Buffer) => {
+    inputBuffer += chunk.toString("utf8");
+    let newline = inputBuffer.indexOf("\n");
+    while (newline >= 0) {
+      const frame = JSON.parse(inputBuffer.slice(0, newline)) as { id: number };
+      inputBuffer = inputBuffer.slice(newline + 1);
+      stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: {} })}\n`);
+      newline = inputBuffer.indexOf("\n");
+    }
+  });
+  return {
+    child: mutable as unknown as ChildProcess,
+    exit(signal: NodeJS.Signals = "SIGKILL"): void {
+      mutable.signalCode = signal;
+      mutable.emit("exit", null, signal);
+    }
+  };
+}
+
+describe("DshProcessManager shutdown guard", () => {
+  it("never spawns a runtime after disposeAll begins", async () => {
+    const stateDir = mkdtempSync(path.join(tmpdir(), "openforge-dsh-closing-"));
+    let spawnCalls = 0;
+    const manager = new DshProcessManager({
+      launcherPath: FAKE_LAUNCHER,
+      gatewayUrl: "http://127.0.0.1:1",
+      bridgeToken,
+      stateDir,
+      idleMs: 60_000,
+      spawnImpl: (() => {
+        spawnCalls += 1;
+        throw new Error("spawn must not run after dispose");
+      }) as never
+    });
+
+    try {
+      await manager.disposeAll();
+      await assert.rejects(
+        () => manager.ensureClient("user-after-close", {
+          api: "openai-completions",
+          baseUrl: "https://stub.example",
+          apiKey: "fake-key",
+          model: "stub-model",
+          modelName: "Stub"
+        }),
+        /DSH_PROCESS_MANAGER_CLOSED/u
+      );
+      assert.equal(spawnCalls, 0);
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("escalates a stubborn live child from SIGTERM to SIGKILL", async () => {
+    const stateDir = mkdtempSync(path.join(tmpdir(), "openforge-dsh-stubborn-"));
+    const signals: Array<NodeJS.Signals | number | undefined> = [];
+    let child: ChildProcess | undefined;
+    const manager = new DshProcessManager({
+      launcherPath: FAKE_LAUNCHER,
+      gatewayUrl: "http://127.0.0.1:1",
+      bridgeToken,
+      stateDir,
+      idleMs: 60_000,
+      killGraceMs: 20,
+      extraEnv: { DSH_FAKE_SCENARIO: "stubborn" },
+      spawnImpl: ((...args: Parameters<typeof spawn>) => {
+        child = spawn(...args);
+        const kill = child.kill.bind(child);
+        child.kill = ((signal?: NodeJS.Signals | number) => {
+          signals.push(signal);
+          return kill(signal);
+        }) as ChildProcess["kill"];
+        return child;
+      }) as typeof spawn
+    });
+
+    try {
+      await manager.ensureClient("user-stubborn", {
+        api: "openai-completions",
+        baseUrl: "https://stub.example",
+        apiKey: "fake-key",
+        model: "stub-model",
+        modelName: "Stub"
+      });
+      await manager.killUser("user-stubborn");
+
+      assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+    } finally {
+      if (child?.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+        await new Promise<void>((resolve) => child?.once("exit", () => resolve()));
+      }
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let a replaced runtime's late exit delete the current generation", async () => {
+    const stateDir = mkdtempSync(path.join(tmpdir(), "openforge-dsh-generation-"));
+    const children: ReturnType<typeof createControlledDshChild>[] = [];
+    const manager = new DshProcessManager({
+      launcherPath: FAKE_LAUNCHER,
+      gatewayUrl: "http://127.0.0.1:1",
+      bridgeToken,
+      stateDir,
+      idleMs: 60_000,
+      killGraceMs: 10,
+      spawnImpl: (() => {
+        const controlled = createControlledDshChild();
+        children.push(controlled);
+        return controlled.child;
+      }) as typeof spawn
+    });
+
+    const route = {
+      api: "openai-completions",
+      baseUrl: "https://stub.example",
+      apiKey: "fake-key",
+      modelName: "Stub"
+    };
+    try {
+      await manager.ensureClient("user-generation", { ...route, model: "model-a" });
+      await manager.ensureClient("user-generation", { ...route, model: "model-b" });
+      assert.equal(children.length, 2);
+      assert.equal(manager.isRunning("user-generation"), true);
+
+      children[0]?.exit();
+
+      assert.equal(manager.isRunning("user-generation"), true);
+      assert.equal(manager.size, 1);
+    } finally {
+      await manager.disposeAll();
+      children[1]?.exit();
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+});
 
 const mockTmuxClient = {
   async createSession() {},

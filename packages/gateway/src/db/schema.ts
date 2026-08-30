@@ -1258,6 +1258,20 @@ export const copilotDshConfig = sqliteTable("copilot_dsh_config", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 });
 
+// Per-user Copilot tool switches: a row pins one tool to enabled(1)/disabled(0).
+// Absent row = tool enabled at its registered default. Enforced by the
+// in-process orchestrator (model schemas + execution) and the internal bridge
+// routes (dsh runtime callbacks).
+export const copilotToolPreferences = sqliteTable("copilot_tool_preferences", {
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  toolName: text("tool_name").notNull(),
+  enabled: integer("enabled").notNull().default(1),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+}, (table) => ({
+  pk_copilot_tool_preferences: primaryKey({ columns: [table.userId, table.toolName] }),
+  idx_copilot_tool_preferences_user: index("idx_copilot_tool_preferences_user").on(table.userId)
+}));
+
 // Feishu Copilot channel: one row per (user, Feishu chat) pointing at the chat's
 // CURRENT Copilot conversation. Chats without a Portfolio channel binding route
 // messages into the Copilot harness; /new swaps the pointer to a fresh context.

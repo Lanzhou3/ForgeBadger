@@ -60,3 +60,13 @@ export { TemplateRepository } from "./template-repository.js";
 export { TokenUsageRepository } from "./token-usage-repository.js";
 export { UsageRepository } from "./usage-repository.js";
 export { UserRepository } from "./user-repository.js";
+export {
+  AuthSessionRepository,
+  hashToken,
+  type AuthSession
+} from "./auth-session-repository.js";
+export {
+  AuthInviteRepository,
+  DEFAULT_INVITE_TTL_MS,
+  type AuthInvite
+} from "./auth-invite-repository.js";

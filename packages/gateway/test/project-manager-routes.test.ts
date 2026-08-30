@@ -52,7 +52,9 @@ describe("project-manager routes", () => {
     app = express();
     app.locals.jwtSecret = secret;
     app.use(express.json());
-    app.use("/api/v1/projects", createProjectManagerRoutes(db));
+    app.use("/api/v1/projects", createProjectManagerRoutes(db, {
+      adapterCommandRunner: async () => ({ exitCode: 0, stdout: "claude 1.0.0 (Claude Code)", stderr: "" })
+    }));
   });
 
   it("returns canonical envelopes for authenticated owner project-manager requests", async () => {
@@ -269,6 +271,49 @@ describe("project-manager routes", () => {
     assert.equal((stored?.details.taskPacket as { sessionId?: string } | undefined)?.sessionId, started.body.data.session.id);
     assert.match(serializedDetails, /promptDigest/u);
     assert.doesNotMatch(serializedDetails, /Prepare a safe operator handoff|Acceptance criteria/u);
+  });
+
+  it("creates the session with an explicitly selected CLI adapter", async () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const item = repo.createWorkItem(projectId, { title: "Pick a CLI" });
+
+    const started = await request(
+      "POST",
+      `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/task-packet/start`,
+      { aiTool: "opencode" }
+    );
+    const sessions = new SessionRepository(db, owner.id).listByProject(projectId);
+
+    assert.equal(started.status, 201);
+    assert.equal(started.body.code, 0);
+    assert.equal(started.body.data.session.aiTool, "opencode");
+    assert.equal(started.body.data.taskPacket.runtime.adapter, "opencode");
+    assert.match(started.body.data.taskPacket.prompt, /Runtime CLI: opencode/u);
+    assert.equal(sessions[0]?.aiTool, "opencode");
+  });
+
+  it("rejects task packet start when the selected CLI is unavailable", async () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const item = repo.createWorkItem(projectId, { title: "Needs missing CLI" });
+    const unavailableApp = express();
+    unavailableApp.locals.jwtSecret = secret;
+    unavailableApp.use(express.json());
+    unavailableApp.use("/api/v1/projects", createProjectManagerRoutes(db, {
+      adapterCommandRunner: async () => ({ exitCode: 1, stdout: "", stderr: "command not found" })
+    }));
+
+    const response = await makeRequest(
+      unavailableApp,
+      "POST",
+      `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/task-packet/start`,
+      { aiTool: "codex" },
+      { Authorization: `Bearer ${token}` }
+    );
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 1);
+    assert.match(response.body.message, /not available for launch/u);
+    assert.equal(response.body.details.adapter, "codex");
   });
 
   it("lists built-in starter packs with bounded task packet guidance", async () => {

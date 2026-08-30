@@ -86,7 +86,11 @@ opencode.jsonc
 # Local browser captures and one-off runtime probes.
 .playwright-mcp/
 packages/gateway/*probe.mjs
+packages/gateway/*probe.mts
 packages/web/*probe.mjs
+
+# Superseded local branding exploration; retained locally, never shipped.
+Runtra-Icon-Pack/
 
 # Local macOS metadata and generated CodeGraph indexes are never repository inputs.
 .DS_Store

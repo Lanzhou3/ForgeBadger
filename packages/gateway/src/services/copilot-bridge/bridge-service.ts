@@ -8,20 +8,33 @@
  * apply their own `WHERE user_id = ?` filtering.
  */
 import { SessionRepository } from "../../db/repositories/session-repository.js";
+import { ProjectRepository } from "../../db/repositories/project-repository.js";
 import {
   PortfolioRepository,
   type PortfolioWorkItemState
 } from "../../db/repositories/portfolio-repository.js";
 import type { Database } from "../../db/types.js";
+import {
+  AgentMemoryRepository,
+  type AgentMemoryScope
+} from "../agent/memory.js";
+import type { AgentMemoryEntry } from "../agent/types.js";
 import type { InMemorySessionManager } from "../session-manager.js";
+import type { AdapterId } from "../adapter-discovery.js";
 import type { PortfolioUserApi } from "../portfolio/portfolio-api-service.js";
 import {
-  confirmDelivery,
+  confirmProgrammaticTaskConsumed,
   DEFAULT_DISPATCH_CONFIRM,
-  deliveryNeedle,
   DISPATCH_DELIVERY_UNCONFIRMED,
   type DispatchConfirmOptions
 } from "./delivery-confirm.js";
+import { PROGRAMMATIC_SUBMIT_INDETERMINATE } from "../programmatic-terminal-submit.js";
+import {
+  getChangedPathsImpact,
+  getSymbolDetail,
+  getSymbolImpact,
+  searchGraphSymbols
+} from "../project-graph.js";
 
 export interface BridgeSessionSummary {
   id: string;
@@ -143,35 +156,218 @@ function requiresAttempt(toState: PortfolioWorkItemState): boolean {
 }
 
 /**
- * Inject a message into a session's terminal through the same
- * session-manager -> tmux send-keys path the Portfolio worker uses (the
- * trailing newline submits the input). The session input gate still applies:
- * a session leased to a Portfolio worker rejects direct writes.
- *
- * Delivery confirmation (post-M3): send-keys succeeds even when the target
- * CLI shows a modal dialog that swallows the input, so after the write the
- * pane is read back (capture-pane, same parameters as terminal history) until
- * the message's normalized prefix appears. An unconfirmed delivery throws
- * DISPATCH_DELIVERY_UNCONFIRMED — the bytes may or may not have landed, so
- * callers must surface the failure instead of claiming dispatch.
- *
- * The Portfolio worker path (sendInput with a capability) is deliberately
- * unchanged; confirmation applies to the bridge dispatch path only.
+ * Submit one adapter-bound task through the programmatic terminal path. The
+ * task is staged as one bracketed paste, allowed to settle, and submitted with
+ * exactly one Enter. Success requires the current CLI composer to consume the
+ * staged task; seeing the text elsewhere in scrollback is not sufficient.
+ * Raw browser and Portfolio worker input continue to use sendInput unchanged.
  */
 export async function dispatchSessionInput(
-  sessionManager: Pick<InMemorySessionManager, "sendInput" | "captureHistory">,
+  sessionManager: Pick<InMemorySessionManager, "submitProgrammaticTask" | "captureHistory">,
   sessionId: string,
+  adapter: AdapterId,
   message: string,
   confirm?: DispatchConfirmOptions
-): Promise<{ dispatched: true; sessionId: string; delivery: "confirmed" }> {
-  await sessionManager.sendInput(sessionId, `${message}\n`);
-  const confirmed = await confirmDelivery(
+): Promise<{ dispatched: true; sessionId: string; delivery: "consumed" }> {
+  let staged;
+  try {
+    staged = await sessionManager.submitProgrammaticTask(sessionId, { adapter, message });
+  } catch (error) {
+    if (error instanceof Error && error.message === PROGRAMMATIC_SUBMIT_INDETERMINATE) {
+      throw new Error(DISPATCH_DELIVERY_UNCONFIRMED);
+    }
+    throw error;
+  }
+  const confirmed = await confirmProgrammaticTaskConsumed(
     () => sessionManager.captureHistory(sessionId),
-    deliveryNeedle(message),
+    staged.adapter,
+    staged.stagedPane,
+    staged.needle,
     confirm ?? DEFAULT_DISPATCH_CONFIRM
   );
   if (!confirmed) {
     throw new Error(DISPATCH_DELIVERY_UNCONFIRMED);
   }
-  return { dispatched: true, sessionId, delivery: "confirmed" };
+  return { dispatched: true, sessionId, delivery: "consumed" };
+}
+
+/* ------------------------------------------------------------------------ */
+/* Projects — shared by the Copilot project tools and the bridge HTTP API.  */
+/* ------------------------------------------------------------------------ */
+
+export interface BridgeProjectSummary {
+  id: string;
+  name: string;
+  path: string;
+  status: string;
+  aiTool: string;
+  description: string | null;
+}
+
+export interface BridgeProjectDetail extends BridgeProjectSummary {
+  isImported: boolean;
+  templateId: string | null;
+}
+
+export function listProjectSummaries(
+  db: Database,
+  userId: string,
+  input: { limit?: number }
+): BridgeProjectSummary[] {
+  return new ProjectRepository(db, userId).list().slice(0, input.limit ?? 50).map((project) => ({
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    status: project.status,
+    aiTool: project.aiTool,
+    description: project.description
+  }));
+}
+
+export function getProjectDetail(
+  db: Database,
+  userId: string,
+  projectId: string
+): BridgeProjectDetail | undefined {
+  const project = new ProjectRepository(db, userId).getById(projectId);
+  if (!project) {
+    return undefined;
+  }
+  return {
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    status: project.status,
+    aiTool: project.aiTool,
+    description: project.description,
+    isImported: project.isImported,
+    templateId: project.templateId
+  };
+}
+
+/**
+ * Create a project record exactly the way the Copilot `create_project` tool
+ * does (blank aiTool, optional description). Path safety classification lives
+ * in the security policy ahead of this call on both surfaces.
+ */
+export function createProjectRecord(
+  db: Database,
+  userId: string,
+  input: { name: string; path: string; description?: string }
+): { projectId: string; name: string } {
+  const created = new ProjectRepository(db, userId).create({
+    name: input.name,
+    path: input.path,
+    aiTool: "",
+    ...(input.description !== undefined ? { description: input.description } : {})
+  });
+  return { projectId: created.id, name: created.name };
+}
+
+/* ------------------------------------------------------------------------ */
+/* Memory — shared by the Copilot memory tools and the bridge HTTP API.     */
+/* ------------------------------------------------------------------------ */
+
+export interface BridgeMemoryEntry {
+  id: string;
+  kind: AgentMemoryEntry["kind"];
+  scope: AgentMemoryEntry["scope"];
+  text: string;
+  projectId: string | null;
+}
+
+function mapMemoryEntry(entry: AgentMemoryEntry): BridgeMemoryEntry {
+  return { id: entry.id, kind: entry.kind, scope: entry.scope, text: entry.text, projectId: entry.projectId ?? null };
+}
+
+export function listMemoryEntries(
+  db: Database,
+  userId: string,
+  input: { scope: AgentMemoryScope["scope"]; projectId?: string; limit?: number }
+): BridgeMemoryEntry[] {
+  const scope: AgentMemoryScope = { scope: input.scope, ...(input.projectId !== undefined ? { projectId: input.projectId } : {}) };
+  return new AgentMemoryRepository(db, userId).list(scope, input.limit ?? 50).map(mapMemoryEntry);
+}
+
+export function searchMemoryEntries(
+  db: Database,
+  userId: string,
+  input: { query: string; scope: AgentMemoryScope["scope"]; projectId?: string; limit?: number }
+): BridgeMemoryEntry[] {
+  const scope: AgentMemoryScope = { scope: input.scope, ...(input.projectId !== undefined ? { projectId: input.projectId } : {}) };
+  return new AgentMemoryRepository(db, userId).search(input.query, scope, input.limit ?? 10).map(mapMemoryEntry);
+}
+
+/** Persist a durable memory entry (redaction and scope rules live in the repository). */
+export function writeMemoryEntry(
+  db: Database,
+  userId: string,
+  input: { kind: "fact" | "preference" | "decision" | "project_note"; scope: AgentMemoryScope["scope"]; text: string; projectId?: string; metadata?: Record<string, unknown> }
+): { saved: true; id: string } {
+  const entry = new AgentMemoryRepository(db, userId).create({
+    kind: input.kind,
+    scope: input.scope,
+    text: input.text,
+    ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+    ...(input.metadata !== undefined ? { metadata: input.metadata } : {})
+  });
+  return { saved: true, id: entry.id };
+}
+
+// ---- Project graph (read-only CodeGraph index) ----
+//
+// Thin user-scoped wrappers over the project-graph service. Each resolves the
+// tenant-owned project first (404-equivalent: undefined / available:false) so
+// neither the internal HTTP surface nor the harness tools can read a foreign
+// project's index.
+
+function projectPathForUser(db: Database, userId: string, projectId: string): string | undefined {
+  const project = new ProjectRepository(db, userId).getById(projectId);
+  return project?.path;
+}
+
+export function searchProjectGraphSymbols(
+  db: Database,
+  userId: string,
+  projectId: string,
+  options: { q: string; kind?: string; limit?: number }
+) {
+  const root = projectPathForUser(db, userId, projectId);
+  if (!root) return { available: false as const, reason: "not_initialized" as const };
+  return searchGraphSymbols(root, options);
+}
+
+export function getProjectGraphSymbol(
+  db: Database,
+  userId: string,
+  projectId: string,
+  symbolId: string
+) {
+  const root = projectPathForUser(db, userId, projectId);
+  if (!root) return { available: false as const, reason: "not_initialized" as const };
+  return getSymbolDetail(root, symbolId);
+}
+
+export function getProjectGraphSymbolImpact(
+  db: Database,
+  userId: string,
+  projectId: string,
+  symbolId: string,
+  depth: number
+) {
+  const root = projectPathForUser(db, userId, projectId);
+  if (!root) return { available: false as const, reason: "not_initialized" as const };
+  return getSymbolImpact(root, symbolId, depth);
+}
+
+export function getProjectGraphAffectedPaths(
+  db: Database,
+  userId: string,
+  projectId: string,
+  paths: string[],
+  depth: number
+) {
+  const root = projectPathForUser(db, userId, projectId);
+  if (!root) return { available: false as const, reason: "not_initialized" as const };
+  return getChangedPathsImpact(root, paths, depth);
 }

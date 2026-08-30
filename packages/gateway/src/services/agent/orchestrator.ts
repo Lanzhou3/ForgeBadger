@@ -23,6 +23,7 @@ import { executeAgentTool } from "./tool-registry.js";
 import type { AgentLlmClient, AgentToolCall } from "./orchestrator-types.js";
 import { CopilotConversationLog } from "./conversation-log.js";
 import { buildCompressedContext } from "./context.js";
+import { resolveLocalCommandReply } from "./slash-commands.js";
 import { redactAgentValue } from "./redaction.js";
 import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js";
 
@@ -35,6 +36,16 @@ export interface CopilotOrchestratorDependencies {
   maxSteps?: number;
   /** User-scoping facade; each run gets the scoped api for its owner. */
   portfolioApi?: { forUser(userId: string): unknown };
+  /**
+   * Owner's per-tool switches (copilot_tool_preferences). Disabled tools are
+   * hidden from the model, and a call that still arrives is refused with a
+   * recoverable tool_result instead of executing.
+   */
+  isToolDisabled?: (toolName: string) => boolean;
+  /** Live-session seam for tools that read terminal output or dispatch. */
+  sessionManager?: import("../session-manager.js").InMemorySessionManager;
+  /** Adapter CLI availability probing for launch preflight. */
+  adapterCommandRunner?: import("../../lib/dependency-check.js").CommandRunner;
 }
 
 const DEFAULT_MAX_STEPS = 16;
@@ -70,16 +81,37 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     const run = log.createRun(input.conversationId, {});
     log.updateRun(run.id, { status: "running", startedAt: new Date() });
 
-    const context: AgentToolContext = {
-      userId,
-      db: deps.db,
-      masterKey: deps.masterKey,
-      ...(deps.portfolioApi !== undefined ? { portfolioApi: deps.portfolioApi.forUser(userId) } : {})
-    };
+      const context: AgentToolContext = {
+        userId,
+        db: deps.db,
+        masterKey: deps.masterKey,
+        ...(deps.sessionManager !== undefined ? { sessionManager: deps.sessionManager } : {}),
+        ...(deps.adapterCommandRunner !== undefined ? { adapterCommandRunner: deps.adapterCommandRunner } : {}),
+        ...(deps.portfolioApi !== undefined ? { portfolioApi: deps.portfolioApi.forUser(userId) } : {})
+      };
 
-    try {
-      // Project model-visible history from the log, compressing older messages
-      // into a rolling summary when the conversation overflows the budget.
+      try {
+        // Local slash-command short-circuit (e.g. /skills): reply straight
+        // from platform state — no context projection, no model call, no
+        // auto-title. The reply is persisted as a normal assistant turn.
+        const commandReply = resolveLocalCommandReply(input.userText);
+        if (commandReply !== null) {
+          log.appendMessage(input.conversationId, { role: "assistant", kind: "text", content: commandReply });
+          log.updateRun(run.id, { status: "completed", completedAt: new Date(), steps: 0 });
+          deps.eventBus.emitEvent({
+            type: "copilot_run_updated",
+            userId,
+            source,
+            runId: run.id,
+            conversationId: input.conversationId,
+            status: "completed",
+            message: commandReply,
+            occurredAt: new Date()
+          });
+          return run.id;
+        }
+        // Project model-visible history from the log, compressing older messages
+        // into a rolling summary when the conversation overflows the budget.
       const { messages } = await buildCompressedContext(log, input.conversationId, deps.llm, input.modelId);
       let steps = 0;
       let finalText = "";
@@ -89,7 +121,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         const toolCalls: AgentToolCall[] = [];
         await deps.llm.stream({
           messages,
-          tools: deps.toolRegistry.toModelSchemas(),
+          tools: deps.toolRegistry.toModelSchemas().filter((schema) => !deps.isToolDisabled?.(schema.name)),
           ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
           onEvent: (event) => {
             if (event.type === "text_delta") {
@@ -138,6 +170,14 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
           if (!tool) {
             log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content: `Unknown tool: ${tc.name}`, toolName: tc.name, toolCallId: tc.id });
             messages.push({ role: "tool", toolCallId: tc.id, content: `Unknown tool: ${tc.name}` });
+            continue;
+          }
+          if (deps.isToolDisabled?.(tc.name)) {
+            // Defense in depth: the schema was already filtered, so this only
+            // triggers on a stale or hallucinated call. Recoverable result.
+            const content = `Tool disabled by owner: ${tc.name}`;
+            log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content, toolName: tc.name, toolCallId: tc.id });
+            messages.push({ role: "tool", toolCallId: tc.id, content });
             continue;
           }
           const decision = securityPolicy.evaluate({
@@ -275,19 +315,24 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     const run = log.getRun(input.runId);
     if (!run || run.status !== "awaiting_approval") return { resumed: false, runId: input.runId };
     const action = log.getPendingAction(input.actionId);
-    if (!action || action.status !== "pending") return { resumed: false, runId: input.runId };
+    if (!action || action.runId !== run.id || action.status !== "pending") return { resumed: false, runId: input.runId };
     log.decidePendingAction(action.id, input.approved ? "approved" : "rejected");
 
     if (input.approved) {
       const tool = deps.toolRegistry.tools.get(action.tool);
-      const context: AgentToolContext = {
-        userId: input.userId,
-        db: deps.db,
-        masterKey: deps.masterKey,
-        ...(deps.portfolioApi !== undefined ? { portfolioApi: deps.portfolioApi.forUser(input.userId) } : {})
-      };
-      const rawInput = safeParse(action.inputJson);
-      if (tool) {
+      // The owner may have disabled the tool between the approval request and
+      // the decision — the switch wins over the earlier approval, and the run
+      // completes without executing it.
+      if (tool && !deps.isToolDisabled?.(action.tool)) {
+        const context: AgentToolContext = {
+          userId: input.userId,
+          db: deps.db,
+          masterKey: deps.masterKey,
+          ...(deps.sessionManager !== undefined ? { sessionManager: deps.sessionManager } : {}),
+          ...(deps.adapterCommandRunner !== undefined ? { adapterCommandRunner: deps.adapterCommandRunner } : {}),
+          ...(deps.portfolioApi !== undefined ? { portfolioApi: deps.portfolioApi.forUser(input.userId) } : {})
+        };
+        const rawInput = safeParse(action.inputJson);
         const result = await executeAgentTool(tool, rawInput, context);
         const safeOutput = redactAgentValue(result.output);
         const content = result.ok ? JSON.stringify(safeOutput) : `Tool error: ${result.error ?? "unknown"}`;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
 import { promisify } from "node:util";
@@ -59,11 +59,52 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
         "-t",
         sessionName,
         "-v",
-        "history-limit"
+        "history-limit",
+        ";",
+        "show-options",
+        "-t",
+        sessionName,
+        "-v",
+        "window-size"
       ]);
 
-      assert.deepEqual(stdout.trim().split("\n"), ["on", "10000"]);
+      assert.deepEqual(stdout.trim().split("\n"), ["on", "10000", "manual"]);
     } finally {
+      await tmux.killSession(sessionName);
+    }
+  });
+
+  it("keeps the window size when a wider client attaches", async () => {
+    const tmux = createTmuxClient();
+    const sessionName = `of-test-winsize-${process.pid}`;
+    let widerClient: ChildProcess | undefined;
+
+    try {
+      await tmux.createSession({
+        name: sessionName,
+        cwd: tmpdir(),
+        command: "bash",
+        args: ["-lc", "sleep 5"],
+        env: {}
+      });
+
+      // Simulate a wider client attaching (e.g. a manual `tmux a` from a big
+      // terminal window) via control mode. With the default `window-size
+      // latest` this would grow the window to 132x43; `window-size manual`
+      // must keep it at the 80x24 the session was created with.
+      widerClient = spawn("tmux", ["-C", "attach-session", "-t", sessionName], {
+        stdio: ["pipe", "ignore", "ignore"]
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      widerClient.stdin?.write("refresh-client -C 132,43\n");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const { stdout } = await execFileAsync("tmux", [
+        "display-message", "-p", "-t", sessionName, "#{window_width}x#{window_height}"
+      ]);
+      assert.equal(stdout.trim(), "80x24");
+    } finally {
+      widerClient?.kill();
       await tmux.killSession(sessionName);
     }
   });
@@ -87,6 +128,54 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
       const output = await tmux.capturePane(sessionName);
 
       assert.match(output, /openforge-input:pwd/);
+    } finally {
+      await tmux.killSession(sessionName);
+    }
+  });
+
+  it("stages one multiline bracketed paste through control stdin and submits once", async () => {
+    const tmux = createTmuxClient();
+    const sessionName = `of-test-programmatic-${process.pid}`;
+    const canary = `PROGRAMMATIC_CANARY_${process.pid}_中文\nsecond line`;
+    const rawConsumer = [
+      "process.stdin.setRawMode(true);",
+      "process.stdin.resume();",
+      "let chunks=[]; let enters=0;",
+      "process.stdin.on('data',(chunk)=>{",
+      "  chunks.push(chunk);",
+      "  if (chunk.includes(13)) {",
+      "    enters += 1;",
+      "    const text=Buffer.concat(chunks).toString('utf8')",
+      "      .replace('\\u001b[200~','').replace('\\u001b[201~','').replace(/\\r/g,'');",
+      "    console.log('TASK:'+JSON.stringify(text));",
+      "    console.log('ENTER_COUNT:'+enters);",
+      "    setTimeout(()=>process.exit(0),500);",
+      "  }",
+      "});"
+    ].join("");
+
+    try {
+      await tmux.createSession({
+        name: sessionName,
+        cwd: tmpdir(),
+        command: process.execPath,
+        args: ["-e", rawConsumer],
+        env: {}
+      });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      const buffersBefore = await listTmuxBuffers();
+      await tmux.stageProgrammaticInput?.(sessionName, canary);
+      assert.deepEqual(await listTmuxBuffers(), buffersBefore, "programmatic input must not use tmux buffers");
+
+      await tmux.pressEnter?.(sessionName);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const output = await tmux.capturePane(sessionName);
+
+      assert.match(output, new RegExp(`TASK:.*PROGRAMMATIC_CANARY_${process.pid}_`));
+      assert.match(output, /second line/);
+      assert.match(output, /ENTER_COUNT:1/);
+      assert.doesNotMatch(output, /ENTER_COUNT:2/);
     } finally {
       await tmux.killSession(sessionName);
     }
@@ -126,6 +215,15 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
     assert.deepEqual(result.killedOrphans, [orphanName]);
   });
 });
+
+async function listTmuxBuffers(): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync("tmux", ["list-buffers", "-F", "#{buffer_name}"]);
+    return stdout.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 function launchPlan(sessionId: string): LaunchPlan {
   return {

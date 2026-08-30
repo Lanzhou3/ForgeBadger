@@ -44,6 +44,8 @@ describe("db schema", () => {
     assert.deepEqual(names, [
       "api_keys",
       "audit_logs",
+      "auth_invites",
+      "auth_sessions",
       "catalog_items",
       "catalog_sources",
       "copilot_conversations",
@@ -59,6 +61,7 @@ describe("db schema", () => {
       "copilot_operation_log",
       "copilot_pending_actions",
       "copilot_runs",
+      "copilot_tool_preferences",
       "feishu_card_actions",
       "feishu_channel_accounts",
       "feishu_channel_inbox",

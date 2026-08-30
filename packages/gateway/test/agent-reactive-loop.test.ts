@@ -107,6 +107,90 @@ describe("copilot reactive loop", () => {
     assert.equal(runCalls.length, 0);
   });
 
+  it("reuses the rolling proactive conversation within the window instead of creating a new one", async () => {
+    const { bus, user, runCalls, log, loop } = setup({ cooldownMs: 10 });
+
+    // First fire creates the rolling conversation.
+    bus.emitEvent({ type: "session_status_changed", userId: user.id, sessionId: "s1", oldStatus: "running", newStatus: "completed", occurredAt: new Date() });
+    await sleep(40);
+    assert.equal(runCalls.length, 1);
+    const firstConversationId = runCalls[0]!.conversationId;
+
+    // Second fire after the cooldown appends to the same thread.
+    bus.emitEvent({ type: "session_status_changed", userId: user.id, sessionId: "s2", oldStatus: "idle", newStatus: "running", occurredAt: new Date() });
+    await sleep(40);
+
+    // Assert: two turns, one rolling conversation.
+    assert.equal(runCalls.length, 2);
+    assert.equal(runCalls[1]!.conversationId, firstConversationId);
+    const conversations = log.listConversations();
+    assert.equal(conversations.length, 1);
+    assert.equal(conversations[0]!.title, PROACTIVE_CONVERSATION_TITLE);
+    loop.stop();
+  });
+
+  it("starts a fresh proactive conversation once the previous one ages out of the window", async () => {
+    const { db, bus, user, runCalls, log, loop } = setup({ cooldownMs: 10 });
+
+    bus.emitEvent({ type: "activity_created", userId: user.id, activityId: "a1", activityType: "session", status: "done", message: "m", createdAt: new Date() });
+    await sleep(40);
+    assert.equal(runCalls.length, 1);
+    const firstConversationId = runCalls[0]!.conversationId;
+
+    // Backdate the rolling conversation beyond the 24h window.
+    const staleTimestamp = Date.now() - 25 * 60 * 60 * 1000;
+    db.prepare(`UPDATE copilot_conversations SET updated_at = ? WHERE id = ?`)
+      .run(staleTimestamp, firstConversationId);
+
+    bus.emitEvent({ type: "activity_created", userId: user.id, activityId: "a2", activityType: "session", status: "done", message: "m2", createdAt: new Date() });
+    await sleep(40);
+
+    // Assert: the aged-out thread is abandoned; a fresh one is created.
+    assert.equal(runCalls.length, 2);
+    assert.notEqual(runCalls[1]!.conversationId, firstConversationId);
+    const conversations = log.listConversations();
+    assert.equal(conversations.length, 2);
+    loop.stop();
+  });
+
+  it("does not reuse another user's proactive conversation for the rolling window", async () => {
+    const db = createTestDb();
+    const userRepository = new UserRepository(db);
+    const userA = userRepository.create("loop-a@example.com", "hash");
+    const userB = userRepository.create("loop-b@example.com", "hash");
+    const bus = new OpenForgeEventBus();
+    const runCalls: Array<{ userId: string; conversationId: string }> = [];
+    const stackFor = (userId: string) => ({
+      log: new CopilotConversationLog(db, userId),
+      orchestrator: {
+        runTurn: async (input: { userId: string; conversationId: string }) => {
+          runCalls.push(input);
+          return "run-1";
+        }
+      }
+    }) as unknown as AgentStack;
+    const loop = attachCopilotReactiveLoop({
+      deps: { db, masterKey: "mk", eventBus: bus },
+      buildAgentStack: (_deps, userId) => stackFor(userId),
+      debounceMs: 5,
+      cooldownMs: 10
+    });
+
+    bus.emitEvent({ type: "session_status_changed", userId: userB.id, sessionId: "s1", oldStatus: "running", newStatus: "completed", occurredAt: new Date() });
+    await sleep(40);
+    bus.emitEvent({ type: "session_status_changed", userId: userA.id, sessionId: "s2", oldStatus: "running", newStatus: "failed", occurredAt: new Date() });
+    await sleep(40);
+
+    // Assert: each user owns their own proactive thread — no cross-user reuse.
+    assert.equal(runCalls.length, 2);
+    assert.notEqual(runCalls[0]!.conversationId, runCalls[1]!.conversationId);
+    const conversationsA = new CopilotConversationLog(db, userA.id).listConversations();
+    const conversationsB = new CopilotConversationLog(db, userB.id).listConversations();
+    assert.equal(conversationsA.length, 1);
+    assert.equal(conversationsB.length, 1);
+    loop.stop();
+  });
+
   it("runs the proactive turn through the dsh BFF when wired (M3)", async () => {
     // Arrange
     const db = createTestDb();

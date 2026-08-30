@@ -2,9 +2,17 @@
  * Project tools for the Copilot harness — the "projects" seam of the platform
  * tool surface. Read tools expose project state; the operate tool (create
  * project) is approval-gated and only fires after the owner approves it.
+ *
+ * The queries/writes live in services/copilot-bridge/bridge-service.ts so the
+ * internal copilot-bridge HTTP API and these tools share one implementation.
  */
 import { z } from "zod";
-import { ProjectRepository } from "../../../db/repositories/project-repository.js";
+import {
+  createProjectRecord,
+  getProjectDetail,
+  listProjectSummaries
+} from "../../copilot-bridge/bridge-service.js";
+import type { Database } from "../../../db/types.js";
 import type { AgentTool, AgentToolContext } from "../tool-registry.js";
 
 const listProjectsInput = z.object({
@@ -21,8 +29,8 @@ const createProjectInput = z.object({
   description: z.string().max(2000).optional()
 }).strict();
 
-function projectsRepo(context: AgentToolContext): ProjectRepository {
-  return new ProjectRepository(context.db as import("../../../db/types.js").Database, context.userId as string);
+function toolDb(context: AgentToolContext): { db: Database; userId: string } {
+  return { db: context.db as Database, userId: context.userId as string };
 }
 
 export function createProjectTools(): AgentTool[] {
@@ -35,14 +43,8 @@ export function createProjectTools(): AgentTool[] {
       inputSchema: listProjectsInput,
       async execute(input, context) {
         const { limit } = listProjectsInput.parse(input);
-        const projects = projectsRepo(context).list().slice(0, limit ?? 50).map((p) => ({
-          id: p.id,
-          name: p.name,
-          path: p.path,
-          status: p.status,
-          aiTool: p.aiTool,
-          description: p.description
-        }));
+        const { db, userId } = toolDb(context);
+        const projects = listProjectSummaries(db, userId, { ...(limit !== undefined ? { limit } : {}) });
         return { projects, count: projects.length };
       }
     },
@@ -54,21 +56,10 @@ export function createProjectTools(): AgentTool[] {
       inputSchema: getProjectInput,
       async execute(input, context) {
         const { projectId } = getProjectInput.parse(input);
-        const p = projectsRepo(context).getById(projectId);
-        if (!p) return { found: false, project: null };
-        return {
-          found: true,
-          project: {
-            id: p.id,
-            name: p.name,
-            path: p.path,
-            status: p.status,
-            aiTool: p.aiTool,
-            isImported: p.isImported,
-            templateId: p.templateId,
-            description: p.description
-          }
-        };
+        const { db, userId } = toolDb(context);
+        const project = getProjectDetail(db, userId, projectId);
+        if (!project) return { found: false, project: null };
+        return { found: true, project };
       }
     },
     {
@@ -80,13 +71,13 @@ export function createProjectTools(): AgentTool[] {
       inputSchema: createProjectInput,
       async execute(input, context) {
         const parsed = createProjectInput.parse(input);
-        const created = projectsRepo(context).create({
+        const { db, userId } = toolDb(context);
+        const created = createProjectRecord(db, userId, {
           name: parsed.name,
           path: parsed.path,
-          aiTool: "",
           ...(parsed.description !== undefined ? { description: parsed.description } : {})
         });
-        return { created: true, projectId: created.id, name: created.name };
+        return { created: true, ...created };
       }
     }
   ];

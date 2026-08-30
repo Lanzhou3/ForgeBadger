@@ -3,11 +3,33 @@ import { describe, it } from "node:test";
 
 import {
   confirmDelivery,
+  confirmProgrammaticTaskConsumed,
   deliveryNeedle,
   normalizePaneText
 } from "../src/services/copilot-bridge/delivery-confirm.js";
+import { dispatchSessionInput } from "../src/services/copilot-bridge/bridge-service.js";
+import { PROGRAMMATIC_SUBMIT_INDETERMINATE } from "../src/services/programmatic-terminal-submit.js";
 
 describe("dispatch delivery confirmation", () => {
+  it("maps any post-write submit failure to a non-retryable delivery uncertainty", async () => {
+    let captureCalls = 0;
+    const sessionManager = {
+      async submitProgrammaticTask() {
+        throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
+      },
+      async captureHistory() {
+        captureCalls += 1;
+        return "";
+      }
+    };
+
+    await assert.rejects(
+      () => dispatchSessionInput(sessionManager as never, "session-1", "codex", "hello"),
+      /BRIDGE_DELIVERY_UNCONFIRMED/
+    );
+    assert.equal(captureCalls, 0);
+  });
+
   describe("normalizePaneText", () => {
     it("strips ANSI escape sequences and collapses all whitespace", () => {
       const pane = "\x1b[38;5;174m❯\x1b[39m \x1b[7mecho\x1b[0m MARKER_1\n  \x1b[2mcontinued\x1b[0m";
@@ -69,6 +91,35 @@ describe("dispatch delivery confirmation", () => {
 
     it("confirms trivially for an unidentifiable (empty) needle", async () => {
       const ok = await confirmDelivery(async () => "", "", { timeoutMs: 1, intervalMs: 1, sleep: noSleep });
+      assert.equal(ok, true);
+    });
+  });
+
+  describe("confirmProgrammaticTaskConsumed", () => {
+    const noSleep = () => Promise.resolve();
+
+    it("does not confirm while the task remains in the current composer", async () => {
+      const staged = "› echo MARKER_A\n\nmodel · cwd";
+      const ok = await confirmProgrammaticTaskConsumed(
+        async () => staged,
+        "codex",
+        staged,
+        deliveryNeedle("echo MARKER_A"),
+        { timeoutMs: 20, intervalMs: 1, sleep: noSleep }
+      );
+      assert.equal(ok, false);
+    });
+
+    it("confirms after the composer clears even if the task remains in scrollback", async () => {
+      const staged = "› echo MARKER_B\n\nmodel · cwd";
+      const consumed = "echo MARKER_B\n\n› Ask Codex to do anything\n\nmodel · cwd";
+      const ok = await confirmProgrammaticTaskConsumed(
+        async () => consumed,
+        "codex",
+        staged,
+        deliveryNeedle("echo MARKER_B"),
+        { timeoutMs: 100, intervalMs: 1, sleep: noSleep }
+      );
       assert.equal(ok, true);
     });
   });

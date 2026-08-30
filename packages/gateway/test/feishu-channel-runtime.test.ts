@@ -8,8 +8,12 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 
 import { FeishuChannelRepository } from "../src/db/repositories/feishu-channel-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
+import { createGatewayApp } from "../src/server.js";
+import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
+import { OpenForgeEventBus } from "../src/services/event-bus.js";
 import { FeishuChannelRuntime } from "../src/services/integrations/feishu-channel-runtime.js";
 import { createFeishuSdkHandlers } from "../src/services/integrations/feishu-runtime-factory.js";
+import { InMemorySessionManager } from "../src/services/session-manager.js";
 
 const masterKey = "0123456789abcdef0123456789abcdef";
 
@@ -52,6 +56,29 @@ describe("FeishuChannelRuntime", () => {
 
     assert.equal(supervisorStops, 1);
     assert.doesNotMatch(runtime.getHealth("user-1").lastErrorMessage ?? "", /plain-secret|token=abc/u);
+  });
+
+  it("does not start supervisor side effects after a same-tick stop", async () => {
+    let supervisorStarts = 0;
+    let supervisorStops = 0;
+    const runtime = new FeishuChannelRuntime({
+      supervisor: {
+        start: async () => { supervisorStarts += 1; },
+        stop: async () => { supervisorStops += 1; },
+        reconcileAccount: async () => undefined,
+        getHealth: () => health("connected")
+      },
+      setInterval: () => 1,
+      clearInterval: () => undefined
+    });
+
+    void runtime.start();
+    await runtime.stop();
+    await new Promise((resolve) => setImmediate(resolve));
+    await runtime.stop();
+
+    assert.equal(supervisorStarts, 0, "queued start must not create SDK side effects after close");
+    assert.equal(supervisorStops, 1, "stop remains idempotent");
   });
 
   it("drains active worker cycles before shutdown", async () => {
@@ -109,6 +136,53 @@ describe("FeishuChannelRuntime", () => {
       "SELECT handler_kind, state, rejection_code FROM portfolio_feishu_ingress_events"
     ).all() as Array<{ handler_kind: string; state: string; rejection_code: string }>;
     assert.deepEqual(ingress, [{ handler_kind: "portfolio", state: "denied", rejection_code: "PORTFOLIO_FEISHU_HANDLER_AMBIGUOUS" }]);
+  });
+
+  it("attaches complete agent deps before starting the production runtime window", async () => {
+    const db = createTestDb();
+    const eventBus = new OpenForgeEventBus();
+    const sessionManager = new InMemorySessionManager({
+      async createSession() {}, async killSession() {}, async capturePane() { return ""; },
+      async listSessions() { return [] as string[]; }, async sendInput() {}
+    } as never);
+    let runtime: FeishuChannelRuntime;
+    let depsObservedAtStart: ReturnType<FeishuChannelRuntime["getAgentDeps"]>;
+    let ambiguousWindowMessage = false;
+    runtime = new FeishuChannelRuntime({
+      supervisor: {
+        start: async () => {
+          depsObservedAtStart = runtime.getAgentDeps();
+          ambiguousWindowMessage = depsObservedAtStart === undefined;
+        },
+        stop: async () => undefined,
+        reconcileAccount: async () => undefined,
+        getHealth: () => health("connected")
+      },
+      setInterval: () => 1,
+      clearInterval: () => undefined
+    });
+
+    const app = createGatewayApp({
+      jwtSecret: "0123456789abcdef0123456789abcdef",
+      masterKey,
+      db,
+      sessionManager,
+      apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
+      eventBus,
+      feishuChannelRuntime: runtime
+    });
+
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(ambiguousWindowMessage, false);
+      assert.ok(depsObservedAtStart);
+      assert.equal(depsObservedAtStart, runtime.getAgentDeps());
+      assert.equal(depsObservedAtStart.eventBus, eventBus);
+      assert.equal(depsObservedAtStart.sessionManager, sessionManager);
+      assert.ok(depsObservedAtStart.portfolioApi);
+    } finally {
+      await app.close();
+    }
   });
 });
 

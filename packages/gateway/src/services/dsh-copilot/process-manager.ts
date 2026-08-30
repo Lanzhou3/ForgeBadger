@@ -43,6 +43,8 @@ export interface DshProcessManagerOptions {
   bridgeToken: string;
   stateDir: string;
   idleMs: number;
+  /** Grace before SIGKILL escalation; production defaults to five seconds. */
+  killGraceMs?: number | undefined;
   /** Test override for child_process.spawn. */
   spawnImpl?: typeof spawn;
   /** Extra env merged into the child env last (test/diagnostics hook, e.g. fake-runtime scenario knobs). */
@@ -73,6 +75,7 @@ const STDERR_TAIL_LIMIT = 4096;
 export class DshProcessManager {
   private readonly runtimes = new Map<string, RuntimeEntry>();
   private readonly exitListeners = new Set<(userId: string, info: { expected: boolean; stderrTail: string }) => void>();
+  private closing = false;
 
   constructor(private readonly options: DshProcessManagerOptions) {}
 
@@ -92,13 +95,15 @@ export class DshProcessManager {
    * model-route change) as needed, and complete the initialize handshake.
    */
   async ensureClient(userId: string, route: DshModelRoute): Promise<DshRpcClient> {
+    this.assertOpen();
     const routeKey = keyForRoute(route);
     const existing = this.runtimes.get(userId);
-    if (existing && existing.routeKey === routeKey && existing.child.exitCode === null && !existing.child.killed) {
+    if (existing && existing.routeKey === routeKey && isChildAlive(existing.child)) {
       this.touch(userId, existing);
       return existing.client;
     }
     if (existing) await this.killEntry(userId, existing);
+    this.assertOpen();
     return this.spawnRuntime(userId, route, routeKey);
   }
 
@@ -113,7 +118,7 @@ export class DshProcessManager {
   /** Whether the user's runtime process is currently live (dsh-config API status). */
   isRunning(userId: string): boolean {
     const entry = this.runtimes.get(userId);
-    return entry !== undefined && entry.child.exitCode === null && !entry.child.killed;
+    return entry !== undefined && isChildAlive(entry.child);
   }
 
   /** Reset the idle reap timer — called on any runtime activity so a long turn is never reaped mid-stream. */
@@ -124,11 +129,13 @@ export class DshProcessManager {
 
   /** Kill every runtime (gateway shutdown). */
   async disposeAll(): Promise<void> {
+    this.closing = true;
     const entries = [...this.runtimes.entries()];
     await Promise.all(entries.map(([userId, entry]) => this.killEntry(userId, entry)));
   }
 
   private async spawnRuntime(userId: string, route: DshModelRoute, routeKey: string): Promise<DshRpcClient> {
+    this.assertOpen();
     const spawnImpl = this.options.spawnImpl ?? spawn;
     const sessionRoot = path.join(this.options.stateDir, "dsh-sessions", userId);
     const cwd = path.join(this.options.stateDir, "dsh-workspace", userId);
@@ -165,8 +172,11 @@ export class DshProcessManager {
     });
     child.on("exit", () => {
       clearTimeout(entry.idleTimer);
-      this.runtimes.delete(userId);
+      const currentEntry = this.runtimes.get(userId);
+      const ownsRuntimeSlot = currentEntry === entry;
+      if (ownsRuntimeSlot) this.runtimes.delete(userId);
       client.failAll("dsh runtime exited");
+      if (currentEntry !== undefined && !ownsRuntimeSlot) return;
       this.options.onRuntimeExit?.(userId, { expected: entry.expectedExit, stderrTail: entry.stderrTail });
       for (const listener of this.exitListeners) {
         listener(userId, { expected: entry.expectedExit, stderrTail: entry.stderrTail });
@@ -181,6 +191,10 @@ export class DshProcessManager {
       throw error;
     }
     return client;
+  }
+
+  private assertOpen(): void {
+    if (this.closing) throw new Error("DSH_PROCESS_MANAGER_CLOSED");
   }
 
   private touch(userId: string, entry: RuntimeEntry): void {
@@ -201,7 +215,7 @@ export class DshProcessManager {
     entry.expectedExit = true;
     clearTimeout(entry.idleTimer);
     this.runtimes.delete(userId);
-    if (entry.child.exitCode !== null || entry.child.killed) {
+    if (!isChildAlive(entry.child)) {
       entry.client.failAll("dsh runtime stopped");
       return;
     }
@@ -212,11 +226,15 @@ export class DshProcessManager {
       child.kill("SIGTERM");
       // A wedged runtime must not block cancel/shutdown forever.
       setTimeout(() => {
-        if (child.exitCode === null && !child.killed) child.kill("SIGKILL");
+        if (isChildAlive(child)) child.kill("SIGKILL");
         resolve();
-      }, 5_000).unref?.();
+      }, Math.max(1, this.options.killGraceMs ?? 5_000)).unref?.();
     });
   }
+}
+
+function isChildAlive(child: ChildProcess): boolean {
+  return child.exitCode === null && child.signalCode === null;
 }
 
 function keyForRoute(route: DshModelRoute): string {

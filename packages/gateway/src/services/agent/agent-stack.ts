@@ -8,7 +8,10 @@
  */
 import type { Database } from "../../db/types.js";
 import type { OpenForgeEventBus } from "../event-bus.js";
+import type { CommandRunner } from "../../lib/dependency-check.js";
+import type { InMemorySessionManager } from "../session-manager.js";
 import { ModelProviderRepository } from "../../db/repositories/model-provider-repository.js";
+import { CopilotToolPreferenceRepository } from "../../db/repositories/copilot-tool-preference-repository.js";
 import { CopilotConversationLog } from "./conversation-log.js";
 import { AgentMemoryRepository } from "./memory.js";
 import { createAgentLlmClient } from "./llm-client.js";
@@ -31,6 +34,12 @@ export interface AgentStackDeps {
   dshBff?: DshCopilotBff | undefined;
   /** Test-only fetch override; production callers omit it. */
   llmFetch?: typeof fetch;
+  /**
+   * Runtime seams for tools that act on live sessions (output tail reading,
+   * task-packet start/dispatch). Optional: read-only stacks may omit them.
+   */
+  sessionManager?: InMemorySessionManager | undefined;
+  adapterCommandRunner?: CommandRunner | undefined;
 }
 
 export interface AgentStack {
@@ -49,12 +58,18 @@ export function buildAgentStack(deps: AgentStackDeps, userId: string): AgentStac
     ...(deps.llmFetch !== undefined ? { fetchImpl: deps.llmFetch } : {})
   });
   const toolRegistry = createAgentToolRegistry(createPlatformTools());
+  // Owner tool switches: disabled tools vanish from the model schema and are
+  // refused at execution time (see orchestrator).
+  const toolPreferences = new CopilotToolPreferenceRepository(deps.db, userId);
   const orchestrator = createCopilotOrchestrator({
     db: deps.db,
     masterKey: deps.masterKey,
     toolRegistry,
     llm,
     eventBus: deps.eventBus,
+    isToolDisabled: (toolName) => !toolPreferences.isEnabled(toolName),
+    ...(deps.sessionManager !== undefined ? { sessionManager: deps.sessionManager } : {}),
+    ...(deps.adapterCommandRunner !== undefined ? { adapterCommandRunner: deps.adapterCommandRunner } : {}),
     ...(deps.portfolioApi !== undefined ? { portfolioApi: deps.portfolioApi } : {})
   });
   return { log, memory, orchestrator, toolRegistry };

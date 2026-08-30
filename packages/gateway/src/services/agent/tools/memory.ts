@@ -3,10 +3,18 @@
  * about the platform/projects and write durable facts, preferences, decisions,
  * and project notes. Writes are scoped and read-tool only (no approval needed
  * to record a memory).
+ *
+ * The queries/writes live in services/copilot-bridge/bridge-service.ts so the
+ * internal copilot-bridge HTTP API and these tools share one implementation.
  */
 import { z } from "zod";
+import {
+  listMemoryEntries,
+  searchMemoryEntries,
+  writeMemoryEntry
+} from "../../copilot-bridge/bridge-service.js";
+import type { Database } from "../../../db/types.js";
 import type { AgentTool, AgentToolContext } from "../tool-registry.js";
-import { AgentMemoryRepository } from "../memory.js";
 
 const searchMemoryInput = z.object({
   query: z.string().min(1).max(512),
@@ -29,8 +37,8 @@ const listMemoryInput = z.object({
   limit: z.number().int().min(1).max(50).optional()
 }).strict();
 
-function memoryRepo(context: AgentToolContext): AgentMemoryRepository {
-  return new AgentMemoryRepository(context.db as import("../../../db/types.js").Database, context.userId as string);
+function toolDb(context: AgentToolContext): { db: Database; userId: string } {
+  return { db: context.db as Database, userId: context.userId as string };
 }
 
 export function createMemoryTools(): AgentTool[] {
@@ -43,8 +51,14 @@ export function createMemoryTools(): AgentTool[] {
       inputSchema: searchMemoryInput,
       async execute(input, context) {
         const { query, scope, projectId, limit } = searchMemoryInput.parse(input);
-        const entries = memoryRepo(context).search(query, { scope, ...(projectId !== undefined ? { projectId } : {}) }, limit ?? 10);
-        return { entries: entries.map((e) => ({ id: e.id, kind: e.kind, scope: e.scope, text: e.text, projectId: e.projectId })) };
+        const { db, userId } = toolDb(context);
+        const entries = searchMemoryEntries(db, userId, {
+          query,
+          scope,
+          ...(projectId !== undefined ? { projectId } : {}),
+          ...(limit !== undefined ? { limit } : {})
+        });
+        return { entries };
       }
     },
     {
@@ -55,8 +69,13 @@ export function createMemoryTools(): AgentTool[] {
       inputSchema: listMemoryInput,
       async execute(input, context) {
         const { scope, projectId, limit } = listMemoryInput.parse(input);
-        const entries = memoryRepo(context).list({ scope, ...(projectId !== undefined ? { projectId } : {}) }, limit ?? 50);
-        return { entries: entries.map((e) => ({ id: e.id, kind: e.kind, scope: e.scope, text: e.text, projectId: e.projectId })) };
+        const { db, userId } = toolDb(context);
+        const entries = listMemoryEntries(db, userId, {
+          scope,
+          ...(projectId !== undefined ? { projectId } : {}),
+          ...(limit !== undefined ? { limit } : {})
+        });
+        return { entries };
       }
     },
     {
@@ -67,14 +86,14 @@ export function createMemoryTools(): AgentTool[] {
       inputSchema: writeMemoryInput,
       async execute(input, context) {
         const { kind, scope, text, projectId, metadata } = writeMemoryInput.parse(input);
-        const entry = memoryRepo(context).create({
+        const { db, userId } = toolDb(context);
+        return writeMemoryEntry(db, userId, {
           kind,
           scope,
           text,
           ...(projectId !== undefined ? { projectId } : {}),
           ...(metadata !== undefined ? { metadata } : {})
         });
-        return { saved: true, id: entry.id };
       }
     }
   ];

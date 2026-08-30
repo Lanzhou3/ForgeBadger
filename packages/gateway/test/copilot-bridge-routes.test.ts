@@ -42,14 +42,13 @@ interface SentInput {
   data: string;
 }
 
-/**
- * Mock tmux whose pane echoes everything written via sendInput — simulating a
- * terminal that actually displays its input, so dispatch delivery confirms.
- */
 function createMockTmux(sentInputs: SentInput[]) {
   const panes = new Map<string, string>();
+  const staged = new Map<string, string>();
   return {
-    async createSession() {},
+    async createSession(options: { name: string }) {
+      panes.set(options.name, "────────────────\n❯  \n────────────────\nauto mode on");
+    },
     async killSession() {},
     async capturePane(name: string) {
       return panes.get(name) ?? "";
@@ -60,14 +59,26 @@ function createMockTmux(sentInputs: SentInput[]) {
     async sendInput(name: string, data: string) {
       sentInputs.push({ name, data });
       panes.set(name, (panes.get(name) ?? "") + data);
+    },
+    async inspectPane(name: string) {
+      return { content: panes.get(name) ?? "", dead: false, inMode: false };
+    },
+    async stageProgrammaticInput(name: string, data: string) {
+      sentInputs.push({ name, data });
+      staged.set(name, data);
+      panes.set(name, `────────────────\n❯ ${data}\n────────────────\nauto mode on`);
+    },
+    async pressEnter(name: string) {
+      sentInputs.push({ name, data: "<Enter>" });
+      panes.set(name, `${staged.get(name) ?? ""}\n────────────────\n❯  \n────────────────\nauto mode on`);
     }
   };
 }
 
-/** Mock tmux whose pane never displays the input (modal-dialog swallow). */
+/** Mock tmux whose staged composer never clears after Enter. */
 function createSilentMockTmux(sentInputs: SentInput[]) {
   const base = createMockTmux(sentInputs);
-  return { ...base, async capturePane() { return ""; } };
+  return { ...base, async pressEnter(name: string) { sentInputs.push({ name, data: "<Enter>" }); } };
 }
 
 interface Envelope {
@@ -321,7 +332,7 @@ describe("copilot bridge internal API", () => {
         userId: owner.id,
         sessionId,
         launchPlan: {
-          command: "bash",
+          command: "claude",
           args: [],
           cwd: project.path,
           env: {},
@@ -339,10 +350,11 @@ describe("copilot bridge internal API", () => {
       });
       const body = (await res.json()) as Envelope;
       assert.equal(res.status, 200, JSON.stringify(body));
-      assert.deepEqual(body.data, { dispatched: true, sessionId, delivery: "confirmed" });
-      const sent = sentInputs.find((input) => input.data === "修复登录页样式回归\n");
-      assert.ok(sent, "tmux sendInput should receive the message plus a submitting newline");
+      assert.deepEqual(body.data, { dispatched: true, sessionId, delivery: "consumed" });
+      const sent = sentInputs.find((input) => input.data === "修复登录页样式回归");
+      assert.ok(sent, "tmux programmatic input should stage the complete message once");
       assert.ok(sent.name.startsWith("of-"));
+      assert.equal(sentInputs.filter((input) => input.data === "<Enter>").length, 1);
     });
 
     it("rejects an empty or oversized message with 400", async () => {
@@ -354,6 +366,20 @@ describe("copilot bridge internal API", () => {
         });
         assert.equal(res.status, 400);
       }
+    });
+
+    it("rejects terminal control characters before writing to tmux", async () => {
+      const before = sentInputs.length;
+      const res = await fetch(`${baseUrl}/api/internal/v1/copilot-bridge/sessions/${sessionId}/dispatch`, {
+        method: "POST",
+        headers: bridgeHeaders(owner.id),
+        body: JSON.stringify({ message: "hello\u001b[201~\rInjected command" })
+      });
+      const body = (await res.json()) as Envelope;
+
+      assert.equal(res.status, 400, JSON.stringify(body));
+      assert.equal(body.details?.code, "PROGRAMMATIC_SUBMIT_UNSAFE_INPUT");
+      assert.equal(sentInputs.length, before, "unsafe input must not reach tmux");
     });
 
     it("returns 404 when dispatching to another user's session", async () => {
@@ -560,7 +586,7 @@ describe("copilot bridge internal API", () => {
   });
 });
 
-describe("session dispatch delivery confirmation (unconfirmed path)", () => {
+describe("session dispatch consumption confirmation (indeterminate path)", () => {
   let app: GatewayApp;
   let baseUrl: string;
   let ownerId: string;
@@ -570,7 +596,7 @@ describe("session dispatch delivery confirmation (unconfirmed path)", () => {
   before(async () => {
     const db = createTestDb();
     sentInputs = [];
-    // The pane never echoes the input: the target CLI swallowed it (modal dialog).
+    // The target shows the staged input but never consumes it after Enter.
     const sessionManager = new InMemorySessionManager(createSilentMockTmux(sentInputs) as never);
     app = createGatewayApp({
       jwtSecret,
@@ -597,7 +623,7 @@ describe("session dispatch delivery confirmation (unconfirmed path)", () => {
       userId: ownerId,
       sessionId,
       launchPlan: {
-        command: "bash",
+        command: "claude",
         args: [],
         cwd: project.path,
         env: {},
@@ -611,7 +637,7 @@ describe("session dispatch delivery confirmation (unconfirmed path)", () => {
     await app.close();
   });
 
-  it("returns 502 delivery_unconfirmed when the pane never shows the dispatched message", async () => {
+  it("returns 502 when the staged composer remains after Enter", async () => {
     const res = await fetch(`${baseUrl}/api/internal/v1/copilot-bridge/sessions/${sessionId}/dispatch`, {
       method: "POST",
       headers: bridgeHeaders(ownerId),
@@ -621,10 +647,11 @@ describe("session dispatch delivery confirmation (unconfirmed path)", () => {
     assert.equal(res.status, 502, JSON.stringify(body));
     assert.equal(body.code, 1);
     assert.equal(body.details?.code, "BRIDGE_DELIVERY_UNCONFIRMED");
-    assert.equal(body.details?.reason, "delivery_unconfirmed");
-    assert.match(body.message ?? "", /modal dialog/);
-    // The bytes were written (send-keys succeeded); only the confirmation failed.
-    assert.ok(sentInputs.some((input) => input.data === "这条消息会被模态对话框吞掉\n"));
+    assert.equal(body.details?.reason, "submission_indeterminate");
+    assert.match(body.message ?? "", /do not retry automatically/);
+    // The task and one Enter were written; no retry or cleanup write followed.
+    assert.ok(sentInputs.some((input) => input.data === "这条消息会被模态对话框吞掉"));
+    assert.equal(sentInputs.filter((input) => input.data === "<Enter>").length, 1);
   });
 });
 

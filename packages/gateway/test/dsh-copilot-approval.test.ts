@@ -32,17 +32,30 @@ interface SentInput {
 }
 
 function createMockTmux(sentInputs: SentInput[]) {
-  // The pane echoes everything written via sendInput so dispatch delivery
-  // confirmation observes the message (terminals that display their input).
   const panes = new Map<string, string>();
+  const staged = new Map<string, string>();
   return {
-    async createSession() {},
+    async createSession(options: { name: string }) {
+      panes.set(options.name, "────────────────\n❯  \n────────────────\nauto mode on");
+    },
     async killSession() {},
     async capturePane(name: string) { return panes.get(name) ?? ""; },
     async listSessions() { return [] as string[]; },
     async sendInput(name: string, data: string) {
       sentInputs.push({ name, data });
       panes.set(name, (panes.get(name) ?? "") + data);
+    },
+    async inspectPane(name: string) {
+      return { content: panes.get(name) ?? "", dead: false, inMode: false };
+    },
+    async stageProgrammaticInput(name: string, data: string) {
+      sentInputs.push({ name, data });
+      staged.set(name, data);
+      panes.set(name, `────────────────\n❯ ${data}\n────────────────\nauto mode on`);
+    },
+    async pressEnter(name: string) {
+      sentInputs.push({ name, data: "<Enter>" });
+      panes.set(name, `${staged.get(name) ?? ""}\n────────────────\n❯  \n────────────────\nauto mode on`);
     }
   };
 }
@@ -291,6 +304,51 @@ describe("dsh copilot approval bridging (M3, fake runtime)", () => {
     assert.equal(readFakeLog(h.logPath).filter((r) => r.kind === "approval").length, 1, "the tool call ran once");
   });
 
+  it("rejects an action id that belongs to a different awaiting run", async () => {
+    // Arrange: park run A on a dispatch, then let its runtime die so a bad
+    // cross-run decision would otherwise enter the gateway-side fallback.
+    const taskMessage = "cross-run dispatch must never execute";
+    const h = await bootDshGateway({ scenario: "operate-crash" });
+    const { token, userId } = await registerAndSeed(h, "dsh-cross-run-action@test.com");
+    const conversationId = await createConversation(h, token);
+    const project = new ProjectRepository(h.db, userId).create({ name: "P", path: "/tmp/dsh-cross-run", aiTool: "claude" });
+    const sessionId = new SessionRepository(h.db, userId).create({
+      projectId: project.id,
+      name: "Cross-run target",
+      aiTool: "claude",
+      workingDir: project.path
+    }).id;
+    await h.sessionManager.createSession({
+      userId,
+      sessionId,
+      launchPlan: { command: "claude", args: [], cwd: project.path, env: {}, secretEnvNames: [], credentialMode: "host_environment" }
+    });
+    const runA = await sendUntilAwaiting(h, token, conversationId, "下发任务");
+    await waitFor(() => readFakeLog(h.logPath).some((record) => record.kind === "crashed"));
+    await sleep(200);
+    const actionA = (await getRun(h, token, runA)).pendingActions[0]!;
+    h.db.prepare("UPDATE copilot_pending_actions SET input_json = ? WHERE id = ?")
+      .run(JSON.stringify({ sessionId, message: taskMessage }), actionA.id);
+    const log = new CopilotConversationLog(h.db, userId);
+    const runB = log.createRun(conversationId, { provider: "stub", model: "stub-model" });
+    log.updateRun(runB.id, { status: "awaiting_approval", startedAt: new Date() });
+
+    // Act: submit run A's action id through run B's decision URL.
+    const decided = await decide(h, token, runB.id, actionA.id, true);
+
+    // Assert: fail closed without mutating either run/action or touching tmux.
+    assert.equal(decided.status, 200, JSON.stringify(decided.body));
+    assert.equal((decided.body.data as { resumed: boolean }).resumed, false);
+    assert.equal(log.getPendingAction(actionA.id)?.status, "pending");
+    assert.equal(log.getRun(runA)?.status, "awaiting_approval");
+    assert.equal(log.getRun(runB.id)?.status, "awaiting_approval");
+    assert.equal(h.sentInputs.filter((input) => input.data === taskMessage).length, 0);
+    assert.equal(h.sentInputs.filter((input) => input.data === "<Enter>").length, 0);
+
+    // Cleanup the real pending run through its own context.
+    await decide(h, token, runA, actionA.id, false);
+  });
+
   it("denies denylisted operate input before any pending action is created", async () => {
     // Arrange: dispatch message carries a destructive shell pattern.
     const h = await bootDshGateway({
@@ -343,7 +401,13 @@ describe("dsh copilot approval bridging (M3, fake runtime)", () => {
 
   it("keeps the pending action decidable after a mid-approval crash and executes gateway-side", async () => {
     // Arrange: a real session row so the gateway-side dispatch passes the tenant check.
-    const h = await bootDshGateway({ scenario: "operate-crash" });
+    const taskMessage = "请继续处理...\n\n1. 先复现问题\n2. 再运行测试";
+    const h = await bootDshGateway({
+      scenario: "operate-crash",
+      extraEnv: {
+        DSH_FAKE_OPERATE_ARGS: JSON.stringify({ sessionId: "sess-1", message: taskMessage })
+      }
+    });
     const { token, userId } = await registerAndSeed(h, "dsh-crash-pending@test.com");
     const conversationId = await createConversation(h, token);
     const project = new ProjectRepository(h.db, userId).create({ name: "P", path: "/tmp/dsh-approval-crash", aiTool: "claude" });
@@ -356,18 +420,27 @@ describe("dsh copilot approval bridging (M3, fake runtime)", () => {
     await h.sessionManager.createSession({
       userId,
       sessionId,
-      launchPlan: { command: "bash", args: [], cwd: project.path, env: {}, secretEnvNames: [], credentialMode: "host_environment" }
+      launchPlan: { command: "claude", args: [], cwd: project.path, env: {}, secretEnvNames: [], credentialMode: "host_environment" }
     });
 
     // Act: the runtime asks for approval and dies before the owner decides.
     const runId = await sendUntilAwaiting(h, token, conversationId, "下发任务");
+    const awaiting = await getRun(h, token, runId);
+    assert.equal(awaiting.run.status, "awaiting_approval");
+    assert.equal(awaiting.pendingActions.length, 1);
+    assert.deepEqual(readFakeLog(h.logPath).find((r) => r.kind === "approval")?.args, {
+      sessionId: "sess-1",
+      message: taskMessage
+    });
+    assert.equal(h.sentInputs.length, 0, "approval must park before dispatch reaches tmux");
     await waitFor(() => readFakeLog(h.logPath).some((r) => r.kind === "crashed"));
     await sleep(200); // let the exit propagate to the process manager
     // Point the pending action at the REAL session before deciding (the fake
     // runtime asked with sess-1; the row input drives the fallback execution).
     const { pendingActions } = await getRun(h, token, runId);
+    assert.equal(pendingActions.length, 1);
     h.db.prepare("UPDATE copilot_pending_actions SET input_json = ? WHERE id = ?")
-      .run(JSON.stringify({ sessionId, message: "修复登录页" }), pendingActions[0]!.id);
+      .run(JSON.stringify({ sessionId, message: taskMessage }), pendingActions[0]!.id);
 
     const decided = await decide(h, token, runId, pendingActions[0]!.id, true);
 
@@ -377,7 +450,21 @@ describe("dsh copilot approval bridging (M3, fake runtime)", () => {
     assert.equal((decided.body.data as { resumed: boolean }).resumed, true, JSON.stringify(decided.body));
     const log = new CopilotConversationLog(h.db, userId);
     assert.equal(log.getRun(runId)?.status, "completed");
-    assert.ok(h.sentInputs.some((input) => input.data === "修复登录页\n"), "dispatch reached tmux sendInput");
+
+    const repeated = await decide(h, token, runId, pendingActions[0]!.id, true);
+    assert.equal(repeated.status, 200, JSON.stringify(repeated.body));
+    assert.equal((repeated.body.data as { resumed: boolean }).resumed, false);
+    const afterRepeated = await getRun(h, token, runId);
+    assert.equal(afterRepeated.run.status, "completed");
+    assert.equal(afterRepeated.pendingActions.length, 1);
+    assert.equal(afterRepeated.pendingActions[0]?.status, "approved");
+
+    assert.equal(
+      h.sentInputs.filter((input) => input.data === taskMessage).length,
+      1,
+      "approved dispatch reached programmatic tmux staging exactly once"
+    );
+    assert.equal(h.sentInputs.filter((input) => input.data === "<Enter>").length, 1);
     const toolResult = log.listMessages(conversationId).find((m) => m.kind === "tool_result");
     assert.match(toolResult?.content ?? "", /"dispatched":true/);
     await waitFor(() => readFakeLog(h.logPath).some((r) => r.kind === "inject"));

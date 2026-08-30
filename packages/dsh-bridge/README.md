@@ -7,9 +7,15 @@ resume 感知 JSON-RPC server + per-user runtime launcher。对应
 ## 组成
 
 - `src/plugin.ts`（`@openforge/dsh-bridge/plugin`）— openforge-bridge 插件，把平台能力
-  注册为模型工具：`list_work_items` / `advance_work_item`（项目开发任务组）、
-  `list_sessions` / `dispatch_task_to_session`（下发任务至会话组）。全部经 HTTP 回调
-  Gateway 内部 API，插件进程内无 DB、无租户数据。
+  注册为模型工具（14 个，与老 copilot harness 工具面对齐）：projects
+  （`list_projects` / `get_project` / `create_project`）、sessions
+  （`list_sessions` / `dispatch_task_to_session`）、portfolio
+  （`list_work_items` / `get_work_item` / `advance_work_item` / `portfolio_overview` /
+  `list_portfolio_requests` / `get_project_dossier`）、memory
+  （`search_memory` / `list_memory` / `write_memory`）。全部经 HTTP 回调
+  Gateway 内部 API，插件进程内无 DB、无租户数据；operate 四件
+  （create_project / write_memory / advance_work_item / dispatch_task_to_session）
+  走 M3 审批桥。
 - `src/server.ts`（`@openforge/dsh-bridge/server`）— resume 感知 SDK JSON-RPC server。
   官方 `dsh-sdk-jsonrpc-server` 对已持久化的 sessionId 会报 id collision；本实现对
   命中持久化日志的 id 走 `ctx.agents.resume()`，使"杀进程 + resume"成为
@@ -44,8 +50,14 @@ Base `{OPENFORGE_GATEWAY_URL}/api/internal/v1/copilot-bridge`，
 envelope `{code:0,data,message}` / `{code:1,message,details}`（`code!==0` 时 message
 作为工具错误透传给模型）。
 
-用到的端点：`GET /work-items?projectId=&status=`、`POST /work-items/:id/advance {note?}`、
-`GET /sessions`、`POST /sessions/:id/dispatch {message}`。dispatch 成功响应含
+用到的端点：`GET /work-items?projectId=&status=`、`GET /work-items/:id`、
+`POST /work-items/:id/advance {note?}`、`GET /sessions?projectId=&limit=`、
+`POST /sessions/:id/dispatch {message}`、`GET /projects?limit=`、`GET /projects/:id`、
+`POST /projects {name,path,description?}`、`GET /portfolio/overview`、
+`GET /portfolio/requests?projectId=&limit=`、`GET /portfolio/projects/:id/dossier`、
+`GET /memory/entries?scope=&projectId=&limit=`、`GET /memory/search?q=&scope=&projectId=&limit=`、
+`POST /memory/entries {kind,scope,text,projectId?,metadata?}`。
+dispatch 成功响应含
 `delivery:"confirmed"`（Gateway 已回读目标 tmux pane 确认送达）；注入未被目标终端回显
 （如模态对话框吞掉输入）时返回 502 `BRIDGE_DELIVERY_UNCONFIRMED`，message 透传给模型。
 

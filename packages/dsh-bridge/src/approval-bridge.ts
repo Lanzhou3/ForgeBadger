@@ -4,7 +4,8 @@
  *
  * Pipeline inside the runtime:
  *   1. `tools/pre-execute` — the operate tools (advance_work_item,
- *      dispatch_task_to_session) answer `{ kind: "ask" }`, which the tools
+ *      dispatch_task_to_session, create_project, write_memory) answer
+ *      `{ kind: "ask" }`, which the tools
  *      runtime resolves through the approval service (`@deepseek-ai/dsh-user-approval`,
  *      composed in cordis.yml). The service appends the durable
  *      `approval/asked` / `approval/decided` audit pair to the session log.
@@ -30,7 +31,12 @@ import type { CallId } from "@deepseek-ai/dsh-llm";
 export const APPROVAL_DECIDE_METHOD = "approval/decide";
 
 /** Tools whose execution is gated behind owner approval. Mirrors plugin.ts. */
-const OPERATE_TOOL_NAMES = new Set(["advance_work_item", "dispatch_task_to_session"]);
+const OPERATE_TOOL_NAMES = new Set([
+  "advance_work_item",
+  "dispatch_task_to_session",
+  "create_project",
+  "write_memory",
+]);
 
 /** Response vocabulary the Gateway may return for {@link APPROVAL_DECIDE_METHOD}. */
 interface DecideResponse {

@@ -52,7 +52,10 @@ export class FeishuChannelRuntime {
     if (this.started || this.stopped) return;
     this.started = true;
     // Neither Feishu connectivity nor automation recovery may delay HTTP readiness.
-    void Promise.resolve().then(() => this.dependencies.supervisor.start()).catch(() => undefined);
+    void Promise.resolve().then(() => {
+      if (!this.started || this.stopped) return undefined;
+      return this.dependencies.supervisor.start();
+    }).catch(() => undefined);
     this.intervalHandle = this.setInterval(
       () => this.runWorkerCycle(),
       clamp(this.dependencies.workerIntervalMs ?? 250, 50, 60_000)

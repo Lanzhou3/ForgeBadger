@@ -12,6 +12,7 @@ import { createAdminUserRoutes } from "./admin-users.js";
 import { createAuditLogRoutes } from "./audit-logs.js";
 import { createCatalogRoutes } from "./catalog.js";
 import { createProjectRoutes } from "./projects.js";
+import { createProjectGraphRoutes } from "./projects-graph.js";
 import { createProjectManagerRoutes } from "./project-manager.js";
 import { createSessionRoutes, createGateASessionRoutes } from "./sessions.js";
 import { createTemplateRoutes } from "./templates.js";
@@ -31,8 +32,19 @@ import { createPortfolioRoutes } from "./portfolio.js";
 import { createCopilotRoutes } from "./copilot.js";
 import { createCopilotBridgeRoutes } from "./internal-copilot-bridge.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
+import type { AgentStackDeps } from "../services/agent/agent-stack.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
+  const agentDeps: AgentStackDeps = deps.agentDeps ?? {
+    db: deps.db,
+    masterKey: deps.masterKey,
+    eventBus: deps.eventBus,
+    sessionManager: deps.sessionManager,
+    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}),
+    ...(deps.dshBff ? { dshBff: deps.dshBff } : {}),
+    ...(deps.portfolioApi ? { portfolioApi: deps.portfolioApi } : {}),
+    ...(deps.llmFetch ? { llmFetch: deps.llmFetch } : {})
+  };
   app.use("/api/v1/health", createHealthRoutes());
   // Guarded internal API for the deepseek-harness openforge-bridge plugin:
   // mounted only when its service token is configured.
@@ -46,6 +58,22 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
       dispatchConfirm: {
         timeoutMs: env.OPENFORGE_DISPATCH_CONFIRM_TIMEOUT_MS,
         intervalMs: env.OPENFORGE_DISPATCH_CONFIRM_INTERVAL_MS
+      },
+      launchSessionRuntime: async (userId, sessionId) => {
+        const { startSessionRuntime } = await import("../services/session-runtime.js");
+        try {
+          await startSessionRuntime({
+            db: deps.db,
+            userId,
+            masterKey: deps.masterKey,
+            eventBus: deps.eventBus,
+            sessionManager: deps.sessionManager,
+            ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
+          }, sessionId);
+          return true;
+        } catch {
+          return false;
+        }
       }
     }));
   }
@@ -73,8 +101,11 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     deps.eventBus,
     deps.adapterCommandRunner
   ));
-  app.use("/api/v1/projects", createProjectManagerRoutes(deps.db));
+  app.use("/api/v1/projects", createProjectManagerRoutes(deps.db, {
+    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
+  }));
   app.use("/api/v1/projects", createProjectRoutes(deps.db, deps.sessionManager, deps.eventBus));
+  app.use("/api/v1/projects", createProjectGraphRoutes(deps.db));
   app.use("/api/v1/sessions", createSessionRoutes(
     deps.db,
     deps.masterKey,
@@ -86,6 +117,16 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/templates", createTemplateRoutes(deps.db, deps.eventBus));
   app.use("/api/v1/usage", createUsageRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/model-providers", createModelProviderRoutes(deps.db, deps.masterKey));
+  // The signed Feishu callback is intentionally public. Mount it before the
+  // broad /api/v1 Skill router, whose router-level auth middleware otherwise
+  // rejects unmatched anonymous requests before they reach this route.
+  app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
+    db: deps.db,
+    masterKey: deps.masterKey,
+    ...(deps.feishuChannelRuntime ? { channelRuntime: deps.feishuChannelRuntime } : {}),
+    resolveAgentDeps: () => agentDeps,
+    ...(deps.feishuWebhookSdkFactory ? { sdkFactory: deps.feishuWebhookSdkFactory } : {})
+  }));
   app.use("/api/v1", createSkillRoutes(deps.db));
   app.use("/api/v1/notifications", createNotificationRoutes(deps.db));
   app.use("/api/v1/api-keys", createApiKeyRoutes(deps.db, deps.masterKey));
@@ -99,20 +140,11 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     db: deps.db,
     masterKey: deps.masterKey,
     eventBus: deps.eventBus,
+    ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}),
+    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}),
     ...(deps.dshBff ? { dshBff: deps.dshBff } : {}),
     ...(deps.portfolioApi ? { portfolioApi: deps.portfolioApi } : {}),
     ...(deps.llmFetch ? { llmFetch: deps.llmFetch } : {})
-  }));
-  app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
-    db: deps.db,
-    masterKey: deps.masterKey,
-    ...(deps.feishuChannelRuntime ? { channelRuntime: deps.feishuChannelRuntime } : {}),
-    resolveAgentDeps: () => ({
-      db: deps.db,
-      masterKey: deps.masterKey,
-      eventBus: deps.eventBus,
-      ...(deps.portfolioApi ? { portfolioApi: deps.portfolioApi } : {})
-    })
   }));
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
     db: deps.db,

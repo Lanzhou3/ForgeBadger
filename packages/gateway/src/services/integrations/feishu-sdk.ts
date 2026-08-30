@@ -20,8 +20,12 @@ export interface FeishuSdkCallbacks {
   onReconnected?: () => void;
 }
 
+export interface FeishuSdkEventContext {
+  botOpenId: string;
+}
+
 export interface FeishuSdkEventHandlers {
-  onMessage?: (event: unknown) => Promise<unknown> | unknown;
+  onMessage?: (event: unknown, context: FeishuSdkEventContext) => Promise<unknown> | unknown;
   onCardAction?: (event: unknown) => Promise<unknown> | unknown;
 }
 
@@ -47,6 +51,8 @@ interface FeishuSdkBindings {
 }
 
 export class FeishuSdkFactory {
+  private readonly botIdentityCache = new Map<string, Promise<string>>();
+
   constructor(private readonly sdk: FeishuSdkBindings = Lark as unknown as FeishuSdkBindings) {}
 
   createRestClient(config: FeishuSdkAccountConfig): unknown {
@@ -61,13 +67,80 @@ export class FeishuSdkFactory {
     handlers: FeishuSdkEventHandlers
   ): FeishuWebSocketHandle {
     assertCredentials(config);
-    const dispatcher = new this.sdk.EventDispatcher({ loggerLevel: this.sdk.LoggerLevel.warn });
-    const registeredHandlers: Record<string, unknown> = {};
-    if (handlers.onMessage) registeredHandlers["im.message.receive_v1"] = handlers.onMessage;
-    if (handlers.onCardAction) registeredHandlers["card.action.trigger"] = handlers.onCardAction;
-    dispatcher.register(registeredHandlers);
+    let client: InstanceType<FeishuSdkBindings["WSClient"]> | undefined;
+    let startPromise: Promise<void> | undefined;
+    let cancelStart: (() => void) | undefined;
+    let closed = false;
+    let generation = 0;
+    let closeForce = false;
+    const isActive = (expectedGeneration: number) =>
+      !closed && generation === expectedGeneration;
+    const requireActive = (expectedGeneration: number): void => {
+      if (!isActive(expectedGeneration)) throw new Error("FEISHU_WS_HANDLE_CLOSED");
+    };
+    const runStart = async (expectedGeneration: number): Promise<void> => {
+      const botOpenId = await this.resolveBotOpenId(config);
+      requireActive(expectedGeneration);
+      const nextClient = client ?? this.createUnderlyingWebSocketClient(config, callbacks);
+      if (!isActive(expectedGeneration)) {
+        if (!client) nextClient.close({ force: closeForce });
+        throw new Error("FEISHU_WS_HANDLE_CLOSED");
+      }
+      client = nextClient;
+      requireActive(expectedGeneration);
+      await client.start({ eventDispatcher: createDispatcher(this.sdk, handlers, botOpenId) });
+      requireActive(expectedGeneration);
+    };
+    const startClient = (expectedGeneration: number): Promise<void> => {
+      const operation = runStart(expectedGeneration);
+      return new Promise<void>((resolve, reject) => {
+        // Intentional close/reconcile is a graceful cancellation, not a
+        // connection failure for the supervisor to mark unhealthy and retry.
+        const cancel = () => {
+          if (cancelStart === cancel) cancelStart = undefined;
+          resolve();
+        };
+        cancelStart = cancel;
+        void operation.then(
+          () => {
+            if (cancelStart === cancel) cancelStart = undefined;
+            resolve();
+          },
+          (error: unknown) => {
+            if (cancelStart === cancel) cancelStart = undefined;
+            reject(error);
+          }
+        );
+      });
+    };
+    return {
+      start: () => {
+        if (closed) return Promise.reject(new Error("FEISHU_WS_HANDLE_CLOSED"));
+        if (startPromise) return startPromise;
+        const pending = startClient(generation);
+        startPromise = pending;
+        void pending.catch(() => {
+          if (startPromise === pending) startPromise = undefined;
+        });
+        return pending;
+      },
+      close: (force = false) => {
+        if (closed) return;
+        closed = true;
+        closeForce = force;
+        generation += 1;
+        cancelStart?.();
+        client?.close({ force });
+      },
+      getConnectionStatus: () => client?.getConnectionStatus() ?? { state: "idle", reconnectAttempts: 0 }
+    };
+  }
 
-    const client = new this.sdk.WSClient({
+  private createUnderlyingWebSocketClient(
+    config: FeishuSdkAccountConfig,
+    callbacks: FeishuSdkCallbacks
+  ): InstanceType<FeishuSdkBindings["WSClient"]> {
+    return new this.sdk.WSClient({
       ...this.createBaseOptions(config),
       ...callbacks,
       autoReconnect: true,
@@ -77,11 +150,33 @@ export class FeishuSdkFactory {
       wsConfig: { pingTimeout: 5 },
       ...(config.proxyAgent ? { agent: config.proxyAgent } : {})
     });
-    return {
-      start: () => client.start({ eventDispatcher: dispatcher }),
-      close: (force = false) => client.close({ force }),
-      getConnectionStatus: () => client.getConnectionStatus()
-    };
+  }
+
+  private resolveBotOpenId(config: FeishuSdkAccountConfig): Promise<string> {
+    const cacheKey = `${config.accountId}:${config.configRevision}`;
+    const cached = this.botIdentityCache.get(cacheKey);
+    if (cached) return cached;
+    const pending = this.fetchBotOpenId(config);
+    this.botIdentityCache.set(cacheKey, pending);
+    void pending.catch(() => {
+      if (this.botIdentityCache.get(cacheKey) === pending) this.botIdentityCache.delete(cacheKey);
+    });
+    return pending;
+  }
+
+  private async fetchBotOpenId(config: FeishuSdkAccountConfig): Promise<string> {
+    try {
+      const client = this.createRestClient(config) as {
+        request(input: { url: string; method: "GET" }): Promise<unknown>;
+      };
+      const response = await client.request({ url: "/open-apis/bot/v3/info", method: "GET" });
+      const bot = isRecord(response) && isRecord(response.bot) ? response.bot : undefined;
+      const openId = bot && typeof bot.open_id === "string" ? bot.open_id.trim() : "";
+      if (openId) return openId;
+    } catch {
+      // The supervisor records a redacted health error and retries startup.
+    }
+    throw new Error("FEISHU_BOT_IDENTITY_REQUIRED");
   }
 
   private createBaseOptions(config: FeishuSdkAccountConfig): Record<string, unknown> {
@@ -95,6 +190,22 @@ export class FeishuSdkFactory {
       httpInstance: withDefaultTimeout(baseHttpInstance, requestTimeoutMs)
     };
   }
+}
+
+function createDispatcher(
+  sdk: FeishuSdkBindings,
+  handlers: FeishuSdkEventHandlers,
+  botOpenId: string
+): unknown {
+  const dispatcher = new sdk.EventDispatcher({ loggerLevel: sdk.LoggerLevel.warn });
+  const registeredHandlers: Record<string, unknown> = {};
+  if (handlers.onMessage) {
+    registeredHandlers["im.message.receive_v1"] = (event: unknown) =>
+      handlers.onMessage?.(event, { botOpenId });
+  }
+  if (handlers.onCardAction) registeredHandlers["card.action.trigger"] = handlers.onCardAction;
+  dispatcher.register(registeredHandlers);
+  return dispatcher;
 }
 
 function withDefaultTimeout(base: Lark.HttpInstance, timeout: number): Lark.HttpInstance {
@@ -121,4 +232,8 @@ function assertCredentials(config: FeishuSdkAccountConfig): void {
 function clamp(value: number, minimum: number, maximum: number): number {
   if (!Number.isFinite(value)) return maximum;
   return Math.max(minimum, Math.min(maximum, Math.round(value)));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

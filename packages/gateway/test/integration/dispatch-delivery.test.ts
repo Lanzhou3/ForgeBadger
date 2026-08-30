@@ -1,15 +1,14 @@
 /**
  * Real-tmux verification for dispatch delivery confirmation (post-M3): the
- * E2E-M3 acceptance run proved that `tmux send-keys` succeeds while a modal
- * dialog (Claude Code's trust prompt) swallows the input. This test drives the
- * real internal bridge route against real tmux sessions:
- * - a plain shell echoes the dispatched message -> 200 + delivery "confirmed";
- * - vim (a modal program) mangles the input as normal-mode commands -> the
- *   pane never shows the message -> 502 + delivery_unconfirmed.
+ * This test drives the real internal bridge route and real tmux process while
+ * using a deterministic Claude-shaped fake TUI. One target consumes the
+ * staged composer after Enter; the other leaves it unchanged.
  *
  * Skipped unless RUN_TMUX_TESTS=1 (real tmux required).
  */
 import assert from "node:assert/strict";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { after, before, describe, it } from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,7 +32,7 @@ const bridgeToken = "dispatch-delivery-it-token-0123456789abcdef";
 
 process.env.OPENFORGE_JWT_SECRET = jwtSecret;
 process.env.OPENFORGE_MASTER_KEY = masterKey;
-// Short read-back budget: vim must fail fast; the shell confirms on poll one.
+// Short read-back budget: the unchanged composer must fail fast.
 process.env.OPENFORGE_DISPATCH_CONFIRM_TIMEOUT_MS = "3000";
 process.env.OPENFORGE_DISPATCH_CONFIRM_INTERVAL_MS = "200";
 
@@ -41,8 +40,9 @@ describe("dispatch delivery confirmation (real tmux)", { skip: !runTmuxTests }, 
   let app: GatewayApp;
   let baseUrl: string;
   let userId: string;
-  let shellSessionId: string;
-  let vimSessionId: string;
+  let consumedSessionId: string;
+  let stuckSessionId: string;
+  let fakeCliRoot: string;
   const tmuxNames: string[] = [];
 
   async function createTargetSession(
@@ -61,7 +61,7 @@ describe("dispatch delivery confirmation (real tmux)", { skip: !runTmuxTests }, 
     const session = await sessionManager.createSession({
       userId,
       sessionId,
-      launchPlan: { command, args: [], cwd: "/tmp", env: {}, secretEnvNames: [], credentialMode: "host_environment" }
+      launchPlan: { command, args: [], cwd: fakeCliRoot, env: {}, secretEnvNames: [], credentialMode: "host_environment" }
     });
     tmuxNames.push(session.tmuxName);
     return sessionId;
@@ -105,13 +105,16 @@ describe("dispatch delivery confirmation (real tmux)", { skip: !runTmuxTests }, 
     baseUrl = `http://127.0.0.1:${address.port}`;
 
     userId = new UserRepository(db).create("dispatch-delivery@example.com", "hash").id;
+    fakeCliRoot = mkdtempSync(path.join(tmpdir(), "openforge-dispatch-cli-"));
+    const consumingCommand = writeFakeClaude(fakeCliRoot, "consume", true);
+    const stuckCommand = writeFakeClaude(fakeCliRoot, "stuck", false);
     const projectId = new ProjectRepository(db, userId).create({
       name: "Dispatch delivery verification",
       path: "/tmp",
       aiTool: "claude"
     }).id;
-    shellSessionId = await createTargetSession(db, sessionManager, projectId, "shell target", "bash");
-    vimSessionId = await createTargetSession(db, sessionManager, projectId, "vim target", "vim");
+    consumedSessionId = await createTargetSession(db, sessionManager, projectId, "consuming target", consumingCommand);
+    stuckSessionId = await createTargetSession(db, sessionManager, projectId, "stuck target", stuckCommand);
     // Let both processes draw their first screen.
     await new Promise((resolve) => setTimeout(resolve, 1500));
   });
@@ -120,21 +123,59 @@ describe("dispatch delivery confirmation (real tmux)", { skip: !runTmuxTests }, 
     const tmux = createTmuxClient();
     for (const name of tmuxNames) await tmux.killSession(name);
     await app.close();
+    rmSync(fakeCliRoot, { recursive: true, force: true });
   });
 
-  it("confirms delivery to a plain shell session", async () => {
-    const marker = `echo SHELL_OK_${process.pid}`;
-    const { status, body } = await dispatch(shellSessionId, marker);
+  it("confirms only after the current CLI composer consumes the staged task", async () => {
+    const marker = `TASK_OK_${process.pid}`;
+    const { status, body } = await dispatch(consumedSessionId, marker);
     assert.equal(status, 200, JSON.stringify(body));
-    assert.deepEqual(body.data, { dispatched: true, sessionId: shellSessionId, delivery: "confirmed" });
+    assert.deepEqual(body.data, { dispatched: true, sessionId: consumedSessionId, delivery: "consumed" });
   });
 
-  it("rejects with delivery_unconfirmed when vim swallows the input", async () => {
-    const marker = `echo VIM_MODAL_${process.pid}`;
-    const { status, body } = await dispatch(vimSessionId, marker);
+  it("returns an indeterminate non-retryable result when the composer remains", async () => {
+    const marker = `TASK_STUCK_${process.pid}`;
+    const { status, body } = await dispatch(stuckSessionId, marker);
     assert.equal(status, 502, JSON.stringify(body));
-    const details = body.details as { code?: string; reason?: string } | undefined;
+    const details = body.details as { code?: string; reason?: string; retryable?: boolean } | undefined;
     assert.equal(details?.code, "BRIDGE_DELIVERY_UNCONFIRMED");
-    assert.equal(details?.reason, "delivery_unconfirmed");
+    assert.equal(details?.reason, "submission_indeterminate");
+    assert.equal(details?.retryable, false);
   });
 });
+
+function writeFakeClaude(root: string, name: string, consumes: boolean): string {
+  const directory = path.join(root, name);
+  const command = path.join(directory, "claude");
+  mkdirSync(directory, { recursive: true });
+  const render = "(body)=>process.stdout.write('\\u001b[2J\\u001b[H'+body)";
+  const script = [
+    "#!/usr/bin/env node",
+    "process.stdin.setRawMode(true); process.stdin.resume();",
+    `const render=${render};`,
+    "const ready='────────────────\\n❯  \\n────────────────\\nauto mode on';",
+    "render(ready); let bytes=[]; let payload='';",
+    "process.stdin.on('data',(chunk)=>{",
+    "  let submitted=false;",
+    "  for (const byte of chunk) {",
+    "    if (byte === 13) {",
+    consumes
+      ? "      render(payload+'\\n────────────────\\n❯  \\n────────────────\\nauto mode on');"
+      : "      render('────────────────\\n❯ '+payload+'\\n────────────────\\nauto mode on');",
+    "      submitted=true;",
+    "      continue;",
+    "    }",
+    "    bytes.push(byte);",
+    "  }",
+    "  if (submitted) return;",
+    "  const text=Buffer.from(bytes).toString('utf8');",
+    "  if (text.includes('\\u001b[201~')) {",
+    "    payload=text.replace('\\u001b[200~','').replace('\\u001b[201~','');",
+    "    render('────────────────\\n❯ '+payload+'\\n────────────────\\nauto mode on');",
+    "  }",
+    "});"
+  ].join("\n");
+  writeFileSync(command, script, { mode: 0o700 });
+  chmodSync(command, 0o700);
+  return command;
+}

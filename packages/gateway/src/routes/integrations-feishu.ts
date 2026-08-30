@@ -10,6 +10,7 @@ import { PortfolioFeishuRegistryRepository } from "../db/repositories/portfolio-
 import {
   FeishuIntegrationRepository,
   type FeishuIntegrationConfig,
+  type FeishuPublicWebhookConfig,
   type FeishuUserMapping
 } from "../db/repositories/feishu-integration-repository.js";
 import type { Database } from "../db/types.js";
@@ -17,7 +18,9 @@ import { getFeishuCliStatus, type FeishuCliStatus } from "../services/integratio
 import {
   createPortfolioIngressSelector,
   routeVerifiedFeishuIngress,
-  sendFeishuChatText
+  sendFeishuChatCard,
+  sendFeishuChatText,
+  updateFeishuChatCard
 } from "../services/integrations/feishu-runtime-factory.js";
 import { createFeishuCopilotChannel } from "../services/integrations/feishu-copilot-channel.js";
 import { FeishuSdkFactory } from "../services/integrations/feishu-sdk.js";
@@ -44,6 +47,7 @@ const feishuUserMappingsSchema = z.object({
   }).strict()).max(100)
 }).strict();
 const publicWebhookReplayTtlMs = 5 * 60 * 1000;
+const publicWebhookTimestampWindowSeconds = 5 * 60;
 
 /** Lazily-shared SDK factory for webhook-originated Copilot replies. */
 let sharedWebhookSdkFactory: FeishuSdkFactory | undefined;
@@ -63,6 +67,8 @@ export interface FeishuIntegrationRoutesOptions {
   };
   /** Copilot harness deps for unbound-chat routing; absent disables the Copilot channel. */
   resolveAgentDeps?: () => AgentStackDeps | undefined;
+  /** External Feishu SDK boundary; production uses the shared lazy factory. */
+  sdkFactory?: FeishuSdkFactory;
 }
 
 /** Feishu exposes only account control and one verified Portfolio ingress path. */
@@ -91,12 +97,37 @@ export function createFeishuIntegrationRoutes(options: FeishuIntegrationRoutesOp
     const masterKey = options.masterKey;
 
     const integration = new FeishuIntegrationRepository(db, config.userId, options.masterKey);
-    if (!consumePublicReplayAndRate(integration, config, normalized, signature, publicWebhookRateLimit)) {
-      return res.status(200).json({ msg: "replayed" });
+    const mapping = authorizePublicWebhookActor(integration, config, normalized);
+    if (!mapping) {
+      return sendPublicWebhookPolicyReject(
+        db,
+        config.userId,
+        req.ip,
+        res,
+        normalized,
+        "feishu_webhook_policy_rejected"
+      );
     }
     const account = new FeishuChannelRepository(db, config.userId, options.masterKey).getAccount();
-    if (!account?.enabled || !config.enabled || config.emergencyDisabled) {
-      return sendPublicWebhookPolicyReject(db, config.userId, req.ip, res, normalized, "feishu_channel_unavailable");
+    if (!account?.enabled) {
+      return sendPublicWebhookPolicyReject(
+        db,
+        config.userId,
+        req.ip,
+        res,
+        normalized,
+        "feishu_channel_unavailable"
+      );
+    }
+    if (!consumePublicReplayAndRate(
+      integration,
+      config,
+      normalized,
+      mapping,
+      signature,
+      publicWebhookRateLimit
+    )) {
+      return res.status(200).json({ msg: "replayed" });
     }
     try {
       const registry = new PortfolioFeishuRegistryRepository(db);
@@ -114,6 +145,7 @@ export function createFeishuIntegrationRoutes(options: FeishuIntegrationRoutesOp
       };
       const agentDeps = options.resolveAgentDeps?.();
       const providerAccount = registry.resolve("feishu", account.appId);
+      const sdkFactory = options.sdkFactory ?? webhookSdkFactory();
       const copilotChannel = agentDeps && providerAccount
         ? createFeishuCopilotChannel({
             deps: agentDeps,
@@ -121,11 +153,29 @@ export function createFeishuIntegrationRoutes(options: FeishuIntegrationRoutesOp
             sendMessage: ({ chatId, text }) => sendFeishuChatText({
               db,
               masterKey,
-              sdkFactory: webhookSdkFactory(),
+              sdkFactory,
               userId: config.userId,
               chatId,
               text
             }),
+            cardTransport: {
+              sendCard: (chatId, card) => sendFeishuChatCard({
+                db,
+                masterKey,
+                sdkFactory,
+                userId: config.userId,
+                chatId,
+                card
+              }),
+              updateCard: (messageId, card) => updateFeishuChatCard({
+                db,
+                masterKey,
+                sdkFactory,
+                userId: config.userId,
+                messageId,
+                card
+              })
+            },
             userId: config.userId,
             providerAccountId: providerAccount.id,
             transport: "webhook"
@@ -140,6 +190,12 @@ export function createFeishuIntegrationRoutes(options: FeishuIntegrationRoutesOp
         event,
         kind: normalized.kind,
         ...(normalized.kind === "message" ? { text: normalized.text } : normalized.actionToken ? { actionToken: normalized.actionToken } : {}),
+        ...(normalized.kind === "message" && normalized.messageId
+          ? { copilotMeta: { messageId: normalized.messageId, ...(normalized.chatType ? { chatType: normalized.chatType } : {}) } }
+          : {}),
+        ...(normalized.kind === "card_action" && normalized.value
+          ? { cardAction: { value: normalized.value, ...(normalized.messageId ? { messageId: normalized.messageId } : {}) } }
+          : {}),
         ...(copilotChannel ? { copilotChannel } : {})
       });
       const acknowledged = routed === "copilot" || routed === "portfolio";
@@ -250,6 +306,9 @@ interface PublicFeishuIngress {
   messageId?: string;
   text: string;
   actionToken?: string;
+  /** Object-form button value (copilot decision cards); portfolio uses actionToken strings. */
+  value?: Record<string, unknown>;
+  chatType?: string;
 }
 
 function findPublicWebhookConfig(db: Database, masterKey: string, publicId: string, res: Response) {
@@ -265,17 +324,39 @@ function consumePublicReplayAndRate(
   repository: FeishuIntegrationRepository,
   config: { userId: string; publicWebhookId: string },
   event: PublicFeishuIngress,
+  mapping: FeishuUserMapping,
   signature: Extract<FeishuSignatureVerification, { ok: true }>,
   limit: { max: number; windowMs: number }
 ): boolean {
   const replayKey = event.eventId ? `event:${event.eventId}` : event.messageId ? `message:${event.messageId}` : `signature:${signature.timestamp}:${signature.nonce}:${signature.signature}`;
   return repository.consumePublicWebhookReplayKey({ userId: config.userId, publicWebhookId: config.publicWebhookId, replayKey, ttlMs: publicWebhookReplayTtlMs })
     && repository.consumePublicWebhookReplayKey({ userId: config.userId, publicWebhookId: config.publicWebhookId, replayKey: `nonce:${signature.timestamp}:${signature.nonce}:${signature.signature}`, ttlMs: publicWebhookReplayTtlMs })
-    && repository.consumePublicWebhookRateWindow({ userId: config.userId, publicWebhookId: config.publicWebhookId, scope: "integration", scopeId: config.publicWebhookId, max: limit.max, windowMs: limit.windowMs });
+    && repository.consumePublicWebhookRateWindow({ userId: config.userId, publicWebhookId: config.publicWebhookId, scope: "integration", scopeId: config.publicWebhookId, max: limit.max, windowMs: limit.windowMs })
+    && repository.consumePublicWebhookRateWindow({ userId: config.userId, publicWebhookId: config.publicWebhookId, scope: "chat", scopeId: event.chatId, max: limit.max, windowMs: limit.windowMs })
+    && repository.consumePublicWebhookRateWindow({ userId: config.userId, publicWebhookId: config.publicWebhookId, scope: "user", scopeId: mapping.openforgeUserId, max: limit.max, windowMs: limit.windowMs });
 }
 
 function ensurePortfolioHandler(registry: PortfolioFeishuRegistryRepository, userId: string, providerAccountId: string): void {
   registry.register({ userId, provider: "feishu", providerAccountId });
+}
+
+function authorizePublicWebhookActor(
+  repository: FeishuIntegrationRepository,
+  config: FeishuPublicWebhookConfig,
+  event: PublicFeishuIngress
+): FeishuUserMapping | undefined {
+  if (
+    !config.enabled
+    || config.emergencyDisabled
+    || (config.identityMode !== "user" && config.identityMode !== "bot")
+    || config.allowedChatIds.length === 0
+    || !config.allowedChatIds.includes(event.chatId)
+  ) {
+    return undefined;
+  }
+  const mapping = repository.listUserMappings()
+    .find((candidate) => candidate.feishuUserId === event.feishuUserId);
+  return mapping?.openforgeUserId === config.userId ? mapping : undefined;
 }
 
 function isFeishuUrlVerification(body: unknown): boolean { return isRecord(body) && body.type === "url_verification"; }
@@ -291,6 +372,17 @@ function verifyFeishuPublicSignature(req: Request, rawBody: Buffer, secret: stri
   const nonce = header(req, "x-lark-request-nonce") ?? header(req, "x-feishu-request-nonce");
   const signature = header(req, "x-lark-signature") ?? header(req, "x-feishu-signature");
   if (!timestamp || !nonce || !signature) return { ok: false, code: "feishu_webhook_signature_missing" };
+  if (!/^\d+$/u.test(timestamp)) {
+    return { ok: false, code: "feishu_webhook_timestamp_invalid" };
+  }
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isSafeInteger(timestampSeconds)) {
+    return { ok: false, code: "feishu_webhook_timestamp_invalid" };
+  }
+  const nowSeconds = Math.floor(Date.now() / 1_000);
+  if (Math.abs(nowSeconds - timestampSeconds) > publicWebhookTimestampWindowSeconds) {
+    return { ok: false, code: "feishu_webhook_timestamp_out_of_window" };
+  }
   const expected = createHash("sha256").update(`${timestamp}${nonce}${secret}${rawBody.toString("utf8")}`).digest("hex");
   if (!safeEqualHex(signature, expected)) return { ok: false, code: "feishu_webhook_signature_invalid" };
   return { ok: true, timestamp, nonce, signature };
@@ -303,24 +395,38 @@ function normalizePublicFeishuIngress(body: unknown): PublicFeishuIngress | unde
   const eventId = firstString(headerValue.event_id, event.event_id, event.eventId);
   const sender = isRecord(event.sender) ? event.sender : {};
   const senderId = isRecord(sender.sender_id) ? sender.sender_id : {};
-  const feishuUserId = firstString(senderId.open_id, event.open_id, event.sender_open_id);
+  const operator = isRecord(event.operator) ? event.operator : {};
+  const context = isRecord(event.context) ? event.context : {};
+  const feishuUserId = firstString(operator.open_id, senderId.open_id, event.open_id, event.sender_open_id);
   const message = isRecord(event.message) ? event.message : {};
-  const chatId = firstString(message.chat_id, event.chat_id, event.open_chat_id);
+  const chatId = firstString(context.open_chat_id, message.chat_id, event.chat_id, event.open_chat_id);
+  const chatType = firstString(message.chat_type, event.chat_type);
   if (!feishuUserId || !chatId) return undefined;
   const action = isRecord(event.action) ? event.action : isRecord(body.action) ? body.action : undefined;
   if (action) {
     const actionToken = firstString(action.value, action.action_value, event.action_token);
-    const messageId = firstString(message.message_id, event.message_id);
-    return actionToken ? {
-      kind: "card_action", chatId, feishuUserId, text: "[card action]", actionToken,
+    const messageId = firstString(
+      context.open_message_id,
+      message.message_id,
+      event.message_id,
+      event.open_message_id
+    );
+    const value = isRecord(action.value) ? action.value : undefined;
+    if (!actionToken && !value) return undefined;
+    return {
+      kind: "card_action", chatId, feishuUserId, text: "[card action]",
+      ...(actionToken ? { actionToken } : {}),
+      ...(value ? { value } : {}),
+      ...(chatType ? { chatType } : {}),
       ...(eventId ? { eventId } : {}),
       ...(messageId ? { messageId } : {})
-    } : undefined;
+    };
   }
   const text = parseFeishuTextContent(message.content);
   const messageId = firstString(message.message_id, event.message_id);
   return text === undefined ? undefined : {
     kind: "message", chatId, feishuUserId, text,
+    ...(chatType ? { chatType } : {}),
     ...(eventId ? { eventId } : {}),
     ...(messageId ? { messageId } : {})
   };

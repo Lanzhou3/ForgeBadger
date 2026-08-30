@@ -18,7 +18,8 @@
  * suspended mid-tool-call, so injecting another prompt would interleave.
  *
  * M3 approval bridging: the runtime's operate tools (advance_work_item,
- * dispatch_task_to_session) answer the dsh pre-execute gate with `ask`, the
+ * dispatch_task_to_session, create_project, write_memory) answer the dsh
+ * pre-execute gate with `ask`, the
  * runtime's answerer forwards the question here as an `approval/decide`
  * server->client JSON-RPC request. This service maps it onto the existing
  * pending-action flow: security policy first (deny -> immediate rejection the
@@ -42,9 +43,10 @@ import { CopilotConversationLog } from "../agent/conversation-log.js";
 import { createAgentLlmClient, type AgentLlmProviderResolution } from "../agent/llm-client.js";
 import { createSecurityPolicy, logSecurityDecision } from "../agent/security-policy.js";
 import { AgentError } from "../agent/types.js";
-import { advanceWorkItem, dispatchSessionInput } from "../copilot-bridge/bridge-service.js";
+import { advanceWorkItem, createProjectRecord, dispatchSessionInput, writeMemoryEntry } from "../copilot-bridge/bridge-service.js";
 import { DISPATCH_DELIVERY_UNCONFIRMED, type DispatchConfirmOptions } from "../copilot-bridge/delivery-confirm.js";
 import type { InMemorySessionManager } from "../session-manager.js";
+import { isAdapterId } from "../adapter-discovery.js";
 import type { PortfolioApiFacade } from "../portfolio/portfolio-api-service.js";
 import { createEventTranslator, type TranslatorEffect } from "./event-translator.js";
 import { resolveDshModelOverride } from "./dsh-config.js";
@@ -244,8 +246,11 @@ export function createDshCopilotBff(deps: DshCopilotBffDeps): DshCopilotBff {
     const run = log.getRun(input.runId);
     if (!run || run.status !== "awaiting_approval") return { resumed: false, runId: input.runId };
     const action = log.getPendingAction(input.actionId);
-    // Idempotent: an already-decided action is a no-op, never a re-execution.
-    if (!action || action.status !== "pending") return { resumed: false, runId: input.runId };
+    // Context binding + idempotency: an action can only resume the persisted
+    // run that created it, and an already-decided action never re-executes.
+    if (!action || action.runId !== run.id || action.status !== "pending") {
+      return { resumed: false, runId: input.runId };
+    }
     log.decidePendingAction(action.id, input.approved ? "approved" : "rejected");
 
     const waiter = approvalWaiters.get(action.id);
@@ -321,18 +326,64 @@ export function createDshCopilotBff(deps: DshCopilotBffDeps): DshCopilotBff {
         const sessionId = String(input.sessionId ?? "");
         // Tenant check against the durable record before any runtime write
         // (mirrors the internal bridge route).
-        if (!new SessionRepository(deps.db, userId).getById(sessionId)) {
+        const session = new SessionRepository(deps.db, userId).getById(sessionId);
+        if (!session) {
           return { content: "Tool error: session not found" };
         }
-        const receipt = await dispatchSessionInput(deps.sessionManager, sessionId, String(input.message ?? ""), deps.dispatchConfirm);
+        if (!isAdapterId(session.aiTool)) {
+          return { content: "Tool error: session adapter is unsupported" };
+        }
+        const receipt = await dispatchSessionInput(
+          deps.sessionManager,
+          sessionId,
+          session.aiTool,
+          String(input.message ?? ""),
+          deps.dispatchConfirm
+        );
         return { content: JSON.stringify(receipt) };
+      }
+      if (tool === "create_project") {
+        // The dead-runtime fallback bypasses the bridge route's zod schema, so
+        // the tool-input constraints are re-checked here before any write.
+        const name = String(input.name ?? "");
+        const path = String(input.path ?? "");
+        const description = typeof input.description === "string" ? input.description : undefined;
+        if (name.length < 1 || name.length > 200 || path.length < 1 || path.length > 1024 || (description !== undefined && description.length > 2000)) {
+          return { content: "Tool error: invalid create_project input" };
+        }
+        const created = createProjectRecord(deps.db, userId, {
+          name,
+          path,
+          ...(description !== undefined ? { description } : {})
+        });
+        return { content: JSON.stringify({ created: true, ...created }) };
+      }
+      if (tool === "write_memory") {
+        const MEMORY_KINDS = new Set(["fact", "preference", "decision", "project_note"]);
+        const MEMORY_SCOPES = new Set(["global", "project", "session"]);
+        const text = String(input.text ?? "");
+        if (typeof input.kind !== "string" || !MEMORY_KINDS.has(input.kind)
+          || typeof input.scope !== "string" || !MEMORY_SCOPES.has(input.scope)
+          || text.length < 1 || text.length > 8 * 1024) {
+          return { content: "Tool error: invalid write_memory input" };
+        }
+        const result = writeMemoryEntry(deps.db, userId, {
+          kind: input.kind as "fact" | "preference" | "decision" | "project_note",
+          scope: input.scope as "global" | "project" | "session",
+          text,
+          ...(typeof input.projectId === "string" ? { projectId: input.projectId } : {}),
+          ...(input.metadata !== null && typeof input.metadata === "object" && !Array.isArray(input.metadata)
+            ? { metadata: input.metadata as Record<string, unknown> }
+            : {})
+        });
+        return { content: JSON.stringify(result) };
       }
       return { content: `Tool error: unknown operate tool ${tool}` };
     } catch (error) {
       // Model-facing wording for the delivery read-back failure (the runtime
       // shows this text as the tool result, like the bridge route's envelope).
       if (error instanceof Error && error.message === DISPATCH_DELIVERY_UNCONFIRMED) {
-        return { content: "Tool error: dispatch could not be confirmed on the target terminal: the session's CLI may be showing a modal dialog and did not receive the input. Ask the user to check the session terminal, then retry." };
+        return { content: "Tool error: dispatch may have reached the target CLI, but consumption could not be confirmed. Ask the user to check the session terminal; do not retry automatically because that could run the task twice." };
       }
       return { content: `Tool error: ${error instanceof Error ? error.message : String(error)}` };
     }

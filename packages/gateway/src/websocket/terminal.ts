@@ -4,7 +4,8 @@ import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
-import { verifyJwt } from "../auth/index.js";
+import { resolveTokenUserId } from "../auth/resolve-token.js";
+import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
 import { extractWsAuthToken, extractWsAttachToken } from "./auth.js";
 import { WebSocketConnectionLimits } from "./connection-limits.js";
@@ -155,6 +156,7 @@ export interface TerminalWebSocketOptions {
   server: Server;
   sessionManager: InMemorySessionManager;
   jwtSecret: string;
+  db: Database;
   registry?: TerminalConnectionRegistry;
   maxConnections?: number;
   maxConnectionsPerUser?: number;
@@ -210,7 +212,11 @@ export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void
 
     let userId: string;
     try {
-      userId = verifyJwt(authToken, options.jwtSecret).userId;
+      const resolved = resolveTokenUserId(options.db, authToken, options.jwtSecret);
+      if (!resolved) {
+        throw new Error("unauthorized");
+      }
+      userId = resolved;
     } catch {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();

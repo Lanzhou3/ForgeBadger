@@ -1,7 +1,14 @@
 import jwt from "jsonwebtoken";
 
+/**
+ * Access tokens are short-lived: the web console clears the session and
+ * returns to /login on the first 401, so a 24h window bounds token-theft
+ * exposure without making active users re-authenticate mid-day.
+ */
+const ACCESS_TOKEN_TTL = "24h";
+
 export function signJwt(payload: { userId: string; email: string }, secret: string): string {
-  return jwt.sign(payload, secret, { algorithm: "HS256", expiresIn: "7d" });
+  return jwt.sign(payload, secret, { algorithm: "HS256", expiresIn: ACCESS_TOKEN_TTL });
 }
 
 export function verifyJwt(token: string, secret: string): { userId: string; email: string } {
