@@ -7,7 +7,7 @@ import {
   TRIAL_FEEDBACK_ROUTE_TRACKER_ISSUES
 } from "./audit-trial-feedback-issue.mjs";
 
-export const DEFAULT_REPOSITORY = "Lanzhou3/OpenForge";
+export const DEFAULT_REPOSITORY = "Lanzhou3/ForgeBadger";
 const DEFAULT_LIMIT = 50;
 
 export async function auditTrialFeedbackIssues(options = {}) {

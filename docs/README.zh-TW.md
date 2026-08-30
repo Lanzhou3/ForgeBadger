@@ -24,9 +24,8 @@ Codex app-server 控制面原型已於 2026-08-14 下線；Codex 會話僅以 tm
 終端機會話方式執行。託管協作、計費、雲部署和自主遠端執行不屬於目前本地優先 MVP
 範圍。
 
-產品與本機倉庫正在 `codex/rename-forgebadger` 分支改名為 ForgeBadger。
-公開 GitHub 遠端在倉庫擁有者完成外部改名前仍為 `Lanzhou3/OpenForge`；現有
-Issue、Pull Request 與安全政策連結因此刻意繼續指向該實際遠端。
+產品、套件作用域、CLI、執行階段識別、本機狀態契約與公開 GitHub 倉庫現已統一使用
+ForgeBadger 品牌。以 `OF-` 開頭的歷史階段 ID 繼續作為穩定的證據識別保留。
 
 ## 首次使用者試用
 

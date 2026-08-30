@@ -30,11 +30,9 @@ guarded behind the Web console's experimental features area. Hosted
 collaboration, billing, cloud deployment, and autonomous remote execution are
 not part of the current local-first MVP.
 
-The product and local repository are being renamed to ForgeBadger on the
-`codex/rename-forgebadger` branch. The public GitHub remote is still
-`Lanzhou3/OpenForge` until the repository owner completes the external rename;
-links to existing issues, pull requests, and security settings intentionally
-continue to use that current remote.
+The product, package scope, CLI, runtime identifiers, local state contract, and
+public GitHub repository now use the ForgeBadger brand. Historical phase IDs
+beginning with `OF-` remain stable evidence identifiers.
 
 ## First User Trial
 

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { auditTrialFeedbackPacket } from "./audit-trial-feedback-packet.mjs";
 
-export const DEFAULT_REPOSITORY = "Lanzhou3/OpenForge";
+export const DEFAULT_REPOSITORY = "Lanzhou3/ForgeBadger";
 const REQUIRED_LABEL = "trial-feedback";
 export const TRIAL_FEEDBACK_ROUTE_TRACKER_ISSUES = new Map([
   [3, "Record live Copilot provider smoke with disposable credential"],

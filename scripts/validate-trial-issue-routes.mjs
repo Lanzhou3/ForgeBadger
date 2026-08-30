@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const DEFAULT_REPOSITORY = "Lanzhou3/OpenForge";
+export const DEFAULT_REPOSITORY = "Lanzhou3/ForgeBadger";
 
 export const EXPECTED_TRIAL_ISSUE_ROUTES = [
   {

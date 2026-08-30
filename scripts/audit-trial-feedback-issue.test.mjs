@@ -8,8 +8,8 @@ import {
 } from "./audit-trial-feedback-issue.mjs";
 
 describe("trial feedback GitHub issue audit", () => {
-  it("keeps the existing GitHub remote as the default repository", () => {
-    assert.equal(DEFAULT_REPOSITORY, "Lanzhou3/OpenForge");
+  it("uses the ForgeBadger GitHub remote as the default repository", () => {
+    assert.equal(DEFAULT_REPOSITORY, "Lanzhou3/ForgeBadger");
   });
   it("audits a completed GitHub issue form body as ready for human triage only", async () => {
     const result = await auditTrialFeedbackIssue({

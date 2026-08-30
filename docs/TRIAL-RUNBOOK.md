@@ -67,7 +67,7 @@ GitHub follow-up routes:
 pnpm trial:issue-routes-validate
 ```
 
-This requires GitHub CLI access to the existing repository `Lanzhou3/OpenForge` and checks that issue
+This requires GitHub CLI access to the repository `Lanzhou3/ForgeBadger` and checks that issue
 #3, #4, and #5 still exist, are open, and match their expected routing labels.
 It does not create or update GitHub issues and does not clear any external
 gate.

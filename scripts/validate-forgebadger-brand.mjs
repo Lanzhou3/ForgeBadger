@@ -5,17 +5,10 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const legacyBrandPattern = /(?:OpenForge|openforge|OPENFORGE)/u;
-const currentRemote = "Lanzhou3/OpenForge";
-
 const compatibilityAllowlist = new Map([
-  ["README.md", [currentRemote]],
-  ["docs/README.zh-CN.md", [currentRemote]],
-  ["docs/README.zh-TW.md", [currentRemote]],
-  ["docs/TRIAL-RUNBOOK.md", [currentRemote]],
-  [".github/ISSUE_TEMPLATE/config.yml", [currentRemote]],
-  ["scripts/audit-trial-feedback-issue.mjs", [currentRemote, "OPENFORGE_TRIAL_FEEDBACK_ISSUE_REPO"]],
-  ["scripts/audit-trial-feedback-issues.mjs", [currentRemote, "OPENFORGE_TRIAL_FEEDBACK_ISSUE_REPO"]],
-  ["scripts/validate-trial-issue-routes.mjs", [currentRemote, "OPENFORGE_TRIAL_ISSUE_ROUTES_REPO"]],
+  ["scripts/audit-trial-feedback-issue.mjs", ["OPENFORGE_TRIAL_FEEDBACK_ISSUE_REPO"]],
+  ["scripts/audit-trial-feedback-issues.mjs", ["OPENFORGE_TRIAL_FEEDBACK_ISSUE_REPO"]],
+  ["scripts/validate-trial-issue-routes.mjs", ["OPENFORGE_TRIAL_ISSUE_ROUTES_REPO"]],
   ["scripts/run-with-root-env.mjs", ['"OPENFORGE_"']],
   ["scripts/smoke-feishu-bot-live.mjs", ['"OPENFORGE_"']],
   ["scripts/smoke-feishu-bot-websocket.mjs", ['"OPENFORGE_"']],
