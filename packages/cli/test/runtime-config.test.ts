@@ -14,7 +14,7 @@ describe("loadOrCreateRuntimeConfig", () => {
     const stateDir = await mkdtemp(path.join(tmpdir(), "forgebadger-runtime-"));
 
     // Act
-    const config = await loadOrCreateRuntimeConfig({ stateDir });
+    const config = await loadOrCreateRuntimeConfig({ stateDir, env: {} });
 
     // Assert
     assert.equal(config.version, 1);
@@ -38,8 +38,8 @@ describe("loadOrCreateRuntimeConfig", () => {
     const stateDir = await mkdtemp(path.join(tmpdir(), "forgebadger-runtime-"));
 
     // Act
-    const first = await loadOrCreateRuntimeConfig({ stateDir });
-    const second = await loadOrCreateRuntimeConfig({ stateDir });
+    const first = await loadOrCreateRuntimeConfig({ stateDir, env: {} });
+    const second = await loadOrCreateRuntimeConfig({ stateDir, env: {} });
 
     // Assert
     assert.equal(second.secrets.masterKey, first.secrets.masterKey);
@@ -54,7 +54,7 @@ describe("loadOrCreateRuntimeConfig", () => {
     await chmod(file, 0o644);
 
     // Act
-    await loadOrCreateRuntimeConfig({ stateDir });
+    await loadOrCreateRuntimeConfig({ stateDir, env: {} });
 
     // Assert
     const mode = (await stat(file)).mode & 0o777;
@@ -69,22 +69,23 @@ describe("loadOrCreateRuntimeConfig", () => {
     await symlink(target, path.join(stateDir, "config.json"));
 
     // Act / Assert
-    await assert.rejects(() => loadOrCreateRuntimeConfig({ stateDir }), /regular file/);
+    await assert.rejects(() => loadOrCreateRuntimeConfig({ stateDir, env: {} }), /regular file/);
   });
 
   it("applies non-persistent runtime overrides", async () => {
     // Arrange
     const stateDir = await mkdtemp(path.join(tmpdir(), "forgebadger-runtime-"));
-    await loadOrCreateRuntimeConfig({ stateDir });
+    await loadOrCreateRuntimeConfig({ stateDir, env: {} });
 
     // Act
     const overridden = await loadOrCreateRuntimeConfig({
       stateDir,
       gatewayPort: 49931,
       webPort: 49932,
-      host: "0.0.0.0"
+      host: "0.0.0.0",
+      env: {}
     });
-    const reloaded = await loadOrCreateRuntimeConfig({ stateDir });
+    const reloaded = await loadOrCreateRuntimeConfig({ stateDir, env: {} });
 
     // Assert
     assert.deepEqual(overridden.gateway, { host: "0.0.0.0", port: 49931 });
@@ -150,10 +151,13 @@ describe("loadOrCreateRuntimeConfig", () => {
   it("rejects invalid runtime override ports with a zod error", async () => {
     // Arrange
     const stateDir = await mkdtemp(path.join(tmpdir(), "forgebadger-runtime-"));
-    await loadOrCreateRuntimeConfig({ stateDir });
+    await loadOrCreateRuntimeConfig({ stateDir, env: {} });
 
     // Act / Assert
-    await assert.rejects(() => loadOrCreateRuntimeConfig({ stateDir, gatewayPort: 0 }), ZodError);
+    await assert.rejects(
+      () => loadOrCreateRuntimeConfig({ stateDir, gatewayPort: 0, env: {} }),
+      ZodError
+    );
   });
 
   it("rejects malformed existing config with a zod error", async () => {
@@ -175,7 +179,7 @@ describe("loadOrCreateRuntimeConfig", () => {
     await chmod(file, 0o600);
 
     // Act / Assert
-    await assert.rejects(() => loadOrCreateRuntimeConfig({ stateDir }), ZodError);
+    await assert.rejects(() => loadOrCreateRuntimeConfig({ stateDir, env: {} }), ZodError);
   });
 
   it("reports invalid JSON in an existing config with a readable error", async () => {
@@ -187,7 +191,7 @@ describe("loadOrCreateRuntimeConfig", () => {
 
     // Act / Assert
     await assert.rejects(
-      () => loadOrCreateRuntimeConfig({ stateDir }),
+      () => loadOrCreateRuntimeConfig({ stateDir, env: {} }),
       /Invalid ForgeBadger runtime config JSON/
     );
   });
