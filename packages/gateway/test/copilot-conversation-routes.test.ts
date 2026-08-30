@@ -242,7 +242,9 @@ describe("copilot edit-message route", () => {
     const provider = repo.createProviderProfile({
       name: "Stub",
       providerKey: "stub",
-      baseUrl: "https://stub.example",
+      // Use a public IP literal so the fake fetch remains hermetic in CI while
+      // still exercising the production SSRF validation path.
+      baseUrl: "https://8.8.8.8",
       authType: "api_key",
       apiFormat: "openai",
       supportedAdapters: ["opencode"]
