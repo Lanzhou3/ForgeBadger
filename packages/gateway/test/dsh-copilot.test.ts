@@ -588,7 +588,9 @@ describe("copilot flag-off path (regression)", () => {
     const user = db.prepare("SELECT id FROM users WHERE email = ?").get("flag-off@test.com") as { id: string };
     const repo = new ModelProviderRepository(db, user.id, masterKey);
     const provider = repo.createProviderProfile({
-      name: "Stub", providerKey: "stub", baseUrl: "https://stub.example",
+      // A public IP literal keeps the fake-fetch test independent of runner DNS
+      // while still exercising the production outbound-host validation.
+      name: "Stub", providerKey: "stub", baseUrl: "https://8.8.8.8",
       authType: "api_key", apiFormat: "openai", supportedAdapters: ["opencode"]
     });
     repo.createModelProfile({ providerProfileId: provider.id, name: "Stub model", modelId: "stub-model", capabilities: ["chat"], isDefault: true });
