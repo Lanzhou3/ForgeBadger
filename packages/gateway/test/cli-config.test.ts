@@ -49,7 +49,7 @@ async function useConfigRoot(key: EnvKey, prefix: string): Promise<string> {
 describe("cli-config service", () => {
   describe("kimi", () => {
     it("manages providers, models, and the default model in config.toml", async () => {
-      const root = await useConfigRoot("KIMI_CODE_HOME", "openforge-cli-config-kimi-");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-cli-config-kimi-");
 
       let snapshot = await upsertCliProvider("kimi", "moonshot", {
         protocol: "kimi",
@@ -95,7 +95,7 @@ describe("cli-config service", () => {
     });
 
     it("keeps the existing api key when updating a provider without one", async () => {
-      await useConfigRoot("KIMI_CODE_HOME", "openforge-cli-config-kimi-keep-");
+      await useConfigRoot("KIMI_CODE_HOME", "forgebadger-cli-config-kimi-keep-");
       await upsertCliProvider("kimi", "moonshot", { apiKey: "sk-secret-value" });
 
       const snapshot = await upsertCliProvider("kimi", "moonshot", { baseUrl: "https://api.moonshot.ai/v1" });
@@ -105,7 +105,7 @@ describe("cli-config service", () => {
     });
 
     it("removes a provider together with its models and default model", async () => {
-      await useConfigRoot("KIMI_CODE_HOME", "openforge-cli-config-kimi-remove-");
+      await useConfigRoot("KIMI_CODE_HOME", "forgebadger-cli-config-kimi-remove-");
       await upsertCliProvider("kimi", "moonshot", { protocol: "kimi" });
       await upsertCliModel("kimi", "moonshot/kimi-k2.5", { provider: "moonshot", modelId: "kimi-k2.5" });
       await setCliDefaultModel("kimi", "moonshot/kimi-k2.5");
@@ -123,7 +123,7 @@ describe("cli-config service", () => {
     });
 
     it("rejects model entry operations for non-kimi adapters", async () => {
-      await useConfigRoot("CODEX_HOME", "openforge-cli-config-codex-models-");
+      await useConfigRoot("CODEX_HOME", "forgebadger-cli-config-codex-models-");
       await assert.rejects(
         upsertCliModel("codex", "openai/gpt-5", { provider: "openai", modelId: "gpt-5" }),
         /only supported for the Kimi Code config/
@@ -133,7 +133,7 @@ describe("cli-config service", () => {
 
   describe("codex", () => {
     it("manages model_providers and the active model in config.toml", async () => {
-      const root = await useConfigRoot("CODEX_HOME", "openforge-cli-config-codex-");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-cli-config-codex-");
 
       let snapshot = await upsertCliProvider("codex", "gateway", {
         name: "OpenAI-compatible gateway",
@@ -168,7 +168,7 @@ describe("cli-config service", () => {
 
   describe("opencode", () => {
     it("manages providers and the active model in opencode.json", async () => {
-      const root = await useConfigRoot("OPENCODE_CONFIG_DIR", "openforge-cli-config-opencode-");
+      const root = await useConfigRoot("OPENCODE_CONFIG_DIR", "forgebadger-cli-config-opencode-");
 
       let snapshot = await upsertCliProvider("opencode", "deepseek", {
         name: "DeepSeek",
@@ -195,7 +195,7 @@ describe("cli-config service", () => {
 
   describe("claude", () => {
     it("manages the Anthropic endpoint and model in settings.json", async () => {
-      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "openforge-cli-config-claude-");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-cli-config-claude-");
 
       let snapshot = await upsertCliProvider("claude", "anthropic", {
         baseUrl: "https://api.anthropic.com",
@@ -219,7 +219,7 @@ describe("cli-config service", () => {
     });
 
     it("rejects non-Anthropic provider ids", async () => {
-      await useConfigRoot("CLAUDE_CONFIG_DIR", "openforge-cli-config-claude-single-");
+      await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-cli-config-claude-single-");
       await assert.rejects(
         upsertCliProvider("claude", "openai", { baseUrl: "https://api.openai.com" }),
         /single Anthropic endpoint/
@@ -229,7 +229,7 @@ describe("cli-config service", () => {
 
   describe("raw file editing", () => {
     it("writes whitelisted config files and rejects unsupported paths", async () => {
-      const root = await useConfigRoot("KIMI_CODE_HOME", "openforge-cli-config-raw-");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-cli-config-raw-");
 
       const snapshot = await writeCliConfigFile("kimi", "AGENTS.md", "# Global Kimi\n");
       const agentsFile = snapshot.files.find((file) => file.relativePath === "AGENTS.md");
@@ -278,7 +278,7 @@ describe("cli-config service", () => {
     });
 
     it("reads current field values from codex config.toml", async () => {
-      await useConfigRoot("CODEX_HOME", "openforge-fields-codex-read-");
+      await useConfigRoot("CODEX_HOME", "forgebadger-fields-codex-read-");
       await writeCliConfigFile("codex", "config.toml", [
         'model = "kimi-k2.5"',
         'model_provider = "gateway"',
@@ -298,7 +298,7 @@ describe("cli-config service", () => {
     });
 
     it("reports claude secret fields as a presence flag only", async () => {
-      await useConfigRoot("CLAUDE_CONFIG_DIR", "openforge-fields-claude-secret-");
+      await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-fields-claude-secret-");
       await writeCliConfigFile("claude", "settings.json", JSON.stringify({
         env: {
           ANTHROPIC_AUTH_TOKEN: "sk-ant-secret",
@@ -312,7 +312,7 @@ describe("cli-config service", () => {
     });
 
     it("patches curated codex fields and preserves unknown TOML sections", async () => {
-      const root = await useConfigRoot("CODEX_HOME", "openforge-fields-codex-patch-");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-fields-codex-patch-");
       await writeCliConfigFile("codex", "config.toml", '[unknown_section]\nkeep = "me"\n');
 
       const snapshot = await applyCliConfigFieldPatch("codex", {
@@ -331,7 +331,7 @@ describe("cli-config service", () => {
     });
 
     it("patches nested claude fields including numbers and enums", async () => {
-      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "openforge-fields-claude-patch-");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-fields-claude-patch-");
       await applyCliConfigFieldPatch("claude", {
         apiTimeoutMs: 600000,
         permissionsDefaultMode: "acceptEdits",
@@ -348,7 +348,7 @@ describe("cli-config service", () => {
     });
 
     it("patches kimi default_model", async () => {
-      const root = await useConfigRoot("KIMI_CODE_HOME", "openforge-fields-kimi-patch-");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-fields-kimi-patch-");
       const snapshot = await applyCliConfigFieldPatch("kimi", { defaultModel: "moonshot/kimi-k2.5" });
 
       assert.equal(snapshot.defaultModel, "moonshot/kimi-k2.5");
@@ -356,7 +356,7 @@ describe("cli-config service", () => {
     });
 
     it("writes secret field values but never reads them back", async () => {
-      await useConfigRoot("CLAUDE_CONFIG_DIR", "openforge-fields-claude-write-secret-");
+      await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-fields-claude-write-secret-");
       await applyCliConfigFieldPatch("claude", { anthropicAuthToken: "sk-new-secret" });
 
       const values = await readCliConfigFieldValues("claude");
@@ -364,7 +364,7 @@ describe("cli-config service", () => {
     });
 
     it("deletes field keys with null", async () => {
-      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "openforge-fields-claude-delete-");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-fields-claude-delete-");
       await applyCliConfigFieldPatch("claude", { apiTimeoutMs: 600000 });
       await applyCliConfigFieldPatch("claude", { apiTimeoutMs: null });
 
@@ -375,7 +375,7 @@ describe("cli-config service", () => {
     });
 
     it("rejects invalid patches without touching the file", async () => {
-      const root = await useConfigRoot("CODEX_HOME", "openforge-fields-codex-invalid-");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-fields-codex-invalid-");
       const original = 'model = "kimi-k2.5"\n';
       await writeCliConfigFile("codex", "config.toml", original);
 
@@ -399,7 +399,7 @@ describe("cli-config service", () => {
     });
 
     it("does not rewrite the file for an empty patch", async () => {
-      const root = await useConfigRoot("CODEX_HOME", "openforge-fields-codex-empty-");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-fields-codex-empty-");
       const original = [
         "# hand-written comment that must survive",
         'model = "kimi-k2.5"',
@@ -415,7 +415,7 @@ describe("cli-config service", () => {
 
   describe("error handling", () => {
     it("rejects invalid provider ids", async () => {
-      await useConfigRoot("KIMI_CODE_HOME", "openforge-cli-config-ids-");
+      await useConfigRoot("KIMI_CODE_HOME", "forgebadger-cli-config-ids-");
       await assert.rejects(
         upsertCliProvider("kimi", "bad id!", {}),
         /Invalid provider id/
@@ -423,7 +423,7 @@ describe("cli-config service", () => {
     });
 
     it("surfaces invalid TOML instead of silently dropping it", async () => {
-      const root = await useConfigRoot("KIMI_CODE_HOME", "openforge-cli-config-bad-toml-");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-cli-config-bad-toml-");
       await assert.rejects(
         writeCliConfigFile("kimi", "config.toml", "[providers\nbroken"),
         /not valid TOML/

@@ -68,7 +68,7 @@ export function createAuthRouter(
       const isFirstUser = userRepository.count() === 0;
       // The first user bootstraps the instance (and becomes admin) even when
       // registration is otherwise closed - otherwise a fresh install with
-      // OPENFORGE_REGISTRATION=off|invite would be permanently locked out.
+      // FORGEBADGER_REGISTRATION=off|invite would be permanently locked out.
       if (!isFirstUser && registrationMode === "off") {
         res.status(403).json({ code: 1, message: "Registration is disabled" });
         return;
@@ -295,6 +295,7 @@ async function respondWithCredentials(
 
 function clearSessionCookie(res: Response): void {
   res.clearCookie(SESSION_COOKIE_NAME, { httpOnly: true, sameSite: "strict", path: "/" });
+  res.clearCookie("openforge_session", { httpOnly: true, sameSite: "strict", path: "/" });
 }
 
 function toPublicUser(user: User) {

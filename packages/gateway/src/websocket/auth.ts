@@ -4,7 +4,7 @@ import { extractBearerToken } from "../auth/middleware.js";
 
 export function extractWsAuthToken(
   headers: IncomingHttpHeaders,
-  expectedProtocol: string
+  expectedProtocol: string | readonly string[]
 ): string | undefined {
   const fromHeader = extractBearerToken(headers.authorization);
   if (fromHeader) {
@@ -21,7 +21,7 @@ export function extractWsAuthToken(
     .flatMap((protocol: string) => protocol.split(",").map((item: string) => item.trim()))
     .filter(Boolean);
 
-  if (tokens[0] !== expectedProtocol) {
+  if (!matchesExpectedProtocol(tokens[0], expectedProtocol)) {
     return undefined;
   }
 
@@ -34,7 +34,7 @@ export function extractWsAuthToken(
 
 export function extractWsAttachToken(
   headers: IncomingHttpHeaders,
-  expectedProtocol: string
+  expectedProtocol: string | readonly string[]
 ): string | undefined {
   const protocolHeader = headers["sec-websocket-protocol"];
   if (!protocolHeader) {
@@ -46,9 +46,17 @@ export function extractWsAttachToken(
     .flatMap((protocol: string) => protocol.split(",").map((item: string) => item.trim()))
     .filter(Boolean);
 
-  if (tokens[0] !== expectedProtocol || tokens.length < 3) {
+  if (!matchesExpectedProtocol(tokens[0], expectedProtocol) || tokens.length < 3) {
     return undefined;
   }
 
   return tokens[2];
+}
+
+function matchesExpectedProtocol(
+  actual: string | undefined,
+  expected: string | readonly string[]
+): boolean {
+  if (!actual) return false;
+  return typeof expected === "string" ? actual === expected : expected.includes(actual);
 }

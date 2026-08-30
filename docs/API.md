@@ -1,4 +1,4 @@
-# OpenForge API Contract
+# ForgeBadger API Contract
 
 > Status: MVP-10 local-first release-candidate slice | Date: 2026-05-11
 
@@ -99,7 +99,7 @@ Diagnostics export is authenticated, tenant scoped, and local-only. It returns a
 redacted report with app version, Node/platform metadata, tenant resource
 counts, dashboard health, adapter definitions/runtime modes, Copilot capability
 metadata, Provider SSOT readiness summaries, Copilot memory entry/note counts,
-safe Feishu integration capability state, and selected OpenForge environment
+safe Feishu integration capability state, and selected ForgeBadger environment
 values. It never uploads telemetry and redacts key, token, password,
 credential, authorization, `sk-*`, and `Bearer ...` values.
 Provider SSOT diagnostics include only bounded counts and status metadata:
@@ -110,7 +110,7 @@ not included.
 
 ### Project Manager Ledger
 
-The Project Manager Ledger is Gateway-owned OpenForge control-plane state. It
+The Project Manager Ledger is Gateway-owned ForgeBadger control-plane state. It
 does not make Feishu or terminal sessions an authority for project-manager
 state; Feishu may be referenced only as bounded collaboration metadata, and
 terminal sessions may be referenced only by safe identifiers or evidence
@@ -180,7 +180,7 @@ Development stages and work-item dependencies are durable state introduced by
   mutations write `stage_created` / `stage_updated` / `stage_deleted` /
   `dependency_added` / `dependency_removed` ledger events.
 
-All Project Manager Ledger REST endpoints use the canonical OpenForge response
+All Project Manager Ledger REST endpoints use the canonical ForgeBadger response
 envelope. Success responses return:
 
 ```json
@@ -269,10 +269,10 @@ obvious secret-like values, placeholder text, and raw terminal dump patterns.
 
 Copilot can explain project-manager state through these read-only tools:
 
-- `openforge.get_project_goal`
-- `openforge.list_project_work_items`
-- `openforge.get_project_work_item`
-- `openforge.get_project_development_ledger`
+- `forgebadger.get_project_goal`
+- `forgebadger.list_project_work_items`
+- `forgebadger.get_project_work_item`
+- `forgebadger.get_project_development_ledger`
 
 These tools are tenant-scoped, project-scoped, redacted, and read-only. They
 return concise current state plus bounded evidence references only. They must
@@ -281,7 +281,7 @@ verification material, provider credentials, attach tokens, or cross-tenant
 mapping details.
 
 Phase 12 adds Project Manager traceability on top of the local-first AI CLI
-control plane. It does not broaden OpenForge into a generic project-management
+control plane. It does not broaden ForgeBadger into a generic project-management
 suite. Copilot-origin Project Manager writes are proposals only: each proposal
 must become exactly one pending action, must use the canonical stored
 pending-action payload at approval time, and must execute through the
@@ -493,18 +493,18 @@ card or split that final fallback into multiple messages.
 These endpoints do not execute Feishu writes, accept model-generated command
 strings, send terminal input, approve actions from Feishu text, or start
 unattended development loops. Outbound Feishu writes are only available through
-Copilot prepare tools plus explicit OpenForge pending-action approval.
+Copilot prepare tools plus explicit ForgeBadger pending-action approval.
 
 `POST /api/v1/integrations/feishu/bot-websocket/events` is the authenticated
 Gateway-side receive path for a local Feishu bot long-connection worker. It
 accepts the SDK-style `im.message.receive_v1` event object, normalizes only text
 messages, applies the tenant Feishu policy, and returns a bounded `replyPlan`
-for commands such as `/openforge status`, `/openforge sessions`, and
-`/openforge task <id>`. The reply plan uses `receiveIdType=chat_id` and
+for commands such as `/forgebadger status`, `/forgebadger sessions`, and
+`/forgebadger task <id>`. The reply plan uses `receiveIdType=chat_id` and
 contains only safe status/session/task summaries; it does not include attach
 tokens, tmux names, raw work-item details, raw event bodies, or terminal
-scrollback. Free-form terminal control such as `/openforge terminal`,
-`/openforge input`, shell commands, or approval text is rejected and audited.
+scrollback. Free-form terminal control such as `/forgebadger terminal`,
+`/forgebadger input`, shell commands, or approval text is rejected and audited.
 
 `POST /api/v1/integrations/feishu/bot-websocket/connection-events` records
 sanitized local long-connection lifecycle evidence such as
@@ -539,7 +539,7 @@ the audit is not itself an external event.
 review artifact. The generated report preserves `FEISHU-BOT-WS=Caveat` until a
 maintainer links the real external evidence and updates the registry.
 
-The inbound endpoint is an authenticated OpenForge test adapter, not a public
+The inbound endpoint is an authenticated ForgeBadger test adapter, not a public
 Feishu webhook. The public callback contract below uses a separate route and
 auth boundary. Event listener consumption, approval links, direct terminal
 input, batch authorization, and unattended loops remain separate non-goals for
@@ -547,7 +547,7 @@ this slice.
 
 `POST /api/v1/integrations/feishu/webhook/:publicId` is the public Feishu
 event callback route. It is separate from the authenticated `/inbound` test
-adapter and does not use the OpenForge REST envelope because Feishu expects
+adapter and does not use the ForgeBadger REST envelope because Feishu expects
 protocol-compatible webhook responses. The `publicId` resolves the tenant
 integration before verification, but it is not a secret or an auth factor.
 Public webhook handling is disabled by default and remains inert until a tenant
@@ -581,7 +581,7 @@ repository state, not audit-log search and not in-memory maps. Replay keys
 include tenant/integration identity plus Feishu event id or message id; the
 same nonce/signature replay is also rejected within the timestamp window. Rate
 limits apply per tenant/integration, per chat, and, once resolved, per mapped
-OpenForge user. SQLite-backed replay and rate storage are supported only for
+ForgeBadger user. SQLite-backed replay and rate storage are supported only for
 the local single-Gateway deployment. Multi-instance public webhook deployment
 requires a shared replay and shared rate-limit store before webhook enablement;
 without that shared store the public webhook route must fail closed or remain
@@ -638,7 +638,7 @@ Implemented public webhook response examples:
 
 Public webhook audit rows use bounded metadata only. Accepted rows include the
 public id or integration id, Feishu event id or message id, chat id, mapped
-OpenForge user id, optional project id, run id, conversation id, pending action
+ForgeBadger user id, optional project id, run id, conversation id, pending action
 count, and redacted text summary. Policy rejection rows include a reason code
 and redacted metadata sufficient for diagnostics without exposing request
 secrets or private message content.
@@ -672,7 +672,7 @@ Successful config response:
       "emergencyDisabled": false,
       "identityMode": "unknown",
       "allowedChatIds": [],
-      "commandPrefix": "/openforge",
+      "commandPrefix": "/forgebadger",
       "publicWebhookId": null,
       "publicWebhookEnabled": false,
       "webhookConfiguredAt": null
@@ -690,7 +690,7 @@ Successful config response:
   "emergencyDisabled": false,
   "identityMode": "bot",
   "allowedChatIds": ["oc_abc"],
-  "commandPrefix": "/openforge"
+  "commandPrefix": "/forgebadger"
 }
 ```
 
@@ -708,7 +708,7 @@ Successful user mapping response:
       {
         "id": "mapping-id",
         "feishuUserId": "ou_abc",
-        "openforgeUserId": "user-id",
+        "forgebadgerUserId": "user-id",
         "displayName": "Alice",
         "createdAt": "2026-05-17T00:00:00.000Z",
         "updatedAt": "2026-05-17T00:00:00.000Z"
@@ -726,7 +726,7 @@ Successful user mapping response:
   "mappings": [
     {
       "feishuUserId": "ou_abc",
-      "openforgeUserId": "user-id",
+      "forgebadgerUserId": "user-id",
       "displayName": "Alice"
     }
   ]
@@ -737,7 +737,7 @@ Mappings are limited to 100 entries and are automatically scoped by
 `user_id`; replacement writes a tenant-scoped audit log with mapping count
 only.
 
-`POST /inbound` accepts an OpenForge JWT, then validates a strict inbound
+`POST /inbound` accepts a ForgeBadger JWT, then validates a strict inbound
 command payload:
 
 ```json
@@ -746,14 +746,14 @@ command payload:
   "feishuUserId": "ou_abc",
   "text": "status",
   "messageId": "om_optional",
-  "projectId": "optional-openforge-project-id"
+  "projectId": "optional-forgebadger-project-id"
 }
 ```
 
 The route fails closed before Copilot execution when the Feishu integration is
 disabled, emergency-disabled, `identityMode` is still `unknown`, no explicit
 `allowedChatIds` allowlist exists, the chat is outside that allowlist, the
-Feishu user is not mapped to the authenticated OpenForge user, the optional
+Feishu user is not mapped to the authenticated ForgeBadger user, the optional
 `projectId` is not visible to that user, an accepted `messageId` is replayed,
 or the per-chat inbound rate limit is exceeded. Accepted commands create a
 Copilot conversation and run with `source: "feishu"`; optional project context
@@ -761,7 +761,7 @@ is used only after tenant-scoped ownership validation. Inbound text is redacted
 before run persistence, conversation message persistence, provider request
 context, audit details, and API response metadata. Free-form approval text such
 as `approve`, `批准`, or `/approve <id>` never approves pending actions; pending
-actions remain controlled by the OpenForge approval routes.
+actions remain controlled by the ForgeBadger approval routes.
 
 ### Copilot Agent API
 
@@ -794,7 +794,7 @@ tools pause the run as `awaiting_approval`; the pending-action decide route
 
 #### Copilot dsh runtime config (guarded)
 
-Mounted only when `OPENFORGE_DSH_COPILOT_ENABLED=1`; otherwise both endpoints
+Mounted only when `FORGEBADGER_DSH_COPILOT_ENABLED=1`; otherwise both endpoints
 return 404 (treat 404 as "feature off"). JWT authenticated and user scoped.
 
 - `GET /api/v1/copilot/dsh-config` — returns the acting user's dsh runtime
@@ -869,7 +869,7 @@ assistant response events back into the conversation. Conversation and message
 deletes are soft deletes scoped to the authenticated user.
 Prompt text is redacted before run persistence, active recall, and provider
 model requests so secret-looking values such as API keys, bearer tokens, and
-OpenForge attach tokens, and PEM private-key blocks are not stored or sent
+ForgeBadger attach tokens, and PEM private-key blocks are not stored or sent
 onward in plaintext.
 If active memory recall fails, Copilot records a non-blocking
 `memory_recall_skipped` timeline event and continues the model request without
@@ -948,27 +948,27 @@ in the Web console even when they are older than the normal history page size.
 
 Read tools are allowlisted and validated server-side. Current read tools are:
 
-- `openforge.get_dashboard_summary`
-- `openforge.list_projects`
-- `openforge.get_project_detail`
-- `openforge.list_agents`
-- `openforge.list_skills`
-- `openforge.get_skill_detail`
-- `openforge.list_templates`
-- `openforge.get_notifications_summary`
-- `openforge.get_usage_summary`
-- `openforge.list_sessions`
-- `openforge.get_session_detail`
-- `openforge.get_session_terminal_snapshot`
-- `openforge.get_adapter_discovery`
-- `openforge.get_model_provider_summary`
-- `openforge.get_model_provider_catalog`
-- `openforge.get_recent_activity`
-- `openforge.get_diagnostics_summary`
-- `openforge.memory_search`
-- `openforge.memory_get`
+- `forgebadger.get_dashboard_summary`
+- `forgebadger.list_projects`
+- `forgebadger.get_project_detail`
+- `forgebadger.list_agents`
+- `forgebadger.list_skills`
+- `forgebadger.get_skill_detail`
+- `forgebadger.list_templates`
+- `forgebadger.get_notifications_summary`
+- `forgebadger.get_usage_summary`
+- `forgebadger.list_sessions`
+- `forgebadger.get_session_detail`
+- `forgebadger.get_session_terminal_snapshot`
+- `forgebadger.get_adapter_discovery`
+- `forgebadger.get_model_provider_summary`
+- `forgebadger.get_model_provider_catalog`
+- `forgebadger.get_recent_activity`
+- `forgebadger.get_diagnostics_summary`
+- `forgebadger.memory_search`
+- `forgebadger.memory_get`
 
-`openforge.get_diagnostics_summary` returns the bounded diagnostics subset
+`forgebadger.get_diagnostics_summary` returns the bounded diagnostics subset
 needed for in-chat recovery: generated time, runtime metadata, tenant resource
 counts, dashboard health, adapter discovery, Provider SSOT readiness summaries,
 and Copilot capability/provider-readiness metadata. Copilot provider readiness
@@ -986,39 +986,39 @@ timeline entries.
 
 Prepare tools create pending actions and do not directly mutate runtime state:
 
-- `openforge.propose_session_create`
-- `openforge.propose_project_create`
-- `openforge.propose_project_import`
-- `openforge.propose_project_delete`
-- `openforge.propose_project_config_sync`
-- `openforge.propose_project_manager_create_work_item`
-- `openforge.propose_project_manager_update_work_item_status`
-- `openforge.propose_project_manager_attach_evidence`
-- `openforge.propose_session_input`
-- `openforge.propose_session_start`
-- `openforge.propose_session_stop`
-- `openforge.propose_session_delete`
-- `openforge.propose_agent_create`
-- `openforge.propose_agent_update`
-- `openforge.propose_agent_delete`
-- `openforge.propose_template_create`
-- `openforge.propose_template_update`
-- `openforge.propose_template_delete`
-- `openforge.propose_skill_toggle`
-- `openforge.propose_project_skill_toggle`
-- `openforge.propose_copilot_model_selection`
-- `openforge.propose_model_provider_sync`
-- `openforge.propose_model_provider_apply`
-- `openforge.propose_diagnostics_export`
-- `openforge.propose_adapter_refresh`
-- `openforge.propose_troubleshooting_steps`
-- `openforge.propose_feishu_message_send`
-- `openforge.propose_feishu_doc_create`
-- `openforge.propose_feishu_doc_update`
-- `openforge.propose_feishu_task_create`
-- `openforge.propose_feishu_task_update`
-- `openforge.propose_memory_write`
-- `openforge.propose_memory_delete`
+- `forgebadger.propose_session_create`
+- `forgebadger.propose_project_create`
+- `forgebadger.propose_project_import`
+- `forgebadger.propose_project_delete`
+- `forgebadger.propose_project_config_sync`
+- `forgebadger.propose_project_manager_create_work_item`
+- `forgebadger.propose_project_manager_update_work_item_status`
+- `forgebadger.propose_project_manager_attach_evidence`
+- `forgebadger.propose_session_input`
+- `forgebadger.propose_session_start`
+- `forgebadger.propose_session_stop`
+- `forgebadger.propose_session_delete`
+- `forgebadger.propose_agent_create`
+- `forgebadger.propose_agent_update`
+- `forgebadger.propose_agent_delete`
+- `forgebadger.propose_template_create`
+- `forgebadger.propose_template_update`
+- `forgebadger.propose_template_delete`
+- `forgebadger.propose_skill_toggle`
+- `forgebadger.propose_project_skill_toggle`
+- `forgebadger.propose_copilot_model_selection`
+- `forgebadger.propose_model_provider_sync`
+- `forgebadger.propose_model_provider_apply`
+- `forgebadger.propose_diagnostics_export`
+- `forgebadger.propose_adapter_refresh`
+- `forgebadger.propose_troubleshooting_steps`
+- `forgebadger.propose_feishu_message_send`
+- `forgebadger.propose_feishu_doc_create`
+- `forgebadger.propose_feishu_doc_update`
+- `forgebadger.propose_feishu_task_create`
+- `forgebadger.propose_feishu_task_update`
+- `forgebadger.propose_memory_write`
+- `forgebadger.propose_memory_delete`
 
 The three Project Manager prepare tools map one-to-one to the Phase 12
 `create_work_item`, `update_work_item_status`, and `attach_evidence` semantics.
@@ -1080,7 +1080,7 @@ transcripts, and does not create embeddings in this release.
 Explicit non-goals for this Copilot release:
 
 - no raw shell or host exec tool;
-- no arbitrary filesystem write tool outside validated OpenForge config/project workflows;
+- no arbitrary filesystem write tool outside validated ForgeBadger config/project workflows;
 - no Codex app-server prompt or `/turn` UI (the Codex app-server control-plane
   prototype was removed on 2026-08-14; Codex runs as tmux-backed terminal
   sessions only);
@@ -1294,7 +1294,7 @@ CI usage example:
 
 ```bash
 curl -fsS \
-  -H "Authorization: Bearer $OPENFORGE_TOKEN" \
+  -H "Authorization: Bearer $FORGEBADGER_TOKEN" \
   "http://127.0.0.1:48731/api/v1/projects/$PROJECT_ID/config/compliance" \
   | jq -e '.data.compliance.status == "compliant"'
 ```
@@ -1390,7 +1390,7 @@ provider cascades to its model aliases and clears a dangling `default_model`.
 
 ### Codex Terminal Notes
 
-For Claude Code sessions, both create and restart paths merge OpenForge command
+For Claude Code sessions, both create and restart paths merge ForgeBadger command
 hooks into `.claude/settings.local.json` before tmux launch.
 
 Codex terminal sessions are also subscription-managed. Session create/start and
@@ -1678,16 +1678,12 @@ console uses these records only to prefill the create form; it does not create a
 Skill until the user saves.
 
 `GET /api/v1/skills` also performs a best-effort local discovery pass before
-returning the tenant Skill list. Discovery scans official project-level Skill
-directories under the current working directory and each ancestor directory:
-`.claude/skills`, `.opencode/skills`, and `.agents/skills`. It also scans
-user-level Claude Code Skills from `CLAUDE_CONFIG_DIR/skills` or
-`~/.claude/skills`, OpenCode Skills from `OPENCODE_CONFIG_DIR/skills` or
-`$XDG_CONFIG_HOME/opencode/skills` or `~/.config/opencode/skills`, and
-agent-compatible Skills from `AGENTS_HOME/skills` or `~/.agents/skills`.
-OpenForge does not scan command directories, plugin caches, plugin marketplace
-checkouts, or `CODEX_HOME` by default; use `OPENFORGE_SKILL_DIRS` with a
-path-delimited list when those roots should be imported explicitly. Discovered
+returning the tenant Skill list. Discovery scans user-level Claude Code Skills
+from `${CLAUDE_CONFIG_DIR:-~/.claude}/skills` and agent-compatible Skills from
+`${AGENTS_HOME:-~/.agents}/skills`. ForgeBadger does not scan project ancestors,
+command directories, OpenCode directories, Codex directories, plugin caches, or
+plugin marketplace checkouts by default; use `FORGEBADGER_SKILL_DIRS` with a
+platform path-delimited list when additional roots should be imported explicitly. Discovered
 `SKILL.md` files are synced as `source: "local"`. Existing local Skills with
 the same name have description, version, and content refreshed while preserving
 enablement state; non-local Skills with the same name are left untouched. The
@@ -1733,7 +1729,7 @@ Query parameters:
 Audit logs are tenant scoped. Current audited actions include
 `template.restore`, `project.config_sync`, `copilot.pending_action.approve`, and
 `copilot.pending_action.reject`.
-Template version audit rows are sanitized on read: OpenForge returns template
+Template version audit rows are sanitized on read: ForgeBadger returns template
 metadata, `fileCount`, and file paths, but not raw template file contents.
 Copilot pending-action audit rows store redacted action input, the acting user
 id, and bounded result details under `resourceType=copilot_run`.
@@ -1756,7 +1752,7 @@ current user's notification list. AI CLI notification payloads include normalize
 
 The built-in Claude Code template writes `.claude/settings.json` hooks for
 `PermissionRequest`, `PermissionDenied`, and `Notification(permission_prompt)`.
-Session create and restart merge OpenForge hooks into
+Session create and restart merge ForgeBadger hooks into
 `.claude/settings.local.json` before starting Claude Code, so imported projects
 can receive permission, `Stop`, and `SessionEnd` notifications even before a
 manual template sync. OpenCode project plugins subscribe to `permission.asked`,
@@ -1766,9 +1762,9 @@ trust approval through `/hooks`. Kimi project hooks subscribe to
 `PermissionRequest`, `Stop`, `Interrupt`, `StopFailure`, `SessionEnd`, and
 `Notification(task.completed)`.
 Claude hooks use `http` handlers and send the raw Claude hook payload as JSON
-to OpenForge; Codex and Kimi use managed command scripts, while OpenCode uses a
-managed plugin. Headers interpolate `OPENFORGE_SESSION_ID` and
-`OPENFORGE_ATTACH_TOKEN` from the tmux launch environment. The endpoint also
+to ForgeBadger; Codex and Kimi use managed command scripts, while OpenCode uses a
+managed plugin. Headers interpolate `FORGEBADGER_SESSION_ID` and
+`FORGEBADGER_ATTACH_TOKEN` from the tmux launch environment. The endpoint also
 accepts the legacy wrapper payload used by older command-hook templates.
 
 ### Activities
@@ -1804,9 +1800,9 @@ optional config version. Snapshot metadata is sanitized and must not contain
 terminal scrollback; terminal pane history remains in tmux.
 
 Snapshot restore is explicit and tenant-scoped. When the recorded tmux session
-still exists, OpenForge reattaches the database session to that tmux session and
+still exists, ForgeBadger reattaches the database session to that tmux session and
 returns `mode: "attach_tmux"` without rotating the existing session attach
-token. When tmux no longer has the recorded session, OpenForge recreates a new
+token. When tmux no longer has the recorded session, ForgeBadger recreates a new
 tmux-backed session from the snapshot's project/model/Agent metadata plus any credential and API key
 metadata still available on the original session record. If the original session record is unavailable, restore falls back to the
 snapshot metadata and `host_environment` credentials. Restore returns
@@ -1820,7 +1816,7 @@ snapshot metadata and `host_environment` credentials. Restore returns
 
 Usage summary aggregates tenant-owned session duration by adapter, project, and
 model. Optional per-model rates are user-configured hourly rates. Cost fields
-are labeled `estimated` and are duration-based only; OpenForge does not claim
+are labeled `estimated` and are duration-based only; ForgeBadger does not claim
 provider token billing accuracy from this endpoint.
 
 ### Session Hooks
@@ -1828,13 +1824,13 @@ provider token billing accuracy from this endpoint.
 - `POST /api/v1/session-hooks/claude-notification`
 - `POST /api/v1/session-hooks/claude-notification/:sessionId`
 
-This unauthenticated endpoint is for OpenForge-generated AI CLI hooks: Claude
+This unauthenticated endpoint is for ForgeBadger-generated AI CLI hooks: Claude
 Code HTTP hooks, the OpenCode notification plugin, Codex hooks, and Kimi hooks.
 All integrations are materialized by the Gateway on session create/restart. It requires
-`X-OpenForge-Session-Token` to match the session attach token and accepts
+`X-ForgeBadger-Session-Token` to match the session attach token and accepts
 either legacy `{ sessionId, event }` payloads or raw Claude Code hook JSON sent
 by Claude Code HTTP hooks / the OpenCode plugin. The session id may be supplied
-in the path or `X-OpenForge-Session-Id`. The payload may carry an optional
+in the path or `X-ForgeBadger-Session-Id`. The payload may carry an optional
 `adapter` field (`"claude"` by default; other integrations send `"opencode"`,
 `"codex"`, or `"kimi"`). Accepted hook payloads are normalized to
 `permission_prompt`, `permission_denied`, `task_completed`, `task_interrupted`,
@@ -1930,18 +1926,18 @@ MVP-0 must enforce:
 
 Before frontend implementation begins, `.claude/rules/api.md`, `CLAUDE.md`, `docs/TECH-ARCHITECTURE.md`, and this file must agree on the response envelope.
 
-## 7. Internal API — Copilot Bridge (dsh openforge-bridge plugin)
+## 7. Internal API — Copilot Bridge (dsh forgebadger-bridge plugin)
 
-Guarded internal surface consumed by the deepseek-harness `openforge-bridge`
+Guarded internal surface consumed by the deepseek-harness `forgebadger-bridge`
 plugin over loopback HTTP (see `.planning/dsh-integration/PLAN.md`). The whole
-route group is mounted only when `OPENFORGE_COPILOT_BRIDGE_TOKEN` is set
+route group is mounted only when `FORGEBADGER_COPILOT_BRIDGE_TOKEN` is set
 (optional env var, min 32 chars); without it every path below returns 404.
 
 Authentication and tenancy:
 
-- `Authorization: Bearer <OPENFORGE_COPILOT_BRIDGE_TOKEN>` — missing token
+- `Authorization: Bearer <FORGEBADGER_COPILOT_BRIDGE_TOKEN>` — missing token
   returns 401 (`BRIDGE_TOKEN_REQUIRED`), wrong token 403 (`BRIDGE_TOKEN_INVALID`).
-- `X-OpenForge-User-Id: <userId>` — required on every request (400
+- `X-ForgeBadger-User-Id: <userId>` — required on every request (400
   `BRIDGE_USER_ID_REQUIRED` otherwise). The header is trusted only after the
   service token passes; all data access goes through per-user repositories and
   the Portfolio facade, so `user_id` isolation is identical to the user API.

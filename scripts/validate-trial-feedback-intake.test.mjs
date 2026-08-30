@@ -128,12 +128,12 @@ describe("validateTrialFeedbackIntake", () => {
     const githubIssueForm = buildIssueFormFixture();
     const markdownTemplate = buildMarkdownTemplateFixture();
     const trialRunbook = [
-      "# OpenForge First-User Trial Runbook",
+      "# ForgeBadger First-User Trial Runbook",
       "## Diagnostics",
       "Export diagnostics from the local Gateway after logging in:",
       "curl -H \"authorization: Bearer <token>\" http://127.0.0.1:48731/api/v1/diagnostics/export",
-      "Open browser developer tools for the OpenForge Web console.",
-      "Read Local Storage and use the `openforge.token` value."
+      "Open browser developer tools for the ForgeBadger Web console.",
+      "Read Local Storage and use the `forgebadger.token` value."
     ].join("\n");
 
     const result = validateTrialFeedbackIntake({
@@ -144,7 +144,7 @@ describe("validateTrialFeedbackIntake", () => {
 
     assert.equal(result.ok, false);
     assert.match(result.errors.join("\n"), /first-user runbook.*browser developer tools/);
-    assert.match(result.errors.join("\n"), /first-user runbook.*openforge\.token/);
+    assert.match(result.errors.join("\n"), /first-user runbook.*forgebadger\.token/);
   });
 
   it("rejects checklist drift that removes gate-routing commands or asks for browser tokens", () => {
@@ -152,9 +152,9 @@ describe("validateTrialFeedbackIntake", () => {
     const markdownTemplate = buildMarkdownTemplateFixture();
     const trialRunbook = buildTrialRunbookFixture();
     const trialChecklist = [
-      "# OpenForge Trial Checklist",
+      "# ForgeBadger Trial Checklist",
       "Use this checklist as the first-user trial entry point.",
-      "Read browser developer tools and copy the `openforge.token` value into the handoff.",
+      "Read browser developer tools and copy the `forgebadger.token` value into the handoff.",
       "Feedback capture is complete after a maintainer reads the packet."
     ].join("\n");
 
@@ -176,7 +176,7 @@ describe("validateTrialFeedbackIntake", () => {
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm evidence:feishu-bot-live-audit/);
     assert.match(result.errors.join("\n"), /trial checklist.*pnpm evidence:feishu-bot-live-report/);
     assert.match(result.errors.join("\n"), /trial checklist.*browser developer tools/);
-    assert.match(result.errors.join("\n"), /trial checklist.*openforge\.token/);
+    assert.match(result.errors.join("\n"), /trial checklist.*forgebadger\.token/);
   });
 
   it("rejects first-user entrypoint docs that omit feedback audit routes", () => {
@@ -187,7 +187,7 @@ describe("validateTrialFeedbackIntake", () => {
       trialChecklist: buildTrialChecklistFixture(),
       openSourceReadiness: [
         "# Open Source Readiness",
-        "Use `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml` or `docs/TRIAL-FEEDBACK.md`."
+        "Use `.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml` or `docs/TRIAL-FEEDBACK.md`."
       ].join("\n"),
       supportDiagnostics: [
         "# Support Diagnostics",
@@ -232,7 +232,7 @@ describe("validateTrialFeedbackIntake", () => {
       openSourceReadiness: buildFirstUserEntrypointFixture(),
       supportDiagnostics: buildFirstUserEntrypointFixture(),
       rootReadme: [
-        "# OpenForge",
+        "# ForgeBadger",
         "## First User Trial",
         "- [Trial runbook](docs/TRIAL-RUNBOOK.md)",
         "- [Trial checklist](docs/TRIAL-CHECKLIST.md)",
@@ -244,14 +244,14 @@ describe("validateTrialFeedbackIntake", () => {
     assert.equal(result.ok, false);
     assert.match(
       result.errors.join("\n"),
-      /root README.*\.github\/ISSUE_TEMPLATE\/openforge-trial-feedback\.yml/
+      /root README.*\.github\/ISSUE_TEMPLATE\/forgebadger-trial-feedback\.yml/
     );
   });
 
   it("rejects intake materials that omit Portfolio evidence prompts", () => {
     const result = validateTrialFeedbackIntake({
-      githubIssueForm: buildIssueFormFixture().replace("Portfolio route availability:", "Portfolio route:"),
-      markdownTemplate: buildMarkdownTemplateFixture().replace(
+      githubIssueForm: buildIssueFormFixture().replaceAll("Portfolio route availability:", "Portfolio route:"),
+      markdownTemplate: buildMarkdownTemplateFixture().replaceAll(
         "Portfolio route availability:",
         "Portfolio route:"
       ),
@@ -269,7 +269,7 @@ describe("validateTrialFeedbackIntake", () => {
 
 function buildIssueFormFixture() {
   const body = [
-    "name: OpenForge first-user trial feedback",
+    "name: ForgeBadger first-user trial feedback",
     "labels:",
     "  - trial-feedback",
     "body:"
@@ -324,7 +324,7 @@ function buildMarkdownTemplateFixture() {
 
 function buildTrialRunbookFixture() {
   return [
-    "# OpenForge First-User Trial Runbook",
+    "# ForgeBadger First-User Trial Runbook",
     "Open Settings.",
     "Click **Export diagnostics JSON**.",
     "Do not ask first users to retrieve browser auth tokens from developer tools.",
@@ -334,13 +334,13 @@ function buildTrialRunbookFixture() {
 
 function buildTrialChecklistFixture() {
   return [
-    "# OpenForge Trial Checklist",
+    "# ForgeBadger Trial Checklist",
     "Use this checklist as the first-user trial entry point.",
     "docs/EXTERNAL-EVIDENCE-GATES.md",
     "`pnpm trial:intake-validate`",
     "`pnpm trial:issue-routes-validate`",
     "`pnpm trial:readiness-validate`",
-    "`pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md`",
+    "`pnpm trial:feedback-audit -- /tmp/forgebadger-trial-feedback.md`",
     "`pnpm trial:feedback-issue-audit -- --issue=<number>`",
     "`pnpm trial:feedback-issues-audit`",
     "`pnpm evidence:gates-validate`",
@@ -359,7 +359,7 @@ function buildTrialChecklistFixture() {
 function buildFirstUserEntrypointFixture() {
   return [
     "docs/TRIAL-FEEDBACK.md",
-    ".github/ISSUE_TEMPLATE/openforge-trial-feedback.yml",
+    ".github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml",
     "pnpm trial:feedback-audit",
     "pnpm trial:feedback-issue-audit",
     "pnpm trial:feedback-issues-audit",

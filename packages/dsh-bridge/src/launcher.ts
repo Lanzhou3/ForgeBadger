@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * OpenForge dsh runtime launcher: boots one DeepSeek Harness runtime process
+ * ForgeBadger dsh runtime launcher: boots one DeepSeek Harness runtime process
  * composed from the packaged cordis.yml template (or `DSH_BRIDGE_CONFIG`),
- * carrying the OpenForge bridge plugin and the resume-aware JSON-RPC server.
+ * carrying the ForgeBadger bridge plugin and the resume-aware JSON-RPC server.
  *
  * Process contract (for the M2 Gateway process manager):
  * - stdio speaks the dsh SDK JSON-RPC protocol (stdout is reserved for frames);
@@ -20,7 +20,7 @@ import { boot, installFailLoud, resolveConfigPath } from "@deepseek-ai/dsh-app-b
 
 import { loadBridgeConfig } from "./bridge-config.js";
 
-const NAME = "openforge-dsh-bridge";
+const NAME = "forgebadger-dsh-bridge";
 
 /** Default composition template shipped in this package. */
 function defaultConfigPath(): string {
@@ -39,8 +39,8 @@ async function main(): Promise<void> {
   // cordis.yml — a ternary in a YAML plain scalar breaks the config parse.)
   if ((process.env.DSH_SYSTEM_PROMPT ?? "") === "") {
     process.env.DSH_SYSTEM_PROMPT = bridgeConfig.enableOperate
-      ? "You are the OpenForge copilot. Use the OpenForge platform tools (list_work_items, advance_work_item, list_sessions, dispatch_task_to_session) to answer project and session questions."
-      : "You are the OpenForge copilot. Use the OpenForge platform tools (list_work_items, list_sessions) to answer project and session questions. You cannot modify platform state in this deployment: if the user asks you to change or dispatch something, explain that this action is not available here and answer with the information you can read.";
+      ? "You are the ForgeBadger copilot. Use the ForgeBadger platform tools (list_work_items, advance_work_item, list_sessions, dispatch_task_to_session) to answer project and session questions."
+      : "You are the ForgeBadger copilot. Use the ForgeBadger platform tools (list_work_items, list_sessions) to answer project and session questions. You cannot modify platform state in this deployment: if the user asks you to change or dispatch something, explain that this action is not available here and answer with the information you can read.";
   }
   // LLM credential: the Gateway injects DSH_LLM_API_KEY (decrypted in memory,
   // never persisted). MINIMAX_API_KEY is accepted as a legacy fallback so the

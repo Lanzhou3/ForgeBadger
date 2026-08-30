@@ -336,7 +336,7 @@ describe("ClaudePortfolioWorker", () => {
     assert.equal(replay.status, "rejected");
     assert.equal(readiness.status, "acknowledged");
     assert.equal(fixture.writes.length, 1);
-    assert.match(fixture.writes[0] ?? "", /^<openforge-portfolio-task-packet>\n/);
+    assert.match(fixture.writes[0] ?? "", /^<forgebadger-portfolio-task-packet>\n/);
     assert.match(fixture.writes[0] ?? "", /"execution":\{"adapter":"claude"\}/);
     assert.deepEqual(fixture.receiptPermits, ["receipt-permit"]);
   });

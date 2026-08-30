@@ -215,7 +215,7 @@ export function setCopilotToolEnabled(toolName: string, enabled: boolean) {
   );
 }
 
-// --- dsh kernel configuration (gated by OPENFORGE_DSH_COPILOT_ENABLED; 404 when off) ---
+// --- dsh kernel configuration (gated by FORGEBADGER_DSH_COPILOT_ENABLED; 404 when off) ---
 
 export const dshConfigQueryKey = ["copilot", "dsh-config"] as const;
 

@@ -579,7 +579,7 @@ export default function ModelsPage() {
     readinessMutation.error;
   return (
     <div className="mx-auto max-w-[1400px] space-y-6 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3 of-animate-in">
+      <div className="flex flex-wrap items-start justify-between gap-3 forgebadger-animate-in">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{t("models.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("models.providerCenterSubtitle")}</p>
@@ -719,7 +719,7 @@ export default function ModelsPage() {
               t={t}
             />
           ) : (
-            <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-border/70 bg-card/50 px-6 py-12 text-center of-animate-in">
+            <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-border/70 bg-card/50 px-6 py-12 text-center forgebadger-animate-in">
               <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
                 <Cloud className="size-5" />
               </div>

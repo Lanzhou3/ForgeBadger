@@ -4,7 +4,7 @@ import path from "node:path";
 import { resolveInstalledPaths, type InstalledPaths } from "../runtime/paths.js";
 
 interface GatewayInitModule {
-  runOpenForgeCli(args: string[]): Promise<number>;
+  runForgeBadgerCli(args: string[]): Promise<number>;
 }
 
 export interface RunInitOptions {
@@ -18,7 +18,7 @@ export async function runInit(args: string[], options: RunInitOptions = {}): Pro
   const paths = resolvePaths();
   const module = await importModule(pathToFileURL(resolveGatewayInitEntry(paths)).href);
 
-  return assertGatewayInitModule(module).runOpenForgeCli(args);
+  return assertGatewayInitModule(module).runForgeBadgerCli(args);
 }
 
 function resolveGatewayInitEntry(paths: InstalledPaths): string {
@@ -39,9 +39,9 @@ function assertGatewayInitModule(module: unknown): GatewayInitModule {
   if (
     typeof module !== "object" ||
     module === null ||
-    typeof (module as Partial<GatewayInitModule>).runOpenForgeCli !== "function"
+    typeof (module as Partial<GatewayInitModule>).runForgeBadgerCli !== "function"
   ) {
-    throw new Error("Gateway init entry must export runOpenForgeCli(args)");
+    throw new Error("Gateway init entry must export runForgeBadgerCli(args)");
   }
   return module as GatewayInitModule;
 }

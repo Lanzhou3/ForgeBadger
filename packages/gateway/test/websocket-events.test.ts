@@ -11,7 +11,7 @@ import WebSocket from "ws";
 import { createGatewayApp, createServer } from "../src/server.js";
 import { attachEventsWebSocket } from "../src/websocket/events.js";
 import { signJwt } from "../src/auth/jwt.js";
-import { OpenForgeEventBus } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 
@@ -73,7 +73,7 @@ describe("events WebSocket", () => {
     db = createTestDb();
     // The events WS auth path re-checks that the JWT subject is an active user.
     seedActiveUsers(db);
-    const eventBus = new OpenForgeEventBus();
+    const eventBus = new ForgeBadgerEventBus();
     const sessionManager = new InMemorySessionManager({
       async createSession() {},
       async killSession() {},
@@ -117,7 +117,7 @@ describe("events WebSocket", () => {
 
   it("connection with valid JWT succeeds", async () => {
     const token = signJwt({ userId: "user_123", email: "test@example.com" }, jwtSecret);
-    const ws = new WebSocket(`${serverUrl}/ws/events`, ["openforge-events", token]);
+    const ws = new WebSocket(`${serverUrl}/ws/events`, ["forgebadger-events", token]);
 
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("Connection timeout")), 2000);
@@ -178,8 +178,8 @@ describe("events WebSocket", () => {
     const tokenA = signJwt({ userId: "user_a", email: "a@example.com" }, jwtSecret);
     const tokenB = signJwt({ userId: "user_b", email: "b@example.com" }, jwtSecret);
 
-    const wsA = new WebSocket(`${serverUrl}/ws/events`, ["openforge-events", tokenA]);
-    const wsB = new WebSocket(`${serverUrl}/ws/events`, ["openforge-events", tokenB]);
+    const wsA = new WebSocket(`${serverUrl}/ws/events`, ["forgebadger-events", tokenA]);
+    const wsB = new WebSocket(`${serverUrl}/ws/events`, ["forgebadger-events", tokenB]);
 
     await Promise.all([
       new Promise<void>((resolve) => wsA.once("open", resolve)),
@@ -239,7 +239,7 @@ describe("events websocket connection limits", () => {
   beforeEach(async () => {
     db = createTestDb();
     seedActiveUsers(db);
-    const eventBus = new OpenForgeEventBus();
+    const eventBus = new ForgeBadgerEventBus();
     const sessionManager = new InMemorySessionManager({
       async createSession() {},
       async killSession() {},
@@ -293,7 +293,7 @@ describe("events websocket connection limits", () => {
   it("enforces per-user event websocket limits", async () => {
     const tokenA = signJwt({ userId: "user_a", email: "a@example.com" }, jwtSecret);
 
-    const wsA = new WebSocket(`${serverUrl}/ws/events`, ["openforge-events", tokenA]);
+    const wsA = new WebSocket(`${serverUrl}/ws/events`, ["forgebadger-events", tokenA]);
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("Connection timeout")), 2000);
       wsA.on("open", () => {
@@ -306,7 +306,7 @@ describe("events websocket connection limits", () => {
       });
     });
 
-    const wsB = new WebSocket(`${serverUrl}/ws/events`, ["openforge-events", tokenA]);
+    const wsB = new WebSocket(`${serverUrl}/ws/events`, ["forgebadger-events", tokenA]);
     const result = await new Promise<{ code: number }>((resolve) => {
       wsB.on("close", (code) => {
         resolve({ code });

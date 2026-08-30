@@ -48,7 +48,7 @@ export function WorkspaceContextPanel({
   return (
     <Card
       data-testid="workspace-context-panel"
-      className={cn("of-animate-in gap-0 overflow-hidden py-0", className)}
+      className={cn("forgebadger-animate-in gap-0 overflow-hidden py-0", className)}
     >
       <CardHeader className="flex flex-row items-start justify-between gap-3 px-4 py-3">
         <div className="min-w-0 space-y-1">

@@ -32,7 +32,7 @@ export function WorkspaceExplorer({
 
   if (!projectId) {
     return (
-      <Card className={cn("of-animate-in", className)}>
+      <Card className={cn("forgebadger-animate-in", className)}>
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
           {t("projects.workspaceNoProject")}
         </CardContent>
@@ -47,7 +47,7 @@ export function WorkspaceExplorer({
       data-testid="workspace-explorer"
       className={cn("grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]", className)}
     >
-      <Card className="of-animate-in gap-0 overflow-hidden py-0">
+      <Card className="forgebadger-animate-in gap-0 overflow-hidden py-0">
         <CardHeader className="flex flex-row items-center justify-between gap-2 px-4 py-3">
           <h2 className="flex items-center gap-2 text-sm font-semibold leading-none">
             <FolderTree className="size-4 text-brand" />
@@ -78,7 +78,7 @@ export function WorkspaceExplorer({
         </CardContent>
       </Card>
 
-      <Card className="of-animate-in gap-0 overflow-hidden py-0" style={{ animationDelay: "50ms" }}>
+      <Card className="forgebadger-animate-in gap-0 overflow-hidden py-0" style={{ animationDelay: "50ms" }}>
         <CardContent className="p-2">
           <WorkspaceFileViewer
             variant="panel"

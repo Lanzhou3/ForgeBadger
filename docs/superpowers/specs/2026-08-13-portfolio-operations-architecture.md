@@ -27,7 +27,7 @@ flowchart TB
     ActionGate[Signed one-use\nChannel Action resolver]
   end
 
-  subgraph Gateway[OpenForge Gateway: local-first Portfolio Operations control plane]
+  subgraph Gateway[ForgeBadger Gateway: local-first Portfolio Operations control plane]
     Intake[Portfolio Request intake\nand Intake Decision]
     Manager[Portfolio Operations Manager\nstructured recommendations only]
     Workflow[Project Manager workflow\nWork Item, Attempt, acceptance]
@@ -40,11 +40,11 @@ flowchart TB
     Scheduler[Durable Scheduler\nclaim, lease, retry, budget]
     Heartbeat[Portfolio Heartbeat\ndefault: disabled]
     Wakeup[Workflow Wakeup\nper tracked Task Attempt]
-    Events[OpenForge Event Bus\nand safe WebSocket projection]
+    Events[ForgeBadger Event Bus\nand safe WebSocket projection]
     Outbox[Durable Outbox\nidempotent delivery]
   end
 
-  subgraph Records[Canonical OpenForge records: tenant-scoped and auditable]
+  subgraph Records[Canonical ForgeBadger records: tenant-scoped and auditable]
     PortfolioDb[(Portfolio records\nrequest, dossier, work item, attempt\nauthorization, evidence, risk, acceptance)]
     AuditDb[(Audit and delivery records\ncommand, action, outbox result)]
   end
@@ -131,12 +131,12 @@ flowchart TB
 | Observation | Only an enrolled project with an Observation Profile is observable. V1 includes platform facts and declared Git-state probes; arbitrary model-generated shell commands are excluded. |
 | Scheduling | Jobs are durable, leased, idempotent, and budgeted. Heartbeat is off by default; Workflow Wakeups are tied to explicit tracking choices. |
 | Channel | Feishu requires identity binding and allowed conversation scope. Approval cards carry an opaque signed, single-use reference to an existing record. Delivery uses a durable Outbox. |
-| Extension | V1 contains OpenForge Platform Tools and the native Feishu connector only. MCP Extensions are intentionally outside this architecture. |
+| Extension | V1 contains ForgeBadger Platform Tools and the native Feishu connector only. MCP Extensions are intentionally outside this architecture. |
 | Replacement | No arrow connects Legacy Copilot data or runtime to this diagram. Clean Cutover removes Gateway routes, runtime, and state access instead of creating compatibility or dual-write paths; `/portfolio` remains the complete workspace, `/copilot` is its Portfolio-only alias, and the pet opens a floating Portfolio Dialog that creates Requests and reports only persisted safe Request status. |
 
 ## Reference Patterns: Adopt, Improve, Exclude
 
-| Reference | Adopt for OpenForge | Improvement or deliberate exclusion |
+| Reference | Adopt for ForgeBadger | Improvement or deliberate exclusion |
 | --- | --- | --- |
 | OpenClaw | Local Gateway as control plane; account-aware channel ingress; explicit identity pairing and allowlists; persistent scheduler and task-flow concepts. | Keep a single native Feishu connector in V1. Do not inherit a broad dynamic channel, plugin, or model-tool surface. Channel ingress can create requests, not arbitrary executable instructions. |
 | Hermes Agent | Explicit delivery routing, channel/platform directory separation, turn ownership, and scheduler lifecycle handling. | Use strict durable assignment and wakeup leases. Do not permit a degraded lease timeout to start a concurrent Code CLI operation; ownership conflicts must remain visible and retryable. |

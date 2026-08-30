@@ -1,4 +1,4 @@
-# OpenForge Manual Smoke Test
+# ForgeBadger Manual Smoke Test
 
 > Status: local-first beta manual acceptance | Date: 2026-05-10
 
@@ -28,15 +28,15 @@ or update `.env` in the repository root so both Gateway and Web dev commands
 load the same values:
 
 ```bash
-OPENFORGE_HOST=127.0.0.1
-OPENFORGE_PORT=48731
-OPENFORGE_WEB_HOST=127.0.0.1
-OPENFORGE_WEB_PORT=48732
-OPENFORGE_GATEWAY_URL=http://127.0.0.1:48731
+FORGEBADGER_HOST=127.0.0.1
+FORGEBADGER_PORT=48731
+FORGEBADGER_WEB_HOST=127.0.0.1
+FORGEBADGER_WEB_PORT=48732
+FORGEBADGER_GATEWAY_URL=http://127.0.0.1:48731
 NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
-OPENFORGE_DB_PATH=/tmp/openforge-smoke.db
-OPENFORGE_MASTER_KEY=<64-hex-characters>
-OPENFORGE_JWT_SECRET=<32+-character-secret>
+FORGEBADGER_DB_PATH=/tmp/forgebadger-smoke.db
+FORGEBADGER_MASTER_KEY=<64-hex-characters>
+FORGEBADGER_JWT_SECRET=<32+-character-secret>
 ```
 
 Start Gateway, then Web in separate shells:
@@ -48,7 +48,7 @@ pnpm --dir packages/web dev
 
 Source fallback scripts load the root `.env` without overriding variables
 already present in the shell. For disposable smoke state, a command prefix such
-as `OPENFORGE_DB_PATH=/tmp/openforge-smoke.db pnpm --dir packages/gateway dev`
+as `FORGEBADGER_DB_PATH=/tmp/forgebadger-smoke.db pnpm --dir packages/gateway dev`
 therefore takes precedence over the same key in `.env`.
 
 Open `http://127.0.0.1:48732`.
@@ -116,16 +116,16 @@ browser terminal sessions.
 Preferred manual path:
 
 - In the Claude Code terminal, trigger an action that requires permission.
-- Confirm an OpenForge notification and session activity are created for the
+- Confirm an ForgeBadger notification and session activity are created for the
   permission prompt.
 
 Fallback hook-path smoke from inside the tmux terminal:
 
 ```bash
 printf '{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Smoke permission request"}' \
-  | curl -fsS -X POST "${OPENFORGE_GATEWAY_URL%/}/api/v1/session-hooks/claude-notification/${OPENFORGE_SESSION_ID}" \
+  | curl -fsS -X POST "${FORGEBADGER_GATEWAY_URL%/}/api/v1/session-hooks/claude-notification/${FORGEBADGER_SESSION_ID}" \
       -H "content-type: application/json" \
-      -H "x-openforge-session-token: ${OPENFORGE_ATTACH_TOKEN}" \
+      -H "x-forgebadger-session-token: ${FORGEBADGER_ATTACH_TOKEN}" \
       --data-binary @-
 ```
 
@@ -153,27 +153,27 @@ permission prompt event.
   pnpm smoke:copilot-provider
   ```
 
-  Without `OPENFORGE_COPILOT_PROVIDER_SMOKE_API_KEY` or provider-specific
+  Without `FORGEBADGER_COPILOT_PROVIDER_SMOKE_API_KEY` or provider-specific
   disposable credentials, the harness records a skipped result. To require live
-  evidence, set `OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1` plus
-  `OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER`, `OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL`,
+  evidence, set `FORGEBADGER_COPILOT_PROVIDER_SMOKE_REQUIRE=1` plus
+  `FORGEBADGER_COPILOT_PROVIDER_SMOKE_PROVIDER`, `FORGEBADGER_COPILOT_PROVIDER_SMOKE_MODEL`,
   and a disposable API key. The command must not print the plaintext key.
-  Set `OPENFORGE_COPILOT_PROVIDER_SMOKE_API_KEY` in your shell or secret
+  Set `FORGEBADGER_COPILOT_PROVIDER_SMOKE_API_KEY` in your shell or secret
   manager before running the command. OpenAI example:
 
   ```bash
-  OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
-  OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER=openai \
-  OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
+  FORGEBADGER_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
+  FORGEBADGER_COPILOT_PROVIDER_SMOKE_PROVIDER=openai \
+  FORGEBADGER_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
   pnpm smoke:copilot-provider
   ```
 
   Anthropic example:
 
   ```bash
-  OPENFORGE_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
-  OPENFORGE_COPILOT_PROVIDER_SMOKE_PROVIDER=anthropic \
-  OPENFORGE_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
+  FORGEBADGER_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
+  FORGEBADGER_COPILOT_PROVIDER_SMOKE_PROVIDER=anthropic \
+  FORGEBADGER_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
   pnpm smoke:copilot-provider
   ```
 
@@ -188,7 +188,7 @@ permission prompt event.
   model and active test credential.
 - Open `/copilot` from the sidebar.
 - Ask Copilot to diagnose project or session launch readiness.
-- Confirm the answer cites safe OpenForge state such as adapter discovery,
+- Confirm the answer cites safe ForgeBadger state such as adapter discovery,
   dashboard health, recent activity, project detail, session detail, or
   diagnostics summary.
 - If Copilot proposes an action, confirm it appears as a pending action before
@@ -229,7 +229,7 @@ Web smoke. It cannot replace these manual checks:
   `pnpm smoke:feishu-bot-websocket`, authenticated `/bot-websocket/*` smoke
   paths, and `lark-cli` preflight alone do not clear the gate. Use
   `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output
-  <report.json>` with a real self-built Feishu bot, OpenForge token, and
+  <report.json>` with a real self-built Feishu bot, ForgeBadger token, and
   operator-induced reconnect to collect gate-clearing evidence, then run
   `pnpm evidence:feishu-bot-live-audit -- <report.json>` and
   `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
@@ -237,5 +237,5 @@ Web smoke. It cannot replace these manual checks:
 - physical Windows native versus WSL behavior;
 - local operator review that diagnostics and logs do not contain secrets.
 
-Record the host OS, shell, `openforge doctor` output, tmux version, Claude Code
+Record the host OS, shell, `forgebadger doctor` output, tmux version, Claude Code
 version, and any skipped steps in `docs/TRIAL-CHECKLIST.md`.

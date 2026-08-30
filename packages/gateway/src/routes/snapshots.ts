@@ -15,7 +15,7 @@ import {
 } from "./sessions.js";
 import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
-import type { OpenForgeEventBus } from "../services/event-bus.js";
+import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import type { CommandRunner } from "../lib/dependency-check.js";
 import { getAdapterLaunchStatus } from "../services/adapter-discovery.js";
 
@@ -28,7 +28,7 @@ export function createSnapshotRoutes(
   db: Database,
   masterKey: string,
   sessionManager: InMemorySessionManager,
-  eventBus?: OpenForgeEventBus,
+  eventBus?: ForgeBadgerEventBus,
   adapterCommandRunner?: CommandRunner
 ): Router {
   const router = Router();
@@ -95,7 +95,7 @@ interface RestoreSnapshotInput {
   userId: string;
   snapshot: SessionSnapshot;
   sessionManager: InMemorySessionManager;
-  eventBus?: OpenForgeEventBus | undefined;
+  eventBus?: ForgeBadgerEventBus | undefined;
   adapterCommandRunner?: CommandRunner | undefined;
 }
 

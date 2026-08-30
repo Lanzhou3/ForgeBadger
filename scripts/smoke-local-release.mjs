@@ -3,28 +3,31 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 
 const secretKeys = new Set([
+  "FORGEBADGER_MASTER_KEY",
+  "FORGEBADGER_JWT_SECRET",
   "OPENFORGE_MASTER_KEY",
-  "OPENFORGE_JWT_SECRET"
+  "OPENFORGE_JWT_SECRET",
+  "OPENFORGE_ATTACH_TOKEN"
 ]);
 
 export function buildSmokeEnvironment(options = {}) {
-  const root = options.root ?? path.join(tmpdir(), "openforge-smoke");
+  const root = options.root ?? path.join(tmpdir(), "forgebadger-smoke");
   const gatewayPort = String(options.gatewayPort ?? 48731);
   const webPort = String(options.webPort ?? 48732);
   const masterKey = options.masterKey ?? "0".repeat(64);
-  const jwtSecret = options.jwtSecret ?? "openforge-smoke-jwt-secret-32-chars";
+  const jwtSecret = options.jwtSecret ?? "forgebadger-smoke-jwt-secret-32-chars";
 
   return {
-    OPENFORGE_HOST: "127.0.0.1",
-    OPENFORGE_PORT: gatewayPort,
-    OPENFORGE_WEB_HOST: "127.0.0.1",
-    OPENFORGE_WEB_PORT: webPort,
-    OPENFORGE_GATEWAY_URL: `http://127.0.0.1:${gatewayPort}`,
+    FORGEBADGER_HOST: "127.0.0.1",
+    FORGEBADGER_PORT: gatewayPort,
+    FORGEBADGER_WEB_HOST: "127.0.0.1",
+    FORGEBADGER_WEB_PORT: webPort,
+    FORGEBADGER_GATEWAY_URL: `http://127.0.0.1:${gatewayPort}`,
     NEXT_PUBLIC_GATEWAY_URL: `http://127.0.0.1:${gatewayPort}`,
-    OPENFORGE_DB_PATH: path.join(root, "openforge-smoke.db"),
-    OPENFORGE_MASTER_KEY: masterKey,
-    OPENFORGE_JWT_SECRET: jwtSecret,
-    OPENFORGE_TMUX_PREFIX: "of-smoke-"
+    FORGEBADGER_DB_PATH: path.join(root, "forgebadger-smoke.db"),
+    FORGEBADGER_MASTER_KEY: masterKey,
+    FORGEBADGER_JWT_SECRET: jwtSecret,
+    FORGEBADGER_TMUX_PREFIX: "of-smoke-"
   };
 }
 
@@ -56,8 +59,8 @@ export function buildSmokeCommandPlan(env = buildSmokeEnvironment()) {
     web: "pnpm --dir packages/web dev",
     cleanup: [
       "Stop Gateway and Web processes",
-      "Remove the disposable OPENFORGE_DB_PATH",
-      "Confirm no tmux sessions remain with the OPENFORGE_TMUX_PREFIX"
+      "Remove the disposable FORGEBADGER_DB_PATH",
+      "Confirm no tmux sessions remain with the FORGEBADGER_TMUX_PREFIX"
     ],
     manualEvidence: requiredManualSmokeEvidence()
   };

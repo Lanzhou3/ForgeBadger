@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  DEFAULT_REPOSITORY,
   EXPECTED_TRIAL_ISSUE_ROUTES,
   validateTrialIssueRoutes
 } from "./validate-trial-issue-routes.mjs";
 
 describe("validateTrialIssueRoutes", () => {
+  it("keeps the existing GitHub remote as the default repository", () => {
+    assert.equal(DEFAULT_REPOSITORY, "Lanzhou3/OpenForge");
+  });
   it("accepts open trial route issues with expected titles and labels", async () => {
     const result = await validateTrialIssueRoutes({
       fetchIssue: async (route) => buildIssue(route)

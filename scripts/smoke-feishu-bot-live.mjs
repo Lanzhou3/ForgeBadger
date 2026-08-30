@@ -8,36 +8,46 @@ const DEFAULT_MAX_EVENTS = 2;
 const EVENT_SUBSCRIPTION = "im.message.receive_v1";
 
 export function resolveFeishuBotLiveConfig(env = process.env, argv = process.argv.slice(2)) {
+  env = normalizeEnvironment(env);
   const args = parseArgs(argv);
-  const token = nonEmpty(args.token) ?? nonEmpty(env.OPENFORGE_TOKEN);
+  const token = nonEmpty(args.token) ?? nonEmpty(env.FORGEBADGER_TOKEN);
   const appId = nonEmpty(args["app-id"]) ?? nonEmpty(env.FEISHU_APP_ID) ?? nonEmpty(env.LARK_APP_ID);
   const appSecret = nonEmpty(args["app-secret"]) ?? nonEmpty(env.FEISHU_APP_SECRET) ?? nonEmpty(env.LARK_APP_SECRET);
   const missing = [];
-  if (!token) missing.push("OPENFORGE_TOKEN or --token");
+  if (!token) missing.push("FORGEBADGER_TOKEN or --token");
   if (!appId) missing.push("FEISHU_APP_ID/LARK_APP_ID or --app-id");
   if (!appSecret) missing.push("FEISHU_APP_SECRET/LARK_APP_SECRET or --app-secret");
   if (missing.length > 0) {
     return { ok: false, reason: `${missing.join(", ")} is required` };
   }
 
-  const requireGateEvidence = readBoolean(args["require-gate-evidence"], env.OPENFORGE_FEISHU_REQUIRE_GATE_EVIDENCE);
+  const requireGateEvidence = readBoolean(args["require-gate-evidence"], env.FORGEBADGER_FEISHU_REQUIRE_GATE_EVIDENCE);
   return {
     ok: true,
     config: {
-      gatewayUrl: nonEmpty(args["gateway-url"]) ?? nonEmpty(env.OPENFORGE_GATEWAY_URL) ?? DEFAULT_GATEWAY_URL,
+      gatewayUrl: nonEmpty(args["gateway-url"]) ?? nonEmpty(env.FORGEBADGER_GATEWAY_URL) ?? DEFAULT_GATEWAY_URL,
       token,
       appId,
       appSecret,
-      domain: nonEmpty(args.domain) ?? nonEmpty(env.OPENFORGE_FEISHU_DOMAIN) ?? "feishu",
-      durationMs: readPositiveInteger(args["duration-ms"], env.OPENFORGE_FEISHU_LIVE_DURATION_MS, DEFAULT_DURATION_MS),
-      maxEvents: readPositiveInteger(args["max-events"], env.OPENFORGE_FEISHU_LIVE_MAX_EVENTS, DEFAULT_MAX_EVENTS),
-      outputPath: nonEmpty(args.output) ?? nonEmpty(env.OPENFORGE_FEISHU_LIVE_REPORT_PATH),
-      sendReplies: !hasFlag(args, "no-send-replies") && readBoolean(args["send-replies"], env.OPENFORGE_FEISHU_SEND_REPLIES, true),
-      requireReconnect: readBoolean(args["require-reconnect"], env.OPENFORGE_FEISHU_REQUIRE_RECONNECT, requireGateEvidence),
-      wsPingTimeout: readPositiveInteger(args["ws-ping-timeout"], env.OPENFORGE_FEISHU_WS_PING_TIMEOUT, 0) || undefined,
+      domain: nonEmpty(args.domain) ?? nonEmpty(env.FORGEBADGER_FEISHU_DOMAIN) ?? "feishu",
+      durationMs: readPositiveInteger(args["duration-ms"], env.FORGEBADGER_FEISHU_LIVE_DURATION_MS, DEFAULT_DURATION_MS),
+      maxEvents: readPositiveInteger(args["max-events"], env.FORGEBADGER_FEISHU_LIVE_MAX_EVENTS, DEFAULT_MAX_EVENTS),
+      outputPath: nonEmpty(args.output) ?? nonEmpty(env.FORGEBADGER_FEISHU_LIVE_REPORT_PATH),
+      sendReplies: !hasFlag(args, "no-send-replies") && readBoolean(args["send-replies"], env.FORGEBADGER_FEISHU_SEND_REPLIES, true),
+      requireReconnect: readBoolean(args["require-reconnect"], env.FORGEBADGER_FEISHU_REQUIRE_RECONNECT, requireGateEvidence),
+      wsPingTimeout: readPositiveInteger(args["ws-ping-timeout"], env.FORGEBADGER_FEISHU_WS_PING_TIMEOUT, 0) || undefined,
       requireGateEvidence
     }
   };
+}
+
+function normalizeEnvironment(env) {
+  const normalized = { ...env };
+  for (const [name, value] of Object.entries(env)) {
+    if (!name.startsWith("OPENFORGE_") || value === undefined) continue;
+    normalized[`FORGEBADGER_${name.slice("OPENFORGE_".length)}`] ??= value;
+  }
+  return normalized;
 }
 
 export async function runFeishuBotLiveSmoke(input) {
@@ -81,7 +91,7 @@ export async function runFeishuBotLiveSmoke(input) {
     appSecret: input.appSecret,
     domain: resolveLarkDomain(sdk, input.domain),
     loggerLevel: sdk.LoggerLevel?.info,
-    source: "openforge-feishu-live-smoke"
+    source: "forgebadger-feishu-live-smoke"
   });
 
   const wsClient = new sdk.WSClient({
@@ -89,7 +99,7 @@ export async function runFeishuBotLiveSmoke(input) {
     appSecret: input.appSecret,
     domain: resolveLarkDomain(sdk, input.domain),
     loggerLevel: sdk.LoggerLevel?.info,
-    source: "openforge-feishu-live-smoke",
+    source: "forgebadger-feishu-live-smoke",
     handshakeTimeoutMs: Math.min(input.durationMs ?? DEFAULT_DURATION_MS, 30_000),
     ...(input.wsPingTimeout ? { wsConfig: { pingTimeout: input.wsPingTimeout } } : {}),
     onReady: () => {

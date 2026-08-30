@@ -19,8 +19,8 @@ import type { TmuxCreateOptions } from "../src/services/tmux.js";
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 interface AuthContext {
   token: string;
@@ -161,7 +161,7 @@ describe("session snapshot restore", () => {
   } {
     const project = new ProjectRepository(db, auth.userId).create({
       name: "Snapshot Project",
-      path: "/tmp/openforge-snapshot-restore",
+      path: "/tmp/forgebadger-snapshot-restore",
       aiTool: "claude"
     });
     mkdirSync(project.path, { recursive: true });

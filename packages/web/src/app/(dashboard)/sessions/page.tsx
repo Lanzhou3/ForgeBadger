@@ -259,7 +259,7 @@ export default function SessionsPage() {
               {groupedSessions.map((group, groupIndex) => (
                 <section
                   key={group.projectName}
-                  className="of-animate-in overflow-hidden rounded-lg border border-border bg-card"
+                  className="forgebadger-animate-in overflow-hidden rounded-lg border border-border bg-card"
                   style={{ animationDelay: `${groupIndex * 40}ms` }}
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-muted/30 px-4 py-2.5">

@@ -250,6 +250,7 @@ function candidateGlobalFilesForAdapter(adapter: AdapterId): string[] {
 
 function redactSensitiveContent(content: string): string {
   return content
+    .replace(/\b((?:FORGEBADGER|OPENFORGE)_(?:MASTER_KEY|JWT_SECRET|ATTACH_TOKEN|API_KEY|TOKEN))\s*=\s*[^\s]+/giu, "$1=[REDACTED]")
     .replace(/("(?:api[_-]?key|token|secret|password|authorization)"\s*:\s*")[^"]*(")/giu, "$1[REDACTED]$2")
     .replace(/^(\s*(?:api[_-]?key|token|secret|password|authorization)\s*=\s*).+$/gimu, "$1\"[REDACTED]\"")
     .replace(/((?:sk|pk|rk)-[A-Za-z0-9_-]{8,})/gu, "[REDACTED]");

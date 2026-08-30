@@ -138,9 +138,9 @@ describe("copilot api client", () => {
 
   const dshConfigPayload = {
     defaultModelId: "model-1",
-    plugins: { "openforge-bridge": true, "mcp-client": false },
+    plugins: { "forgebadger-bridge": true, "mcp-client": false },
     availablePlugins: [
-      { id: "openforge-bridge", label: "OpenForge Bridge", description: "平台工具" },
+      { id: "forgebadger-bridge", label: "ForgeBadger Bridge", description: "平台工具" },
       { id: "mcp-client", label: "MCP Client", description: "外部工具接入" },
     ],
     runtime: { status: "running" },
@@ -154,7 +154,7 @@ describe("copilot api client", () => {
       expect.anything()
     );
     expect(config.defaultModelId).toBe("model-1");
-    expect(config.plugins["openforge-bridge"]).toBe(true);
+    expect(config.plugins["forgebadger-bridge"]).toBe(true);
     expect(config.availablePlugins).toHaveLength(2);
     expect(config.runtime.status).toBe("running");
   });
@@ -166,12 +166,12 @@ describe("copilot api client", () => {
 
   it("updates the dsh config through PUT and parses the envelope", async () => {
     vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({ ...dshConfigPayload, defaultModelId: null })));
-    const config = await updateDshConfig({ defaultModelId: null, plugins: { "openforge-bridge": false } });
+    const config = await updateDshConfig({ defaultModelId: null, plugins: { "forgebadger-bridge": false } });
     expect(fetch).toHaveBeenCalledWith(
       `${BASE}/api/v1/copilot/dsh-config`,
       expect.objectContaining({
         method: "PUT",
-        body: JSON.stringify({ defaultModelId: null, plugins: { "openforge-bridge": false } }),
+        body: JSON.stringify({ defaultModelId: null, plugins: { "forgebadger-bridge": false } }),
       })
     );
     expect(config.defaultModelId).toBeNull();

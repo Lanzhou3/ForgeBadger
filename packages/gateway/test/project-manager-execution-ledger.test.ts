@@ -35,7 +35,7 @@ describe("ProjectManagerExecutionLedgerService", () => {
     userId = new UserRepository(db).create("ledger-owner@example.com", "hash").id;
     projectId = new ProjectRepository(db, userId).create({
       name: "Ledger project",
-      path: "/tmp/openforge-ledger",
+      path: "/tmp/forgebadger-ledger",
       aiTool: "claude"
     }).id;
     workItemId = new ProjectManagerRepository(db, userId).createWorkItem(projectId, {

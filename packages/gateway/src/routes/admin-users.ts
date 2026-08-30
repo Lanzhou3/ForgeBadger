@@ -107,7 +107,7 @@ export function createAdminUserRoutes(db: Database): Router {
     });
   });
 
-  // ---- Invite management (for OPENFORGE_REGISTRATION=invite) ----
+  // ---- Invite management (for FORGEBADGER_REGISTRATION=invite) ----
 
   router.post("/invites", (req, res) => {
     const createdBy = (req as unknown as AuthenticatedRequest).userId;

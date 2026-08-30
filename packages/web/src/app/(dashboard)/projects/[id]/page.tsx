@@ -279,20 +279,20 @@ export default function ProjectDetailPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-4 p-6">
       {projectLoading ? (
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("projects.loadingOne")}
           </CardContent>
         </Card>
       ) : !project ? (
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("projects.notFound")}
           </CardContent>
         </Card>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 of-animate-in">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 forgebadger-animate-in">
             <Button
               variant="ghost"
               size="icon"
@@ -392,7 +392,7 @@ export default function ProjectDetailPage() {
           </div>
 
           {launchableRuntimeAdapters.length === 0 && !adapterDiscoveryLoading && (
-            <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 of-animate-in">
+            <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 forgebadger-animate-in">
               <p className="flex items-center gap-1.5 text-xs font-medium text-destructive">
                 <AlertTriangle className="size-3.5" />
                 {!dependenciesLoading && terminalSetupGuidance.blocked
@@ -416,7 +416,7 @@ export default function ProjectDetailPage() {
           )}
 
           {configNeedsReview && !isUntrackedTemplate && (
-            <Card className="of-animate-in border-amber-500/40 bg-amber-500/10">
+            <Card className="forgebadger-animate-in border-amber-500/40 bg-amber-500/10">
               <CardContent className="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between">
                 <div className="flex items-start gap-3">
                   <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-400">
@@ -495,7 +495,7 @@ export default function ProjectDetailPage() {
               </p>
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
                 {projectSessions.length === 0 ? (
-                  <Card className="of-animate-in">
+                  <Card className="forgebadger-animate-in">
                     <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
                       <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
                         <TerminalSquare className="size-5" />
@@ -520,7 +520,7 @@ export default function ProjectDetailPage() {
                       <Link
                         key={session.id}
                         href={`/sessions/${session.id}`}
-                        className="group flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40"
+                        className="group flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
                         style={{ animationDelay: `${index * 40}ms` }}
                       >
                         <SessionStatusDot status={session.status} />
@@ -560,7 +560,7 @@ export default function ProjectDetailPage() {
 
             <TabsContent value="skills" className="mt-4">
               {skills.length === 0 ? (
-                <Card className="of-animate-in">
+                <Card className="forgebadger-animate-in">
                   <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
                     <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
                       <Wrench className="size-5" />
@@ -576,7 +576,7 @@ export default function ProjectDetailPage() {
                     return (
                       <div
                         key={skill.id}
-                        className="flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40"
+                        className="flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
                         style={{ animationDelay: `${index * 40}ms` }}
                       >
                         <div className="min-w-0 flex-1">
@@ -758,7 +758,7 @@ function ProjectConfigPanel({
 
   if (projectLoading) {
     return (
-      <Card className="of-animate-in">
+      <Card className="forgebadger-animate-in">
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
           {t("common.loading")}
         </CardContent>
@@ -768,7 +768,7 @@ function ProjectConfigPanel({
 
   return (
     <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-      <Card className="of-animate-in">
+      <Card className="forgebadger-animate-in">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-sm font-semibold">
             <FileText className="size-4 text-brand" />
@@ -801,7 +801,7 @@ function ProjectConfigPanel({
         </CardContent>
       </Card>
 
-      <Card className="of-animate-in" style={{ animationDelay: "50ms" }}>
+      <Card className="forgebadger-animate-in" style={{ animationDelay: "50ms" }}>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pb-3">
           <CardTitle className="min-w-0 truncate font-mono text-sm font-semibold">
             {selectedFile?.relativePath ?? t("projects.selectConfigFile")}
@@ -874,7 +874,7 @@ function ProjectConfigPanel({
       </Card>
 
       <div className="grid gap-4 xl:col-span-2">
-        <Card className="of-animate-in" style={{ animationDelay: "100ms" }}>
+        <Card className="forgebadger-animate-in" style={{ animationDelay: "100ms" }}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-sm font-semibold">
               <Globe2 className="size-4 text-brand" />
@@ -1036,7 +1036,7 @@ function ProjectActivityList({ activities }: { activities: SessionActivity[] }) 
   const { t } = useLanguage();
 
   return (
-    <Card className="of-animate-in overflow-hidden">
+    <Card className="forgebadger-animate-in overflow-hidden">
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold">
           <Activity className="size-4 text-brand" />

@@ -17,7 +17,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
-import { OpenForgeEventBus } from "../event-bus.js";
+import { ForgeBadgerEventBus } from "../event-bus.js";
 import type { AgentToolRegistry, AgentToolContext } from "./tool-registry.js";
 import { executeAgentTool } from "./tool-registry.js";
 import type { AgentLlmClient, AgentToolCall } from "./orchestrator-types.js";
@@ -32,7 +32,7 @@ export interface CopilotOrchestratorDependencies {
   masterKey: string;
   toolRegistry: AgentToolRegistry;
   llm: AgentLlmClient;
-  eventBus: OpenForgeEventBus;
+  eventBus: ForgeBadgerEventBus;
   maxSteps?: number;
   /** User-scoping facade; each run gets the scoped api for its owner. */
   portfolioApi?: { forUser(userId: string): unknown };
@@ -403,7 +403,7 @@ async function maybeAutoTitle(input: {
   assistantText: string;
   source: "user" | "reactive";
   runId: string;
-  eventBus: OpenForgeEventBus;
+  eventBus: ForgeBadgerEventBus;
   llm: AgentLlmClient;
   modelId?: string;
 }): Promise<void> {

@@ -17,12 +17,12 @@ describe("verifyNpmPackage", () => {
 
   it("rejects SQLite sidecar files", async () => {
     const root = await createPackageTree();
-    await writeFile(path.join(root, "dist", "gateway", "openforge.db-wal"), "");
+    await writeFile(path.join(root, "dist", "gateway", "forgebadger.db-wal"), "");
 
     const result = await verifyNpmPackage({ cliPackageRoot: root });
 
     assert.equal(result.ok, false);
-    assert.match(result.errors.join("\n"), /openforge\.db-wal/);
+    assert.match(result.errors.join("\n"), /forgebadger\.db-wal/);
   });
 
   it("rejects symlinks inside dist", async () => {
@@ -81,10 +81,55 @@ describe("verifyNpmPackage", () => {
     assert.match(result.errors.join("\n"), /forbidden runtime dependency: react/);
     assert.match(result.errors.join("\n"), /forbidden runtime dependency: react-dom/);
   });
+
+  it("rejects Gateway dependencies missing from the published CLI", async () => {
+    const root = await createPackageTree({
+      packageJson: { dependencies: { express: "^4.0.0" } }
+    });
+    const gatewayPackageRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-gateway-package-"));
+    await writeFile(
+      path.join(gatewayPackageRoot, "package.json"),
+      `${JSON.stringify({ dependencies: { express: "^4.0.0", "smol-toml": "^1.7.1" } })}\n`
+    );
+
+    const result = await verifyNpmPackage({ cliPackageRoot: root, gatewayPackageRoot });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /missing Gateway runtime dependency: smol-toml/);
+  });
+
+  it("rejects Gateway runtime dependency version drift", async () => {
+    const root = await createPackageTree({
+      packageJson: { dependencies: { express: "^4.19.2" } }
+    });
+    const gatewayPackageRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-gateway-package-"));
+    await writeFile(
+      path.join(gatewayPackageRoot, "package.json"),
+      `${JSON.stringify({ dependencies: { express: "^4.22.0" } })}\n`
+    );
+
+    const result = await verifyNpmPackage({ cliPackageRoot: root, gatewayPackageRoot });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /Gateway runtime dependency version mismatch: express/);
+  });
+
+  it("rejects platform-native binaries bundled in the Web standalone runtime", async () => {
+    const root = await createPackageTree();
+    await writeFile(
+      await ensureFile(root, "dist/web/standalone/node_modules/@img/sharp-darwin-arm64/lib/sharp.node"),
+      "native"
+    );
+
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /sharp\.node/);
+  });
 });
 
 async function createPackageTree(options = {}) {
-  const root = await mkdtemp(path.join(tmpdir(), "openforge-npm-verify-"));
+  const root = await mkdtemp(path.join(tmpdir(), "forgebadger-npm-verify-"));
   const packageJson = {
     files: ["dist", "README.md", "LICENSE", "docs/README.zh-CN.md", "docs/README.zh-TW.md", "package.json"],
     ...options.packageJson
@@ -93,11 +138,11 @@ async function createPackageTree(options = {}) {
     path.join(root, "package.json"),
     `${JSON.stringify(packageJson)}\n`
   );
-  await writeFile(path.join(root, "README.md"), "# OpenForge\n");
+  await writeFile(path.join(root, "README.md"), "# ForgeBadger\n");
   await writeFile(path.join(root, "LICENSE"), "MIT\n");
   await mkdir(path.join(root, "docs"), { recursive: true });
-  await writeFile(path.join(root, "docs", "README.zh-CN.md"), "# OpenForge\n");
-  await writeFile(path.join(root, "docs", "README.zh-TW.md"), "# OpenForge\n");
+  await writeFile(path.join(root, "docs", "README.zh-CN.md"), "# ForgeBadger\n");
+  await writeFile(path.join(root, "docs", "README.zh-TW.md"), "# ForgeBadger\n");
 
   await writeFile(await ensureFile(root, "dist/index.js"), "");
   await writeFile(await ensureFile(root, "dist/gateway/src/index.js"), "");
@@ -111,7 +156,7 @@ async function createPackageTree(options = {}) {
   }
   await writeFile(await ensureFile(root, "dist/web/standalone/packages/web/node_modules/next/package.json"), "{}\n");
   await writeFile(await ensureFile(root, "dist/web/standalone/node_modules/@swc/helpers/package.json"), "{}\n");
-  await writeFile(await ensureFile(root, "dist/web/standalone/packages/web/public/openforge-runtime.js"), "");
+  await writeFile(await ensureFile(root, "dist/web/standalone/packages/web/public/forgebadger-runtime.js"), "");
 
   return root;
 }

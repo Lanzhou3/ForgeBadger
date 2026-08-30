@@ -11,8 +11,8 @@ import {
 
 const secret = "0123456789abcdef0123456789abcdef";
 
-process.env.OPENFORGE_JWT_SECRET = secret;
-process.env.OPENFORGE_MASTER_KEY = "abcdef0123456789abcdef0123456789";
+process.env.FORGEBADGER_JWT_SECRET = secret;
+process.env.FORGEBADGER_MASTER_KEY = "abcdef0123456789abcdef0123456789";
 
 describe("jwt auth", () => {
   it("signs and verifies a token to user id and email", () => {
@@ -83,6 +83,21 @@ describe("authenticate middleware", () => {
 
     assert.equal(response.statusCode, 401);
     assert.deepEqual(response.body, { code: 1, message: "Unauthorized" });
+  });
+
+  it("accepts the legacy OpenForge auth cookie during the rename window", () => {
+    const token = signJwt({ userId: "user_legacy", email: "legacy@example.com" }, secret);
+    const middleware = requireAuth();
+    const request = { headers: { cookie: `openforge_session=${token}` } } as any;
+    const response = fakeResponse();
+    let nextCalled = false;
+
+    middleware(request, response as any, () => {
+      nextCalled = true;
+    });
+
+    assert.equal(nextCalled, true);
+    assert.equal(request.userId, "user_legacy");
   });
 });
 

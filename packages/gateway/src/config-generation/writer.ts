@@ -122,7 +122,7 @@ export async function writeConfigPlan(
 }
 
 function buildBackupPath(plan: RenderPlan, backupRoot?: string): string {
-  const root = backupRoot ?? join(plan.targetRoot, ".openforge", "backups", "config-writes");
+  const root = backupRoot ?? join(plan.targetRoot, ".forgebadger", "backups", "config-writes");
   // Use crypto.randomUUID so two writes triggered in the same millisecond do
   // not collide on the backup directory name.
   return join(root, `${plan.projectId}-${plan.templateId}-${Date.now()}-${randomUUID()}`);

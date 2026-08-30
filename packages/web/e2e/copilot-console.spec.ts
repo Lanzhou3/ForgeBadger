@@ -4,9 +4,9 @@ const CONVERSATION_ID = "conv-e2e-1";
 
 const dshConfig = {
   defaultModelId: "model-1",
-  plugins: { "openforge-bridge": true, "mcp-client": false },
+  plugins: { "forgebadger-bridge": true, "mcp-client": false },
   availablePlugins: [
-    { id: "openforge-bridge", label: "OpenForge Bridge", description: "Platform tools" },
+    { id: "forgebadger-bridge", label: "ForgeBadger Bridge", description: "Platform tools" },
     { id: "mcp-client", label: "MCP Client", description: "External tool access" },
   ],
   runtime: { status: "running" },
@@ -239,9 +239,9 @@ async function mockCopilotConsoleApis(
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.localStorage.setItem("openforge-language", "en");
-    window.localStorage.setItem("openforge.token", "e2e-token");
-    window.localStorage.setItem("openforge.user", JSON.stringify({
+    window.localStorage.setItem("forgebadger-language", "en");
+    window.localStorage.setItem("forgebadger.token", "e2e-token");
+    window.localStorage.setItem("forgebadger.user", JSON.stringify({
       id: "user-e2e",
       email: "copilot-console-e2e@example.com",
       role: "admin",
@@ -270,7 +270,7 @@ test("renders the three-column dsh console layout", async ({ page }) => {
   const panel = page.getByTestId("copilot-kernel-panel");
   await expect(panel).toBeVisible();
   await expect(panel.getByText("dsh kernel")).toBeVisible();
-  await expect(panel.getByText("OpenForge Bridge")).toBeVisible();
+  await expect(panel.getByText("ForgeBadger Bridge")).toBeVisible();
   await expect(panel.getByRole("button", { name: /list_projects/ })).toBeVisible();
   await expect(panel.getByRole("button", { name: /run_terminal/ })).toBeVisible();
   // Tool chip expands to show the description.
@@ -289,7 +289,7 @@ test("collapses the kernel panel and persists the choice across reloads", async 
   await page.getByRole("button", { name: "Toggle kernel panel" }).click();
   await expect(page.getByTestId("copilot-kernel-panel")).toBeHidden();
   await expect
-    .poll(() => page.evaluate(() => window.localStorage.getItem("openforge.copilot.kernel-panel")))
+    .poll(() => page.evaluate(() => window.localStorage.getItem("forgebadger.copilot.kernel-panel")))
     .toBe("0");
 
   await page.reload();
@@ -309,7 +309,7 @@ test("persists plugin toggles through the dsh-config PUT", async ({ page }) => {
 
   await expect.poll(() => updates.length).toBe(1);
   expect(updates[0]).toEqual({
-    plugins: { "openforge-bridge": true, "mcp-client": true },
+    plugins: { "forgebadger-bridge": true, "mcp-client": true },
   });
 });
 
@@ -339,7 +339,7 @@ test("opens the kernel panel as a sheet on small screens", async ({ page }) => {
   const sheet = page.getByRole("dialog");
   await expect(sheet).toBeVisible();
   await expect(sheet.getByText("dsh kernel")).toBeVisible();
-  await expect(sheet.getByRole("switch", { name: "OpenForge Bridge" })).toBeVisible();
+  await expect(sheet.getByRole("switch", { name: "ForgeBadger Bridge" })).toBeVisible();
 });
 
 test("opens the robot chat panel and renders a streamed reply", async ({ page }) => {
@@ -359,7 +359,7 @@ test("opens the robot chat panel and renders a streamed reply", async ({ page })
   await panel.getByPlaceholder("Type a message…").press("Enter");
   await expect(panel.getByText("Panel hello")).toBeVisible();
   await expect
-    .poll(() => page.evaluate(() => window.localStorage.getItem("openforge.copilot.robot-conversation")))
+    .poll(() => page.evaluate(() => window.localStorage.getItem("forgebadger.copilot.robot-conversation")))
     .toBe("conv-robot-1");
 
   // Optimistic pending state: the pulsing indicator shows before the first
@@ -369,7 +369,7 @@ test("opens the robot chat panel and renders a streamed reply", async ({ page })
   // Streamed tokens arrive over the shared gateway event bus.
   await page.evaluate(() => {
     window.dispatchEvent(
-      new CustomEvent("openforge:gateway-event", {
+      new CustomEvent("forgebadger:gateway-event", {
         detail: {
           type: "copilot_run_updated",
           payload: { run_id: "run-robot-1", status: "running", text_delta: "Streamed robot reply" },
@@ -421,7 +421,7 @@ test("folds inline think blocks and handles approvals in the robot panel", async
   // stays folded in the dim strip — raw <think> markup never leaks.
   await page.evaluate(() => {
     window.dispatchEvent(
-      new CustomEvent("openforge:gateway-event", {
+      new CustomEvent("forgebadger:gateway-event", {
         detail: {
           type: "copilot_run_updated",
           payload: {
@@ -442,7 +442,7 @@ test("folds inline think blocks and handles approvals in the robot panel", async
   // Pending action: the approval card decides through the decide endpoint.
   await page.evaluate(() => {
     window.dispatchEvent(
-      new CustomEvent("openforge:gateway-event", {
+      new CustomEvent("forgebadger:gateway-event", {
         detail: {
           type: "copilot_run_updated",
           payload: {

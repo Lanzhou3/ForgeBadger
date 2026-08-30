@@ -1,12 +1,12 @@
 # Security Policy
 
-OpenForge manages local project files, terminal sessions, provider credentials,
+ForgeBadger manages local project files, terminal sessions, provider credentials,
 tmux processes, WebSocket terminal access, and SQLite state. Treat all reports
 as sensitive until proven otherwise.
 
 ## Supported Scope
 
-Current security support covers the local-first OpenForge repository:
+Current security support covers the local-first ForgeBadger repository:
 
 - `packages/gateway`
 - `packages/web`
@@ -69,7 +69,7 @@ This document describes the security model. Key invariants:
 
 ## Caveats
 
-OpenForge remains a local-first beta-oriented control plane. The repository's
+ForgeBadger remains a local-first beta-oriented control plane. The repository's
 open-source packet does not clear the current live-provider, physical
 Windows/WSL, Feishu developer-console callback, or completed first-user
 feedback caveats. Those require real redacted evidence before status can move

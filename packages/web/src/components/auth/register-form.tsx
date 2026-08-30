@@ -60,7 +60,7 @@ export function RegisterForm() {
     <form
       method="post"
       onSubmit={handleSubmit(onSubmit)}
-      className="of-animate-in flex flex-col gap-4"
+      className="forgebadger-animate-in flex flex-col gap-4"
       style={{ animationDelay: "60ms" }}
     >
       <div className="flex flex-col gap-1.5">

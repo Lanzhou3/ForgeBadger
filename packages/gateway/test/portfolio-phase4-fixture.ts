@@ -51,7 +51,7 @@ export function createPortfolioPhase4Fixture(options: PortfolioPhase4FixtureOpti
   const owner = new UserRepository(db).create(options.ownerEmail ?? "portfolio-phase4-owner@example.com", "hash");
   const project = new ProjectRepository(db, owner.id).create({
     name: "Portfolio Phase 4 project",
-    path: "/tmp/openforge-portfolio-phase4",
+    path: "/tmp/forgebadger-portfolio-phase4",
     aiTool: "claude"
   });
   const intake = new PortfolioIntakeService(db, owner.id);

@@ -354,7 +354,7 @@ export function ProjectManagerWorkItemsSection({
       </CardContent>
       {selectedWorkItemCount > 0 && (
         <div
-          className="of-slide-up-toolbar fixed bottom-6 left-1/2 z-40 flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-lg"
+          className="forgebadger-slide-up-toolbar fixed bottom-6 left-1/2 z-40 flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-lg"
           data-testid="project-manager-batch-toolbar"
         >
           <span className="text-sm font-medium">
@@ -558,7 +558,7 @@ function ProjectManagerBoardColumn({
       ref={setNodeRef}
       className={cn(
         "min-h-56 rounded-md border border-border/70 bg-background/40",
-        highlighted && "of-lane-drop-highlight"
+        highlighted && "forgebadger-lane-drop-highlight"
       )}
       data-testid={`project-manager-board-column-${status}`}
     >
@@ -621,7 +621,7 @@ function ProjectManagerBoardCard({
     <article
       ref={setDragNodeRef}
       className={cn(
-        "of-animate-in rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs transition-colors hover:border-border",
+        "forgebadger-animate-in rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs transition-colors hover:border-border",
         highlighted && "border-brand/50 bg-brand/5",
         selected && "ring-2 ring-brand/40",
         isDragging && "opacity-40"

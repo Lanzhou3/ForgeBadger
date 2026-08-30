@@ -76,7 +76,7 @@ describe("team library visibility foundations", () => {
     });
     const project = new ProjectRepository(db, reader.id).create({
       name: "Reader Project",
-      path: "/tmp/openforge-shared-project-skill",
+      path: "/tmp/forgebadger-shared-project-skill",
       aiTool: "claude"
     });
 
@@ -103,7 +103,7 @@ describe("team library visibility foundations", () => {
     });
     const project = new ProjectRepository(db, user.id).create({
       name: "Inherited Project",
-      path: "/tmp/openforge-inherited-project-skill",
+      path: "/tmp/forgebadger-inherited-project-skill",
       aiTool: "claude"
     });
 
@@ -136,12 +136,12 @@ describe("team library visibility foundations", () => {
     });
     const adminProject = new ProjectRepository(db, admin.id).create({
       name: "Admin Project",
-      path: "/tmp/openforge-admin-project-skill",
+      path: "/tmp/forgebadger-admin-project-skill",
       aiTool: "claude"
     });
     const readerProject = new ProjectRepository(db, reader.id).create({
       name: "Reader Project",
-      path: "/tmp/openforge-normal-project-skill",
+      path: "/tmp/forgebadger-normal-project-skill",
       aiTool: "claude"
     });
 

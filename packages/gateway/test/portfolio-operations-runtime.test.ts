@@ -301,7 +301,7 @@ describe("Gateway OperationsRuntime lifecycle", () => {
     });
 
     // Assert
-    assert.deepEqual(validatedPaths, ["/tmp/openforge-portfolio-phase4"]);
+    assert.deepEqual(validatedPaths, ["/tmp/forgebadger-portfolio-phase4"]);
     assert.deepEqual(activated, { activated: 1, skipped: 0 });
     assert.deepEqual(active.repository.getObservationProfile(active.projectId)?.approvedRoot, approvedRoot);
     assert.deepEqual(skipped, { activated: 0, skipped: 1 });
@@ -322,14 +322,14 @@ describe("Gateway OperationsRuntime lifecycle", () => {
       async hasSession() { return false; }
     };
     const gateway = await createGatewayRuntime({
-      OPENFORGE_PORT: 30_000,
-      OPENFORGE_HOST: "127.0.0.1",
-      OPENFORGE_STATE_DIR: "/tmp/openforge-phase5-lifecycle",
-      OPENFORGE_DB_PATH: ":memory:",
-      OPENFORGE_JWT_SECRET: masterKey,
-      OPENFORGE_TMUX_PREFIX: "of-",
-      OPENFORGE_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: false,
-      OPENFORGE_MASTER_KEY: masterKey
+      FORGEBADGER_PORT: 30_000,
+      FORGEBADGER_HOST: "127.0.0.1",
+      FORGEBADGER_STATE_DIR: "/tmp/forgebadger-phase5-lifecycle",
+      FORGEBADGER_DB_PATH: ":memory:",
+      FORGEBADGER_JWT_SECRET: masterKey,
+      FORGEBADGER_TMUX_PREFIX: "of-",
+      FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: false,
+      FORGEBADGER_MASTER_KEY: masterKey
     }, {
       tmuxClient,
       operationsRuntimeFactory: (dependencies) => {

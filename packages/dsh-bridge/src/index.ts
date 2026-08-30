@@ -1,9 +1,9 @@
 /**
- * @openforge/dsh-bridge package root: consumer interface re-exports.
+ * @forgebadger/dsh-bridge package root: consumer interface re-exports.
  *
- * - `./plugin` — the openforge-bridge Cordis plugin (platform tools)
+ * - `./plugin` — the forgebadger-bridge Cordis plugin (platform tools)
  * - `./server` — the resume-aware SDK JSON-RPC server plugin
- * - launcher — bin only (`openforge-dsh-bridge`), not a library import
+ * - launcher — bin only (`forgebadger-dsh-bridge`), not a library import
  *
  * @module
  */

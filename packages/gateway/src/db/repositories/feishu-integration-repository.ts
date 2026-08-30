@@ -72,7 +72,7 @@ export interface FeishuUserMapping {
   id: string;
   userId: string;
   feishuUserId: string;
-  openforgeUserId: string;
+  forgebadgerUserId: string;
   displayName: string | null;
   createdAt: number;
   updatedAt: number;
@@ -80,7 +80,7 @@ export interface FeishuUserMapping {
 
 export interface ReplaceFeishuUserMappingInput {
   feishuUserId: string;
-  openforgeUserId: string;
+  forgebadgerUserId: string;
   displayName?: string | null | undefined;
 }
 
@@ -107,7 +107,7 @@ interface FeishuUserMappingRow {
   id: string;
   user_id: string;
   feishu_user_id: string;
-  openforge_user_id: string;
+  forgebadger_user_id: string;
   display_name: string | null;
   created_at: number;
   updated_at: number;
@@ -118,7 +118,7 @@ const defaultConfig: FeishuIntegrationConfig = {
   emergencyDisabled: false,
   identityMode: "unknown",
   allowedChatIds: [],
-  commandPrefix: "/openforge",
+  commandPrefix: "/forgebadger",
   publicWebhookId: null,
   publicWebhookEnabled: false,
   webhookConfiguredAt: null
@@ -385,7 +385,7 @@ export class FeishuIntegrationRepository {
 
       const insert = this.db.prepare(`
         INSERT INTO integration_feishu_user_mappings (
-          id, user_id, feishu_user_id, openforge_user_id, display_name, created_at, updated_at
+          id, user_id, feishu_user_id, forgebadger_user_id, display_name, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
       for (const mapping of mappings) {
@@ -393,7 +393,7 @@ export class FeishuIntegrationRepository {
           randomUUID(),
           this.userId,
           mapping.feishuUserId,
-          mapping.openforgeUserId,
+          mapping.forgebadgerUserId,
           mapping.displayName ?? null,
           now,
           now
@@ -448,7 +448,7 @@ function toUserMapping(row: FeishuUserMappingRow): FeishuUserMapping {
     id: row.id,
     userId: row.user_id,
     feishuUserId: row.feishu_user_id,
-    openforgeUserId: row.openforge_user_id,
+    forgebadgerUserId: row.forgebadger_user_id,
     displayName: row.display_name,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -484,16 +484,16 @@ function normalizeUserMappings(input: ReplaceFeishuUserMappingInput[]): ReplaceF
   const byFeishuUserId = new Map<string, ReplaceFeishuUserMappingInput>();
   for (const mapping of input) {
     const feishuUserId = mapping.feishuUserId.trim();
-    const openforgeUserId = mapping.openforgeUserId.trim();
-    if (!feishuUserId || !openforgeUserId) {
-      throw new Error("Feishu user mappings require Feishu and OpenForge user ids");
+    const forgebadgerUserId = mapping.forgebadgerUserId.trim();
+    if (!feishuUserId || !forgebadgerUserId) {
+      throw new Error("Feishu user mappings require Feishu and ForgeBadger user ids");
     }
-    if (feishuUserId.length > 128 || openforgeUserId.length > 128) {
+    if (feishuUserId.length > 128 || forgebadgerUserId.length > 128) {
       throw new Error("Feishu user mapping ids must be 128 characters or fewer");
     }
     byFeishuUserId.set(feishuUserId, {
       feishuUserId,
-      openforgeUserId,
+      forgebadgerUserId,
       displayName: emptyToNull(mapping.displayName)
     });
   }

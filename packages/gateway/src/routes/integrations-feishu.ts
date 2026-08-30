@@ -42,7 +42,7 @@ const feishuAccountSchema = z.object({
 const feishuUserMappingsSchema = z.object({
   mappings: z.array(z.object({
     feishuUserId: z.string().trim().min(1).max(128),
-    openforgeUserId: z.string().trim().min(1).max(128),
+    forgebadgerUserId: z.string().trim().min(1).max(128),
     displayName: z.string().trim().min(1).max(128).nullable().optional()
   }).strict()).max(100)
 }).strict();
@@ -333,7 +333,7 @@ function consumePublicReplayAndRate(
     && repository.consumePublicWebhookReplayKey({ userId: config.userId, publicWebhookId: config.publicWebhookId, replayKey: `nonce:${signature.timestamp}:${signature.nonce}:${signature.signature}`, ttlMs: publicWebhookReplayTtlMs })
     && repository.consumePublicWebhookRateWindow({ userId: config.userId, publicWebhookId: config.publicWebhookId, scope: "integration", scopeId: config.publicWebhookId, max: limit.max, windowMs: limit.windowMs })
     && repository.consumePublicWebhookRateWindow({ userId: config.userId, publicWebhookId: config.publicWebhookId, scope: "chat", scopeId: event.chatId, max: limit.max, windowMs: limit.windowMs })
-    && repository.consumePublicWebhookRateWindow({ userId: config.userId, publicWebhookId: config.publicWebhookId, scope: "user", scopeId: mapping.openforgeUserId, max: limit.max, windowMs: limit.windowMs });
+    && repository.consumePublicWebhookRateWindow({ userId: config.userId, publicWebhookId: config.publicWebhookId, scope: "user", scopeId: mapping.forgebadgerUserId, max: limit.max, windowMs: limit.windowMs });
 }
 
 function ensurePortfolioHandler(registry: PortfolioFeishuRegistryRepository, userId: string, providerAccountId: string): void {
@@ -356,7 +356,7 @@ function authorizePublicWebhookActor(
   }
   const mapping = repository.listUserMappings()
     .find((candidate) => candidate.feishuUserId === event.feishuUserId);
-  return mapping?.openforgeUserId === config.userId ? mapping : undefined;
+  return mapping?.forgebadgerUserId === config.userId ? mapping : undefined;
 }
 
 function isFeishuUrlVerification(body: unknown): boolean { return isRecord(body) && body.type === "url_verification"; }
@@ -450,6 +450,6 @@ function repoFor(db: Database, req: unknown): FeishuIntegrationRepository { retu
 function requireDb(db: Database | undefined, res: Response): Database | undefined { if (db) return db; res.status(503).json({ code: 1, message: "Feishu integration persistence is unavailable" }); return undefined; }
 function unavailable(res: Response): void { res.status(503).json({ code: 1, message: "Feishu credential encryption is unavailable" }); }
 function invalid(res: Response, message: string): void { res.status(400).json({ code: 1, message }); }
-function toMappingPayload(mapping: FeishuUserMapping) { return { id: mapping.id, feishuUserId: mapping.feishuUserId, openforgeUserId: mapping.openforgeUserId, displayName: mapping.displayName, createdAt: new Date(mapping.createdAt).toISOString(), updatedAt: new Date(mapping.updatedAt).toISOString() }; }
+function toMappingPayload(mapping: FeishuUserMapping) { return { id: mapping.id, feishuUserId: mapping.feishuUserId, forgebadgerUserId: mapping.forgebadgerUserId, displayName: mapping.displayName, createdAt: new Date(mapping.createdAt).toISOString(), updatedAt: new Date(mapping.updatedAt).toISOString() }; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function firstString(...values: unknown[]): string | undefined { return values.find((value): value is string => typeof value === "string" && value.trim().length > 0); }

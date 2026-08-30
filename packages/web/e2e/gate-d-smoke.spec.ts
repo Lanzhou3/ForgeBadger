@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.localStorage.setItem("openforge-language", "en");
+    window.localStorage.setItem("forgebadger-language", "en");
   });
 });
 
@@ -11,7 +11,7 @@ test("complete MVP-0 user journey", async ({ page }) => {
   const email = `test-${suffix}@example.com`;
   const password = "password12345";
   const projectName = `Test Project ${suffix}`;
-  const projectPath = `/tmp/openforge-gate-d-${suffix}`;
+  const projectPath = `/tmp/forgebadger-gate-d-${suffix}`;
 
   // 1. Visit register page
   await page.goto("/register");

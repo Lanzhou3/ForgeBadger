@@ -30,11 +30,11 @@ const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 const bridgeToken = "dispatch-delivery-it-token-0123456789abcdef";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 // Short read-back budget: the unchanged composer must fail fast.
-process.env.OPENFORGE_DISPATCH_CONFIRM_TIMEOUT_MS = "3000";
-process.env.OPENFORGE_DISPATCH_CONFIRM_INTERVAL_MS = "200";
+process.env.FORGEBADGER_DISPATCH_CONFIRM_TIMEOUT_MS = "3000";
+process.env.FORGEBADGER_DISPATCH_CONFIRM_INTERVAL_MS = "200";
 
 describe("dispatch delivery confirmation (real tmux)", { skip: !runTmuxTests }, () => {
   let app: GatewayApp;
@@ -72,7 +72,7 @@ describe("dispatch delivery confirmation (real tmux)", { skip: !runTmuxTests }, 
       method: "POST",
       headers: {
         authorization: `Bearer ${bridgeToken}`,
-        "x-openforge-user-id": userId,
+        "x-forgebadger-user-id": userId,
         "content-type": "application/json"
       },
       body: JSON.stringify({ message })
@@ -105,7 +105,7 @@ describe("dispatch delivery confirmation (real tmux)", { skip: !runTmuxTests }, 
     baseUrl = `http://127.0.0.1:${address.port}`;
 
     userId = new UserRepository(db).create("dispatch-delivery@example.com", "hash").id;
-    fakeCliRoot = mkdtempSync(path.join(tmpdir(), "openforge-dispatch-cli-"));
+    fakeCliRoot = mkdtempSync(path.join(tmpdir(), "forgebadger-dispatch-cli-"));
     const consumingCommand = writeFakeClaude(fakeCliRoot, "consume", true);
     const stuckCommand = writeFakeClaude(fakeCliRoot, "stuck", false);
     const projectId = new ProjectRepository(db, userId).create({

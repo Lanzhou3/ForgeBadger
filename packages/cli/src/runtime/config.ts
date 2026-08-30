@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { chmod, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -30,12 +31,16 @@ export interface LoadRuntimeConfigOptions {
   gatewayPort?: number;
   webPort?: number;
   host?: string;
+  env?: NodeJS.ProcessEnv;
+  homeDir?: string;
 }
 
 export async function loadOrCreateRuntimeConfig(
   options: LoadRuntimeConfigOptions = {}
 ): Promise<RuntimeConfig> {
-  const stateDir = resolveStateDir(options.stateDir);
+  const env = options.env ?? process.env;
+  const homeDir = options.homeDir ?? homedir();
+  const stateDir = resolveStateDir(options.stateDir, homeDir, env);
   const configPath = path.join(stateDir, "config.json");
 
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
@@ -44,13 +49,13 @@ export async function loadOrCreateRuntimeConfig(
   if (await isExistingConfigFile(configPath)) {
     await chmod(configPath, 0o600).catch(() => undefined);
     const config = runtimeConfigSchema.parse(await readRuntimeConfigJson(configPath));
-    return applyRuntimeOverrides(config, options);
+    return applyRuntimeOverrides(config, options, env, homeDir);
   }
 
   const config: RuntimeConfig = {
     version: 1,
     stateDir,
-    dbPath: path.join(stateDir, "openforge.db"),
+    dbPath: resolveDefaultDbPath(stateDir),
     gateway: { host: "127.0.0.1", port: 48731 },
     web: { host: "127.0.0.1", port: 48732 },
     secrets: {
@@ -62,12 +67,31 @@ export async function loadOrCreateRuntimeConfig(
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, { flag: "wx", mode: 0o600 });
   await chmod(configPath, 0o600).catch(() => undefined);
 
-  return applyRuntimeOverrides(config, options);
+  return applyRuntimeOverrides(config, options, env, homeDir);
 }
 
-export function resolveStateDir(stateDir: string | undefined, homeDir = homedir()): string {
-  const configuredStateDir = stateDir ?? process.env.OPENFORGE_STATE_DIR ?? path.join(homeDir, ".openforge");
+export function resolveStateDir(
+  stateDir: string | undefined,
+  homeDir = homedir(),
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const configuredStateDir =
+    stateDir ??
+    env.FORGEBADGER_STATE_DIR ??
+    env.OPENFORGE_STATE_DIR ??
+    chooseDefaultStateDir(homeDir);
   return path.resolve(expandHomeDir(configuredStateDir, homeDir));
+}
+
+function chooseDefaultStateDir(homeDir: string): string {
+  const currentDir = path.join(homeDir, ".forgebadger");
+  const legacyDir = path.join(homeDir, ".openforge");
+  return !existsSync(currentDir) && existsSync(legacyDir) ? legacyDir : currentDir;
+}
+
+function resolveDefaultDbPath(stateDir: string): string {
+  const legacyDbPath = path.join(stateDir, "openforge.db");
+  return existsSync(legacyDbPath) ? legacyDbPath : path.join(stateDir, "forgebadger.db");
 }
 
 function expandHomeDir(filePath: string, homeDir: string): string {
@@ -109,20 +133,49 @@ async function readRuntimeConfigJson(configPath: string): Promise<unknown> {
   try {
     return JSON.parse(content);
   } catch (error) {
-    throw new Error(`Invalid OpenForge runtime config JSON: ${configPath}`, { cause: error });
+    throw new Error(`Invalid ForgeBadger runtime config JSON: ${configPath}`, { cause: error });
   }
 }
 
-function applyRuntimeOverrides(config: RuntimeConfig, options: LoadRuntimeConfigOptions): RuntimeConfig {
+function applyRuntimeOverrides(
+  config: RuntimeConfig,
+  options: LoadRuntimeConfigOptions,
+  env: NodeJS.ProcessEnv,
+  homeDir: string
+): RuntimeConfig {
+  const configuredDbPath = nonEmptyEnv(env.FORGEBADGER_DB_PATH);
   return runtimeConfigSchema.parse({
     ...config,
+    dbPath: configuredDbPath
+      ? path.resolve(expandHomeDir(configuredDbPath, homeDir))
+      : config.dbPath,
     gateway: {
-      host: options.host ?? config.gateway.host,
-      port: options.gatewayPort ?? config.gateway.port
+      host: options.host ?? nonEmptyEnv(env.FORGEBADGER_HOST) ?? config.gateway.host,
+      port: options.gatewayPort ?? parseEnvPort(env.FORGEBADGER_PORT, "FORGEBADGER_PORT") ?? config.gateway.port
     },
     web: {
-      host: options.host ?? config.web.host,
-      port: options.webPort ?? config.web.port
+      host: options.host ?? nonEmptyEnv(env.FORGEBADGER_WEB_HOST) ?? config.web.host,
+      port: options.webPort ?? parseEnvPort(env.FORGEBADGER_WEB_PORT, "FORGEBADGER_WEB_PORT") ?? config.web.port
     }
   });
+}
+
+function nonEmptyEnv(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+function parseEnvPort(value: string | undefined, variableName: string): number | undefined {
+  const normalized = nonEmptyEnv(value);
+  if (normalized === undefined) {
+    return undefined;
+  }
+  if (!/^\d+$/.test(normalized)) {
+    throw new Error(`${variableName} must be an integer between 1 and 65535`);
+  }
+  const port = Number(normalized);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${variableName} must be an integer between 1 and 65535`);
+  }
+  return port;
 }

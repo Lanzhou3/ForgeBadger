@@ -16,8 +16,8 @@ import { UserRepository } from "../src/db/repositories/user-repository.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 
-process.env.OPENFORGE_JWT_SECRET = secret;
-process.env.OPENFORGE_MASTER_KEY = "abcdef0123456789abcdef0123456789";
+process.env.FORGEBADGER_JWT_SECRET = secret;
+process.env.FORGEBADGER_MASTER_KEY = "abcdef0123456789abcdef0123456789";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -135,8 +135,10 @@ describe("auth routes", () => {
     db = createTestDb();
     userRepo = new UserRepository(db);
     app = express();
+    app.locals.db = db;
+    app.locals.jwtSecret = secret;
     app.use(express.json());
-    app.use("/api/v1/auth", createAuthRouter(userRepo, secret));
+    app.use("/api/v1/auth", createAuthRouter(userRepo, secret, { db }));
   });
 
   describe("POST /register", () => {
@@ -276,14 +278,57 @@ describe("auth routes", () => {
       assert.match(res.body.message, /disabled/i);
     });
   });
+
+  describe("legacy cookie cleanup", () => {
+    it("clears both ForgeBadger and legacy OpenForge cookies on logout", async () => {
+      const registered = await makeRequest(app, "POST", "/api/v1/auth/register", {
+        email: "logout-cookies@example.com",
+        password: "password123"
+      });
+      const token = registered.body.data.token as string;
+
+      const response = await makeRequest(
+        app,
+        "POST",
+        "/api/v1/auth/logout",
+        undefined,
+        { cookie: `forgebadger_session=${token}; openforge_session=${token}` }
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.setCookie.some((value) => value.startsWith("forgebadger_session=")), true);
+      assert.equal(response.setCookie.some((value) => value.startsWith("openforge_session=")), true);
+    });
+
+    it("clears both ForgeBadger and legacy OpenForge cookies after changing password", async () => {
+      const registered = await makeRequest(app, "POST", "/api/v1/auth/register", {
+        email: "password-cookies@example.com",
+        password: "password123"
+      });
+      const token = registered.body.data.token as string;
+
+      const response = await makeRequest(
+        app,
+        "POST",
+        "/api/v1/auth/change-password",
+        { currentPassword: "password123", newPassword: "new-password-123" },
+        { cookie: `forgebadger_session=${token}; openforge_session=${token}` }
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.setCookie.some((value) => value.startsWith("forgebadger_session=")), true);
+      assert.equal(response.setCookie.some((value) => value.startsWith("openforge_session=")), true);
+    });
+  });
 });
 
 async function makeRequest(
   app: express.Express,
   method: string,
   path: string,
-  body?: unknown
-): Promise<{ status: number; body: any }> {
+  body?: unknown,
+  headers: Record<string, string> = {}
+): Promise<{ status: number; body: any; setCookie: string[] }> {
   return new Promise((resolve, reject) => {
     const server = app.listen(0, "127.0.0.1", () => {
       const { port } = server.address() as { port: number };
@@ -296,6 +341,7 @@ async function makeRequest(
           method,
           headers: {
             "Content-Type": "application/json",
+            ...headers,
             ...(payload ? { "Content-Length": Buffer.byteLength(payload) } : {})
           }
         },
@@ -308,7 +354,8 @@ async function makeRequest(
             server.close();
             resolve({
               status: res.statusCode || 0,
-              body: data ? JSON.parse(data) : undefined
+              body: data ? JSON.parse(data) : undefined,
+              setCookie: res.headers["set-cookie"] ?? []
             });
           });
         }

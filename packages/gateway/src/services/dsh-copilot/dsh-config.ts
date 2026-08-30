@@ -5,7 +5,7 @@
  * - `DSH_AVAILABLE_PLUGINS` is the whitelist the PUT API validates against and
  *   the template's feature markers reference.
  * - `renderCordisConfig` is a pure function over the packaged template: blocks
- *   wrapped in `# @openforge-feature: <id>` / `# @openforge-feature-end: <id>`
+ *   wrapped in `# @forgebadger-feature: <id>` / `# @forgebadger-feature-end: <id>`
  *   comment markers are dropped when the feature is off. Markers are YAML
  *   comments, so the packaged template stays valid for the default (all-on)
  *   composition used by the M1-M3 spikes.
@@ -44,8 +44,8 @@ export const DSH_DEFAULT_PLUGINS: Readonly<Record<DshPluginId, boolean>> = Objec
   subagents: true
 });
 
-const FEATURE_BEGIN = /^# @openforge-feature: ([a-z-]+)\s*$/;
-const FEATURE_END = /^# @openforge-feature-end: ([a-z-]+)\s*$/;
+const FEATURE_BEGIN = /^# @forgebadger-feature: ([a-z-]+)\s*$/;
+const FEATURE_END = /^# @forgebadger-feature-end: ([a-z-]+)\s*$/;
 
 /** Effective plugin map: stored overrides on top of defaults. */
 export function effectivePlugins(stored: Record<string, boolean> | undefined): Record<DshPluginId, boolean> {
@@ -74,24 +74,24 @@ export function renderCordisConfig(template: string, plugins: Record<DshPluginId
   for (const line of template.split("\n")) {
     const begin = FEATURE_BEGIN.exec(line);
     if (begin) {
-      if (skipping !== null) throw new Error(`nested @openforge-feature marker: ${begin[1]} inside ${skipping}`);
-      if (!(begin[1]! in DSH_DEFAULT_PLUGINS)) throw new Error(`unknown @openforge-feature marker: ${begin[1]}`);
+      if (skipping !== null) throw new Error(`nested @forgebadger-feature marker: ${begin[1]} inside ${skipping}`);
+      if (!(begin[1]! in DSH_DEFAULT_PLUGINS)) throw new Error(`unknown @forgebadger-feature marker: ${begin[1]}`);
       if (plugins[begin[1] as DshPluginId] === false) skipping = begin[1]!;
       continue;
     }
     const end = FEATURE_END.exec(line);
     if (end) {
       if (skipping === null) {
-        if (!(end[1]! in DSH_DEFAULT_PLUGINS)) throw new Error(`unknown @openforge-feature-end marker: ${end[1]}`);
+        if (!(end[1]! in DSH_DEFAULT_PLUGINS)) throw new Error(`unknown @forgebadger-feature-end marker: ${end[1]}`);
         continue; // enabled feature: drop only the marker line itself
       }
-      if (skipping !== end[1]) throw new Error(`mismatched @openforge-feature-end: ${end[1]} (open: ${skipping})`);
+      if (skipping !== end[1]) throw new Error(`mismatched @forgebadger-feature-end: ${end[1]} (open: ${skipping})`);
       skipping = null;
       continue;
     }
     if (skipping === null) out.push(line);
   }
-  if (skipping !== null) throw new Error(`unclosed @openforge-feature marker: ${skipping}`);
+  if (skipping !== null) throw new Error(`unclosed @forgebadger-feature marker: ${skipping}`);
   return out.join("\n");
 }
 

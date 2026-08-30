@@ -3,10 +3,14 @@ import { describe, it } from "node:test";
 
 import {
   auditTrialFeedbackIssue,
+  DEFAULT_REPOSITORY,
   parseTrialFeedbackIssueAuditCliArgs
 } from "./audit-trial-feedback-issue.mjs";
 
 describe("trial feedback GitHub issue audit", () => {
+  it("keeps the existing GitHub remote as the default repository", () => {
+    assert.equal(DEFAULT_REPOSITORY, "Lanzhou3/OpenForge");
+  });
   it("audits a completed GitHub issue form body as ready for human triage only", async () => {
     const result = await auditTrialFeedbackIssue({
       issueNumber: 42,
@@ -153,7 +157,7 @@ source fallback
 
 ### Environment
 
-OpenForge version or commit: abc1234
+ForgeBadger version or commit: abc1234
 OS: linux x64 6.8.0
 Shell: /bin/zsh
 Browser: Chromium 125
@@ -161,7 +165,7 @@ node --version: v24.14.1
 tmux -V: tmux 3.4
 claude --version: 2.1.152
 
-### openforge doctor summary
+### forgebadger doctor summary
 
 terminal native_tmux
 
@@ -244,6 +248,6 @@ Actual: Trial completed with caveat: no physical Windows/WSL host was available.
 ### Safety confirmation
 
 - [x] I reviewed this issue and attachments for secrets before submitting.
-- [x] Any API keys, passwords, JWTs, attach tokens, private keys, project secrets, and \`openforge.token\` values have been removed.
+- [x] Any API keys, passwords, JWTs, attach tokens, private keys, project secrets, and \`forgebadger.token\` values have been removed.
 `;
 }

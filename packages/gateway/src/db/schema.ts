@@ -728,7 +728,7 @@ export const integrationFeishuConfigs = sqliteTable(
     emergencyDisabled: integer("emergency_disabled", { mode: "boolean" }).notNull().default(false),
     identityMode: text("identity_mode").notNull().default("unknown"),
     allowedChatIds: text("allowed_chat_ids").notNull().default("[]"),
-    commandPrefix: text("command_prefix").notNull().default("/openforge"),
+    commandPrefix: text("command_prefix").notNull().default("/forgebadger"),
     appId: text("app_id"),
     appSecretEncrypted: text("app_secret_encrypted"),
     publicWebhookId: text("public_webhook_id"),
@@ -753,7 +753,7 @@ export const integrationFeishuUserMappings = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     feishuUserId: text("feishu_user_id").notNull(),
-    openforgeUserId: text("openforge_user_id")
+    forgebadgerUserId: text("forgebadger_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     displayName: text("display_name"),
@@ -765,9 +765,9 @@ export const integrationFeishuUserMappings = sqliteTable(
       table.userId,
       table.feishuUserId
     ),
-    idx_integration_feishu_user_mappings_openforge_user: index("idx_integration_feishu_user_mappings_openforge_user").on(
+    idx_integration_feishu_user_mappings_forgebadger_user: index("idx_integration_feishu_user_mappings_forgebadger_user").on(
       table.userId,
-      table.openforgeUserId
+      table.forgebadgerUserId
     )
   })
 );

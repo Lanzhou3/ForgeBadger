@@ -109,8 +109,8 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
   const cleanupShutdown = installShutdown(children) ?? noop;
 
   try {
-    stdout.write(`OpenForge Web Console: ${webUrl}\n`);
-    stdout.write(`OpenForge Gateway: ${gatewayUrl}\n`);
+    stdout.write(`ForgeBadger Web Console: ${webUrl}\n`);
+    stdout.write(`ForgeBadger Gateway: ${gatewayUrl}\n`);
     if (options.openBrowser) {
       stdout.write("--open is not supported yet; open the URL manually.\n");
     }
@@ -119,7 +119,7 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
     terminateSiblings(children, result.child);
 
     if (result.type === "error") {
-      throw result.error ?? new Error("OpenForge child process failed to spawn");
+      throw result.error ?? new Error("ForgeBadger child process failed to spawn");
     }
 
     return result.code ?? 1;
@@ -141,7 +141,7 @@ async function warnIfTerminalRuntimeUnsupported(options: {
     return;
   }
   options.stderr.write(
-    `Terminal warning: ${terminalRuntime.message} Run \`openforge doctor\` for dependency details.\n`
+    `Terminal warning: ${terminalRuntime.message} Run \`forgebadger doctor\` for dependency details.\n`
   );
 }
 
@@ -159,19 +159,25 @@ function toRuntimeConfigOptions(options: RunStartOptions): LoadRuntimeConfigOpti
   if (options.host !== undefined) {
     runtimeOptions.host = options.host;
   }
+  if (options.env !== undefined) {
+    runtimeOptions.env = options.env;
+  }
+  if (options.homeDir !== undefined) {
+    runtimeOptions.homeDir = options.homeDir;
+  }
   return runtimeOptions;
 }
 
 function buildGatewayEnv(config: RuntimeConfig, gatewayUrl: string): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    OPENFORGE_HOST: config.gateway.host,
-    OPENFORGE_PORT: String(config.gateway.port),
-    OPENFORGE_STATE_DIR: config.stateDir,
-    OPENFORGE_DB_PATH: config.dbPath,
-    OPENFORGE_MASTER_KEY: config.secrets.masterKey,
-    OPENFORGE_JWT_SECRET: config.secrets.jwtSecret,
-    OPENFORGE_GATEWAY_URL: gatewayUrl
+    FORGEBADGER_HOST: config.gateway.host,
+    FORGEBADGER_PORT: String(config.gateway.port),
+    FORGEBADGER_STATE_DIR: config.stateDir,
+    FORGEBADGER_DB_PATH: config.dbPath,
+    FORGEBADGER_MASTER_KEY: config.secrets.masterKey,
+    FORGEBADGER_JWT_SECRET: config.secrets.jwtSecret,
+    FORGEBADGER_GATEWAY_URL: gatewayUrl
   };
 }
 
@@ -188,7 +194,7 @@ function buildWebEnv(config: RuntimeConfig, gatewayUrl: string): NodeJS.ProcessE
     ...env,
     HOSTNAME: config.web.host,
     PORT: String(config.web.port),
-    OPENFORGE_GATEWAY_URL: gatewayUrl
+    FORGEBADGER_GATEWAY_URL: gatewayUrl
   };
 }
 

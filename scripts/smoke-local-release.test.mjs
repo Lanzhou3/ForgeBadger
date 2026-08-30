@@ -11,22 +11,22 @@ import {
 describe("local release smoke harness", () => {
   it("builds deterministic loopback environment without exposing secrets in reports", () => {
     const env = buildSmokeEnvironment({
-      root: "/tmp/openforge-smoke",
+      root: "/tmp/forgebadger-smoke",
       masterKey: "a".repeat(64),
       jwtSecret: "test-jwt-secret-with-enough-length"
     });
 
-    assert.equal(env.OPENFORGE_HOST, "127.0.0.1");
-    assert.equal(env.OPENFORGE_PORT, "48731");
-    assert.equal(env.OPENFORGE_WEB_PORT, "48732");
-    assert.equal(env.OPENFORGE_GATEWAY_URL, "http://127.0.0.1:48731");
+    assert.equal(env.FORGEBADGER_HOST, "127.0.0.1");
+    assert.equal(env.FORGEBADGER_PORT, "48731");
+    assert.equal(env.FORGEBADGER_WEB_PORT, "48732");
+    assert.equal(env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
     assert.equal(env.NEXT_PUBLIC_GATEWAY_URL, "http://127.0.0.1:48731");
-    assert.equal(env.OPENFORGE_DB_PATH, "/tmp/openforge-smoke/openforge-smoke.db");
+    assert.equal(env.FORGEBADGER_DB_PATH, "/tmp/forgebadger-smoke/forgebadger-smoke.db");
 
     assert.deepEqual(redactSmokeEnvironment(env), {
       ...env,
-      OPENFORGE_MASTER_KEY: "[redacted]",
-      OPENFORGE_JWT_SECRET: "[redacted]"
+      FORGEBADGER_MASTER_KEY: "[redacted]",
+      FORGEBADGER_JWT_SECRET: "[redacted]"
     });
   });
 
@@ -44,15 +44,15 @@ describe("local release smoke harness", () => {
 
   it("emits command plan with redacted env and detailed manual evidence", () => {
     const plan = buildSmokeCommandPlan(buildSmokeEnvironment({
-      root: "/tmp/openforge-smoke",
+      root: "/tmp/forgebadger-smoke",
       masterKey: "b".repeat(64),
       jwtSecret: "another-test-jwt-secret-with-enough-length"
     }));
 
     assert.equal(plan.gateway, "pnpm --dir packages/gateway dev");
     assert.equal(plan.web, "pnpm --dir packages/web dev");
-    assert.equal(plan.environment.OPENFORGE_MASTER_KEY, "[redacted]");
-    assert.equal(plan.environment.OPENFORGE_JWT_SECRET, "[redacted]");
+    assert.equal(plan.environment.FORGEBADGER_MASTER_KEY, "[redacted]");
+    assert.equal(plan.environment.FORGEBADGER_JWT_SECRET, "[redacted]");
     assert.deepEqual(plan.manualEvidence, requiredManualSmokeEvidence());
   });
 });

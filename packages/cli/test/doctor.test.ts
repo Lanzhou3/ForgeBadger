@@ -32,7 +32,8 @@ describe("checkCliDependencies", () => {
       { command: "tmux", args: ["-V"] },
       { command: "claude", args: ["--version"] },
       { command: "opencode", args: ["--version"] },
-      { command: "codex", args: ["--version"] }
+      { command: "codex", args: ["--version"] },
+      { command: "kimi", args: ["--version"] }
     ]);
     assert.deepEqual(
       result.map((item) => ({
@@ -46,7 +47,8 @@ describe("checkCliDependencies", () => {
         { name: "tmux", available: true, required: true, version: "tmux 3.4", error: undefined },
         { name: "claude", available: false, required: false, version: undefined, error: "not found" },
         { name: "opencode", available: false, required: false, version: undefined, error: "not found" },
-        { name: "codex", available: false, required: false, version: undefined, error: "not found" }
+        { name: "codex", available: false, required: false, version: undefined, error: "not found" },
+        { name: "kimi", available: false, required: false, version: undefined, error: "not found" }
       ]
     );
   });
@@ -62,7 +64,7 @@ describe("describeCliTerminalRuntime", () => {
       persistence: "tmux",
       mode: "wsl_required",
       supported: false,
-      message: "Native Windows terminals require WSL because OpenForge persists sessions with tmux."
+      message: "Native Windows terminals require WSL because ForgeBadger persists sessions with tmux."
     });
   });
 
@@ -163,7 +165,7 @@ describe("runDoctor", () => {
     const stderr = createMemoryWriter();
 
     const code = await runDoctor({
-      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       dependencyRunner: async (command) => {
         if (command === "tmux") {
           return { exitCode: 0, stdout: "tmux 3.4\n", stderr: "" };
@@ -178,7 +180,7 @@ describe("runDoctor", () => {
     });
 
     assert.equal(code, 0);
-    assert.match(stdout.text, /OpenForge state: \/tmp\/openforge-state\n/);
+    assert.match(stdout.text, /ForgeBadger state: \/tmp\/forgebadger-state\n/);
     assert.match(stdout.text, /ok tmux tmux 3\.4\n/);
     assert.match(stdout.text, /ok claude claude 1\.2\.3\n/);
     assert.match(stdout.text, /optional-missing opencode - not found\n/);
@@ -191,7 +193,7 @@ describe("runDoctor", () => {
     const stderr = createMemoryWriter();
 
     const code = await runDoctor({
-      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       dependencyRunner: async (command) => ({
         exitCode: command === "tmux" ? 127 : 0,
         stdout: command === "tmux" ? "" : `${command} ok\n`,
@@ -212,7 +214,7 @@ describe("runDoctor", () => {
     const stderr = createMemoryWriter();
 
     const code = await runDoctor({
-      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       dependencyRunner: async (command) => ({
         exitCode: 0,
         stdout: `${command} ok\n`,
@@ -241,9 +243,9 @@ describe("runCli", () => {
 
 describe("isMainModule", () => {
   it("treats a symlinked npm bin path as the main module", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "openforge-main-"));
+    const tempDir = await mkdtemp(path.join(tmpdir(), "forgebadger-main-"));
     const targetPath = path.join(tempDir, "index.js");
-    const binPath = path.join(tempDir, "openforge");
+    const binPath = path.join(tempDir, "forgebadger");
     await writeFile(targetPath, "", "utf8");
     await symlink(targetPath, binPath);
 
@@ -255,7 +257,7 @@ function createRuntimeConfig(stateDir: string): RuntimeConfig {
   return {
     version: 1,
     stateDir,
-    dbPath: `${stateDir}/openforge.db`,
+    dbPath: `${stateDir}/forgebadger.db`,
     gateway: { host: "127.0.0.1", port: 48731 },
     web: { host: "127.0.0.1", port: 48732 },
     secrets: {

@@ -17,7 +17,7 @@ const TERMINAL_HEARTBEAT_INTERVAL_MS = 30_000;
 const TERMINAL_HEARTBEAT_TIMEOUT_MS = 90_000;
 const DEFAULT_TERMINAL_WS_MAX_CONNECTIONS = 100;
 const DEFAULT_TERMINAL_WS_MAX_CONNECTIONS_PER_USER = 5;
-const TERMINAL_WS_AUTH_PROTOCOL = "openforge-terminal";
+const TERMINAL_WS_AUTH_PROTOCOLS = ["forgebadger-terminal", "openforge-terminal"] as const;
 
 export type TerminalMessage =
   | { type: "terminal_input"; payload: { data: string } }
@@ -203,7 +203,7 @@ export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void
       return;
     }
 
-    const authToken = extractWsAuthToken(request.headers, TERMINAL_WS_AUTH_PROTOCOL);
+    const authToken = extractWsAuthToken(request.headers, TERMINAL_WS_AUTH_PROTOCOLS);
     if (!authToken) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
@@ -223,7 +223,7 @@ export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void
       return;
     }
 
-    const attachToken = extractWsAttachToken(request.headers, TERMINAL_WS_AUTH_PROTOCOL) ?? "";
+    const attachToken = extractWsAttachToken(request.headers, TERMINAL_WS_AUTH_PROTOCOLS) ?? "";
     const terminalAccessRequest: TerminalAccessRequest = {
       authTokenUserId: userId,
       attachToken

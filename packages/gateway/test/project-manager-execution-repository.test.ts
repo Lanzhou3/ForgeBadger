@@ -35,7 +35,7 @@ describe("ProjectManagerExecutionRepository", () => {
     other = users.create("execution-other@example.com", "hash");
     projectId = new ProjectRepository(db, owner.id).create({
       name: "Execution project",
-      path: "/tmp/openforge-execution",
+      path: "/tmp/forgebadger-execution",
       aiTool: "claude"
     }).id;
     workItemId = new ProjectManagerRepository(db, owner.id).createWorkItem(projectId, {
@@ -45,7 +45,7 @@ describe("ProjectManagerExecutionRepository", () => {
       projectId,
       name: "Execution worker",
       aiTool: "claude",
-      workingDir: "/tmp/openforge-execution"
+      workingDir: "/tmp/forgebadger-execution"
     }).id;
   });
 
@@ -228,7 +228,7 @@ describe("ProjectManagerExecutionRepository", () => {
       projectId,
       name: "Competing worker",
       aiTool: "claude",
-      workingDir: "/tmp/openforge-execution"
+      workingDir: "/tmp/forgebadger-execution"
     });
     assert.throws(
       () => repo.createAssignment({

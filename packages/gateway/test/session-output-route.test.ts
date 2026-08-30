@@ -182,7 +182,7 @@ describe("session output route", () => {
   function createDbSession(auth: AuthContext): string {
     const project = new ProjectRepository(db, auth.userId).create({
       name: "Output Project",
-      path: "/tmp/openforge-session-output",
+      path: "/tmp/forgebadger-session-output",
       aiTool: "claude"
     });
     const session = new SessionRepository(db, auth.userId).create({
@@ -211,7 +211,7 @@ function minimalLaunchPlan(): LaunchPlan {
     command: "bash",
     args: [],
     cwd: "/tmp",
-    env: { OPENFORGE_SESSION_ID: "session-output-test" },
+    env: { FORGEBADGER_SESSION_ID: "session-output-test" },
     secretEnvNames: [],
     credentialMode: "host_environment"
   };

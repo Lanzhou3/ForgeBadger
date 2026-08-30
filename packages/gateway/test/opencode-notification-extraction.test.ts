@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { after, before, describe, it } from "node:test";
 
-import { OPENFORGE_OPENCODE_PLUGIN_TEMPLATE } from "../src/services/opencode-notification-settings.js";
+import { FORGEBADGER_OPENCODE_PLUGIN_TEMPLATE } from "../src/services/opencode-notification-settings.js";
 
 interface CapturedRequest {
   url: string;
@@ -18,9 +18,9 @@ interface PluginHandler {
 }
 
 const ENV_KEYS = [
-  "OPENFORGE_GATEWAY_URL",
-  "OPENFORGE_SESSION_ID",
-  "OPENFORGE_ATTACH_TOKEN"
+  "FORGEBADGER_GATEWAY_URL",
+  "FORGEBADGER_SESSION_ID",
+  "FORGEBADGER_ATTACH_TOKEN"
 ] as const;
 
 type PluginEnv = Partial<Record<(typeof ENV_KEYS)[number], string>>;
@@ -58,7 +58,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
   let originalFetch: typeof fetch;
 
   before(async () => {
-    pluginDir = await mkdtemp(path.join(tmpdir(), "openforge-opencode-extract-"));
+    pluginDir = await mkdtemp(path.join(tmpdir(), "forgebadger-opencode-extract-"));
     loadCounter = 0;
     captured = null;
     originalFetch = globalThis.fetch;
@@ -99,19 +99,19 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
   // unique file path per load is required to force re-evaluation.
   async function loadHandler(): Promise<PluginHandler> {
     loadCounter += 1;
-    const file = path.join(pluginDir, `openforge-permission-notify-${loadCounter}.js`);
-    await writeFile(file, OPENFORGE_OPENCODE_PLUGIN_TEMPLATE, "utf8");
+    const file = path.join(pluginDir, `forgebadger-permission-notify-${loadCounter}.js`);
+    await writeFile(file, FORGEBADGER_OPENCODE_PLUGIN_TEMPLATE, "utf8");
     const mod = (await import(pathToFileURL(file).href)) as {
-      OpenForgePermissionNotify: () => Promise<PluginHandler>;
+      ForgeBadgerPermissionNotify: () => Promise<PluginHandler>;
     };
-    return mod.OpenForgePermissionNotify();
+    return mod.ForgeBadgerPermissionNotify();
   }
 
   it("POSTs the expected body for a realistic permission.asked event", async () => {
     setEnv({
-      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731/",
-      OPENFORGE_SESSION_ID: "sess-opencode-1",
-      OPENFORGE_ATTACH_TOKEN: "attach-token-123"
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731/",
+      FORGEBADGER_SESSION_ID: "sess-opencode-1",
+      FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
     mockFetch();
     const handler = await loadHandler();
@@ -124,16 +124,16 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
       "http://127.0.0.1:48731/api/v1/session-hooks/claude-notification/sess-opencode-1"
     );
     assert.equal(captured?.headers["content-type"], "application/json");
-    assert.equal(captured?.headers["x-openforge-session-id"], "sess-opencode-1");
-    assert.equal(captured?.headers["x-openforge-session-token"], "attach-token-123");
+    assert.equal(captured?.headers["x-forgebadger-session-id"], "sess-opencode-1");
+    assert.equal(captured?.headers["x-forgebadger-session-token"], "attach-token-123");
     assert.deepEqual(captured?.body, EXPECTED_PERMISSION_BODY);
   });
 
   it("falls back to a plain permission label when permission is not a string", async () => {
     setEnv({
-      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731",
-      OPENFORGE_SESSION_ID: "sess-opencode-1",
-      OPENFORGE_ATTACH_TOKEN: "attach-token-123"
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_SESSION_ID: "sess-opencode-1",
+      FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
     mockFetch();
     const handler = await loadHandler();
@@ -160,9 +160,9 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("falls back to a generic message when properties are missing", async () => {
     setEnv({
-      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731",
-      OPENFORGE_SESSION_ID: "sess-opencode-1",
-      OPENFORGE_ATTACH_TOKEN: "attach-token-123"
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_SESSION_ID: "sess-opencode-1",
+      FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
     mockFetch();
     const handler = await loadHandler();
@@ -176,9 +176,9 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("derives tool_name from metadata.tool when tool is a reference object", async () => {
     setEnv({
-      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731",
-      OPENFORGE_SESSION_ID: "sess-opencode-1",
-      OPENFORGE_ATTACH_TOKEN: "attach-token-123"
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_SESSION_ID: "sess-opencode-1",
+      FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
     mockFetch();
     const handler = await loadHandler();
@@ -205,9 +205,9 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("falls back to OpenCode tool name when neither tool nor metadata.tool is present", async () => {
     setEnv({
-      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731",
-      OPENFORGE_SESSION_ID: "sess-opencode-1",
-      OPENFORGE_ATTACH_TOKEN: "attach-token-123"
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_SESSION_ID: "sess-opencode-1",
+      FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
     mockFetch();
     const handler = await loadHandler();
@@ -233,9 +233,9 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("does not notify for non permission.asked events", async () => {
     setEnv({
-      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731",
-      OPENFORGE_SESSION_ID: "sess-opencode-1",
-      OPENFORGE_ATTACH_TOKEN: "attach-token-123"
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_SESSION_ID: "sess-opencode-1",
+      FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
     mockFetch();
     const handler = await loadHandler();
@@ -247,9 +247,9 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("maps idle and error events to completion and failure notifications", async () => {
     setEnv({
-      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731",
-      OPENFORGE_SESSION_ID: "sess-opencode-1",
-      OPENFORGE_ATTACH_TOKEN: "attach-token-123"
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_SESSION_ID: "sess-opencode-1",
+      FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
     mockFetch();
     const handler = await loadHandler();
@@ -273,8 +273,8 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("no-ops without fetching when GATEWAY_URL is missing", async () => {
     setEnv({
-      OPENFORGE_SESSION_ID: "sess-opencode-1",
-      OPENFORGE_ATTACH_TOKEN: "attach-token-123"
+      FORGEBADGER_SESSION_ID: "sess-opencode-1",
+      FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
     mockFetch();
     const handler = await loadHandler();
@@ -286,8 +286,8 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("no-ops without fetching when SESSION_ID is missing", async () => {
     setEnv({
-      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731",
-      OPENFORGE_ATTACH_TOKEN: "attach-token-123"
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
     mockFetch();
     const handler = await loadHandler();
@@ -299,8 +299,8 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("no-ops without fetching when ATTACH_TOKEN is missing", async () => {
     setEnv({
-      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731",
-      OPENFORGE_SESSION_ID: "sess-opencode-1"
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_SESSION_ID: "sess-opencode-1"
     });
     mockFetch();
     const handler = await loadHandler();

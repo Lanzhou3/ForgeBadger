@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { NotificationRepository } from "../src/db/repositories/notification-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
-import { OpenForgeEventBus } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { attachNotificationPersistence } from "../src/services/notification-events.js";
 
 function createTestDb(): Database {
@@ -27,7 +27,7 @@ describe("notification event persistence", () => {
   it("does not persist session lifecycle events as notifications", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("event-notify@example.com", "hash");
-    const eventBus = new OpenForgeEventBus();
+    const eventBus = new ForgeBadgerEventBus();
     attachNotificationPersistence({ db, eventBus });
 
     eventBus.emitEvent({
@@ -53,7 +53,7 @@ describe("notification event persistence", () => {
   it("does not persist CLI notifications outside the allowlist", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("filtered-notify@example.com", "hash");
-    const eventBus = new OpenForgeEventBus();
+    const eventBus = new ForgeBadgerEventBus();
     attachNotificationPersistence({ db, eventBus });
 
     for (const notificationType of ["task_failed", "session_ended", "status"]) {
@@ -75,7 +75,7 @@ describe("notification event persistence", () => {
   it("persists Claude permission notifications with permission title key", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("claude-notify@example.com", "hash");
-    const eventBus = new OpenForgeEventBus();
+    const eventBus = new ForgeBadgerEventBus();
     attachNotificationPersistence({ db, eventBus });
 
     eventBus.emitEvent({
@@ -98,7 +98,7 @@ describe("notification event persistence", () => {
   it("persists adapter lifecycle notifications with project and session context", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("lifecycle-notify@example.com", "hash");
-    const eventBus = new OpenForgeEventBus();
+    const eventBus = new ForgeBadgerEventBus();
     attachNotificationPersistence({ db, eventBus });
 
     eventBus.emitEvent({
@@ -106,7 +106,7 @@ describe("notification event persistence", () => {
       userId: user.id,
       sessionId: "session-3",
       projectId: "project-3",
-      projectName: "OpenForge",
+      projectName: "ForgeBadger",
       sessionName: "Repair notifications",
       hookEventName: "Interrupt",
       notificationType: "task_interrupted",
@@ -120,7 +120,7 @@ describe("notification event persistence", () => {
     assert.deepEqual(JSON.parse(notification.payload ?? "{}"), {
       session_id: "session-3",
       project_id: "project-3",
-      project_name: "OpenForge",
+      project_name: "ForgeBadger",
       session_name: "Repair notifications",
       hook_event_name: "Interrupt",
       notification_type: "task_interrupted",

@@ -91,7 +91,7 @@ export default function HistoryPage() {
         <p className="mt-1 text-sm text-muted-foreground">{t("snapshots.subtitle")}</p>
       </div>
 
-      <Card className="of-animate-in">
+      <Card className="forgebadger-animate-in">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold">{t("snapshots.filters")}</CardTitle>
           <p className="text-xs text-muted-foreground">{t("snapshots.noTerminalHistory")}</p>
@@ -127,20 +127,20 @@ export default function HistoryPage() {
       </Card>
 
       {restoreMutation.error instanceof Error && (
-        <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive of-animate-in">
+        <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive forgebadger-animate-in">
           <span className="size-1.5 shrink-0 rounded-full bg-red-400" />
           {restoreMutation.error.message}
         </div>
       )}
 
       {isLoading ? (
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("snapshots.loading")}
           </CardContent>
         </Card>
       ) : snapshots.length === 0 ? (
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
               <Clock3 className="size-5" />
@@ -161,7 +161,7 @@ export default function HistoryPage() {
           {snapshots.map((snapshot, index) => (
             <div
               key={snapshot.id}
-              className="of-animate-in"
+              className="forgebadger-animate-in"
               style={{ animationDelay: `${index * 40}ms` }}
             >
               <SnapshotCard

@@ -12,14 +12,14 @@ import {
 } from "../src/services/programmatic-terminal-submit.js";
 
 const READY_PANES = {
-  codex: "› Ask Codex to do anything\n\n  gpt-5.6-sol · ~/Project/OpenForge",
+  codex: "› Ask Codex to do anything\n\n  gpt-5.6-sol · ~/Project/ForgeBadger",
   claude: "Claude Code v2.1.239\n────────────────\n❯  \n────────────────\nauto mode on",
   opencode: "┃ Ask anything... \"Fix a TODO in the codebase\"\n┃ Build · model\nctrl+p commands",
   kimi: "│ >                                                                        │\nauto  K3 thinking: high  context: 0%"
 } as const;
 
 const STAGED_PANES = {
-  codex: "› 修复登录流程\n\n  gpt-5.6-sol · ~/Project/OpenForge",
+  codex: "› 修复登录流程\n\n  gpt-5.6-sol · ~/Project/ForgeBadger",
   claude: "Claude Code v2.1.239\n────────────────\n❯ 修复登录流程\n────────────────\nauto mode on",
   opencode: "┃ 修复登录流程\n┃ Build · model\nctrl+p commands",
   kimi: "│ > 修复登录流程                                                           │\nauto  K3 thinking: high  context: 0%"

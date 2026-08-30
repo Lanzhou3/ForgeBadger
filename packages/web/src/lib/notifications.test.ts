@@ -145,7 +145,7 @@ describe("notifications", () => {
       payload: {
         session_id: "session-7",
         project_id: "project-7",
-        project_name: "OpenForge",
+        project_name: "ForgeBadger",
         session_name: "Repair notifications",
         notification_type: "task_interrupted",
         adapter: "kimi",
@@ -156,7 +156,7 @@ describe("notifications", () => {
     expect(notification).toMatchObject({
       titleKey: "notifications.taskInterrupted",
       projectId: "project-7",
-      projectName: "OpenForge",
+      projectName: "ForgeBadger",
       sessionId: "session-7",
       sessionName: "Repair notifications",
       adapter: "kimi",
@@ -167,7 +167,7 @@ describe("notifications", () => {
       session: "Session",
       cli: "CLI",
     })).toEqual([
-      "Project: OpenForge",
+      "Project: ForgeBadger",
       "Session: Repair notifications",
       "CLI: Kimi Code",
     ]);

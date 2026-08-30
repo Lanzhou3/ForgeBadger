@@ -22,15 +22,15 @@ describe("prepare Feishu public webhook", () => {
     const fixture = createFixtureDb();
     try {
       const config = resolvePrepareFeishuPublicWebhookConfig({
-        OPENFORGE_DB_PATH: fixture.dbPath,
-        OPENFORGE_MASTER_KEY: fixture.masterKey,
-        OPENFORGE_FEISHU_OPENFORGE_USER_EMAIL: fixture.email,
-        OPENFORGE_FEISHU_PUBLIC_WEBHOOK_ID: "public-live-test",
-        OPENFORGE_FEISHU_PUBLIC_WEBHOOK_ENABLED: "1",
-        OPENFORGE_FEISHU_WEBHOOK_VERIFICATION_TOKEN: "verify-token-secret",
-        OPENFORGE_FEISHU_WEBHOOK_EVENT_ENCRYPT_KEY: "encrypt-key-secret",
-        OPENFORGE_FEISHU_ALLOWED_CHAT_IDS: "oc_allowed,oc_second",
-        OPENFORGE_FEISHU_USER_MAPPINGS_JSON: JSON.stringify([
+        FORGEBADGER_DB_PATH: fixture.dbPath,
+        FORGEBADGER_MASTER_KEY: fixture.masterKey,
+        FORGEBADGER_FEISHU_FORGEBADGER_USER_EMAIL: fixture.email,
+        FORGEBADGER_FEISHU_PUBLIC_WEBHOOK_ID: "public-live-test",
+        FORGEBADGER_FEISHU_PUBLIC_WEBHOOK_ENABLED: "1",
+        FORGEBADGER_FEISHU_WEBHOOK_VERIFICATION_TOKEN: "verify-token-secret",
+        FORGEBADGER_FEISHU_WEBHOOK_EVENT_ENCRYPT_KEY: "encrypt-key-secret",
+        FORGEBADGER_FEISHU_ALLOWED_CHAT_IDS: "oc_allowed,oc_second",
+        FORGEBADGER_FEISHU_USER_MAPPINGS_JSON: JSON.stringify([
           { feishuUserId: "ou_allowed", displayName: "Allowed User" }
         ])
       });
@@ -75,7 +75,27 @@ describe("prepare Feishu public webhook", () => {
     const config = resolvePrepareFeishuPublicWebhookConfig({});
 
     assert.equal(config.ok, false);
-    assert.match(config.reason, /OPENFORGE_DB_PATH/);
+    assert.match(config.reason, /FORGEBADGER_DB_PATH/);
+  });
+
+  it("accepts legacy OpenForge variables while preferring ForgeBadger values", () => {
+    const config = resolvePrepareFeishuPublicWebhookConfig({
+      OPENFORGE_DB_PATH: "/tmp/openforge.db",
+      OPENFORGE_MASTER_KEY: "legacy-master",
+      OPENFORGE_FEISHU_FORGEBADGER_USER_EMAIL: "legacy@example.com",
+      OPENFORGE_FEISHU_PUBLIC_WEBHOOK_ID: "legacy-webhook",
+      OPENFORGE_FEISHU_WEBHOOK_VERIFICATION_TOKEN: "legacy-verify",
+      OPENFORGE_FEISHU_WEBHOOK_EVENT_ENCRYPT_KEY: "legacy-encrypt",
+      FORGEBADGER_DB_PATH: "/tmp/forgebadger.db",
+      FORGEBADGER_MASTER_KEY: "current-master"
+    });
+
+    assert.equal(config.ok, true);
+    if (!config.ok) return;
+    assert.equal(config.dbPath, "/tmp/forgebadger.db");
+    assert.equal(config.masterKey, "current-master");
+    assert.equal(config.forgebadgerUserEmail, "legacy@example.com");
+    assert.equal(config.publicWebhookId, "legacy-webhook");
   });
 });
 
@@ -85,8 +105,8 @@ function createFixtureDb(): {
   email: string;
   cleanup: () => void;
 } {
-  const dir = mkdtempSync(path.join(tmpdir(), "openforge-feishu-webhook-"));
-  const dbPath = path.join(dir, "openforge.db");
+  const dir = mkdtempSync(path.join(tmpdir(), "forgebadger-feishu-webhook-"));
+  const dbPath = path.join(dir, "forgebadger.db");
   const db = new Database(dbPath);
   const migrationsFolder = path.join(workspaceRoot(), "packages/gateway/src/db/migrations");
   migrate(drizzle(db), { migrationsFolder });

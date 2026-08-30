@@ -1,4 +1,9 @@
 import type { Session } from "@/lib/api";
+import {
+  readMigratedStorageValue,
+  writeMigratedStorageValue,
+  type BrandStorage,
+} from "@/lib/brand-storage";
 
 export interface SessionTab {
   id: string;
@@ -12,7 +17,8 @@ export interface SessionTab {
   updatedAt: number;
 }
 
-const SESSION_TABS_KEY = "openforge.sessionTabs.v1";
+const SESSION_TABS_KEY = "forgebadger.sessionTabs.v1";
+const LEGACY_SESSION_TABS_KEY = "openforge.sessionTabs.v1";
 const MAX_SESSION_TABS = 8;
 
 export function sessionToTab(session: Session, now = Date.now()): SessionTab {
@@ -27,9 +33,9 @@ export function sessionToTab(session: Session, now = Date.now()): SessionTab {
   };
 }
 
-export function readSessionTabs(storage: Pick<Storage, "getItem"> = window.localStorage): SessionTab[] {
+export function readSessionTabs(storage: BrandStorage = window.localStorage): SessionTab[] {
   try {
-    const raw = storage.getItem(SESSION_TABS_KEY);
+    const raw = readMigratedStorageValue(storage, SESSION_TABS_KEY, LEGACY_SESSION_TABS_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -49,16 +55,21 @@ export function readSessionTabs(storage: Pick<Storage, "getItem"> = window.local
 
 export function writeSessionTabs(
   tabs: SessionTab[],
-  storage: Pick<Storage, "setItem"> = window.localStorage
+  storage: BrandStorage = window.localStorage
 ): SessionTab[] {
   const normalized = normalizeTabs(tabs);
-  storage.setItem(SESSION_TABS_KEY, JSON.stringify(normalized));
+  writeMigratedStorageValue(
+    storage,
+    SESSION_TABS_KEY,
+    LEGACY_SESSION_TABS_KEY,
+    JSON.stringify(normalized)
+  );
   return normalized;
 }
 
 export function upsertSessionTab(
   tab: SessionTab,
-  storage: Pick<Storage, "getItem" | "setItem"> = window.localStorage
+  storage: BrandStorage = window.localStorage
 ): SessionTab[] {
   const existing = readSessionTabs(storage);
   const currentIndex = existing.findIndex((current) => current.id === tab.id);
@@ -97,7 +108,7 @@ function sanitizeStoredPrompt(prompt: unknown): string | undefined {
 export function setSessionTabPrompt(
   id: string,
   prompt: string,
-  storage: Pick<Storage, "getItem" | "setItem"> = window.localStorage
+  storage: BrandStorage = window.localStorage
 ): SessionTab[] {
   const tabs = readSessionTabs(storage);
   const index = tabs.findIndex((tab) => tab.id === id);
@@ -129,12 +140,12 @@ export function sessionTabGroupColor(projectName: string): string {
 }
 
 export function notifySessionTabsChanged() {
-  window.dispatchEvent(new Event("openforge-session-tabs-changed"));
+  window.dispatchEvent(new Event("forgebadger-session-tabs-changed"));
 }
 
 export function removeSessionTab(
   id: string,
-  storage: Pick<Storage, "getItem" | "setItem"> = window.localStorage
+  storage: BrandStorage = window.localStorage
 ): SessionTab[] {
   return writeSessionTabs(readSessionTabs(storage).filter((tab) => tab.id !== id), storage);
 }
@@ -171,7 +182,7 @@ export function groupSessionTabs(tabs: SessionTab[]): SessionTabGroup[] {
 
 export function pruneSessionTabs(
   allowedIds: Set<string>,
-  storage: Pick<Storage, "getItem" | "setItem"> = window.localStorage
+  storage: BrandStorage = window.localStorage
 ): SessionTab[] {
   return writeSessionTabs(
     readSessionTabs(storage).filter((tab) => allowedIds.has(tab.id)),

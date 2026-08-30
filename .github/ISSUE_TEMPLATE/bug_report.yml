@@ -1,5 +1,5 @@
-name: OpenForge bug report
-description: Report a reproducible local-first OpenForge bug with redacted diagnostics.
+name: ForgeBadger bug report
+description: Report a reproducible local-first ForgeBadger bug with redacted diagnostics.
 title: "[Bug]: "
 labels:
   - bug
@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this form for local OpenForge bugs. Do not paste API keys, passwords, JWTs, attach tokens, browser auth tokens, private keys, provider request/response bodies, Feishu event bodies, terminal transcripts, `.env` files, SQLite databases, or private AI CLI config.
+        Use this form for local ForgeBadger bugs. Do not paste API keys, passwords, JWTs, attach tokens, browser auth tokens, private keys, provider request/response bodies, Feishu event bodies, terminal transcripts, `.env` files, SQLite databases, or private AI CLI config.
         Security-sensitive reports should follow `SECURITY.md` instead of using a public issue.
 
   - type: dropdown
@@ -35,7 +35,7 @@ body:
       label: Environment
       description: Include local runtime details only. Redact paths if needed.
       value: |
-        OpenForge commit/version:
+        ForgeBadger commit/version:
         OS:
         WSL distribution/version, if applicable:
         Browser:
@@ -79,7 +79,7 @@ body:
     id: diagnostics
     attributes:
       label: Redacted diagnostics
-      description: Include bounded OpenForge diagnostics, status codes, route names, readiness status/code, and screenshots only after reviewing for secrets.
+      description: Include bounded ForgeBadger diagnostics, status codes, route names, readiness status/code, and screenshots only after reviewing for secrets.
       value: |
         Gateway route/status:
         Browser console/network summary:

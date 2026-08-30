@@ -15,8 +15,8 @@ import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -115,7 +115,7 @@ describe("project config compliance", () => {
 
   it("reports missing, identical, modified, and stale generated config files", async () => {
     const token = await register("compliance@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-compliance-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-compliance-"));
     const projectId = await createProject(token, {
       name: "Compliance Project",
       path: rootPath,
@@ -163,7 +163,7 @@ describe("project config compliance", () => {
 
   it("reports unsafe template paths without writing files", async () => {
     const token = await register("unsafe-compliance@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-compliance-unsafe-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-compliance-unsafe-"));
     const templateRes = await fetch(`${baseUrl}/api/v1/templates`, {
       method: "POST",
       headers: {
@@ -194,7 +194,7 @@ describe("project config compliance", () => {
   it("does not expose another user's project compliance report", async () => {
     const ownerToken = await register("owner-compliance@test.com");
     const otherToken = await register("other-compliance@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-compliance-owner-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-compliance-owner-"));
     const projectId = await createProject(ownerToken, {
       name: "Private Compliance",
       path: rootPath,
@@ -208,7 +208,7 @@ describe("project config compliance", () => {
 
   it("returns 404 with TEMPLATE_NOT_TRACKED after the template binding is removed", async () => {
     const token = await register("untracked-compliance@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-compliance-untracked-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-compliance-untracked-"));
     const projectId = await createProject(token, {
       name: "Untracked Compliance",
       path: rootPath,
@@ -234,7 +234,7 @@ describe("project config compliance", () => {
 
   it("allows an explicit templateId query for an untracked project", async () => {
     const token = await register("explicit-query-compliance@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-compliance-explicit-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-compliance-explicit-"));
     const projectId = await createProject(token, {
       name: "Explicit Query Compliance",
       path: rootPath,

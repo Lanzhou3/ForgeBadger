@@ -1,6 +1,7 @@
 import type { Server } from "node:http";
 import { randomBytes } from "node:crypto";
-import { dirname, join } from "node:path";
+import { statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { GatewayEnv } from "../config/env.js";
@@ -26,6 +27,10 @@ export async function createGatewayRuntime(
   overrides: GatewayRuntimeOverrides = {}
 ): Promise<GatewayApp> {
   const env = resolveGatewayEnv(input);
+  const dshEnabled = env.FORGEBADGER_DSH_COPILOT_ENABLED;
+  const dshLauncherPath = dshEnabled
+    ? resolveDshLauncherPath(env.FORGEBADGER_DSH_BRIDGE_LAUNCHER)
+    : undefined;
   const startupOptions = {
     env,
     ...(overrides.tmuxClient === undefined ? {} : { tmuxClient: overrides.tmuxClient }),
@@ -45,16 +50,15 @@ export async function createGatewayRuntime(
   // M2 dsh copilot: when enabled without a configured bridge token, generate
   // an ephemeral per-boot token that serves both the internal route mount and
   // the child-process env injection. The value is never logged.
-  const dshEnabled = env.OPENFORGE_DSH_COPILOT_ENABLED;
-  let bridgeToken = env.OPENFORGE_COPILOT_BRIDGE_TOKEN;
+  let bridgeToken = env.FORGEBADGER_COPILOT_BRIDGE_TOKEN;
   if (dshEnabled && !bridgeToken) {
     bridgeToken = randomBytes(32).toString("hex");
     console.info("[gateway] dsh copilot enabled: generated an ephemeral copilot-bridge token for this boot");
   }
 
   const runtime = createGatewayApp({
-    jwtSecret: env.OPENFORGE_JWT_SECRET,
-    masterKey: env.OPENFORGE_MASTER_KEY,
+    jwtSecret: env.FORGEBADGER_JWT_SECRET,
+    masterKey: env.FORGEBADGER_MASTER_KEY,
     db,
     sessionManager,
     apiKeyStore,
@@ -64,19 +68,20 @@ export async function createGatewayRuntime(
     operationsRuntime,
     feishuChannelRuntime,
     copilotBridgeToken: bridgeToken,
-    copilotReactiveEnabled: env.OPENFORGE_COPILOT_REACTIVE_ENABLED,
+    copilotReactiveEnabled: env.FORGEBADGER_COPILOT_REACTIVE_ENABLED,
+    registrationMode: env.FORGEBADGER_REGISTRATION,
     dispatchConfirm: {
-      timeoutMs: env.OPENFORGE_DISPATCH_CONFIRM_TIMEOUT_MS,
-      intervalMs: env.OPENFORGE_DISPATCH_CONFIRM_INTERVAL_MS
+      timeoutMs: env.FORGEBADGER_DISPATCH_CONFIRM_TIMEOUT_MS,
+      intervalMs: env.FORGEBADGER_DISPATCH_CONFIRM_INTERVAL_MS
     },
     ...(dshEnabled
       ? {
         dshCopilot: {
-          launcherPath: env.OPENFORGE_DSH_BRIDGE_LAUNCHER ?? defaultDshLauncherPath(),
-          gatewayUrl: `http://${env.OPENFORGE_HOST}:${env.OPENFORGE_PORT}`,
+          launcherPath: dshLauncherPath!,
+          gatewayUrl: `http://${env.FORGEBADGER_HOST}:${env.FORGEBADGER_PORT}`,
           bridgeToken: bridgeToken ?? "",
-          stateDir: env.OPENFORGE_STATE_DIR,
-          idleMs: env.OPENFORGE_DSH_IDLE_MS
+          stateDir: env.FORGEBADGER_STATE_DIR,
+          idleMs: env.FORGEBADGER_DSH_IDLE_MS
         }
       }
       : {})
@@ -94,7 +99,7 @@ export async function startGateway(
   const runtime = await createGatewayRuntime(env, overrides);
 
   try {
-    await listen(runtime.server, env.OPENFORGE_PORT, env.OPENFORGE_HOST);
+    await listen(runtime.server, env.FORGEBADGER_PORT, env.FORGEBADGER_HOST);
   } catch (error) {
     await runtime.close();
     throw error;
@@ -102,8 +107,8 @@ export async function startGateway(
 
   return {
     ...runtime,
-    host: env.OPENFORGE_HOST,
-    port: env.OPENFORGE_PORT
+    host: env.FORGEBADGER_HOST,
+    port: env.FORGEBADGER_PORT
   };
 }
 
@@ -111,9 +116,31 @@ function resolveGatewayEnv(input: NodeJS.ProcessEnv | GatewayEnv): GatewayEnv {
   return loadEnv(input as NodeJS.ProcessEnv);
 }
 
-/** Default dsh launcher: the monorepo dsh-bridge build output. */
-function defaultDshLauncherPath(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "dsh-bridge", "dist", "launcher.js");
+/** Resolves the optional DSH bridge without assuming the source monorepo exists in npm installs. */
+export function resolveDshLauncherPath(
+  configuredPath: string | undefined,
+  moduleUrl = import.meta.url
+): string {
+  const candidate = configuredPath?.trim()
+    ? resolve(configuredPath)
+    : join(dirname(fileURLToPath(moduleUrl)), "..", "..", "..", "dsh-bridge", "dist", "launcher.js");
+
+  try {
+    if (statSync(candidate).isFile()) {
+      return candidate;
+    }
+  } catch {
+    // Report one actionable configuration error below.
+  }
+
+  if (configuredPath?.trim()) {
+    throw new Error(
+      `FORGEBADGER_DSH_BRIDGE_LAUNCHER must point to an existing file when DSH Copilot is enabled: ${candidate}`
+    );
+  }
+  throw new Error(
+    "FORGEBADGER_DSH_BRIDGE_LAUNCHER is required when DSH Copilot is enabled outside a source checkout with packages/dsh-bridge/dist/launcher.js"
+  );
 }
 
 async function listen(server: Server, port: number, host: string): Promise<void> {

@@ -1,5 +1,5 @@
 import {
-  checkOpenForgeRuntimeDependencies,
+  checkForgeBadgerRuntimeDependencies,
   type CommandRunner,
   type DependencyStatus,
   type TerminalRuntimeStatus
@@ -111,7 +111,7 @@ export async function getAdapterLaunchStatus(
   platform: NodeJS.Platform = process.platform
 ): Promise<AdapterDiscoveryResult> {
   const definition = getAdapterDefinition(adapterId);
-  const report = await checkOpenForgeRuntimeDependencies(runner, platform);
+  const report = await checkForgeBadgerRuntimeDependencies(runner, platform);
   return toAdapterDiscoveryResult(
     definition,
     getDependencyStatus(report.dependencies, definition.command),
@@ -123,7 +123,7 @@ export async function discoverAdapters(
   runner?: CommandRunner,
   platform: NodeJS.Platform = process.platform
 ): Promise<AdapterDiscoveryResult[]> {
-  const report = await checkOpenForgeRuntimeDependencies(runner, platform);
+  const report = await checkForgeBadgerRuntimeDependencies(runner, platform);
   return adapterDefinitions.map((definition) =>
     toAdapterDiscoveryResult(
       definition,

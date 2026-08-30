@@ -25,8 +25,8 @@ const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 const bridgeToken = "dsh-config-test-bridge-token-0123456789abcdef";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 const FAKE_LAUNCHER = path.join(path.dirname(fileURLToPath(import.meta.url)), "helpers", "fake-dsh-runtime.mjs");
 const REAL_TEMPLATE = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../dsh-bridge", "templates", "cordis.yml");
@@ -103,7 +103,7 @@ describe("dsh-config plugin registry and rendering", () => {
     const rendered = renderCordisConfig(template, { compaction: true, subagents: true });
     assert.ok(rendered.includes("dsh-compaction-basic"));
     assert.ok(rendered.includes("dsh-subagent"));
-    assert.ok(!rendered.includes("@openforge-feature"), "markers never leak into the rendered file");
+    assert.ok(!rendered.includes("@forgebadger-feature"), "markers never leak into the rendered file");
   });
 
   it("drops the compaction block when compaction is off", () => {
@@ -127,21 +127,21 @@ describe("dsh-config plugin registry and rendering", () => {
     assert.ok(!rendered.includes("dsh-compaction-basic"));
     assert.ok(!rendered.includes("dsh-subagent"));
     assert.ok(rendered.includes("dsh-llm-pi-ai"), "unrelated plugins stay mounted");
-    assert.ok(rendered.includes("@openforge/dsh-bridge/server"));
+    assert.ok(rendered.includes("@forgebadger/dsh-bridge/server"));
   });
 
   it("fails loud on unknown or unbalanced markers", () => {
     assert.throws(
-      () => renderCordisConfig("# @openforge-feature: mcp\n- id: x\n# @openforge-feature-end: mcp\n", { compaction: true, subagents: true }),
-      /unknown @openforge-feature marker: mcp/
+      () => renderCordisConfig("# @forgebadger-feature: mcp\n- id: x\n# @forgebadger-feature-end: mcp\n", { compaction: true, subagents: true }),
+      /unknown @forgebadger-feature marker: mcp/
     );
     assert.throws(
-      () => renderCordisConfig("# @openforge-feature: compaction\n- id: x\n", { compaction: false, subagents: true }),
-      /unclosed @openforge-feature marker/
+      () => renderCordisConfig("# @forgebadger-feature: compaction\n- id: x\n", { compaction: false, subagents: true }),
+      /unclosed @forgebadger-feature marker/
     );
     assert.throws(
-      () => renderCordisConfig("# @openforge-feature: compaction\n# @openforge-feature-end: subagents\n", { compaction: false, subagents: true }),
-      /mismatched @openforge-feature-end/
+      () => renderCordisConfig("# @forgebadger-feature: compaction\n# @forgebadger-feature-end: subagents\n", { compaction: false, subagents: true }),
+      /mismatched @forgebadger-feature-end/
     );
   });
 });
@@ -161,7 +161,7 @@ after(async () => {
 
 async function bootDshGateway(input: { withDsh: boolean; configTemplatePath?: string }): Promise<Harness> {
   const db = createTestDb();
-  const stateDir = mkdtempSync(path.join(tmpdir(), "openforge-dsh-config-test-"));
+  const stateDir = mkdtempSync(path.join(tmpdir(), "forgebadger-dsh-config-test-"));
   const logPath = path.join(stateDir, "fake-runtime.jsonl");
   const app = createGatewayApp({
     jwtSecret,

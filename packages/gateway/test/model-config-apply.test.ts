@@ -13,7 +13,7 @@ type PreviewInput = Parameters<typeof previewModelProviderConfig>[0];
 
 describe("model provider config apply", () => {
   it("applies Claude Code provider settings with secret placeholders", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-apply-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-apply-"));
     await mkdir(path.join(root, ".claude"));
     await writeFile(path.join(root, ".claude/settings.local.json"), JSON.stringify({
       permissions: { allow: ["Bash(pnpm test)"] },
@@ -57,7 +57,7 @@ describe("model provider config apply", () => {
   });
 
   it("applies OpenCode provider fragments additively with backup metadata", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-opencode-apply-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-opencode-apply-"));
     await writeFile(path.join(root, "opencode.json"), JSON.stringify({
       provider: {
         existing: {
@@ -92,7 +92,7 @@ describe("model provider config apply", () => {
     const config = JSON.parse(await readFile(path.join(root, "opencode.json"), "utf8"));
 
     assert.equal(result.changedFiles[0]?.relativePath, "opencode.json");
-    assert.match(result.backupPath, /\.openforge\/backups\/model-provider-apply\//);
+    assert.match(result.backupPath, /\.forgebadger\/backups\/model-provider-apply\//);
     assert.ok(config.provider.existing);
     assert.equal(config.provider.deepseek.options.baseURL, "https://api.deepseek.com");
     assert.equal(config.provider.deepseek.options.apiKey, "{env:DEEPSEEK_API_KEY}");
@@ -100,7 +100,7 @@ describe("model provider config apply", () => {
   });
 
   it("uses adapter-specific OpenCode provider packages from api format", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-opencode-google-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-opencode-google-"));
 
     const preview = await previewModelProviderConfig({
       projectRoot: root,
@@ -127,7 +127,7 @@ describe("model provider config apply", () => {
   });
 
   it("applies Claude settings for any provider format selected by a Claude-compatible preset", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-openai-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-openai-"));
 
     const preview = await previewModelProviderConfig({
         projectRoot: root,
@@ -153,7 +153,7 @@ describe("model provider config apply", () => {
   });
 
   it("rejects Codex provider apply because Codex is subscription-managed", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-codex-apply-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-codex-apply-"));
     await mkdir(path.join(root, ".codex"));
 
     await assert.rejects(
@@ -177,7 +177,7 @@ describe("model provider config apply", () => {
   });
 
   it("applies Kimi provider settings to a project-scope config.toml", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-kimi-apply-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-kimi-apply-"));
     await mkdir(path.join(root, ".kimi-code"));
     await writeFile(path.join(root, ".kimi-code/config.toml"), [
       "[providers.existing]",
@@ -212,7 +212,7 @@ describe("model provider config apply", () => {
     assert.deepEqual(result.scope, "project");
     assert.equal(result.changedFiles[0]?.relativePath, ".kimi-code/config.toml");
     assert.deepEqual(result.env, { MOONSHOT_API_KEY: "{stored-provider-credential}" });
-    assert.match(result.backupPath, /\.openforge\/backups\/model-provider-apply\//);
+    assert.match(result.backupPath, /\.forgebadger\/backups\/model-provider-apply\//);
     assert.ok(config.includes("default_model = \"moonshot/kimi-k2.5\""));
     assert.ok(config.includes("base_url = \"https://api.moonshot.cn/v1\""));
     assert.ok(config.includes("api_key = \"{env:MOONSHOT_API_KEY}\""));
@@ -220,13 +220,15 @@ describe("model provider config apply", () => {
   });
 
   it("applies Claude provider settings to the user-global settings.json", async () => {
-    const globalRoot = await mkdtemp(path.join(tmpdir(), "openforge-claude-global-"));
+    const globalRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-global-"));
     await writeFile(path.join(globalRoot, "settings.json"), JSON.stringify({
       env: { GLOBAL_FLAG: "1" }
     }, null, 2), "utf8");
 
     const previous = process.env.CLAUDE_CONFIG_DIR;
+    const previousStateDir = process.env.FORGEBADGER_STATE_DIR;
     process.env.CLAUDE_CONFIG_DIR = globalRoot;
+    process.env.FORGEBADGER_STATE_DIR = path.join(globalRoot, ".state");
     try {
       const result = await applyModelProviderConfig({
         projectRoot: "/unused",
@@ -256,20 +258,24 @@ describe("model provider config apply", () => {
       assert.equal(settings.env.GLOBAL_FLAG, "1");
       assert.equal(settings.env.ANTHROPIC_AUTH_TOKEN, "{env:ANTHROPIC_AUTH_TOKEN}");
       assert.equal(settings.env.ANTHROPIC_MODEL, "claude-sonnet-4-5");
-      assert.match(result.backupPath, /\.openforge\/backups\/model-provider-apply\//);
+      assert.match(result.backupPath, /\.state\/backups\/model-provider-apply\//);
     } finally {
       if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
       else process.env.CLAUDE_CONFIG_DIR = previous;
+      if (previousStateDir === undefined) delete process.env.FORGEBADGER_STATE_DIR;
+      else process.env.FORGEBADGER_STATE_DIR = previousStateDir;
       await rm(globalRoot, { recursive: true, force: true });
     }
   });
 
   it("applies Kimi provider settings to the user-global config.toml", async () => {
-    const globalRoot = await mkdtemp(path.join(tmpdir(), "openforge-kimi-global-"));
+    const globalRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-kimi-global-"));
     await writeFile(path.join(globalRoot, "config.toml"), "[models]\n", "utf8");
 
     const previous = process.env.KIMI_CODE_HOME;
+    const previousStateDir = process.env.FORGEBADGER_STATE_DIR;
     process.env.KIMI_CODE_HOME = globalRoot;
+    process.env.FORGEBADGER_STATE_DIR = path.join(globalRoot, ".state");
     try {
       const result = await applyModelProviderConfig({
         projectRoot: "/unused",
@@ -301,12 +307,14 @@ describe("model provider config apply", () => {
     } finally {
       if (previous === undefined) delete process.env.KIMI_CODE_HOME;
       else process.env.KIMI_CODE_HOME = previous;
+      if (previousStateDir === undefined) delete process.env.FORGEBADGER_STATE_DIR;
+      else process.env.FORGEBADGER_STATE_DIR = previousStateDir;
       await rm(globalRoot, { recursive: true, force: true });
     }
   });
 
   it("applies OpenCode provider settings to the user-global opencode.json", async () => {
-    const globalRoot = await mkdtemp(path.join(tmpdir(), "openforge-opencode-global-"));
+    const globalRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-opencode-global-"));
     await writeFile(path.join(globalRoot, "opencode.json"), JSON.stringify({}, null, 2), "utf8");
 
     const previous = process.env.OPENCODE_CONFIG_DIR;

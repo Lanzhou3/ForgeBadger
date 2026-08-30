@@ -33,7 +33,7 @@ export const copilotCapabilitiesQueryKey = ["copilot", "capabilities"] as const;
  * stream (CopilotStatusBar), the dsh kernel configuration section
  * (DshKernelSection: default model + plugin switches + runtime badge), the
  * capability tool list (CapabilitiesSection), and the runtime badge. When the
- * Gateway reports 404 for dsh-config (OPENFORGE_DSH_COPILOT_ENABLED off) the
+ * Gateway reports 404 for dsh-config (FORGEBADGER_DSH_COPILOT_ENABLED off) the
  * kernel section degrades to a not-enabled placeholder; the rest of the chat
  * stays unaffected.
  */
@@ -111,7 +111,7 @@ export function DshKernelSection({ active, onError }: DshKernelSectionProps) {
     onError: () => onError(t("copilot.dshSaveError")),
   });
 
-  // The Gateway returns 404 when OPENFORGE_DSH_COPILOT_ENABLED is off; treat it
+  // The Gateway returns 404 when FORGEBADGER_DSH_COPILOT_ENABLED is off; treat it
   // as "feature unavailable" instead of an error.
   const unavailable =
     dshConfig.error instanceof GatewayApiError && dshConfig.error.status === 404;

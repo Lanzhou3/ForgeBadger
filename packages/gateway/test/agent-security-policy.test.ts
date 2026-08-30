@@ -313,7 +313,7 @@ describe("security policy", () => {
     for (const message of [
       "sudo rm -rf /tmp/project",
       "sudo -u root rm -rf /tmp/project",
-      "env OPENFORGE_TEST=1 rm -r -f /tmp/project",
+      "env FORGEBADGER_TEST=1 rm -r -f /tmp/project",
       "rm /tmp/project -fr",
       ":>/tmp/output.log",
       ">/tmp/output.log",
@@ -371,7 +371,7 @@ describe("security policy", () => {
       "env --chdir /tmp rm -rf /tmp/project",
       "env --unset=OLD_TOKEN rm -rf /tmp/project",
       "env --chdir=/tmp rm -rf /tmp/project",
-      "env -- OPENFORGE_TEST=1 rm -rf /tmp/project"
+      "env -- FORGEBADGER_TEST=1 rm -rf /tmp/project"
     ]) {
       const decision = policy.evaluate({
         userId: "u1",

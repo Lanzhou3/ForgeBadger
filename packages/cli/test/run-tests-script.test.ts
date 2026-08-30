@@ -9,7 +9,7 @@ import { resolveNodeTestArgs } from "../scripts/run-tests.mjs";
 describe("resolveNodeTestArgs", () => {
   it("rewrites test file basenames to the test directory", async () => {
     // Arrange
-    const cwd = await mkdtemp(path.join(tmpdir(), "openforge-cli-tests-"));
+    const cwd = await mkdtemp(path.join(tmpdir(), "forgebadger-cli-tests-"));
     await mkdir(path.join(cwd, "test"));
     await writeFile(path.join(cwd, "test", "runtime-config.test.ts"), "");
 
@@ -22,7 +22,7 @@ describe("resolveNodeTestArgs", () => {
 
   it("preserves existing paths and other node:test arguments", async () => {
     // Arrange
-    const cwd = await mkdtemp(path.join(tmpdir(), "openforge-cli-tests-"));
+    const cwd = await mkdtemp(path.join(tmpdir(), "forgebadger-cli-tests-"));
     await mkdir(path.join(cwd, "test"));
     await writeFile(path.join(cwd, "test", "runtime-config.test.ts"), "");
 
@@ -35,7 +35,7 @@ describe("resolveNodeTestArgs", () => {
 
   it("does not rewrite values for node:test options", async () => {
     // Arrange
-    const cwd = await mkdtemp(path.join(tmpdir(), "openforge-cli-tests-"));
+    const cwd = await mkdtemp(path.join(tmpdir(), "forgebadger-cli-tests-"));
     await mkdir(path.join(cwd, "test"));
     await writeFile(path.join(cwd, "test", "runtime-config.test.ts"), "");
 

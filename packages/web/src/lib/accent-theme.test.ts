@@ -16,6 +16,9 @@ class MemoryStorage implements Pick<Storage, "getItem" | "setItem"> {
   setItem(key: string, value: string): void {
     this.values.set(key, value);
   }
+  removeItem(key: string): void {
+    this.values.delete(key);
+  }
 }
 
 describe("accent theme", () => {
@@ -34,10 +37,19 @@ describe("accent theme", () => {
   it("reads the stored accent with fallback to default", () => {
     const storage = new MemoryStorage();
     expect(readStoredAccent(storage)).toBe("cyan");
-    storage.setItem("openforge.accent", "rose");
+    storage.setItem("forgebadger.accent", "rose");
     expect(readStoredAccent(storage)).toBe("rose");
-    storage.setItem("openforge.accent", "bogus");
+    storage.setItem("forgebadger.accent", "bogus");
     expect(readStoredAccent(storage)).toBe("cyan");
+  });
+
+  it("migrates the legacy accent key on first read", () => {
+    const storage = new MemoryStorage();
+    storage.setItem("openforge.accent", "violet");
+
+    expect(readStoredAccent(storage)).toBe("violet");
+    expect(storage.getItem("forgebadger.accent")).toBe("violet");
+    expect(storage.getItem("openforge.accent")).toBeNull();
   });
 
   it("gives every theme a distinct brand color and swatch", () => {

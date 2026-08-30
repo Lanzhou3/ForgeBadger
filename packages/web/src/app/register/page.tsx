@@ -5,7 +5,7 @@ export default function RegisterPage() {
   return (
     <AuthShell
       title="Create account"
-      description="Bootstrap a local user for this OpenForge instance."
+      description="Bootstrap a local user for this ForgeBadger instance."
     >
       <RegisterForm />
     </AuthShell>

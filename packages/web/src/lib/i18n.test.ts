@@ -56,7 +56,7 @@ describe("i18n", () => {
     expect(getTranslation("en", "usage.totalTokens")).toContain("tokens");
     expect(getTranslation("zh-CN", "skills.catalogInstall")).toContain("目录");
     expect(getTranslation("en", "skills.discoveryRoots")).toContain("Scan roots");
-    expect(getTranslation("zh-CN", "skills.discoveryHint")).toContain("OPENFORGE_SKILL_DIRS");
+    expect(getTranslation("zh-CN", "skills.discoveryHint")).toContain("FORGEBADGER_SKILL_DIRS");
     expect(getTranslation("zh-CN", "common.visibility")).toBe("可见性");
     expect(getTranslation("en", "visibility.sharedDescription")).toContain("local instance");
     expect(getTranslation("zh-CN", "commandPalette.title")).toBe("命令面板");

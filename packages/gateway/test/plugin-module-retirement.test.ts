@@ -16,8 +16,8 @@ import { builtinSkillSeeds } from "../src/services/builtin-skills.js";
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 interface AuthBody {
   data: { token: string };

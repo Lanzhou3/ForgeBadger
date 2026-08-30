@@ -6,26 +6,26 @@ import { describe, it } from "node:test";
 
 import {
   buildClaudePortfolioWorkerHookSettings,
-  buildOpenForgeClaudeHookSettings,
+  buildForgeBadgerClaudeHookSettings,
   ensureClaudeNotificationSettings
 } from "../src/services/claude-notification-settings.js";
 
 describe("Claude notification settings", () => {
   it("builds HTTP forwarding hooks for permission and lifecycle events", () => {
-    const settings = buildOpenForgeClaudeHookSettings("http://127.0.0.1:48731", "openforge-session-id");
+    const settings = buildForgeBadgerClaudeHookSettings("http://127.0.0.1:48731", "forgebadger-session-id");
 
     const permissionHook = settings.hooks.PermissionRequest[0]?.hooks[0];
     assert.equal(permissionHook?.type, "http");
-    assert.equal(permissionHook?.url, "http://127.0.0.1:48731/api/v1/session-hooks/claude-notification/openforge-session-id");
-    assert.equal(permissionHook?.headers?.["x-openforge-session-id"], "$OPENFORGE_SESSION_ID");
-    assert.equal(permissionHook?.headers?.["x-openforge-session-token"], "$OPENFORGE_ATTACH_TOKEN");
-    assert.deepEqual(permissionHook?.allowedEnvVars, ["OPENFORGE_SESSION_ID", "OPENFORGE_ATTACH_TOKEN"]);
+    assert.equal(permissionHook?.url, "http://127.0.0.1:48731/api/v1/session-hooks/claude-notification/forgebadger-session-id");
+    assert.equal(permissionHook?.headers?.["x-forgebadger-session-id"], "$FORGEBADGER_SESSION_ID");
+    assert.equal(permissionHook?.headers?.["x-forgebadger-session-token"], "$FORGEBADGER_ATTACH_TOKEN");
+    assert.deepEqual(permissionHook?.allowedEnvVars, ["FORGEBADGER_SESSION_ID", "FORGEBADGER_ATTACH_TOKEN"]);
     assert.deepEqual(settings.allowedHttpHookUrls, [
       "http://127.0.0.1:48731/api/v1/session-hooks/claude-notification*"
     ]);
     assert.deepEqual(settings.httpHookAllowedEnvVars, [
-      "OPENFORGE_SESSION_ID",
-      "OPENFORGE_ATTACH_TOKEN"
+      "FORGEBADGER_SESSION_ID",
+      "FORGEBADGER_ATTACH_TOKEN"
     ]);
     assert.equal(settings.hooks.PermissionDenied[0]?.hooks[0]?.type, "http");
     assert.equal(settings.hooks.Stop[0]?.hooks[0]?.type, "http");
@@ -33,10 +33,10 @@ describe("Claude notification settings", () => {
     assert.equal(settings.hooks.Notification[0]?.matcher, "permission_prompt");
     const notificationHook = settings.hooks.Notification[0]?.hooks[0];
     assert.equal(notificationHook?.type, "http");
-    assert.equal(notificationHook?.url, "http://127.0.0.1:48731/api/v1/session-hooks/claude-notification/openforge-session-id");
+    assert.equal(notificationHook?.url, "http://127.0.0.1:48731/api/v1/session-hooks/claude-notification/forgebadger-session-id");
     assert.doesNotMatch(String(notificationHook?.url), /session-token-value|attach-token-value/);
     assert.equal(settings.hooks.SessionStart, undefined);
-    assert.equal(settings.httpHookAllowedEnvVars.includes("OPENFORGE_PORTFOLIO_WORKER_ACK_CAPABILITY"), false);
+    assert.equal(settings.httpHookAllowedEnvVars.includes("FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"), false);
   });
 
   it("builds an isolated SessionStart worker hook with no attach-token authority", () => {
@@ -51,18 +51,18 @@ describe("Claude notification settings", () => {
     assert.equal(workerHook?.type, "http");
     assert.equal(workerHook?.url, "http://127.0.0.1:48731/api/v1/session-hooks/claude-portfolio-worker/portfolio-session-id");
     assert.deepEqual(workerHook?.headers, {
-      "x-openforge-session-id": "$OPENFORGE_SESSION_ID",
-      "x-openforge-portfolio-worker-capability": "$OPENFORGE_PORTFOLIO_WORKER_ACK_CAPABILITY"
+      "x-forgebadger-session-id": "$FORGEBADGER_SESSION_ID",
+      "x-forgebadger-portfolio-worker-capability": "$FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"
     });
-    assert.deepEqual(workerHook?.allowedEnvVars, ["OPENFORGE_SESSION_ID", "OPENFORGE_PORTFOLIO_WORKER_ACK_CAPABILITY"]);
-    assert.equal(JSON.stringify(settings).includes("OPENFORGE_ATTACH_TOKEN"), false);
+    assert.deepEqual(workerHook?.allowedEnvVars, ["FORGEBADGER_SESSION_ID", "FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"]);
+    assert.equal(JSON.stringify(settings).includes("FORGEBADGER_ATTACH_TOKEN"), false);
     assert.deepEqual(settings.allowedHttpHookUrls, [
       "http://127.0.0.1:48731/api/v1/session-hooks/claude-portfolio-worker*"
     ]);
   });
 
-  it("merges OpenForge hooks into project-local Claude settings without clobbering existing hooks", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-hooks-"));
+  it("merges ForgeBadger hooks into project-local Claude settings without clobbering existing hooks", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-hooks-"));
     const settingsPath = path.join(root, ".claude", "settings.local.json");
     await mkdir(path.dirname(settingsPath), { recursive: true });
     await writeFile(
@@ -84,8 +84,8 @@ describe("Claude notification settings", () => {
     assert.equal(settings.hooks.Notification.some((group: { matcher?: string }) => group.matcher === "permission_prompt"), true);
   });
 
-  it("replaces prior OpenForge session-scoped hooks when a new session starts", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-hooks-replace-"));
+  it("replaces prior ForgeBadger session-scoped hooks when a new session starts", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-hooks-replace-"));
     const settingsPath = path.join(root, ".claude", "settings.local.json");
 
     await ensureClaudeNotificationSettings(root, "http://127.0.0.1:48731", "first-session");
@@ -100,8 +100,8 @@ describe("Claude notification settings", () => {
     assert.doesNotMatch(permissionHooks[0].url, /first-session/);
   });
 
-  it("preserves existing HTTP hook allowlists while adding OpenForge entries", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-hooks-allowlist-"));
+  it("preserves existing HTTP hook allowlists while adding ForgeBadger entries", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-hooks-allowlist-"));
     const settingsPath = path.join(root, ".claude", "settings.local.json");
     await mkdir(path.dirname(settingsPath), { recursive: true });
     await writeFile(
@@ -125,8 +125,8 @@ describe("Claude notification settings", () => {
     ]);
     assert.deepEqual(settings.httpHookAllowedEnvVars, [
       "EXISTING_TOKEN",
-      "OPENFORGE_SESSION_ID",
-      "OPENFORGE_ATTACH_TOKEN"
+      "FORGEBADGER_SESSION_ID",
+      "FORGEBADGER_ATTACH_TOKEN"
     ]);
   });
 });

@@ -14,8 +14,8 @@ import { UserRepository } from "../src/db/repositories/user-repository.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 
-process.env.OPENFORGE_JWT_SECRET = secret;
-process.env.OPENFORGE_MASTER_KEY = "abcdef0123456789abcdef0123456789";
+process.env.FORGEBADGER_JWT_SECRET = secret;
+process.env.FORGEBADGER_MASTER_KEY = "abcdef0123456789abcdef0123456789";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");

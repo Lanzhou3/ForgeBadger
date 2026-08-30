@@ -12,7 +12,7 @@ import { CopilotConversationLog } from "../src/services/agent/conversation-log.j
 import { createCopilotOrchestrator } from "../src/services/agent/orchestrator.js";
 import type { AgentLlmClient } from "../src/services/agent/orchestrator-types.js";
 import { createAgentToolRegistry } from "../src/services/agent/tool-registry.js";
-import { OpenForgeEventBus, type OpenForgeEvent } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
@@ -38,9 +38,9 @@ describe("copilot orchestrator approval", () => {
         inputJson: "{}",
         inputDigest: "digest"
       });
-      const events: OpenForgeEvent[] = [];
-      const eventBus = new OpenForgeEventBus();
-      eventBus.on("event", (event: OpenForgeEvent) => events.push(event));
+      const events: ForgeBadgerEvent[] = [];
+      const eventBus = new ForgeBadgerEventBus();
+      eventBus.on("event", (event: ForgeBadgerEvent) => events.push(event));
       let executions = 0;
       const toolRegistry = createAgentToolRegistry([{
         name: "side_effect_tool",

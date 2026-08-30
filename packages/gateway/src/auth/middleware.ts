@@ -14,7 +14,8 @@ export interface AuthenticatedRequest extends Request {
   authToken?: string;
 }
 
-export const SESSION_COOKIE_NAME = "openforge_session";
+export const SESSION_COOKIE_NAME = "forgebadger_session";
+const LEGACY_SESSION_COOKIE_NAME = "openforge_session";
 
 export function authenticate(req: Request, res: Response, next: NextFunction): void {
   const token = extractRequestToken(req);
@@ -75,7 +76,10 @@ export function extractRequestToken(req: Request): string | undefined {
     const bearer = authHeader.slice(7).trim();
     if (bearer) return bearer;
   }
-  return extractCookieValue(req.headers.cookie, SESSION_COOKIE_NAME);
+  return (
+    extractCookieValue(req.headers.cookie, SESSION_COOKIE_NAME) ??
+    extractCookieValue(req.headers.cookie, LEGACY_SESSION_COOKIE_NAME)
+  );
 }
 
 export function extractCookieValue(
@@ -112,5 +116,5 @@ function resolveJwtSecret(req: Request): string {
     return jwtSecret;
   }
 
-  return loadEnv().OPENFORGE_JWT_SECRET;
+  return loadEnv().FORGEBADGER_JWT_SECRET;
 }

@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
-import { OPENFORGE_GATEWAY_EVENT } from "@/lib/gateway-events";
+import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
 import {
+  LEGACY_ROBOT_CONVERSATION_STORAGE_KEY,
   ROBOT_CONVERSATION_STORAGE_KEY,
   RobotChatPanel,
 } from "@/components/copilot/robot-chat-panel";
@@ -98,7 +99,7 @@ function renderPanel(overrides: { onClose?: () => void; onExpandFull?: (id: stri
 function dispatchRunUpdated(payload: Record<string, unknown>) {
   act(() => {
     window.dispatchEvent(
-      new CustomEvent(OPENFORGE_GATEWAY_EVENT, {
+      new CustomEvent(FORGEBADGER_GATEWAY_EVENT, {
         detail: { type: "copilot_run_updated", payload },
       })
     );
@@ -311,6 +312,17 @@ describe("RobotChatPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "展开全屏" }));
     expect(onExpandFull).toHaveBeenCalledWith("conv-stored");
+  });
+
+  it("migrates the legacy persisted conversation on open", async () => {
+    window.localStorage.setItem(LEGACY_ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    listMessagesMock.mockResolvedValue({ messages: [storedMessage] });
+
+    renderPanel();
+
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledWith("conv-stored"));
+    expect(window.localStorage.getItem(ROBOT_CONVERSATION_STORAGE_KEY)).toBe("conv-stored");
+    expect(window.localStorage.getItem(LEGACY_ROBOT_CONVERSATION_STORAGE_KEY)).toBeNull();
   });
 
   it("drops a stale persisted conversation id when the server no longer has it", async () => {

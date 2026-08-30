@@ -1,12 +1,12 @@
 /**
  * dsh copilot tool surface manifest — the canonical name/description/risk list
- * of the tools the dsh runtime registers via the openforge-bridge Cordis
+ * of the tools the dsh runtime registers via the forgebadger-bridge Cordis
  * plugin (`packages/dsh-bridge/src/plugin.ts`). The Gateway cannot import the
  * plugin package, so this mirror exists for `GET /api/v1/copilot/capabilities`
  * to report the true tool surface when the dsh path is active; both sides pin
  * the same 15 names in their tests.
  *
- * The gateway-spawned runtime always runs with OPENFORGE_BRIDGE_ENABLE_OPERATE=1,
+ * The gateway-spawned runtime always runs with FORGEBADGER_BRIDGE_ENABLE_OPERATE=1,
  * so the operate tools are present (each gated behind the M3 approval bridge).
  */
 
@@ -24,12 +24,12 @@ export function dshToolSurface(): DshToolSurfaceEntry[] {
     { name: "load_skill", description: "Load the full playbook body of one skill by name: step-by-step guidance, exact tool names/parameters, error codes, and recovery rules.", risk: "read", requiresApproval: false },
     { name: "list_projects", description: "List the user's projects with name, path, status, and AI tool.", risk: "read", requiresApproval: false },
     { name: "get_project", description: "Get a single project by id with full detail.", risk: "read", requiresApproval: false },
-    { name: "create_project", description: "Create a new OpenForge project (approval required).", risk: "operate", requiresApproval: true },
+    { name: "create_project", description: "Create a new ForgeBadger project (approval required).", risk: "operate", requiresApproval: true },
     { name: "list_sessions", description: "List the user's AI CLI sessions with status, adapter, and project.", risk: "read", requiresApproval: false },
-    { name: "dispatch_task_to_session", description: "Dispatch a task to an OpenForge session: the message is delivered to the session's terminal as its next instruction (approval required).", risk: "operate", requiresApproval: true },
-    { name: "list_work_items", description: "List OpenForge project development work items (portfolio tasks).", risk: "read", requiresApproval: false },
+    { name: "dispatch_task_to_session", description: "Dispatch a task to an ForgeBadger session: the message is delivered to the session's terminal as its next instruction (approval required).", risk: "operate", requiresApproval: true },
+    { name: "list_work_items", description: "List ForgeBadger project development work items (portfolio tasks).", risk: "read", requiresApproval: false },
     { name: "get_work_item", description: "Get a portfolio work item by id.", risk: "read", requiresApproval: false },
-    { name: "advance_work_item", description: "Advance one OpenForge work item automatically by ONE lifecycle step (approval required).", risk: "operate", requiresApproval: true },
+    { name: "advance_work_item", description: "Advance one ForgeBadger work item automatically by ONE lifecycle step (approval required).", risk: "operate", requiresApproval: true },
     { name: "portfolio_overview", description: "Get portfolio overview: enrolled projects, open work items, and recent activity.", risk: "read", requiresApproval: false },
     { name: "list_portfolio_requests", description: "List portfolio requests, optionally filtered by project.", risk: "read", requiresApproval: false },
     { name: "get_project_dossier", description: "Get a project's portfolio dossier (objective, intended outcome, current evidence).", risk: "read", requiresApproval: false },

@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { recordActivity } from "./activity-events.js";
 import { recordSessionSnapshot } from "./session-snapshots.js";
 import { SessionConflictError, type InMemorySessionManager } from "./session-manager.js";
-import type { OpenForgeEventBus } from "./event-bus.js";
+import type { ForgeBadgerEventBus } from "./event-bus.js";
 import {
   createLaunchPlan,
   normalizeAdapter,
@@ -37,7 +37,7 @@ export interface SessionRuntimeDeps {
   userId: string;
   masterKey: string;
   sessionManager: InMemorySessionManager;
-  eventBus?: OpenForgeEventBus | undefined;
+  eventBus?: ForgeBadgerEventBus | undefined;
   adapterCommandRunner?: CommandRunner | undefined;
 }
 

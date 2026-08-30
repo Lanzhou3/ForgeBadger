@@ -87,7 +87,7 @@ export function CredentialTab({
           {credentials.map((credential, index) => (
             <div
               key={credential.id}
-              className={`flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40 ${
+              className={`flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40 ${
                 credential.id === selectedCredentialId ? "bg-brand/5" : ""
               }`}
               style={{ animationDelay: `${index * 40}ms` }}

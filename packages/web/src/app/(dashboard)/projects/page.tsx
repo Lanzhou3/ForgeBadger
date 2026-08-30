@@ -99,7 +99,7 @@ export default function ProjectsPage() {
           {projects.map((project, index) => (
             <div
               key={project.id}
-              className="of-animate-in flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
+              className="forgebadger-animate-in flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
               style={{ animationDelay: `${index * 40}ms` }}
             >
               <Link

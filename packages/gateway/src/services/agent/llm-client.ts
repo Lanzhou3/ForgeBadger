@@ -168,7 +168,7 @@ export function createAgentLlmClient(input: {
 }
 
 const SUMMARY_SYSTEM_PROMPT = [
-  "You are the conversation summarizer for Copilot, the OpenForge platform agent.",
+  "You are the conversation summarizer for Copilot, the ForgeBadger platform agent.",
   "Produce a concise but complete summary of the conversation so far, preserving:",
   "- key decisions and their reasons",
   "- project/session state facts and progress",
@@ -322,7 +322,7 @@ async function streamOpenAi(
 
 function buildSystemPrompt(): string {
   return [
-    "You are Copilot, the platform agent for OpenForge.",
+    "You are Copilot, the platform agent for ForgeBadger.",
     "You can observe and operate the whole platform through the provided tools:",
     "- projects: list and inspect projects",
     "- sessions: list and inspect AI CLI sessions",

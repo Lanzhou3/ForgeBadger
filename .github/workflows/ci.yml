@@ -1,4 +1,4 @@
-name: OpenForge CI
+name: ForgeBadger CI
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: openforge-ci-${{ github.workflow }}-${{ github.ref }}
+  group: forgebadger-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -23,14 +23,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      OPENFORGE_HOST: "127.0.0.1"
-      OPENFORGE_PORT: "48731"
-      OPENFORGE_WEB_PORT: "48732"
-      OPENFORGE_GATEWAY_URL: "http://127.0.0.1:48731"
+      FORGEBADGER_HOST: "127.0.0.1"
+      FORGEBADGER_PORT: "48731"
+      FORGEBADGER_WEB_PORT: "48732"
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731"
       NEXT_PUBLIC_GATEWAY_URL: "http://127.0.0.1:48731"
-      OPENFORGE_DB_PATH: "/tmp/openforge-ci.db"
-      OPENFORGE_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
-      OPENFORGE_JWT_SECRET: "ci-jwt-secret-not-for-production-32chars"
+      FORGEBADGER_DB_PATH: "/tmp/forgebadger-ci.db"
+      FORGEBADGER_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      FORGEBADGER_JWT_SECRET: "ci-jwt-secret-not-for-production-32chars"
       NEXT_TELEMETRY_DISABLED: "1"
       RUN_TMUX_TESTS: "1"
       CI: "true"
@@ -59,6 +59,9 @@ jobs:
       - name: Script harness tests
         run: node --test scripts/audit-feishu-bot-live-report.test.mjs scripts/create-feishu-bot-live-evidence-report.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-feishu-bot-websocket.test.mjs scripts/smoke-feishu-bot-live.test.mjs scripts/smoke-local-release.test.mjs scripts/smoke-npm-package-runner.test.mjs scripts/verify-npm-package.test.mjs
 
+      - name: ForgeBadger brand contract
+        run: pnpm validate:brand
+
       - name: Workspace typecheck
         run: pnpm -r typecheck
 
@@ -81,7 +84,7 @@ jobs:
           gateway_pid=$!
           trap 'kill "$gateway_pid" 2>/dev/null || true' EXIT
           for attempt in {1..40}; do
-            if curl --fail --silent --show-error "$OPENFORGE_GATEWAY_URL/api/v1/health" >/dev/null; then
+            if curl --fail --silent --show-error "$FORGEBADGER_GATEWAY_URL/api/v1/health" >/dev/null; then
               break
             fi
             if ! kill -0 "$gateway_pid" 2>/dev/null; then
@@ -90,7 +93,7 @@ jobs:
             fi
             sleep 1
           done
-          curl --fail --silent --show-error "$OPENFORGE_GATEWAY_URL/api/v1/health" >/dev/null
+          curl --fail --silent --show-error "$FORGEBADGER_GATEWAY_URL/api/v1/health" >/dev/null
           pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line
 
       - name: Whitespace check

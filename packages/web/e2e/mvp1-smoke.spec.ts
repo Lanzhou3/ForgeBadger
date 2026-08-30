@@ -8,11 +8,11 @@ test("MVP-1 management console smoke", async ({ page }) => {
   const email = `mvp1-${suffix}@example.com`;
   const password = "password12345";
   const projectName = `MVP1 Project ${suffix}`;
-  const projectPath = `/tmp/openforge-mvp1-${suffix}`;
+  const projectPath = `/tmp/forgebadger-mvp1-${suffix}`;
   const templateName = `MVP1 Template ${suffix}`;
 
   await page.addInitScript(() => {
-    window.localStorage.setItem("openforge-language", "en");
+    window.localStorage.setItem("forgebadger-language", "en");
   });
 
   await page.goto("/register");

@@ -134,7 +134,7 @@ function buildRecoveredLaunchPlan(row: SessionRecoveryRow): LaunchPlan {
     command: row.ai_tool === "claude" ? "claude" : row.ai_tool,
     args: [],
     cwd: row.working_dir,
-    env: { OPENFORGE_SESSION_ID: row.id },
+    env: { FORGEBADGER_SESSION_ID: row.id },
     secretEnvNames: [],
     credentialMode
   };

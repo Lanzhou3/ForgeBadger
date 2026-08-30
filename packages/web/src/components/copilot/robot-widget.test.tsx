@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
-import { OPENFORGE_GATEWAY_EVENT } from "@/lib/gateway-events";
+import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
+import {
+  LEGACY_ROBOT_CORNER_STORAGE_KEY,
+  ROBOT_CORNER_STORAGE_KEY,
+} from "@/lib/pixel-robot";
 import { RobotWidget } from "@/components/copilot/robot-widget";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -71,7 +75,7 @@ function clickRobot(robot: HTMLElement) {
 function dispatchCliNotification() {
   act(() => {
     window.dispatchEvent(
-      new CustomEvent(OPENFORGE_GATEWAY_EVENT, {
+      new CustomEvent(FORGEBADGER_GATEWAY_EVENT, {
         detail: {
           type: "claude_notification",
           payload: {
@@ -101,6 +105,16 @@ describe("RobotWidget activation", () => {
     expect(onActivate).toHaveBeenCalledTimes(1);
     // The click no longer navigates; the host owns the chat panel.
     expect(routerPushMock).not.toHaveBeenCalled();
+  });
+
+  it("migrates the legacy robot corner on mount", async () => {
+    window.localStorage.setItem(LEGACY_ROBOT_CORNER_STORAGE_KEY, "top-left");
+
+    renderWidget();
+    await robotButton();
+
+    expect(window.localStorage.getItem(ROBOT_CORNER_STORAGE_KEY)).toBe("top-left");
+    expect(window.localStorage.getItem(LEGACY_ROBOT_CORNER_STORAGE_KEY)).toBeNull();
   });
 
   it("reflects the panel state through aria-expanded", async () => {

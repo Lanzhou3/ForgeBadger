@@ -1,6 +1,6 @@
 ## Context
 
-OpenForge currently has two adjacent but incompatible control models. The legacy `routes/copilot.ts` exposes a generic provider-backed conversation, run, memory, and pending-action loop. It can create Project Manager mutations after approval, but its run state is not a durable project-execution fact. The current Project Manager routes own goals, work items, a readable ledger, and Task Packet helpers, but a Task Packet start creates or links an idle session rather than forming a durable portfolio workflow.
+ForgeBadger currently has two adjacent but incompatible control models. The legacy `routes/copilot.ts` exposes a generic provider-backed conversation, run, memory, and pending-action loop. It can create Project Manager mutations after approval, but its run state is not a durable project-execution fact. The current Project Manager routes own goals, work items, a readable ledger, and Task Packet helpers, but a Task Packet start creates or links an idle session rather than forming a durable portfolio workflow.
 
 The accepted product direction is a clean replacement: a local-first Portfolio Operations Manager coordinates explicitly enrolled projects; the Web console and a native Feishu connector are its surfaces; Gateway-owned records are canonical. The existing Project Manager board is retained only as the visual and domain basis for the Work Item workflow when its invariants match. The legacy Copilot is not a data source, compatibility dependency, or fallback.
 
@@ -145,7 +145,7 @@ One Gateway-owned Feishu transport registry/selector owns both the configured ac
 
 ### 8. The public contract is domain-oriented and safe to project
 
-All new HTTP operations live below `/api/v1/portfolio/**` and return OpenForge's `{ code, data, message }` envelope. Mutations require a server-validated request body and an idempotency key except where a verified external event supplies a stable provider event identity.
+All new HTTP operations live below `/api/v1/portfolio/**` and return ForgeBadger's `{ code, data, message }` envelope. Mutations require a server-validated request body and an idempotency key except where a verified external event supplies a stable provider event identity.
 
 The existing event WebSocket stays transport-only. Portfolio events contain IDs, safe state, bounded summaries, timestamps, and correlation IDs; raw provider content, credentials, unredacted terminal output, and signed action material are excluded.
 

@@ -54,7 +54,7 @@ export default function NotificationsPage() {
       </div>
 
       {notifications.length === 0 ? (
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
             <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
               <Bell className="size-5" />
@@ -111,7 +111,7 @@ function NotificationRow({
 
   return (
     <div
-      className="flex items-start gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40"
+      className="flex items-start gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
       style={{ animationDelay: `${index * 40}ms` }}
     >
       <span

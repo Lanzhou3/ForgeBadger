@@ -1,12 +1,12 @@
 {
-  "name": "@openforge/gateway",
+  "name": "@forgebadger/gateway",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json && mkdir -p dist/src/db && cp -R src/db/migrations dist/src/db/",
     "dev": "node ../../scripts/run-with-root-env.mjs tsx watch src/index.ts",
-    "openforge": "tsx src/cli/init.ts",
+    "forgebadger": "tsx src/cli/init.ts",
     "start": "node ../../scripts/run-with-root-env.mjs node dist/src/index.js",
     "test": "node --test --import tsx",
     "typecheck": "tsc -p tsconfig.json --noEmit"

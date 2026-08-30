@@ -5,7 +5,7 @@
     "userId": "user_owner_01",
     "source": "web",
     "sourceEventId": "web:request:01",
-    "originalText": "为 OpenForge 的 Portfolio Operations 创建持久化状态机。",
+    "originalText": "为 ForgeBadger 的 Portfolio Operations 创建持久化状态机。",
     "receivedAt": "2026-08-14T09:00:00.000Z",
     "status": "received",
     "correlationId": "corr_01JPORTFOLIOEXAMPLE"
@@ -13,7 +13,7 @@
   "actionIntent": {
     "id": "intent_01JPORTFOLIOEXAMPLE",
     "userId": "user_owner_01",
-    "projectId": "project_openforge",
+    "projectId": "project_forgebadger",
     "workItemId": "work_item_state_gate",
     "attemptId": "attempt_01",
     "sessionId": "session_01",
@@ -29,7 +29,7 @@
   "evidence": {
     "id": "evidence_01JPORTFOLIOEXAMPLE",
     "userId": "user_owner_01",
-    "projectId": "project_openforge",
+    "projectId": "project_forgebadger",
     "workItemId": "work_item_state_gate",
     "attemptId": "attempt_01",
     "producer": "platform.git-state.v1",
@@ -57,7 +57,7 @@
     "type": "portfolio.authorization.required",
     "payload": {
       "requestId": "request_01JPORTFOLIOEXAMPLE",
-      "projectId": "project_openforge",
+      "projectId": "project_forgebadger",
       "workItemId": "work_item_state_gate",
       "authorizationId": "authorization_01",
       "status": "awaiting_owner",

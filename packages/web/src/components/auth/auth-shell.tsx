@@ -20,7 +20,7 @@ export function AuthShell({ title, description, children }: AuthShellProps) {
         aria-hidden="true"
         className="absolute inset-0 bg-[radial-gradient(circle_at_center,hsl(var(--background)/0.22)_0%,hsl(var(--background)/0.72)_48%,hsl(var(--background)/0.96)_100%)]"
       />
-      <section className="of-animate-in relative z-10 w-full max-w-[420px] rounded-lg border border-border bg-card/85 p-6 text-card-foreground shadow-2xl shadow-black/40 backdrop-blur-md">
+      <section className="forgebadger-animate-in relative z-10 w-full max-w-[420px] rounded-lg border border-border bg-card/85 p-6 text-card-foreground shadow-2xl shadow-black/40 backdrop-blur-md">
         <div className="mb-6 flex items-center gap-3">
           <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
             <img
@@ -31,7 +31,7 @@ export function AuthShell({ title, description, children }: AuthShellProps) {
             />
           </div>
           <div className="min-w-0">
-            <div className="text-base font-semibold tracking-tight">OpenForge</div>
+            <div className="text-base font-semibold tracking-tight">ForgeBadger</div>
             <p className="text-xs text-muted-foreground">
               Local-first AI IDE control platform
             </p>

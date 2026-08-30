@@ -235,7 +235,7 @@ export default function SkillsPage() {
       </div>
 
       {data?.discovery && (
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardContent className="space-y-3 py-4">
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <Badge variant="outline">
@@ -260,7 +260,7 @@ export default function SkillsPage() {
         </Card>
       )}
 
-      <Card className="of-animate-in">
+      <Card className="forgebadger-animate-in">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
             {editingId ? t("skills.editSkill") : t("skills.createSkill")}
@@ -422,7 +422,7 @@ export default function SkillsPage() {
           </CardContent>
         </Card>
       ) : filteredSkills.length === 0 ? (
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
               <Wrench className="size-5" />
@@ -448,7 +448,7 @@ export default function SkillsPage() {
             return (
               <div key={skill.id}>
                 <div
-                  className="flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40"
+                  className="flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
                   style={{ animationDelay: `${index * 40}ms` }}
                 >
                   <span

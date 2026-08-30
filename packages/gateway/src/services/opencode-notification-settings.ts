@@ -3,12 +3,12 @@ import { dirname } from "node:path";
 
 import { safeResolve } from "../lib/safe-resolve.js";
 
-export const OPENFORGE_OPENCODE_PLUGIN_RELATIVE = ".opencode/plugins/openforge-permission-notify.js";
+export const FORGEBADGER_OPENCODE_PLUGIN_RELATIVE = ".opencode/plugins/forgebadger-permission-notify.js";
 
-export const OPENFORGE_OPENCODE_PLUGIN_TEMPLATE = `// OpenForge managed plugin — do not edit by hand
-const GATEWAY_URL = process.env.OPENFORGE_GATEWAY_URL || "";
-const SESSION_ID = process.env.OPENFORGE_SESSION_ID || "";
-const ATTACH_TOKEN = process.env.OPENFORGE_ATTACH_TOKEN || "";
+export const FORGEBADGER_OPENCODE_PLUGIN_TEMPLATE = `// ForgeBadger managed plugin — do not edit by hand
+const GATEWAY_URL = process.env.FORGEBADGER_GATEWAY_URL || "";
+const SESSION_ID = process.env.FORGEBADGER_SESSION_ID || "";
+const ATTACH_TOKEN = process.env.FORGEBADGER_ATTACH_TOKEN || "";
 
 function permissionText(props) {
   if (!props || typeof props !== "object") return "OpenCode permission request";
@@ -63,8 +63,8 @@ async function notify(event) {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-openforge-session-id": SESSION_ID,
-          "x-openforge-session-token": ATTACH_TOKEN
+          "x-forgebadger-session-id": SESSION_ID,
+          "x-forgebadger-session-token": ATTACH_TOKEN
         },
         body: JSON.stringify({ ...lifecycle, adapter: "opencode" })
       }
@@ -74,7 +74,7 @@ async function notify(event) {
   }
 }
 
-export const OpenForgePermissionNotify = async () => ({
+export const ForgeBadgerPermissionNotify = async () => ({
   event: async ({ event }) => {
     if (
       event &&
@@ -84,12 +84,12 @@ export const OpenForgePermissionNotify = async () => ({
 });
 `;
 
-export async function ensureOpenForgeOpenCodePlugin(
+export async function ensureForgeBadgerOpenCodePlugin(
   projectRoot: string
 ): Promise<{ path: string; changed: boolean }> {
   // Throws on path traversal / denied roots / symlink escapes. Security
   // errors must never be swallowed.
-  const pluginPath = safeResolve(projectRoot, OPENFORGE_OPENCODE_PLUGIN_RELATIVE);
+  const pluginPath = safeResolve(projectRoot, FORGEBADGER_OPENCODE_PLUGIN_RELATIVE);
 
   let existing: string | null = null;
   try {
@@ -101,13 +101,13 @@ export async function ensureOpenForgeOpenCodePlugin(
     }
   }
 
-  if (existing === OPENFORGE_OPENCODE_PLUGIN_TEMPLATE) {
+  if (existing === FORGEBADGER_OPENCODE_PLUGIN_TEMPLATE) {
     return { path: pluginPath, changed: false };
   }
 
   try {
     await mkdir(dirname(pluginPath), { recursive: true });
-    await writeFile(pluginPath, OPENFORGE_OPENCODE_PLUGIN_TEMPLATE, "utf8");
+    await writeFile(pluginPath, FORGEBADGER_OPENCODE_PLUGIN_TEMPLATE, "utf8");
   } catch (error) {
     // Writing the plugin must never block OpenCode session launch.
     console.warn(`[opencode-notification-settings] failed to write plugin at ${pluginPath}:`, error);

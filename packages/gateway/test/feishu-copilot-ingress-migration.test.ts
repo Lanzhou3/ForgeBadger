@@ -135,6 +135,18 @@ function createStaleDatabase(): Database.Database {
     );
     CREATE UNIQUE INDEX idx_portfolio_feishu_ingress_event
       ON portfolio_feishu_ingress_events (provider_account_id, provider_event_id);
+    CREATE TABLE integration_feishu_configs (
+      user_id text PRIMARY KEY NOT NULL,
+      command_prefix text NOT NULL DEFAULT '/openforge'
+    );
+    CREATE TABLE integration_feishu_user_mappings (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL,
+      feishu_user_id text NOT NULL,
+      openforge_user_id text NOT NULL
+    );
+    CREATE INDEX idx_integration_feishu_user_mappings_openforge_user
+      ON integration_feishu_user_mappings (user_id, openforge_user_id);
     CREATE TABLE __drizzle_migrations (
       id integer PRIMARY KEY AUTOINCREMENT,
       hash text NOT NULL,

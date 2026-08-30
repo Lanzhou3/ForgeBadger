@@ -1,17 +1,17 @@
-# OpenForge First-User Trial Runbook
+# ForgeBadger First-User Trial Runbook
 
 > Status: first-user local beta trial | Date: 2026-05-10
 
-This is the single entry point for a local OpenForge first-user trial. It is not
-a public release guide. Use it to start OpenForge, run the core Claude Code
+This is the single entry point for a local ForgeBadger first-user trial. It is not
+a public release guide. Use it to start ForgeBadger, run the core Claude Code
 browser terminal path, collect diagnostics, and submit feedback. Prefer the
-GitHub issue form `OpenForge first-user trial feedback` when filing feedback;
+GitHub issue form `ForgeBadger first-user trial feedback` when filing feedback;
 use `docs/TRIAL-FEEDBACK.md` as the offline copy/paste template.
 
 To start from a local Markdown draft, run:
 
 ```bash
-pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md
+pnpm trial:feedback-draft -- --output /tmp/forgebadger-trial-feedback.md
 ```
 
 The draft pre-fills bounded environment metadata only. It is not submitted,
@@ -21,7 +21,7 @@ redaction, and links or attaches it through the feedback path.
 Before a completed Markdown packet is used for maintainer triage, run:
 
 ```bash
-pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
+pnpm trial:feedback-audit -- /tmp/forgebadger-trial-feedback.md
 ```
 
 Passing audit means ready for human triage only. It does not automatically
@@ -67,7 +67,7 @@ GitHub follow-up routes:
 pnpm trial:issue-routes-validate
 ```
 
-This requires GitHub CLI access to `Lanzhou3/OpenForge` and checks that issue
+This requires GitHub CLI access to the existing repository `Lanzhou3/OpenForge` and checks that issue
 #3, #4, and #5 still exist, are open, and match their expected routing labels.
 It does not create or update GitHub issues and does not clear any external
 gate.
@@ -99,10 +99,10 @@ claude --version
 
 Required:
 
-- Node.js 20 or newer.
+- Node.js 20.12 through 24.
 - `tmux` 3.2 or newer.
 - Claude Code CLI on `PATH` for the main terminal smoke path.
-- A local shell where OpenForge can bind loopback ports.
+- A local shell where ForgeBadger can bind loopback ports.
 
 Windows users should run the terminal trial inside WSL. Native Windows can open
 the management UI, but the built-in persistent browser terminal depends on
@@ -110,7 +110,7 @@ tmux and is not treated as supported without WSL.
 
 For a Windows evidence pass, record both sides explicitly:
 
-1. Run `openforge doctor` from native Windows and record the terminal runtime
+1. Run `forgebadger doctor` from native Windows and record the terminal runtime
    warning.
 2. Run the terminal trial from WSL with Node.js, tmux, and Claude Code installed
    inside WSL.
@@ -123,7 +123,7 @@ Required only for source fallback:
 pnpm --version
 ```
 
-- pnpm 9 or newer. The repository currently pins pnpm through
+- pnpm 10 or newer. The repository currently pins pnpm through
   `packageManager`.
 
 Optional for later exploration only:
@@ -140,27 +140,27 @@ Missing optional CLIs should not block the Claude Code first-user trial.
 
 ## 2. Primary Startup: npm/CLI
 
-Install the trial package if the `openforge` command is not already available:
+Install the trial package if the `forgebadger` command is not already available:
 
 ```bash
-npm install -g openforge
+npm install -g forgebadger
 ```
 
 Run the doctor first:
 
 ```bash
-openforge doctor
+forgebadger doctor
 ```
 
-On native Windows, or when `tmux` is missing, `openforge doctor` reports that
+On native Windows, or when `tmux` is missing, `forgebadger doctor` reports that
 the terminal runtime is unsupported and points to WSL or tmux installation.
-`openforge start` may still start the management services, but terminal session
+`forgebadger start` may still start the management services, but terminal session
 launch should be treated as blocked until the runtime warning is fixed.
 
 Start Gateway and Web on the trial ports:
 
 ```bash
-openforge start --gateway-port 48731 --web-port 48732
+forgebadger start --gateway-port 48731 --web-port 48732
 ```
 
 Expected:
@@ -168,7 +168,7 @@ Expected:
 - Gateway listens on `127.0.0.1:48731`.
 - Web listens on `127.0.0.1:48732`.
 - The CLI prints the Web console URL.
-- Runtime state defaults to `~/.openforge` unless `OPENFORGE_STATE_DIR` is set.
+- Runtime state defaults to `~/.forgebadger` unless `FORGEBADGER_STATE_DIR` is set.
 
 Open:
 
@@ -193,16 +193,16 @@ pnpm install
 Create or update `.env` with source runtime values:
 
 ```bash
-OPENFORGE_HOST=127.0.0.1
-OPENFORGE_PORT=48731
-OPENFORGE_WEB_HOST=127.0.0.1
-OPENFORGE_WEB_PORT=48732
-OPENFORGE_GATEWAY_URL=http://127.0.0.1:48731
+FORGEBADGER_HOST=127.0.0.1
+FORGEBADGER_PORT=48731
+FORGEBADGER_WEB_HOST=127.0.0.1
+FORGEBADGER_WEB_PORT=48732
+FORGEBADGER_GATEWAY_URL=http://127.0.0.1:48731
 NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
-OPENFORGE_DB_PATH=/tmp/openforge-trial/openforge.db
-OPENFORGE_MASTER_KEY=<64-character-hex-key-from-openssl-rand-hex-32>
-OPENFORGE_JWT_SECRET=<32-or-more-random-characters>
-OPENFORGE_TMUX_PREFIX=of-trial-
+FORGEBADGER_DB_PATH=/tmp/forgebadger-trial/forgebadger.db
+FORGEBADGER_MASTER_KEY=<64-character-hex-key-from-openssl-rand-hex-32>
+FORGEBADGER_JWT_SECRET=<32-or-more-random-characters>
+FORGEBADGER_TMUX_PREFIX=of-trial-
 ```
 
 Generate local secrets when needed:
@@ -227,7 +227,7 @@ pnpm --dir packages/web dev
 The source fallback dev scripts load repository root `.env` values while
 preserving environment variables that are already set in the shell. This lets
 operators run an isolated trial by prefixing a specific variable, for example
-`OPENFORGE_DB_PATH=/tmp/openforge-trial/openforge.db pnpm --dir packages/gateway dev`.
+`FORGEBADGER_DB_PATH=/tmp/forgebadger-trial/forgebadger.db pnpm --dir packages/gateway dev`.
 
 Open:
 
@@ -255,7 +255,7 @@ Expected Gateway result:
 - JSON envelope with `code: 0`.
 
 If either port is already in use, stop the conflicting process or restart
-OpenForge with different ports. Keep Gateway and Web URLs aligned in the env
+ForgeBadger with different ports. Keep Gateway and Web URLs aligned in the env
 vars when using source fallback.
 
 ## 5. Trial Flow
@@ -314,7 +314,7 @@ Maintainer-only fallback:
 
 Recommended feedback attachments:
 
-- `openforge doctor` output.
+- `forgebadger doctor` output.
 - Diagnostics export output after redaction review.
 - Gateway and Web startup command output.
 - Gateway health check output.
@@ -327,7 +327,7 @@ Recommended feedback attachments:
 Optional draft helper:
 
 ```bash
-pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md
+pnpm trial:feedback-draft -- --output /tmp/forgebadger-trial-feedback.md
 ```
 
 Review and complete the draft before sharing. It intentionally leaves
@@ -337,7 +337,7 @@ owner, disposition, and redaction review as human-filled fields.
 After completing and redacting a Markdown packet, run:
 
 ```bash
-pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
+pnpm trial:feedback-audit -- /tmp/forgebadger-trial-feedback.md
 ```
 
 After filing feedback through the GitHub issue form, a maintainer can run:
@@ -376,7 +376,7 @@ private project source unless you intentionally choose to share them.
 
 ## 7. Shutdown
 
-For npm/CLI startup, stop the foreground `openforge start` process with
+For npm/CLI startup, stop the foreground `forgebadger start` process with
 `Ctrl-C`.
 
 For source fallback, stop both foreground dev processes with `Ctrl-C`:
@@ -384,12 +384,12 @@ For source fallback, stop both foreground dev processes with `Ctrl-C`:
 - `pnpm --dir packages/gateway dev`
 - `pnpm --dir packages/web dev`
 
-OpenForge sessions are tmux-backed. Stopping Gateway or Web should not kill a
+ForgeBadger sessions are tmux-backed. Stopping Gateway or Web should not kill a
 running CLI session by itself.
 
 ## 8. Cleanup
 
-List OpenForge tmux sessions:
+List ForgeBadger tmux sessions:
 
 ```bash
 tmux list-sessions | grep '^of-'
@@ -412,17 +412,17 @@ review.
 Remove disposable source fallback state only if you used the example path:
 
 ```bash
-rm -rf /tmp/openforge-trial
+rm -rf /tmp/forgebadger-trial
 ```
 
 Remove npm/CLI trial state only if you intentionally used disposable state:
 
 ```bash
-rm -rf <your-openforge-state-dir>
+rm -rf <your-forgebadger-state-dir>
 ```
 
-Do not remove `~/.openforge` unless you are intentionally deleting all local
-OpenForge trial state.
+Do not remove `~/.forgebadger` unless you are intentionally deleting all local
+ForgeBadger trial state.
 
 ## 9. Related Trial Materials
 

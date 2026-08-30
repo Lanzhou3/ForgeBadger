@@ -6,9 +6,9 @@ const PROJECT_ID = "project-123";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.localStorage.setItem("openforge-language", "en");
-    window.localStorage.setItem("openforge.token", "e2e-token");
-    window.localStorage.setItem("openforge.user", JSON.stringify({
+    window.localStorage.setItem("forgebadger-language", "en");
+    window.localStorage.setItem("forgebadger.token", "e2e-token");
+    window.localStorage.setItem("forgebadger.user", JSON.stringify({
       id: "user-e2e",
       email: "project-manager-e2e@example.com",
       role: "admin",

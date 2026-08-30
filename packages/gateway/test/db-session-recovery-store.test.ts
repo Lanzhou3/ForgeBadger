@@ -103,7 +103,7 @@ describe("DbSessionRecoveryStore", () => {
         command: "claude",
         args: [],
         cwd: project.path,
-        env: { OPENFORGE_SESSION_ID: session.id },
+        env: { FORGEBADGER_SESSION_ID: session.id },
         secretEnvNames: [],
         credentialMode: "host_environment"
       },

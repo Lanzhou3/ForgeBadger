@@ -4,9 +4,9 @@ const PROJECT_ID = "project-123";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.localStorage.setItem("openforge-language", "en");
-    window.localStorage.setItem("openforge.token", "e2e-token");
-    window.localStorage.setItem("openforge.user", JSON.stringify({
+    window.localStorage.setItem("forgebadger-language", "en");
+    window.localStorage.setItem("forgebadger.token", "e2e-token");
+    window.localStorage.setItem("forgebadger.user", JSON.stringify({
       id: "user-e2e",
       email: "workspace-e2e@example.com",
       role: "admin",
@@ -22,7 +22,7 @@ test("project detail exposes a safe workspace sidecar with lazy tree and sheet v
 
   const panel = page.getByTestId("workspace-context-panel");
   await expect(panel.getByRole("heading", { name: "Workspace" })).toBeVisible();
-  await expect(panel.getByText("/workspace/openforge")).toBeVisible();
+  await expect(panel.getByText("/workspace/forgebadger")).toBeVisible();
 
   // Directories expand lazily; files open in the sheet viewer.
   await panel.getByRole("button", { name: "src", exact: true }).click();
@@ -79,8 +79,8 @@ async function mockWorkspaceApis(page: Page) {
           project: {
             id: PROJECT_ID,
             name: "Workspace E2E",
-            path: "/workspace/openforge",
-            rootPath: "/workspace/openforge",
+            path: "/workspace/forgebadger",
+            rootPath: "/workspace/forgebadger",
             aiTool: "claude",
             status: "active",
           },
@@ -97,7 +97,7 @@ async function mockWorkspaceApis(page: Page) {
       await route.fulfill({
         json: envelope({
           adapter: "claude",
-          projectRoot: "/workspace/openforge",
+          projectRoot: "/workspace/forgebadger",
           files: [],
           forms: [],
         }),
@@ -115,7 +115,7 @@ async function mockWorkspaceApis(page: Page) {
         await route.fulfill({
           json: envelope({
             projectId: PROJECT_ID,
-            rootPath: "/workspace/openforge",
+            rootPath: "/workspace/forgebadger",
             path: "src",
             truncated: false,
             entries: [{
@@ -132,7 +132,7 @@ async function mockWorkspaceApis(page: Page) {
       await route.fulfill({
         json: envelope({
           projectId: PROJECT_ID,
-          rootPath: "/workspace/openforge",
+          rootPath: "/workspace/forgebadger",
           path: "",
           truncated: false,
           entries: [{
@@ -157,7 +157,7 @@ async function mockWorkspaceApis(page: Page) {
       await route.fulfill({
         json: envelope({
           projectId: PROJECT_ID,
-          rootPath: "/workspace/openforge",
+          rootPath: "/workspace/forgebadger",
           path: "src/index.ts",
           name: "index.ts",
           sizeBytes: 31,

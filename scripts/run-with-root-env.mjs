@@ -11,14 +11,24 @@ export async function buildRootEnv(options = {}) {
   const dotenvPath = options.dotenvPath ?? path.join(rootDir, ".env");
   const inherited = sanitizeEnv(options.env ?? process.env);
   if (!existsSync(dotenvPath)) {
-    return inherited;
+    return applyLegacyAliases(inherited);
   }
 
   const dotenv = parseEnv(await readFile(dotenvPath, "utf8"));
-  return {
+  return applyLegacyAliases({
     ...dotenv,
     ...inherited
-  };
+  });
+}
+
+export function applyLegacyAliases(env) {
+  const normalized = { ...env };
+  for (const [name, value] of Object.entries(env)) {
+    if (!name.startsWith("OPENFORGE_") || value === undefined) continue;
+    const currentName = `FORGEBADGER_${name.slice("OPENFORGE_".length)}`;
+    normalized[currentName] ??= value;
+  }
+  return normalized;
 }
 
 export function buildRunCommand(argv, options = {}) {

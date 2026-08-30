@@ -17,8 +17,8 @@ type PrepareConfig =
       ok: true;
       dbPath: string;
       masterKey: string;
-      openforgeUserId?: string;
-      openforgeUserEmail?: string;
+      forgebadgerUserId?: string;
+      forgebadgerUserEmail?: string;
       publicWebhookId: string;
       publicWebhookEnabled: boolean;
       integrationEnabled: boolean;
@@ -36,7 +36,7 @@ type PrepareConfig =
 
 interface FeishuMappingInput {
   feishuUserId: string;
-  openforgeUserId?: string;
+  forgebadgerUserId?: string;
   displayName?: string | null;
 }
 
@@ -58,47 +58,62 @@ export interface PrepareFeishuPublicWebhookResult {
 export function resolvePrepareFeishuPublicWebhookConfig(
   env: Record<string, string | undefined>
 ): PrepareConfig {
-  const dbPath = nonEmpty(env.OPENFORGE_DB_PATH);
-  if (!dbPath) return missing("OPENFORGE_DB_PATH");
-  const masterKey = nonEmpty(env.OPENFORGE_MASTER_KEY);
-  if (!masterKey) return missing("OPENFORGE_MASTER_KEY");
-  const publicWebhookId = nonEmpty(env.OPENFORGE_FEISHU_PUBLIC_WEBHOOK_ID);
-  if (!publicWebhookId) return missing("OPENFORGE_FEISHU_PUBLIC_WEBHOOK_ID");
-  const verificationToken = nonEmpty(env.OPENFORGE_FEISHU_WEBHOOK_VERIFICATION_TOKEN);
-  if (!verificationToken) return missing("OPENFORGE_FEISHU_WEBHOOK_VERIFICATION_TOKEN");
-  const eventEncryptKey = nonEmpty(env.OPENFORGE_FEISHU_WEBHOOK_EVENT_ENCRYPT_KEY);
-  if (!eventEncryptKey) return missing("OPENFORGE_FEISHU_WEBHOOK_EVENT_ENCRYPT_KEY");
+  env = normalizeEnvironment(env);
+  const dbPath = nonEmpty(env.FORGEBADGER_DB_PATH);
+  if (!dbPath) return missing("FORGEBADGER_DB_PATH");
+  const masterKey = nonEmpty(env.FORGEBADGER_MASTER_KEY);
+  if (!masterKey) return missing("FORGEBADGER_MASTER_KEY");
+  const publicWebhookId = nonEmpty(env.FORGEBADGER_FEISHU_PUBLIC_WEBHOOK_ID);
+  if (!publicWebhookId) return missing("FORGEBADGER_FEISHU_PUBLIC_WEBHOOK_ID");
+  const verificationToken = nonEmpty(env.FORGEBADGER_FEISHU_WEBHOOK_VERIFICATION_TOKEN);
+  if (!verificationToken) return missing("FORGEBADGER_FEISHU_WEBHOOK_VERIFICATION_TOKEN");
+  const eventEncryptKey = nonEmpty(env.FORGEBADGER_FEISHU_WEBHOOK_EVENT_ENCRYPT_KEY);
+  if (!eventEncryptKey) return missing("FORGEBADGER_FEISHU_WEBHOOK_EVENT_ENCRYPT_KEY");
 
-  const openforgeUserId = nonEmpty(env.OPENFORGE_FEISHU_OPENFORGE_USER_ID);
-  const openforgeUserEmail = nonEmpty(env.OPENFORGE_FEISHU_OPENFORGE_USER_EMAIL);
-  if (!openforgeUserId && !openforgeUserEmail) {
-    return { ok: false, reason: "OPENFORGE_FEISHU_OPENFORGE_USER_ID or OPENFORGE_FEISHU_OPENFORGE_USER_EMAIL is required" };
+  const forgebadgerUserId = nonEmpty(env.FORGEBADGER_FEISHU_FORGEBADGER_USER_ID);
+  const forgebadgerUserEmail = nonEmpty(env.FORGEBADGER_FEISHU_FORGEBADGER_USER_EMAIL);
+  if (!forgebadgerUserId && !forgebadgerUserEmail) {
+    return { ok: false, reason: "FORGEBADGER_FEISHU_FORGEBADGER_USER_ID or FORGEBADGER_FEISHU_FORGEBADGER_USER_EMAIL is required" };
   }
 
-  const identityMode = parseIdentityMode(env.OPENFORGE_FEISHU_IDENTITY_MODE);
+  const identityMode = parseIdentityMode(env.FORGEBADGER_FEISHU_IDENTITY_MODE);
   if (!identityMode) {
-    return { ok: false, reason: "OPENFORGE_FEISHU_IDENTITY_MODE must be user or bot when provided" };
+    return { ok: false, reason: "FORGEBADGER_FEISHU_IDENTITY_MODE must be user or bot when provided" };
   }
 
-  const mappings = parseUserMappings(env.OPENFORGE_FEISHU_USER_MAPPINGS_JSON);
+  const mappings = parseUserMappings(env.FORGEBADGER_FEISHU_USER_MAPPINGS_JSON);
   if (!mappings.ok) return mappings;
 
   return {
     ok: true,
     dbPath,
     masterKey,
-    ...(openforgeUserId ? { openforgeUserId } : {}),
-    ...(openforgeUserEmail ? { openforgeUserEmail } : {}),
+    ...(forgebadgerUserId ? { forgebadgerUserId } : {}),
+    ...(forgebadgerUserEmail ? { forgebadgerUserEmail } : {}),
     publicWebhookId,
-    publicWebhookEnabled: parseBoolean(env.OPENFORGE_FEISHU_PUBLIC_WEBHOOK_ENABLED, true),
-    integrationEnabled: parseBoolean(env.OPENFORGE_FEISHU_INTEGRATION_ENABLED, true),
-    emergencyDisabled: parseBoolean(env.OPENFORGE_FEISHU_EMERGENCY_DISABLED, false),
+    publicWebhookEnabled: parseBoolean(env.FORGEBADGER_FEISHU_PUBLIC_WEBHOOK_ENABLED, true),
+    integrationEnabled: parseBoolean(env.FORGEBADGER_FEISHU_INTEGRATION_ENABLED, true),
+    emergencyDisabled: parseBoolean(env.FORGEBADGER_FEISHU_EMERGENCY_DISABLED, false),
     identityMode,
-    allowedChatIds: parseCsv(env.OPENFORGE_FEISHU_ALLOWED_CHAT_IDS),
+    allowedChatIds: parseCsv(env.FORGEBADGER_FEISHU_ALLOWED_CHAT_IDS),
     userMappings: mappings.value,
     verificationToken,
     eventEncryptKey
   };
+}
+
+function normalizeEnvironment(
+  env: Record<string, string | undefined>
+): Record<string, string | undefined> {
+  const normalized = { ...env };
+  for (const [name, value] of Object.entries(env)) {
+    if (!name.startsWith("OPENFORGE_") || value === undefined) continue;
+    const currentName = `FORGEBADGER_${name.slice("OPENFORGE_".length)}`;
+    normalized[currentName] ??= value;
+  }
+  normalized.FORGEBADGER_FEISHU_FORGEBADGER_USER_ID ??= env.OPENFORGE_FEISHU_OPENFORGE_USER_ID;
+  normalized.FORGEBADGER_FEISHU_FORGEBADGER_USER_EMAIL ??= env.OPENFORGE_FEISHU_OPENFORGE_USER_EMAIL;
+  return normalized;
 }
 
 export function prepareFeishuPublicWebhook(
@@ -107,11 +122,11 @@ export function prepareFeishuPublicWebhook(
   const db = openDatabase(config.dbPath);
   try {
     const users = new UserRepository(db);
-    const user = config.openforgeUserId
-      ? users.findById(config.openforgeUserId)
-      : users.findByEmail(config.openforgeUserEmail ?? "");
+    const user = config.forgebadgerUserId
+      ? users.findById(config.forgebadgerUserId)
+      : users.findByEmail(config.forgebadgerUserEmail ?? "");
     if (!user) {
-      throw new Error("OpenForge user for Feishu public webhook setup was not found");
+      throw new Error("ForgeBadger user for Feishu public webhook setup was not found");
     }
 
     const repo = new FeishuIntegrationRepository(db, user.id, config.masterKey);
@@ -123,7 +138,7 @@ export function prepareFeishuPublicWebhook(
     });
     const normalizedMappings = config.userMappings.map((mapping) => ({
       feishuUserId: mapping.feishuUserId,
-      openforgeUserId: mapping.openforgeUserId ?? user.id,
+      forgebadgerUserId: mapping.forgebadgerUserId ?? user.id,
       displayName: mapping.displayName ?? null
     }));
     if (normalizedMappings.length > 0) {
@@ -209,12 +224,12 @@ function parseUserMappings(value: string | undefined): { ok: true; value: Feishu
   try {
     const parsed = JSON.parse(trimmed) as unknown;
     if (!Array.isArray(parsed)) {
-      return { ok: false, reason: "OPENFORGE_FEISHU_USER_MAPPINGS_JSON must be an array" };
+      return { ok: false, reason: "FORGEBADGER_FEISHU_USER_MAPPINGS_JSON must be an array" };
     }
     const mappings: FeishuMappingInput[] = [];
     for (const item of parsed) {
       if (!item || typeof item !== "object" || Array.isArray(item)) {
-        return { ok: false, reason: "OPENFORGE_FEISHU_USER_MAPPINGS_JSON contains an invalid mapping" };
+        return { ok: false, reason: "FORGEBADGER_FEISHU_USER_MAPPINGS_JSON contains an invalid mapping" };
       }
       const record = item as Record<string, unknown>;
       if (typeof record.feishuUserId !== "string" || record.feishuUserId.trim().length === 0) {
@@ -222,8 +237,8 @@ function parseUserMappings(value: string | undefined): { ok: true; value: Feishu
       }
       mappings.push({
         feishuUserId: record.feishuUserId.trim(),
-        ...(typeof record.openforgeUserId === "string" && record.openforgeUserId.trim()
-          ? { openforgeUserId: record.openforgeUserId.trim() }
+        ...(typeof record.forgebadgerUserId === "string" && record.forgebadgerUserId.trim()
+          ? { forgebadgerUserId: record.forgebadgerUserId.trim() }
           : {}),
         ...(typeof record.displayName === "string" && record.displayName.trim()
           ? { displayName: record.displayName.trim() }
@@ -232,7 +247,7 @@ function parseUserMappings(value: string | undefined): { ok: true; value: Feishu
     }
     return { ok: true, value: mappings };
   } catch {
-    return { ok: false, reason: "OPENFORGE_FEISHU_USER_MAPPINGS_JSON must be valid JSON" };
+    return { ok: false, reason: "FORGEBADGER_FEISHU_USER_MAPPINGS_JSON must be valid JSON" };
   }
 }
 

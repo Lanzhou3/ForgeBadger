@@ -10,7 +10,7 @@ function launchPlan(): LaunchPlan {
     command: "bash",
     args: [],
     cwd: "/tmp",
-    env: { OPENFORGE_SESSION_ID: "session_abcdef" },
+    env: { FORGEBADGER_SESSION_ID: "session_abcdef" },
     secretEnvNames: [],
     credentialMode: "host_environment"
   };
@@ -51,7 +51,7 @@ describe("InMemorySessionManager", () => {
     // (inherited from the tmux server global environment) must be overridden
     // to an empty value — CLI TUI (e.g. Claude Code) then renders in color.
     assert.equal(capturedEnv?.NO_COLOR, "");
-    assert.equal(capturedEnv?.["OPENFORGE_ATTACH_TOKEN"]?.length, 36);
+    assert.equal(capturedEnv?.["FORGEBADGER_ATTACH_TOKEN"]?.length, 36);
   });
 
   it("marks a session exited when stopped", async () => {
@@ -358,7 +358,7 @@ describe("InMemorySessionManager", () => {
     assert.equal(manager.getSession("session_abcdef")?.status, "error");
   });
 
-  it("recovers existing OpenForge tmux sessions after Gateway restart", async () => {
+  it("recovers existing ForgeBadger tmux sessions after Gateway restart", async () => {
     const configured: string[] = [];
     const store = new MemoryRecoveryStore([
       {
@@ -383,7 +383,7 @@ describe("InMemorySessionManager", () => {
       }
     }, store);
 
-    const recovered = await manager.recoverOpenForgeSessions({
+    const recovered = await manager.recoverForgeBadgerSessions({
       userId: "gate-a-user",
       cwd: "/tmp"
     });
@@ -394,7 +394,7 @@ describe("InMemorySessionManager", () => {
     assert.deepEqual(configured, ["of-gate-a-u-session_recovered"]);
   });
 
-  it("kills OpenForge tmux sessions missing from the recovery index", async () => {
+  it("kills ForgeBadger tmux sessions missing from the recovery index", async () => {
     const calls: string[] = [];
     const manager = new InMemorySessionManager({
       async createSession() {},
@@ -417,7 +417,7 @@ describe("InMemorySessionManager", () => {
       }
     ]));
 
-    const result = await manager.recoverOpenForgeSessions({
+    const result = await manager.recoverForgeBadgerSessions({
       userId: "gate-a-user",
       cwd: "/tmp"
     });
@@ -449,7 +449,7 @@ describe("InMemorySessionManager", () => {
       }
     ]), undefined, { tmuxPrefix: "smoke-" });
 
-    const result = await manager.recoverOpenForgeSessions({
+    const result = await manager.recoverForgeBadgerSessions({
       userId: "gate-a-user",
       cwd: "/tmp"
     });

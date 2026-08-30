@@ -71,7 +71,7 @@ describe("getTerminalRuntimeSetupGuidance", () => {
       getTerminalRuntimeSetupGuidance(undefined),
     ]);
 
-    expect(serialized).not.toMatch(/OPENFORGE|JWT|Bearer |attach token|sk-/i);
+    expect(serialized).not.toMatch(/FORGEBADGER|JWT|Bearer |attach token|sk-/i);
   });
 });
 
@@ -99,6 +99,6 @@ describe("getTerminalRuntimeRemediation", () => {
       getTerminalRuntimeRemediation("future-mode"),
     ]);
 
-    expect(serialized).not.toMatch(/OPENFORGE|JWT|Bearer |attach token|sk-/i);
+    expect(serialized).not.toMatch(/FORGEBADGER|JWT|Bearer |attach token|sk-/i);
   });
 });

@@ -38,7 +38,7 @@ export function initializeDatabase(dbPath: string): Database {
   const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check").all();
   if (foreignKeyViolations.length > 0) {
     db.close();
-    throw new Error("OPENFORGE_FOREIGN_KEY_CHECK_FAILED");
+    throw new Error("FORGEBADGER_FOREIGN_KEY_CHECK_FAILED");
   }
   dbInstance = db;
   return db;

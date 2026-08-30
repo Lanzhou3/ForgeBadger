@@ -106,7 +106,7 @@ This procedure is designed now; task 8.3 executes it after new-system acceptance
 
 ### Preconditions
 
-1. The release owner explicitly approves the resolved `OPENFORGE_DB_PATH`, destination directory, and the 30-day encrypted retention window. A different window requires a recorded owner decision.
+1. The release owner explicitly approves the resolved `FORGEBADGER_DB_PATH`, destination directory, and the 30-day encrypted retention window. A different window requires a recorded owner decision.
 2. The destination is outside the Gateway state directory, uses owner-only permissions, and is not committed, uploaded, or passed to Portfolio Operations.
 3. The backup manifest records source path, release revision, UTC time, table list, SHA-256 digest, operator, and restore result. It contains no copied secret values.
 

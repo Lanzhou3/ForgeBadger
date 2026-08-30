@@ -9,7 +9,7 @@ const DEFAULT_GITHUB_ISSUE_FORM_PATH = path.join(
   REPO_ROOT,
   ".github",
   "ISSUE_TEMPLATE",
-  "openforge-trial-feedback.yml"
+  "forgebadger-trial-feedback.yml"
 );
 const DEFAULT_MARKDOWN_TEMPLATE_PATH = path.join(REPO_ROOT, "docs", "TRIAL-FEEDBACK.md");
 const DEFAULT_TRIAL_RUNBOOK_PATH = path.join(REPO_ROOT, "docs", "TRIAL-RUNBOOK.md");
@@ -115,7 +115,7 @@ export const REQUIRED_CHECKLIST_PHRASES = [
   "`pnpm trial:intake-validate`",
   "`pnpm trial:issue-routes-validate`",
   "`pnpm trial:readiness-validate`",
-  "`pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md`",
+  "`pnpm trial:feedback-audit -- /tmp/forgebadger-trial-feedback.md`",
   "`pnpm trial:feedback-issue-audit -- --issue=<number>`",
   "`pnpm trial:feedback-issues-audit`",
   "`pnpm evidence:gates-validate`",
@@ -130,7 +130,7 @@ export const REQUIRED_CHECKLIST_PHRASES = [
 
 export const REQUIRED_FIRST_USER_ENTRYPOINT_PHRASES = [
   "docs/TRIAL-FEEDBACK.md",
-  ".github/ISSUE_TEMPLATE/openforge-trial-feedback.yml",
+  ".github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml",
   "pnpm trial:feedback-audit",
   "pnpm trial:feedback-issue-audit",
   "pnpm trial:feedback-issues-audit",
@@ -142,7 +142,7 @@ export const REQUIRED_ROOT_README_TRIAL_ENTRYPOINT_PHRASES = [
   "docs/TRIAL-CHECKLIST.md",
   "docs/TROUBLESHOOTING.md",
   "docs/TRIAL-FEEDBACK.md",
-  ".github/ISSUE_TEMPLATE/openforge-trial-feedback.yml"
+  ".github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml"
 ];
 
 export const REQUIRED_LOCALIZED_README_TRIAL_ENTRYPOINT_PHRASES = [
@@ -150,7 +150,7 @@ export const REQUIRED_LOCALIZED_README_TRIAL_ENTRYPOINT_PHRASES = [
   "TRIAL-CHECKLIST.md",
   "TROUBLESHOOTING.md",
   "TRIAL-FEEDBACK.md",
-  "../.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml"
+  "../.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml"
 ];
 
 export const REQUIRED_SAFETY_PHRASES = {
@@ -186,11 +186,11 @@ export const REQUIRED_MARKDOWN_PHRASES = [
   "Result: pass / pass with caveats / blocked",
   "Affected surface:",
   "Startup path:",
-  "OpenForge version or commit:",
+  "ForgeBadger version or commit:",
   "node --version",
   "tmux -V",
   "claude --version",
-  "openforge doctor",
+  "forgebadger doctor",
   "Owner:",
   "Disposition:",
   "Follow-up route:",
@@ -239,7 +239,8 @@ const UNSAFE_INTAKE_PATTERNS = [
 const FORBIDDEN_FIRST_USER_RUNBOOK_PATTERNS = [
   { pattern: /\bbrowser developer tools\b/i, label: "browser developer tools" },
   { pattern: /\bRead Local Storage\b/i, label: "Read Local Storage" },
-  { pattern: /\bopenforge\.token\b/i, label: "openforge.token" },
+  { pattern: /\bforgebadger\.token\b/i, label: "forgebadger.token" },
+  { pattern: /\bopenforge\.token\b/i, label: "legacy browser token storage" },
   { pattern: /\bauthorization:\s*Bearer\s*<token>\b/i, label: "authorization: Bearer <token>" }
 ];
 
@@ -248,7 +249,7 @@ export function validateTrialFeedbackIntake(options = {}) {
   const githubIssueForm = readInput(
     options.githubIssueForm,
     options.githubIssueFormPath ?? DEFAULT_GITHUB_ISSUE_FORM_PATH,
-    ".github/ISSUE_TEMPLATE/openforge-trial-feedback.yml",
+    ".github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml",
     errors
   );
   const markdownTemplate = readInput(

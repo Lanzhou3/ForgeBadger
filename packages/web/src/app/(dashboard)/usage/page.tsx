@@ -213,7 +213,7 @@ export default function UsagePage() {
       {notice && (
         <div
           className={cn(
-            "flex items-center gap-2.5 rounded-lg border px-4 py-3 text-sm of-animate-in",
+            "flex items-center gap-2.5 rounded-lg border px-4 py-3 text-sm forgebadger-animate-in",
             noticeType === "error"
               ? "border-red-500/40 bg-red-500/10 text-red-300"
               : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
@@ -230,14 +230,14 @@ export default function UsagePage() {
       )}
 
       {isLoading || !summary ? (
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("usage.loading")}
           </CardContent>
         </Card>
       ) : (
         <>
-          <Card className="of-animate-in">
+          <Card className="forgebadger-animate-in">
             <CardContent className="flex flex-wrap p-0">
               {metrics.map((metric) => (
                 <div
@@ -264,7 +264,7 @@ export default function UsagePage() {
           </Card>
 
           {summary.requestCount === 0 ? (
-            <Card className="of-animate-in">
+            <Card className="forgebadger-animate-in">
               <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
                 <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
                   <Activity className="size-5" />
@@ -288,7 +288,7 @@ export default function UsagePage() {
             </Card>
           ) : (
             <>
-              <Card className="of-animate-in">
+              <Card className="forgebadger-animate-in">
                 <CardHeader className="pb-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <CardTitle className="text-sm font-semibold">{t("usage.dailyTrend")}</CardTitle>
@@ -384,7 +384,7 @@ export default function UsagePage() {
           )}
 
           {activityLoading ? (
-            <Card className="of-animate-in">
+            <Card className="forgebadger-animate-in">
               <CardContent className="py-6 text-center text-sm text-muted-foreground">
                 {t("usage.loading")}
               </CardContent>
@@ -415,7 +415,7 @@ function UsageTable({
   const maxRowTotal = Math.max(1, ...rows.map((row) => row.totalTokens));
 
   return (
-    <section className={cn("space-y-3 of-animate-in", className)}>
+    <section className={cn("space-y-3 forgebadger-animate-in", className)}>
       <h2 className="text-sm font-semibold">{title}</h2>
       <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
         <div className="flex items-center gap-3 px-4 py-2 text-xs text-muted-foreground">
@@ -484,7 +484,7 @@ function ActivityHeatmap({ series, days }: { series: TokenDailyPoint[]; days: st
   if (projects.length === 0 || days.length === 0) return null;
 
   return (
-    <Card className="of-animate-in">
+    <Card className="forgebadger-animate-in">
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-sm font-semibold">{t("usage.activityTitle")}</CardTitle>

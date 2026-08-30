@@ -23,9 +23,9 @@ try {
   await rm(cliDist, { recursive: true, force: true });
   await rm(gatewayDist, { recursive: true, force: true });
 
-  run("pnpm", ["--filter", "@openforge/gateway", "build"]);
-  run("pnpm", ["--filter", "@openforge/web", "build"]);
-  run("pnpm", ["--filter", "openforge", "build"]);
+  run("pnpm", ["--filter", "@forgebadger/gateway", "build"]);
+  run("pnpm", ["--filter", "@forgebadger/web", "build"]);
+  run("pnpm", ["--filter", "forgebadger", "build"]);
 
   await rm(gatewayTarget, { recursive: true, force: true });
   await rm(webTarget, { recursive: true, force: true });
@@ -34,6 +34,7 @@ try {
   await cp(path.join(workspaceRoot, "packages/gateway/dist"), gatewayTarget, copyTreeOptions);
   await cp(path.join(workspaceRoot, "packages/web/.next/standalone"), webStandaloneTarget, copyTreeOptions);
   await materializePnpmAliases(path.join(webStandaloneTarget, "node_modules"));
+  await removeBundledWebNativeDependencies(path.join(webStandaloneTarget, "node_modules"));
   await mkdir(path.join(webStandalonePackage, ".next"), { recursive: true });
   await cp(path.join(workspaceRoot, "packages/web/.next/static"), path.join(webStandalonePackage, ".next", "static"), copyTreeOptions);
   await cp(path.join(workspaceRoot, "packages/web/public"), path.join(webStandalonePackage, "public"), copyTreeOptions);
@@ -104,4 +105,22 @@ async function copyAliasIfMissing(source, target) {
     return;
   }
   await cp(source, target, copyTreeOptions);
+}
+
+async function removeBundledWebNativeDependencies(nodeModulesDir) {
+  await rm(path.join(nodeModulesDir, "sharp"), { recursive: true, force: true });
+  await rm(path.join(nodeModulesDir, "@img"), { recursive: true, force: true });
+
+  const pnpmStore = path.join(nodeModulesDir, ".pnpm");
+  if (!existsSync(pnpmStore)) {
+    return;
+  }
+
+  for (const entry of await readdir(pnpmStore, { withFileTypes: true })) {
+    if (entry.name.startsWith("sharp@") || entry.name.startsWith("@img+")) {
+      await rm(path.join(pnpmStore, entry.name), { recursive: true, force: true });
+    }
+  }
+  await rm(path.join(pnpmStore, "node_modules", "sharp"), { recursive: true, force: true });
+  await rm(path.join(pnpmStore, "node_modules", "@img"), { recursive: true, force: true });
 }

@@ -1,12 +1,12 @@
 {
-  "name": "@openforge/dsh-bridge",
+  "name": "@forgebadger/dsh-bridge",
   "version": "0.1.0",
   "private": true,
-  "description": "OpenForge platform bridge plugin + resume-aware JSON-RPC server + launcher for the DeepSeek Harness (dsh) copilot kernel.",
+  "description": "ForgeBadger platform bridge plugin + resume-aware JSON-RPC server + launcher for the DeepSeek Harness (dsh) copilot kernel.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "openforge-dsh-bridge": "dist/launcher.js"
+    "forgebadger-dsh-bridge": "dist/launcher.js"
   },
   "exports": {
     ".": {

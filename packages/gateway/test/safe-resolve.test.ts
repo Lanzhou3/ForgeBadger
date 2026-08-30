@@ -8,7 +8,7 @@ import { safeResolve, validateProjectRoot } from "../src/lib/safe-resolve.js";
 
 describe("safeResolve", () => {
   it("resolves a relative path inside an approved project root", () => {
-    const root = mkdtempSync(join(tmpdir(), "openforge-root-"));
+    const root = mkdtempSync(join(tmpdir(), "forgebadger-root-"));
 
     const resolved = safeResolve(root, ".claude/CLAUDE.md");
 
@@ -16,7 +16,7 @@ describe("safeResolve", () => {
   });
 
   it("rejects parent traversal outside the project root", () => {
-    const root = mkdtempSync(join(tmpdir(), "openforge-root-"));
+    const root = mkdtempSync(join(tmpdir(), "forgebadger-root-"));
 
     assert.throws(
       () => safeResolve(root, "../outside.md"),
@@ -25,7 +25,7 @@ describe("safeResolve", () => {
   });
 
   it("rejects absolute output paths", () => {
-    const root = mkdtempSync(join(tmpdir(), "openforge-root-"));
+    const root = mkdtempSync(join(tmpdir(), "forgebadger-root-"));
 
     assert.throws(() => safeResolve(root, "/tmp/outside.md"), /absolute paths/);
   });
@@ -35,8 +35,8 @@ describe("safeResolve", () => {
   });
 
   it("rejects symlink escapes", () => {
-    const root = mkdtempSync(join(tmpdir(), "openforge-root-"));
-    const outside = mkdtempSync(join(tmpdir(), "openforge-outside-"));
+    const root = mkdtempSync(join(tmpdir(), "forgebadger-root-"));
+    const outside = mkdtempSync(join(tmpdir(), "forgebadger-outside-"));
     const outsideFile = join(outside, "secret.txt");
     writeFileSync(outsideFile, "secret");
     symlinkSync(outsideFile, join(root, "leak.txt"));

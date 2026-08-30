@@ -34,8 +34,8 @@ describe("ProjectManagerRepository", () => {
     owner = users.create("pm-owner@example.com", "hash");
     other = users.create("pm-other@example.com", "hash");
     projectId = new ProjectRepository(db, owner.id).create({
-      name: "OpenForge",
-      path: "/tmp/openforge-pm",
+      name: "ForgeBadger",
+      path: "/tmp/forgebadger-pm",
       aiTool: "claude"
     }).id;
   });
@@ -237,7 +237,7 @@ describe("ProjectManagerRepository", () => {
       title: "Redact evidence",
       details: {
         apiKey,
-        rawTerminalOutput: "OPENFORGE_ATTACH_TOKEN=attach-secret",
+        rawTerminalOutput: "FORGEBADGER_ATTACH_TOKEN=attach-secret",
         [stdErrKey]: "Bearer jwt.secret.value",
         eventEncryptKey: "feishu-event-secret",
         providerCredential: "provider-secret"

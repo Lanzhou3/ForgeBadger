@@ -1,5 +1,5 @@
 /**
- * Approval bridge (M3): routes dsh approval questions for the OpenForge
+ * Approval bridge (M3): routes dsh approval questions for the ForgeBadger
  * operate tools to the Gateway over the stdio JSON-RPC transport.
  *
  * Pipeline inside the runtime:
@@ -72,7 +72,7 @@ export function registerApprovalBridge(ctx: Context): void {
     pendingArgs.set(String(exec.callId), exec.arguments);
     return {
       kind: "ask",
-      reason: `OpenForge operate action "${exec.name}" requires owner approval`,
+      reason: `ForgeBadger operate action "${exec.name}" requires owner approval`,
     };
   });
 

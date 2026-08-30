@@ -100,7 +100,7 @@ async function emitOperateTurn(sessionId, promptCount) {
     toolName: OPERATE_TOOL,
     callId,
     args,
-    reason: `OpenForge operate action "${OPERATE_TOOL}" requires owner approval`
+    reason: `ForgeBadger operate action "${OPERATE_TOOL}" requires owner approval`
   });
   if (SCENARIO === "operate-hang") return; // Never ends: the cancel test kills us.
   if (SCENARIO === "operate-crash" && !hasCrashedBefore()) {
@@ -169,15 +169,15 @@ function emitTurn(sessionId, promptCount) {
 record({
   kind: "boot",
   env: {
-    operate: process.env.OPENFORGE_BRIDGE_ENABLE_OPERATE ?? null,
+    operate: process.env.FORGEBADGER_BRIDGE_ENABLE_OPERATE ?? null,
     hasLlmKey: (process.env.DSH_LLM_API_KEY ?? "") !== "",
     llmApi: process.env.DSH_LLM_API ?? null,
     llmBaseUrl: process.env.DSH_LLM_BASE_URL ?? null,
     llmModel: process.env.DSH_LLM_MODEL_ID ?? null,
-    userId: process.env.OPENFORGE_USER_ID ?? null,
-    hasBridgeToken: (process.env.OPENFORGE_COPILOT_BRIDGE_TOKEN ?? "") !== "",
-    hasMasterKey: process.env.OPENFORGE_MASTER_KEY !== undefined,
-    hasJwtSecret: process.env.OPENFORGE_JWT_SECRET !== undefined,
+    userId: process.env.FORGEBADGER_USER_ID ?? null,
+    hasBridgeToken: (process.env.FORGEBADGER_COPILOT_BRIDGE_TOKEN ?? "") !== "",
+    hasMasterKey: process.env.FORGEBADGER_MASTER_KEY !== undefined,
+    hasJwtSecret: process.env.FORGEBADGER_JWT_SECRET !== undefined,
     sessionRoot: process.env.DSH_SESSION_ROOT ?? null,
     bridgeConfig: process.env.DSH_BRIDGE_CONFIG ?? null
   }

@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { Database } from "../types.js";
 
 import { auditLogs, templateFiles, templates, users } from "../schema.js";
-import { buildOpenForgeClaudeHookSettings } from "../../services/claude-notification-settings.js";
+import { buildForgeBadgerClaudeHookSettings } from "../../services/claude-notification-settings.js";
 
 export interface Template {
   id: string;
@@ -79,7 +79,7 @@ function builtInClaudeTemplate(): typeof templates.$inferInsert {
     id: BUILTIN_CLAUDE_TEMPLATE_ID,
     userId: null,
     name: "Claude Code",
-    description: "Built-in Claude Code template with project memory, hooks, and OpenForge session integration",
+    description: "Built-in Claude Code template with project memory, hooks, and ForgeBadger session integration",
     version: BUILTIN_CLAUDE_TEMPLATE_VERSION,
     isBuiltin: true,
     visibility: "shared",
@@ -104,7 +104,7 @@ function builtInClaudeFiles(): Array<typeof templateFiles.$inferInsert> {
     },
     {
       templateId: BUILTIN_CLAUDE_TEMPLATE_ID,
-      filePath: ".claude/hooks/openforge-guard.mjs",
+      filePath: ".claude/hooks/forgebadger-guard.mjs",
       content: builtInGuardHook(),
       fileType: "javascript"
     },
@@ -317,7 +317,7 @@ function builtInClaudeMd(): string {
   return [
     "# {{projectName}}",
     "",
-    "You are working inside an OpenForge-managed Claude Code session.",
+    "You are working inside an ForgeBadger-managed Claude Code session.",
     "",
     "## Project Context",
     "",
@@ -367,7 +367,7 @@ function builtInClaudeMd(): string {
     "",
     "- Keep Gateway responsibilities in `packages/gateway`; do not add Next.js API routes for Gateway behavior.",
     "- Keep Web console responsibilities in `packages/web`; call Gateway through `/api/v1` and WebSocket endpoints.",
-    "- REST responses use the OpenForge envelope: `{ \"code\": 0, \"data\": {}, \"message\": \"\" }` or `{ \"code\": 1, \"message\": \"...\", \"details\": {} }`.",
+    "- REST responses use the ForgeBadger envelope: `{ \"code\": 0, \"data\": {}, \"message\": \"\" }` or `{ \"code\": 1, \"message\": \"...\", \"details\": {} }`.",
     "- Terminal sessions are tmux-backed. Gateway restarts and browser reconnects must not kill the underlying CLI session.",
     "- Store project, session, model, agent, skill, and template state in SQLite. Do not store terminal scrollback in SQLite.",
     "",
@@ -411,9 +411,9 @@ function builtInClaudeMd(): string {
     "",
     "## Claude Code Hooks And Notifications",
     "",
-    "- OpenForge writes hooks into `.claude/settings.json` or `.claude/settings.local.json` at session launch.",
-    "- `PermissionRequest`, `PermissionDenied`, and `Notification(permission_prompt)` use HTTP hooks that POST Claude Code's hook JSON directly to OpenForge with env-backed headers.",
-    "- If notifications do not appear, check that `OPENFORGE_SESSION_ID`, `OPENFORGE_ATTACH_TOKEN`, and `OPENFORGE_GATEWAY_URL` are present in the launched tmux environment.",
+    "- ForgeBadger writes hooks into `.claude/settings.json` or `.claude/settings.local.json` at session launch.",
+    "- `PermissionRequest`, `PermissionDenied`, and `Notification(permission_prompt)` use HTTP hooks that POST Claude Code's hook JSON directly to ForgeBadger with env-backed headers.",
+    "- If notifications do not appear, check that `FORGEBADGER_SESSION_ID`, `FORGEBADGER_ATTACH_TOKEN`, and `FORGEBADGER_GATEWAY_URL` are present in the launched tmux environment.",
     "- Use Claude Code `/hooks` inside the terminal to inspect which project, local, user, and plugin hooks are active.",
     "",
     "## When To Update This File",
@@ -426,14 +426,14 @@ function builtInClaudeMd(): string {
 }
 
 function builtInClaudeSettings(): string {
-  const settings = buildOpenForgeClaudeHookSettings("{{gatewayUrl}}");
+  const settings = buildForgeBadgerClaudeHookSettings("{{gatewayUrl}}");
   settings.hooks.PreToolUse = [
     {
       matcher: "Bash",
       hooks: [
         {
           type: "command",
-          command: "node .claude/hooks/openforge-guard.mjs",
+          command: "node .claude/hooks/forgebadger-guard.mjs",
           timeout: 5
         }
       ]
@@ -458,7 +458,7 @@ function builtInGuardHook(): string {
     "  /(^|\\s)chmod\\s+-R\\s+777\\b/",
     "];",
     "if (blockedPatterns.some((pattern) => pattern.test(command))) {",
-    "  console.error(\"OpenForge guard blocked a dangerous Bash command. Ask the user for explicit approval or choose a safer operation.\");",
+    "  console.error(\"ForgeBadger guard blocked a dangerous Bash command. Ask the user for explicit approval or choose a safer operation.\");",
     "  process.exit(2);",
     "}",
     "process.exit(0);",
@@ -520,7 +520,7 @@ function builtInAdapterAgentsMd(adapterName: "OpenCode" | "Codex" | "Kimi Code")
   return [
     "# {{projectName}}",
     "",
-    `You are working inside an OpenForge-managed ${adapterName} session.`,
+    `You are working inside an ForgeBadger-managed ${adapterName} session.`,
     "",
     "## Project Context",
     "",
@@ -604,8 +604,8 @@ function builtInOpenCodeJson(): string {
 
 function builtInCodexConfigToml(): string {
   return [
-    "# OpenForge project-level Codex preset.",
-    "# Codex normally reads config.toml from CODEX_HOME; OpenForge treats this file as the project preset source.",
+    "# ForgeBadger project-level Codex preset.",
+    "# Codex normally reads config.toml from CODEX_HOME; ForgeBadger treats this file as the project preset source.",
     "# Keep secrets and personal authentication outside the repository.",
     "",
     'model = "gpt-5.1-codex"',

@@ -57,7 +57,7 @@ export function ProviderWorkspace({
 }: ProviderWorkspaceProps) {
   return (
     <div className="min-w-0 space-y-6">
-      <Card className="of-animate-in">
+      <Card className="forgebadger-animate-in">
         <CardContent className="space-y-4 p-4 md:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
@@ -122,7 +122,7 @@ export function ProviderWorkspace({
         <ProviderHealthPanel readiness={readiness} t={t} />
       )}
 
-      <Tabs defaultValue="models" className="of-animate-in" style={{ animationDelay: "40ms" }}>
+      <Tabs defaultValue="models" className="forgebadger-animate-in" style={{ animationDelay: "40ms" }}>
         <TabsList>
           <TabsTrigger value="models">{t("models.modelsWorkspace")}</TabsTrigger>
           <TabsTrigger value="credentials">{t("models.credentials")}</TabsTrigger>
@@ -150,7 +150,7 @@ function ProviderHealthPanel({
   t: Translate;
 }) {
   return (
-    <Card data-testid="provider-health-card" className="of-animate-in">
+    <Card data-testid="provider-health-card" className="forgebadger-animate-in">
       <CardHeader>
         <div className="flex items-center gap-3">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">

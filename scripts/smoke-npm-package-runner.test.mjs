@@ -6,17 +6,17 @@ import { buildNpmInstallArgs, runCommand } from "./smoke-npm-package-runner.mjs"
 describe("npm package smoke command runner", () => {
   it("omits peer dependency resolution during tarball install", () => {
     const args = buildNpmInstallArgs({
-      npmPrefix: "/tmp/openforge-prefix",
-      npmCache: "/tmp/openforge-cache",
-      tarball: "/tmp/openforge-0.1.0.tgz"
+      npmPrefix: "/tmp/forgebadger-prefix",
+      npmCache: "/tmp/forgebadger-cache",
+      tarball: "/tmp/forgebadger-0.1.0.tgz"
     });
 
     assert.deepEqual(args, [
       "install",
       "--prefix",
-      "/tmp/openforge-prefix",
+      "/tmp/forgebadger-prefix",
       "--cache",
-      "/tmp/openforge-cache",
+      "/tmp/forgebadger-cache",
       "--ignore-scripts=false",
       "--omit=peer",
       "--legacy-peer-deps",
@@ -27,7 +27,7 @@ describe("npm package smoke command runner", () => {
       "--fetch-timeout=120000",
       "--no-audit",
       "--no-fund",
-      "/tmp/openforge-0.1.0.tgz"
+      "/tmp/forgebadger-0.1.0.tgz"
     ]);
   });
 

@@ -22,11 +22,11 @@ const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 const bridgeToken = "copilot-bridge-test-token-0123456789abcdef";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 // Keep the delivery read-back budget short so the unconfirmed-path test is fast.
-process.env.OPENFORGE_DISPATCH_CONFIRM_TIMEOUT_MS = "800";
-process.env.OPENFORGE_DISPATCH_CONFIRM_INTERVAL_MS = "50";
+process.env.FORGEBADGER_DISPATCH_CONFIRM_TIMEOUT_MS = "800";
+process.env.FORGEBADGER_DISPATCH_CONFIRM_INTERVAL_MS = "50";
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
@@ -100,7 +100,7 @@ async function listen(app: GatewayApp): Promise<string> {
 function bridgeHeaders(userId: string, token: string = bridgeToken): Record<string, string> {
   return {
     authorization: `Bearer ${token}`,
-    "x-openforge-user-id": userId,
+    "x-forgebadger-user-id": userId,
     "content-type": "application/json"
   };
 }
@@ -227,7 +227,7 @@ describe("copilot bridge internal API", () => {
       assert.equal(res.status, 403);
     });
 
-    it("rejects a missing X-OpenForge-User-Id header with 400", async () => {
+    it("rejects a missing X-ForgeBadger-User-Id header with 400", async () => {
       const res = await fetch(`${baseUrl}/api/internal/v1/copilot-bridge/sessions`, {
         headers: { authorization: `Bearer ${bridgeToken}` }
       });
@@ -244,7 +244,7 @@ describe("copilot bridge internal API", () => {
     before(async () => {
       const project = new ProjectRepository(db, owner.id).create({
         name: "Bridge sessions project",
-        path: "/tmp/openforge-bridge-sessions",
+        path: "/tmp/forgebadger-bridge-sessions",
         aiTool: "claude"
       });
       projectId = project.id;
@@ -302,7 +302,7 @@ describe("copilot bridge internal API", () => {
       assert.equal(res.status, 200, JSON.stringify(body));
       const session = body.data?.session as Record<string, unknown>;
       assert.equal(session.id, sessionId);
-      assert.equal(session.workingDir, "/tmp/openforge-bridge-sessions");
+      assert.equal(session.workingDir, "/tmp/forgebadger-bridge-sessions");
 
       const foreign = await fetch(`${baseUrl}/api/internal/v1/copilot-bridge/sessions/${sessionId}`, {
         headers: bridgeHeaders(stranger.id)
@@ -318,7 +318,7 @@ describe("copilot bridge internal API", () => {
     before(async () => {
       const project = new ProjectRepository(db, owner.id).create({
         name: "Bridge dispatch project",
-        path: "/tmp/openforge-bridge-dispatch",
+        path: "/tmp/forgebadger-bridge-dispatch",
         aiTool: "claude"
       });
       projectId = project.id;
@@ -398,7 +398,7 @@ describe("copilot bridge internal API", () => {
         projectId,
         name: "Inactive session",
         aiTool: "claude",
-        workingDir: "/tmp/openforge-bridge-dispatch"
+        workingDir: "/tmp/forgebadger-bridge-dispatch"
       }).id;
       const res = await fetch(`${baseUrl}/api/internal/v1/copilot-bridge/sessions/${inactiveId}/dispatch`, {
         method: "POST",
@@ -610,7 +610,7 @@ describe("session dispatch consumption confirmation (indeterminate path)", () =>
     ownerId = new UserRepository(db).create("bridge-modal-owner@example.com", "hash").id;
     const project = new ProjectRepository(db, ownerId).create({
       name: "Modal dispatch project",
-      path: "/tmp/openforge-bridge-modal",
+      path: "/tmp/forgebadger-bridge-modal",
       aiTool: "claude"
     });
     sessionId = new SessionRepository(db, ownerId).create({

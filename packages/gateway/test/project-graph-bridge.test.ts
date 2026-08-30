@@ -27,8 +27,8 @@ const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 const bridgeToken = "copilot-bridge-graph-token-0123456789abcdef";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
@@ -68,7 +68,7 @@ describe("copilot-bridge project graph endpoints", () => {
   function bridgeHeaders(userId: string): Record<string, string> {
     return {
       authorization: `Bearer ${bridgeToken}`,
-      "x-openforge-user-id": userId,
+      "x-forgebadger-user-id": userId,
       "content-type": "application/json"
     };
   }
@@ -112,7 +112,7 @@ describe("copilot-bridge project graph endpoints", () => {
   it("rejects requests without the bridge token", async () => {
     const res = await fetch(
       `${baseUrl}/api/internal/v1/copilot-bridge/projects/${graphProjectId}/graph/search?q=greet`,
-      { headers: { "x-openforge-user-id": owner.id } }
+      { headers: { "x-forgebadger-user-id": owner.id } }
     );
     assert.equal(res.status, 401);
   });

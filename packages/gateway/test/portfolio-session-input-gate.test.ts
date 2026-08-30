@@ -25,7 +25,7 @@ function session(): GateASession {
     launchPlan: {
       command: "claude",
       args: [],
-      cwd: "/tmp/openforge-portfolio-session-gate",
+      cwd: "/tmp/forgebadger-portfolio-session-gate",
       env: {},
       secretEnvNames: [],
       credentialMode: "host_environment"
@@ -112,7 +112,7 @@ function launchPlan(): LaunchPlan {
   return {
     command: "claude",
     args: [],
-    cwd: "/tmp/openforge-portfolio-session-gate",
+    cwd: "/tmp/forgebadger-portfolio-session-gate",
     env: {},
     secretEnvNames: [],
     credentialMode: "host_environment"

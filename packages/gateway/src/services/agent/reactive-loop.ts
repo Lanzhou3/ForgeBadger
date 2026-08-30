@@ -10,7 +10,7 @@
  * update to the owner. Operate tools stay behind the security-policy approval
  * gate, so the loop grants no new authority.
  *
- * Attachment itself is opt-in via OPENFORGE_COPILOT_REACTIVE_ENABLED (see
+ * Attachment itself is opt-in via FORGEBADGER_COPILOT_REACTIVE_ENABLED (see
  * server.ts): when off, no listener is attached at all.
  *
  * `copilot_run_updated` never wakes the loop (a proactive turn would otherwise
@@ -18,7 +18,7 @@
  * idle prompts would wake the agent mid-session). All timers are `.unref()`d so a
  * pending debounce never keeps the process alive in tests.
  */
-import type { OpenForgeEvent, OpenForgeEventBus } from "../event-bus.js";
+import type { ForgeBadgerEvent, ForgeBadgerEventBus } from "../event-bus.js";
 import { CopilotConversationLog } from "./conversation-log.js";
 import type { AgentStack, AgentStackDeps } from "./agent-stack.js";
 
@@ -61,12 +61,12 @@ export function attachCopilotReactiveLoop(options: CopilotReactiveLoopOptions): 
   const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
   const cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
   const debounceTimers = new Map<string, NodeJS.Timeout>();
-  const latestEvent = new Map<string, OpenForgeEvent>();
+  const latestEvent = new Map<string, ForgeBadgerEvent>();
   const lastFireAt = new Map<string, number>();
   const inFlight = new Set<string>();
   let stopped = false;
 
-  function schedule(userId: string, event: OpenForgeEvent): void {
+  function schedule(userId: string, event: ForgeBadgerEvent): void {
     latestEvent.set(userId, event);
     const existing = debounceTimers.get(userId);
     if (existing) clearTimeout(existing);
@@ -146,7 +146,7 @@ export function attachCopilotReactiveLoop(options: CopilotReactiveLoopOptions): 
     return match?.id;
   }
 
-  function onEvent(event: OpenForgeEvent): void {
+  function onEvent(event: ForgeBadgerEvent): void {
     if (stopped) return;
     if (!REACTIVE_TRIGGERS.has(event.type)) return;
     schedule(event.userId, event);
@@ -166,7 +166,7 @@ export function attachCopilotReactiveLoop(options: CopilotReactiveLoopOptions): 
   return { stop };
 }
 
-function buildProactivePrompt(event: OpenForgeEvent): string {
+function buildProactivePrompt(event: ForgeBadgerEvent): string {
   return [
     "平台刚刚发生了一个事件，请你主动查看并汇报。",
     `事件：${describeEvent(event)}`,
@@ -176,7 +176,7 @@ function buildProactivePrompt(event: OpenForgeEvent): string {
   ].join("\n");
 }
 
-function describeEvent(event: OpenForgeEvent): string {
+function describeEvent(event: ForgeBadgerEvent): string {
   let description: string;
   switch (event.type) {
     case "session_status_changed":

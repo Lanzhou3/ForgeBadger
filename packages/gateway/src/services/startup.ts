@@ -10,7 +10,7 @@ import { InMemoryApiKeyStore } from "../secrets/api-key-store.js";
 import { InMemorySessionManager } from "./session-manager.js";
 import { createDbSessionRecoveryStore } from "./db-session-recovery-store.js";
 import { createTmuxClient, type TmuxClient } from "./tmux.js";
-import { OpenForgeEventBus } from "./event-bus.js";
+import { ForgeBadgerEventBus } from "./event-bus.js";
 import {
   ClaudePortfolioWorker,
   InMemoryVerifiedWorkerCapabilityRegistry
@@ -42,7 +42,7 @@ export interface StartupResult {
   db: Database;
   sessionManager: InMemorySessionManager;
   apiKeyStore: InMemoryApiKeyStore;
-  eventBus: OpenForgeEventBus;
+  eventBus: ForgeBadgerEventBus;
   feishuChannelRuntime: FeishuChannelRuntime;
   claudePortfolioWorker: ClaudePortfolioWorker;
   portfolioExecution: PortfolioExecutionRuntime;
@@ -74,24 +74,24 @@ export async function startupGateway(options: {
 }): Promise<StartupResult> {
   // 1. Validate env (already done by loadEnv)
   // 2. Initialize database
-  const db = initializeDatabase(options.env.OPENFORGE_DB_PATH);
+  const db = initializeDatabase(options.env.FORGEBADGER_DB_PATH);
 
   // 3. Create API key store
   const apiKeyStore = new InMemoryApiKeyStore({
-    masterKey: options.env.OPENFORGE_MASTER_KEY
+    masterKey: options.env.FORGEBADGER_MASTER_KEY
   });
 
   // 4. Create event bus
-  const eventBus = new OpenForgeEventBus();
+  const eventBus = new ForgeBadgerEventBus();
 
   // 5. Build the Portfolio writer fence before any Gateway-owned terminal exists.
-  const portfolioRuntime = createPortfolioRuntimeBoundary(db, options.env.OPENFORGE_MASTER_KEY);
+  const portfolioRuntime = createPortfolioRuntimeBoundary(db, options.env.FORGEBADGER_MASTER_KEY);
   const sessionManager = new InMemorySessionManager(
     options.tmuxClient ?? createTmuxClient(),
-    createDbSessionRecoveryStore(db, options.env.OPENFORGE_MASTER_KEY),
+    createDbSessionRecoveryStore(db, options.env.FORGEBADGER_MASTER_KEY),
     eventBus,
     {
-      tmuxPrefix: options.env.OPENFORGE_TMUX_PREFIX,
+      tmuxPrefix: options.env.FORGEBADGER_TMUX_PREFIX,
       sessionInputGate: portfolioRuntime.sessionInputGate
     }
   );
@@ -108,12 +108,12 @@ export async function startupGateway(options: {
   });
   const portfolioExecution = portfolioRuntime.createExecutionRuntime({
     sessionManager,
-    masterKey: options.env.OPENFORGE_MASTER_KEY
+    masterKey: options.env.FORGEBADGER_MASTER_KEY
   });
 
   // 6. Recover sessions + kill orphans
   await sessionManager
-    .recoverOpenForgeSessions({
+    .recoverForgeBadgerSessions({
       userId: "system",
       cwd: process.cwd()
     })
@@ -148,7 +148,7 @@ export async function startupGateway(options: {
   // Feishu connection failures are isolated from HTTP readiness and retried by the supervisor.
   const feishuChannelRuntime = createProductionFeishuChannelRuntime({
     db,
-    masterKey: options.env.OPENFORGE_MASTER_KEY
+    masterKey: options.env.FORGEBADGER_MASTER_KEY
   });
 
   return {
@@ -165,7 +165,7 @@ export async function startupGateway(options: {
 
 function createPortfolioRuntimeBoundary(db: Database, masterKey: string) {
   const capabilitySecret = createHmac("sha256", masterKey)
-    .update("openforge:portfolio-worker-capability:v1")
+    .update("forgebadger:portfolio-worker-capability:v1")
     .digest("hex");
   const assignmentLookup = {
     findActiveAssignment(input: { userId: string; sessionId: string; now?: Date }) {

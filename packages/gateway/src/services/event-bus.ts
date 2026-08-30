@@ -100,7 +100,7 @@ export interface CopilotRunUpdatedEvent {
   occurredAt: Date;
 }
 
-export type OpenForgeEvent =
+export type ForgeBadgerEvent =
   | SessionStatusChangedEvent
   | SessionCreatedEvent
   | SessionDeletedEvent
@@ -110,8 +110,8 @@ export type OpenForgeEvent =
   | CopilotRunUpdatedEvent
   | ErrorEvent;
 
-export class OpenForgeEventBus extends EventEmitter {
-  emitEvent(event: OpenForgeEvent): void {
+export class ForgeBadgerEventBus extends EventEmitter {
+  emitEvent(event: ForgeBadgerEvent): void {
     this.emit("event", event);
   }
 }

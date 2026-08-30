@@ -3,7 +3,7 @@ import { createServer as createHttpServer, type Server } from "node:http";
 
 import { InMemoryApiKeyStore } from "./secrets/api-key-store.js";
 import { InMemorySessionManager } from "./services/session-manager.js";
-import { OpenForgeEventBus } from "./services/event-bus.js";
+import { ForgeBadgerEventBus } from "./services/event-bus.js";
 import type { ClaudePortfolioWorker } from "./services/portfolio/claude-portfolio-worker.js";
 import type { OperationsRuntime } from "./services/portfolio/operations-runtime.js";
 import type { PortfolioExecutionRuntime } from "./services/startup.js";
@@ -21,6 +21,7 @@ import { createDshCopilotBff, type DshCopilotBff } from "./services/dsh-copilot/
 import { createCordisConfigRenderer } from "./services/dsh-copilot/dsh-config.js";
 import type { DispatchConfirmOptions } from "./services/copilot-bridge/delivery-confirm.js";
 import type { FeishuSdkFactory } from "./services/integrations/feishu-sdk.js";
+import type { RegistrationMode } from "./routes/auth.js";
 import { drainFeishuCopilotChatQueues } from "./services/integrations/feishu-copilot-channel.js";
 
 import { mountRoutes } from "./routes/index.js";
@@ -32,7 +33,7 @@ export interface ServerDeps {
   masterKey: string;
   sessionManager: InMemorySessionManager;
   apiKeyStore: InMemoryApiKeyStore;
-  eventBus: OpenForgeEventBus;
+  eventBus: ForgeBadgerEventBus;
   /** The only Portfolio object exposed to HTTP routes; no execution runtime leaks here. */
   portfolioApi?: PortfolioApiFacade | undefined;
   /** Service token guarding the internal copilot-bridge API; unset disables the route group. */
@@ -51,6 +52,8 @@ export interface ServerDeps {
   agentDeps?: AgentStackDeps | undefined;
   /** Test-only external SDK boundary for signed Feishu webhook delivery. */
   feishuWebhookSdkFactory?: FeishuSdkFactory | undefined;
+  registrationMode?: RegistrationMode | undefined;
+  dispatchConfirm?: DispatchConfirmOptions | undefined;
 }
 
 /**
@@ -67,12 +70,12 @@ export interface GatewayApp {
   server: Server;
   sessionManager: InMemorySessionManager;
   apiKeyStore: InMemoryApiKeyStore;
-  eventBus: OpenForgeEventBus;
+  eventBus: ForgeBadgerEventBus;
   internalServices: GatewayInternalServices;
   recoveryReady: Promise<void>;
   /**
    * Proactive Copilot reactive loop handle; present only when opted in via
-   * OPENFORGE_COPILOT_REACTIVE_ENABLED. close() stops it automatically.
+   * FORGEBADGER_COPILOT_REACTIVE_ENABLED. close() stops it automatically.
    */
   reactiveLoop?: ReturnType<typeof attachCopilotReactiveLoop> | undefined;
   close(): Promise<void>;
@@ -84,7 +87,7 @@ export interface GatewayAppOptions {
   db: Database;
   sessionManager: InMemorySessionManager;
   apiKeyStore: InMemoryApiKeyStore;
-  eventBus?: OpenForgeEventBus;
+  eventBus?: ForgeBadgerEventBus;
   claudePortfolioWorker?: ClaudePortfolioWorker | undefined;
   portfolioExecution?: PortfolioExecutionRuntime | undefined;
   operationsRuntime?: Pick<OperationsRuntime, "stop"> | undefined;
@@ -100,13 +103,14 @@ export interface GatewayAppOptions {
   /** Test-only external SDK boundary for signed Feishu webhook delivery. */
   feishuWebhookSdkFactory?: FeishuSdkFactory | undefined;
   /**
-   * Opt-in (OPENFORGE_COPILOT_REACTIVE_ENABLED, default off): attach the
+   * Opt-in (FORGEBADGER_COPILOT_REACTIVE_ENABLED, default off): attach the
    * proactive Copilot reactive loop. When off, Copilot never self-starts
    * report conversations.
    */
   copilotReactiveEnabled?: boolean | undefined;
   /** Delivery read-back budget for the bridge dispatch path (from env in start-gateway). */
   dispatchConfirm?: DispatchConfirmOptions | undefined;
+  registrationMode?: RegistrationMode | undefined;
 }
 
 export function createServer(deps: ServerDeps): express.Express {
@@ -148,7 +152,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const jwtSecret = options.jwtSecret;
   const sessionManager = options.sessionManager;
   const apiKeyStore = options.apiKeyStore;
-  const eventBus = options.eventBus ?? new OpenForgeEventBus();
+  const eventBus = options.eventBus ?? new ForgeBadgerEventBus();
   const internalServices = createGatewayInternalServices(options.portfolioExecution);
   const portfolioApi = createPortfolioApiFacade({ db: options.db, events: createPortfolioEventFacade(eventBus) });
   const recoveryReady = Promise.resolve();
@@ -202,6 +206,8 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     adapterCommandRunner: options.adapterCommandRunner,
     feishuChannelRuntime: options.feishuChannelRuntime,
     agentDeps,
+    registrationMode: options.registrationMode,
+    dispatchConfirm: options.dispatchConfirm,
     ...(options.feishuWebhookSdkFactory ? { feishuWebhookSdkFactory: options.feishuWebhookSdkFactory } : {}),
     ...(dshBff ? { dshBff } : {}),
     ...(options.llmFetch ? { llmFetch: options.llmFetch } : {})
@@ -212,7 +218,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   attachNotificationPersistence({ db: options.db, eventBus });
   attachTerminalWebSocket({ server, sessionManager, jwtSecret, db: options.db });
   attachEventsWebSocket({ server, eventBus, jwtSecret, db: options.db });
-  // Proactive copilot: opt-in via OPENFORGE_COPILOT_REACTIVE_ENABLED. When
+  // Proactive copilot: opt-in via FORGEBADGER_COPILOT_REACTIVE_ENABLED. When
   // off, no listener is attached — Copilot never wakes itself on events.
   const reactiveLoop = options.copilotReactiveEnabled
     ? attachCopilotReactiveLoop({

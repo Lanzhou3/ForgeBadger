@@ -1,15 +1,29 @@
 import type { GatewayEvent, StoredNotification } from "./notifications";
+import { readMigratedStorageValue, writeMigratedStorageValue } from "./brand-storage";
 
-export const browserNotificationPreferenceKey = "openforge.browserNotifications.enabled";
+export const browserNotificationPreferenceKey = "forgebadger.browserNotifications.enabled";
+const legacyBrowserNotificationPreferenceKey = "openforge.browserNotifications.enabled";
 
 export type BrowserNotificationPermission = NotificationPermission | "unsupported";
 
 export function getBrowserNotificationPreference(storage: Storage | undefined = getStorage()): boolean {
-  return storage?.getItem(browserNotificationPreferenceKey) === "true";
+  return storage
+    ? readMigratedStorageValue(
+        storage,
+        browserNotificationPreferenceKey,
+        legacyBrowserNotificationPreferenceKey
+      ) === "true"
+    : false;
 }
 
 export function setBrowserNotificationPreference(enabled: boolean, storage: Storage | undefined = getStorage()): void {
-  storage?.setItem(browserNotificationPreferenceKey, enabled ? "true" : "false");
+  if (!storage) return;
+  writeMigratedStorageValue(
+    storage,
+    browserNotificationPreferenceKey,
+    legacyBrowserNotificationPreferenceKey,
+    enabled ? "true" : "false"
+  );
 }
 
 export function getBrowserNotificationPermission(): BrowserNotificationPermission {

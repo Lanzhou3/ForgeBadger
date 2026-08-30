@@ -12,7 +12,7 @@ import { Socket } from "node:net";
 
 import { createGatewayApp } from "../src/server.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
-import { OpenForgeEventBus } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import type { TmuxClient } from "../src/services/tmux.js";
 
@@ -21,10 +21,10 @@ const masterKey = "abcdef0123456789abcdef0123456789";
 describe("Gateway app auth secret injection", () => {
   it("verifies authenticated routes with the app jwt secret instead of process env", async () => {
     const injectedSecret = "injected-jwt-secret-0123456789abcdef";
-    const originalJwtSecret = process.env.OPENFORGE_JWT_SECRET;
-    const originalMasterKey = process.env.OPENFORGE_MASTER_KEY;
-    process.env.OPENFORGE_JWT_SECRET = "process-env-jwt-secret-0123456789";
-    process.env.OPENFORGE_MASTER_KEY = masterKey;
+    const originalJwtSecret = process.env.FORGEBADGER_JWT_SECRET;
+    const originalMasterKey = process.env.FORGEBADGER_MASTER_KEY;
+    process.env.FORGEBADGER_JWT_SECRET = "process-env-jwt-secret-0123456789";
+    process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
     const db = createTestDb();
     const gateway = createGatewayApp({
@@ -33,7 +33,7 @@ describe("Gateway app auth secret injection", () => {
       db,
       sessionManager: new InMemorySessionManager(createMockTmuxClient()),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
-      eventBus: new OpenForgeEventBus()
+      eventBus: new ForgeBadgerEventBus()
     });
 
     try {
@@ -53,13 +53,13 @@ describe("Gateway app auth secret injection", () => {
       assert.equal(me.body.data.email, "injected-secret@example.com");
     } finally {
       await gateway.close();
-      restoreEnv("OPENFORGE_JWT_SECRET", originalJwtSecret);
-      restoreEnv("OPENFORGE_MASTER_KEY", originalMasterKey);
+      restoreEnv("FORGEBADGER_JWT_SECRET", originalJwtSecret);
+      restoreEnv("FORGEBADGER_MASTER_KEY", originalMasterKey);
     }
   });
 });
 
-function restoreEnv(name: "OPENFORGE_JWT_SECRET" | "OPENFORGE_MASTER_KEY", value: string | undefined): void {
+function restoreEnv(name: "FORGEBADGER_JWT_SECRET" | "FORGEBADGER_MASTER_KEY", value: string | undefined): void {
   if (value === undefined) {
     delete process.env[name];
     return;

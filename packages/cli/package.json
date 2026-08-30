@@ -1,11 +1,11 @@
 {
-  "name": "openforge",
+  "name": "forgebadger",
   "version": "0.1.0",
-  "description": "Local-first Web console for Claude Code, OpenCode, and Codex workflows.",
+  "description": "Local-first Web console for Claude Code, OpenCode, Codex, and Kimi Code workflows.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "openforge": "dist/index.js"
+    "forgebadger": "dist/index.js"
   },
   "files": [
     "dist",
@@ -16,7 +16,7 @@
     "package.json"
   ],
   "engines": {
-    "node": ">=20.9 <25"
+    "node": ">=20.12 <25"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -25,12 +25,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.71.1",
     "bcryptjs": "^3.0.2",
     "better-sqlite3": "^11.7.0",
+    "croner": "10.0.1",
     "drizzle-orm": "^0.36.4",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "node-pty": "^1.0.0",
+    "smol-toml": "^1.7.1",
     "ws": "^8.18.0",
     "zod": "^3.24.1"
   },

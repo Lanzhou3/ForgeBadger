@@ -9,12 +9,12 @@ test("first-value flow creates projects without CLI/template binding, runs an id
   const suffix = uniqueSuffix();
   const password = "password12345";
   const projectName = `First value ${suffix}`;
-  const projectPath = `/tmp/openforge-first-value-${suffix}`;
-  const importedPath = `/tmp/openforge-first-value-import-${suffix}`;
+  const projectPath = `/tmp/forgebadger-first-value-${suffix}`;
+  const importedPath = `/tmp/forgebadger-first-value-import-${suffix}`;
   const terminalFrames: string[] = [];
 
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.addInitScript(() => window.localStorage.setItem("openforge-language", "en"));
+  await page.addInitScript(() => window.localStorage.setItem("forgebadger-language", "en"));
   page.on("websocket", (socket) => {
     socket.on("framesent", (frame) => terminalFrames.push(frame.payload));
   });
@@ -71,7 +71,7 @@ test("first-value flow creates projects without CLI/template binding, runs an id
     page.waitForEvent("download"),
     exportPanel.getByRole("button", { name: "Download Markdown" }).click(),
   ]);
-  expect(download.suggestedFilename()).toMatch(/^openforge-session-handoff-.*\.md$/);
+  expect(download.suggestedFilename()).toMatch(/^forgebadger-session-handoff-.*\.md$/);
   expect(terminalFrames.some((frame) => frame.includes("Verify manual task handoff"))).toBe(false);
 });
 

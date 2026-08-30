@@ -13,7 +13,7 @@ import {
   ensureCodexNotificationSettings,
   ensureKimiNotificationSettings
 } from "./cli-notification-settings.js";
-import { ensureOpenForgeOpenCodePlugin } from "./opencode-notification-settings.js";
+import { ensureForgeBadgerOpenCodePlugin } from "./opencode-notification-settings.js";
 import type { WorkerLaunchMaterial } from "./portfolio/worker-signal-service.js";
 
 export interface LaunchPlanInput {
@@ -78,8 +78,8 @@ export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
   if (!credentialBoundary.ok) throw new Error(credentialBoundary.message);
 
   const env: Record<string, string> = {
-    OPENFORGE_SESSION_ID: input.sessionId,
-    OPENFORGE_GATEWAY_URL: getGatewayUrl()
+    FORGEBADGER_SESSION_ID: input.sessionId,
+    FORGEBADGER_GATEWAY_URL: getGatewayUrl()
   };
   const secretEnvNames: string[] = [];
   let selectedModel: AdapterModelSelection | undefined;
@@ -128,7 +128,7 @@ export async function prepareAdapterLaunchExtras(
     assertClaudePortfolioWorkerLaunchForSession(portfolioWorker, adapter, sessionId);
   }
   if (adapter === "opencode") {
-    await ensureOpenForgeOpenCodePlugin(projectRoot);
+    await ensureForgeBadgerOpenCodePlugin(projectRoot);
     return [];
   }
   if (adapter === "codex") {
@@ -199,8 +199,8 @@ function applyClaudePortfolioWorkerLaunchEnvironment(
   const worker = input.portfolioWorker;
   if (!worker) return;
   assertClaudePortfolioWorkerLaunchForSession(worker, input.adapter, input.sessionId);
-  env.OPENFORGE_PORTFOLIO_WORKER_ACK_CAPABILITY = worker.workerAckCapability;
-  secretEnvNames.push("OPENFORGE_PORTFOLIO_WORKER_ACK_CAPABILITY");
+  env.FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY = worker.workerAckCapability;
+  secretEnvNames.push("FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY");
 }
 
 function assertClaudePortfolioWorkerLaunchForSession(
@@ -237,8 +237,8 @@ function apiKeyEnvName(provider: string): string {
 
 function getGatewayUrl(): string {
   return (
-    process.env.OPENFORGE_GATEWAY_URL
+    process.env.FORGEBADGER_GATEWAY_URL
     || process.env.NEXT_PUBLIC_GATEWAY_URL
-    || `http://${process.env.OPENFORGE_HOST || "127.0.0.1"}:${process.env.OPENFORGE_PORT || "3000"}`
+    || `http://${process.env.FORGEBADGER_HOST || "127.0.0.1"}:${process.env.FORGEBADGER_PORT || "3000"}`
   );
 }

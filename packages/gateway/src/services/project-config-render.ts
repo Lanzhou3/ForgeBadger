@@ -30,9 +30,9 @@ export type ProjectConfigSkillSync = (repo: Pick<SkillRepository, "create" | "ge
 
 export function getGatewayUrl(): string {
   return (
-    process.env.OPENFORGE_GATEWAY_URL ||
+    process.env.FORGEBADGER_GATEWAY_URL ||
     process.env.NEXT_PUBLIC_GATEWAY_URL ||
-    `http://${process.env.OPENFORGE_HOST || "127.0.0.1"}:${process.env.OPENFORGE_PORT || "3000"}`
+    `http://${process.env.FORGEBADGER_HOST || "127.0.0.1"}:${process.env.FORGEBADGER_PORT || "3000"}`
   );
 }
 

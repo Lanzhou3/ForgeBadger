@@ -15,8 +15,8 @@ import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -113,7 +113,7 @@ describe("project AI config routes", () => {
 
   it("returns project-level config files for the project's adapter", async () => {
     const token = await register("ai-config-reader@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-read-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-ai-config-read-"));
     await mkdir(path.join(rootPath, ".opencode", "agents"), { recursive: true });
     await mkdir(path.join(rootPath, ".claude"), { recursive: true });
     await writeFile(path.join(rootPath, "AGENTS.md"), "# Existing Agents\n", "utf8");
@@ -144,7 +144,7 @@ describe("project AI config routes", () => {
 
   it("returns project-level config files for a Kimi Code project", async () => {
     const token = await register("ai-config-kimi-reader@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-kimi-read-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-ai-config-kimi-read-"));
     await mkdir(path.join(rootPath, ".kimi-code", "agents"), { recursive: true });
     await writeFile(path.join(rootPath, "AGENTS.md"), "# Existing Kimi Agents\n", "utf8");
     await writeFile(path.join(rootPath, ".kimi-code", "mcp.json"), "{}\n", "utf8");
@@ -169,7 +169,7 @@ describe("project AI config routes", () => {
 
   it("reports existing root instruction files when scanning an import directory", async () => {
     const token = await register("scan-existing-config@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-scan-config-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-scan-config-"));
     await writeFile(path.join(rootPath, "CLAUDE.md"), "# Existing Claude\n", "utf8");
     await writeFile(path.join(rootPath, "AGENTS.md"), "# Existing Agents\n", "utf8");
     const canonicalRootPath = await realpath(rootPath);
@@ -191,7 +191,7 @@ describe("project AI config routes", () => {
 
   it("uses root CLAUDE.md as the Claude Code project instruction file", async () => {
     const token = await register("ai-config-claude-root@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-claude-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-ai-config-claude-"));
     await mkdir(path.join(rootPath, ".claude"), { recursive: true });
     await writeFile(path.join(rootPath, "CLAUDE.md"), "# Root Claude\n", "utf8");
     await writeFile(path.join(rootPath, ".claude", "CLAUDE.md"), "# Legacy Nested Claude\n", "utf8");
@@ -211,7 +211,7 @@ describe("project AI config routes", () => {
     assert.equal(body.data?.adapter, "claude");
     assertFile(body, "CLAUDE.md", true, "# Root Claude\n");
     assertNoFile(body, ".claude/settings.json");
-    assertNoFile(body, ".claude/hooks/openforge-guard.mjs");
+    assertNoFile(body, ".claude/hooks/forgebadger-guard.mjs");
     assert.equal(
       body.data?.files.some((file) => file.relativePath === ".claude/CLAUDE.md"),
       false
@@ -220,7 +220,7 @@ describe("project AI config routes", () => {
 
   it("updates allowed project config files and rejects unsafe paths", async () => {
     const token = await register("ai-config-writer@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-write-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-ai-config-write-"));
     const projectId = await importProject(token, {
       name: "Codex Project",
       path: rootPath,
@@ -262,7 +262,7 @@ describe("project AI config routes", () => {
 
   it("rejects writing to directory-based config files (root-level only)", async () => {
     const token = await register("ai-config-root-only@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-root-only-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-ai-config-root-only-"));
     const projectId = await importProject(token, {
       name: "Root Only Project",
       path: rootPath,
@@ -295,7 +295,7 @@ describe("project AI config routes", () => {
 
   it("requires an explicit aiTool for CLI-agnostic projects", async () => {
     const token = await register("ai-config-explicit@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-explicit-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-ai-config-explicit-"));
     const projectId = await importProject(token, {
       name: "Unbound Project",
       path: rootPath,
@@ -328,7 +328,7 @@ describe("project AI config routes", () => {
 
   it("leaves the project untracked when no template is provided at import", async () => {
     const token = await register("ai-config-template-default@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-default-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-ai-config-default-"));
 
     const res = await fetch(`${baseUrl}/api/v1/projects/import`, {
       method: "POST",
@@ -353,7 +353,7 @@ describe("project AI config routes", () => {
   it("does not expose another user's project config", async () => {
     const ownerToken = await register("ai-config-owner@test.com");
     const readerToken = await register("ai-config-reader-other@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-private-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-ai-config-private-"));
     await writeFile(path.join(rootPath, "AGENTS.md"), "# Private\n", "utf8");
     const projectId = await importProject(ownerToken, {
       name: "Private Project",
@@ -372,8 +372,8 @@ describe("project AI config routes", () => {
 
   it("returns redacted read-only global config files and form metadata", async () => {
     const token = await register("ai-config-global@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-global-project-"));
-    const opencodeConfigDir = await mkdtemp(path.join(tmpdir(), "openforge-opencode-config-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-ai-config-global-project-"));
+    const opencodeConfigDir = await mkdtemp(path.join(tmpdir(), "forgebadger-opencode-config-"));
     await writeFile(path.join(opencodeConfigDir, "AGENTS.md"), "# Personal OpenCode\n", "utf8");
     await writeFile(
       path.join(opencodeConfigDir, "opencode.json"),
@@ -412,8 +412,8 @@ describe("project AI config routes", () => {
 
   it("returns only ~/.claude/settings.json for Claude Code global config", async () => {
     const token = await register("ai-config-claude-global@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-claude-global-project-"));
-    const claudeConfigDir = await mkdtemp(path.join(tmpdir(), "openforge-claude-config-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-ai-config-claude-global-project-"));
+    const claudeConfigDir = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-config-"));
     await writeFile(path.join(claudeConfigDir, "CLAUDE.md"), "# Personal Claude\n", "utf8");
     await writeFile(path.join(claudeConfigDir, "settings.local.json"), "{}\n", "utf8");
     await writeFile(
@@ -453,8 +453,8 @@ describe("project AI config routes", () => {
 
   it("returns redacted read-only Kimi Code global config from KIMI_CODE_HOME", async () => {
     const token = await register("ai-config-kimi-global@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-ai-config-kimi-global-project-"));
-    const kimiHome = await mkdtemp(path.join(tmpdir(), "openforge-kimi-home-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-ai-config-kimi-global-project-"));
+    const kimiHome = await mkdtemp(path.join(tmpdir(), "forgebadger-kimi-home-"));
     await writeFile(path.join(kimiHome, "AGENTS.md"), "# Personal Kimi\n", "utf8");
     await writeFile(
       path.join(kimiHome, "config.toml"),

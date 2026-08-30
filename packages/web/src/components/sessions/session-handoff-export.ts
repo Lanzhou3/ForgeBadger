@@ -17,7 +17,7 @@ export interface SessionHandoffExportInput {
 }
 
 const secretLikePattern =
-  /\b(?:sk-[A-Za-z0-9_-]{6,}|Bearer\s+[A-Za-z0-9._~+/=-]+|OPENFORGE_ATTACH_TOKEN=|api[_-]?key\s*[:=]|token\s*[:=]|password\s*[:=]|secret\s*[:=])/iu;
+  /\b(?:sk-[A-Za-z0-9_-]{6,}|Bearer\s+[A-Za-z0-9._~+/=-]+|(?:FORGEBADGER|OPENFORGE)_ATTACH_TOKEN=|api[_-]?key\s*[:=]|token\s*[:=]|password\s*[:=]|secret\s*[:=])/iu;
 const placeholderPattern = /\b(?:todo|tbd|fixme|xxx|placeholder)\b/iu;
 const rawTerminalDumpPattern = /(?:^|\n)\s*(?:[$#>]\s+\S+|[A-Z0-9_]+=[^\s]+\s+\S+)|\x1b\[[0-9;]*[A-Za-z]/u;
 
@@ -93,7 +93,7 @@ export function sessionHandoffMarkdownFilename(input: Pick<SessionHandoffExportI
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "task";
-  return `openforge-session-handoff-${slug}-${timestamp}.md`;
+  return `forgebadger-session-handoff-${slug}-${timestamp}.md`;
 }
 
 function fenced(value: string): string {

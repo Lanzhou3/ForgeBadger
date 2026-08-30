@@ -1,12 +1,12 @@
 {
-  "name": "@openforge/web",
+  "name": "@forgebadger/web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node ../../scripts/run-with-root-env.mjs next build",
-    "dev": "node ../../scripts/run-with-root-env.mjs --shell 'next dev -H ${OPENFORGE_WEB_HOST:-127.0.0.1} -p ${OPENFORGE_WEB_PORT:-48732}'",
-    "start": "node ../../scripts/run-with-root-env.mjs --shell 'next start -H ${OPENFORGE_WEB_HOST:-127.0.0.1} -p ${OPENFORGE_WEB_PORT:-48732}'",
+    "dev": "node ../../scripts/run-with-root-env.mjs --shell 'next dev -H ${FORGEBADGER_WEB_HOST:-127.0.0.1} -p ${FORGEBADGER_WEB_PORT:-48732}'",
+    "start": "node ../../scripts/run-with-root-env.mjs --shell 'next start -H ${FORGEBADGER_WEB_HOST:-127.0.0.1} -p ${FORGEBADGER_WEB_PORT:-48732}'",
     "test": "vitest run --passWithNoTests",
     "typecheck": "next typegen && tsc -p tsconfig.json --noEmit"
   },

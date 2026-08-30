@@ -79,9 +79,9 @@ export function PixelRobot({ frame, flip = false, size = ROBOT_SIZE_PX, glow = f
           key={key}
           className={
             GLOW_KEYS.has(key)
-              ? "of-robot-glow-layer"
+              ? "forgebadger-robot-glow-layer"
               : key === "O"
-                ? "of-robot-accent-pulse"
+                ? "forgebadger-robot-accent-pulse"
                 : undefined
           }
         >

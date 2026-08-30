@@ -1,18 +1,18 @@
 <p align="center">
-  <img src="docs/assets/openforge-wordmark.png" alt="OpenForge" width="720">
+  <img src="logos/ForgeBadger.svg" alt="ForgeBadger" width="720">
 </p>
 
-# OpenForge
+# ForgeBadger
 
 [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md)
 
-OpenForge is a local-first control plane for AI programming CLIs. It gives
+ForgeBadger is a local-first control plane for AI programming CLIs. It gives
 developers one Web console for managing projects, persistent terminal
 sessions, AI tool configuration, models, API keys, Agents, Skills, Templates,
 usage visibility, and session history across Claude Code, OpenCode, and
 Codex.
 
-OpenForge is built for self-hosted developer machines and private workspaces.
+ForgeBadger is built for self-hosted developer machines and private workspaces.
 The Gateway owns filesystem access, SQLite persistence, tmux sessions,
 WebSocket terminal traffic, encryption, and CLI process lifecycle. The Web
 console is a pure Next.js SPA that talks to the Gateway over HTTP and
@@ -20,7 +20,7 @@ WebSocket.
 
 ## Project Status
 
-OpenForge is in MVP / local-first release-candidate development. The core
+ForgeBadger is in MVP / local-first release-candidate development. The core
 Gateway, Web console, tmux terminal flow, authentication, encrypted API key
 storage, project setup, adapter discovery, provider model profiles, live model
 sync, and management surfaces are in place for local user testing.
@@ -30,15 +30,21 @@ guarded behind the Web console's experimental features area. Hosted
 collaboration, billing, cloud deployment, and autonomous remote execution are
 not part of the current local-first MVP.
 
+The product and local repository are being renamed to ForgeBadger on the
+`codex/rename-forgebadger` branch. The public GitHub remote is still
+`Lanzhou3/OpenForge` until the repository owner completes the external rename;
+links to existing issues, pull requests, and security settings intentionally
+continue to use that current remote.
+
 ## First User Trial
 
 - [Trial runbook](docs/TRIAL-RUNBOOK.md)
 - [Trial checklist](docs/TRIAL-CHECKLIST.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Trial feedback template](docs/TRIAL-FEEDBACK.md)
-- [GitHub feedback issue form](.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml)
+- [GitHub feedback issue form](.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml)
 
-## Why OpenForge
+## Why ForgeBadger
 
 - Keep long-running AI CLI work visible and recoverable from a browser.
 - Manage Claude Code, OpenCode, and Codex sessions without mixing their local
@@ -80,7 +86,7 @@ Repository layout:
 
 ```text
 packages/
-  cli/       npm-distributed OpenForge CLI wrapper
+  cli/       npm-distributed ForgeBadger CLI wrapper
   gateway/   Express, WebSocket, tmux/node-pty, SQLite, adapters, services
   web/       Next.js App Router, React, Tailwind CSS, xterm.js
 docs/        architecture, release, smoke-test, trial, and localized docs
@@ -99,29 +105,29 @@ Key rules:
 
 ## Requirements
 
-- Node.js 20 or newer
-- pnpm 9 or newer for source development
+- Node.js 20.12 through 24
+- pnpm 10 or newer for source development
 - tmux 3.2 or newer
 - SQLite-compatible local filesystem
-- Claude Code, OpenCode, and/or Codex installed on `PATH` for real AI CLI
+- Claude Code, OpenCode, Codex, and/or Kimi Code installed on `PATH` for real AI CLI
   sessions
 
-On Windows, run OpenForge inside WSL for the built-in browser terminal. Native
+On Windows, run ForgeBadger inside WSL for the built-in browser terminal. Native
 Windows installs can still use the management UI, but persistent terminal
 sessions depend on tmux.
 
 ## Install From npm
 
 ```bash
-npm install -g openforge
-openforge doctor
-openforge start
+npm install -g forgebadger
+forgebadger doctor
+forgebadger start
 ```
 
-Open the Web console at the URL printed by `openforge start`.
+Open the Web console at the URL printed by `forgebadger start`.
 
-The npm package installs the OpenForge CLI wrapper. It does not install tmux,
-Claude Code, OpenCode, or Codex. Install the AI CLI tools you plan to use
+The npm package installs the ForgeBadger CLI wrapper. It does not install tmux,
+Claude Code, OpenCode, Codex, or Kimi Code. Install the AI CLI tools you plan to use
 separately and make sure they are available on `PATH`.
 
 ## Development From Source
@@ -135,18 +141,18 @@ pnpm install
 Create a local `.env` file. Do not commit it.
 
 ```bash
-OPENFORGE_PORT=48731
-OPENFORGE_WEB_PORT=48732
+FORGEBADGER_PORT=48731
+FORGEBADGER_WEB_PORT=48732
 NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
-OPENFORGE_MASTER_KEY=<64-hex-characters-from-openssl-rand-hex-32>
-OPENFORGE_JWT_SECRET=<32+-character-random-secret>
+FORGEBADGER_MASTER_KEY=<64-hex-characters-from-openssl-rand-hex-32>
+FORGEBADGER_JWT_SECRET=<32+-character-random-secret>
 ```
 
 Start the Gateway and Web console in separate shells:
 
 ```bash
-pnpm --filter @openforge/gateway dev
-pnpm --filter @openforge/web dev -- --hostname 127.0.0.1 --port 48732
+pnpm --filter @forgebadger/gateway dev
+FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=48732 pnpm --filter @forgebadger/web dev
 ```
 
 Open the Web console:
@@ -158,10 +164,10 @@ http://127.0.0.1:48732
 Run focused checks:
 
 ```bash
-pnpm --filter @openforge/web typecheck
-pnpm --filter @openforge/web test
-pnpm --filter @openforge/gateway typecheck
-pnpm --filter @openforge/gateway test
+pnpm --filter @forgebadger/web typecheck
+pnpm --filter @forgebadger/web test
+pnpm --filter @forgebadger/gateway typecheck
+pnpm --filter @forgebadger/gateway test
 git diff --check
 ```
 
@@ -204,9 +210,9 @@ prototype intentionally keeps prompt/turn input disabled for beta feedback.
   sensitive system paths.
 - WebSocket terminal access requires JWT authentication and session-scoped
   attach credentials.
-- OpenForge is local-first, but local-first does not remove the need to treat
+- ForgeBadger is local-first, but local-first does not remove the need to treat
   terminal access and API keys as sensitive.
 
 ## License
 
-OpenForge is released under the [MIT License](LICENSE).
+ForgeBadger is released under the [MIT License](LICENSE).

@@ -16,8 +16,8 @@ import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -180,7 +180,7 @@ describe("project <-> template binding lifecycle", () => {
 
   it("rejects a body that is not an object with templateId", async () => {
     const token = await register("patch-invalid@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-binding-invalid-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-invalid-"));
     const projectId = await createProject(token, {
       name: "Invalid Patch",
       path: rootPath,
@@ -192,7 +192,7 @@ describe("project <-> template binding lifecycle", () => {
 
   it("binds the template via PATCH and leaves it unchanged when templateId is omitted", async () => {
     const token = await register("patch-omitted@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-binding-omitted-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-omitted-"));
     const projectId = await createProject(token, {
       name: "Omitted Patch",
       path: rootPath,
@@ -213,7 +213,7 @@ describe("project <-> template binding lifecycle", () => {
 
   it("unbinds with an explicit null templateId and keeps project files untouched", async () => {
     const token = await register("patch-unbind@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-binding-unbind-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-unbind-"));
     const projectId = await createProject(token, {
       name: "Unbind Patch",
       path: rootPath,
@@ -244,7 +244,7 @@ describe("project <-> template binding lifecycle", () => {
 
   it("switches to a different template with a non-empty templateId", async () => {
     const token = await register("patch-switch@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-binding-switch-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-switch-"));
     const customTemplateId = await createCustomTemplate(token, "Switch Target");
     const projectId = await createProject(token, {
       name: "Switch Patch",
@@ -259,7 +259,7 @@ describe("project <-> template binding lifecycle", () => {
 
   it("rejects switching to a template that does not exist", async () => {
     const token = await register("patch-switch-missing@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-binding-missing-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-missing-"));
     const projectId = await createProject(token, {
       name: "Switch Missing",
       path: rootPath,
@@ -277,7 +277,7 @@ describe("project <-> template binding lifecycle", () => {
     const ownerToken = await register("patch-tenant-owner@test.com");
     const otherToken = await register("patch-tenant-other@test.com");
     const ownerTemplateId = await createCustomTemplate(ownerToken, "Owner Only");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-binding-tenant-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-tenant-"));
     const projectId = await createProject(otherToken, {
       name: "Tenant Project",
       path: rootPath,
@@ -290,7 +290,7 @@ describe("project <-> template binding lifecycle", () => {
 
   it("excludes an unbound project from template usage and bulk sync", async () => {
     const token = await register("patch-usage-exclude@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-binding-usage-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-usage-"));
     const projectId = await createProject(token, {
       name: "Usage Exclude",
       path: rootPath,

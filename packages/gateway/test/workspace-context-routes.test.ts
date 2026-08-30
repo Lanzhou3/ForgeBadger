@@ -15,8 +15,8 @@ import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 interface AuthResponseBody {
   data: {
@@ -107,7 +107,7 @@ describe("workspace context routes", () => {
 
   it("lists a project-rooted file tree and reads bounded text content", async () => {
     const token = await register("workspace-owner@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-workspace-tree-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-workspace-tree-"));
     await mkdir(path.join(rootPath, "src"), { recursive: true });
     await writeFile(path.join(rootPath, "README.md"), "# Workspace\n", "utf8");
     await writeFile(path.join(rootPath, "src", "index.ts"), "export const value = 1;\n", "utf8");
@@ -152,8 +152,8 @@ describe("workspace context routes", () => {
 
   it("rejects traversal, absolute paths, symlink escapes, and binary text reads", async () => {
     const token = await register("workspace-boundary@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-workspace-boundary-"));
-    const outsidePath = await mkdtemp(path.join(tmpdir(), "openforge-workspace-outside-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-workspace-boundary-"));
+    const outsidePath = await mkdtemp(path.join(tmpdir(), "forgebadger-workspace-outside-"));
     await writeFile(path.join(rootPath, "README.md"), "# Safe\n", "utf8");
     await writeFile(path.join(rootPath, "asset.bin"), Buffer.from([0, 1, 2, 3]));
     await writeFile(path.join(outsidePath, "secret.txt"), "secret\n", "utf8");
@@ -180,7 +180,7 @@ describe("workspace context routes", () => {
   it("returns 404 for cross-tenant workspace context requests", async () => {
     const ownerToken = await register("workspace-cross-owner@test.com");
     const otherToken = await register("workspace-cross-other@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-workspace-cross-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-workspace-cross-"));
     await writeFile(path.join(rootPath, "README.md"), "# Private\n", "utf8");
     const projectId = await importProject(ownerToken, rootPath);
 

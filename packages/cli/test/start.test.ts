@@ -17,13 +17,13 @@ import { prepareWebRuntime } from "../src/runtime/web-runtime.js";
 describe("resolveInstalledPaths", () => {
   it("resolves shipped artifacts relative to the compiled CLI dist directory", () => {
     // Arrange
-    const metaUrl = pathToFileURL(path.join("/tmp", "openforge", "packages", "cli", "dist", "runtime", "paths.js")).href;
+    const metaUrl = pathToFileURL(path.join("/tmp", "forgebadger", "packages", "cli", "dist", "runtime", "paths.js")).href;
 
     // Act
     const paths = resolveInstalledPaths(metaUrl);
 
     // Assert
-    assert.equal(paths.packageRoot, path.join("/tmp", "openforge", "packages", "cli", "dist"));
+    assert.equal(paths.packageRoot, path.join("/tmp", "forgebadger", "packages", "cli", "dist"));
     assert.equal(paths.gatewayEntry, path.join(paths.packageRoot, "gateway", "src", "index.js"));
     assert.equal(paths.gatewayInitEntry, path.join(paths.packageRoot, "gateway", "src", "cli", "init.js"));
     assert.equal(paths.webServerEntry, path.join(paths.packageRoot, "web", "standalone", "packages", "web", "server.js"));
@@ -32,13 +32,13 @@ describe("resolveInstalledPaths", () => {
 
   it("maps source runtime module paths to the CLI dist artifact root", () => {
     // Arrange
-    const metaUrl = pathToFileURL(path.join("/tmp", "openforge", "packages", "cli", "src", "runtime", "paths.ts")).href;
+    const metaUrl = pathToFileURL(path.join("/tmp", "forgebadger", "packages", "cli", "src", "runtime", "paths.ts")).href;
 
     // Act
     const paths = resolveInstalledPaths(metaUrl);
 
     // Assert
-    assert.equal(paths.packageRoot, path.join("/tmp", "openforge", "packages", "cli", "dist"));
+    assert.equal(paths.packageRoot, path.join("/tmp", "forgebadger", "packages", "cli", "dist"));
     assert.equal(paths.gatewayEntry, path.join(paths.packageRoot, "gateway", "src", "index.js"));
   });
 });
@@ -72,13 +72,13 @@ describe("runStart", () => {
   it("writes web runtime config, spawns gateway and web, installs shutdown handlers, and returns first exit code", async () => {
     // Arrange
     const stdout = createMemoryWriter();
-    const config = createRuntimeConfig("/tmp/openforge-state");
+    const config = createRuntimeConfig("/tmp/forgebadger-state");
     const paths = {
-      packageRoot: "/tmp/openforge-package",
-      gatewayEntry: "/tmp/openforge-package/gateway/src/index.js",
-      gatewayInitEntry: "/tmp/openforge-package/gateway/src/cli/init.js",
-      webServerEntry: "/tmp/openforge-package/web/standalone/packages/web/server.js",
-      webPublicDir: "/tmp/openforge-package/web/standalone/packages/web/public"
+      packageRoot: "/tmp/forgebadger-package",
+      gatewayEntry: "/tmp/forgebadger-package/gateway/src/index.js",
+      gatewayInitEntry: "/tmp/forgebadger-package/gateway/src/cli/init.js",
+      webServerEntry: "/tmp/forgebadger-package/web/standalone/packages/web/server.js",
+      webPublicDir: "/tmp/forgebadger-package/web/standalone/packages/web/public"
     };
     const loadCalls: unknown[] = [];
     const portChecks: Array<{ host: string; port: number }> = [];
@@ -87,13 +87,13 @@ describe("runStart", () => {
     const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
     const spawnedChildren: FakeChild[] = [];
     let shutdownChildren: FakeChild[] = [];
-    const parentEnvName = "OPENFORGE_START_TEST_PARENT";
+    const parentEnvName = "FORGEBADGER_START_TEST_PARENT";
     const originalParentEnv = process.env[parentEnvName];
-    const originalMasterKey = process.env.OPENFORGE_MASTER_KEY;
-    const originalJwtSecret = process.env.OPENFORGE_JWT_SECRET;
+    const originalMasterKey = process.env.FORGEBADGER_MASTER_KEY;
+    const originalJwtSecret = process.env.FORGEBADGER_JWT_SECRET;
     process.env[parentEnvName] = "from-parent-env";
-    delete process.env.OPENFORGE_MASTER_KEY;
-    delete process.env.OPENFORGE_JWT_SECRET;
+    delete process.env.FORGEBADGER_MASTER_KEY;
+    delete process.env.FORGEBADGER_JWT_SECRET;
 
     try {
       const codePromise = runStart({
@@ -115,7 +115,7 @@ describe("runStart", () => {
         },
         writeRuntimeConfig: async (options) => {
           runtimeWrites.push(options);
-          return path.join(options.webPublicDir, "openforge-runtime.js");
+          return path.join(options.webPublicDir, "forgebadger-runtime.js");
         },
         spawn: (entry, env) => {
           const child = new FakeChild();
@@ -154,24 +154,24 @@ describe("runStart", () => {
       ]);
       assert.equal(spawns[0]?.entry, paths.gatewayEntry);
       assert.equal(spawns[0]?.env[parentEnvName], "from-parent-env");
-      assert.equal(spawns[0]?.env.OPENFORGE_HOST, "127.0.0.1");
-      assert.equal(spawns[0]?.env.OPENFORGE_PORT, "48731");
-      assert.equal(spawns[0]?.env.OPENFORGE_STATE_DIR, "/tmp/openforge-state");
-      assert.equal(spawns[0]?.env.OPENFORGE_DB_PATH, "/tmp/openforge-state/openforge.db");
-      assert.equal(spawns[0]?.env.OPENFORGE_MASTER_KEY, config.secrets.masterKey);
-      assert.equal(spawns[0]?.env.OPENFORGE_JWT_SECRET, config.secrets.jwtSecret);
-      assert.equal(spawns[0]?.env.OPENFORGE_GATEWAY_URL, "http://127.0.0.1:48731");
+      assert.equal(spawns[0]?.env.FORGEBADGER_HOST, "127.0.0.1");
+      assert.equal(spawns[0]?.env.FORGEBADGER_PORT, "48731");
+      assert.equal(spawns[0]?.env.FORGEBADGER_STATE_DIR, "/tmp/forgebadger-state");
+      assert.equal(spawns[0]?.env.FORGEBADGER_DB_PATH, "/tmp/forgebadger-state/forgebadger.db");
+      assert.equal(spawns[0]?.env.FORGEBADGER_MASTER_KEY, config.secrets.masterKey);
+      assert.equal(spawns[0]?.env.FORGEBADGER_JWT_SECRET, config.secrets.jwtSecret);
+      assert.equal(spawns[0]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
       assert.equal(spawns[1]?.entry, path.join(config.stateDir, "runtime", "web", "packages", "web", "server.js"));
       assert.equal(spawns[1]?.env[parentEnvName], undefined);
       assert.equal(spawns[1]?.env.HOSTNAME, "127.0.0.1");
       assert.equal(spawns[1]?.env.PORT, "48732");
-      assert.equal(spawns[1]?.env.OPENFORGE_GATEWAY_URL, "http://127.0.0.1:48731");
-      assert.equal(spawns[1]?.env.OPENFORGE_MASTER_KEY, undefined);
-      assert.equal(spawns[1]?.env.OPENFORGE_JWT_SECRET, undefined);
+      assert.equal(spawns[1]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
+      assert.equal(spawns[1]?.env.FORGEBADGER_MASTER_KEY, undefined);
+      assert.equal(spawns[1]?.env.FORGEBADGER_JWT_SECRET, undefined);
       assert.deepEqual(shutdownChildren, spawnedChildren);
       assert.equal(shutdownChildren.length, 2);
-      assert.match(stdout.text, /OpenForge Web Console: http:\/\/127\.0\.0\.1:48732\n/);
-      assert.match(stdout.text, /OpenForge Gateway: http:\/\/127\.0\.0\.1:48731\n/);
+      assert.match(stdout.text, /ForgeBadger Web Console: http:\/\/127\.0\.0\.1:48732\n/);
+      assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/127\.0\.0\.1:48731\n/);
       assert.match(stdout.text, /--open is not supported yet; open the URL manually\.\n/);
     } finally {
       if (originalParentEnv === undefined) {
@@ -180,14 +180,14 @@ describe("runStart", () => {
         process.env[parentEnvName] = originalParentEnv;
       }
       if (originalMasterKey === undefined) {
-        delete process.env.OPENFORGE_MASTER_KEY;
+        delete process.env.FORGEBADGER_MASTER_KEY;
       } else {
-        process.env.OPENFORGE_MASTER_KEY = originalMasterKey;
+        process.env.FORGEBADGER_MASTER_KEY = originalMasterKey;
       }
       if (originalJwtSecret === undefined) {
-        delete process.env.OPENFORGE_JWT_SECRET;
+        delete process.env.FORGEBADGER_JWT_SECRET;
       } else {
-        process.env.OPENFORGE_JWT_SECRET = originalJwtSecret;
+        process.env.FORGEBADGER_JWT_SECRET = originalJwtSecret;
       }
     }
   });
@@ -196,29 +196,29 @@ describe("runStart", () => {
     // Arrange
     const originalEnv = captureEnv([
       "PATH",
-      "OPENFORGE_MASTER_KEY",
-      "OPENFORGE_JWT_SECRET",
+      "FORGEBADGER_MASTER_KEY",
+      "FORGEBADGER_JWT_SECRET",
       "ANTHROPIC_API_KEY",
       "OPENAI_API_KEY",
       "DATABASE_URL",
-      "OPENFORGE_EXTRA_SECRET"
+      "FORGEBADGER_EXTRA_SECRET"
     ]);
     const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
-    process.env.PATH = "/tmp/openforge-bin";
-    process.env.OPENFORGE_MASTER_KEY = "parent-master-key";
-    process.env.OPENFORGE_JWT_SECRET = "parent-jwt-secret";
+    process.env.PATH = "/tmp/forgebadger-bin";
+    process.env.FORGEBADGER_MASTER_KEY = "parent-master-key";
+    process.env.FORGEBADGER_JWT_SECRET = "parent-jwt-secret";
     process.env.ANTHROPIC_API_KEY = "parent-anthropic";
     process.env.OPENAI_API_KEY = "parent-openai";
     process.env.DATABASE_URL = "postgres://example";
-    process.env.OPENFORGE_EXTRA_SECRET = "parent-openforge-extra";
+    process.env.FORGEBADGER_EXTRA_SECRET = "parent-forgebadger-extra";
 
     try {
       const codePromise = runStart({
-        loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+        loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
         resolvePaths: () => createInstalledPaths(),
         checkPort: async () => undefined,
         prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-        writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+        writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
         spawn: (entry, env) => {
           const child = new FakeChild();
           spawns.push({ entry, env });
@@ -233,15 +233,15 @@ describe("runStart", () => {
       await codePromise;
 
       // Assert
-      assert.equal(spawns[0]?.env.OPENFORGE_MASTER_KEY, "a".repeat(64));
-      assert.equal(spawns[0]?.env.OPENFORGE_JWT_SECRET, "abcdefghijklmnopqrstuvwxyz123456");
-      assert.equal(spawns[1]?.env.PATH, "/tmp/openforge-bin");
-      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "OPENFORGE_MASTER_KEY"), false);
-      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "OPENFORGE_JWT_SECRET"), false);
+      assert.equal(spawns[0]?.env.FORGEBADGER_MASTER_KEY, "a".repeat(64));
+      assert.equal(spawns[0]?.env.FORGEBADGER_JWT_SECRET, "abcdefghijklmnopqrstuvwxyz123456");
+      assert.equal(spawns[1]?.env.PATH, "/tmp/forgebadger-bin");
+      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "FORGEBADGER_MASTER_KEY"), false);
+      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "FORGEBADGER_JWT_SECRET"), false);
       assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "ANTHROPIC_API_KEY"), false);
       assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "OPENAI_API_KEY"), false);
       assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "DATABASE_URL"), false);
-      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "OPENFORGE_EXTRA_SECRET"), false);
+      assert.equal(Object.hasOwn(spawns[1]?.env ?? {}, "FORGEBADGER_EXTRA_SECRET"), false);
     } finally {
       restoreEnvSnapshot(originalEnv);
     }
@@ -254,14 +254,14 @@ describe("runStart", () => {
 
     const codePromise = runStart({
       loadConfig: async () =>
-        createRuntimeConfig("/tmp/openforge-state", {
+        createRuntimeConfig("/tmp/forgebadger-state", {
           gateway: { host: "0.0.0.0", port: 48731 },
           web: { host: "0.0.0.0", port: 48732 }
         }),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
       prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
       spawn: (entry, env) => {
         const child = new FakeChild();
         spawns.push({ entry, env });
@@ -276,12 +276,12 @@ describe("runStart", () => {
     await codePromise;
 
     // Assert
-    assert.equal(spawns[0]?.env.OPENFORGE_HOST, "0.0.0.0");
-    assert.equal(spawns[0]?.env.OPENFORGE_GATEWAY_URL, "http://127.0.0.1:48731");
+    assert.equal(spawns[0]?.env.FORGEBADGER_HOST, "0.0.0.0");
+    assert.equal(spawns[0]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
     assert.equal(spawns[1]?.env.HOSTNAME, "0.0.0.0");
-    assert.equal(spawns[1]?.env.OPENFORGE_GATEWAY_URL, "http://127.0.0.1:48731");
-    assert.match(stdout.text, /OpenForge Web Console: http:\/\/127\.0\.0\.1:48732\n/);
-    assert.match(stdout.text, /OpenForge Gateway: http:\/\/127\.0\.0\.1:48731\n/);
+    assert.equal(spawns[1]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
+    assert.match(stdout.text, /ForgeBadger Web Console: http:\/\/127\.0\.0\.1:48732\n/);
+    assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/127\.0\.0\.1:48731\n/);
   });
 
   it("warns native Windows users to run terminal sessions inside WSL while starting management services", async () => {
@@ -290,11 +290,11 @@ describe("runStart", () => {
     let dependencyChecks = 0;
 
     const codePromise = runStart({
-      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
       prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
       dependencyRunner: async () => {
         dependencyChecks += 1;
         return { exitCode: 0, stdout: "tmux 3.4\n", stderr: "" };
@@ -318,7 +318,7 @@ describe("runStart", () => {
     assert.equal(children.length, 2);
     assert.equal(dependencyChecks, 0);
     assert.match(stderr.text, /Native Windows terminals require WSL/);
-    assert.match(stderr.text, /openforge doctor/);
+    assert.match(stderr.text, /forgebadger doctor/);
   });
 
   it("checks only tmux before warning about missing Unix terminal persistence", async () => {
@@ -326,11 +326,11 @@ describe("runStart", () => {
     const seen: Array<{ command: string; args: string[] }> = [];
 
     const codePromise = runStart({
-      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
       prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
       dependencyRunner: async (command, args) => {
         seen.push({ command, args });
         return { exitCode: 127, stdout: "", stderr: "tmux not found" };
@@ -349,7 +349,7 @@ describe("runStart", () => {
     assert.equal(code, 0);
     assert.deepEqual(seen, [{ command: "tmux", args: ["-V"] }]);
     assert.match(stderr.text, /Install tmux to enable persistent browser terminals/);
-    assert.match(stderr.text, /openforge doctor/);
+    assert.match(stderr.text, /forgebadger doctor/);
   });
 
   it("formats IPv6 browser URLs with brackets", async () => {
@@ -359,14 +359,14 @@ describe("runStart", () => {
 
     const codePromise = runStart({
       loadConfig: async () =>
-        createRuntimeConfig("/tmp/openforge-state", {
+        createRuntimeConfig("/tmp/forgebadger-state", {
           gateway: { host: "::1", port: 48731 },
           web: { host: "::1", port: 48732 }
         }),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
       prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
       spawn: (entry, env) => {
         const child = new FakeChild();
         spawns.push({ entry, env });
@@ -381,12 +381,12 @@ describe("runStart", () => {
     await codePromise;
 
     // Assert
-    assert.equal(spawns[0]?.env.OPENFORGE_HOST, "::1");
-    assert.equal(spawns[0]?.env.OPENFORGE_GATEWAY_URL, "http://[::1]:48731");
+    assert.equal(spawns[0]?.env.FORGEBADGER_HOST, "::1");
+    assert.equal(spawns[0]?.env.FORGEBADGER_GATEWAY_URL, "http://[::1]:48731");
     assert.equal(spawns[1]?.env.HOSTNAME, "::1");
-    assert.equal(spawns[1]?.env.OPENFORGE_GATEWAY_URL, "http://[::1]:48731");
-    assert.match(stdout.text, /OpenForge Web Console: http:\/\/\[::1\]:48732\n/);
-    assert.match(stdout.text, /OpenForge Gateway: http:\/\/\[::1\]:48731\n/);
+    assert.equal(spawns[1]?.env.FORGEBADGER_GATEWAY_URL, "http://[::1]:48731");
+    assert.match(stdout.text, /ForgeBadger Web Console: http:\/\/\[::1\]:48732\n/);
+    assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/\[::1\]:48731\n/);
   });
 
   it("rejects matching gateway and web bind endpoints before checking ports", async () => {
@@ -398,7 +398,7 @@ describe("runStart", () => {
       () =>
         runStart({
           loadConfig: async () =>
-            createRuntimeConfig("/tmp/openforge-state", {
+            createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "127.0.0.1", port: 48731 },
               web: { host: "127.0.0.1", port: 48731 }
             }),
@@ -407,7 +407,7 @@ describe("runStart", () => {
             portChecks.push({ host, port });
           },
           prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
           spawn: () => new FakeChild(),
           installShutdown: (children) => {
             setImmediate(() => children[1]?.emit("exit", 0, null));
@@ -428,7 +428,7 @@ describe("runStart", () => {
       () =>
         runStart({
           loadConfig: async () =>
-            createRuntimeConfig("/tmp/openforge-state", {
+            createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "0.0.0.0", port: 48731 },
               web: { host: "127.0.0.1", port: 48731 }
             }),
@@ -437,7 +437,7 @@ describe("runStart", () => {
             portChecks.push({ host, port });
           },
           prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
           spawn: () => new FakeChild(),
           installShutdown: (children) => {
             setImmediate(() => children[1]?.emit("exit", 0, null));
@@ -458,7 +458,7 @@ describe("runStart", () => {
       () =>
         runStart({
           loadConfig: async () =>
-            createRuntimeConfig("/tmp/openforge-state", {
+            createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "localhost", port: 48731 },
               web: { host: "127.0.0.1", port: 48731 }
             }),
@@ -467,7 +467,7 @@ describe("runStart", () => {
             portChecks.push({ host, port });
           },
           prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
           spawn: () => new FakeChild(),
           installShutdown: (children) => {
             setImmediate(() => children[1]?.emit("exit", 0, null));
@@ -488,7 +488,7 @@ describe("runStart", () => {
       () =>
         runStart({
           loadConfig: async () =>
-            createRuntimeConfig("/tmp/openforge-state", {
+            createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "localhost", port: 48731 },
               web: { host: "::1", port: 48731 }
             }),
@@ -497,7 +497,7 @@ describe("runStart", () => {
             portChecks.push({ host, port });
           },
           prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+          writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
           spawn: () => new FakeChild(),
           installShutdown: (children) => {
             setImmediate(() => children[1]?.emit("exit", 0, null));
@@ -517,11 +517,11 @@ describe("runStart", () => {
     const spawnError = new Error("gateway spawn failed");
 
     const codePromise = runStart({
-      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
       prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
       spawn: () => {
         const child = new FakeChild();
         children.push(child);
@@ -552,11 +552,11 @@ describe("runStart", () => {
     const children: FakeChild[] = [];
 
     const codePromise = runStart({
-      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
       prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
       spawn: () => {
         const child = new FakeChild();
         children.push(child);
@@ -588,11 +588,11 @@ describe("runStart", () => {
     const children: FakeChild[] = [];
 
     const codePromise = runStart({
-      loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
       prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "openforge-runtime.js"),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
       spawn: () => {
         const child = new FakeChild();
         children.push(child);
@@ -622,13 +622,13 @@ describe("runStart", () => {
     const paths = createInstalledPaths();
     const writeError = new Error("EACCES: permission denied");
     const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
-    const runtimePublicDir = path.join("/tmp", "openforge-state", "runtime", "web", "packages", "web", "public");
+    const runtimePublicDir = path.join("/tmp", "forgebadger-state", "runtime", "web", "packages", "web", "public");
 
     // Act / Assert
     await assert.rejects(
       () =>
         runStart({
-          loadConfig: async () => createRuntimeConfig("/tmp/openforge-state"),
+          loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
           resolvePaths: () => paths,
           checkPort: async () => undefined,
           prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
@@ -650,7 +650,7 @@ describe("runStart", () => {
 describe("prepareWebRuntime", () => {
   it("copies the installed Web standalone artifact into a writable runtime directory", async () => {
     // Arrange
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-web-prepare-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-web-prepare-"));
     const installedRoot = path.join(root, "installed", "standalone");
     const installedServer = path.join(installedRoot, "packages", "web", "server.js");
     const installedPublicFile = path.join(installedRoot, "packages", "web", "public", "asset.txt");
@@ -738,7 +738,7 @@ function createRuntimeConfig(
   return {
     version: 1,
     stateDir,
-    dbPath: `${stateDir}/openforge.db`,
+    dbPath: `${stateDir}/forgebadger.db`,
     gateway: overrides.gateway ?? { host: "127.0.0.1", port: 48731 },
     web: overrides.web ?? { host: "127.0.0.1", port: 48732 },
     secrets: {
@@ -750,11 +750,11 @@ function createRuntimeConfig(
 
 function createInstalledPaths() {
   return {
-    packageRoot: "/tmp/openforge-package",
-    gatewayEntry: "/tmp/openforge-package/gateway/src/index.js",
-    gatewayInitEntry: "/tmp/openforge-package/gateway/src/cli/init.js",
-    webServerEntry: "/tmp/openforge-package/web/standalone/packages/web/server.js",
-    webPublicDir: "/tmp/openforge-package/web/standalone/packages/web/public"
+    packageRoot: "/tmp/forgebadger-package",
+    gatewayEntry: "/tmp/forgebadger-package/gateway/src/index.js",
+    gatewayInitEntry: "/tmp/forgebadger-package/gateway/src/cli/init.js",
+    webServerEntry: "/tmp/forgebadger-package/web/standalone/packages/web/server.js",
+    webPublicDir: "/tmp/forgebadger-package/web/standalone/packages/web/public"
   };
 }
 

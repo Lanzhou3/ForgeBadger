@@ -32,12 +32,13 @@ export interface CreateInitRenderPlanInput {
   templateId: string;
   credentialMode: CredentialMode;
   dryRun: boolean;
+  env?: NodeJS.ProcessEnv;
 }
 
-export function parseOpenForgeCliArgs(args: string[]): InitCommand {
+export function parseForgeBadgerCliArgs(args: string[]): InitCommand {
   const normalizedArgs = args[0] === "--" ? args.slice(1) : args;
   if (normalizedArgs[0] !== "init") {
-    throw new Error("Usage: openforge init --path <project-path> [--template-id <id>] [--dry-run]");
+    throw new Error("Usage: forgebadger init --path <project-path> [--template-id <id>] [--dry-run]");
   }
 
   const values = parseFlags(normalizedArgs.slice(1));
@@ -70,14 +71,15 @@ export async function createInitRenderPlan(input: CreateInitRenderPlanInput): Pr
   }
 
   const templateFiles = loadTemplateFiles(input.templateId);
+  const env = input.env ?? process.env;
   return createRenderPlan({
-    projectId: "openforge-cli-init",
+    projectId: "forgebadger-cli-init",
     targetRoot,
     templateId: input.templateId,
     variables: {
       projectName: path.basename(targetRoot),
       projectRoot: targetRoot,
-      gatewayUrl: process.env.OPENFORGE_GATEWAY_URL ?? "http://127.0.0.1:48731"
+      gatewayUrl: env.FORGEBADGER_GATEWAY_URL ?? env.OPENFORGE_GATEWAY_URL ?? "http://127.0.0.1:48731"
     },
     templateFiles: buildProjectConfigFiles({
       adapter: "claude",
@@ -104,14 +106,14 @@ export async function runInitCommand(command: InitCommand): Promise<unknown> {
   };
 }
 
-export async function runOpenForgeCli(args: string[]): Promise<number> {
+export async function runForgeBadgerCli(args: string[]): Promise<number> {
   try {
-    const command = parseOpenForgeCliArgs(args);
+    const command = parseForgeBadgerCliArgs(args);
     const data = await runInitCommand(command);
     process.stdout.write(`${JSON.stringify({ code: 0, data, message: "" }, null, 2)}\n`);
     return 0;
   } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : "OpenForge CLI failed"}\n`);
+    process.stderr.write(`${error instanceof Error ? error.message : "ForgeBadger CLI failed"}\n`);
     return 1;
   }
 }
@@ -141,7 +143,7 @@ function parseFlags(args: string[]): Record<string, string> {
 function loadTemplateFiles(templateId: string): TemplateFileInput[] {
   const db = createTemplateDb();
   try {
-    const template = new TemplateRepository(db, "openforge-cli").getById(templateId);
+    const template = new TemplateRepository(db, "forgebadger-cli").getById(templateId);
     if (!template?.files) {
       throw new Error(`Template not found: ${templateId}`);
     }
@@ -181,7 +183,7 @@ function publicRenderPlan(plan: RenderPlan) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  runOpenForgeCli(process.argv.slice(2)).then((exitCode) => {
+  runForgeBadgerCli(process.argv.slice(2)).then((exitCode) => {
     process.exitCode = exitCode;
   });
 }

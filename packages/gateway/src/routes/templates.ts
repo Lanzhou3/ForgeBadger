@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
-import type { OpenForgeEventBus } from "../services/event-bus.js";
+import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import {
   applyTemplateSync,
   buildTemplateUsage,
@@ -73,7 +73,7 @@ const templateSyncSchema = z.object({
     .optional()
 });
 
-export function createTemplateRoutes(db: Database, eventBus?: OpenForgeEventBus): Router {
+export function createTemplateRoutes(db: Database, eventBus?: ForgeBadgerEventBus): Router {
   const router = Router();
   router.use(authenticate);
 

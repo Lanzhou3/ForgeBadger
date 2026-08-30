@@ -1,14 +1,14 @@
-# OpenForge Trial Feedback Template
+# ForgeBadger Trial Feedback Template
 
 Use this template for first-user local trial feedback. Prefer the GitHub issue
-form `OpenForge first-user trial feedback` when filing feedback from the
+form `ForgeBadger first-user trial feedback` when filing feedback from the
 repository; use this document as the offline copy/paste template. Review all
 attachments before sharing.
 
 Optional local draft helper:
 
 ```bash
-pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md
+pnpm trial:feedback-draft -- --output /tmp/forgebadger-trial-feedback.md
 ```
 
 The generated file is only a draft. It does not clear
@@ -17,7 +17,7 @@ The generated file is only a draft. It does not clear
 Before using a completed Markdown packet for maintainer triage, run:
 
 ```bash
-pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md
+pnpm trial:feedback-audit -- /tmp/forgebadger-trial-feedback.md
 ```
 
 Passing audit means ready for human triage only. It does not automatically
@@ -68,7 +68,7 @@ external gate.
 - Result: pass / pass with caveats / blocked
 - Affected surface: onboarding / dependency / provider / platform / terminal / Copilot / Feishu / Project Manager / docs / other
 - Startup path: npm/CLI / source fallback
-- OpenForge version or commit:
+- ForgeBadger version or commit:
 - Operating system:
 - Shell:
 - Windows native or WSL, if applicable:
@@ -88,7 +88,7 @@ Result rubric:
 - node --version:
 - tmux -V:
 - claude --version:
-- openforge doctor summary:
+- forgebadger doctor summary:
 
 Optional:
 
@@ -160,6 +160,12 @@ Requirement mapping guide:
 
 - Console errors:
 - Network failures:
+- Portfolio route availability: observed / unavailable / blocked
+- Portfolio request lifecycle observed: yes / no / skipped
+- Owner decision result, if exercised: approved / rejected / not exercised
+- Feishu Portfolio ingress disposition, if configured: accepted / rejected / not configured
+- Visible Portfolio blocker, if any:
+- Confirmed no terminal/shell/Codex turn input in Portfolio: yes / no
 - `pnpm smoke:copilot-provider` result: passed / skipped / failed
 - Provider smoke skip or failure reason:
 - Copilot provider with active model configured: yes / no / skipped

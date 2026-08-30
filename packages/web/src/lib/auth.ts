@@ -1,5 +1,13 @@
-const TOKEN_KEY = "openforge.token";
-const USER_KEY = "openforge.user";
+import {
+  readMigratedStorageValue,
+  removeMigratedStorageValue,
+  writeMigratedStorageValue,
+} from "./brand-storage";
+
+const TOKEN_KEY = "forgebadger.token";
+const USER_KEY = "forgebadger.user";
+const LEGACY_TOKEN_KEY = "openforge.token";
+const LEGACY_USER_KEY = "openforge.user";
 
 export interface User {
   id: string;
@@ -10,20 +18,20 @@ export interface User {
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(TOKEN_KEY);
+  return readMigratedStorageValue(localStorage, TOKEN_KEY, LEGACY_TOKEN_KEY);
 }
 
 export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+  writeMigratedStorageValue(localStorage, TOKEN_KEY, LEGACY_TOKEN_KEY, token);
 }
 
 export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
+  removeMigratedStorageValue(localStorage, TOKEN_KEY, LEGACY_TOKEN_KEY);
 }
 
 export function getUser(): User | null {
   if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(USER_KEY);
+  const raw = readMigratedStorageValue(localStorage, USER_KEY, LEGACY_USER_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as User;
@@ -33,11 +41,11 @@ export function getUser(): User | null {
 }
 
 export function setUser(user: User): void {
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  writeMigratedStorageValue(localStorage, USER_KEY, LEGACY_USER_KEY, JSON.stringify(user));
 }
 
 export function clearUser(): void {
-  localStorage.removeItem(USER_KEY);
+  removeMigratedStorageValue(localStorage, USER_KEY, LEGACY_USER_KEY);
 }
 
 export function isAuthenticated(): boolean {

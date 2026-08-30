@@ -106,11 +106,34 @@ export function syncLocalSkills(
   return result;
 }
 
-export function defaultLocalSkillRoots(_cwd: string, _env: NodeJS.ProcessEnv): string[] {
+export function defaultLocalSkillRoots(cwd: string, env: NodeJS.ProcessEnv): string[] {
+  const claudeConfigDir = expandConfiguredHome(
+    env.CLAUDE_CONFIG_DIR?.trim() || path.join(homedir(), ".claude")
+  );
+  const agentsHome = expandConfiguredHome(
+    env.AGENTS_HOME?.trim() || path.join(homedir(), ".agents")
+  );
+  const configuredRoots = (env.FORGEBADGER_SKILL_DIRS ?? "")
+    .split(path.delimiter)
+    .map((root) => root.trim())
+    .filter(Boolean)
+    .map((root) => path.resolve(cwd, expandConfiguredHome(root)));
+
   return uniqueRoots([
-    path.join(homedir(), ".claude", "skills"),
-    path.join(homedir(), ".agents", "skills")
+    path.resolve(cwd, claudeConfigDir, "skills"),
+    path.resolve(cwd, agentsHome, "skills"),
+    ...configuredRoots
   ]);
+}
+
+function expandConfiguredHome(value: string): string {
+  if (value === "~") {
+    return homedir();
+  }
+  if (value.startsWith("~/")) {
+    return path.join(homedir(), value.slice(2));
+  }
+  return value;
 }
 
 function skillChanged(existing: Skill, incoming: CreateSkillInput): boolean {

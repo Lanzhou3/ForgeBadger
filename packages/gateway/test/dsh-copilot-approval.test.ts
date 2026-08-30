@@ -15,14 +15,14 @@ import { CopilotConversationLog } from "../src/services/agent/conversation-log.j
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
-import type { OpenForgeEvent } from "../src/services/event-bus.js";
+import type { ForgeBadgerEvent } from "../src/services/event-bus.js";
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 const bridgeToken = "dsh-approval-test-bridge-token-0123456789abcdef";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 const FAKE_LAUNCHER = path.join(path.dirname(fileURLToPath(import.meta.url)), "helpers", "fake-dsh-runtime.mjs");
 
@@ -66,7 +66,7 @@ interface Harness {
   db: Database.Database;
   stateDir: string;
   logPath: string;
-  events: OpenForgeEvent[];
+  events: ForgeBadgerEvent[];
   sentInputs: SentInput[];
   sessionManager: InMemorySessionManager;
 }
@@ -88,9 +88,9 @@ function createTestDb(): Database.Database {
 /** Boot a gateway with the dsh copilot BFF wired to the fake runtime. */
 async function bootDshGateway(input: { scenario: string; idleMs?: number; extraEnv?: Record<string, string> }): Promise<Harness> {
   const db = createTestDb();
-  const stateDir = mkdtempSync(path.join(tmpdir(), "openforge-dsh-approval-test-"));
+  const stateDir = mkdtempSync(path.join(tmpdir(), "forgebadger-dsh-approval-test-"));
   const logPath = path.join(stateDir, "fake-runtime.jsonl");
-  const events: OpenForgeEvent[] = [];
+  const events: ForgeBadgerEvent[] = [];
   const sentInputs: SentInput[] = [];
   const sessionManager = new InMemorySessionManager(createMockTmux(sentInputs) as never);
   const app = createGatewayApp({

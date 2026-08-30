@@ -1,10 +1,10 @@
 # Claude Code Best Practice Template
 
 This directory contains a public, reusable Claude Code project template copied
-from the local OpenForge development `.claude` scaffold.
+from the local ForgeBadger development `.claude` scaffold.
 
 The files are stored under `files/dot-claude/` instead of a repository-root
-`.claude/` directory so they do not collide with OpenForge's own local
+`.claude/` directory so they do not collide with ForgeBadger's own local
 development configuration.
 
 When materialized into a user project, map:

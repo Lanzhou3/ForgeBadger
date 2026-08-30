@@ -2,7 +2,7 @@
  * Core types for the Copilot agent harness.
  *
  * The harness is a self-hosted, conversation-centred runtime whose "tool
- * surface" is the entire OpenForge platform (projects, sessions, portfolio,
+ * surface" is the entire ForgeBadger platform (projects, sessions, portfolio,
  * memory, ...). Design is inspired by deepseek-harness: the conversation log is
  * the single source of truth for model-visible history, and every platform
  * capability is exposed to the model as a registered tool.

@@ -121,7 +121,7 @@ export default function ImportProjectPage() {
         </div>
       </div>
 
-      <div className="of-animate-in flex items-center gap-1.5">
+      <div className="forgebadger-animate-in flex items-center gap-1.5">
         {STEP_ORDER.map((stepId, index) => (
           <div
             key={stepId}
@@ -133,7 +133,7 @@ export default function ImportProjectPage() {
         ))}
       </div>
 
-      <Card className="of-animate-in" style={{ animationDelay: "40ms" }}>
+      <Card className="forgebadger-animate-in" style={{ animationDelay: "40ms" }}>
         <CardHeader>
           <CardTitle className="text-sm font-semibold">
             {step === "path" && t("projects.importStepPath")}

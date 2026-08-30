@@ -22,9 +22,9 @@ describe("trial feedback draft generator", () => {
       gatewayUrl: "http://127.0.0.1:48731"
     });
 
-    assert.match(draft, /# OpenForge Trial Feedback Draft/);
+    assert.match(draft, /# ForgeBadger Trial Feedback Draft/);
     assert.match(draft, /Generated draft status: not submitted, not reviewed, not gate-clearing evidence/);
-    assert.match(draft, /OpenForge version or commit: abc1234/);
+    assert.match(draft, /ForgeBadger version or commit: abc1234/);
     assert.match(draft, /Startup path: source fallback/);
     assert.match(draft, /Gateway URL: http:\/\/127\.0\.0\.1:48731/);
     assert.match(draft, /Copilot memory write proposal tested: yes \/ no \/ skipped/);
@@ -41,14 +41,20 @@ describe("trial feedback draft generator", () => {
       commit: "abc1234",
       shell: "Bearer secret-token-value",
       nodeVersion: "sk-test-secret",
-      tmuxVersion: "openforge.token=secret",
-      claudeVersion: "OPENFORGE_MASTER_KEY=abc123"
+      tmuxVersion: "forgebadger.token=secret",
+      claudeVersion: [
+        "FORGEBADGER_MASTER_KEY=abc123",
+        "OPENFORGE_MASTER_KEY=legacy-master",
+        "OPENFORGE_JWT_SECRET=legacy-jwt",
+        "OPENFORGE_ATTACH_TOKEN=legacy-attach"
+      ].join(" ")
     });
 
     assert.doesNotMatch(draft, /secret-token-value/);
     assert.doesNotMatch(draft, /sk-test-secret/);
-    assert.doesNotMatch(draft, /openforge\.token=secret/);
-    assert.doesNotMatch(draft, /OPENFORGE_MASTER_KEY=abc123/);
+    assert.doesNotMatch(draft, /forgebadger\.token=secret/);
+    assert.doesNotMatch(draft, /FORGEBADGER_MASTER_KEY=abc123/);
+    assert.doesNotMatch(draft, /legacy-master|legacy-jwt|legacy-attach/);
     assert.match(draft, /\[redacted\]/);
   });
 

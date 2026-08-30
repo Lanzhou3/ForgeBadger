@@ -11,7 +11,7 @@ const MAX_DRAFT_LINE_LENGTH = 180;
 
 export function buildTrialFeedbackDraft(input = {}) {
   const context = normalizeDraftContext(input);
-  return `# OpenForge Trial Feedback Draft
+  return `# ForgeBadger Trial Feedback Draft
 
 Generated draft status: not submitted, not reviewed, not gate-clearing evidence.
 Review and redact this draft before attaching diagnostics, screenshots, or written observations.
@@ -21,7 +21,7 @@ Review and redact this draft before attaching diagnostics, screenshots, or writt
 - Result: pass / pass with caveats / blocked
 - Affected surface: onboarding / dependency / provider / platform / terminal / Copilot / Feishu / Project Manager / docs / other
 - Startup path: ${context.startupPath}
-- OpenForge version or commit: ${context.commit}
+- ForgeBadger version or commit: ${context.commit}
 - Operating system: ${context.os}
 - Shell: ${context.shell}
 - Windows native or WSL, if applicable:
@@ -36,7 +36,7 @@ Review and redact this draft before attaching diagnostics, screenshots, or writt
 - claude --version: ${context.claudeVersion}
 - opencode --version, if checked: ${context.opencodeVersion}
 - codex --version, if checked: ${context.codexVersion}
-- openforge doctor summary:
+- forgebadger doctor summary:
 
 ## Diagnostics Export
 
@@ -217,8 +217,8 @@ function redactSecrets(value) {
   return value
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/\bsk-[A-Za-z0-9_-]+/g, "[redacted]")
-    .replace(/\bopenforge\.token\s*=\s*\S+/gi, "openforge.token=[redacted]")
-    .replace(/\b(OPENFORGE_(?:MASTER_KEY|JWT_SECRET|ATTACH_TOKEN|API_KEY|TOKEN))\s*=\s*\S+/g, "$1=[redacted]")
+    .replace(/\b(?:forgebadger|openforge)\.token\s*=\s*\S+/gi, "forgebadger.token=[redacted]")
+    .replace(/\b((?:FORGEBADGER|OPENFORGE)_(?:MASTER_KEY|JWT_SECRET|ATTACH_TOKEN|API_KEY|TOKEN))\s*=\s*\S+/g, "$1=[redacted]")
     .replace(/\b(api[_-]?key|jwt|token|password|private[_-]?key)\s*[:=]\s*\S+/gi, "$1=[redacted]");
 }
 

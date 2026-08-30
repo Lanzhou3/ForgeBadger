@@ -5,7 +5,7 @@ import {
   type PortfolioWorkItemState
 } from "../../db/repositories/portfolio-repository.js";
 import { PortfolioSchedulerRepository } from "../../db/repositories/portfolio-scheduler-repository.js";
-import { OpenForgeEventBus } from "../event-bus.js";
+import { ForgeBadgerEventBus } from "../event-bus.js";
 import { PortfolioIntakeService, type CreateRequestInput, type DecideIntakeInput, type EnrollProjectInput, type ResolveOwnerDecisionInput, type UpdateDossierInput } from "./intake-service.js";
 import { createPlatformToolManifestService } from "./platform-tool-manifest.js";
 import { createTaskPacketService } from "./task-packet-service.js";
@@ -197,7 +197,7 @@ function readRows(db: Database, sql: string, parameters: unknown[]): SqlRow[] {
   return db.prepare(sql).all(...parameters) as SqlRow[];
 }
 
-export function createPortfolioEventFacade(eventBus: OpenForgeEventBus): PortfolioEventFacade {
+export function createPortfolioEventFacade(eventBus: ForgeBadgerEventBus): PortfolioEventFacade {
   return Object.freeze<PortfolioEventFacade>({
     publish(userId, event) {
       eventBus.emitEvent({

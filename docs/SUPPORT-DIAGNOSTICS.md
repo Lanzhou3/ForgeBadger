@@ -1,4 +1,4 @@
-# OpenForge Support Diagnostics
+# ForgeBadger Support Diagnostics
 
 Use this packet when a first-user trial reports provider, runtime/terminal, or
 Feishu failures. The goal is to collect enough redacted evidence for triage
@@ -9,13 +9,13 @@ sensitive terminal output.
 
 - Confirm the report uses `docs/TRIAL-CHECKLIST.md` and either
   `docs/TRIAL-FEEDBACK.md` or the GitHub issue form
-  `OpenForge first-user trial feedback`.
+  `ForgeBadger first-user trial feedback`.
 - Check `docs/EXTERNAL-EVIDENCE-GATES.md` before reclassifying live-provider,
   Windows/WSL, Feishu bot long-connection, or first-user feedback evidence.
 - Prefer the Web Settings diagnostics export. The local API is
   `GET /api/v1/diagnostics/export`; it is authenticated, tenant scoped,
   local-only, and redacted.
-- Record OpenForge version or commit, startup path, OS, shell, browser, Node,
+- Record ForgeBadger version or commit, startup path, OS, shell, browser, Node,
   tmux, Claude Code, and package manager versions.
 - Share summaries, counts, statuses, sanitized error names, public metadata, and
   file paths. Do not share raw secrets or full payload bodies.
@@ -37,7 +37,7 @@ Collect these redacted artifacts:
 
 - project id or disposable project name when non-sensitive;
 - Project Manager tab screenshot showing goal, work item, or ledger state;
-- exact OpenForge request path and status code for failing
+- exact ForgeBadger request path and status code for failing
   `/api/v1/projects/:projectId/project-manager/*` calls;
 - work item title or short ID;
 - evidence reference fields only: `kind`, `label`, `ref`, and `path`;
@@ -109,7 +109,7 @@ Collect these redacted artifacts:
   text. Do not collect plaintext credentials, Authorization headers, provider
   request/response bodies, or raw provider payloads.
 - diagnostics export summary from `GET /api/v1/diagnostics/export`;
-- browser console/network failure names, status codes, and OpenForge request
+- browser console/network failure names, status codes, and ForgeBadger request
   paths;
 - owner and next action.
 
@@ -124,7 +124,7 @@ Classify:
   timeout; retry once, then check host network/proxy connectivity.
 - `provider_outage` means the provider returned a 5xx-style failure; check the
   provider status page or retry later.
-- `endpoint_or_network_failure` means OpenForge could not reach the configured
+- `endpoint_or_network_failure` means ForgeBadger could not reach the configured
   endpoint or model-list route; verify base URL, proxy, DNS, and models support.
 - `remote_model_missing` means the selected model id was not returned by the
   provider model list; sync models or pick a returned model id.
@@ -168,7 +168,7 @@ report claims physical Windows/WSL terminal evidence.
 Run or request:
 
 ```bash
-openforge doctor
+forgebadger doctor
 node --version
 tmux -V
 claude --version
@@ -180,12 +180,12 @@ RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
 Collect these redacted artifacts:
 
 - startup command, Web URL, Gateway URL, and health envelope status;
-- `openforge doctor` dependency summary;
+- `forgebadger doctor` dependency summary;
 - browser terminal attach/input/resize evidence;
 - refresh/reconnect result;
 - stop-session and restart-recovery result;
 - tmux session name only when it is not sensitive;
-- relevant OpenForge error names, status codes, and request paths;
+- relevant ForgeBadger error names, status codes, and request paths;
 - `mvp1-smoke`, `gate-d-smoke`, and focused tmux command summaries.
 
 Classify:
@@ -237,11 +237,11 @@ pnpm evidence:feishu-bot-live-report -- --report <report.json> --output <report.
 
 For the primary Feishu gate, configure the self-built Feishu bot to receive
 events through persistent connection/WebSocket mode, subscribe to
-`im.message.receive_v1`, set `OPENFORGE_GATEWAY_URL`, `OPENFORGE_TOKEN`,
+`im.message.receive_v1`, set `FORGEBADGER_GATEWAY_URL`, `FORGEBADGER_TOKEN`,
 `FEISHU_APP_ID`, and `FEISHU_APP_SECRET`, then start
 `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output <report.json>`.
-Send one allowed bounded command such as `/openforge status`, then send a
-terminal-control probe such as `/openforge terminal session-1 continue`, and
+Send one allowed bounded command such as `/forgebadger status`, then send a
+terminal-control probe such as `/forgebadger terminal session-1 continue`, and
 force a reconnect or restart observation before saving the redacted JSON
 report. Run
 `pnpm evidence:feishu-bot-live-audit -- <report.json>` before maintainer gate
@@ -345,7 +345,7 @@ Before attaching diagnostics, confirm all of these are removed or summarized:
 - raw provider keys;
 - Feishu secrets, verification token values, event encryption keys, and app
   secrets;
-- JWTs, browser auth token values, attach tokens, and `openforge.token` values;
+- JWTs, browser auth token values, attach tokens, and `forgebadger.token` values;
 - plaintext passwords and private keys;
 - raw provider request bodies and raw provider response bodies;
 - raw callback body content;
@@ -383,7 +383,7 @@ Route to maintainer/operator when the issue is missing external evidence:
 - no public HTTPS Gateway URL or Feishu developer-console URL verification
   action, when the optional public webhook compatibility path is under test;
 - no completed first-user feedback packet. Use `docs/TRIAL-FEEDBACK.md` or
-  `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml`, then run
+  `.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml`, then run
   `pnpm trial:feedback-audit -- <packet.md>` for Markdown packets or
   `pnpm trial:feedback-issue-audit -- --issue=<number>` for GitHub issue-form
   feedback before maintainer triage. Use `pnpm trial:feedback-issues-audit` to

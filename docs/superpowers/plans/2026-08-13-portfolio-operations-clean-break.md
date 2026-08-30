@@ -1,15 +1,15 @@
-# OpenForge Portfolio Operations Clean-Break Rebuild Plan
+# ForgeBadger Portfolio Operations Clean-Break Rebuild Plan
 
 ## 1. Understanding the requirement
 
 ### Goal
 
-Replace OpenForge's generic chat Copilot with a **Portfolio Operations Manager**: one durable, tenant-scoped controller that coordinates all explicitly enrolled projects, turns user requirements into traceable work, governs Code CLI sessions and permissions, monitors evidence, and sends controlled updates through Web and Feishu.
+Replace ForgeBadger's generic chat Copilot with a **Portfolio Operations Manager**: one durable, tenant-scoped controller that coordinates all explicitly enrolled projects, turns user requirements into traceable work, governs Code CLI sessions and permissions, monitors evidence, and sends controlled updates through Web and Feishu.
 
 ### Accepted product decisions
 
 1. The manager uses three-tier execution authorization: preauthorization, manager recommendation plus owner confirmation, and always-owner-confirmed protected actions.
-2. Only explicitly enrolled OpenForge projects are in the portfolio. Each has a Project Dossier and evidence-backed Observed State.
+2. Only explicitly enrolled ForgeBadger projects are in the portfolio. Each has a Project Dossier and evidence-backed Observed State.
 3. Global Portfolio Heartbeat is disabled by default and configurable by the user. It combines event ingestion with periodic reconciliation; model reasoning is not invoked on every tick.
 4. A Work Item explicitly delegated for tracking owns Workflow Wakeups even when the global Heartbeat is disabled. “No tracking” creates no wakeups.
 5. Platform Tools are server-owned and schema-bound. Skills are versioned playbooks over an already-authorized tool subset and cannot create privileges. MCP is out of scope for V1.
@@ -57,7 +57,7 @@ Web / bound Feishu request
 
 **Reuse as platform foundations**
 
-- Gateway authentication, repositories, envelope, audit logs, redaction, `OpenForgeEventBus`, notifications, Event WebSocket, Session Manager, tmux, adapter discovery, and CLI lifecycle hooks.
+- Gateway authentication, repositories, envelope, audit logs, redaction, `ForgeBadgerEventBus`, notifications, Event WebSocket, Session Manager, tmux, adapter discovery, and CLI lifecycle hooks.
 - Project Manager Work Item / Goal / Development Ledger and its Web page, evolved into the work-flow view.
 - Existing task-attempt, session-assignment, command, acceptance-result, and wakeup schema concepts; their currently unconnected service code is a design reference, not a compatibility contract.
 - Feishu credentials, tenant binding, outbound delivery and Outbox mechanics; adopt OpenClaw's account/channel/identity/ingress separation as a design reference only.

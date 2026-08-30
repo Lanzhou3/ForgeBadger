@@ -247,12 +247,12 @@ describe("api client", () => {
     vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({
       report: {
         generatedAt: "2026-05-11T00:00:00.000Z",
-        app: { name: "OpenForge", version: "0.0.0" },
+        app: { name: "ForgeBadger", version: "0.0.0" },
         runtime: { node: "v22.0.0", platform: "linux", arch: "x64" },
         counts: { projects: 1 },
         dashboardHealth: {},
         adapters: [{ id: "claude", command: "claude", runtimeModes: ["terminal"] }],
-        environment: { OPENFORGE_PORT: "48731" },
+        environment: { FORGEBADGER_PORT: "48731" },
       },
     })));
 
@@ -262,21 +262,21 @@ describe("api client", () => {
       "http://127.0.0.1:48731/api/v1/diagnostics/export",
       expect.objectContaining({ headers: expect.any(Object) })
     );
-    expect(result.report.app.name).toBe("OpenForge");
-    expect(result.report.environment.OPENFORGE_PORT).toBe("48731");
+    expect(result.report.app.name).toBe("ForgeBadger");
+    expect(result.report.environment.FORGEBADGER_PORT).toBe("48731");
   });
 
   it("creates Gate A sessions with the current login token", async () => {
     vi.stubGlobal("window", {});
     vi.stubGlobal("localStorage", {
-      getItem: vi.fn((key: string) => (key === "openforge.token" ? "jwt-token" : null)),
+      getItem: vi.fn((key: string) => (key === "forgebadger.token" ? "jwt-token" : null)),
     });
     vi.mocked(fetch).mockResolvedValueOnce(
       await mockEnvelope({
         session: {
           id: "gate-a-session",
           attachToken: "attach-token",
-          tmuxName: "of-gate-a",
+          tmuxName: "forgebadger-gate-a",
           status: "running",
         },
       })
@@ -1322,7 +1322,7 @@ describe("api client", () => {
         {
           id: "mapping-1",
           feishuUserId: "ou_1",
-          openforgeUserId: "user-1",
+          forgebadgerUserId: "user-1",
           displayName: "Owner",
           createdAt: "2026-05-17T00:00:00.000Z",
           updatedAt: "2026-05-17T00:00:00.000Z",
@@ -1332,7 +1332,7 @@ describe("api client", () => {
 
     const mappings = await listFeishuUserMappings();
     await replaceFeishuUserMappings([
-      { feishuUserId: "ou_1", openforgeUserId: "user-1", displayName: "Owner" },
+      { feishuUserId: "ou_1", forgebadgerUserId: "user-1", displayName: "Owner" },
     ]);
 
     expect(fetch).toHaveBeenNthCalledWith(
@@ -1352,7 +1352,7 @@ describe("api client", () => {
         method: "PUT",
         body: JSON.stringify({
           mappings: [
-            { feishuUserId: "ou_1", openforgeUserId: "user-1", displayName: "Owner" },
+            { feishuUserId: "ou_1", forgebadgerUserId: "user-1", displayName: "Owner" },
           ],
         }),
       })
@@ -1381,13 +1381,13 @@ describe("api client", () => {
           ok: false,
           status: 500,
           statusText: "Internal Server Error",
-          text: () => Promise.resolve("stack trace: /tmp/openforge/private.ts"),
+          text: () => Promise.resolve("stack trace: /tmp/forgebadger/private.ts"),
         } as Response)
       )
     );
 
     await expect(getDashboardSummary()).rejects.toThrow("Gateway request failed with HTTP 500");
-    await expect(getDashboardSummary()).rejects.not.toThrow("/tmp/openforge");
+    await expect(getDashboardSummary()).rejects.not.toThrow("/tmp/forgebadger");
   });
 
   it("manages CLI global config through REST", async () => {

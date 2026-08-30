@@ -34,11 +34,11 @@ describe("local diagnostics export", () => {
     assert.deepEqual(
       redactDiagnosticValue({
         token: "abc",
-        nested: { OPENFORGE_MASTER_KEY: "secret", safe: "value" }
+        nested: { FORGEBADGER_MASTER_KEY: "secret", safe: "value" }
       }),
       {
         token: "[redacted]",
-        nested: { OPENFORGE_MASTER_KEY: "[redacted]", safe: "value" }
+        nested: { FORGEBADGER_MASTER_KEY: "[redacted]", safe: "value" }
       }
     );
   });
@@ -102,7 +102,7 @@ describe("local diagnostics export", () => {
         appVersion: "0.0.0-test",
         now: new Date("2026-05-06T00:00:00.000Z"),
         env: {
-          OPENFORGE_MASTER_KEY: "a".repeat(64),
+          FORGEBADGER_MASTER_KEY: "a".repeat(64),
           OPENAI_API_KEY: "sk-test-secret"
         }
       });
@@ -152,7 +152,7 @@ describe("local diagnostics export", () => {
           readyForUse: false
         }
       ]);
-      assert.equal("OPENFORGE_MASTER_KEY" in report.environment, false);
+      assert.equal("FORGEBADGER_MASTER_KEY" in report.environment, false);
       assert.equal("OPENAI_API_KEY" in report.environment, false);
       assert.equal(JSON.stringify(report).includes("sk-test-secret"), false);
       assert.equal(JSON.stringify(report).includes("sk-provider-secret"), false);
@@ -213,7 +213,7 @@ describe("local diagnostics export", () => {
       repo.upsertGoal(project.id, { summary: "Diagnostics summary" });
       const item = repo.createWorkItem(project.id, {
         title: "Count me",
-        details: { rawTerminalOutput: "OPENFORGE_ATTACH_TOKEN=diagnostics-pm-secret" }
+        details: { rawTerminalOutput: "FORGEBADGER_ATTACH_TOKEN=diagnostics-pm-secret" }
       });
       repo.updateWorkItemStatus(project.id, item.id, { status: "in_progress" });
       new ProjectManagerRepository(db, otherUser.id).createWorkItem(otherProject.id, {

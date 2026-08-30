@@ -11,7 +11,7 @@ import { FeishuChannelRepository } from "../src/db/repositories/feishu-channel-r
 import { PortfolioFeishuRegistryRepository } from "../src/db/repositories/portfolio-feishu-registry-repository.js";
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
 import { buildAgentStack, type AgentStackDeps } from "../src/services/agent/agent-stack.js";
-import { OpenForgeEventBus } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { createFeishuCopilotChannel } from "../src/services/integrations/feishu-copilot-channel.js";
 import {
   buildCopilotRunCard,
@@ -91,7 +91,7 @@ describe("copilot channel streaming cards & approvals", () => {
     const providerAccount = new PortfolioFeishuRegistryRepository(db)
       .register({ userId, provider: "feishu", providerAccountId: "cli_cards_test" });
 
-    const eventBus = new OpenForgeEventBus();
+    const eventBus = new ForgeBadgerEventBus();
     const turnCalls: Array<{ conversationId: string; userText: string }> = [];
     const resumeCalls: Array<{ runId: string; actionId: string; approved: boolean }> = [];
     let gate: ((value: unknown) => void) | null = null;

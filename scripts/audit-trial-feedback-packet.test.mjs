@@ -39,7 +39,7 @@ describe("trial feedback packet audit", () => {
   });
 
   it("rejects unsafe secret-like content", () => {
-    const packet = `${buildCompletedPacket()}\nAuthorization: Bearer secret-token\nprovider key sk-test-secret\n`;
+    const packet = `${buildCompletedPacket()}\nAuthorization: Bearer secret-token\nprovider key sk-test-secret\nOPENFORGE_MASTER_KEY=legacy-master\nOPENFORGE_JWT_SECRET=legacy-jwt\nOPENFORGE_ATTACH_TOKEN=legacy-attach\n`;
     const result = auditTrialFeedbackPacket(packet);
 
     assert.equal(result.ok, false);
@@ -95,14 +95,14 @@ describe("trial feedback packet audit", () => {
 });
 
 function buildCompletedPacket() {
-  return `# OpenForge Trial Feedback Packet
+  return `# ForgeBadger Trial Feedback Packet
 
 ## Summary
 
 - Result: pass with caveats
 - Affected surface: terminal
 - Startup path: source fallback
-- OpenForge version or commit: abc1234
+- ForgeBadger version or commit: abc1234
 - Operating system: linux x64 6.8.0
 - Shell: /bin/zsh
 - Windows native or WSL, if applicable: not applicable
@@ -113,7 +113,7 @@ function buildCompletedPacket() {
 - node --version: v24.14.1
 - tmux -V: tmux 3.4
 - claude --version: 2.1.152
-- openforge doctor summary: terminal native_tmux
+- forgebadger doctor summary: terminal native_tmux
 
 ## Diagnostics Export
 
@@ -175,14 +175,14 @@ The trial completed with a caveat: no physical Windows/WSL host was available.
 }
 
 function buildPlaceholderPacket() {
-  return `# OpenForge Trial Feedback Packet
+  return `# ForgeBadger Trial Feedback Packet
 
 ## Summary
 
 - Result: TBD
 - Affected surface: TODO
 - Startup path: ...
-- OpenForge version or commit: TBD
+- ForgeBadger version or commit: TBD
 - Operating system: TBD
 - Shell: TBD
 - Browser and version: TBD
@@ -192,7 +192,7 @@ function buildPlaceholderPacket() {
 - node --version: TBD
 - tmux -V: TODO
 - claude --version: ...
-- openforge doctor summary: n/a
+- forgebadger doctor summary: n/a
 
 ## Diagnostics Export
 

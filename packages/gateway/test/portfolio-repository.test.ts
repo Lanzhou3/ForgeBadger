@@ -204,12 +204,12 @@ describe("PortfolioRepository", () => {
     other = users.create("portfolio-other@example.com", "hash");
     projectId = new ProjectRepository(db, owner.id).create({
       name: "Portfolio owner project",
-      path: "/tmp/openforge-portfolio-owner",
+      path: "/tmp/forgebadger-portfolio-owner",
       aiTool: "claude"
     }).id;
     new ProjectRepository(db, other.id).create({
       name: "Portfolio other project",
-      path: "/tmp/openforge-portfolio-other",
+      path: "/tmp/forgebadger-portfolio-other",
       aiTool: "claude"
     }).id;
   });
@@ -370,7 +370,7 @@ describe("PortfolioRepository", () => {
     const repo = new PortfolioRepository(db, owner.id);
     const activeProjectId = new ProjectRepository(db, owner.id).create({
       name: "Repository semantic Dossier state",
-      path: "/tmp/openforge-portfolio-repository-semantic-dossier-state",
+      path: "/tmp/forgebadger-portfolio-repository-semantic-dossier-state",
       aiTool: "claude"
     }).id;
 
@@ -378,7 +378,7 @@ describe("PortfolioRepository", () => {
     for (const [label, observedState] of nonMaterialObservedStates) {
       const invalidProjectId = new ProjectRepository(db, owner.id).create({
         name: `Repository non-material Dossier state ${label}`,
-        path: `/tmp/openforge-portfolio-repository-non-material-dossier-state-${label}`,
+        path: `/tmp/forgebadger-portfolio-repository-non-material-dossier-state-${label}`,
         aiTool: "claude"
       }).id;
       assert.throws(
@@ -518,7 +518,7 @@ describe("PortfolioRepository", () => {
     });
     const secondProjectId = new ProjectRepository(db, owner.id).create({
       name: "Second Portfolio project",
-      path: "/tmp/openforge-portfolio-second",
+      path: "/tmp/forgebadger-portfolio-second",
       aiTool: "claude"
     }).id;
     enrollProject(db, owner.id, {
@@ -565,13 +565,13 @@ describe("PortfolioRepository", () => {
       projectId,
       name: "First Portfolio action session",
       aiTool: "claude",
-      workingDir: "/tmp/openforge-portfolio-owner"
+      workingDir: "/tmp/forgebadger-portfolio-owner"
     }).id;
     const secondSessionId = new SessionRepository(db, owner.id).create({
       projectId: secondProjectId,
       name: "Second Portfolio action session",
       aiTool: "claude",
-      workingDir: "/tmp/openforge-portfolio-second"
+      workingDir: "/tmp/forgebadger-portfolio-second"
     }).id;
     const firstIntent = repo.createActionIntent({
       projectId,
@@ -643,7 +643,7 @@ describe("PortfolioRepository", () => {
     });
     const secondProjectId = new ProjectRepository(db, owner.id).create({
       name: "Second Portfolio record scope project",
-      path: "/tmp/openforge-portfolio-record-scope",
+      path: "/tmp/forgebadger-portfolio-record-scope",
       aiTool: "claude"
     }).id;
     enrollProject(db, owner.id, {
@@ -1026,13 +1026,13 @@ describe("PortfolioRepository", () => {
       projectId,
       name: "Portfolio first session",
       aiTool: "claude",
-      workingDir: "/tmp/openforge-portfolio-owner"
+      workingDir: "/tmp/forgebadger-portfolio-owner"
     }).id;
     const secondSessionId = new SessionRepository(db, owner.id).create({
       projectId,
       name: "Portfolio second session",
       aiTool: "claude",
-      workingDir: "/tmp/openforge-portfolio-owner"
+      workingDir: "/tmp/forgebadger-portfolio-owner"
     }).id;
     const first = repo.claimSessionAssignment({
       projectId,
@@ -1088,7 +1088,7 @@ describe("PortfolioRepository", () => {
 
   it("allows only one contender to claim a lease across separate SQLite connections", () => {
     // Arrange
-    const directory = mkdtempSync(path.join(tmpdir(), "openforge-portfolio-lease-"));
+    const directory = mkdtempSync(path.join(tmpdir(), "forgebadger-portfolio-lease-"));
     const dbPath = path.join(directory, "portfolio.sqlite");
     let firstConnection: Database.Database | undefined;
     let secondConnection: Database.Database | undefined;
@@ -1100,7 +1100,7 @@ describe("PortfolioRepository", () => {
       const leaseOwner = users.create("portfolio-lease-owner@example.com", "hash");
       const leaseProjectId = new ProjectRepository(firstConnection, leaseOwner.id).create({
         name: "Portfolio concurrent lease project",
-        path: "/tmp/openforge-portfolio-concurrent-lease",
+        path: "/tmp/forgebadger-portfolio-concurrent-lease",
         aiTool: "claude"
       }).id;
       const firstRepo = new PortfolioRepository(firstConnection, leaseOwner.id);
@@ -1149,13 +1149,13 @@ describe("PortfolioRepository", () => {
         projectId: leaseProjectId,
         name: "First concurrent lease session",
         aiTool: "claude",
-        workingDir: "/tmp/openforge-portfolio-concurrent-lease"
+        workingDir: "/tmp/forgebadger-portfolio-concurrent-lease"
       }).id;
       const secondSessionId = new SessionRepository(firstConnection, leaseOwner.id).create({
         projectId: leaseProjectId,
         name: "Second concurrent lease session",
         aiTool: "claude",
-        workingDir: "/tmp/openforge-portfolio-concurrent-lease"
+        workingDir: "/tmp/forgebadger-portfolio-concurrent-lease"
       }).id;
       const now = new Date("2026-08-14T10:00:00.000Z");
       const winner = firstRepo.claimSessionAssignment({

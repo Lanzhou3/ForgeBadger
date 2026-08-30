@@ -415,8 +415,8 @@ describe("db repositories", () => {
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/rules/backend.md"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/rules/frontend.md"));
       assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/rules/testing.md"));
-      assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/hooks/openforge-guard.mjs"));
-      assert.equal(withFiles!.files!.some((f) => f.filePath === ".claude/hooks/openforge-notification.mjs"), false);
+      assert.ok(withFiles!.files!.some((f) => f.filePath === ".claude/hooks/forgebadger-guard.mjs"));
+      assert.equal(withFiles!.files!.some((f) => f.filePath === ".claude/hooks/forgebadger-notification.mjs"), false);
       const claudeMd = withFiles!.files!.find((f) => f.filePath === "CLAUDE.md")?.content ?? "";
       assert.ok(claudeMd.split("\n").length <= 200);
       assert.match(claudeMd, /Common Commands/);
@@ -446,19 +446,19 @@ describe("db repositories", () => {
       assert.equal(settings.hooks.PermissionRequest[0].matcher, undefined);
       assert.equal(settings.hooks.PermissionRequest[0].hooks[0].type, "http");
       assert.match(settings.hooks.PermissionRequest[0].hooks[0].url, /\/api\/v1\/session-hooks\/claude-notification/);
-      assert.equal(settings.hooks.PermissionRequest[0].hooks[0].headers["x-openforge-session-token"], "$OPENFORGE_ATTACH_TOKEN");
+      assert.equal(settings.hooks.PermissionRequest[0].hooks[0].headers["x-forgebadger-session-token"], "$FORGEBADGER_ATTACH_TOKEN");
       assert.deepEqual(settings.hooks.PermissionRequest[0].hooks[0].allowedEnvVars, [
-        "OPENFORGE_SESSION_ID",
-        "OPENFORGE_ATTACH_TOKEN"
+        "FORGEBADGER_SESSION_ID",
+        "FORGEBADGER_ATTACH_TOKEN"
       ]);
       assert.equal(settings.hooks.PermissionDenied[0].hooks[0].type, "http");
       assert.equal(settings.hooks.Notification[0].matcher, "permission_prompt");
       assert.equal(settings.hooks.Notification[0].hooks[0].type, "http");
       assert.equal(settings.hooks.PreToolUse[0].matcher, "Bash");
       assert.equal(settings.hooks.PreToolUse[0].hooks[0].type, "command");
-      assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /openforge-guard\.mjs/);
+      assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /forgebadger-guard\.mjs/);
 
-      const guard = withFiles!.files!.find((f) => f.filePath === ".claude/hooks/openforge-guard.mjs")?.content ?? "";
+      const guard = withFiles!.files!.find((f) => f.filePath === ".claude/hooks/forgebadger-guard.mjs")?.content ?? "";
       assert.match(guard, /rm\\s\+-rf/);
       assert.match(guard, /process\.exit\(2\)/);
     });
@@ -473,7 +473,7 @@ describe("db repositories", () => {
       ).run("builtin-claude-code", ".claude/CLAUDE.md", "# Old", "markdown");
       db.prepare(
         "INSERT INTO template_files (template_id, file_path, content, file_type) VALUES (?, ?, ?, ?)"
-      ).run("builtin-claude-code", ".claude/hooks/openforge-notification.mjs", "old hook", "javascript");
+      ).run("builtin-claude-code", ".claude/hooks/forgebadger-notification.mjs", "old hook", "javascript");
 
       const repo = new TemplateRepository(db, user.id);
       const refreshed = repo.getById("builtin-claude-code");
@@ -483,7 +483,7 @@ describe("db repositories", () => {
       assert.match(claudeMd, /Verification Contract/);
       assert.match(claudeMd, /Operating Pattern/);
       assert.equal(
-        refreshed?.files?.some((file) => file.filePath === ".claude/hooks/openforge-notification.mjs"),
+        refreshed?.files?.some((file) => file.filePath === ".claude/hooks/forgebadger-notification.mjs"),
         false
       );
       assert.equal(

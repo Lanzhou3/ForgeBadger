@@ -1,14 +1,14 @@
 /**
- * Environment-backed configuration for the OpenForge bridge plugin.
+ * Environment-backed configuration for the ForgeBadger bridge plugin.
  *
  * The dsh runtime runs as a per-user child process of the Gateway; the Gateway
  * injects these variables at spawn time (never write them to files or logs):
  *
- * - `OPENFORGE_GATEWAY_URL` — Gateway base URL (default `http://127.0.0.1:48731`)
- * - `OPENFORGE_COPILOT_BRIDGE_TOKEN` — internal API bearer token (required)
- * - `OPENFORGE_USER_ID` — tenant id forwarded as `X-OpenForge-User-Id` (required)
- * - `OPENFORGE_BRIDGE_TIMEOUT_MS` — per-request timeout (default 15000)
- * - `OPENFORGE_BRIDGE_ENABLE_OPERATE` — "1"/"true" registers the operate tools
+ * - `FORGEBADGER_GATEWAY_URL` — Gateway base URL (default `http://127.0.0.1:48731`)
+ * - `FORGEBADGER_COPILOT_BRIDGE_TOKEN` — internal API bearer token (required)
+ * - `FORGEBADGER_USER_ID` — tenant id forwarded as `X-ForgeBadger-User-Id` (required)
+ * - `FORGEBADGER_BRIDGE_TIMEOUT_MS` — per-request timeout (default 15000)
+ * - `FORGEBADGER_BRIDGE_ENABLE_OPERATE` — "1"/"true" registers the operate tools
  *   (advance_work_item, dispatch_task_to_session); anything else (default)
  *   registers only the read-only tools. The M3 Gateway spawns with "1"; every
  *   operate call is then gated behind the approval bridge (see approval-bridge.ts).
@@ -42,38 +42,41 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 export function loadBridgeConfig(env: NodeJS.ProcessEnv): BridgeConfig {
   const problems: string[] = [];
 
-  const gatewayUrl = (env.OPENFORGE_GATEWAY_URL ?? DEFAULT_GATEWAY_URL).replace(/\/+$/, "");
+  const gatewayUrl = (
+    env.FORGEBADGER_GATEWAY_URL ?? env.OPENFORGE_GATEWAY_URL ?? DEFAULT_GATEWAY_URL
+  ).replace(/\/+$/, "");
   try {
     new URL(gatewayUrl);
   } catch {
-    problems.push(`OPENFORGE_GATEWAY_URL is not a valid URL: ${gatewayUrl}`);
+    problems.push(`FORGEBADGER_GATEWAY_URL is not a valid URL: ${gatewayUrl}`);
   }
 
-  const token = env.OPENFORGE_COPILOT_BRIDGE_TOKEN ?? "";
+  const token = env.FORGEBADGER_COPILOT_BRIDGE_TOKEN ?? env.OPENFORGE_COPILOT_BRIDGE_TOKEN ?? "";
   if (token.length === 0) {
-    problems.push("OPENFORGE_COPILOT_BRIDGE_TOKEN is required (internal API bearer token)");
+    problems.push("FORGEBADGER_COPILOT_BRIDGE_TOKEN is required (internal API bearer token)");
   }
 
-  const userId = env.OPENFORGE_USER_ID ?? "";
+  const userId = env.FORGEBADGER_USER_ID ?? env.OPENFORGE_USER_ID ?? "";
   if (userId.length === 0) {
-    problems.push("OPENFORGE_USER_ID is required (tenant id for the internal API)");
+    problems.push("FORGEBADGER_USER_ID is required (tenant id for the internal API)");
   }
 
   let timeoutMs = DEFAULT_TIMEOUT_MS;
-  const rawTimeout = env.OPENFORGE_BRIDGE_TIMEOUT_MS;
+  const rawTimeout = env.FORGEBADGER_BRIDGE_TIMEOUT_MS ?? env.OPENFORGE_BRIDGE_TIMEOUT_MS;
   if (rawTimeout !== undefined && rawTimeout !== "") {
     const parsed = Number(rawTimeout);
     if (!Number.isFinite(parsed) || parsed <= 0) {
-      problems.push(`OPENFORGE_BRIDGE_TIMEOUT_MS must be a positive number, got: ${rawTimeout}`);
+      problems.push(`FORGEBADGER_BRIDGE_TIMEOUT_MS must be a positive number, got: ${rawTimeout}`);
     } else {
       timeoutMs = parsed;
     }
   }
 
   if (problems.length > 0) {
-    throw new Error(`openforge-bridge configuration invalid:\n  - ${problems.join("\n  - ")}`);
+    throw new Error(`forgebadger-bridge configuration invalid:\n  - ${problems.join("\n  - ")}`);
   }
-  const rawOperate = env.OPENFORGE_BRIDGE_ENABLE_OPERATE ?? "";
+  const rawOperate =
+    env.FORGEBADGER_BRIDGE_ENABLE_OPERATE ?? env.OPENFORGE_BRIDGE_ENABLE_OPERATE ?? "";
   const enableOperate = rawOperate === "1" || rawOperate === "true";
   return { gatewayUrl, token, userId, timeoutMs, enableOperate };
 }

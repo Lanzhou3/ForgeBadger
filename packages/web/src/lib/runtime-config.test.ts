@@ -21,7 +21,7 @@ describe("getGatewayBaseUrl", () => {
 
   it("uses the browser runtime gateway URL when present", () => {
     vi.stubGlobal("window", {
-      __OPENFORGE_RUNTIME__: {
+      __FORGEBADGER_RUNTIME__: {
         gatewayBaseUrl: "http://runtime.example:48731",
       },
     });
@@ -36,7 +36,7 @@ describe("getGatewayBaseUrl", () => {
 
   it("ignores an empty browser runtime gateway URL", () => {
     vi.stubGlobal("window", {
-      __OPENFORGE_RUNTIME__: {
+      __FORGEBADGER_RUNTIME__: {
         gatewayBaseUrl: " ",
       },
     });

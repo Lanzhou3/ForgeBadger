@@ -2,9 +2,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.localStorage.setItem("openforge-language", "en");
-    window.localStorage.setItem("openforge.token", "e2e-token");
-    window.localStorage.setItem("openforge.user", JSON.stringify({
+    window.localStorage.setItem("forgebadger-language", "en");
+    window.localStorage.setItem("forgebadger.token", "e2e-token");
+    window.localStorage.setItem("forgebadger.user", JSON.stringify({
       id: "user-e2e",
       email: "models-e2e@example.com",
       role: "admin",
@@ -92,12 +92,12 @@ test("Models provider add dialog saves credential, syncs models, and previews Co
   });
   expect(requests.syncModels).toEqual({ credentialId: "credential-1" });
 
-  await page.getByLabel("Apply to").selectOption("openforge-copilot");
-  await expect(page.getByText("Copilot uses the OpenForge internal runtime default model and does not write project files or external CLI config.")).toBeVisible();
+  await page.getByLabel("Apply to").selectOption("forgebadger-copilot");
+  await expect(page.getByText("Copilot uses the ForgeBadger internal runtime default model and does not write project files or external CLI config.")).toBeVisible();
   await page.getByRole("button", { name: "Preview" }).click();
 
   expect(requests.previewApply).toEqual({
-    adapter: "openforge-copilot",
+    adapter: "forgebadger-copilot",
     scope: "project",
     modelProfileId: "model-1",
     credentialId: "credential-1",
@@ -461,7 +461,7 @@ async function mockModelsApis(
       await route.fulfill({
         json: envelope({
           preview: {
-            adapter: "openforge-copilot",
+            adapter: "forgebadger-copilot",
             env: {},
             secretEnvNames: [],
             changedFiles: [],

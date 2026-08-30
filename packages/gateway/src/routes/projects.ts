@@ -19,7 +19,7 @@ import { SessionRepository } from "../db/repositories/session-repository.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
 import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
-import type { OpenForgeEventBus } from "../services/event-bus.js";
+import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import type { CredentialMode, WriteResult } from "../config-generation/types.js";
 import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } from "../services/project-ai-config.js";
 import { listWorkspaceTree, readWorkspaceFile } from "../services/workspace-context.js";
@@ -100,7 +100,7 @@ const rootInstructionFileNames = ["AGENT.md", "AGENTS.md", "CLAUDE.md"] as const
 export function createProjectRoutes(
   db: Database,
   sessionManager?: InMemorySessionManager,
-  eventBus?: OpenForgeEventBus
+  eventBus?: ForgeBadgerEventBus
 ): Router {
   const router = Router();
   router.use(authenticate);

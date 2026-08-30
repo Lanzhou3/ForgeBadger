@@ -145,7 +145,7 @@ export default function SettingsPage() {
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">
-          <Card className="of-animate-in">
+          <Card className="forgebadger-animate-in">
             <SettingsCardHeader
               icon={<Globe2 className="size-4" />}
               title={t("settings.language")}
@@ -169,7 +169,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card className="of-animate-in" style={{ animationDelay: "40ms" }}>
+          <Card className="forgebadger-animate-in" style={{ animationDelay: "40ms" }}>
             <SettingsCardHeader
               icon={<Palette className="size-4" />}
               title={t("settings.theme")}
@@ -204,7 +204,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card className="of-animate-in" style={{ animationDelay: "80ms" }}>
+          <Card className="forgebadger-animate-in" style={{ animationDelay: "80ms" }}>
             <SettingsCardHeader
               icon={<Settings2 className="size-4" />}
               title={t("settings.console")}
@@ -236,11 +236,11 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <div className="of-animate-in" style={{ animationDelay: "100ms" }}>
+          <div className="forgebadger-animate-in" style={{ animationDelay: "100ms" }}>
             <AccountSecuritySettings />
           </div>
 
-          <Card className="of-animate-in" style={{ animationDelay: "120ms" }}>
+          <Card className="forgebadger-animate-in" style={{ animationDelay: "120ms" }}>
             <CardHeader className="flex flex-wrap items-center gap-3 space-y-0">
               <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
                 <Cpu className="size-4" />
@@ -359,13 +359,13 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <div className="of-animate-in" style={{ animationDelay: "160ms" }}>
+          <div className="forgebadger-animate-in" style={{ animationDelay: "160ms" }}>
             <FeishuIntegrationSettings />
           </div>
         </div>
 
         <div className="space-y-6">
-          <Card className="of-animate-in" style={{ animationDelay: "80ms" }}>
+          <Card className="forgebadger-animate-in" style={{ animationDelay: "80ms" }}>
             <SettingsCardHeader
               icon={<ShieldCheck className="size-4" />}
               title={t("settings.securityBaseline")}
@@ -385,7 +385,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card className="of-animate-in" style={{ animationDelay: "120ms" }}>
+          <Card className="forgebadger-animate-in" style={{ animationDelay: "120ms" }}>
             <SettingsCardHeader
               icon={<Download className="size-4" />}
               title={t("settings.diagnostics")}
@@ -424,7 +424,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card className="of-animate-in" style={{ animationDelay: "160ms" }}>
+          <Card className="forgebadger-animate-in" style={{ animationDelay: "160ms" }}>
             <SettingsCardHeader
               icon={<ScrollText className="size-4" />}
               title={t("settings.auditHistory")}
@@ -471,7 +471,7 @@ function downloadDiagnosticsReport(report: LocalDiagnosticsExport) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `openforge-diagnostics-${generatedAt}.json`;
+  anchor.download = `forgebadger-diagnostics-${generatedAt}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 }

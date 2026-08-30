@@ -15,6 +15,11 @@ import {
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
 import {
+  readMigratedStorageValue,
+  removeMigratedStorageValue,
+  writeMigratedStorageValue,
+} from "@/lib/brand-storage";
+import {
   cancelRun,
   createConversation,
   listMessages,
@@ -24,7 +29,8 @@ import {
 import { cn } from "@/lib/utils";
 
 const AUTO_TITLE_MAX_CHARS = 24;
-export const ROBOT_CONVERSATION_STORAGE_KEY = "openforge.copilot.robot-conversation";
+export const ROBOT_CONVERSATION_STORAGE_KEY = "forgebadger.copilot.robot-conversation";
+export const LEGACY_ROBOT_CONVERSATION_STORAGE_KEY = "openforge.copilot.robot-conversation";
 
 interface RobotChatPanelProps {
   onClose: () => void;
@@ -67,7 +73,11 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
   // Restore the previous conversation on mount; a stale id (deleted on the
   // server) is dropped so the panel falls back to a fresh draft.
   useEffect(() => {
-    const stored = window.localStorage.getItem(ROBOT_CONVERSATION_STORAGE_KEY);
+    const stored = readMigratedStorageValue(
+      window.localStorage,
+      ROBOT_CONVERSATION_STORAGE_KEY,
+      LEGACY_ROBOT_CONVERSATION_STORAGE_KEY
+    );
     if (!stored) return;
     setRestoring(true);
     setConversationId(stored);
@@ -76,7 +86,11 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
         if (conversationIdRef.current === stored) setMessages(next);
       })
       .catch(() => {
-        window.localStorage.removeItem(ROBOT_CONVERSATION_STORAGE_KEY);
+        removeMigratedStorageValue(
+          window.localStorage,
+          ROBOT_CONVERSATION_STORAGE_KEY,
+          LEGACY_ROBOT_CONVERSATION_STORAGE_KEY
+        );
         if (conversationIdRef.current === stored) {
           setConversationId(null);
           setMessages([]);
@@ -118,7 +132,12 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
         const { conversation } = await createConversation();
         id = conversation.id;
         setConversationId(id);
-        window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, id);
+        writeMigratedStorageValue(
+          window.localStorage,
+          ROBOT_CONVERSATION_STORAGE_KEY,
+          LEGACY_ROBOT_CONVERSATION_STORAGE_KEY,
+          id
+        );
         await renameConversation(id, text.slice(0, AUTO_TITLE_MAX_CHARS)).catch(() => undefined);
       }
       await startRun(id, text);
@@ -137,7 +156,11 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
     setMessages([]);
     setLoadError(null);
     setSendError(false);
-    window.localStorage.removeItem(ROBOT_CONVERSATION_STORAGE_KEY);
+    removeMigratedStorageValue(
+      window.localStorage,
+      ROBOT_CONVERSATION_STORAGE_KEY,
+      LEGACY_ROBOT_CONVERSATION_STORAGE_KEY
+    );
   }, [clearActive]);
 
   const stopRun = useCallback(async () => {

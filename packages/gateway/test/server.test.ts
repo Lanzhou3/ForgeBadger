@@ -7,7 +7,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
-import { OpenForgeEventBus } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createServer, createGatewayApp, type GatewayApp } from "../src/server.js";
@@ -28,7 +28,7 @@ describe("createServer", () => {
       masterKey,
       sessionManager: {} as InMemorySessionManager,
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
-      eventBus: new OpenForgeEventBus()
+      eventBus: new ForgeBadgerEventBus()
     });
 
     const stack = (app as { _router?: { stack?: { handle?: unknown }[] } })._router?.stack ?? [];
@@ -119,7 +119,7 @@ describe("Gateway Feishu shutdown ordering", () => {
       provider: "feishu",
       providerAccountId: "cli-feishu-close-order"
     });
-    const eventBus = new OpenForgeEventBus();
+    const eventBus = new ForgeBadgerEventBus();
     const sessionManager = new InMemorySessionManager({} as never);
     const order: string[] = [];
     let app: GatewayApp;

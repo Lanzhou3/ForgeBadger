@@ -3,7 +3,7 @@
 ### Requirement: Portfolio membership and dossiers are explicit
 The system MUST treat only projects explicitly enrolled by their owner as Portfolio Projects. Each enrolled project MUST have a tenant-scoped Project Dossier containing its objective, owner reference, intended outcome, project scope, and the current evidence-backed Observed State. The system MUST NOT infer portfolio membership by scanning arbitrary directories or repositories.
 
-#### Scenario: Enrolling an existing OpenForge project
+#### Scenario: Enrolling an existing ForgeBadger project
 - **WHEN** an owner enrolls a project that belongs to the authenticated tenant
 - **THEN** the system creates or updates that project's Dossier with an audit fact
 - **THEN** the project becomes eligible for Portfolio Requests, Work Items, and declared observations

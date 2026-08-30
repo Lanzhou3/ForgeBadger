@@ -2,7 +2,7 @@
 
 The current Copilot is a generic, conversation-centred tool loop and the current Project Manager board is not yet a durable portfolio workflow. Together they cannot safely act as the project-group manager: neither provides one canonical path from a user requirement to evidence-backed execution, owner-governed permissions, progress tracking, and channel delivery.
 
-OpenForge now needs a clean replacement that treats project work, authorization, evidence, and delivery as tenant-scoped operational facts. The prior `add-project-manager-agent-control-loop` proposal is a useful implementation reference, but its Copilot entry point and compatibility period conflict with the accepted Clean Cutover direction.
+ForgeBadger now needs a clean replacement that treats project work, authorization, evidence, and delivery as tenant-scoped operational facts. The prior `add-project-manager-agent-control-loop` proposal is a useful implementation reference, but its Copilot entry point and compatibility period conflict with the accepted Clean Cutover direction.
 
 ## What Changes
 

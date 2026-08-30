@@ -1,8 +1,8 @@
-# OpenForge CI/CD Plan
+# ForgeBadger CI/CD Plan
 
 > Status: local-first beta release gates | Date: 2026-05-10
 
-This plan defines the minimum checks for a local/self-hosted OpenForge release.
+This plan defines the minimum checks for a local/self-hosted ForgeBadger release.
 It is written so the same commands can run in CI or in a release engineer's
 terminal.
 
@@ -81,7 +81,7 @@ Acceptance:
 - `pnpm build:npm` creates the publishable CLI package artifacts from the
   current source tree.
 - `pnpm pack:npm` completes the package dry-run and reports the files that
-  would ship in the `openforge` npm package. Inspect this dry-run output before
+  would ship in the `forgebadger` npm package. Inspect this dry-run output before
   publishing and confirm it excludes local config, databases, logs, API keys,
   and internal development artifacts.
 - `node scripts/verify-npm-package.mjs` confirms required Gateway, Web
@@ -89,16 +89,16 @@ Acceptance:
   artifacts are present and no forbidden local state files are included.
 - `pnpm smoke:npm` builds the npm package, packs a tarball into a temporary
   directory, installs that tarball with `npm --prefix` into a temporary prefix,
-  sets `OPENFORGE_STATE_DIR` to temporary state, and runs `openforge doctor`
+  sets `FORGEBADGER_STATE_DIR` to temporary state, and runs `forgebadger doctor`
   from the installed package. The smoke runner bounds child commands with
-  `OPENFORGE_NPM_SMOKE_COMMAND_TIMEOUT_MS` and bounds the tarball install with
-  `OPENFORGE_NPM_SMOKE_INSTALL_TIMEOUT_MS`. The smoke install uses
-  `--omit=peer --legacy-peer-deps` because OpenForge does not require optional
+  `FORGEBADGER_NPM_SMOKE_COMMAND_TIMEOUT_MS` and bounds the tarball install with
+  `FORGEBADGER_NPM_SMOKE_INSTALL_TIMEOUT_MS`. The smoke install uses
+  `--omit=peer --legacy-peer-deps` because ForgeBadger does not require optional
   peer packages from dependencies such as Drizzle ORM to validate package
   install/startup behavior. It also sets explicit npm fetch retry and timeout
   options so transient registry resets fail less often and still produce a
   bounded diagnostic when the network remains unavailable.
-- The `openforge` package ships the Next standalone Web runtime under `dist/`;
+- The `forgebadger` package ships the Next standalone Web runtime under `dist/`;
   do not add `next`, `react`, or `react-dom` as top-level runtime dependencies
   of the CLI package unless the standalone packaging strategy changes.
 
@@ -111,7 +111,7 @@ Known skip:
   this happens, record the exact npm stdout/stderr and keep `pnpm build:npm`,
   `pnpm pack:npm`, and `node scripts/verify-npm-package.mjs` as required
   evidence.
-- `openforge doctor` must fail when required dependencies such as `tmux` are not
+- `forgebadger doctor` must fail when required dependencies such as `tmux` are not
   installed. Treat that as an environment failure, not a passing smoke.
 
 ### Codex Background Task Gates
@@ -126,17 +126,17 @@ dedicated gates no longer apply.
 E2E requires a real Gateway plus Web console on the configured ports:
 
 ```bash
-export OPENFORGE_HOST=127.0.0.1
-export OPENFORGE_PORT=48731
-export OPENFORGE_WEB_PORT=48732
-export OPENFORGE_GATEWAY_URL=http://127.0.0.1:48731
+export FORGEBADGER_HOST=127.0.0.1
+export FORGEBADGER_PORT=48731
+export FORGEBADGER_WEB_PORT=48732
+export FORGEBADGER_GATEWAY_URL=http://127.0.0.1:48731
 export NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
-export OPENFORGE_DB_PATH=/tmp/openforge-ci.db
-export OPENFORGE_MASTER_KEY=<64-hex-characters>
-export OPENFORGE_JWT_SECRET=<32+-character-secret>
+export FORGEBADGER_DB_PATH=/tmp/forgebadger-ci.db
+export FORGEBADGER_MASTER_KEY=<64-hex-characters>
+export FORGEBADGER_JWT_SECRET=<32+-character-secret>
 
-pnpm --filter @openforge/gateway dev > /tmp/openforge-gateway.log 2>&1 &
-pnpm --filter @openforge/web exec playwright test e2e/gate-d-smoke.spec.ts e2e/mvp1-smoke.spec.ts
+pnpm --filter @forgebadger/gateway dev > /tmp/forgebadger-gateway.log 2>&1 &
+pnpm --filter @forgebadger/web exec playwright test e2e/gate-d-smoke.spec.ts e2e/mvp1-smoke.spec.ts
 ```
 
 Acceptance:
@@ -210,7 +210,7 @@ is completed. Do not mark the live provider row `Pass` unless a disposable live
 provider credential and explicit model id produce a successful redacted smoke
 result. Do not mark the Feishu bot row `Pass` unless a real persistent
 connection/WebSocket run received `im.message.receive_v1`, routed through
-OpenForge policy, produced a bounded reply or pending action, and recorded
+ForgeBadger policy, produced a bounded reply or pending action, and recorded
 reconnect behavior. The real SDK smoke command also requires a terminal-input
 rejection observation before it emits `gateClearingEvidence=true`; the report
 audit only makes that report ready for human review and does not clear the gate
@@ -223,7 +223,7 @@ replay and shared rate-limit stores first. Top-level encrypted Feishu payloads m
 
 Block a release if any of these are true:
 
-- `OPENFORGE_JWT_SECRET` or `OPENFORGE_MASTER_KEY` is hardcoded in source.
+- `FORGEBADGER_JWT_SECRET` or `FORGEBADGER_MASTER_KEY` is hardcoded in source.
 - API keys are logged or written to config files.
 - Gateway accepts unauthenticated REST or WebSocket access for tenant data.
 - Project path operations bypass `safeResolve` or accepted realpath checks.
@@ -234,7 +234,7 @@ Block a release if any of these are true:
 Suggested review focus:
 
 ```bash
-rg -n "OPENFORGE_JWT_SECRET=|OPENFORGE_MASTER_KEY=|sk-[A-Za-z0-9_-]+" --glob '!*.md' --glob '!.env*'
+rg -n "FORGEBADGER_JWT_SECRET=|FORGEBADGER_MASTER_KEY=|sk-[A-Za-z0-9_-]+" --glob '!*.md' --glob '!.env*'
 rg -n "innerHTML|dangerouslySetInnerHTML|exec\\(|spawn\\(|db\\.prepare\\(" packages
 ```
 
@@ -267,7 +267,7 @@ Gate 3 - Manual acceptance:
 - Manual smoke passes on the same ports and hostnames the user will access.
 - A real Claude Code session receives terminal input and preserves state across
   refresh.
-- Claude Code permission notification hook produces an OpenForge notification.
+- Claude Code permission notification hook produces an ForgeBadger notification.
 - Physical Windows/WSL trial evidence is recorded before removing the native
   Windows terminal caveat.
 - Rollback steps have been rehearsed on a disposable database or are explicitly

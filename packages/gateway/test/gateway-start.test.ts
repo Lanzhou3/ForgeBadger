@@ -15,7 +15,7 @@ import { createGatewayRuntime } from "../src/runtime/start-gateway.js";
 describe("createGatewayRuntime", () => {
   it("returns 404 for removed API endpoints", async () => {
     // Arrange
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-gateway-cutover-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-gateway-cutover-"));
     const tmux = createMockTmuxClient();
     const restorePath = await installFailingTmuxShim(root);
     let runtime: Awaited<ReturnType<typeof createGatewayRuntime>> | undefined;
@@ -50,7 +50,7 @@ describe("createGatewayRuntime", () => {
   });
 
   it("creates an app without binding a port", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-gateway-runtime-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-gateway-runtime-"));
     const tmux = createMockTmuxClient();
     const restorePath = await installFailingTmuxShim(root);
     let runtime: Awaited<ReturnType<typeof createGatewayRuntime>> | undefined;
@@ -72,7 +72,7 @@ describe("createGatewayRuntime", () => {
   });
 
   it("validates GatewayEnv-shaped input instead of trusting its shape", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-gateway-runtime-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-gateway-runtime-"));
     const tmux = createMockTmuxClient();
     const restorePath = await installFailingTmuxShim(root);
     let runtime: Awaited<ReturnType<typeof createGatewayRuntime>> | undefined;
@@ -81,18 +81,18 @@ describe("createGatewayRuntime", () => {
     try {
       runtime = await createGatewayRuntime(
         {
-          OPENFORGE_HOST: "127.0.0.1",
-          OPENFORGE_PORT: 0,
-          OPENFORGE_STATE_DIR: root,
-          OPENFORGE_DB_PATH: path.join(root, "openforge.db"),
-          OPENFORGE_MASTER_KEY: "a".repeat(64),
-          OPENFORGE_JWT_SECRET: "jwt-secret-for-gateway-runtime-test-456"
+          FORGEBADGER_HOST: "127.0.0.1",
+          FORGEBADGER_PORT: 0,
+          FORGEBADGER_STATE_DIR: root,
+          FORGEBADGER_DB_PATH: path.join(root, "forgebadger.db"),
+          FORGEBADGER_MASTER_KEY: "a".repeat(64),
+          FORGEBADGER_JWT_SECRET: "jwt-secret-for-gateway-runtime-test-456"
         },
         { tmuxClient: tmux.client }
       );
     } catch (error) {
       rejected = true;
-      assert.match(String(error), /OPENFORGE_PORT|greater than 0|positive/i);
+      assert.match(String(error), /FORGEBADGER_PORT|greater than 0|positive/i);
     } finally {
       restorePath();
       if (runtime && "close" in runtime) {
@@ -107,12 +107,12 @@ describe("createGatewayRuntime", () => {
 
 function gatewayEnv(root: string) {
   return {
-    OPENFORGE_HOST: "127.0.0.1",
-    OPENFORGE_PORT: 3001,
-    OPENFORGE_STATE_DIR: root,
-    OPENFORGE_DB_PATH: path.join(root, "openforge.db"),
-    OPENFORGE_MASTER_KEY: "a".repeat(64),
-    OPENFORGE_JWT_SECRET: "jwt-secret-for-gateway-runtime-test-123"
+    FORGEBADGER_HOST: "127.0.0.1",
+    FORGEBADGER_PORT: 3001,
+    FORGEBADGER_STATE_DIR: root,
+    FORGEBADGER_DB_PATH: path.join(root, "forgebadger.db"),
+    FORGEBADGER_MASTER_KEY: "a".repeat(64),
+    FORGEBADGER_JWT_SECRET: "jwt-secret-for-gateway-runtime-test-123"
   };
 }
 

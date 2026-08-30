@@ -11,13 +11,13 @@ describe("agent preview helpers", () => {
     const preview = buildAgentPermissionPreview({
       tools: "Read,Edit",
       allowedDirs: "/path/to/project\n/tmp/project",
-      projectName: "OpenForge",
+      projectName: "ForgeBadger",
       modelName: "Claude Sonnet",
     });
 
     expect(preview.tools).toEqual(["Read", "Edit"]);
     expect(preview.allowedDirs).toEqual(["/path/to/project", "/tmp/project"]);
-    expect(preview.scope).toBe("OpenForge");
+    expect(preview.scope).toBe("ForgeBadger");
     expect(preview.model).toBe("Claude Sonnet");
   });
 });

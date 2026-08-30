@@ -18,21 +18,21 @@ describe("terminalWebSocketUrl", () => {
 describe("terminalWebSocketProtocols", () => {
   it("carries the attach token in the subprotocol header alongside the auth token", () => {
     const protocols = terminalWebSocketProtocols("jwt-token", "attach-token");
-    expect(protocols).toEqual(["openforge-terminal", "jwt-token", "attach-token"]);
+    expect(protocols).toEqual(["forgebadger-terminal", "jwt-token", "attach-token"]);
   });
 });
 
 describe("eventsWebSocketUrl", () => {
   it("does not put token in query params for events", () => {
-    const url = eventsWebSocketUrl("https://openforge.example");
+    const url = eventsWebSocketUrl("https://forgebadger.example");
 
-    expect(url).toBe("wss://openforge.example/ws/events");
+    expect(url).toBe("wss://forgebadger.example/ws/events");
   });
 });
 
 describe("eventsWebSocketProtocols", () => {
-  it("returns openforge-events protocol with auth token", () => {
+  it("returns forgebadger-events protocol with auth token", () => {
     const protocols = eventsWebSocketProtocols("jwt-token");
-    expect(protocols).toEqual(["openforge-events", "jwt-token"]);
+    expect(protocols).toEqual(["forgebadger-events", "jwt-token"]);
   });
 });

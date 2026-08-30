@@ -687,7 +687,7 @@ export async function fetchModelsDevProviderCatalog(
   try {
     const response = await fetchImpl(options.sourceUrl ?? modelsDevUrl, {
       method: "GET",
-      headers: { "User-Agent": "OpenForge model catalog" },
+      headers: { "User-Agent": "ForgeBadger model catalog" },
       redirect: "error",
       signal: controller.signal
     });

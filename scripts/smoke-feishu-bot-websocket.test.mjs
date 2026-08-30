@@ -9,9 +9,21 @@ import {
 } from "./smoke-feishu-bot-websocket.mjs";
 
 describe("Feishu bot WebSocket smoke helper", () => {
+  it("accepts legacy OpenForge smoke variables while preferring ForgeBadger values", () => {
+    const result = resolveFeishuBotWebSocketSmokeConfig({
+      OPENFORGE_TOKEN: "legacy-token",
+      OPENFORGE_GATEWAY_URL: "http://legacy.example:48731",
+      FORGEBADGER_GATEWAY_URL: "http://current.example:48731"
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.config.token, "legacy-token");
+    assert.equal(result.config.gatewayUrl, "http://current.example:48731");
+  });
+
   it("builds SDK-style im.message.receive_v1 fixture events", () => {
     const event = buildFeishuBotWebSocketFixtureEvent({
-      text: "/openforge status",
+      text: "/forgebadger status",
       eventId: "ev_fixture",
       messageId: "om_fixture",
       chatId: "oc_allowed",
@@ -23,7 +35,7 @@ describe("Feishu bot WebSocket smoke helper", () => {
     assert.equal(event.event.message.message_id, "om_fixture");
     assert.equal(event.event.message.chat_id, "oc_allowed");
     assert.equal(event.event.sender.sender_id.open_id, "ou_allowed");
-    assert.equal(event.event.message.content, JSON.stringify({ text: "/openforge status" }));
+    assert.equal(event.event.message.content, JSON.stringify({ text: "/forgebadger status" }));
   });
 
   it("posts receive, reconnect, and terminal-rejection checks without leaking auth", async () => {
@@ -53,7 +65,7 @@ describe("Feishu bot WebSocket smoke helper", () => {
                 receiveId: "oc_sensitive_chat",
                 receiveIdType: "chat_id",
                 msgType: "text",
-                text: "OpenForge rejected terminal input from Feishu."
+                text: "ForgeBadger rejected terminal input from Feishu."
               }
             }
           });
@@ -66,7 +78,7 @@ describe("Feishu bot WebSocket smoke helper", () => {
               receiveId: "oc_sensitive_chat",
               receiveIdType: "chat_id",
               msgType: "text",
-              text: "OpenForge status\nProjects: 1"
+              text: "ForgeBadger status\nProjects: 1"
             }
           },
           message: ""
@@ -121,7 +133,7 @@ describe("Feishu bot WebSocket smoke helper", () => {
     const config = resolveFeishuBotWebSocketSmokeConfig({});
 
     assert.equal(config.ok, false);
-    assert.match(config.reason, /OPENFORGE_TOKEN/);
+    assert.match(config.reason, /FORGEBADGER_TOKEN/);
   });
 });
 

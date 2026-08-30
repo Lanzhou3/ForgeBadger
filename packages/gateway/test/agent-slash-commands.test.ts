@@ -13,7 +13,7 @@ import type { AgentLlmClient, AgentLlmStreamEvent } from "../src/services/agent/
 import { resolveLocalCommandReply } from "../src/services/agent/slash-commands.js";
 import { listCopilotSkillSummaries } from "../src/services/agent/skills/copilot-skills.js";
 import { createAgentToolRegistry } from "../src/services/agent/tool-registry.js";
-import { OpenForgeEventBus, type OpenForgeEvent } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
@@ -84,9 +84,9 @@ describe("copilot /skills command routing", () => {
     const user = new UserRepository(db).create("slash-skills@example.com", "hash");
     const log = new CopilotConversationLog(db, user.id);
     const conversation = log.createConversation();
-    const events: OpenForgeEvent[] = [];
-    const eventBus = new OpenForgeEventBus();
-    eventBus.on("event", (event: OpenForgeEvent) => events.push(event));
+    const events: ForgeBadgerEvent[] = [];
+    const eventBus = new ForgeBadgerEventBus();
+    eventBus.on("event", (event: ForgeBadgerEvent) => events.push(event));
     const llm = createStubLlm("stubbed answer", options);
     const orchestrator = createCopilotOrchestrator({
       db,
@@ -121,7 +121,7 @@ describe("copilot /skills command routing", () => {
       assert.equal(llm.streamCalls(), 0);
       assert.equal(llm.titleCalls(), 0);
       const completed = events.find((event) => event.type === "copilot_run_updated" && event.status === "completed") as
-        | (OpenForgeEvent & { message?: string })
+        | (ForgeBadgerEvent & { message?: string })
         | undefined;
       assert.ok(completed);
       assert.equal(completed.message, expected);

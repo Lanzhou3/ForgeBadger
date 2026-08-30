@@ -289,7 +289,7 @@ const maxDetailDepth = 4;
 const sensitiveKeyPattern = /(secret|token|password|credential|authorization|api[_-]?key|private[_-]?key|signature|encrypt[_-]?key|std(?:err|out)|raw|terminal)/iu;
 const rawDetailTextPattern = /[\r\n\x00-\x08\x0B\x0C\x0E-\x1F]|\b(?:std(?:err|out)|terminal transcript|raw terminal|command output)\b|\$\s+\S+/iu;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gu;
-const attachTokenPattern = /\bOPENFORGE_ATTACH_TOKEN=([^\s,;]+)/gu;
+const attachTokenPattern = /\b(?:FORGEBADGER|OPENFORGE)_ATTACH_TOKEN=([^\s,;]+)/gu;
 const openAiSecretPattern = /\b[s]k-[A-Za-z0-9_-]{6,}\b/gu;
 const headerSecretPattern = /\b(X-Lark-[Ss]ignature|Authorization)(\s*:\s*)([^\s,;]+)/giu;
 const keyValueSecretPattern = /\b(api[_-]?key|token|password|secret|private[_-]?key|credential|event[_-]?encrypt[_-]?key)\b(\s*[:=]\s*)([^\s,;]+)/giu;
@@ -1302,7 +1302,7 @@ function normalizeDetailString(value: string): string {
 
 function redactSensitiveString(value: string): string {
   return value
-    .replace(attachTokenPattern, "OPENFORGE_ATTACH_TOKEN=[REDACTED]")
+    .replace(attachTokenPattern, "FORGEBADGER_ATTACH_TOKEN=[REDACTED]")
     .replace(bearerPattern, "Bearer [REDACTED]")
     .replace(openAiSecretPattern, "sk" + "-[REDACTED]")
     .replace(headerSecretPattern, "$1$2[REDACTED]")

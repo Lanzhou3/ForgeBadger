@@ -364,7 +364,7 @@ export interface UpdateFeishuIntegrationConfigInput {
 export interface FeishuUserMapping {
   id: string;
   feishuUserId: string;
-  openforgeUserId: string;
+  forgebadgerUserId: string;
   displayName: string | null;
   createdAt: string;
   updatedAt: string;
@@ -372,14 +372,14 @@ export interface FeishuUserMapping {
 
 export interface ReplaceFeishuUserMappingInput {
   feishuUserId: string;
-  openforgeUserId: string;
+  forgebadgerUserId: string;
   displayName?: string | null;
 }
 
 export interface LocalDiagnosticsExport {
   generatedAt: string;
   app: {
-    name: "OpenForge";
+    name: "ForgeBadger";
     version: string;
   };
   runtime: {

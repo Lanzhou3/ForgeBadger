@@ -9,9 +9,9 @@
  *
  * Security contract:
  * - the child receives a MINIMAL env (PATH/HOME/TMPDIR/LANG plus the bridge and
- *   LLM variables) — gateway secrets such as OPENFORGE_MASTER_KEY or
- *   OPENFORGE_JWT_SECRET are never inherited;
- * - OPENFORGE_BRIDGE_ENABLE_OPERATE is "1" (M3): the runtime registers the
+ *   LLM variables) — gateway secrets such as FORGEBADGER_MASTER_KEY or
+ *   FORGEBADGER_JWT_SECRET are never inherited;
+ * - FORGEBADGER_BRIDGE_ENABLE_OPERATE is "1" (M3): the runtime registers the
  *   operate tools, but every call is gated behind the approval bridge — the
  *   dsh pre-execute `ask` is forwarded to the Gateway's pending-action flow
  *   and the tool body runs only after an owner approval;
@@ -257,10 +257,10 @@ function buildChildEnv(
   }
   return {
     ...base,
-    OPENFORGE_GATEWAY_URL: options.gatewayUrl,
-    OPENFORGE_COPILOT_BRIDGE_TOKEN: options.bridgeToken,
-    OPENFORGE_USER_ID: userId,
-    OPENFORGE_BRIDGE_ENABLE_OPERATE: "1",
+    FORGEBADGER_GATEWAY_URL: options.gatewayUrl,
+    FORGEBADGER_COPILOT_BRIDGE_TOKEN: options.bridgeToken,
+    FORGEBADGER_USER_ID: userId,
+    FORGEBADGER_BRIDGE_ENABLE_OPERATE: "1",
     DSH_LLM_API_KEY: route.apiKey,
     DSH_LLM_API: route.api,
     DSH_LLM_BASE_URL: route.baseUrl,

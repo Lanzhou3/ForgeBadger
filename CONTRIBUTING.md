@@ -1,6 +1,6 @@
-# Contributing To OpenForge
+# Contributing To ForgeBadger
 
-OpenForge is a local-first control plane for AI programming CLIs. Contributions
+ForgeBadger is a local-first control plane for AI programming CLIs. Contributions
 should strengthen local session reliability, recoverability, provider setup,
 and auditable project traceability without turning the project into a hosted
 cloud service or generic project-management suite.
@@ -9,7 +9,7 @@ cloud service or generic project-management suite.
 
 - Read `README.md`, `docs/TECH-ARCHITECTURE.md`, `docs/API.md`, and
   `docs/OPEN-SOURCE-READINESS.md`.
-- Use Node.js 20 or newer, pnpm, tmux, and at least one local AI CLI when
+- Use Node.js 20.12 through 24, pnpm 10, tmux, and at least one local AI CLI when
   testing terminal/session behavior.
 - Keep Gateway behavior in `packages/gateway`; do not add Next.js API routes
   for Gateway responsibilities.
@@ -20,12 +20,12 @@ cloud service or generic project-management suite.
 
 ```bash
 pnpm install
-pnpm --filter @openforge/gateway dev
-pnpm --filter @openforge/web dev -- --hostname 127.0.0.1 --port 48732
+pnpm --filter @forgebadger/gateway dev
+FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=48732 pnpm --filter @forgebadger/web dev
 ```
 
 Use a local `.env` and never commit it. Required secrets include
-`OPENFORGE_MASTER_KEY` and `OPENFORGE_JWT_SECRET`; use throwaway local values
+`FORGEBADGER_MASTER_KEY` and `FORGEBADGER_JWT_SECRET`; use throwaway local values
 for development.
 
 ## Verification
@@ -33,10 +33,10 @@ for development.
 Run the narrowest relevant checks first, then broaden for release-sized work:
 
 ```bash
-pnpm --filter @openforge/web test
-pnpm --filter @openforge/web typecheck
-pnpm --filter @openforge/gateway test
-pnpm --filter @openforge/gateway typecheck
+pnpm --filter @forgebadger/web test
+pnpm --filter @forgebadger/web typecheck
+pnpm --filter @forgebadger/gateway test
+pnpm --filter @forgebadger/gateway typecheck
 git diff --check
 ```
 
@@ -45,7 +45,7 @@ For changes touching release behavior, also use `docs/RELEASE-PLAN.md` and
 
 ## Boundaries To Preserve
 
-- OpenForge is local-first. Do not add hosted telemetry, hosted collaboration,
+- ForgeBadger is local-first. Do not add hosted telemetry, hosted collaboration,
   billing, cloud workers, or remote autonomous execution without a new accepted
   architecture and security review.
 - tmux is the terminal persistence layer. Do not store terminal scrollback in
@@ -66,7 +66,7 @@ Issues and PRs must not include:
 - raw provider request/response bodies;
 - raw terminal transcripts or command histories that may contain secrets;
 - Feishu app secrets, event bodies, signatures, or message bodies;
-- private Claude Code, Codex, OpenCode, or OpenForge user configuration.
+- private Claude Code, Codex, OpenCode, or ForgeBadger user configuration.
 
 Use redacted diagnostics and bounded evidence references instead. When a
 problem depends on external evidence such as live providers, physical
@@ -76,6 +76,6 @@ record it as a caveat until that evidence exists.
 ## Issue Routing
 
 - Bugs: use the GitHub bug report template.
-- First-user trial results: use `OpenForge first-user trial feedback`.
+- First-user trial results: use `ForgeBadger first-user trial feedback`.
 - Security issues: follow `SECURITY.md`; do not open a public issue with
   exploitable details or secrets.

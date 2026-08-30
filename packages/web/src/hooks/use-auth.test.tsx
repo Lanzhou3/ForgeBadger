@@ -37,8 +37,8 @@ describe("useAuth session validation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    localStorage.setItem("openforge.token", "session-token");
-    localStorage.setItem("openforge.user", JSON.stringify(cachedUser));
+    localStorage.setItem("forgebadger.token", "session-token");
+    localStorage.setItem("forgebadger.user", JSON.stringify(cachedUser));
   });
 
   it("keeps the cached session when Gateway validation fails transiently", async () => {
@@ -49,8 +49,24 @@ describe("useAuth session validation", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.user).toEqual(cachedUser);
-    expect(localStorage.getItem("openforge.token")).toBe("session-token");
-    expect(localStorage.getItem("openforge.user")).toBe(JSON.stringify(cachedUser));
+    expect(localStorage.getItem("forgebadger.token")).toBe("session-token");
+    expect(localStorage.getItem("forgebadger.user")).toBe(JSON.stringify(cachedUser));
+  });
+
+  it("migrates a legacy cached session before validation", async () => {
+    localStorage.clear();
+    localStorage.setItem("openforge.token", "legacy-token");
+    localStorage.setItem("openforge.user", JSON.stringify(cachedUser));
+    getMeMock.mockRejectedValue(new Error("Gateway temporarily unavailable"));
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.user).toEqual(cachedUser);
+    expect(localStorage.getItem("forgebadger.token")).toBe("legacy-token");
+    expect(localStorage.getItem("forgebadger.user")).toBe(JSON.stringify(cachedUser));
+    expect(localStorage.getItem("openforge.token")).toBeNull();
+    expect(localStorage.getItem("openforge.user")).toBeNull();
   });
 
   it("clears the cached session when Gateway explicitly rejects authentication", async () => {
@@ -61,7 +77,7 @@ describe("useAuth session validation", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.user).toBeNull();
-    expect(localStorage.getItem("openforge.token")).toBeNull();
-    expect(localStorage.getItem("openforge.user")).toBeNull();
+    expect(localStorage.getItem("forgebadger.token")).toBeNull();
+    expect(localStorage.getItem("forgebadger.user")).toBeNull();
   });
 });

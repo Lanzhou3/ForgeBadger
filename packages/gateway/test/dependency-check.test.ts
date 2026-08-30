@@ -4,8 +4,8 @@ import { describe, it } from "node:test";
 import {
   checkCommand,
   checkGateADependencies,
-  checkOpenForgeDependencies,
-  checkOpenForgeRuntimeDependencies,
+  checkForgeBadgerDependencies,
+  checkForgeBadgerRuntimeDependencies,
   runCommand
 } from "../src/lib/dependency-check.js";
 
@@ -98,9 +98,9 @@ describe("checkGateADependencies", () => {
   });
 });
 
-describe("checkOpenForgeDependencies", () => {
+describe("checkForgeBadgerDependencies", () => {
   it("marks tmux required and AI CLIs optional", async () => {
-    const result = await checkOpenForgeDependencies(async (command) => ({
+    const result = await checkForgeBadgerDependencies(async (command) => ({
       exitCode: command === "tmux" ? 0 : 127,
       stdout: command === "tmux" ? "tmux 3.4\n" : "",
       stderr: command === "tmux" ? "" : "not found"
@@ -122,10 +122,10 @@ describe("checkOpenForgeDependencies", () => {
     assert.equal(kimi?.available, false);
   });
 
-  it("checks the OpenForge runtime command list in order", async () => {
+  it("checks the ForgeBadger runtime command list in order", async () => {
     const seen: Array<{ command: string; args: string[] }> = [];
 
-    await checkOpenForgeDependencies(async (command, args) => {
+    await checkForgeBadgerDependencies(async (command, args) => {
       seen.push({ command, args });
       return {
         exitCode: 0,
@@ -144,9 +144,9 @@ describe("checkOpenForgeDependencies", () => {
   });
 });
 
-describe("checkOpenForgeRuntimeDependencies", () => {
+describe("checkForgeBadgerRuntimeDependencies", () => {
   it("reports native tmux terminal support on Unix-like systems when tmux is available", async () => {
-    const result = await checkOpenForgeRuntimeDependencies(
+    const result = await checkForgeBadgerRuntimeDependencies(
       async (command) => ({
         exitCode: command === "tmux" ? 0 : 127,
         stdout: command === "tmux" ? "tmux 3.4\n" : "",
@@ -164,7 +164,7 @@ describe("checkOpenForgeRuntimeDependencies", () => {
   });
 
   it("reports WSL guidance instead of native tmux support on Windows", async () => {
-    const result = await checkOpenForgeRuntimeDependencies(
+    const result = await checkForgeBadgerRuntimeDependencies(
       async () => ({
         exitCode: 127,
         stdout: "",
@@ -177,12 +177,12 @@ describe("checkOpenForgeRuntimeDependencies", () => {
       persistence: "tmux",
       mode: "wsl_required",
       supported: false,
-      message: "Native Windows terminals require WSL because OpenForge persists sessions with tmux."
+      message: "Native Windows terminals require WSL because ForgeBadger persists sessions with tmux."
     });
   });
 
   it("reports missing tmux when the host platform supports native terminal sessions but tmux is absent", async () => {
-    const result = await checkOpenForgeRuntimeDependencies(
+    const result = await checkForgeBadgerRuntimeDependencies(
       async () => ({
         exitCode: 127,
         stdout: "",

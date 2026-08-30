@@ -10,7 +10,7 @@ import { FeishuChannelRepository } from "../src/db/repositories/feishu-channel-r
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createGatewayApp } from "../src/server.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
-import { OpenForgeEventBus } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { FeishuChannelRuntime } from "../src/services/integrations/feishu-channel-runtime.js";
 import { createFeishuSdkHandlers } from "../src/services/integrations/feishu-runtime-factory.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
@@ -140,7 +140,7 @@ describe("FeishuChannelRuntime", () => {
 
   it("attaches complete agent deps before starting the production runtime window", async () => {
     const db = createTestDb();
-    const eventBus = new OpenForgeEventBus();
+    const eventBus = new ForgeBadgerEventBus();
     const sessionManager = new InMemorySessionManager({
       async createSession() {}, async killSession() {}, async capturePane() { return ""; },
       async listSessions() { return [] as string[]; }, async sendInput() {}

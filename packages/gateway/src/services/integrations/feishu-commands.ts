@@ -238,7 +238,7 @@ function getCommandDefinition(operation: unknown): FeishuCommandDefinition | und
 }
 
 function resolveExecutable(options: ExecuteFeishuCommandOptions): string {
-  const configured = options.executable ?? options.env?.OPENFORGE_FEISHU_CLI_PATH;
+  const configured = options.executable ?? options.env?.FORGEBADGER_FEISHU_CLI_PATH;
   return typeof configured === "string" && configured.trim().length > 0
     ? configured.trim()
     : defaultExecutable;

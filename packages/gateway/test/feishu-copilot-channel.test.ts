@@ -12,7 +12,7 @@ import { PortfolioFeishuRegistryRepository } from "../src/db/repositories/portfo
 import { PortfolioFeishuChannelRepository } from "../src/db/repositories/portfolio-feishu-channel-repository.js";
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
 import { buildAgentStack, type AgentStackDeps } from "../src/services/agent/agent-stack.js";
-import { OpenForgeEventBus } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import {
   createFeishuCopilotChannel,
   drainFeishuCopilotChatQueues,
@@ -132,7 +132,7 @@ function createHarness() {
     .register({ userId, provider: "feishu", providerAccountId: "cli_copilot_test" });
   const stub = createStubAgentStackFactory(db);
   const sent: SentMessage[] = [];
-  const deps: AgentStackDeps = { db, masterKey, eventBus: new OpenForgeEventBus() };
+  const deps: AgentStackDeps = { db, masterKey, eventBus: new ForgeBadgerEventBus() };
   const channel = createFeishuCopilotChannel({
     deps,
     buildAgentStack: stub.factory,
@@ -256,7 +256,7 @@ function createDshHarness(
       return { resumed: true, runId: input.runId };
     }
   };
-  const deps: AgentStackDeps = { db, masterKey, eventBus: new OpenForgeEventBus(), dshBff };
+  const deps: AgentStackDeps = { db, masterKey, eventBus: new ForgeBadgerEventBus(), dshBff };
   const channel = createFeishuCopilotChannel({
     deps,
     buildAgentStack: stub.factory,

@@ -68,7 +68,7 @@ export default function NewProjectPage() {
         </div>
       </div>
 
-      <Card className="of-animate-in">
+      <Card className="forgebadger-animate-in">
         <CardHeader>
           <CardTitle className="text-sm font-semibold">{t("projects.details")}</CardTitle>
         </CardHeader>

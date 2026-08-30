@@ -1,22 +1,22 @@
 <p align="center">
-  <img src="assets/openforge-wordmark.png" alt="OpenForge" width="720">
+  <img src="../logos/ForgeBadger.svg" alt="ForgeBadger" width="720">
 </p>
 
-# OpenForge
+# ForgeBadger
 
 [English](../README.md) | [简体中文](README.zh-CN.md)
 
-OpenForge 是一個本地優先的 AI 程式設計 CLI 控制平面。它為開發者提供統一的 Web
+ForgeBadger 是一個本地優先的 AI 程式設計 CLI 控制平面。它為開發者提供統一的 Web
 控制台，用來管理 Claude Code、OpenCode 和 Codex 的專案、持久終端機工作階段、AI
 工具設定、模型、API Key、Agent、Skill、範本、外掛、用量視覺化和工作階段歷史。
 
-OpenForge 面向自架開發機器和私有工作區。Gateway 負責檔案系統存取、SQLite
+ForgeBadger 面向自架開發機器和私有工作區。Gateway 負責檔案系統存取、SQLite
 持久化、tmux 工作階段、WebSocket 終端機流量、加密和 CLI 程序生命週期；Web 控制台是
 純 Next.js SPA，透過 HTTP 和 WebSocket 與 Gateway 通訊。
 
 ## 專案狀態
 
-OpenForge 處於 MVP / 本地優先發布候選開發階段。核心 Gateway、Web 控制台、tmux
+ForgeBadger 處於 MVP / 本地優先發布候選開發階段。核心 Gateway、Web 控制台、tmux
 終端機鏈路、認證、加密 API Key 儲存、專案設定、適配器偵測和管理介面已經具備本地
 使用者測試條件，並已支援模型服務商 Profile 和線上模型同步。
 
@@ -24,15 +24,19 @@ Codex app-server 控制面原型已於 2026-08-14 下線；Codex 會話僅以 tm
 終端機會話方式執行。託管協作、計費、雲部署和自主遠端執行不屬於目前本地優先 MVP
 範圍。
 
+產品與本機倉庫正在 `codex/rename-forgebadger` 分支改名為 ForgeBadger。
+公開 GitHub 遠端在倉庫擁有者完成外部改名前仍為 `Lanzhou3/OpenForge`；現有
+Issue、Pull Request 與安全政策連結因此刻意繼續指向該實際遠端。
+
 ## 首次使用者試用
 
 - [試用執行手冊](TRIAL-RUNBOOK.md)
 - [首次執行檢查表](TRIAL-CHECKLIST.md)
 - [疑難排解](TROUBLESHOOTING.md)
 - [回饋範本](TRIAL-FEEDBACK.md)
-- [GitHub 回饋 Issue 表單](../.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml)
+- [GitHub 回饋 Issue 表單](../.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml)
 
-## 為什麼使用 OpenForge
+## 為什麼使用 ForgeBadger
 
 - 在瀏覽器裡查看和恢復長時間執行的 AI CLI 工作。
 - 統一管理 Claude Code、OpenCode 和 Codex 工作階段，減少手動混改本地設定檔。
@@ -66,7 +70,7 @@ Codex app-server 控制面原型已於 2026-08-14 下線；Codex 會話僅以 tm
 
 ```text
 packages/
-  cli/       npm 分發的 OpenForge CLI 包裝器
+  cli/       npm 分發的 ForgeBadger CLI 包裝器
   gateway/   Express、WebSocket、tmux/node-pty、SQLite、適配器、服務層
   web/       Next.js App Router、React、Tailwind CSS、xterm.js
 docs/        架構、發布、冒煙測試、試用和多語言文件
@@ -83,27 +87,27 @@ templates/   內建 AI CLI 設定範本
 
 ## 環境需求
 
-- Node.js 20 或更高版本
-- 原始碼開發需要 pnpm 9 或更高版本
+- Node.js 20.12 至 24
+- 原始碼開發需要 pnpm 10 或更新版本
 - tmux 3.2 或更高版本
 - 支援 SQLite 的本地檔案系統
-- 如需真實 AI CLI 工作階段，需要在 `PATH` 中安裝 Claude Code、OpenCode 和/或 Codex
+- 如需真實 AI CLI 工作階段，需要在 `PATH` 中安裝 Claude Code、OpenCode、Codex 和/或 Kimi Code
 
-Windows 使用者如需使用內建瀏覽器終端機，請在 WSL 中執行 OpenForge。原生
+Windows 使用者如需使用內建瀏覽器終端機，請在 WSL 中執行 ForgeBadger。原生
 Windows 安裝仍可使用管理介面，但可還原的終端機工作階段依賴 tmux。
 
 ## 從 npm 安裝
 
 ```bash
-npm install -g openforge
-openforge doctor
-openforge start
+npm install -g forgebadger
+forgebadger doctor
+forgebadger start
 ```
 
-在 `openforge start` 印出的 URL 開啟 Web 控制台。
+在 `forgebadger start` 印出的 URL 開啟 Web 控制台。
 
-npm 包只安裝 OpenForge CLI 包裝器，不會安裝 tmux、Claude Code、OpenCode 或
-Codex。請另外安裝計劃使用的 AI CLI 工具，並確保它們在 `PATH` 中可用。
+npm 包只安裝 ForgeBadger CLI 包裝器，不會安裝 tmux、Claude Code、OpenCode、
+Codex 或 Kimi Code。請另外安裝計劃使用的 AI CLI 工具，並確保它們在 `PATH` 中可用。
 
 ## 從原始碼開發
 
@@ -116,18 +120,18 @@ pnpm install
 建立本地 `.env` 檔案。不要提交此檔案。
 
 ```bash
-OPENFORGE_PORT=48731
-OPENFORGE_WEB_PORT=48732
+FORGEBADGER_PORT=48731
+FORGEBADGER_WEB_PORT=48732
 NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
-OPENFORGE_MASTER_KEY=<使用-openssl-rand-hex-32-生成的64位hex字串>
-OPENFORGE_JWT_SECRET=<32位以上隨機密鑰>
+FORGEBADGER_MASTER_KEY=<使用-openssl-rand-hex-32-生成的64位hex字串>
+FORGEBADGER_JWT_SECRET=<32位以上隨機密鑰>
 ```
 
 分別在兩個 shell 中啟動 Gateway 和 Web 控制台：
 
 ```bash
-pnpm --filter @openforge/gateway dev
-pnpm --filter @openforge/web dev -- --hostname 127.0.0.1 --port 48732
+pnpm --filter @forgebadger/gateway dev
+FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=48732 pnpm --filter @forgebadger/web dev
 ```
 
 開啟 Web 控制台：
@@ -139,10 +143,10 @@ http://127.0.0.1:48732
 執行聚焦檢查：
 
 ```bash
-pnpm --filter @openforge/web typecheck
-pnpm --filter @openforge/web test
-pnpm --filter @openforge/gateway typecheck
-pnpm --filter @openforge/gateway test
+pnpm --filter @forgebadger/web typecheck
+pnpm --filter @forgebadger/web test
+pnpm --filter @forgebadger/gateway typecheck
+pnpm --filter @forgebadger/gateway test
 git diff --check
 ```
 
@@ -174,8 +178,8 @@ pnpm smoke:npm
 - 使用者級 Claude Code、Codex、OpenCode 設定應保留在倉庫外。
 - Gateway 會校驗專案路徑，並拒絕目錄穿越、符號連結逃逸和敏感系統路徑。
 - WebSocket 終端機存取同時需要 JWT 認證和工作階段級 attach 憑據。
-- OpenForge 是本地優先產品，但本地優先並不意味著可以降低終端機存取和 API Key 的敏感級別。
+- ForgeBadger 是本地優先產品，但本地優先並不意味著可以降低終端機存取和 API Key 的敏感級別。
 
 ## 授權
 
-OpenForge 使用 [MIT License](../LICENSE) 開源。
+ForgeBadger 使用 [MIT License](../LICENSE) 開源。

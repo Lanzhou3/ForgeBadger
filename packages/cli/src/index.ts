@@ -113,7 +113,7 @@ export async function runCli(args = process.argv.slice(2), options: RunCliOption
     return (options.initRunner ?? runInit)(command.args);
   }
   if (command.command === "help") {
-    process.stdout.write("Usage: openforge [start|doctor|init|config]\n");
+    process.stdout.write("Usage: forgebadger [start|doctor|init|config]\n");
     return 0;
   }
   throw new Error(`Command not implemented yet: ${command.command}`);

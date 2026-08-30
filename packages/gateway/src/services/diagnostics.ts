@@ -32,7 +32,7 @@ export interface LocalDiagnosticsExportInput {
 export interface LocalDiagnosticsExport {
   generatedAt: string;
   app: {
-    name: "OpenForge";
+    name: "ForgeBadger";
     version: string;
   };
   runtime: {
@@ -103,7 +103,7 @@ export function buildLocalDiagnosticsExport(
   return {
     generatedAt: now.toISOString(),
     app: {
-      name: "OpenForge",
+      name: "ForgeBadger",
       version: input.appVersion
     },
     runtime: {
@@ -228,13 +228,13 @@ function pickDiagnosticEnv(
   env: NodeJS.ProcessEnv | Record<string, string | undefined>
 ): Record<string, string | undefined> {
   return {
-    OPENFORGE_HOST: env.OPENFORGE_HOST,
-    OPENFORGE_PORT: env.OPENFORGE_PORT,
-    OPENFORGE_WEB_HOST: env.OPENFORGE_WEB_HOST,
-    OPENFORGE_WEB_PORT: env.OPENFORGE_WEB_PORT,
-    OPENFORGE_GATEWAY_URL: env.OPENFORGE_GATEWAY_URL,
-    OPENFORGE_DB_PATH: env.OPENFORGE_DB_PATH,
-    OPENFORGE_TMUX_PREFIX: env.OPENFORGE_TMUX_PREFIX
+    FORGEBADGER_HOST: env.FORGEBADGER_HOST,
+    FORGEBADGER_PORT: env.FORGEBADGER_PORT,
+    FORGEBADGER_WEB_HOST: env.FORGEBADGER_WEB_HOST,
+    FORGEBADGER_WEB_PORT: env.FORGEBADGER_WEB_PORT,
+    FORGEBADGER_GATEWAY_URL: env.FORGEBADGER_GATEWAY_URL,
+    FORGEBADGER_DB_PATH: env.FORGEBADGER_DB_PATH,
+    FORGEBADGER_TMUX_PREFIX: env.FORGEBADGER_TMUX_PREFIX
   };
 }
 

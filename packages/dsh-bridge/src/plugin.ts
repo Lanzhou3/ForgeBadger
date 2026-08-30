@@ -1,5 +1,5 @@
 /**
- * OpenForge bridge Cordis plugin: exposes the OpenForge platform capabilities
+ * ForgeBadger bridge Cordis plugin: exposes the ForgeBadger platform capabilities
  * as model-facing tools, backed by the Gateway internal copilot-bridge API.
  *
  * Tool surface (14 tools, parity with the in-process Copilot harness tools):
@@ -13,7 +13,7 @@
  * (gateway `services/agent/tools/*`) so model behavior does not diverge
  * between the two paths.
  *
- * Operate tools are registered only when `OPENFORGE_BRIDGE_ENABLE_OPERATE` is
+ * Operate tools are registered only when `FORGEBADGER_BRIDGE_ENABLE_OPERATE` is
  * "1"/"true"; the default surface is read-only. With the operate surface on,
  * every operate call is gated behind the dsh approval seam and bridged to the
  * Gateway pending-action flow (see approval-bridge.ts) — the tool body runs
@@ -33,7 +33,7 @@ import { registerApprovalBridge } from "./approval-bridge.js";
 import { BridgeClient } from "./bridge-client.js";
 import { loadBridgeConfig } from "./bridge-config.js";
 
-export const name = "openforge-bridge";
+export const name = "forgebadger-bridge";
 export const inject = ["tools"];
 
 /** Render a canonical JSON value as model-facing text. */
@@ -41,7 +41,7 @@ function renderJson(value: unknown): { type: "text"; text: string }[] {
   return [{ type: "text", text: JSON.stringify(value, null, 2) }];
 }
 
-/** Tools that write platform state; gated behind OPENFORGE_BRIDGE_ENABLE_OPERATE. */
+/** Tools that write platform state; gated behind FORGEBADGER_BRIDGE_ENABLE_OPERATE. */
 const OPERATE_TOOL_NAMES = new Set([
   "advance_work_item",
   "dispatch_task_to_session",
@@ -103,7 +103,7 @@ export function createBridgeTools(client: BridgeClient, options: { enableOperate
     defineTool({
       name: "create_project",
       description:
-        "Create a new OpenForge project (approval required). "
+        "Create a new ForgeBadger project (approval required). "
         + "The path must be an absolute path; paths outside the user's home directory or "
         + "containing traversal segments are denied by the platform security policy.",
       parameters: {
@@ -145,7 +145,7 @@ export function createBridgeTools(client: BridgeClient, options: { enableOperate
     defineTool({
       name: "dispatch_task_to_session",
       description:
-        "Dispatch a task to an OpenForge session: the message is delivered to the session's "
+        "Dispatch a task to an ForgeBadger session: the message is delivered to the session's "
         + "terminal as its next instruction. Delivery is confirmed by terminal read-back: if the "
         + "session's CLI is showing a modal dialog the call fails with delivery_unconfirmed — "
         + "ask the user to check the session terminal before retrying. Returns the dispatch receipt.",
@@ -163,7 +163,7 @@ export function createBridgeTools(client: BridgeClient, options: { enableOperate
     defineTool({
       name: "list_work_items",
       description:
-        "List OpenForge project development work items (portfolio tasks). "
+        "List ForgeBadger project development work items (portfolio tasks). "
         + "Each item carries id, title, state, project and priority.",
       parameters: {
         projectId: { type: "string", description: "Optional project id filter" },
@@ -194,7 +194,7 @@ export function createBridgeTools(client: BridgeClient, options: { enableOperate
     defineTool({
       name: "advance_work_item",
       description:
-        "Advance one OpenForge work item automatically by ONE lifecycle step "
+        "Advance one ForgeBadger work item automatically by ONE lifecycle step "
         + "(todo -> in_progress -> ready_for_review -> done; blocked -> in_progress). "
         + "There is no action/target parameter: the next state is decided by the platform's "
         + "state machine, which enforces preconditions (dispatch receipt, verified completion, "

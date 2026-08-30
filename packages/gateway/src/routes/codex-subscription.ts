@@ -49,12 +49,12 @@ export function createCodexSubscriptionRoutes(): Router {
 }
 
 function buildCodexSubscriptionStatus() {
-  const connected = process.env.OPENFORGE_CODEX_SUBSCRIPTION_STATUS === "connected";
+  const connected = process.env.FORGEBADGER_CODEX_SUBSCRIPTION_STATUS === "connected";
   return {
     providerApplyEnabled: false,
     identitySource: "chatgpt_subscription_sdk",
     connectionState: connected ? "connected" : "not_connected",
-    accountLabel: process.env.OPENFORGE_CODEX_ACCOUNT_LABEL ?? null,
+    accountLabel: process.env.FORGEBADGER_CODEX_ACCOUNT_LABEL ?? null,
     canUseAppServerIdentity: connected,
     sdk: {
       packageName: CODEX_SDK_PACKAGE,

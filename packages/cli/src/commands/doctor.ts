@@ -24,7 +24,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<number> {
   const dependencies = await checkCliDependencies(options.dependencyRunner);
   const requiredMissing = dependencies.filter((item) => item.required && !item.available);
 
-  stdout.write(`OpenForge state: ${config.stateDir}\n`);
+  stdout.write(`ForgeBadger state: ${config.stateDir}\n`);
   for (const item of dependencies) {
     const marker = item.available ? "ok" : item.required ? "missing" : "optional-missing";
     const version = item.version ? ` ${item.version}` : "";

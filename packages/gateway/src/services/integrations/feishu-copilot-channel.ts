@@ -12,7 +12,7 @@
  * it (mirroring the Portfolio binding's external-identity key). Messages,
  * commands, and approval decisions from any other sender in the chat are
  * refused, so a group member cannot run turns or approve pending actions as
- * the OpenForge account owner.
+ * the ForgeBadger account owner.
  */
 import { FeishuCopilotChannelRepository } from "../../db/repositories/feishu-copilot-channel-repository.js";
 import type { Database } from "../../db/types.js";

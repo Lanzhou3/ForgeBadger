@@ -2,7 +2,7 @@
  * dsh-backed Copilot BFF (M2/M3). Drop-in replacement for the in-process
  * orchestrator behind POST /conversations/:id/messages, POST /runs/:id/cancel
  * and POST /runs/:id/pending-actions/:actionId/decide when
- * OPENFORGE_DSH_COPILOT_ENABLED=1.
+ * FORGEBADGER_DSH_COPILOT_ENABLED=1.
  *
  * Mirrors orchestrator request semantics: sendMessage blocks until the turn
  * reaches a terminal state OR parks on an approval, then returns the run id
@@ -38,7 +38,7 @@ import { createHash } from "node:crypto";
 import type { Database } from "../../db/types.js";
 import { ModelProviderRepository } from "../../db/repositories/model-provider-repository.js";
 import { SessionRepository } from "../../db/repositories/session-repository.js";
-import type { OpenForgeEventBus } from "../event-bus.js";
+import type { ForgeBadgerEventBus } from "../event-bus.js";
 import { CopilotConversationLog } from "../agent/conversation-log.js";
 import { createAgentLlmClient, type AgentLlmProviderResolution } from "../agent/llm-client.js";
 import { createSecurityPolicy, logSecurityDecision } from "../agent/security-policy.js";
@@ -56,7 +56,7 @@ import type { DshRpcClient, DshNotification } from "./rpc-client.js";
 export interface DshCopilotBffDeps {
   db: Database;
   masterKey: string;
-  eventBus: OpenForgeEventBus;
+  eventBus: ForgeBadgerEventBus;
   processManager: DshProcessManager;
   /** Gateway-side execution of approved actions whose runtime died mid-approval. */
   sessionManager: InMemorySessionManager;

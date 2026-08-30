@@ -141,7 +141,7 @@ describe("PortfolioStateGate", () => {
     other = users.create("portfolio-gate-other@example.com", "hash");
     projectId = new ProjectRepository(db, owner.id).create({
       name: "Portfolio state-gate project",
-      path: "/tmp/openforge-portfolio-state-gate",
+      path: "/tmp/forgebadger-portfolio-state-gate",
       aiTool: "claude"
     }).id;
     repo = new PortfolioRepository(db, owner.id);
@@ -425,7 +425,7 @@ describe("PortfolioStateGate", () => {
       projectId,
       name: "State Gate session",
       aiTool: "claude",
-      workingDir: "/tmp/openforge-portfolio-state-gate"
+      workingDir: "/tmp/forgebadger-portfolio-state-gate"
     }).id;
 
     // Act / Assert: neither an idle Attempt nor another actor can alter lifecycle state.
@@ -1091,7 +1091,7 @@ describe("PortfolioStateGate", () => {
       projectId,
       name: "Attempt-bound receipt session",
       aiTool: "claude",
-      workingDir: "/tmp/openforge-portfolio-attempt-bound"
+      workingDir: "/tmp/forgebadger-portfolio-attempt-bound"
     }).id;
     const assignment = repo.claimSessionAssignment({
       projectId,

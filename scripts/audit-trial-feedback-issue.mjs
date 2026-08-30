@@ -4,11 +4,11 @@ import { fileURLToPath } from "node:url";
 
 import { auditTrialFeedbackPacket } from "./audit-trial-feedback-packet.mjs";
 
-const DEFAULT_REPOSITORY = "Lanzhou3/OpenForge";
+export const DEFAULT_REPOSITORY = "Lanzhou3/OpenForge";
 const REQUIRED_LABEL = "trial-feedback";
 export const TRIAL_FEEDBACK_ROUTE_TRACKER_ISSUES = new Map([
   [3, "Record live Copilot provider smoke with disposable credential"],
-  [4, "Run physical Windows and WSL OpenForge smoke"],
+  [4, "Run physical Windows and WSL ForgeBadger smoke"],
   [5, "Collect first-user Copilot hardening feedback"]
 ]);
 
@@ -22,7 +22,7 @@ export async function auditTrialFeedbackIssue(options = {}) {
   let issue;
   try {
     issue = await fetchIssue({
-      repository: options.repository ?? process.env.OPENFORGE_TRIAL_FEEDBACK_ISSUE_REPO ?? DEFAULT_REPOSITORY,
+      repository: options.repository ?? process.env.FORGEBADGER_TRIAL_FEEDBACK_ISSUE_REPO ?? process.env.OPENFORGE_TRIAL_FEEDBACK_ISSUE_REPO ?? DEFAULT_REPOSITORY,
       issueNumber
     });
   } catch (error) {
@@ -115,14 +115,14 @@ function issueFormBodyToTrialFeedbackPacket(body) {
   const diagnostics = fields.get("Diagnostics and browser evidence") ?? "";
   const reproduction = fields.get("Reproduction steps for each issue") ?? "";
 
-  return `# OpenForge Trial Feedback Packet
+  return `# ForgeBadger Trial Feedback Packet
 
 ## Summary
 
 - Result: ${singleLine(fields.get("Trial result"))}
 - Affected surface: ${singleLine(fields.get("Affected surface"))}
 - Startup path: ${singleLine(fields.get("Startup path"))}
-- OpenForge version or commit: ${fieldValue(environment, "OpenForge version or commit")}
+- ForgeBadger version or commit: ${fieldValue(environment, "ForgeBadger version or commit")}
 - Operating system: ${fieldValue(environment, "OS")}
 - Shell: ${fieldValue(environment, "Shell")}
 - Browser and version: ${fieldValue(environment, "Browser")}
@@ -132,7 +132,7 @@ function issueFormBodyToTrialFeedbackPacket(body) {
 - node --version: ${fieldValue(environment, "node --version")}
 - tmux -V: ${fieldValue(environment, "tmux -V")}
 - claude --version: ${fieldValue(environment, "claude --version")}
-- openforge doctor summary: ${singleLine(fields.get("openforge doctor summary"))}
+- forgebadger doctor summary: ${singleLine(fields.get("forgebadger doctor summary"))}
 
 ## Diagnostics Export
 
@@ -187,7 +187,7 @@ ${extractExpectedActual(reproduction, "Actual")}
 
 - Gateway log summary, no raw log attachment: ${fieldValue(fields.get("Startup and health checks") ?? "", "Gateway health envelope")}
 - Web log summary, no raw log attachment: ${fieldValue(fields.get("Startup and health checks") ?? "", "/login result")}
-- Relevant command result summary, no raw private output: ${singleLine(fields.get("openforge doctor summary"))}
+- Relevant command result summary, no raw private output: ${singleLine(fields.get("forgebadger doctor summary"))}
 `;
 }
 

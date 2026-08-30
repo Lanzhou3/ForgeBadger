@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { ActivityRepository, UserRepository } from "../src/db/repositories/index.js";
 import { recordActivity } from "../src/services/activity-events.js";
-import { OpenForgeEventBus, type OpenForgeEvent } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -26,8 +26,8 @@ describe("activity events", () => {
   it("records activity and emits an activity_created event", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("activity-event@example.com", "hash");
-    const eventBus = new OpenForgeEventBus();
-    const events: OpenForgeEvent[] = [];
+    const eventBus = new ForgeBadgerEventBus();
+    const events: ForgeBadgerEvent[] = [];
     eventBus.on("event", (event) => events.push(event));
 
     const activity = recordActivity({

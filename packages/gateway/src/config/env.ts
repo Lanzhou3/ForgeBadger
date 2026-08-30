@@ -1,65 +1,105 @@
-import { z } from "zod";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
-// Accept parsed booleans so runtime wiring can safely validate an already-normalized GatewayEnv twice.
+import { z } from "zod";
+
 const strictEnvBoolean = z
   .union([z.boolean(), z.enum(["true", "false"])])
   .default(false)
   .transform((value) => value === true || value === "true");
 
-// Feature flags additionally accept "1"/"0" (operator habit for kill switches).
 const featureFlagBoolean = z
   .union([z.boolean(), z.enum(["true", "false", "1", "0"])])
   .default(false)
   .transform((value) => value === true || value === "true" || value === "1");
 
 const envSchema = z.object({
-  OPENFORGE_PORT: z.coerce.number().int().positive().default(3000),
-  OPENFORGE_HOST: z.string().default("127.0.0.1"),
-  OPENFORGE_STATE_DIR: z.string().default(path.join(homedir(), ".openforge")),
-  OPENFORGE_DB_PATH: z.string().default(path.join(homedir(), ".openforge", "openforge.db")),
-  OPENFORGE_JWT_SECRET: z.string().min(32),
-  OPENFORGE_TMUX_PREFIX: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("of-"),
-  // open: anyone may register (personal/local default). off: registration
-  // closed (admin-managed users only). invite: registration requires a valid
-  // one-time invite code. The first user bootstrap is always allowed.
-  OPENFORGE_REGISTRATION: z.enum(["open", "off", "invite"]).default("open"),
-  OPENFORGE_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: strictEnvBoolean,
-  // M2: run the Copilot message/run endpoints on the dsh (deepseek-harness)
-  // kernel via a per-user child process instead of the in-process orchestrator.
-  // Off by default; when off the copilot behavior is byte-identical to M1.
-  OPENFORGE_DSH_COPILOT_ENABLED: featureFlagBoolean,
-  // Proactive Copilot reactive loop: platform-event wake-ups that start
-  // report turns in a rolling "Copilot 主动更新" conversation. Opt-in and off
-  // by default — when off, Copilot never self-starts conversations.
-  OPENFORGE_COPILOT_REACTIVE_ENABLED: featureFlagBoolean,
-  // Idle reap for the per-user dsh runtime process; the session log persists,
-  // so the next message transparently resumes after a kill.
-  OPENFORGE_DSH_IDLE_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
-  // Override the dsh runtime launcher entrypoint (defaults to the monorepo
-  // packages/dsh-bridge/dist/launcher.js).
-  OPENFORGE_DSH_BRIDGE_LAUNCHER: z.string().min(1).optional(),
-  // Service token for the deepseek-harness openforge-bridge plugin's HTTP
-  // callbacks. Optional: when unset, the whole /api/internal/v1/copilot-bridge
-  // route group is not mounted at all — unless DSH copilot is enabled, in
-  // which case an ephemeral per-boot token is generated (see start-gateway).
-  OPENFORGE_COPILOT_BRIDGE_TOKEN: z.string().min(32).optional(),
-  // Dispatch delivery confirmation (bridge dispatch path only): after tmux
-  // send-keys, poll capture-pane until the message prefix is visible on screen.
-  OPENFORGE_DISPATCH_CONFIRM_TIMEOUT_MS: z.coerce.number().int().positive().default(4000),
-  OPENFORGE_DISPATCH_CONFIRM_INTERVAL_MS: z.coerce.number().int().positive().default(300),
-  OPENFORGE_MASTER_KEY: z
-    .string()
-    .refine((value) => isValidMasterKey(value), {
-      message: "OPENFORGE_MASTER_KEY must be 32 bytes or 64 hex characters"
-    })
+  FORGEBADGER_PORT: z.coerce.number().int().positive().default(3000),
+  FORGEBADGER_HOST: z.string().default("127.0.0.1"),
+  FORGEBADGER_STATE_DIR: z.string(),
+  FORGEBADGER_DB_PATH: z.string(),
+  FORGEBADGER_JWT_SECRET: z.string().min(32),
+  FORGEBADGER_TMUX_PREFIX: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("of-"),
+  FORGEBADGER_REGISTRATION: z.enum(["open", "off", "invite"]).default("open"),
+  FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: strictEnvBoolean,
+  FORGEBADGER_DSH_COPILOT_ENABLED: featureFlagBoolean,
+  FORGEBADGER_COPILOT_REACTIVE_ENABLED: featureFlagBoolean,
+  FORGEBADGER_DSH_IDLE_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
+  FORGEBADGER_DSH_BRIDGE_LAUNCHER: z.string().min(1).optional(),
+  FORGEBADGER_COPILOT_BRIDGE_TOKEN: z.string().min(32).optional(),
+  FORGEBADGER_DISPATCH_CONFIRM_TIMEOUT_MS: z.coerce.number().int().positive().default(4000),
+  FORGEBADGER_DISPATCH_CONFIRM_INTERVAL_MS: z.coerce.number().int().positive().default(300),
+  FORGEBADGER_MASTER_KEY: z.string().refine((value) => isValidMasterKey(value), {
+    message: "FORGEBADGER_MASTER_KEY must be 32 bytes or 64 hex characters"
+  })
 });
 
 export type GatewayEnv = z.infer<typeof envSchema>;
 
+const ENV_SUFFIXES = [
+  "PORT",
+  "HOST",
+  "STATE_DIR",
+  "DB_PATH",
+  "JWT_SECRET",
+  "TMUX_PREFIX",
+  "REGISTRATION",
+  "PROJECT_MANAGER_AUTO_DISPATCH_ENABLED",
+  "DSH_COPILOT_ENABLED",
+  "COPILOT_REACTIVE_ENABLED",
+  "DSH_IDLE_MS",
+  "DSH_BRIDGE_LAUNCHER",
+  "COPILOT_BRIDGE_TOKEN",
+  "DISPATCH_CONFIRM_TIMEOUT_MS",
+  "DISPATCH_CONFIRM_INTERVAL_MS",
+  "MASTER_KEY"
+] as const;
+
 export function loadEnv(input: NodeJS.ProcessEnv = process.env): GatewayEnv {
-  return envSchema.parse(input);
+  return envSchema.parse(normalizeEnvironment(input));
+}
+
+function normalizeEnvironment(input: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const normalized: NodeJS.ProcessEnv = { ...input };
+  for (const suffix of ENV_SUFFIXES) {
+    const currentName = `FORGEBADGER_${suffix}`;
+    const legacyName = `OPENFORGE_${suffix}`;
+    normalized[currentName] ??= input[legacyName];
+  }
+
+  const stateSelection = resolveDefaultStateDir(input);
+  normalized.FORGEBADGER_STATE_DIR ??= stateSelection.path;
+  normalized.FORGEBADGER_DB_PATH ??= resolveDefaultDbPath(input, stateSelection);
+  return normalized;
+}
+
+interface StateSelection {
+  path: string;
+  legacy: boolean;
+}
+
+function resolveDefaultStateDir(input: NodeJS.ProcessEnv): StateSelection {
+  if (input.FORGEBADGER_STATE_DIR) return { path: input.FORGEBADGER_STATE_DIR, legacy: false };
+  if (input.OPENFORGE_STATE_DIR) return { path: input.OPENFORGE_STATE_DIR, legacy: true };
+
+  const currentPath = path.join(homedir(), ".forgebadger");
+  const legacyPath = path.join(homedir(), ".openforge");
+  if (!existsSync(currentPath) && existsSync(legacyPath)) {
+    return { path: legacyPath, legacy: true };
+  }
+  return { path: currentPath, legacy: false };
+}
+
+function resolveDefaultDbPath(input: NodeJS.ProcessEnv, state: StateSelection): string {
+  if (input.FORGEBADGER_DB_PATH) return input.FORGEBADGER_DB_PATH;
+  if (input.OPENFORGE_DB_PATH) return input.OPENFORGE_DB_PATH;
+  const currentPath = path.join(state.path, "forgebadger.db");
+  const legacyPath = path.join(state.path, "openforge.db");
+  if (state.legacy || (!existsSync(currentPath) && existsSync(legacyPath))) {
+    return legacyPath;
+  }
+  return currentPath;
 }
 
 function isValidMasterKey(value: string): boolean {

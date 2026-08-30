@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
-import { OpenForgeEventBus, type OpenForgeEvent } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
 import {
   handleClaudeNotificationHook,
   handleClaudePortfolioWorkerSessionStart
@@ -28,10 +28,10 @@ function createTestDb(): Database {
   return db;
 }
 
-function waitForEvent(eventBus: OpenForgeEventBus, timeoutMs = 2000): Promise<OpenForgeEvent> {
+function waitForEvent(eventBus: ForgeBadgerEventBus, timeoutMs = 2000): Promise<ForgeBadgerEvent> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("Timeout waiting for event")), timeoutMs);
-    eventBus.once("event", (event: OpenForgeEvent) => {
+    eventBus.once("event", (event: ForgeBadgerEvent) => {
       clearTimeout(timer);
       resolve(event);
     });
@@ -40,11 +40,11 @@ function waitForEvent(eventBus: OpenForgeEventBus, timeoutMs = 2000): Promise<Op
 
 describe("Claude Code session hook route", () => {
   let db: Database;
-  let eventBus: OpenForgeEventBus;
+  let eventBus: ForgeBadgerEventBus;
 
   beforeEach(() => {
     db = createTestDb();
-    eventBus = new OpenForgeEventBus();
+    eventBus = new ForgeBadgerEventBus();
   });
 
   afterEach(() => {

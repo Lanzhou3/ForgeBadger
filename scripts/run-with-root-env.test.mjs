@@ -8,12 +8,12 @@ import { buildRootEnv, buildRunCommand } from "./run-with-root-env.mjs";
 
 describe("run-with-root-env", () => {
   it("loads root .env values without overriding inherited environment", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-root-env-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-root-env-"));
     await writeFile(
       path.join(root, ".env"),
       [
-        "OPENFORGE_DB_PATH=/repo/openforge.db",
-        "OPENFORGE_PORT=48731",
+        "FORGEBADGER_DB_PATH=/repo/forgebadger.db",
+        "FORGEBADGER_PORT=48731",
         "NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731"
       ].join("\n")
     );
@@ -21,17 +21,44 @@ describe("run-with-root-env", () => {
     const env = await buildRootEnv({
       rootDir: root,
       env: {
-        OPENFORGE_DB_PATH: "/tmp/operator/openforge.db",
+        FORGEBADGER_DB_PATH: "/tmp/operator/forgebadger.db",
         EXISTING_EMPTY: "",
         UNDEFINED_VALUE: undefined
       }
     });
 
-    assert.equal(env.OPENFORGE_DB_PATH, "/tmp/operator/openforge.db");
-    assert.equal(env.OPENFORGE_PORT, "48731");
+    assert.equal(env.FORGEBADGER_DB_PATH, "/tmp/operator/forgebadger.db");
+    assert.equal(env.FORGEBADGER_PORT, "48731");
     assert.equal(env.NEXT_PUBLIC_GATEWAY_URL, "http://127.0.0.1:48731");
     assert.equal(env.EXISTING_EMPTY, "");
     assert.equal("UNDEFINED_VALUE" in env, false);
+  });
+
+  it("maps legacy OpenForge variables to ForgeBadger names with new names winning", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-root-env-legacy-"));
+    await writeFile(
+      path.join(root, ".env"),
+      [
+        "OPENFORGE_WEB_HOST=0.0.0.0",
+        "OPENFORGE_WEB_PORT=48733",
+        "OPENFORGE_PORT=48731",
+        "OPENFORGE_DB_PATH=/repo/openforge.db",
+        "FORGEBADGER_PORT=49831"
+      ].join("\n")
+    );
+
+    const env = await buildRootEnv({
+      rootDir: root,
+      env: {
+        OPENFORGE_WEB_PORT: "48734",
+        FORGEBADGER_WEB_HOST: "127.0.0.1"
+      }
+    });
+
+    assert.equal(env.FORGEBADGER_WEB_HOST, "127.0.0.1");
+    assert.equal(env.FORGEBADGER_WEB_PORT, "48734");
+    assert.equal(env.FORGEBADGER_PORT, "49831");
+    assert.equal(env.FORGEBADGER_DB_PATH, "/repo/openforge.db");
   });
 
   it("builds direct and shell command invocations", () => {
@@ -41,12 +68,12 @@ describe("run-with-root-env", () => {
     });
 
     assert.deepEqual(
-      buildRunCommand(["--shell", "next dev -H ${OPENFORGE_WEB_HOST:-127.0.0.1}"], {
+      buildRunCommand(["--shell", "next dev -H ${FORGEBADGER_WEB_HOST:-127.0.0.1}"], {
         shell: "/bin/zsh"
       }),
       {
         command: "/bin/zsh",
-        args: ["-lc", "next dev -H ${OPENFORGE_WEB_HOST:-127.0.0.1}"]
+        args: ["-lc", "next dev -H ${FORGEBADGER_WEB_HOST:-127.0.0.1}"]
       }
     );
   });
@@ -66,11 +93,11 @@ describe("run-with-root-env", () => {
     assert.equal(webPackage.scripts.build, "node ../../scripts/run-with-root-env.mjs next build");
     assert.equal(
       webPackage.scripts.dev,
-      "node ../../scripts/run-with-root-env.mjs --shell 'next dev -H ${OPENFORGE_WEB_HOST:-127.0.0.1} -p ${OPENFORGE_WEB_PORT:-48732}'"
+      "node ../../scripts/run-with-root-env.mjs --shell 'next dev -H ${FORGEBADGER_WEB_HOST:-127.0.0.1} -p ${FORGEBADGER_WEB_PORT:-48732}'"
     );
     assert.equal(
       webPackage.scripts.start,
-      "node ../../scripts/run-with-root-env.mjs --shell 'next start -H ${OPENFORGE_WEB_HOST:-127.0.0.1} -p ${OPENFORGE_WEB_PORT:-48732}'"
+      "node ../../scripts/run-with-root-env.mjs --shell 'next start -H ${FORGEBADGER_WEB_HOST:-127.0.0.1} -p ${FORGEBADGER_WEB_PORT:-48732}'"
     );
   });
 });

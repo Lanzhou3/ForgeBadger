@@ -44,7 +44,7 @@ function createTestDb(): Database {
 // ---------------------------------------------------------------------------
 
 function writeClaudeFixture(root: string, sessionId: string, lines: string[]): string {
-  const projectDir = path.join(root, "projects", "-Users-lanzhou-Project-OpenForge");
+  const projectDir = path.join(root, "projects", "-Users-lanzhou-Project-ForgeBadger");
   mkdirSync(projectDir, { recursive: true });
   const file = path.join(projectDir, `${sessionId}.jsonl`);
   writeFileSync(file, lines.join("\n"));
@@ -95,7 +95,7 @@ describe("ClaudeCodeSource", () => {
       assert.equal(a.inputTokens, 1200);
       assert.equal(a.cacheReadTokens, 500);
       assert.equal(a.cacheWriteTokens, 100);
-      assert.equal(a.projectPath, "/Users/lanzhou/Project/OpenForge");
+      assert.equal(a.projectPath, "/Users/lanzhou/Project/ForgeBadger");
       assert.equal(a.adapter, "claude");
       assert.equal(b.requestId, "msg-b");
       assert.equal(b.outputTokens, 30);

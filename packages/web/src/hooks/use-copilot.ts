@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { OPENFORGE_GATEWAY_EVENT } from "@/lib/gateway-events";
+import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
 import {
   decidePendingAction,
   editMessage,
@@ -181,8 +181,8 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       }
     };
 
-    window.addEventListener(OPENFORGE_GATEWAY_EVENT, handler);
-    return () => window.removeEventListener(OPENFORGE_GATEWAY_EVENT, handler);
+    window.addEventListener(FORGEBADGER_GATEWAY_EVENT, handler);
+    return () => window.removeEventListener(FORGEBADGER_GATEWAY_EVENT, handler);
   }, [setActiveSafe, armStaleTimer]);
 
   // Blocking-POST reconcile: the run may already be finished by the time the

@@ -2,7 +2,7 @@
  * Copilot agent routes — /api/v1/copilot/*.
  *
  * Exposes the self-hosted agent harness (conversations, runs, messages,
- * pending-action approval, and scoped memory). The whole OpenForge platform is
+ * pending-action approval, and scoped memory). The whole ForgeBadger platform is
  * the copilot's tool surface; operate tools are approval-gated and surfaced as
  * pending actions. Streaming text/tool deltas are published over /ws/events via
  * copilot_run_updated; these routes are request/response only.
@@ -50,7 +50,7 @@ const toolEnabledSchema = z.object({ enabled: z.boolean() }).strict();
 
 export type CopilotRouteDeps = AgentStackDeps & {
   /**
-   * M2/M3 dsh kernel BFF. Present only when OPENFORGE_DSH_COPILOT_ENABLED=1;
+   * M2/M3 dsh kernel BFF. Present only when FORGEBADGER_DSH_COPILOT_ENABLED=1;
    * the message/cancel/decide endpoints then delegate to it while every other
    * endpoint (conversations CRUD, memory) keeps the in-process stack.
    * edit-message is explicitly unsupported (501) on the dsh path.
@@ -71,7 +71,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   router.get("/capabilities", (req, res) => {
     const actingUser = userId(req);
     const preferences = new CopilotToolPreferenceRepository(deps.db, actingUser);
-    // dsh path (M2+): the runtime's tool surface comes from the openforge-bridge
+    // dsh path (M2+): the runtime's tool surface comes from the forgebadger-bridge
     // plugin, not the in-process registry — report the dsh manifest instead.
     const tools = deps.dshBff
       ? dshToolSurface()
@@ -173,7 +173,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
 
   // Run a turn: appends the user message, runs the step loop, and returns the
   // run id. Streaming deltas arrive over /ws/events (copilot_run_updated).
-  // When the dsh BFF is wired (OPENFORGE_DSH_COPILOT_ENABLED=1) the turn runs
+  // When the dsh BFF is wired (FORGEBADGER_DSH_COPILOT_ENABLED=1) the turn runs
   // on the per-user dsh kernel process with an identical response contract.
   router.post("/conversations/:id/messages", (req, res) => {
     const id = parseId(req.params.id, res); if (!id) return;

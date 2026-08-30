@@ -1,13 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const webPort = process.env.OPENFORGE_WEB_PORT ?? "48732";
-const webHost = process.env.OPENFORGE_WEB_HOST ?? "127.0.0.1";
-const webUrl = process.env.OPENFORGE_WEB_URL ?? `http://${webHost}:${webPort}`;
+const webPort = process.env.FORGEBADGER_WEB_PORT ?? "48732";
+const webHost = process.env.FORGEBADGER_WEB_HOST ?? "127.0.0.1";
+const webUrl = process.env.FORGEBADGER_WEB_URL ?? `http://${webHost}:${webPort}`;
 const gatewayUrl =
   process.env.NEXT_PUBLIC_GATEWAY_URL ??
-  process.env.OPENFORGE_GATEWAY_URL ??
+  process.env.FORGEBADGER_GATEWAY_URL ??
   "http://127.0.0.1:48731";
-const chromiumExecutablePath = process.env.OPENFORGE_PLAYWRIGHT_CHROMIUM_PATH;
+const chromiumExecutablePath = process.env.FORGEBADGER_PLAYWRIGHT_CHROMIUM_PATH;
 const noProxy = mergeNoProxy(process.env.NO_PROXY ?? process.env.no_proxy, [
   "127.0.0.1",
   "localhost",
@@ -48,7 +48,7 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
-    command: `OPENFORGE_WEB_HOST=${webHost} OPENFORGE_WEB_PORT=${webPort} NEXT_PUBLIC_GATEWAY_URL=${gatewayUrl} pnpm dev`,
+    command: `FORGEBADGER_WEB_HOST=${webHost} FORGEBADGER_WEB_PORT=${webPort} NEXT_PUBLIC_GATEWAY_URL=${gatewayUrl} pnpm dev`,
     url: webUrl,
     reuseExistingServer: !process.env.CI,
   },

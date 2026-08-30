@@ -1,6 +1,6 @@
 export const brandAssets = {
-  logoSvg: "/brand/openforge-logo.svg",
-  logoPng: "/brand/openforge-logo.png",
-  background: "/brand/openforge-bg.png",
+  logoSvg: "/brand/forgebadger-logo.svg",
+  logoPng: "/brand/forgebadger-logo.png",
+  background: "/brand/forgebadger-bg.png",
   favicon: "/favicon.ico",
 } as const;

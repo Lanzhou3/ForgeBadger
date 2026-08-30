@@ -36,11 +36,11 @@ describe("createClaudeLaunchPlan", () => {
       credentialMode: "stored_encrypted_key",
       secretEnvNames: ["ANTHROPIC_API_KEY"],
       env: {
-        OPENFORGE_SESSION_ID: "session_123"
+        FORGEBADGER_SESSION_ID: "session_123"
       }
     });
 
-    assert.deepEqual(plan.env, { OPENFORGE_SESSION_ID: "session_123" });
+    assert.deepEqual(plan.env, { FORGEBADGER_SESSION_ID: "session_123" });
     assert.equal("ANTHROPIC_API_KEY" in plan.env, false);
   });
 
@@ -49,16 +49,16 @@ describe("createClaudeLaunchPlan", () => {
       projectRoot: "/workspace/app",
       credentialMode: "host_environment",
       pluginDirs: [
-        "/workspace/app/.openforge/claude-plugins/claude-safe-edits",
-        "/workspace/app/.openforge/claude-plugins/claude-code-review"
+        "/workspace/app/.forgebadger/claude-plugins/claude-safe-edits",
+        "/workspace/app/.forgebadger/claude-plugins/claude-code-review"
       ]
     });
 
     assert.deepEqual(plan.args, [
       "--plugin-dir",
-      "/workspace/app/.openforge/claude-plugins/claude-safe-edits",
+      "/workspace/app/.forgebadger/claude-plugins/claude-safe-edits",
       "--plugin-dir",
-      "/workspace/app/.openforge/claude-plugins/claude-code-review"
+      "/workspace/app/.forgebadger/claude-plugins/claude-code-review"
     ]);
   });
 });

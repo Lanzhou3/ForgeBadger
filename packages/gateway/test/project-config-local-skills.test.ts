@@ -20,7 +20,7 @@ describe("project config render plan local Skills", () => {
     new TemplateRepository(db, user.id).listBuiltIn();
     const project = new ProjectRepository(db, user.id).create({
       name: "Local Skill Project",
-      path: await mkdtemp(path.join(tmpdir(), "openforge-local-skill-plan-")),
+      path: await mkdtemp(path.join(tmpdir(), "forgebadger-local-skill-plan-")),
       aiTool: "claude",
       templateId: "builtin-claude-code"
     });

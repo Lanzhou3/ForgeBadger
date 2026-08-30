@@ -19,8 +19,8 @@ import { InMemorySessionManager } from "../src/services/session-manager.js";
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 interface AuthBody {
   data: { token: string };
@@ -56,14 +56,14 @@ describe("session launch hook credentials", () => {
     db = createTestDb();
     const sessionManager = new InMemorySessionManager({
       async createSession(input: { env: Record<string, string>; secretEnvNames?: string[] }) {
-        const sessionId = input.env.OPENFORGE_SESSION_ID;
+        const sessionId = input.env.FORGEBADGER_SESSION_ID;
         const row = db
           .prepare("SELECT attach_token as attachToken FROM sessions WHERE id = ?")
           .get(sessionId) as { attachToken: string | null } | undefined;
         observedLaunches.push({
           sessionId,
-          envAttachToken: input.env.OPENFORGE_ATTACH_TOKEN,
-          envWorkerAckCapability: input.env.OPENFORGE_PORTFOLIO_WORKER_ACK_CAPABILITY,
+          envAttachToken: input.env.FORGEBADGER_ATTACH_TOKEN,
+          envWorkerAckCapability: input.env.FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY,
           secretEnvNames: input.secretEnvNames ?? [],
           persistedAttachToken: row?.attachToken
         });
@@ -104,7 +104,7 @@ describe("session launch hook credentials", () => {
 
   it("persists the Claude hook attach token before tmux can emit early hook events", async () => {
     const token = await register("session-launch-hooks@example.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-session-hook-project-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-session-hook-project-"));
     await mkdir(rootPath, { recursive: true });
     const project = await createProject(token, rootPath);
 
@@ -130,7 +130,7 @@ describe("session launch hook credentials", () => {
 
   it("accepts worker ACK material only through the internal Claude launch path", async () => {
     // Arrange
-    const projectRoot = await mkdtemp(path.join(tmpdir(), "openforge-portfolio-worker-launch-"));
+    const projectRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-portfolio-worker-launch-"));
     const workerAckCapability = "a".repeat(64);
     const configuration = createClaudePortfolioWorkerLaunchConfiguration({
       binding: {
@@ -160,8 +160,8 @@ describe("session launch hook credentials", () => {
 
     // Assert
     assert.equal(plan.command, "claude");
-    assert.equal(plan.env.OPENFORGE_PORTFOLIO_WORKER_ACK_CAPABILITY, workerAckCapability);
-    assert.equal(plan.secretEnvNames.includes("OPENFORGE_PORTFOLIO_WORKER_ACK_CAPABILITY"), true);
+    assert.equal(plan.env.FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY, workerAckCapability);
+    assert.equal(plan.secretEnvNames.includes("FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"), true);
     assert.match(settings, /claude-portfolio-worker\/session%3Aportfolio-launch/);
     assert.doesNotMatch(settings, new RegExp(workerAckCapability));
     assert.throws(
@@ -189,7 +189,7 @@ describe("session launch hook credentials", () => {
   it("ignores injected worker ACK material on the ordinary session REST boundary", async () => {
     // Arrange
     const token = await register("session-worker-capability-rest@example.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-session-worker-capability-rest-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-session-worker-capability-rest-"));
     await mkdir(rootPath, { recursive: true });
     const project = await createProject(token, rootPath);
     const before = observedLaunches.length;
@@ -223,7 +223,7 @@ describe("session launch hook credentials", () => {
     // Assert
     assert.equal(sessionRes.status, 201, body.message);
     assert.equal(observed?.envWorkerAckCapability, undefined);
-    assert.equal((observed?.secretEnvNames ?? []).includes("OPENFORGE_PORTFOLIO_WORKER_ACK_CAPABILITY"), false);
+    assert.equal((observed?.secretEnvNames ?? []).includes("FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"), false);
     assert.doesNotMatch(JSON.stringify(body), new RegExp(forgedCapability));
   });
 

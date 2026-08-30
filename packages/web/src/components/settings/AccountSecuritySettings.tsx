@@ -107,7 +107,7 @@ export function AccountSecuritySettings() {
   }
 
   return (
-    <Card className="of-animate-in">
+    <Card className="forgebadger-animate-in">
       <CardHeader className="flex flex-row items-center gap-3 space-y-0">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
           <KeyRound className="size-4" />

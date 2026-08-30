@@ -1,9 +1,9 @@
-# OpenForge Trial Checklist
+# ForgeBadger Trial Checklist
 
 Use this checklist as the first-user trial entry point. Attach the completed
 notes to either `docs/TRIAL-FEEDBACK.md` or the GitHub issue form
-`OpenForge first-user trial feedback` at
-`.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml`.
+`ForgeBadger first-user trial feedback` at
+`.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml`.
 
 The v1.1 evidence matrix remains
 `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`. Historical Feishu
@@ -26,11 +26,11 @@ evidence reports.
 ### Startup Path
 
 - [ ] Choose startup path: npm/CLI package or source fallback.
-- [ ] Record OpenForge version or commit:
+- [ ] Record ForgeBadger version or commit:
 - [ ] Record Web URL:
 - [ ] Record Gateway URL:
-- [ ] Start OpenForge successfully.
-- [ ] Confirm Gateway health returns the OpenForge envelope
+- [ ] Start ForgeBadger successfully.
+- [ ] Confirm Gateway health returns the ForgeBadger envelope
       `{"code":0,"data":...,"message":""}`.
 - [ ] Confirm `/login` loads in the browser.
 
@@ -42,7 +42,7 @@ evidence reports.
 - [ ] `node --version`:
 - [ ] `tmux -V`:
 - [ ] `claude --version`:
-- [ ] npm/CLI only: `openforge doctor` output reviewed.
+- [ ] npm/CLI only: `forgebadger doctor` output reviewed.
 - [ ] Windows only: native Windows was used for management UI checks only.
 - [ ] Windows terminal evidence, if claimed: WSL distribution/version and
       terminal trial result recorded.
@@ -118,7 +118,7 @@ Forbidden Project Manager evidence content:
 - [ ] Confirm terminal evidence came from a real browser, not only unit tests or
       mocked Playwright.
 - [ ] If a Claude Code permission prompt appears, record the prompt type, what
-      OpenForge showed, and the outcome without copying sensitive terminal
+      ForgeBadger showed, and the outcome without copying sensitive terminal
       output.
 
 ### Provider Readiness And Copilot Smoke
@@ -143,7 +143,7 @@ Forbidden Project Manager evidence content:
       disposable test credential before claiming live Copilot provider pass.
 - [ ] Open `/copilot` from the sidebar.
 - [ ] Ask Copilot to diagnose session launch readiness.
-- [ ] Verify the response uses safe OpenForge platform state such as adapter
+- [ ] Verify the response uses safe ForgeBadger platform state such as adapter
       discovery, dashboard health, recent activity, project detail, session
       detail, or diagnostics summary.
 - [ ] If Copilot proposes an action, confirm it appears as a pending action
@@ -162,7 +162,7 @@ Forbidden Project Manager evidence content:
 - [ ] Configure a self-built Feishu bot with persistent connection/WebSocket
       event subscription.
 - [ ] Subscribe to `im.message.receive_v1`.
-- [ ] Set `OPENFORGE_GATEWAY_URL`, `OPENFORGE_TOKEN`, `FEISHU_APP_ID`, and
+- [ ] Set `FORGEBADGER_GATEWAY_URL`, `FORGEBADGER_TOKEN`, `FEISHU_APP_ID`, and
       `FEISHU_APP_SECRET` in the operator shell.
 - [ ] Run `pnpm smoke:feishu-bot-websocket` against the authenticated Gateway
       fixture path and confirm it returns `gateClearingEvidence: false`.
@@ -171,7 +171,7 @@ Forbidden Project Manager evidence content:
 - [ ] Send a DM or allowed group @mention to the bot and record only sanitized
       receive/routing/reply or pending-action evidence.
 - [ ] Send a terminal-control probe such as
-      `/openforge terminal session-1 continue` and confirm the report records
+      `/forgebadger terminal session-1 continue` and confirm the report records
       `feishu_terminal_input_rejected`.
 - [ ] Confirm the connection recovers after a restart or reconnect event, or
       record the blocker.
@@ -205,7 +205,7 @@ Forbidden Project Manager evidence content:
 ### Feedback Capture
 
 - [ ] Complete `docs/TRIAL-FEEDBACK.md` or open the GitHub issue form
-      `OpenForge first-user trial feedback`.
+      `ForgeBadger first-user trial feedback`.
 - [ ] If trial intake materials changed, run `pnpm trial:intake-validate` and
       keep the output with maintainer handoff notes.
 - [ ] Maintainer preflight, if routing to existing GitHub follow-up issues:
@@ -213,10 +213,10 @@ Forbidden Project Manager evidence content:
 - [ ] Maintainer readiness bundle before a real collection round:
       run `pnpm trial:readiness-validate`.
 - [ ] Optional: generate a local draft with
-      `pnpm trial:feedback-draft -- --output /tmp/openforge-trial-feedback.md`
+      `pnpm trial:feedback-draft -- --output /tmp/forgebadger-trial-feedback.md`
       and complete/redact it before sharing.
 - [ ] If using a Markdown packet, run
-      `pnpm trial:feedback-audit -- /tmp/openforge-trial-feedback.md`; treat a
+      `pnpm trial:feedback-audit -- /tmp/forgebadger-trial-feedback.md`; treat a
       pass as ready for human triage only, not automatic gate clearance.
 - [ ] If feedback was filed as a GitHub issue, run
       `pnpm trial:feedback-issue-audit -- --issue=<number>`; treat a pass as
@@ -253,8 +253,8 @@ feedback packet is attached or linked from closeout with the artifact shape in
 Accepted collection paths:
 
 - `docs/TRIAL-FEEDBACK.md` for a redacted Markdown packet.
-- `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml` for the GitHub issue
-  form named `OpenForge first-user trial feedback`.
+- `.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml` for the GitHub issue
+  form named `ForgeBadger first-user trial feedback`.
 
 Templates and empty issue forms do not count as completed feedback. Keep
 feedback status as `Caveat` until real first-user evidence exists.
@@ -333,7 +333,7 @@ For every `pass with caveats` or `blocked` result, record:
 - Physical Windows/WSL terminal evidence remains a `Caveat` until a real WSL
   host completes dependency checks, browser terminal attach/input/resize,
   WebSocket reconnect, Gateway restart recovery, and session cleanup checks.
-- Record WSL distribution/version, `openforge doctor`, terminal trial result,
+- Record WSL distribution/version, `forgebadger doctor`, terminal trial result,
   and any environment-specific blocker.
 
 ### Manual Evidence Boundary

@@ -146,7 +146,7 @@ describe("model provider routes", () => {
       capabilities: ["chat", "code"]
     }, authHeaders());
 
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-provider-route-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-provider-route-"));
     const preview = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/preview-apply`, {
       adapter: "opencode",
       projectRoot: root,
@@ -297,7 +297,7 @@ describe("model provider routes", () => {
       modelId: "deepseek-chat",
       capabilities: ["chat", "code"]
     }, authHeaders());
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-dual-provider-route-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-dual-provider-route-"));
 
     const claudePreview = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/preview-apply`, {
       adapter: "claude",
@@ -350,7 +350,7 @@ describe("model provider routes", () => {
     const credential = await makeRequest(app, "POST", `/api/v1/model-providers/${openai.body.data.provider.id}/credentials`, {
       plaintextSecret: "sk-openai"
     }, authHeaders());
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-provider-route-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-provider-route-"));
 
     const mismatchedModel = await makeRequest(app, "POST", `/api/v1/model-providers/${deepseek.body.data.provider.id}/preview-apply`, {
       adapter: "opencode",
@@ -630,7 +630,7 @@ describe("model provider routes", () => {
       catalogId: "openrouter"
     }, authHeaders());
     const providerId = created.body.data.provider.id;
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-provider-route-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-provider-route-"));
     const preview = await makeRequest(catalogApp, "POST", `/api/v1/model-providers/${providerId}/preview-apply`, {
       adapter: "opencode",
       projectRoot: root,
@@ -692,7 +692,7 @@ describe("model provider routes", () => {
     const credential = await makeRequest(catalogApp, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
       plaintextSecret: "sk-kimi"
     }, authHeaders());
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-provider-route-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-provider-route-"));
     const preview = await makeRequest(catalogApp, "POST", `/api/v1/model-providers/${providerId}/preview-apply`, {
       adapter: "claude",
       projectRoot: root,

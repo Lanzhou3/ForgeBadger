@@ -8,7 +8,8 @@ import { PixelRobot } from "@/components/copilot/pixel-robot";
 import { useLanguage } from "@/hooks/use-language";
 import { useNotifications } from "@/hooks/use-notifications";
 import { shouldTriggerBrowserNotification } from "@/lib/browser-notifications";
-import { OPENFORGE_GATEWAY_EVENT } from "@/lib/gateway-events";
+import { readMigratedStorageValue, writeMigratedStorageValue } from "@/lib/brand-storage";
+import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
 import {
   toastDurationFor,
   toastToneFor,
@@ -28,6 +29,7 @@ import {
   CLICK_DRAG_THRESHOLD_PX,
   CORNER_MARGIN_PX,
   IDLE_SIT_DELAY_MS,
+  LEGACY_ROBOT_CORNER_STORAGE_KEY,
   ROBOT_CORNER_STORAGE_KEY,
   ROBOT_NUDGE_DURATION_MS,
   ROBOT_SIZE_PX,
@@ -120,7 +122,11 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     reducedMotionRef.current = prefersReducedMotion;
     setReducedMotion(prefersReducedMotion);
-    const stored = window.localStorage.getItem(ROBOT_CORNER_STORAGE_KEY);
+    const stored = readMigratedStorageValue(
+      window.localStorage,
+      ROBOT_CORNER_STORAGE_KEY,
+      LEGACY_ROBOT_CORNER_STORAGE_KEY
+    );
     const initial = isRobotCorner(stored) ? stored : "bottom-right";
     setCorner(initial);
     cornerRef.current = initial;
@@ -244,9 +250,9 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
       }
     }
 
-    window.addEventListener(OPENFORGE_GATEWAY_EVENT, onGatewayEvent);
+    window.addEventListener(FORGEBADGER_GATEWAY_EVENT, onGatewayEvent);
     return () => {
-      window.removeEventListener(OPENFORGE_GATEWAY_EVENT, onGatewayEvent);
+      window.removeEventListener(FORGEBADGER_GATEWAY_EVENT, onGatewayEvent);
       if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
     };
   }, [t]);
@@ -271,7 +277,12 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
     const next = nearestCorner(clientX, clientY, viewport);
     setCorner(next);
     cornerRef.current = next;
-    window.localStorage.setItem(ROBOT_CORNER_STORAGE_KEY, next);
+    writeMigratedStorageValue(
+      window.localStorage,
+      ROBOT_CORNER_STORAGE_KEY,
+      LEGACY_ROBOT_CORNER_STORAGE_KEY,
+      next
+    );
     setPos(cornerOffsetPosition(next, viewport, ROBOT_SIZE_PX, CORNER_MARGIN_PX));
   }, []);
 
@@ -428,14 +439,14 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
           aria-hidden="true"
           className={cn(
             "pointer-events-none absolute -bottom-1 left-1/2 h-[7px] w-[72%] -translate-x-1/2 rounded-full bg-black/60 blur-[3px]",
-            !dragging && mode === "stand" && !reducedMotion && "of-robot-ground-shadow"
+            !dragging && mode === "stand" && !reducedMotion && "forgebadger-robot-ground-shadow"
           )}
         />
-        <div className={nudge ? "of-robot-nudge" : undefined}>
+        <div className={nudge ? "forgebadger-robot-nudge" : undefined}>
           <div
             className={cn(
-              !dragging && mode === "stand" && !reducedMotion && "of-robot-idle-bob",
-              bubble && "of-robot-alert rounded-md"
+              !dragging && mode === "stand" && !reducedMotion && "forgebadger-robot-idle-bob",
+              bubble && "forgebadger-robot-alert rounded-md"
             )}
           >
             <PixelRobot frame={frame} flip={flip} size={ROBOT_SIZE_PX} glow={!!bubble} />
@@ -445,7 +456,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
       {bubble && ToneIcon && (
         <div
           className={cn(
-            "of-bubble-pop absolute rounded-lg border-[1.5px] border-zinc-900 bg-zinc-50 p-3 text-zinc-900 shadow-lg shadow-black/40",
+            "forgebadger-bubble-pop absolute rounded-lg border-[1.5px] border-zinc-900 bg-zinc-50 p-3 text-zinc-900 shadow-lg shadow-black/40",
             placement.vertical === "above" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"
           )}
           style={{ left: bubbleRelLeft, width: bubbleWidth }}

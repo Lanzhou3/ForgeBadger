@@ -24,8 +24,8 @@ const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 const bridgeToken = "copilot-bridge-parity-token-0123456789abcdef";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 const FAKE_LAUNCHER = path.join(path.dirname(fileURLToPath(import.meta.url)), "helpers", "fake-dsh-runtime.mjs");
 
@@ -64,7 +64,7 @@ async function listen(app: GatewayApp): Promise<string> {
 function bridgeHeaders(userId: string): Record<string, string> {
   return {
     authorization: `Bearer ${bridgeToken}`,
-    "x-openforge-user-id": userId,
+    "x-forgebadger-user-id": userId,
     "content-type": "application/json"
   };
 }
@@ -99,7 +99,7 @@ describe("copilot bridge tool-parity endpoints", () => {
     it("lists only the acting user's projects with the tool field shape", async () => {
       const created = new ProjectRepository(db, owner.id).create({
         name: "Parity project",
-        path: "/tmp/openforge-parity-project",
+        path: "/tmp/forgebadger-parity-project",
         aiTool: "claude",
         description: "tool parity target"
       });
@@ -124,7 +124,7 @@ describe("copilot bridge tool-parity endpoints", () => {
     it("gets a project detail and answers found:false for foreign or missing ids", async () => {
       const created = new ProjectRepository(db, owner.id).create({
         name: "Parity detail project",
-        path: "/tmp/openforge-parity-detail",
+        path: "/tmp/forgebadger-parity-detail",
         aiTool: "claude"
       });
       const res = await fetch(`${baseUrl}/api/internal/v1/copilot-bridge/projects/${created.id}`, {
@@ -155,7 +155,7 @@ describe("copilot bridge tool-parity endpoints", () => {
       const res = await fetch(`${baseUrl}/api/internal/v1/copilot-bridge/projects`, {
         method: "POST",
         headers: bridgeHeaders(owner.id),
-        body: JSON.stringify({ name: "Bridge created", path: "/tmp/openforge-bridge-created", description: "via bridge" })
+        body: JSON.stringify({ name: "Bridge created", path: "/tmp/forgebadger-bridge-created", description: "via bridge" })
       });
       const body = (await res.json()) as Envelope;
       assert.equal(res.status, 201, JSON.stringify(body));
@@ -280,7 +280,7 @@ describe("copilot capabilities on the dsh path", () => {
   let stateDir: string;
 
   before(async () => {
-    stateDir = mkdtempSync(path.join(tmpdir(), "openforge-dsh-capabilities-test-"));
+    stateDir = mkdtempSync(path.join(tmpdir(), "forgebadger-dsh-capabilities-test-"));
     app = createGatewayApp({
       jwtSecret,
       masterKey,

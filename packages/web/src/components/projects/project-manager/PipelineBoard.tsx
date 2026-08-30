@@ -481,7 +481,7 @@ export function ProjectManagerPipelineBoard({
 
 function stageStatusDotClassName(status: ProjectManagerStage["status"] | undefined) {
   if (!status) return "bg-muted-foreground/60";
-  if (status === "active") return "bg-brand of-pulse-dot";
+  if (status === "active") return "bg-brand forgebadger-pulse-dot";
   if (status === "completed") return "bg-emerald-500";
   return "bg-muted-foreground/40";
 }
@@ -527,7 +527,7 @@ function ProjectManagerStageLane({
       ref={setLaneDroppableRef}
       className={cn(
         "flex w-72 shrink-0 flex-col rounded-md border border-border/70 bg-background/40",
-        highlighted && "of-lane-drop-highlight"
+        highlighted && "forgebadger-lane-drop-highlight"
       )}
       data-testid={stage ? `project-manager-stage-lane-${stage.id}` : "project-manager-stage-lane-backlog"}
     >
@@ -639,7 +639,7 @@ function ProjectManagerStageItemCard({
     <article
       ref={setDragNodeRef}
       className={cn(
-        "of-animate-in rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs transition-colors hover:border-border",
+        "forgebadger-animate-in rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs transition-colors hover:border-border",
         isDragging && "opacity-40"
       )}
       style={{ animationDelay: `${index * 40}ms` }}

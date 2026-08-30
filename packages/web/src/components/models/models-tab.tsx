@@ -75,7 +75,7 @@ export function ModelsTab({
             return (
               <div
                 key={model.id}
-                className={`flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40 ${
+                className={`flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40 ${
                   model.id === selectedModelId ? "bg-brand/5" : ""
                 }`}
                 style={{ animationDelay: `${index * 40}ms` }}

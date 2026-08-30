@@ -7,7 +7,7 @@
  * and every entry point is scoped by user_id.
  */
 import type { Database } from "../../db/types.js";
-import type { OpenForgeEventBus } from "../event-bus.js";
+import type { ForgeBadgerEventBus } from "../event-bus.js";
 import type { CommandRunner } from "../../lib/dependency-check.js";
 import type { InMemorySessionManager } from "../session-manager.js";
 import { ModelProviderRepository } from "../../db/repositories/model-provider-repository.js";
@@ -24,10 +24,10 @@ import type { DshCopilotBff } from "../dsh-copilot/bff-service.js";
 export interface AgentStackDeps {
   db: Database;
   masterKey: string;
-  eventBus: OpenForgeEventBus;
+  eventBus: ForgeBadgerEventBus;
   portfolioApi?: PortfolioApiFacade | undefined;
   /**
-   * M3: present when OPENFORGE_DSH_COPILOT_ENABLED=1. Proactive (reactive-loop)
+   * M3: present when FORGEBADGER_DSH_COPILOT_ENABLED=1. Proactive (reactive-loop)
    * and Feishu-channel turns then run on the dsh kernel BFF instead of the
    * in-process orchestrator, with the same run/pending-action contract.
    */

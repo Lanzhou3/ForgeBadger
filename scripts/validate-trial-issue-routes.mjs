@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_REPOSITORY = "Lanzhou3/OpenForge";
+export const DEFAULT_REPOSITORY = "Lanzhou3/OpenForge";
 
 export const EXPECTED_TRIAL_ISSUE_ROUTES = [
   {
@@ -14,7 +14,7 @@ export const EXPECTED_TRIAL_ISSUE_ROUTES = [
   {
     number: 4,
     gate: "WINDOWS-WSL",
-    title: "Run physical Windows and WSL OpenForge smoke",
+    title: "Run physical Windows and WSL ForgeBadger smoke",
     labels: ["trial-feedback", "product-hardening"]
   },
   {
@@ -78,7 +78,7 @@ export async function validateTrialIssueRoutes(options = {}) {
 }
 
 function fetchIssueWithGh(route, options) {
-  const repository = options.repository ?? process.env.OPENFORGE_TRIAL_ISSUE_ROUTES_REPO ?? DEFAULT_REPOSITORY;
+  const repository = options.repository ?? process.env.FORGEBADGER_TRIAL_ISSUE_ROUTES_REPO ?? process.env.OPENFORGE_TRIAL_ISSUE_ROUTES_REPO ?? DEFAULT_REPOSITORY;
   const output = execFileSync(
     "gh",
     [

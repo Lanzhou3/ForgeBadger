@@ -6,7 +6,7 @@ import { z } from "zod";
 import { projects, sessions } from "../db/schema.js";
 import type { Database } from "../db/types.js";
 import type { Session } from "../db/repositories/session-repository.js";
-import type { OpenForgeEventBus } from "../services/event-bus.js";
+import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import { recordActivity } from "../services/activity-events.js";
 import type { ClaudePortfolioWorker } from "../services/portfolio/claude-portfolio-worker.js";
 
@@ -47,7 +47,7 @@ export interface ClaudeNotificationHookResult {
 
 export function createSessionHookRoutes(
   db: Database,
-  eventBus: OpenForgeEventBus,
+  eventBus: ForgeBadgerEventBus,
   claudePortfolioWorker?: ClaudePortfolioWorker
 ): Router {
   const router = Router();
@@ -56,16 +56,16 @@ export function createSessionHookRoutes(
     traceClaudeNotificationHook("received", {
       route: "/claude-notification/:sessionId",
       sessionIdFromPath: req.params.sessionId,
-      sessionIdHeaderPresent: Boolean(req.header("x-openforge-session-id")),
-      sessionTokenPresent: Boolean(req.header("x-openforge-session-token")),
+      sessionIdHeaderPresent: Boolean(sessionHookHeader(req, "session-id")),
+      sessionTokenPresent: Boolean(sessionHookHeader(req, "session-token")),
       bodyKeys: getBodyKeys(req.body)
     });
     const result = handleClaudeNotificationHook(
       db,
       eventBus,
       req.body ?? {},
-      req.header("x-openforge-session-token"),
-      req.params.sessionId || req.header("x-openforge-session-id")
+      sessionHookHeader(req, "session-token"),
+      req.params.sessionId || sessionHookHeader(req, "session-id")
     );
     traceClaudeNotificationHook("result", {
       route: "/claude-notification/:sessionId",
@@ -80,16 +80,16 @@ export function createSessionHookRoutes(
   router.post("/claude-notification", (req, res) => {
     traceClaudeNotificationHook("received", {
       route: "/claude-notification",
-      sessionIdHeaderPresent: Boolean(req.header("x-openforge-session-id")),
-      sessionTokenPresent: Boolean(req.header("x-openforge-session-token")),
+      sessionIdHeaderPresent: Boolean(sessionHookHeader(req, "session-id")),
+      sessionTokenPresent: Boolean(sessionHookHeader(req, "session-token")),
       bodyKeys: getBodyKeys(req.body)
     });
     const result = handleClaudeNotificationHook(
       db,
       eventBus,
       req.body ?? {},
-      req.header("x-openforge-session-token"),
-      req.header("x-openforge-session-id")
+      sessionHookHeader(req, "session-token"),
+      sessionHookHeader(req, "session-id")
     );
     traceClaudeNotificationHook("result", {
       route: "/claude-notification",
@@ -106,7 +106,7 @@ export function createSessionHookRoutes(
       db,
       req.params.sessionId,
       req.body ?? {},
-      req.header("x-openforge-portfolio-worker-capability"),
+      sessionHookHeader(req, "portfolio-worker-capability"),
       claudePortfolioWorker
     );
     res.status(result.status).json(result.body);
@@ -115,9 +115,13 @@ export function createSessionHookRoutes(
   return router;
 }
 
+function sessionHookHeader(req: { header(name: string): string | undefined }, suffix: string): string | undefined {
+  return req.header(`x-forgebadger-${suffix}`) ?? req.header(`x-openforge-${suffix}`);
+}
+
 export function handleClaudeNotificationHook(
   db: Database,
-  eventBus: OpenForgeEventBus,
+  eventBus: ForgeBadgerEventBus,
   body: unknown,
   sessionToken: string | undefined,
   sessionIdHeader?: string | undefined
@@ -364,7 +368,7 @@ function getBodyKeys(body: unknown): string[] {
 }
 
 function traceClaudeNotificationHook(stage: string, details: Record<string, unknown>): void {
-  if (process.env.OPENFORGE_DEBUG_SESSION_HOOKS?.trim() !== "1") {
+  if (process.env.FORGEBADGER_DEBUG_SESSION_HOOKS?.trim() !== "1") {
     return;
   }
 

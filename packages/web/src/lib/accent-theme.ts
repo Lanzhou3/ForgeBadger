@@ -1,4 +1,5 @@
 import type { TranslationKey } from "./i18n";
+import { readMigratedStorageValue, writeMigratedStorageValue, type BrandStorage } from "./brand-storage";
 
 /**
  * Accent themes (shadcn/tweakcn-style): a curated palette that recolors the
@@ -30,7 +31,8 @@ export const ACCENT_THEMES: readonly AccentTheme[] = [
   { id: "amber", nameKey: "settings.themeAmber", brand: "38 92% 55%", brandForeground: "38 60% 8%", swatch: "#f59e0b" },
 ] as const;
 
-const ACCENT_STORAGE_KEY = "openforge.accent";
+const ACCENT_STORAGE_KEY = "forgebadger.accent";
+const LEGACY_ACCENT_STORAGE_KEY = "openforge.accent";
 
 export function isAccentThemeId(value: string | null | undefined): value is string {
   return ACCENT_THEMES.some((theme) => theme.id === value);
@@ -41,17 +43,17 @@ export function getAccentTheme(id: string | null | undefined): AccentTheme {
   return ACCENT_THEMES.find((theme) => theme.id === id) ?? ACCENT_THEMES[0]!;
 }
 
-export function readStoredAccent(storage: Pick<Storage, "getItem"> = window.localStorage): string {
-  const stored = storage.getItem(ACCENT_STORAGE_KEY);
+export function readStoredAccent(storage: BrandStorage = window.localStorage): string {
+  const stored = readMigratedStorageValue(storage, ACCENT_STORAGE_KEY, LEGACY_ACCENT_STORAGE_KEY);
   return isAccentThemeId(stored) ? stored : DEFAULT_ACCENT_ID;
 }
 
 export function applyAccentTheme(
   id: string,
-  storage: Pick<Storage, "setItem"> = window.localStorage
+  storage: BrandStorage = window.localStorage
 ): string {
   const themeId = isAccentThemeId(id) ? id : DEFAULT_ACCENT_ID;
   document.documentElement.dataset.accent = themeId;
-  storage.setItem(ACCENT_STORAGE_KEY, themeId);
+  writeMigratedStorageValue(storage, ACCENT_STORAGE_KEY, LEGACY_ACCENT_STORAGE_KEY, themeId);
   return themeId;
 }

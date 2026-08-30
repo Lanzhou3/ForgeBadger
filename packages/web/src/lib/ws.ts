@@ -19,7 +19,7 @@ export function terminalWebSocketProtocols(authToken: string, attachToken: strin
   // The attach token is delivered through the subprotocol header rather than
   // the URL query so it never appears in browser address bars, server access
   // logs, or HTTP referrer headers.
-  return ["openforge-terminal", authToken, attachToken];
+  return ["forgebadger-terminal", authToken, attachToken];
 }
 
 export function eventsWebSocketUrl(baseUrl = getGatewayBaseUrl()): string {
@@ -30,5 +30,5 @@ export function eventsWebSocketUrl(baseUrl = getGatewayBaseUrl()): string {
 }
 
 export function eventsWebSocketProtocols(authToken: string): string[] {
-  return ["openforge-events", authToken];
+  return ["forgebadger-events", authToken];
 }

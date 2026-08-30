@@ -144,7 +144,7 @@ export function TerminalView({
       }
 
       if (message.type === "terminal_error") {
-        terminal.writeln(`\r\n[openforge] ${message.payload.message}`);
+        terminal.writeln(`\r\n[forgebadger] ${message.payload.message}`);
       }
     });
 

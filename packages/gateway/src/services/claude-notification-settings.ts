@@ -17,11 +17,11 @@ export interface ClaudeHttpHook {
   timeout: number;
 }
 
-type ClaudeOpenForgeHook = ClaudeCommandHook | ClaudeHttpHook;
+type ClaudeForgeBadgerHook = ClaudeCommandHook | ClaudeHttpHook;
 
 export interface ClaudeHookGroup {
   matcher?: string | undefined;
-  hooks: Array<ClaudeOpenForgeHook | Record<string, unknown>>;
+  hooks: Array<ClaudeForgeBadgerHook | Record<string, unknown>>;
 }
 
 export interface ClaudeHookSettings {
@@ -36,11 +36,11 @@ export interface ClaudeHookSettings {
   };
 }
 
-export function buildOpenForgeClaudeHookSettings(gatewayUrl: string, sessionId?: string): ClaudeHookSettings {
-  const httpHook = buildOpenForgeHttpHook(gatewayUrl, sessionId);
+export function buildForgeBadgerClaudeHookSettings(gatewayUrl: string, sessionId?: string): ClaudeHookSettings {
+  const httpHook = buildForgeBadgerHttpHook(gatewayUrl, sessionId);
   return {
-    allowedHttpHookUrls: [openForgeHookUrlAllowlist(gatewayUrl)],
-    httpHookAllowedEnvVars: openForgeHookEnvVars(),
+    allowedHttpHookUrls: [forgeBadgerHookUrlAllowlist(gatewayUrl)],
+    httpHookAllowedEnvVars: forgeBadgerHookEnvVars(),
     hooks: {
       PermissionRequest: [
         {
@@ -79,7 +79,7 @@ export async function ensureClaudeNotificationSettings(
 ): Promise<{ path: string; changed: boolean }> {
   const settingsPath = safeResolve(projectRoot, ".claude/settings.local.json");
   const existing = await readJsonObject(settingsPath);
-  const merged = mergeOpenForgeHookSettings(existing, gatewayUrl, sessionId);
+  const merged = mergeForgeBadgerHookSettings(existing, gatewayUrl, sessionId);
   const changed = JSON.stringify(existing) !== JSON.stringify(merged);
 
   if (changed) {
@@ -113,7 +113,7 @@ export async function ensureClaudePortfolioWorkerHookSettings(
   return { path: settingsPath, changed };
 }
 
-function mergeOpenForgeHookSettings(
+function mergeForgeBadgerHookSettings(
   existing: Record<string, unknown>,
   gatewayUrl: string,
   sessionId?: string
@@ -121,32 +121,32 @@ function mergeOpenForgeHookSettings(
   const next = cloneRecord(existing);
   const existingHooks = isRecord(next.hooks) ? next.hooks : {};
   const hooks: Record<string, unknown> = { ...existingHooks };
-  const openForgeHook = buildOpenForgeHttpHook(gatewayUrl, sessionId);
+  const forgeBadgerHook = buildForgeBadgerHttpHook(gatewayUrl, sessionId);
 
   hooks.PermissionRequest = ensureHookGroup(
     hooks.PermissionRequest,
     undefined,
-    openForgeHook
+    forgeBadgerHook
   );
   hooks.PermissionDenied = ensureHookGroup(
     hooks.PermissionDenied,
     undefined,
-    openForgeHook
+    forgeBadgerHook
   );
-  hooks.Stop = ensureHookGroup(hooks.Stop, undefined, openForgeHook);
-  hooks.SessionEnd = ensureHookGroup(hooks.SessionEnd, undefined, openForgeHook);
+  hooks.Stop = ensureHookGroup(hooks.Stop, undefined, forgeBadgerHook);
+  hooks.SessionEnd = ensureHookGroup(hooks.SessionEnd, undefined, forgeBadgerHook);
   hooks.Notification = ensureHookGroup(
     hooks.Notification,
     "permission_prompt",
-    openForgeHook
+    forgeBadgerHook
   );
   next.allowedHttpHookUrls = mergeStringList(
     next.allowedHttpHookUrls,
-    openForgeHookUrlAllowlist(gatewayUrl)
+    forgeBadgerHookUrlAllowlist(gatewayUrl)
   );
   next.httpHookAllowedEnvVars = mergeStringList(
     next.httpHookAllowedEnvVars,
-    ...openForgeHookEnvVars()
+    ...forgeBadgerHookEnvVars()
   );
   next.hooks = hooks;
   return next;
@@ -201,7 +201,7 @@ export function buildClaudePortfolioWorkerHookSettings(
 function ensureHookGroup(
   value: unknown,
   matcher: string | undefined,
-  hook: ClaudeOpenForgeHook
+  hook: ClaudeForgeBadgerHook
 ): ClaudeHookGroup[] {
   const groups = Array.isArray(value) ? normalizeHookGroups(value) : [];
   const nextGroups: ClaudeHookGroup[] = [];
@@ -213,10 +213,10 @@ function ensureHookGroup(
       continue;
     }
 
-    // Replacing prior OpenForge hooks prevents a later worker launch from
+    // Replacing prior ForgeBadger hooks prevents a later worker launch from
     // retaining a stale session-specific SessionStart target.
-    const hooks = group.hooks.filter((item) => !isOpenForgeManagedHook(item));
-    if (!handled && !hooks.some((item) => isSameOpenForgeHook(item, hook))) {
+    const hooks = group.hooks.filter((item) => !isForgeBadgerManagedHook(item));
+    if (!handled && !hooks.some((item) => isSameForgeBadgerHook(item, hook))) {
       hooks.push(hook);
     }
     nextGroups.push({ ...group, hooks });
@@ -245,16 +245,16 @@ function normalizeHookGroups(value: unknown): ClaudeHookGroup[] {
     });
 }
 
-function buildOpenForgeHttpHook(gatewayUrl: string, sessionId?: string): ClaudeHttpHook {
+function buildForgeBadgerHttpHook(gatewayUrl: string, sessionId?: string): ClaudeHttpHook {
   const sessionPath = sessionId ? `/${encodeURIComponent(sessionId)}` : "";
   return {
     type: "http",
     url: `${gatewayUrl.replace(/\/+$/u, "")}/api/v1/session-hooks/claude-notification${sessionPath}`,
     headers: {
-      "x-openforge-session-id": "$OPENFORGE_SESSION_ID",
-      "x-openforge-session-token": "$OPENFORGE_ATTACH_TOKEN"
+      "x-forgebadger-session-id": "$FORGEBADGER_SESSION_ID",
+      "x-forgebadger-session-token": "$FORGEBADGER_ATTACH_TOKEN"
     },
-    allowedEnvVars: ["OPENFORGE_SESSION_ID", "OPENFORGE_ATTACH_TOKEN"],
+    allowedEnvVars: ["FORGEBADGER_SESSION_ID", "FORGEBADGER_ATTACH_TOKEN"],
     timeout: 5
   };
 }
@@ -265,15 +265,15 @@ function buildClaudePortfolioWorkerHttpHook(gatewayUrl: string, sessionId?: stri
     type: "http",
     url: `${gatewayUrl.replace(/\/+$/u, "")}/api/v1/session-hooks/claude-portfolio-worker${sessionPath}`,
     headers: {
-      "x-openforge-session-id": "$OPENFORGE_SESSION_ID",
-      "x-openforge-portfolio-worker-capability": "$OPENFORGE_PORTFOLIO_WORKER_ACK_CAPABILITY"
+      "x-forgebadger-session-id": "$FORGEBADGER_SESSION_ID",
+      "x-forgebadger-portfolio-worker-capability": "$FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"
     },
-    allowedEnvVars: ["OPENFORGE_SESSION_ID", "OPENFORGE_PORTFOLIO_WORKER_ACK_CAPABILITY"],
+    allowedEnvVars: ["FORGEBADGER_SESSION_ID", "FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"],
     timeout: 5
   };
 }
 
-function openForgeHookUrlAllowlist(gatewayUrl: string): string {
+function forgeBadgerHookUrlAllowlist(gatewayUrl: string): string {
   const trimmed = gatewayUrl.replace(/\/+$/u, "");
   try {
     const url = new URL(trimmed);
@@ -293,8 +293,8 @@ function workerHookUrlAllowlist(gatewayUrl: string): string {
   }
 }
 
-function openForgeHookEnvVars(): string[] {
-  return ["OPENFORGE_SESSION_ID", "OPENFORGE_ATTACH_TOKEN"];
+function forgeBadgerHookEnvVars(): string[] {
+  return ["FORGEBADGER_SESSION_ID", "FORGEBADGER_ATTACH_TOKEN"];
 }
 
 function mergeStringList(value: unknown, ...items: string[]): string[] {
@@ -311,9 +311,9 @@ function mergeStringList(value: unknown, ...items: string[]): string[] {
   return current;
 }
 
-function isSameOpenForgeHook(
-  value: ClaudeOpenForgeHook | Record<string, unknown>,
-  expected: ClaudeOpenForgeHook
+function isSameForgeBadgerHook(
+  value: ClaudeForgeBadgerHook | Record<string, unknown>,
+  expected: ClaudeForgeBadgerHook
 ): boolean {
   if (value.type !== expected.type) return false;
   if (value.type === "command" && expected.type === "command") {
@@ -325,7 +325,7 @@ function isSameOpenForgeHook(
   return false;
 }
 
-function isOpenForgeNotificationHook(value: ClaudeOpenForgeHook | Record<string, unknown>): boolean {
+function isForgeBadgerNotificationHook(value: ClaudeForgeBadgerHook | Record<string, unknown>): boolean {
   if (value.type === "command") {
     return (
       typeof value.command === "string" &&
@@ -341,11 +341,11 @@ function isOpenForgeNotificationHook(value: ClaudeOpenForgeHook | Record<string,
   return false;
 }
 
-function isOpenForgeManagedHook(value: ClaudeOpenForgeHook | Record<string, unknown>): boolean {
-  return isOpenForgeNotificationHook(value) || isOpenForgePortfolioWorkerHook(value);
+function isForgeBadgerManagedHook(value: ClaudeForgeBadgerHook | Record<string, unknown>): boolean {
+  return isForgeBadgerNotificationHook(value) || isForgeBadgerPortfolioWorkerHook(value);
 }
 
-function isOpenForgePortfolioWorkerHook(value: ClaudeOpenForgeHook | Record<string, unknown>): boolean {
+function isForgeBadgerPortfolioWorkerHook(value: ClaudeForgeBadgerHook | Record<string, unknown>): boolean {
   if (value.type === "command") {
     return (
       typeof value.command === "string"

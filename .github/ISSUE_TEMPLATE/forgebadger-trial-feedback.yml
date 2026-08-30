@@ -1,5 +1,5 @@
-name: OpenForge first-user trial feedback
-description: Report a local OpenForge trial result with environment, diagnostics, and Portfolio workflow evidence.
+name: ForgeBadger first-user trial feedback
+description: Report a local ForgeBadger trial result with environment, diagnostics, and Portfolio workflow evidence.
 title: "[Trial]: "
 labels:
   - trial-feedback
@@ -9,8 +9,8 @@ body:
     attributes:
       value: |
         Use this form for local first-user trial feedback. Review all attachments before sharing.
-        Do not paste API keys, passwords, JWTs, attach tokens, private keys, unrelated project secrets, or the `openforge.token` value.
-        If this is a general bug, use the OpenForge bug report template. If it may expose a vulnerability or secret, follow `SECURITY.md` instead of opening a public issue.
+        Do not paste API keys, passwords, JWTs, attach tokens, private keys, unrelated project secrets, or the `forgebadger.token` value.
+        If this is a general bug, use the ForgeBadger bug report template. If it may expose a vulnerability or secret, follow `SECURITY.md` instead of opening a public issue.
 
   - type: dropdown
     id: result
@@ -58,7 +58,7 @@ body:
       label: Environment
       description: Include commit/version, OS, shell, browser, Node, tmux, Claude Code, and optional OpenCode/Codex versions.
       value: |
-        OpenForge version or commit:
+        ForgeBadger version or commit:
         OS:
         Shell:
         Browser:
@@ -73,8 +73,8 @@ body:
   - type: textarea
     id: doctor
     attributes:
-      label: openforge doctor summary
-      description: Summarize the redacted `openforge doctor` result. Native Windows users should include the runtime warning. Do not attach raw terminal transcripts.
+      label: forgebadger doctor summary
+      description: Summarize the redacted `forgebadger doctor` result. Native Windows users should include the runtime warning. Do not attach raw terminal transcripts.
       render: text
     validations:
       required: true
@@ -233,7 +233,7 @@ body:
       options:
         - label: I reviewed this issue and attachments for secrets before submitting.
           required: true
-        - label: Any API keys, passwords, JWTs, attach tokens, private keys, project secrets, and `openforge.token` values have been removed.
+        - label: Any API keys, passwords, JWTs, attach tokens, private keys, project secrets, and `forgebadger.token` values have been removed.
           required: true
         - label: I did not attach raw terminal transcripts, raw provider payloads, raw Feishu bodies, local databases, `.env` files, or private AI CLI config.
           required: true

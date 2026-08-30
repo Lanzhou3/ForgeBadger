@@ -243,7 +243,7 @@ export default function CliConfigPage() {
         </Button>
       </div>
 
-      <Card className="of-animate-in">
+      <Card className="forgebadger-animate-in">
         <CardContent className="flex items-center gap-3 p-4">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
             <KeyRound className="size-4" />
@@ -260,7 +260,7 @@ export default function CliConfigPage() {
       <Tabs
         value={adapter}
         onValueChange={(value) => setAdapter(value as RuntimeAdapterId)}
-        className="of-animate-in"
+        className="forgebadger-animate-in"
       >
         <TabsList>
           {cliAdapters.map((adapterId) => (
@@ -272,20 +272,20 @@ export default function CliConfigPage() {
       </Tabs>
 
       {isLoading ? (
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("common.loading")}
           </CardContent>
         </Card>
       ) : error || !snapshot ? (
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardContent className="py-10 text-center text-sm text-destructive">
             {error instanceof Error ? error.message : t("cliConfig.loadFailed")}
           </CardContent>
         </Card>
       ) : (
         <>
-          <Card className="of-animate-in" style={{ animationDelay: "40ms" }}>
+          <Card className="forgebadger-animate-in" style={{ animationDelay: "40ms" }}>
             <CardContent className="grid gap-3 p-4 md:grid-cols-2">
               <div className="space-y-1.5">
                 <div className="text-xs text-muted-foreground">{t("cliConfig.configRoot")}</div>
@@ -302,7 +302,7 @@ export default function CliConfigPage() {
             </CardContent>
           </Card>
 
-          <Card className="of-animate-in" style={{ animationDelay: "80ms" }}>
+          <Card className="forgebadger-animate-in" style={{ animationDelay: "80ms" }}>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-semibold">{t("cliConfig.providers")}</CardTitle>
             </CardHeader>
@@ -529,7 +529,7 @@ export default function CliConfigPage() {
           </Card>
 
           {(adapter === "kimi" || adapter === "opencode") && (
-            <Card className="of-animate-in" style={{ animationDelay: "120ms" }}>
+            <Card className="forgebadger-animate-in" style={{ animationDelay: "120ms" }}>
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold">{t("cliConfig.models")}</CardTitle>
               </CardHeader>
@@ -649,7 +649,7 @@ export default function CliConfigPage() {
             </Card>
           )}
 
-          <Card className="of-animate-in" style={{ animationDelay: "160ms" }}>
+          <Card className="forgebadger-animate-in" style={{ animationDelay: "160ms" }}>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-semibold">{t("cliConfig.defaultModel")}</CardTitle>
             </CardHeader>
@@ -718,7 +718,7 @@ export default function CliConfigPage() {
           </Card>
 
           {commonFields.length > 0 && (
-            <Card className="of-animate-in" style={{ animationDelay: "180ms" }}>
+            <Card className="forgebadger-animate-in" style={{ animationDelay: "180ms" }}>
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold">{t("cliConfig.commonFields")}</CardTitle>
                 <p className="text-xs leading-relaxed text-muted-foreground">
@@ -804,7 +804,7 @@ export default function CliConfigPage() {
             </Card>
           )}
 
-          <Card className="of-animate-in" style={{ animationDelay: "200ms" }}>
+          <Card className="forgebadger-animate-in" style={{ animationDelay: "200ms" }}>
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <CardTitle className="text-sm font-semibold">{t("cliConfig.rawEditor")}</CardTitle>

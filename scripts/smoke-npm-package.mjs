@@ -15,7 +15,7 @@ import {
 } from "./smoke-npm-package-runner.mjs";
 
 const workspaceRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
-const smokeRoot = await mkdtemp(path.join(tmpdir(), "openforge-npm-smoke-"));
+const smokeRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-npm-smoke-"));
 const packDir = path.join(smokeRoot, "pack");
 const npmPrefix = path.join(smokeRoot, "npm-prefix");
 const npmCache = path.join(smokeRoot, "npm-cache");
@@ -23,17 +23,17 @@ const stateDir = path.join(smokeRoot, "state");
 const tmuxPrefix = `of-smoke-${process.pid}-`;
 const commandTimeoutMs = readPositiveIntegerEnv(
   process.env,
-  "OPENFORGE_NPM_SMOKE_COMMAND_TIMEOUT_MS",
+  "FORGEBADGER_NPM_SMOKE_COMMAND_TIMEOUT_MS",
   DEFAULT_COMMAND_TIMEOUT_MS
 );
 const npmInstallTimeoutMs = readPositiveIntegerEnv(
   process.env,
-  "OPENFORGE_NPM_SMOKE_INSTALL_TIMEOUT_MS",
+  "FORGEBADGER_NPM_SMOKE_INSTALL_TIMEOUT_MS",
   DEFAULT_NPM_INSTALL_TIMEOUT_MS
 );
 
 try {
-  console.log(`OpenForge npm smoke root: ${smokeRoot}`);
+  console.log(`ForgeBadger npm smoke root: ${smokeRoot}`);
 
   await mkdir(packDir, { recursive: true });
   runStep("build npm package artifacts", "pnpm", ["--dir", workspaceRoot, "build:npm"]);
@@ -41,7 +41,7 @@ try {
     "--dir",
     workspaceRoot,
     "--filter",
-    "openforge",
+    "forgebadger",
     "pack",
     "--pack-destination",
     packDir
@@ -56,18 +56,18 @@ try {
     tarball
   }), { timeoutMs: npmInstallTimeoutMs });
 
-  const openforgeBin = resolveOpenForgeBin(npmPrefix);
-  runStep("run installed openforge doctor", openforgeBin, ["doctor"], {
+  const forgebadgerBin = resolveForgeBadgerBin(npmPrefix);
+  runStep("run installed forgebadger doctor", forgebadgerBin, ["doctor"], {
     env: {
-      OPENFORGE_STATE_DIR: stateDir,
-      OPENFORGE_TMUX_PREFIX: tmuxPrefix
+      FORGEBADGER_STATE_DIR: stateDir,
+      FORGEBADGER_TMUX_PREFIX: tmuxPrefix
     }
   });
   console.log("[smoke:npm] start installed services and run API smoke");
-  await runStartSmoke(openforgeBin);
+  await runStartSmoke(forgebadgerBin);
 } finally {
   cleanupTmuxSessions();
-  if (process.env.OPENFORGE_KEEP_NPM_SMOKE_ROOT !== "1") {
+  if (process.env.FORGEBADGER_KEEP_NPM_SMOKE_ROOT !== "1") {
     await rm(smokeRoot, { recursive: true, force: true });
   }
 }
@@ -118,27 +118,27 @@ async function collectTarballs(directory, tarballs) {
   }
 }
 
-function resolveOpenForgeBin(prefix) {
+function resolveForgeBadgerBin(prefix) {
   const extension = process.platform === "win32" ? ".cmd" : "";
   const candidates = [
-    path.join(prefix, process.platform === "win32" ? "" : "bin", `openforge${extension}`),
-    path.join(prefix, "node_modules", ".bin", `openforge${extension}`)
+    path.join(prefix, process.platform === "win32" ? "" : "bin", `forgebadger${extension}`),
+    path.join(prefix, "node_modules", ".bin", `forgebadger${extension}`)
   ];
   const binPath = candidates.find((candidate) => existsSync(candidate));
   if (!binPath) {
-    throw new Error(`Installed openforge binary was not found at ${candidates.join(" or ")}`);
+    throw new Error(`Installed forgebadger binary was not found at ${candidates.join(" or ")}`);
   }
   return binPath;
 }
 
-async function runStartSmoke(openforgeBin) {
+async function runStartSmoke(forgebadgerBin) {
   const gatewayPort = await getAvailablePort();
   const webPort = await getAvailablePort();
   const projectRoot = path.join(smokeRoot, "project");
   await mkdir(projectRoot, { recursive: true });
-  await writeFile(path.join(projectRoot, "package.json"), "{\"name\":\"openforge-smoke\"}\n");
+  await writeFile(path.join(projectRoot, "package.json"), "{\"name\":\"forgebadger-smoke\"}\n");
 
-  const child = spawn(openforgeBin, [
+  const child = spawn(forgebadgerBin, [
     "start",
     "--host",
     "127.0.0.1",
@@ -151,8 +151,8 @@ async function runStartSmoke(openforgeBin) {
     env: {
       ...process.env,
       npm_config_update_notifier: "false",
-      OPENFORGE_STATE_DIR: stateDir,
-      OPENFORGE_TMUX_PREFIX: tmuxPrefix
+      FORGEBADGER_STATE_DIR: stateDir,
+      FORGEBADGER_TMUX_PREFIX: tmuxPrefix
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -230,7 +230,7 @@ async function waitForUrl(url, exitPromise, getOutput) {
       delay(250).then(() => ({ exited: false }))
     ]);
     if (exited.exited) {
-      throw new Error(`openforge start exited before ${url} became ready: ${JSON.stringify(exited.exit)}\n${getOutput()}`);
+      throw new Error(`forgebadger start exited before ${url} became ready: ${JSON.stringify(exited.exit)}\n${getOutput()}`);
     }
 
     try {

@@ -24,7 +24,7 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
       name: sessionName,
       cwd: tmpdir(),
       command: "bash",
-      args: ["-lc", "printf openforge-gate-a && sleep 2"],
+      args: ["-lc", "printf forgebadger-gate-a && sleep 2"],
       env: {}
     });
 
@@ -32,7 +32,7 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
     const output = await tmux.capturePane(sessionName);
     await tmux.killSession(sessionName);
 
-    assert.match(output, /openforge-gate-a/);
+    assert.match(output, /forgebadger-gate-a/);
   });
 
   it("enables tmux mouse scrolling and keeps a larger history", async () => {
@@ -118,7 +118,7 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
         name: sessionName,
         cwd: tmpdir(),
         command: "bash",
-        args: ["-lc", "read line; printf 'openforge-input:%s' \"$line\"; sleep 2"],
+        args: ["-lc", "read line; printf 'forgebadger-input:%s' \"$line\"; sleep 2"],
         env: {}
       });
 
@@ -127,7 +127,7 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
       await new Promise((resolve) => setTimeout(resolve, 250));
       const output = await tmux.capturePane(sessionName);
 
-      assert.match(output, /openforge-input:pwd/);
+      assert.match(output, /forgebadger-input:pwd/);
     } finally {
       await tmux.killSession(sessionName);
     }
@@ -181,7 +181,7 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
     }
   });
 
-  it("recovers indexed tmux sessions and kills unindexed OpenForge sessions", async () => {
+  it("recovers indexed tmux sessions and kills unindexed ForgeBadger sessions", async () => {
     const tmux = createTmuxClient();
     const store = new MemoryRecoveryStore();
     const tmuxPrefix = `of-recovery-${process.pid}-`;
@@ -203,7 +203,7 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
     });
 
     const restartedManager = new InMemorySessionManager(tmux, store, undefined, { tmuxPrefix });
-    const result = await restartedManager.recoverOpenForgeSessions({
+    const result = await restartedManager.recoverForgeBadgerSessions({
       userId: "user123",
       cwd: tmpdir()
     });
@@ -230,7 +230,7 @@ function launchPlan(sessionId: string): LaunchPlan {
     command: "bash",
     args: ["-lc", "sleep 5"],
     cwd: tmpdir(),
-    env: { OPENFORGE_SESSION_ID: sessionId },
+    env: { FORGEBADGER_SESSION_ID: sessionId },
     secretEnvNames: [],
     credentialMode: "host_environment"
   };

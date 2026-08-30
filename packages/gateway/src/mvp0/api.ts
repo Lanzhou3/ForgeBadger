@@ -188,7 +188,7 @@ export function createMvp0Api(options: Mvp0ApiOptions) {
       const launchPlan = createClaudeLaunchPlan({
         projectRoot: project.path,
         credentialMode: input.credentialMode,
-        env: { OPENFORGE_SESSION_ID: sessionId }
+        env: { FORGEBADGER_SESSION_ID: sessionId }
       });
       const session = await options.sessionLauncher.createSession({
         userId,

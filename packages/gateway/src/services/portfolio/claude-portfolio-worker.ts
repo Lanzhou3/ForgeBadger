@@ -243,7 +243,7 @@ function isPacketDigest(value: string): boolean {
 }
 
 function renderCanonicalClaudeTaskPacket(packet: CanonicalTaskPacket): string {
-  return `<openforge-portfolio-task-packet>\n${JSON.stringify(packet)}\n</openforge-portfolio-task-packet>\n`;
+  return `<forgebadger-portfolio-task-packet>\n${JSON.stringify(packet)}\n</forgebadger-portfolio-task-packet>\n`;
 }
 
 function dispatchReceiptDigest(authorization: WorkerDispatchAuthorization): string {

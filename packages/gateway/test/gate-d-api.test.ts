@@ -96,8 +96,8 @@ describe("Gate D auth and project API contracts", () => {
       email: "beta@example.com",
       password: "correct horse battery staple"
     });
-    const createdRoot = await mkdtemp(path.join(tmpdir(), "openforge-created-project-"));
-    const importedRoot = await mkdtemp(path.join(tmpdir(), "openforge-imported-project-"));
+    const createdRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-created-project-"));
+    const importedRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-imported-project-"));
     const canonicalCreatedRoot = await realpath(createdRoot);
     const canonicalImportedRoot = await realpath(importedRoot);
 
@@ -132,7 +132,7 @@ describe("Gate D auth and project API contracts", () => {
       email: "create-dir@example.com",
       password: "correct horse battery staple"
     });
-    const parent = await mkdtemp(path.join(tmpdir(), "openforge-create-parent-"));
+    const parent = await mkdtemp(path.join(tmpdir(), "forgebadger-create-parent-"));
     const rootPath = path.join(parent, "missing", "project");
 
     const created = await api.createProject(user.body.data.user.id, {
@@ -151,7 +151,7 @@ describe("Gate D auth and project API contracts", () => {
       email: "import-dir@example.com",
       password: "correct horse battery staple"
     });
-    const parent = await mkdtemp(path.join(tmpdir(), "openforge-import-parent-"));
+    const parent = await mkdtemp(path.join(tmpdir(), "forgebadger-import-parent-"));
     const rootPath = path.join(parent, "missing-project");
 
     const imported = await api.importProject(user.body.data.user.id, {
@@ -169,7 +169,7 @@ describe("Gate D auth and project API contracts", () => {
       email: "template@example.com",
       password: "correct horse battery staple"
     });
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-template-project-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-template-project-"));
     await writeFile(path.join(rootPath, "CLAUDE.md"), "existing", "utf8");
     const project = await api.createProject(user.body.data.user.id, {
       name: "Template Project",
@@ -208,7 +208,7 @@ describe("Gate D auth and project API contracts", () => {
       email: "other@example.com",
       password: "correct horse battery staple"
     });
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-session-project-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-session-project-"));
     const project = await api.createProject(user.body.data.user.id, {
       name: "Session Project",
       rootPath

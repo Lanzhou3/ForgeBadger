@@ -17,8 +17,8 @@ import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 const execFileAsync = promisify(execFile);
 
@@ -91,11 +91,11 @@ describe("project git-changes routes", () => {
 
   it("reports branch, working tree changes, and recent commits", async () => {
     const token = await register("git-owner@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-git-repo-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-git-repo-"));
     await git(rootPath, "init", "-b", "main");
     await writeFile(path.join(rootPath, "tracked.ts"), "export const v = 1;\n", "utf8");
     await git(rootPath, "add", "tracked.ts");
-    await git(rootPath, "-c", "user.email=test@openforge.local", "-c", "user.name=Test", "commit", "-m", "initial commit");
+    await git(rootPath, "-c", "user.email=test@forgebadger.local", "-c", "user.name=Test", "commit", "-m", "initial commit");
     await writeFile(path.join(rootPath, "tracked.ts"), "export const v = 2;\n", "utf8");
     await writeFile(path.join(rootPath, "untracked notes.md"), "notes\n", "utf8");
     const projectId = await importProject(token, rootPath);
@@ -122,11 +122,11 @@ describe("project git-changes routes", () => {
 
   it("reports changes even when git status output exceeds the old 1 MiB buffer limit", async () => {
     const token = await register("git-large@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-git-large-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-git-large-"));
     await git(rootPath, "init", "-b", "main");
     await writeFile(path.join(rootPath, "tracked.ts"), "export const v = 1;\n", "utf8");
     await git(rootPath, "add", "tracked.ts");
-    await git(rootPath, "-c", "user.email=test@openforge.local", "-c", "user.name=Test", "commit", "-m", "initial commit");
+    await git(rootPath, "-c", "user.email=test@forgebadger.local", "-c", "user.name=Test", "commit", "-m", "initial commit");
     await writeFile(path.join(rootPath, "tracked.ts"), "export const v = 2;\n", "utf8");
     // Long untracked filenames produce a large porcelain listing; enough of
     // them push the `-z` status output past 1 MiB, which used to make execFile
@@ -154,7 +154,7 @@ describe("project git-changes routes", () => {
 
   it("reports isGitRepo=false for directories without git", async () => {
     const token = await register("git-plain@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-git-plain-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-git-plain-"));
     await writeFile(path.join(rootPath, "README.md"), "# Plain\n", "utf8");
     const projectId = await importProject(token, rootPath);
 
@@ -171,11 +171,11 @@ describe("project git-changes routes", () => {
 
   it("serves per-file diffs and untracked file previews", async () => {
     const token = await register("git-diff@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-git-diff-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-git-diff-"));
     await git(rootPath, "init", "-b", "main");
     await writeFile(path.join(rootPath, "tracked.ts"), "export const v = 1;\n", "utf8");
     await git(rootPath, "add", "tracked.ts");
-    await git(rootPath, "-c", "user.email=test@openforge.local", "-c", "user.name=Test", "commit", "-m", "initial commit");
+    await git(rootPath, "-c", "user.email=test@forgebadger.local", "-c", "user.name=Test", "commit", "-m", "initial commit");
     await writeFile(path.join(rootPath, "tracked.ts"), "export const v = 2;\n", "utf8");
     await writeFile(path.join(rootPath, "fresh.ts"), "export const f = 1;\n", "utf8");
     const projectId = await importProject(token, rootPath);
@@ -210,7 +210,7 @@ describe("project git-changes routes", () => {
   it("returns 404 for cross-tenant git-changes requests", async () => {
     const ownerToken = await register("git-cross-owner@test.com");
     const otherToken = await register("git-cross-other@test.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-git-cross-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-git-cross-"));
     const projectId = await importProject(ownerToken, rootPath);
 
     const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/git-changes`, {

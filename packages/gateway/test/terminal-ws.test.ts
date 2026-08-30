@@ -23,7 +23,7 @@ import { createGatewayApp } from "../src/server.js";
 import { WebSocketConnectionLimits } from "../src/websocket/connection-limits.js";
 import { extractWsAuthToken } from "../src/websocket/auth.js";
 import { signJwt } from "../src/auth/index.js";
-import { OpenForgeEventBus } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 
@@ -248,9 +248,9 @@ describe("extractWsAuthToken", () => {
     const token = extractWsAuthToken(
       {
         authorization: "Bearer header-token",
-        "sec-websocket-protocol": "openforge-terminal, protocol-token"
+        "sec-websocket-protocol": "forgebadger-terminal, protocol-token"
       },
-      "openforge-terminal"
+      "forgebadger-terminal"
     );
     assert.equal(token, "header-token");
   });
@@ -258,19 +258,28 @@ describe("extractWsAuthToken", () => {
   it("extracts token from protocol list when header is absent", () => {
     const token = extractWsAuthToken(
       {
-        "sec-websocket-protocol": "openforge-terminal, protocol-token"
+        "sec-websocket-protocol": "forgebadger-terminal, protocol-token"
       },
-      "openforge-terminal"
+      "forgebadger-terminal"
     );
     assert.equal(token, "protocol-token");
+  });
+
+  it("accepts the legacy OpenForge terminal protocol during the rename window", () => {
+    const token = extractWsAuthToken(
+      { "sec-websocket-protocol": "openforge-terminal, legacy-token" },
+      ["forgebadger-terminal", "openforge-terminal"]
+    );
+
+    assert.equal(token, "legacy-token");
   });
 
   it("returns undefined when protocol token is missing", () => {
     const token = extractWsAuthToken(
       {
-        "sec-websocket-protocol": "openforge-terminal"
+        "sec-websocket-protocol": "forgebadger-terminal"
       },
-      "openforge-terminal"
+      "forgebadger-terminal"
     );
     assert.equal(token, undefined);
   });
@@ -301,7 +310,7 @@ describe("WebSocket connection limits", () => {
 describe("terminal websocket authentication", () => {
   it("does not read auth token from query params", async () => {
     const db = createTestDb();
-    const eventBus = new OpenForgeEventBus();
+    const eventBus = new ForgeBadgerEventBus();
     const sessionManager = new InMemorySessionManager({
       async createSession() {},
       async killSession() {},
@@ -353,7 +362,7 @@ describe("terminal websocket authentication", () => {
     db.prepare(
       "INSERT INTO users (id, username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)"
     ).run("user_123", "ws-tester", "test@example.com", "hash", "user", "active");
-    const eventBus = new OpenForgeEventBus();
+    const eventBus = new ForgeBadgerEventBus();
     const sessionManager = new InMemorySessionManager({
       async createSession() {},
       async killSession() {},

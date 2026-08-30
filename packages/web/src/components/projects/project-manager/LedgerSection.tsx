@@ -74,7 +74,7 @@ export function ProjectManagerLedgerSection({
           <ChevronDown className={cn("size-4 transition-transform", isOpen && "rotate-180")} />
         </Button>
       </CardHeader>
-      <div className="of-collapse-grid" data-open={isOpen}>
+      <div className="forgebadger-collapse-grid" data-open={isOpen}>
         <div>
           <CardContent className="space-y-3 pt-0">
             <div className="flex flex-wrap gap-2 border-t border-border/70 pt-3">

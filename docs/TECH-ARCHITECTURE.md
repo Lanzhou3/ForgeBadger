@@ -1,4 +1,4 @@
-# OpenForge — 技术架构设计
+# ForgeBadger — 技术架构设计
 
 > 版本：v1.1 | 2026-04-24
 > 作者：毕方 🏗️
@@ -82,8 +82,8 @@ MVP-0 采用显式 approved project root，不允许无边界访问本地文件�
 - `/run`
 - `/boot`
 - `/root`
-- OpenForge 数据库目录
-- OpenForge 备份目录（备份服务自身写入除外）
+- ForgeBadger 数据库目录
+- ForgeBadger 备份目录（备份服务自身写入除外）
 
 路径规则：
 
@@ -146,7 +146,7 @@ interface RollbackResult {
 - `exists` 表示目标文件与生成文件内容完全一致。写入时可自动按 skip 处理，不要求用户再次确认。
 - `modified` 表示目标文件内容不同，必须由用户显式选择 skip 或 overwrite。
 - `unsafe_path` 必须阻塞，不能通过 overwrite 绕过。
-- backup path 必须位于 OpenForge 控制的备份目录。
+- backup path 必须位于 ForgeBadger 控制的备份目录。
 - 部分写入失败必须自动 rollback。
 - rollback 失败必须返回需人工检查的文件列表。
 - 导入已有项目时，项目记录创建和配置生成是两个阶段。配置生成可以作为 Web 侧 best-effort 后续步骤执行；若配置冲突，项目记录仍然有效，UI 必须提示用户进入预览/冲突处理流程。
@@ -185,7 +185,7 @@ Project goal / work item
 - 所有副作用必须经过服务器端 Action Policy。默认策略为 `observe`；有期限的项目 `operate` 只允许明确列出的低风险可逆动作；删除、密钥、权限扩大、外部发布、跨项目操作和 raw shell 始终审批或拒绝。
 - CLI 的完成声明只产生 completion candidate。工作项进入 `done` 前必须有 accepted 或 verified acceptance result。
 - tmux 继续作为进程持久层和 terminal fallback。SQLite 只保存结构化状态、摘要、哈希、证据引用和审计，不保存完整终端日志。
-- `OPENFORGE_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED` 默认 `false`，只有显式设置为字符串 `true` 才允许未来的自动 dispatch runner；无效布尔值必须使 Gateway 启动校验失败。
+- `FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED` 默认 `false`，只有显式设置为字符串 `true` 才允许未来的自动 dispatch runner；无效布尔值必须使 Gateway 启动校验失败。
 
 ## 零、架构总览
 
@@ -205,7 +205,7 @@ Project goal / work item
 └────────┼────────┼────────┼────────┼──────────┘
          │        │        │        │
 ┌────────▼────────▼────────▼────────▼──────────┐
-│          OpenForge Gateway (Node.js)         │
+│          ForgeBadger Gateway (Node.js)         │
 │                                              │
 │  ┌──────────┐  ┌──────────────────────────┐  │
 │  │ REST API │  │ WebSocket Hub            │  │
@@ -252,7 +252,7 @@ Project goal / work item
 │  用户机器 / 开发服务器               │
 │                                     │
 │  ┌─────────────────────────────┐   │
-│  │  openforge gateway (后台)    │   │
+│  │  forgebadger gateway (后台)    │   │
 │  │  ├── HTTP (端口 3000)       │   │
 │  │  ├── WebSocket (端口 3000)   │   │
 │  │  └── SQLite (本地文件)      │   │
@@ -375,12 +375,12 @@ Project goal / work item
 
 ```bash
 # 安装
-npm install -g @openforge/gateway
+npm install -g @forgebadger/gateway
 
 # 一键启动（自动完成以下动作）
-openforge start
+forgebadger start
 
-# openforge start 内部流程：
+# forgebadger start 内部流程：
 # 1. 检查 node-pty 编译依赖（已 prebuild，无需编译）
 # 2. 检查 tmux 是否安装，未安装则提示
 # 3. 初始化 SQLite 数据库（首次运行自动迁移）
@@ -388,10 +388,10 @@ openforge start
 # 5. 自动打开浏览器 → http://localhost:3000
 
 # 停止
-openforge stop
+forgebadger stop
 
 # 查看状态
-openforge status
+forgebadger status
 ```
 
 **外部依赖清单：**
@@ -405,10 +405,10 @@ openforge status
 | Python | ❌ 不需要 | 仅 node-gyp 编译时用，非运行时依赖 |
 
 **打包策略：**
-- Gateway 作为 npm 全局包发布（`@openforge/gateway`）
-- `bin` 字段注册 `openforge` 命令
+- Gateway 作为 npm 全局包发布（`@forgebadger/gateway`）
+- `bin` 字段注册 `forgebadger` 命令
 - 使用 `pkg` 或 `nexe` 可选打包为单二进制文件（降低 Node.js 版本要求）
-- SQLite 数据库文件存储在 `~/.openforge/openforge.db`
+- SQLite 数据库文件存储在 `~/.forgebadger/forgebadger.db`
 
 ---
 
@@ -674,7 +674,7 @@ const projects = await projectRepo.findByUserId(req.userId);
 **安全边界：**
 - Gateway 以普通用户身份运行，不碰 `root` 权限
 - 文件系统访问限制在项目路径内（通过 `path.resolve` + 路径前缀校验）
-- API Key 加密存储（AES-256-GCM），密钥从环境变量 `OPENFORGE_MASTER_KEY` 读取
+- API Key 加密存储（AES-256-GCM），密钥从环境变量 `FORGEBADGER_MASTER_KEY` 读取
 
 ---
 
@@ -1354,7 +1354,7 @@ interface CliAdapter {
 | 1 | **node-pty 编译失败** | Gateway 无法启动，终端功能完全不可用 | 中 | 🔴 致命 | ① 使用 prebuild 包跳过编译 ② 准备 fallback：如果 node-pty 不可用，降级为纯命令行模式（不嵌入终端，外部打开终端窗口） |
 | 2 | **tmux 会话泄漏** | 停止会话后 tmux 进程残留，占用资源 | 高 | 🟡 严重 | ① 所有 tmux 操作封装在 SessionManager 中，确保 create/destroy 配对 ② 定时巡检：每 5 分钟扫描孤立 tmux session 并清理 ③ Gateway 启动时清理上一次残留的 `of-*` 会话 |
 | 3 | **WebSocket 连接不稳定** | 终端卡顿、断连，用户体验差 | 高 | 🟡 严重 | ① 客户端自动重连（指数退避：1s → 2s → 4s → 8s → 最大 30s） ② tmux 保活：WebSocket 断连不影响 CLI 运行 ③ 重连后通过 `tmux capture-pane` 恢复终端显示 |
-| 4 | **API Key 安全存储** | 密钥泄露 → 资损 | 低 | 🔴 致命 | ① AES-256-GCM 加密，密钥来自环境变量 `OPENFORGE_MASTER_KEY` ② 不在日志中打印密钥 ③ 内存中解密后通过环境变量注入 CLI 进程 ④ 支持 API Key 轮换 |
+| 4 | **API Key 安全存储** | 密钥泄露 → 资损 | 低 | 🔴 致命 | ① AES-256-GCM 加密，密钥来自环境变量 `FORGEBADGER_MASTER_KEY` ② 不在日志中打印密钥 ③ 内存中解密后通过环境变量注入 CLI 进程 ④ 支持 API Key 轮换 |
 | 5 | **MVP 工时压缩** | 项目跳票 | 高 | 🟡 严重 | ① MVP 只打透 Claude Code，OpenCode/Codex 适配器延后 ② 前端页面使用 shadcn/ui 快速搭建，不追求完美 UI ③ 严格 P0 范围，P1 功能不提前做 ④ 每周检查进度，必要时砍功能不砍质量 |
 
 ### 风险详细应对
@@ -1382,7 +1382,7 @@ interface CliAdapter {
   1. 进程级：使用 SIGTERM 处理函数，优雅关闭所有 tmux session
   2. 定时巡检：setInterval(() => cleanupOrphanSessions(), 5 * 60 * 1000)
   3. 启动时清理：启动时扫描所有 of-{user_id}-* 会话，对比数据库中的活跃会话，清理孤儿
-  4. 命名规范：所有 OpenForge 管理的 tmux session 以 of- 开头，便于识别和清理
+  4. 命名规范：所有 ForgeBadger 管理的 tmux session 以 of- 开头，便于识别和清理
 ```
 
 #### 风险 3：WebSocket 连接不稳定
@@ -1412,7 +1412,7 @@ interface CliAdapter {
 ```
 加密方案：
   - 算法：AES-256-GCM（替代 CBC，增加认证标签防篡改）
-  - 密钥：OPENFORGE_MASTER_KEY 环境变量（推荐 64 字符 hex）
+  - 密钥：FORGEBADGER_MASTER_KEY 环境变量（推荐 64 字符 hex）
   - 首次启动时如未设置则生成并提示用户保存
 
 注入方案：
@@ -1452,7 +1452,7 @@ interface CliAdapter {
 ### 7.1 Monorepo 结构
 
 ```
-openforge/
+forgebadger/
 ├── packages/
 │   ├── gateway/                    # Gateway 服务
 │   │   ├── src/
@@ -1738,12 +1738,12 @@ openforge/
 
 | 变量名 | 必需 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `OPENFORGE_PORT` | ❌ | 3000 | Gateway HTTP/WS 端口 |
-| `OPENFORGE_DB_PATH` | ❌ | `~/.openforge/openforge.db` | SQLite 数据库路径 |
-| `OPENFORGE_MASTER_KEY` | ✅ | — | AES 加密密钥（推荐 64 字符 hex） |
-| `OPENFORGE_JWT_SECRET` | ✅ | — | JWT 签名密钥 |
-| `OPENFORGE_LOG_LEVEL` | ❌ | info | 日志级别 |
-| `OPENFORGE_TMUX_PREFIX` | ❌ | of- | tmux 会话名前缀 |
+| `FORGEBADGER_PORT` | ❌ | 3000 | Gateway HTTP/WS 端口 |
+| `FORGEBADGER_DB_PATH` | ❌ | `~/.forgebadger/forgebadger.db` | SQLite 数据库路径 |
+| `FORGEBADGER_MASTER_KEY` | ✅ | — | AES 加密密钥（推荐 64 字符 hex） |
+| `FORGEBADGER_JWT_SECRET` | ✅ | — | JWT 签名密钥 |
+| `FORGEBADGER_LOG_LEVEL` | ❌ | info | 日志级别 |
+| `FORGEBADGER_TMUX_PREFIX` | ❌ | of- | tmux 会话名前缀 |
 
 ### 9.3 前端页面路由
 

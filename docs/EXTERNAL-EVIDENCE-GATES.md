@@ -2,7 +2,7 @@
 
 > Status: v1.5 evidence registry with Feishu long-connection gate | Date: 2026-06-13
 
-This registry is the source of truth for external OpenForge release gates.
+This registry is the source of truth for external ForgeBadger release gates.
 Repository tests, mocked browser checks, documentation, templates, and empty
 issue forms are useful support artifacts, but they do not clear an external
 gate by themselves.
@@ -13,7 +13,7 @@ is linked and reviewed.
 
 ## Purpose And Scope
 
-OpenForge is a local-first AI CLI control plane. The current external gates
+ForgeBadger is a local-first AI CLI control plane. The current external gates
 focus on release trust: live provider behavior, real Windows/WSL terminal
 behavior, Feishu bot long-connection behavior, and completed first-user
 feedback.
@@ -44,8 +44,8 @@ do not exercise the external boundary.
 |------|---------------|-------|--------------------|------------|--------------------|
 | `LIVE-PROVIDER` | `Caveat` | Release maintainer with disposable provider credential | `pnpm smoke:copilot-provider` runs with an explicit provider, explicit model id, and disposable credential; result is redacted and maps failure classes if not passing. | Run `pnpm smoke:copilot-provider` after configuring an explicit provider/model/credential outside the repository. | `docs/reports/phase-18-live-provider-evidence-rerun-2026-05-29.md`; historical baseline in `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`; follow-up issue #3. |
 | `WINDOWS-WSL` | `Caveat` | Release maintainer with physical Windows host and WSL | A real WSL run records dependency checks, browser terminal attach/input/resize, reconnect, Gateway restart recovery, and cleanup. Native Windows management UI checks do not clear terminal evidence. | Run the Windows/WSL section in `docs/TRIAL-CHECKLIST.md` on physical hardware. | `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`; historical baseline in `docs/reports/phase-6-terminal-gate-evidence-2026-05-21.md`; follow-up issue #4. |
-| `FEISHU-BOT-WS` | `Caveat` | OpenForge operator with Feishu bot long-connection access | A real Feishu bot WebSocket or persistent connection run receives an `im.message.receive_v1` event from an allowed DM or group, routes it through OpenForge policy, sends a bounded reply or creates a pending action, reconnects after interruption, and preserves no-free-form-approval and no-terminal-input boundaries. Candidate reports pass automated redaction/audit checks, but the reports explicitly require maintainer review before this gate can move to `Pass`. | Configure a Feishu self-built bot for persistent connection event subscription, subscribe to `im.message.receive_v1`, run `pnpm smoke:feishu-bot-websocket` against the authenticated Gateway fixture path, then run `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output <report.json>`, run `pnpm evidence:feishu-bot-live-audit -- <report.json>`, and run `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output <report.md>` before maintainer review. Public webhook URL verification is optional compatibility evidence, not the primary gate. | Candidate artifacts pending explicit maintainer acceptance: `docs/reports/phase-41-feishu-bot-live-evidence-2026-06-14.json`; `docs/reports/phase-41-feishu-bot-live-evidence-2026-06-14.md`; historical public webhook blocker baseline in `docs/reports/phase-19-feishu-public-callback-evidence-2026-05-29.md`; historical local callback baseline in `docs/reports/phase-7-feishu-callback-evidence-2026-05-21.md`. |
-| `FIRST-USER-FEEDBACK` | `Caveat` | Maintainer/operator collecting a real trial packet | At least one completed redacted first-user feedback packet is attached or linked with severity, owner, disposition, affected surface, environment, reproduction detail, and follow-up route or no-action rationale. | Use `docs/TRIAL-FEEDBACK.md` or `.github/ISSUE_TEMPLATE/openforge-trial-feedback.yml`; run `pnpm trial:feedback-audit -- <packet.md>` for Markdown packets, `pnpm trial:feedback-issue-audit -- --issue=<number>` for a specific GitHub issue-form feedback item, or `pnpm trial:feedback-issues-audit` to scan non-tracker GitHub feedback candidates before maintainer triage. | `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`; follow-up issue #5 or a completed trial feedback issue. |
+| `FEISHU-BOT-WS` | `Caveat` | ForgeBadger operator with Feishu bot long-connection access | A real Feishu bot WebSocket or persistent connection run receives an `im.message.receive_v1` event from an allowed DM or group, routes it through ForgeBadger policy, sends a bounded reply or creates a pending action, reconnects after interruption, and preserves no-free-form-approval and no-terminal-input boundaries. Candidate reports pass automated redaction/audit checks, but the reports explicitly require maintainer review before this gate can move to `Pass`. | Configure a Feishu self-built bot for persistent connection event subscription, subscribe to `im.message.receive_v1`, run `pnpm smoke:feishu-bot-websocket` against the authenticated Gateway fixture path, then run `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output <report.json>`, run `pnpm evidence:feishu-bot-live-audit -- <report.json>`, and run `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output <report.md>` before maintainer review. Public webhook URL verification is optional compatibility evidence, not the primary gate. | Candidate artifacts pending explicit maintainer acceptance: `docs/reports/phase-41-feishu-bot-live-evidence-2026-06-14.json`; `docs/reports/phase-41-feishu-bot-live-evidence-2026-06-14.md`; historical public webhook blocker baseline in `docs/reports/phase-19-feishu-public-callback-evidence-2026-05-29.md`; historical local callback baseline in `docs/reports/phase-7-feishu-callback-evidence-2026-05-21.md`. |
+| `FIRST-USER-FEEDBACK` | `Caveat` | Maintainer/operator collecting a real trial packet | At least one completed redacted first-user feedback packet is attached or linked with severity, owner, disposition, affected surface, environment, reproduction detail, and follow-up route or no-action rationale. | Use `docs/TRIAL-FEEDBACK.md` or `.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml`; run `pnpm trial:feedback-audit -- <packet.md>` for Markdown packets, `pnpm trial:feedback-issue-audit -- --issue=<number>` for a specific GitHub issue-form feedback item, or `pnpm trial:feedback-issues-audit` to scan non-tracker GitHub feedback candidates before maintainer triage. | `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`; follow-up issue #5 or a completed trial feedback issue. |
 
 ## Required Artifact Shapes
 
@@ -56,7 +56,7 @@ Allowed:
 - command: `pnpm smoke:copilot-provider`;
 - provider name and explicit model id;
 - smoke status: `passed`, `skipped`, or `failed`;
-- OpenForge readiness code or provider failure class;
+- ForgeBadger readiness code or provider failure class;
 - timestamp, commit, and environment summary;
 - redacted artifact path or issue link.
 
@@ -75,7 +75,7 @@ Forbidden:
 Allowed:
 
 - Windows version and WSL distribution/version;
-- `openforge doctor`, `node --version`, `tmux -V`, and AI CLI version summaries;
+- `forgebadger doctor`, `node --version`, `tmux -V`, and AI CLI version summaries;
 - browser terminal attach/input/resize/reconnect result;
 - Gateway restart recovery result;
 - cleanup result;
@@ -148,7 +148,7 @@ Forbidden:
 ## Redaction Rules
 
 All gate artifacts must be reviewed before sharing. Keep only summaries,
-counts, bounded statuses, public metadata, command names, OpenForge request
+counts, bounded statuses, public metadata, command names, ForgeBadger request
 paths, sanitized error codes, timestamps, and redacted screenshots.
 
 Do not publish raw provider payloads, Feishu bodies, terminal transcripts,

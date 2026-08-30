@@ -21,6 +21,10 @@ class MemoryStorage implements Pick<Storage, "getItem" | "setItem"> {
   setItem(key: string, value: string): void {
     this.values.set(key, value);
   }
+
+  removeItem(key: string): void {
+    this.values.delete(key);
+  }
 }
 
 describe("session tabs", () => {
@@ -48,9 +52,19 @@ describe("session tabs", () => {
 
   it("recovers from malformed local storage", () => {
     const storage = new MemoryStorage();
-    storage.setItem("openforge.sessionTabs.v1", "{");
+    storage.setItem("forgebadger.sessionTabs.v1", "{");
 
     expect(readSessionTabs(storage)).toEqual([]);
+  });
+
+  it("migrates legacy session tabs on first read", () => {
+    const storage = new MemoryStorage();
+    const tabs = [{ id: "legacy", label: "Legacy", updatedAt: 1 }];
+    storage.setItem("openforge.sessionTabs.v1", JSON.stringify(tabs));
+
+    expect(readSessionTabs(storage)).toEqual(tabs);
+    expect(storage.getItem("forgebadger.sessionTabs.v1")).toBe(JSON.stringify(tabs));
+    expect(storage.getItem("openforge.sessionTabs.v1")).toBeNull();
   });
 
   it("prunes deleted sessions", () => {
@@ -156,10 +170,10 @@ describe("session tabs", () => {
   });
 
   it("assigns stable, distinct group colors per project name", () => {
-    expect(sessionTabGroupColor("OpenForge")).toBe(sessionTabGroupColor("OpenForge"));
-    expect(sessionTabGroupColor("OpenForge")).toMatch(/^#[0-9a-f]{6}$/);
+    expect(sessionTabGroupColor("ForgeBadger")).toBe(sessionTabGroupColor("ForgeBadger"));
+    expect(sessionTabGroupColor("ForgeBadger")).toMatch(/^#[0-9a-f]{6}$/);
     const colors = new Set(
-      ["OpenForge", "Mindspark", "Shop API", "Docs"].map((name) => sessionTabGroupColor(name))
+      ["ForgeBadger", "Mindspark", "Shop API", "Docs"].map((name) => sessionTabGroupColor(name))
     );
     expect(colors.size).toBeGreaterThan(1);
   });

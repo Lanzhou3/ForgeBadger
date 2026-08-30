@@ -25,7 +25,7 @@ function createTestDb(): Database {
 
 describe("local skill discovery", () => {
   it("discovers folder-based SKILL.md files", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-local-skills-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-local-skills-"));
     const projectSkills = path.join(root, ".claude", "skills");
     const userSkills = path.join(root, "user-skills");
     await mkdir(path.join(projectSkills, "plan-workflow"), { recursive: true });
@@ -71,7 +71,7 @@ describe("local skill discovery", () => {
   });
 
   it("discovers plugin-provided skills from nested Codex plugin cache layouts", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-plugin-skills-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-plugin-skills-"));
     const pluginSkillDir = path.join(
       root,
       "openai-curated",
@@ -99,7 +99,7 @@ describe("local skill discovery", () => {
   });
 
   it("does not let an early large root hide Skills from later local roots", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-large-skill-roots-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-large-skill-roots-"));
     const largeRoot = path.join(root, "large-skills");
     const laterRoot = path.join(root, "later-skills");
     await mkdir(largeRoot, { recursive: true });
@@ -139,7 +139,7 @@ describe("local skill discovery", () => {
   });
 
   it("uses only root Claude Code and Agents skill directories as the default discovery roots", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-ancestor-skills-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-ancestor-skills-"));
     const nestedCwd = path.join(root, "packages", "gateway");
     const projectSkillDir = path.join(root, ".claude", "skills", "verify-workflow");
     const agentSkillDir = path.join(root, ".agents", "skills", "agent-workflow");
@@ -195,7 +195,7 @@ describe("local skill discovery", () => {
   });
 
   it("does not include command or plugin cache directories in default discovery roots", () => {
-    const roots = defaultLocalSkillRoots("/tmp/openforge-project", {});
+    const roots = defaultLocalSkillRoots("/tmp/forgebadger-project", {});
 
     assert.ok(!roots.includes(path.join(homedir(), ".claude", "commands")));
     assert.ok(!roots.includes(path.join(homedir(), ".claude", "plugins", "cache")));
@@ -204,8 +204,8 @@ describe("local skill discovery", () => {
     assert.ok(!roots.includes(path.join(homedir(), ".codex", "plugins", "cache")));
   });
 
-  it("ignores custom skill directory environment variables for default discovery", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-claude-config-skills-"));
+  it("honors custom skill directory environment variables for default discovery", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-config-skills-"));
     const configDir = path.join(root, "custom-claude");
     const agentsHome = path.join(root, "agents-home");
     const configuredDir = path.join(root, "configured-skills");
@@ -242,7 +242,7 @@ describe("local skill discovery", () => {
       [
         "---",
         "name: configured-review",
-        "description: Review from OPENFORGE_SKILL_DIRS.",
+        "description: Review from FORGEBADGER_SKILL_DIRS.",
         "---",
         "",
         "# Configured Review"
@@ -251,29 +251,31 @@ describe("local skill discovery", () => {
 
     const roots = defaultLocalSkillRoots(path.join(root, "project"), {
       CLAUDE_CONFIG_DIR: configDir,
-      OPENFORGE_SKILL_DIRS: configuredDir,
+      FORGEBADGER_SKILL_DIRS: [configuredDir, path.join(root, "missing-skills")].join(path.delimiter),
       AGENTS_HOME: agentsHome
     });
     const skills = discoverLocalSkills({
       cwd: path.join(root, "project"),
       env: {
         CLAUDE_CONFIG_DIR: configDir,
-        OPENFORGE_SKILL_DIRS: configuredDir,
+        FORGEBADGER_SKILL_DIRS: [configuredDir, path.join(root, "missing-skills")].join(path.delimiter),
         AGENTS_HOME: agentsHome
       }
     });
 
     assert.deepEqual(roots, [
-      path.join(homedir(), ".claude", "skills"),
-      path.join(homedir(), ".agents", "skills")
+      path.join(configDir, "skills"),
+      path.join(agentsHome, "skills"),
+      configuredDir,
+      path.join(root, "missing-skills")
     ]);
-    assert.equal(skills.some((skill) => skill.name === "custom-review"), false);
-    assert.equal(skills.some((skill) => skill.name === "agent-review"), false);
-    assert.equal(skills.some((skill) => skill.name === "configured-review"), false);
+    assert.equal(skills.some((skill) => skill.name === "custom-review"), true);
+    assert.equal(skills.some((skill) => skill.name === "agent-review"), true);
+    assert.equal(skills.some((skill) => skill.name === "configured-review"), true);
   });
 
   it("follows symlinked local Skill directories", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-symlink-skills-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-symlink-skills-"));
     const realSkillDir = path.join(root, "real-skills", "linked-review");
     const skillRoot = path.join(root, ".claude", "skills");
     await mkdir(realSkillDir, { recursive: true });
@@ -297,7 +299,7 @@ describe("local skill discovery", () => {
   });
 
   it("syncs discovered local Skills into the current user's library and refreshes changed content", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-sync-local-skills-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-sync-local-skills-"));
     const skillRoot = path.join(root, "skills", "safe-review");
     await mkdir(skillRoot, { recursive: true });
     const skillPath = path.join(skillRoot, "SKILL.md");
@@ -351,7 +353,7 @@ describe("local skill discovery", () => {
   });
 
   it("does not delete local Skills that are no longer discovered under the current roots", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "openforge-prune-local-skills-"));
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-prune-local-skills-"));
     const currentSkillRoot = path.join(root, "skills", "safe-review");
     await mkdir(currentSkillRoot, { recursive: true });
     await writeFile(

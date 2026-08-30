@@ -2,7 +2,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { OPENFORGE_GATEWAY_EVENT } from "@/lib/gateway-events";
+import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
 import { RUN_STALE_TIMEOUT_MS, useCopilotRun } from "@/hooks/use-copilot";
 import type { CopilotPendingAction } from "@/lib/copilot-api";
 
@@ -39,7 +39,7 @@ function deferred<T>() {
 function dispatchRunUpdated(payload: Record<string, unknown>) {
   act(() => {
     window.dispatchEvent(
-      new CustomEvent(OPENFORGE_GATEWAY_EVENT, {
+      new CustomEvent(FORGEBADGER_GATEWAY_EVENT, {
         detail: { type: "copilot_run_updated", payload },
       })
     );

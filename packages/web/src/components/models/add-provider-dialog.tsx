@@ -183,7 +183,7 @@ export function AddProviderDialog({
                   {catalog.map((preset, index) => (
                     <div
                       key={preset.id}
-                      className="flex min-h-[154px] flex-col justify-between gap-3 rounded-md border border-border/70 bg-muted/20 px-3 py-3 transition-colors of-animate-in hover:border-brand/30"
+                      className="flex min-h-[154px] flex-col justify-between gap-3 rounded-md border border-border/70 bg-muted/20 px-3 py-3 transition-colors forgebadger-animate-in hover:border-brand/30"
                       style={{ animationDelay: `${index * 40}ms` }}
                     >
                       <div className="space-y-2">

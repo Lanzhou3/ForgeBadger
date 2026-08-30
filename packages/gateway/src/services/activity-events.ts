@@ -1,11 +1,11 @@
 import { ActivityRepository, type CreateActivityInput, type SessionActivity } from "../db/repositories/activity-repository.js";
 import type { Database } from "../db/types.js";
-import type { OpenForgeEventBus } from "./event-bus.js";
+import type { ForgeBadgerEventBus } from "./event-bus.js";
 
 export interface RecordActivityOptions extends CreateActivityInput {
   db: Database;
   userId: string;
-  eventBus?: OpenForgeEventBus | undefined;
+  eventBus?: ForgeBadgerEventBus | undefined;
 }
 
 export function recordActivity(options: RecordActivityOptions): SessionActivity {

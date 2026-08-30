@@ -165,7 +165,7 @@ Installed from {{source}}.
 
 ## Usage
 
-{{name}} is available as a Skill in OpenForge.
+{{name}} is available as a Skill in ForgeBadger.
 
 ## Notes
 

@@ -16,7 +16,7 @@ import { ModelProviderRepository } from "../src/db/repositories/model-provider-r
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createGatewayApp, type GatewayAppOptions } from "../src/server.js";
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
-import { OpenForgeEventBus } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { FeishuChannelRuntime } from "../src/services/integrations/feishu-channel-runtime.js";
 import { createFeishuSdkHandlers } from "../src/services/integrations/feishu-runtime-factory.js";
 import type { FeishuSdkFactory } from "../src/services/integrations/feishu-sdk.js";
@@ -38,7 +38,7 @@ const fakeLauncher = path.join(
 describe("Feishu production route composition", () => {
   it("resumes a long-connection DSH approval through the same BFF from a signed classic webhook", async () => {
     const db = createTestDb();
-    const stateDir = mkdtempSync(path.join(tmpdir(), "openforge-feishu-route-dsh-"));
+    const stateDir = mkdtempSync(path.join(tmpdir(), "forgebadger-feishu-route-dsh-"));
     const logPath = path.join(stateDir, "fake-runtime.jsonl");
     const runtime = createIdleFeishuRuntime();
     const sdkCalls = { create: [] as unknown[], patch: [] as unknown[] };
@@ -47,7 +47,7 @@ describe("Feishu production route composition", () => {
       jwtSecret,
       masterKey,
       db,
-      eventBus: new OpenForgeEventBus(),
+      eventBus: new ForgeBadgerEventBus(),
       sessionManager: new InMemorySessionManager(createEchoingTmux() as never),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
       feishuChannelRuntime: runtime,
@@ -140,7 +140,7 @@ describe("Feishu production route composition", () => {
       jwtSecret,
       masterKey,
       db,
-      eventBus: new OpenForgeEventBus(),
+      eventBus: new ForgeBadgerEventBus(),
       sessionManager: new InMemorySessionManager(createEchoingTmux() as never),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
       feishuWebhookSdkFactory: createFakeSdkFactory(sdkCalls)
@@ -196,7 +196,7 @@ describe("Feishu production route composition", () => {
       jwtSecret,
       masterKey,
       db,
-      eventBus: new OpenForgeEventBus(),
+      eventBus: new ForgeBadgerEventBus(),
       sessionManager: new InMemorySessionManager(createEchoingTmux() as never),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
       feishuWebhookSdkFactory: createFakeSdkFactory(sdkCalls)
@@ -240,7 +240,7 @@ describe("Feishu production route composition", () => {
       jwtSecret,
       masterKey,
       db,
-      eventBus: new OpenForgeEventBus(),
+      eventBus: new ForgeBadgerEventBus(),
       sessionManager: new InMemorySessionManager(createEchoingTmux() as never),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
       feishuWebhookSdkFactory: createFakeSdkFactory(sdkCalls)
@@ -287,7 +287,7 @@ describe("Feishu production route composition", () => {
       jwtSecret,
       masterKey,
       db,
-      eventBus: new OpenForgeEventBus(),
+      eventBus: new ForgeBadgerEventBus(),
       sessionManager: new InMemorySessionManager(createEchoingTmux() as never),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
       feishuWebhookSdkFactory: createFakeSdkFactory(sdkCalls)
@@ -342,7 +342,7 @@ describe("Feishu production route composition", () => {
         jwtSecret,
         masterKey,
         db,
-        eventBus: new OpenForgeEventBus(),
+        eventBus: new ForgeBadgerEventBus(),
         sessionManager: new InMemorySessionManager(createEchoingTmux() as never),
         apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
         feishuWebhookSdkFactory: createFakeSdkFactory(sdkCalls)
@@ -359,7 +359,7 @@ describe("Feishu production route composition", () => {
           const foreignUserId = new UserRepository(db)
             .create("foreign-feishu-mapping@example.com", "hash").id;
           integration.replaceUserMappings([
-            { feishuUserId: "ou-owner", openforgeUserId: foreignUserId }
+            { feishuUserId: "ou-owner", forgebadgerUserId: foreignUserId }
           ]);
         }
         const pending = policyCase.kind === "card"
@@ -427,7 +427,7 @@ describe("Feishu production route composition", () => {
       jwtSecret,
       masterKey,
       db,
-      eventBus: new OpenForgeEventBus(),
+      eventBus: new ForgeBadgerEventBus(),
       sessionManager: new InMemorySessionManager(createEchoingTmux() as never),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
       feishuWebhookSdkFactory: createFakeSdkFactory(sdkCalls)
@@ -480,7 +480,7 @@ describe("Feishu production route composition", () => {
       jwtSecret,
       masterKey,
       db,
-      eventBus: new OpenForgeEventBus(),
+      eventBus: new ForgeBadgerEventBus(),
       sessionManager: new InMemorySessionManager(createEchoingTmux() as never),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey })
     });
@@ -505,7 +505,7 @@ describe("Feishu production route composition", () => {
         jwtSecret,
         masterKey,
         db,
-        eventBus: new OpenForgeEventBus(),
+        eventBus: new ForgeBadgerEventBus(),
         sessionManager: new InMemorySessionManager(createEchoingTmux() as never),
         apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
         feishuWebhookSdkFactory: createFakeSdkFactory(sdkCalls)
@@ -656,8 +656,8 @@ function seedUserAndFeishu(db: Database.Database): string {
     allowedChatIds: ["oc-shared-dsh", "oc-modern-callback", "oc-webhook-group"]
   });
   integration.replaceUserMappings([
-    { feishuUserId: "ou-owner", openforgeUserId: userId },
-    { feishuUserId: "ou-group-member", openforgeUserId: userId }
+    { feishuUserId: "ou-owner", forgebadgerUserId: userId },
+    { feishuUserId: "ou-group-member", forgebadgerUserId: userId }
   ]);
   integration.configurePublicWebhook({
     publicWebhookId: webhookId,

@@ -203,7 +203,7 @@ export default function DashboardPage() {
           <Link
             key={stat.label}
             href={stat.href}
-            className="group of-animate-in"
+            className="group forgebadger-animate-in"
             style={{ animationDelay: `${index * 50}ms` }}
           >
             <Card className="h-full transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-brand/40 group-hover:shadow-lg group-hover:shadow-brand/5">
@@ -226,7 +226,7 @@ export default function DashboardPage() {
       </div>
 
       {showFirstRunReadiness && (
-        <Card className="of-animate-in border-brand/30 bg-brand/5">
+        <Card className="forgebadger-animate-in border-brand/30 bg-brand/5">
           <CardHeader className="pb-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -327,7 +327,7 @@ export default function DashboardPage() {
                 <Link
                   key={session.id}
                   href={`/sessions/${session.id}`}
-                  className="group flex items-center gap-3 px-4 py-3 transition-colors of-animate-in hover:bg-muted/40"
+                  className="group flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
                   style={{ animationDelay: `${index * 40}ms` }}
                 >
                   <SessionStatusDot status={session.status} />

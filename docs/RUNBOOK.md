@@ -1,4 +1,4 @@
-# OpenForge Runbook
+# ForgeBadger Runbook
 
 > Status: MVP local-first beta operations | Date: 2026-05-10
 
@@ -17,7 +17,7 @@ NPM runtime:
 - SQLite-compatible filesystem
 
 The built-in browser terminal is supported on Unix-like hosts with tmux. On
-Windows, run OpenForge inside WSL for terminal sessions; native Windows is only
+Windows, run ForgeBadger inside WSL for terminal sessions; native Windows is only
 expected to support non-terminal management UI workflows.
 
 Optional runtime dependencies:
@@ -35,19 +35,19 @@ Optional during development:
 
 Required for direct Gateway/source startup:
 
-- `OPENFORGE_MASTER_KEY` - preferred 64-character hex key for AES-256-GCM; legacy 32-byte strings are still accepted
-- `OPENFORGE_JWT_SECRET` - JWT signing secret
+- `FORGEBADGER_MASTER_KEY` - preferred 64-character hex key for AES-256-GCM; legacy 32-byte strings are still accepted
+- `FORGEBADGER_JWT_SECRET` - JWT signing secret
 
 Optional:
 
-- `OPENFORGE_PORT` - default `3000`
-- `OPENFORGE_DB_PATH` - default `~/.openforge/openforge.db`
-- `OPENFORGE_LOG_LEVEL` - default `info`
-- `OPENFORGE_TMUX_PREFIX` - default `of-`
+- `FORGEBADGER_PORT` - default `3000`
+- `FORGEBADGER_DB_PATH` - default `~/.forgebadger/forgebadger.db`
+- `FORGEBADGER_LOG_LEVEL` - default `info`
+- `FORGEBADGER_TMUX_PREFIX` - default `of-`
 
-For npm CLI startup, do not hand-create `OPENFORGE_MASTER_KEY` or
-`OPENFORGE_JWT_SECRET`. The CLI generates them on first startup and stores
-runtime state under `~/.openforge` by default. Set `OPENFORGE_STATE_DIR` to use
+For npm CLI startup, do not hand-create `FORGEBADGER_MASTER_KEY` or
+`FORGEBADGER_JWT_SECRET`. The CLI generates them on first startup and stores
+runtime state under `~/.forgebadger` by default. Set `FORGEBADGER_STATE_DIR` to use
 a different state directory for config, database, logs, and runtime files.
 
 ## 3. Dependency Checks
@@ -77,7 +77,7 @@ Expected:
 
 - Node.js is 20 or newer.
 - tmux is installed.
-- `openforge doctor` reports `terminal native_tmux` for supported terminal use.
+- `forgebadger doctor` reports `terminal native_tmux` for supported terminal use.
   `terminal wsl_required` means rerun inside WSL; `terminal tmux_missing` means
   install tmux before launching browser terminal sessions.
 - pnpm is installed for source development workflows.
@@ -89,29 +89,29 @@ Expected:
 Use the installed CLI for local npm-distributed runtime checks:
 
 ```bash
-openforge doctor
-openforge start --gateway-port 48731 --web-port 48732
+forgebadger doctor
+forgebadger start --gateway-port 48731 --web-port 48732
 ```
 
-`openforge start` starts the Gateway/Web child processes and prints the Web
+`forgebadger start` starts the Gateway/Web child processes and prints the Web
 console URL. It also prints a non-blocking terminal warning when the current
 host cannot support tmux-backed browser terminals. If the browser cannot connect
-immediately, wait for initialization or inspect logs and `openforge doctor`
-output. Runtime state defaults to `~/.openforge`; use `OPENFORGE_STATE_DIR`
+immediately, wait for initialization or inspect logs and `forgebadger doctor`
+output. Runtime state defaults to `~/.forgebadger`; use `FORGEBADGER_STATE_DIR`
 when testing against disposable state or running multiple isolated installs.
 
 Windows native hosts can still start the management UI, but browser terminal
-sessions require WSL because OpenForge persists terminal sessions with tmux.
+sessions require WSL because ForgeBadger persists terminal sessions with tmux.
 Recommended recovery path:
 
 1. Install WSL, for example `wsl --install -d Ubuntu`.
 2. Open the WSL distribution and install Node.js 20+ plus tmux.
 3. On Ubuntu/Debian WSL, install tmux with `sudo apt update && sudo apt install -y tmux`.
-4. Re-run `openforge doctor` inside WSL and confirm `terminal native_tmux`.
-5. Re-run `openforge start` inside WSL for terminal-enabled browser sessions.
+4. Re-run `forgebadger doctor` inside WSL and confirm `terminal native_tmux`.
+5. Re-run `forgebadger start` inside WSL for terminal-enabled browser sessions.
 
-For Unix-like hosts where `openforge doctor` reports `terminal tmux_missing`,
-install tmux with the platform package manager, then re-run `openforge doctor`
+For Unix-like hosts where `forgebadger doctor` reports `terminal tmux_missing`,
+install tmux with the platform package manager, then re-run `forgebadger doctor`
 before launching terminal sessions. Examples: `sudo apt install tmux` on
 Ubuntu/Debian or `brew install tmux` on macOS.
 
@@ -145,7 +145,7 @@ On startup, Gateway must:
 
 ## 7. Manual tmux Inspection
 
-List OpenForge sessions:
+List ForgeBadger sessions:
 
 ```bash
 tmux list-sessions | grep '^of-'
@@ -183,12 +183,12 @@ If Gate A fails:
 
 ## 9. CLI Project Bootstrap
 
-The MVP-5 `openforge init` prototype can generate OpenForge project config
+The MVP-5 `forgebadger init` prototype can generate ForgeBadger project config
 without opening the Web console:
 
 ```bash
-pnpm openforge -- init --path /path/to/project --dry-run
-pnpm openforge -- init --path /path/to/project --template-id builtin-claude-code
+pnpm forgebadger -- init --path /path/to/project --dry-run
+pnpm forgebadger -- init --path /path/to/project --template-id builtin-claude-code
 ```
 
 Dry-run returns a JSON envelope with generated file paths, hashes, and detected

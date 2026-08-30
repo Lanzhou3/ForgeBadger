@@ -1,7 +1,5 @@
 import type { Express } from "express";
 
-import { loadEnv } from "../config/env.js";
-
 import type { ServerDeps } from "../server.js";
 import { createHealthRoutes } from "./health.js";
 import { createDependencyRoutes } from "./dependencies.js";
@@ -46,19 +44,15 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     ...(deps.llmFetch ? { llmFetch: deps.llmFetch } : {})
   };
   app.use("/api/v1/health", createHealthRoutes());
-  // Guarded internal API for the deepseek-harness openforge-bridge plugin:
+  // Guarded internal API for the deepseek-harness forgebadger-bridge plugin:
   // mounted only when its service token is configured.
   if (deps.copilotBridgeToken && deps.portfolioApi) {
-    const env = loadEnv();
     app.use("/api/internal/v1/copilot-bridge", createCopilotBridgeRoutes({
       db: deps.db,
       sessionManager: deps.sessionManager,
       portfolioApi: deps.portfolioApi,
       bridgeToken: deps.copilotBridgeToken,
-      dispatchConfirm: {
-        timeoutMs: env.OPENFORGE_DISPATCH_CONFIRM_TIMEOUT_MS,
-        intervalMs: env.OPENFORGE_DISPATCH_CONFIRM_INTERVAL_MS
-      },
+      ...(deps.dispatchConfirm ? { dispatchConfirm: deps.dispatchConfirm } : {}),
       launchSessionRuntime: async (userId, sessionId) => {
         const { startSessionRuntime } = await import("../services/session-runtime.js");
         try {
@@ -83,7 +77,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     "/api/v1/auth",
     createAuthRouter(new UserRepository(deps.db), deps.jwtSecret, {
       db: deps.db,
-      registrationMode: loadEnv().OPENFORGE_REGISTRATION
+      ...(deps.registrationMode ? { registrationMode: deps.registrationMode } : {})
     })
   );
   app.use("/api/v1/admin/users", createAdminUserRoutes(deps.db));

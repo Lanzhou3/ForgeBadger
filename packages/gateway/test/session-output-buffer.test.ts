@@ -151,7 +151,7 @@ function minimalLaunchPlan(): LaunchPlan {
     command: "bash",
     args: [],
     cwd: "/tmp",
-    env: { OPENFORGE_SESSION_ID: "session_1" },
+    env: { FORGEBADGER_SESSION_ID: "session_1" },
     secretEnvNames: [],
     credentialMode: "host_environment"
   };

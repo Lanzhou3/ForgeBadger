@@ -34,8 +34,8 @@ export async function prepareWebRuntime(options: PrepareWebRuntimeOptions): Prom
 
 export async function writeWebRuntimeConfig(options: WriteWebRuntimeConfigOptions): Promise<string> {
   await mkdir(options.webPublicDir, { recursive: true });
-  const filePath = path.join(options.webPublicDir, "openforge-runtime.js");
-  const content = `window.__OPENFORGE_RUNTIME__ = ${JSON.stringify({
+  const filePath = path.join(options.webPublicDir, "forgebadger-runtime.js");
+  const content = `window.__FORGEBADGER_RUNTIME__ = ${JSON.stringify({
     gatewayBaseUrl: options.gatewayBaseUrl
   })};\n`;
   await writeFile(filePath, content, { mode: 0o644 });

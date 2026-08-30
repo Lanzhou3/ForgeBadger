@@ -40,8 +40,8 @@ async function startStub(reply: StubReply): Promise<{ url: string; requests: Rec
         method: req.method ?? "",
         url: req.url ?? "",
         ...(req.headers.authorization !== undefined ? { authorization: req.headers.authorization } : {}),
-        ...(req.headers["x-openforge-user-id"] !== undefined
-          ? { userId: String(req.headers["x-openforge-user-id"]) } : {}),
+        ...(req.headers["x-forgebadger-user-id"] !== undefined
+          ? { userId: String(req.headers["x-forgebadger-user-id"]) } : {}),
         body: Buffer.concat(chunks).toString("utf8"),
       });
       if (reply.hang === true) return;

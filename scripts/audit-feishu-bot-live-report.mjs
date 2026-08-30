@@ -117,7 +117,7 @@ function containsSecretLikeContent(text) {
     /\bsk-[A-Za-z0-9._-]+/iu,
     /\bapp[_-]?secret\s*[:=]\s*(?!\[REDACTED\])\S+/iu,
     /\b(?:FEISHU|LARK)_APP_SECRET\s*[:=]/iu,
-    /\bOPENFORGE_TOKEN\s*[:=]/iu
+    /\b(?:FORGEBADGER|OPENFORGE)_TOKEN\s*[:=]/iu
   ].some((pattern) => pattern.test(text));
 }
 

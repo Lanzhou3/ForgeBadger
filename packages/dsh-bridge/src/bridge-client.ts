@@ -3,7 +3,7 @@
  *
  * Contract (implemented by the Gateway, do not deviate):
  * - Base: `{gatewayUrl}/api/internal/v1/copilot-bridge`
- * - Headers: `Authorization: Bearer <token>`, `X-OpenForge-User-Id: <userId>`
+ * - Headers: `Authorization: Bearer <token>`, `X-ForgeBadger-User-Id: <userId>`
  * - Envelope: `{ code: 0, data, message }` on success, `{ code: 1, message, details }` on error
  *
  * @module
@@ -335,7 +335,7 @@ export class BridgeClient {
         method: options.method ?? "GET",
         headers: {
           authorization: `Bearer ${this.token}`,
-          "x-openforge-user-id": this.userId,
+          "x-forgebadger-user-id": this.userId,
           ...(options.body === undefined ? {} : { "content-type": "application/json" }),
         },
         ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),

@@ -191,7 +191,7 @@ export function Sidebar({
   const BrandHeader = (
     <div className="flex items-center gap-2.5 px-3 pb-3 select-none">
       <BrandMark />
-      <div className="min-w-0 text-[15px] font-semibold tracking-tight">OpenForge</div>
+      <div className="min-w-0 text-[15px] font-semibold tracking-tight">ForgeBadger</div>
     </div>
   );
 
@@ -242,7 +242,7 @@ export function Sidebar({
           </SheetTrigger>
           <SheetContent side="left" className="w-[232px] p-0">
             <div className="flex h-full flex-col py-3">
-              <SheetTitle className="sr-only">OpenForge navigation</SheetTitle>
+              <SheetTitle className="sr-only">ForgeBadger navigation</SheetTitle>
               {BrandHeader}
               <NavLinks onNavigate={() => setOpen(false)} />
               {UserSection}

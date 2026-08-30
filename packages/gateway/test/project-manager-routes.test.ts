@@ -43,8 +43,8 @@ describe("project-manager routes", () => {
     owner = users.create("pm-route-owner@example.com", "hash");
     other = users.create("pm-route-other@example.com", "hash");
     projectId = new ProjectRepository(db, owner.id).create({
-      name: "OpenForge",
-      path: "/tmp/openforge-route-pm",
+      name: "ForgeBadger",
+      path: "/tmp/forgebadger-route-pm",
       aiTool: "claude"
     }).id;
     token = signJwt({ userId: owner.id, email: owner.email }, secret);
@@ -195,20 +195,20 @@ describe("project-manager routes", () => {
       projectId,
       name: "Run task from work item",
       aiTool: "claude",
-      workingDir: "/tmp/openforge-route-pm",
+      workingDir: "/tmp/forgebadger-route-pm",
       credentialMode: "host_environment"
     });
     sessionRepo.update(session.id, { status: "running", tmuxSession: "of-task-packet" });
     const otherProjectId = new ProjectRepository(db, owner.id).create({
       name: "Other project",
-      path: "/tmp/openforge-other-task-packet",
+      path: "/tmp/forgebadger-other-task-packet",
       aiTool: "claude"
     }).id;
     const crossProjectSession = sessionRepo.create({
       projectId: otherProjectId,
       name: "Wrong project",
       aiTool: "claude",
-      workingDir: "/tmp/openforge-other-task-packet",
+      workingDir: "/tmp/forgebadger-other-task-packet",
       credentialMode: "host_environment"
     });
 
@@ -581,7 +581,7 @@ describe("project-manager routes", () => {
     const created = repo.createWorkItem(projectId, {
       title: "Redacted route item",
       details: {
-        rawTerminalOutput: "OPENFORGE_ATTACH_TOKEN=route-attach-secret",
+        rawTerminalOutput: "FORGEBADGER_ATTACH_TOKEN=route-attach-secret",
         providerCredential: providerSecret
       }
     });

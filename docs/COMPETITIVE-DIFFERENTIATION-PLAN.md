@@ -1,4 +1,4 @@
-# OpenForge Competitive Differentiation Plan
+# ForgeBadger Competitive Differentiation Plan
 
 > Date: 2026-06-13
 > Status: v1.6 planning candidate. This plan does not clear v1.5 external
@@ -6,7 +6,7 @@
 
 ## PM Verdict
 
-OpenForge has product value, but not as another AI editor. The stronger wedge is
+ForgeBadger has product value, but not as another AI editor. The stronger wedge is
 an **AI CLI operations cockpit** for developers and small teams that already use
 Claude Code, Codex, OpenCode, or similar terminal agents and need reliable
 browser control, resumable local sessions, auditable evidence, and lightweight
@@ -20,18 +20,18 @@ The differentiated promise should be:
 
 ## Competitive Baseline
 
-| Product | Public pattern | Lesson for OpenForge |
+| Product | Public pattern | Lesson for ForgeBadger |
 |---------|----------------|----------------------|
-| [GitHub Copilot cloud agent](https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent) | Delegates repository work to a background agent that researches, plans, changes a branch, and can create pull requests. | Users want task delegation and reviewable outcomes, not terminal plumbing. OpenForge should add a task packet/work queue on top of local sessions. |
+| [GitHub Copilot cloud agent](https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent) | Delegates repository work to a background agent that researches, plans, changes a branch, and can create pull requests. | Users want task delegation and reviewable outcomes, not terminal plumbing. ForgeBadger should add a task packet/work queue on top of local sessions. |
 | [OpenAI Codex](https://developers.openai.com/codex/) | Positions as one coding agent across app, IDE, CLI, web, GitHub, Slack, and Linear surfaces. | Do not compete on model quality or editor surface. Compete as the local-first control plane that can supervise multiple existing CLI agents. |
-| [Claude Code](https://code.claude.com/docs/en/overview) | Terminal-native agent that edits files, runs commands, uses git, integrates MCP, and supports repeatable workflows. | Treat Claude Code-style CLIs as first-class runtimes. OpenForge should inject context, monitor readiness, and preserve sessions instead of replacing the CLI. |
-| [Claude Code subagents](https://code.claude.com/docs/en/sub-agents) | Specialized agents run in their own contexts for repeated task patterns and parallel work. | Starter packs should map OpenForge agents/templates/skills to concrete task types such as review, bugfix, docs sync, and trial evidence. |
-| [Replit Agent](https://docs.replit.com/references/agent/overview) | Converts plain-language ideas into apps, sets up projects, checks work, fixes problems, and guides publishing. | OpenForge needs a first-value flow, not a settings maze: import/create project, verify runtime, start a session, and show the next action. |
+| [Claude Code](https://code.claude.com/docs/en/overview) | Terminal-native agent that edits files, runs commands, uses git, integrates MCP, and supports repeatable workflows. | Treat Claude Code-style CLIs as first-class runtimes. ForgeBadger should inject context, monitor readiness, and preserve sessions instead of replacing the CLI. |
+| [Claude Code subagents](https://code.claude.com/docs/en/sub-agents) | Specialized agents run in their own contexts for repeated task patterns and parallel work. | Starter packs should map ForgeBadger agents/templates/skills to concrete task types such as review, bugfix, docs sync, and trial evidence. |
+| [Replit Agent](https://docs.replit.com/references/agent/overview) | Converts plain-language ideas into apps, sets up projects, checks work, fixes problems, and guides publishing. | ForgeBadger needs a first-value flow, not a settings maze: import/create project, verify runtime, start a session, and show the next action. |
 | [Lark Node SDK long connection](https://github.com/larksuite/node-sdk) | Long connection mode lets local development receive event callbacks without public ingress during testing. | Feishu should use bot long connection as the primary collaboration path. Public webhook callback remains optional compatibility evidence, not a product blocker. |
 
 ## Differentiation Thesis
 
-OpenForge should avoid becoming a general IDE or a hosted autonomous developer.
+ForgeBadger should avoid becoming a general IDE or a hosted autonomous developer.
 The fast path is to own the layer between AI CLIs and the team:
 
 1. **Local-first runtime control:** tmux-backed, browser-accessible, recoverable
@@ -113,7 +113,7 @@ Goal: add a team entrypoint without requiring a public callback URL.
 Deliverables:
 
 - Feishu bot long-connection receive path for bounded commands such as
-  `/openforge status`, `/openforge sessions`, and `/openforge task <id>`.
+  `/forgebadger status`, `/forgebadger sessions`, and `/forgebadger task <id>`.
 - Official Feishu/Lark SDK live smoke command:
   `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output
   <report.json>`.
@@ -134,7 +134,7 @@ Success metrics:
 
 ### Phase 42: Starter Packs And Distribution Loop
 
-Goal: make OpenForge feel useful immediately for repeatable AI development work.
+Goal: make ForgeBadger feel useful immediately for repeatable AI development work.
 
 Deliverables:
 
@@ -153,7 +153,7 @@ Success metrics:
 
 ## What To Avoid
 
-- Do not position OpenForge as a better Cursor, Copilot, Codex, or Claude Code.
+- Do not position ForgeBadger as a better Cursor, Copilot, Codex, or Claude Code.
 - Do not add hosted cloud workers before v1.5 first-user evidence closes or a
   separate remote-execution milestone is approved.
 - Do not allow Feishu free-form terminal input.
@@ -164,7 +164,7 @@ Success metrics:
 ## Fastest Landing Order
 
 1. Ship Phase 38 first because activation is the biggest adoption leak.
-2. Ship Phase 39 second because task packets convert OpenForge from a session
+2. Ship Phase 39 second because task packets convert ForgeBadger from a session
    console into a work system.
 3. Ship Phase 40 third because reviewable evidence is the trust moat.
 4. Ship Phase 41 when real Feishu bot access is available.

@@ -19,8 +19,8 @@ import { UserRepository } from "../src/db/repositories/user-repository.js";
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -129,7 +129,7 @@ describe("security hardening", () => {
     const registerData = await registerRes.json();
     const token = registerData.data.token;
 
-    const tmpDir = await mkdtemp(path.join(tmpdir(), "openforge-sql-"));
+    const tmpDir = await mkdtemp(path.join(tmpdir(), "forgebadger-sql-"));
     const res = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
       headers: {
@@ -448,7 +448,7 @@ describe("security hardening", () => {
     const registerData = await registerRes.json();
     const token = registerData.data.token;
 
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-model-key-session-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-model-key-session-"));
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
       headers: {
@@ -588,7 +588,7 @@ describe("security hardening", () => {
     const otherData = await otherRes.json();
     const otherToken = otherData.data.token;
 
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-cross-model-session-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-cross-model-session-"));
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
       headers: {
@@ -634,7 +634,7 @@ describe("security hardening", () => {
     const registerData = await registerRes.json();
     const token = registerData.data.token;
 
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-connect-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-connect-"));
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
       headers: {
@@ -681,8 +681,8 @@ describe("security hardening", () => {
     const permissionHook = localSettings.hooks.PermissionRequest[0].hooks[0];
     assert.equal(permissionHook.type, "http");
     assert.match(permissionHook.url, /\/api\/v1\/session-hooks\/claude-notification\//);
-    assert.equal(permissionHook.headers["x-openforge-session-token"], "$OPENFORGE_ATTACH_TOKEN");
-    assert.deepEqual(permissionHook.allowedEnvVars, ["OPENFORGE_SESSION_ID", "OPENFORGE_ATTACH_TOKEN"]);
+    assert.equal(permissionHook.headers["x-forgebadger-session-token"], "$FORGEBADGER_ATTACH_TOKEN");
+    assert.deepEqual(permissionHook.allowedEnvVars, ["FORGEBADGER_SESSION_ID", "FORGEBADGER_ATTACH_TOKEN"]);
   });
 
   it("deletes only the project record and stops running project sessions", async () => {
@@ -698,7 +698,7 @@ describe("security hardening", () => {
     const registerData = await registerRes.json();
     const token = registerData.data.token;
 
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-delete-project-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-delete-project-"));
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
       headers: {
@@ -763,7 +763,7 @@ describe("security hardening", () => {
     const registerData = await registerRes.json();
     const token = registerData.data.token;
 
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-delete-session-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-delete-session-"));
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
       headers: {
@@ -823,7 +823,7 @@ describe("security hardening", () => {
     const registerData = await registerRes.json();
     const token = registerData.data.token;
 
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-stopped-connect-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-stopped-connect-"));
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
       headers: {
@@ -881,7 +881,7 @@ describe("security hardening", () => {
     const registerData = await registerRes.json();
     const token = registerData.data.token;
 
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-restart-hooks-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-restart-hooks-"));
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
       headers: {
@@ -1034,7 +1034,7 @@ describe("security hardening", () => {
     );
     assert.equal(builtinMutationRes.status, 409);
 
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-template-apply-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-template-apply-"));
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
       headers: {
@@ -1083,7 +1083,7 @@ describe("security hardening", () => {
     const registerData = await registerRes.json();
     const token = registerData.data.token;
 
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-injection-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-injection-"));
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
       headers: {
@@ -1160,7 +1160,7 @@ describe("security hardening", () => {
     });
     const registerData = await registerRes.json();
     const token = registerData.data.token;
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-template-sync-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-template-sync-"));
     const builtinsRes = await fetch(`${baseUrl}/api/v1/templates/builtins`, {
       headers: { Authorization: `Bearer ${token}` }
     });

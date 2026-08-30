@@ -127,7 +127,7 @@ export default function SkillInstallPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">{t("skills.sourceCatalog")}</CardTitle>
           </CardHeader>
@@ -143,7 +143,7 @@ export default function SkillInstallPage() {
                     onClick={() => selectSource(source.id)}
                     style={{ animationDelay: `${index * 40}ms` }}
                     className={[
-                      "rounded-md border p-4 text-left transition-all duration-200 of-animate-in",
+                      "rounded-md border p-4 text-left transition-all duration-200 forgebadger-animate-in",
                       sourceId === source.id
                         ? "border-brand/50 bg-brand/5"
                         : "border-border bg-background hover:-translate-y-0.5 hover:border-brand/30 hover:bg-muted/40",
@@ -217,7 +217,7 @@ export default function SkillInstallPage() {
           </CardContent>
         </Card>
 
-        <Card className="of-animate-in">
+        <Card className="forgebadger-animate-in">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">{t("skills.installSkill")}</CardTitle>
           </CardHeader>

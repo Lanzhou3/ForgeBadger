@@ -21,14 +21,14 @@ const REQUIRED_FIELDS = [
   { label: "Result", disallow: /pass\s*\/\s*pass with caveats\s*\/\s*blocked/i },
   { label: "Affected surface", disallow: /onboarding\s*\/\s*dependency\s*\/\s*provider/i },
   { label: "Startup path", disallow: /npm\/CLI\s*\/\s*source fallback/i },
-  { label: "OpenForge version or commit" },
+  { label: "ForgeBadger version or commit" },
   { label: "Operating system" },
   { label: "Shell" },
   { label: "Browser and version" },
   { label: "node --version" },
   { label: "tmux -V" },
   { label: "claude --version" },
-  { label: "openforge doctor summary" },
+  { label: "forgebadger doctor summary" },
   { label: "Diagnostics export attached", disallow: /yes\s*\/\s*no/i },
   { label: "Export path used", disallow: /Settings\s*->\s*Export diagnostics JSON\s*\/\s*unavailable/i },
   { label: "Redaction review completed", requiredValue: /^yes$/i },
@@ -63,8 +63,8 @@ const REQUIRED_FIELDS = [
 const SECRET_PATTERNS = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]+/i,
   /\bsk-[A-Za-z0-9_-]+/i,
-  /\bopenforge\.token\s*=\s*\S+/i,
-  /\bOPENFORGE_(?:MASTER_KEY|JWT_SECRET|ATTACH_TOKEN|API_KEY|TOKEN)\s*=\s*\S+/,
+  /\b(?:forgebadger|openforge)\.token\s*=\s*\S+/i,
+  /\b(?:FORGEBADGER|OPENFORGE)_(?:MASTER_KEY|JWT_SECRET|ATTACH_TOKEN|API_KEY|TOKEN)\s*=\s*\S+/,
   /\b(api[_-]?key|jwt|token|password|private[_-]?key)\s*[:=]\s*\S+/i
 ];
 

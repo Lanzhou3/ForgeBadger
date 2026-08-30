@@ -76,9 +76,9 @@ const baseHeartbeat = { enabled: false, cadenceMinutes: null as number | null };
 
 const baseDshConfig = {
   defaultModelId: "model-1",
-  plugins: { "openforge-bridge": true, "mcp-client": false },
+  plugins: { "forgebadger-bridge": true, "mcp-client": false },
   availablePlugins: [
-    { id: "openforge-bridge", label: "OpenForge Bridge", description: "平台工具" },
+    { id: "forgebadger-bridge", label: "ForgeBadger Bridge", description: "平台工具" },
     { id: "mcp-client", label: "MCP Client", description: "外部工具接入" },
   ],
   runtime: { status: "running" as const },
@@ -206,10 +206,10 @@ describe("CopilotSettingsPage", () => {
 
     await waitFor(() => expect(screen.getByText("运行中")).toBeTruthy());
     expect(screen.getByText("DeepSeek / deepseek-chat")).toBeTruthy();
-    expect(screen.getByText("OpenForge Bridge")).toBeTruthy();
+    expect(screen.getByText("ForgeBadger Bridge")).toBeTruthy();
     expect(screen.getByText("MCP Client")).toBeTruthy();
     expect(
-      screen.getByRole("switch", { name: "OpenForge Bridge" }).getAttribute("data-state")
+      screen.getByRole("switch", { name: "ForgeBadger Bridge" }).getAttribute("data-state")
     ).toBe("checked");
     expect(screen.getByRole("switch", { name: "MCP Client" }).getAttribute("data-state")).toBe(
       "unchecked"
@@ -224,7 +224,7 @@ describe("CopilotSettingsPage", () => {
 
     await waitFor(() =>
       expect(updateDshConfigMock).toHaveBeenCalledWith({
-        plugins: { "openforge-bridge": true, "mcp-client": true },
+        plugins: { "forgebadger-bridge": true, "mcp-client": true },
       })
     );
   });
@@ -235,7 +235,7 @@ describe("CopilotSettingsPage", () => {
     renderPage();
 
     await waitFor(() => expect(screen.getByText("dsh 内核未启用")).toBeTruthy());
-    expect(screen.queryByRole("switch", { name: "OpenForge Bridge" })).toBeNull();
+    expect(screen.queryByRole("switch", { name: "ForgeBadger Bridge" })).toBeNull();
     expect(screen.queryByText("dsh 配置加载失败，请检查 Gateway 服务。")).toBeNull();
     await waitFor(() => expect(screen.getByText("list_projects")).toBeTruthy());
   });

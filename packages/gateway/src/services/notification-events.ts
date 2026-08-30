@@ -2,8 +2,8 @@ import { NotificationRepository, type CreateNotificationInput } from "../db/repo
 import type { Database } from "../db/types.js";
 import type {
   ClaudeNotificationEvent,
-  OpenForgeEvent,
-  OpenForgeEventBus
+  ForgeBadgerEvent,
+  ForgeBadgerEventBus
 } from "./event-bus.js";
 
 type PersistableNotificationEvent = ClaudeNotificationEvent;
@@ -17,11 +17,11 @@ const NOTIFIED_CLI_NOTIFICATION_TYPES = new Set([
 
 export interface NotificationPersistenceOptions {
   db: Database;
-  eventBus: OpenForgeEventBus;
+  eventBus: ForgeBadgerEventBus;
 }
 
 export function attachNotificationPersistence(options: NotificationPersistenceOptions): void {
-  options.eventBus.on("event", (event: OpenForgeEvent) => {
+  options.eventBus.on("event", (event: ForgeBadgerEvent) => {
     const input = notificationInputFromEvent(event);
     if (!input) return;
 
@@ -37,11 +37,11 @@ export function attachNotificationPersistence(options: NotificationPersistenceOp
   });
 }
 
-function isPersistableNotificationEvent(event: OpenForgeEvent): event is PersistableNotificationEvent {
+function isPersistableNotificationEvent(event: ForgeBadgerEvent): event is PersistableNotificationEvent {
   return event.type === "claude_notification";
 }
 
-export function notificationInputFromEvent(event: OpenForgeEvent): CreateNotificationInput | undefined {
+export function notificationInputFromEvent(event: ForgeBadgerEvent): CreateNotificationInput | undefined {
   switch (event.type) {
     case "claude_notification": {
       if (!NOTIFIED_CLI_NOTIFICATION_TYPES.has(event.notificationType)) {

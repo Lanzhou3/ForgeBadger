@@ -1,7 +1,7 @@
 /**
  * Copilot bridge service — the shared seam behind both the Copilot harness
  * session/portfolio tools and the internal HTTP API consumed by the
- * deepseek-harness openforge-bridge plugin. Keeping both callers on these
+ * deepseek-harness forgebadger-bridge plugin. Keeping both callers on these
  * functions prevents the two surfaces from drifting apart.
  *
  * Every function is user-scoped: repositories are constructed per userId and

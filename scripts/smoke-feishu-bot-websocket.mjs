@@ -4,22 +4,32 @@ const DEFAULT_GATEWAY_URL = "http://127.0.0.1:48731";
 const EVENT_SUBSCRIPTION = "im.message.receive_v1";
 
 export function resolveFeishuBotWebSocketSmokeConfig(env = process.env, argv = process.argv.slice(2)) {
+  env = normalizeEnvironment(env);
   const args = parseArgs(argv);
-  const gatewayUrl = nonEmpty(args["gateway-url"]) ?? nonEmpty(env.OPENFORGE_GATEWAY_URL) ?? DEFAULT_GATEWAY_URL;
-  const token = nonEmpty(args.token) ?? nonEmpty(env.OPENFORGE_TOKEN);
-  if (!token) return { ok: false, reason: "OPENFORGE_TOKEN or --token is required" };
+  const gatewayUrl = nonEmpty(args["gateway-url"]) ?? nonEmpty(env.FORGEBADGER_GATEWAY_URL) ?? DEFAULT_GATEWAY_URL;
+  const token = nonEmpty(args.token) ?? nonEmpty(env.FORGEBADGER_TOKEN);
+  if (!token) return { ok: false, reason: "FORGEBADGER_TOKEN or --token is required" };
 
   return {
     ok: true,
     config: {
       gatewayUrl,
       token,
-      chatId: nonEmpty(args["chat-id"]) ?? nonEmpty(env.OPENFORGE_FEISHU_SMOKE_CHAT_ID) ?? "oc_openforge_smoke",
-      feishuUserId: nonEmpty(args["feishu-user-id"]) ?? nonEmpty(env.OPENFORGE_FEISHU_SMOKE_USER_ID) ?? "ou_openforge_smoke",
-      command: nonEmpty(args.command) ?? "/openforge status",
+      chatId: nonEmpty(args["chat-id"]) ?? nonEmpty(env.FORGEBADGER_FEISHU_SMOKE_CHAT_ID) ?? "oc_forgebadger_smoke",
+      feishuUserId: nonEmpty(args["feishu-user-id"]) ?? nonEmpty(env.FORGEBADGER_FEISHU_SMOKE_USER_ID) ?? "ou_forgebadger_smoke",
+      command: nonEmpty(args.command) ?? "/forgebadger status",
       connectionId: nonEmpty(args["connection-id"]) ?? `of-feishu-ws-smoke-${Date.now()}`
     }
   };
+}
+
+function normalizeEnvironment(env) {
+  const normalized = { ...env };
+  for (const [name, value] of Object.entries(env)) {
+    if (!name.startsWith("OPENFORGE_") || value === undefined) continue;
+    normalized[`FORGEBADGER_${name.slice("OPENFORGE_".length)}`] ??= value;
+  }
+  return normalized;
 }
 
 export function buildFeishuBotWebSocketFixtureEvent(input) {
@@ -77,7 +87,7 @@ export async function runFeishuBotWebSocketSmoke(input) {
     name: "receive_route",
     event: buildFeishuBotWebSocketFixtureEvent({
       ...baseEvent,
-      text: input.command ?? "/openforge status",
+      text: input.command ?? "/forgebadger status",
       eventId: `${connectionId}-receive`,
       messageId: `${connectionId}-receive`
     })
@@ -86,7 +96,7 @@ export async function runFeishuBotWebSocketSmoke(input) {
     name: "terminal_input_rejected",
     event: buildFeishuBotWebSocketFixtureEvent({
       ...baseEvent,
-      text: "/openforge terminal session-1 continue",
+      text: "/forgebadger terminal session-1 continue",
       eventId: `${connectionId}-terminal`,
       messageId: `${connectionId}-terminal`
     })

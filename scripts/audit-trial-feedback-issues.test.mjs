@@ -3,15 +3,19 @@ import { describe, it } from "node:test";
 
 import {
   auditTrialFeedbackIssues,
+  DEFAULT_REPOSITORY,
   parseTrialFeedbackIssuesAuditCliArgs
 } from "./audit-trial-feedback-issues.mjs";
 
 describe("trial feedback GitHub issue candidate audit", () => {
+  it("keeps the existing GitHub remote as the default repository", () => {
+    assert.equal(DEFAULT_REPOSITORY, "Lanzhou3/OpenForge");
+  });
   it("skips route tracker issues and reports no completed feedback candidates", async () => {
     const audited = [];
     const result = await auditTrialFeedbackIssues({
       fetchIssues: async () => [
-        buildIssue({ number: 4, title: "Run physical Windows and WSL OpenForge smoke" }),
+        buildIssue({ number: 4, title: "Run physical Windows and WSL ForgeBadger smoke" }),
         buildIssue({ number: 5, title: "Collect first-user Copilot hardening feedback" })
       ],
       auditIssue: async (options) => {

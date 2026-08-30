@@ -4,7 +4,7 @@ import { basename } from "node:path";
 import type { LaunchPlan } from "../adapters/claude.js";
 import { isAdapterId, type AdapterId } from "./adapter-discovery.js";
 import type { TmuxClient } from "./tmux.js";
-import type { OpenForgeEventBus } from "./event-bus.js";
+import type { ForgeBadgerEventBus } from "./event-bus.js";
 import { SessionOutputRing } from "./session-output-buffer.js";
 import type {
   PortfolioSessionInputGate,
@@ -134,7 +134,7 @@ export class InMemorySessionManager {
   constructor(
     private readonly tmux: TmuxClient,
     private readonly recoveryStore: SessionRecoveryStore = new EmptyRecoveryStore(),
-    private readonly eventBus?: OpenForgeEventBus,
+    private readonly eventBus?: ForgeBadgerEventBus,
     options: SessionManagerOptions = {}
   ) {
     this.tmuxPrefix = normalizeTmuxPrefix(options.tmuxPrefix);
@@ -194,7 +194,7 @@ export class InMemorySessionManager {
         args: input.launchPlan.args,
         env: {
           ...input.launchPlan.env,
-          OPENFORGE_ATTACH_TOKEN: session.attachToken,
+          FORGEBADGER_ATTACH_TOKEN: session.attachToken,
           // The Web terminal renders ANSI colors, so a NO_COLOR=1 leaked from
           // the host shell (inherited via the tmux server global environment)
           // must be overridden to empty — CLI TUIs (e.g. Claude Code) then
@@ -262,16 +262,16 @@ export class InMemorySessionManager {
       throw new Error(`tmux session not found: ${input.tmuxName}`);
     }
 
-    // Verify the tmux session belongs to this OpenForge session before adopting
+    // Verify the tmux session belongs to this ForgeBadger session before adopting
     // it, so snapshot/restore cannot attach to a session owned by another
     // session id or a stale attach token (hook auth break).
     if (this.tmux.showEnvironment) {
       const env = await this.tmux.showEnvironment(input.tmuxName);
-      const storedSessionId = env.OPENFORGE_SESSION_ID;
+      const storedSessionId = env.FORGEBADGER_SESSION_ID ?? env.OPENFORGE_SESSION_ID;
       if (storedSessionId && storedSessionId !== input.sessionId) {
-        throw new Error(`tmux session belongs to another OpenForge session: ${storedSessionId}`);
+        throw new Error(`tmux session belongs to another ForgeBadger session: ${storedSessionId}`);
       }
-      const storedToken = env.OPENFORGE_ATTACH_TOKEN;
+      const storedToken = env.FORGEBADGER_ATTACH_TOKEN ?? env.OPENFORGE_ATTACH_TOKEN;
       const requestedToken = input.attachToken ?? "";
       if (storedToken && requestedToken && storedToken !== requestedToken) {
         throw new Error("tmux session attach token mismatch");
@@ -490,7 +490,7 @@ export class InMemorySessionManager {
     this.sessionInputGate?.assertBrowserInputAllowed(session);
   }
 
-  async recoverOpenForgeSessions(input: RecoverSessionsInput): Promise<RecoveryResult> {
+  async recoverForgeBadgerSessions(input: RecoverSessionsInput): Promise<RecoveryResult> {
     const names = await this.tmux.listSessions();
     const indexed = await this.recoveryStore.listSessions();
     const indexedByTmuxName = new Map(indexed.map((session) => [session.tmuxName, session]));
@@ -498,7 +498,7 @@ export class InMemorySessionManager {
     const killedOrphans: string[] = [];
 
     for (const tmuxName of names) {
-      if (!isOpenForgeTmuxName(tmuxName, this.tmuxPrefix)) {
+      if (!isForgeBadgerTmuxName(tmuxName, this.tmuxPrefix)) {
         continue;
       }
 
@@ -592,7 +592,7 @@ function sanitizeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
-function isOpenForgeTmuxName(tmuxName: string, tmuxPrefix: string): boolean {
+function isForgeBadgerTmuxName(tmuxName: string, tmuxPrefix: string): boolean {
   return tmuxName.startsWith(tmuxPrefix);
 }
 
@@ -606,7 +606,7 @@ function fallbackLaunchPlan(cwd: string, sessionId: string): LaunchPlan {
     command: "bash",
     args: [],
     cwd,
-    env: { OPENFORGE_SESSION_ID: sessionId },
+    env: { FORGEBADGER_SESSION_ID: sessionId },
     secretEnvNames: [],
     credentialMode: "host_environment"
   };

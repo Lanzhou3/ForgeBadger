@@ -56,7 +56,7 @@ describe("getDashboardSummary", () => {
   it("reports tenant-owned resources as healthy when configured", async () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("ready@example.com", "hash");
-    const projectRoot = await mkdtemp(path.join(tmpdir(), "openforge-dashboard-"));
+    const projectRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-dashboard-"));
     const project = new ProjectRepository(db, user.id).create({
       name: "Ready",
       path: projectRoot,

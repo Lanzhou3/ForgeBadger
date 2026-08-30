@@ -46,7 +46,8 @@ const CLI_DEPENDENCY_CHECKS: CliDependencyCheck[] = [
   TMUX_DEPENDENCY_CHECK,
   { name: "claude", args: ["--version"], required: false },
   { name: "opencode", args: ["--version"], required: false },
-  { name: "codex", args: ["--version"], required: false }
+  { name: "codex", args: ["--version"], required: false },
+  { name: "kimi", args: ["--version"], required: false }
 ];
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 3000;
@@ -90,7 +91,7 @@ export function describeCliTerminalRuntime(
       persistence: "tmux",
       mode: "wsl_required",
       supported: false,
-      message: "Native Windows terminals require WSL because OpenForge persists sessions with tmux."
+      message: "Native Windows terminals require WSL because ForgeBadger persists sessions with tmux."
     };
   }
 

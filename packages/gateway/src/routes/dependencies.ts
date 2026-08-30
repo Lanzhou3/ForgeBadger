@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import { authenticate } from "../auth/middleware.js";
-import { checkOpenForgeRuntimeDependencies } from "../lib/dependency-check.js";
+import { checkForgeBadgerRuntimeDependencies } from "../lib/dependency-check.js";
 
 export function createDependencyRoutes(): Router {
   const router = Router();
@@ -9,7 +9,7 @@ export function createDependencyRoutes(): Router {
   router.use(authenticate);
 
   router.get("/", async (_req, res) => {
-    const report = await checkOpenForgeRuntimeDependencies();
+    const report = await checkForgeBadgerRuntimeDependencies();
     res.json({
       code: 0,
       data: report,

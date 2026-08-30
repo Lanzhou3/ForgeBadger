@@ -3,7 +3,7 @@ import { WebSocket, WebSocketServer } from "ws";
 
 import { resolveTokenUserId } from "../auth/resolve-token.js";
 import type { Database } from "../db/types.js";
-import type { OpenForgeEventBus, OpenForgeEvent } from "../services/event-bus.js";
+import type { ForgeBadgerEventBus, ForgeBadgerEvent } from "../services/event-bus.js";
 import { extractWsAuthToken } from "./auth.js";
 import { WebSocketConnectionLimits } from "./connection-limits.js";
 
@@ -11,11 +11,11 @@ const EVENTS_HEARTBEAT_INTERVAL_MS = 30_000;
 const EVENTS_HEARTBEAT_TIMEOUT_MS = 90_000;
 const DEFAULT_EVENTS_WS_MAX_CONNECTIONS = 300;
 const DEFAULT_EVENTS_WS_MAX_CONNECTIONS_PER_USER = 10;
-const EVENTS_WS_AUTH_PROTOCOL = "openforge-events";
+const EVENTS_WS_AUTH_PROTOCOLS = ["forgebadger-events", "openforge-events"] as const;
 
 export interface EventsWebSocketOptions {
   server: Server;
-  eventBus: OpenForgeEventBus;
+  eventBus: ForgeBadgerEventBus;
   jwtSecret: string;
   db: Database;
   maxConnections?: number;
@@ -45,7 +45,7 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
       return;
     }
 
-    const token = extractWsAuthToken(request.headers, EVENTS_WS_AUTH_PROTOCOL);
+    const token = extractWsAuthToken(request.headers, EVENTS_WS_AUTH_PROTOCOLS);
     if (!token) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
@@ -118,7 +118,7 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
     clearInterval(heartbeatInterval);
   });
 
-  options.eventBus.on("event", (event: OpenForgeEvent) => {
+  options.eventBus.on("event", (event: ForgeBadgerEvent) => {
     const payload = JSON.stringify({ type: event.type, payload: buildPayload(event) });
     for (const [ws, client] of clients) {
       if (ws.readyState === WebSocket.OPEN && client.userId === event.userId) {
@@ -128,7 +128,7 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
   });
 }
 
-function buildPayload(event: OpenForgeEvent): Record<string, unknown> {
+function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
   const notificationMeta = buildNotificationMeta(event);
   switch (event.type) {
     case "session_status_changed":
@@ -210,7 +210,7 @@ function buildPayload(event: OpenForgeEvent): Record<string, unknown> {
   }
 }
 
-function buildNotificationMeta(event: OpenForgeEvent): Record<string, unknown> {
+function buildNotificationMeta(event: ForgeBadgerEvent): Record<string, unknown> {
   if (event.type === "activity_created" || event.type === "portfolio_projection_updated" || event.type === "copilot_run_updated" || !event.notificationId) {
     return {};
   }

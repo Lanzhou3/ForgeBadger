@@ -1,4 +1,4 @@
-# OpenForge MVP 开发计划
+# ForgeBadger MVP 开发计划
 
 > 版本：v1.1 | 2026-04-24
 > 修订人：朱雀 🛠️（基于三方评审结论 + 盘古拍板）
@@ -18,10 +18,10 @@
 > 2026-05-10 补充：Phase B Codex Background Tasks 已作为 observable control-plane prototype 接受 beta feedback，Web 仍不开放 prompt/turn 输入，`/turn` 默认 403 且仅作为 feature-flag prototype。Provider SSOT 与 Codex subscription boundary 已完成回归，Windows/tmux/WSL 指引已落地；真实 Windows/WSL 主机 smoke 仍为平台 caveat。下一阶段 Phase C 聚焦首次试用、依赖失败态、诊断反馈、CI/release gate 自动化和平台验收闭环，不扩大 Codex turn 输入范围。
 > 2026-05-11 补充：SSH/remote execution 独立架构规格已确认，见 `docs/superpowers/specs/2026-05-11-ssh-remote-execution-design.md`；该方向仍不属于当前 beta release gate 实现范围，当前状态为待拆解实施计划，后续应在单独 feature slice 中开发。
 > 2026-05-11 补充：Platform AI Copilot 第一版独立架构规格已确认，见 `docs/superpowers/specs/2026-05-11-platform-ai-copilot-design.md`；实施计划见 `docs/superpowers/plans/2026-05-11-platform-ai-copilot.md`。第一版起点为 provider-backed、read-heavy、approval-gated 的平台操作助手；后续按用户反馈扩展到 Chat-style Copilot、全局抽屉、显式记忆、项目/会话/配置/Agent/Skill/Template/模型配置 proposal tools、运行中会话终端快照、approval-gated terminal input，以及批准后基于最新终端输出继续对话。OpenClaw 参考点已吸收到 provider seam、memory recall、session visibility、inline tool activity 和 approval canonical payload 约束中。当前已完成 provider-backed text runs、Web Copilot 聊天页面和全局入口、对话和消息管理、Markdown/多气泡/流式 delta 渲染、read-only tool registry（含项目、会话、终端快照、Provider SSOT、诊断、记忆等状态）、approval-gated pending actions、run/tool/pending-action lifecycle 与 cancel 系统审计、provider HTTP failure 分类与本地化提示、in-flight model cancel/timeout 控制、waiting-for-approval Web approval 控件、prompt persistence/provider-request redaction、tool-output size/sensitive-output fail-closed safety、显式 tenant-scoped Copilot memory（SQLite FTS、memory_search/memory_get/propose_memory_write）、source-aware active recall、per-user run concurrency guard 和 diagnostics capability/count 元数据；仍不开放 raw shell/host exec、直接文件写入、未批准终端输入、Codex app-server `/turn` UI 或无人值守自主开发循环。
-> 2026-05-13 补充：Provider Catalog 已切换为 models.dev / OpenCode registry 运行时来源，不再混入 OpenForge 内置 Provider fallback；`catalogId` 创建只接受当前外部目录中的条目，目录刷新失败时返回空目录并保留自定义 Provider 手动配置入口。OpenCode apply 会持久化并使用 models.dev 提供的 provider npm package，Codex 仍保持 subscription-managed，不进入 Provider URL/API key 配置流。
+> 2026-05-13 补充：Provider Catalog 已切换为 models.dev / OpenCode registry 运行时来源，不再混入 ForgeBadger 内置 Provider fallback；`catalogId` 创建只接受当前外部目录中的条目，目录刷新失败时返回空目录并保留自定义 Provider 手动配置入口。OpenCode apply 会持久化并使用 models.dev 提供的 provider npm package，Codex 仍保持 subscription-managed，不进入 Provider URL/API key 配置流。
 > 2026-05-15 补充：Models tab 按 cc-switch 风格改造为 Claude Code 优先的 Provider preset 目录：目录项覆盖 Anthropic API、Kimi、DeepSeek、Qwen、z.ai、OpenRouter 和 Ollama，并自带 endpoint/env/default models，用户主流程只需选择服务商并保存 API Key；Gateway provider/apply 契约支持 `claude` 与 `opencode`，Claude preview/apply 写入 `.claude/settings.local.json` 和 `ANTHROPIC_DEFAULT_*_MODEL` 默认模型环境变量，OpenCode 仍写入 `opencode.json`，Codex 继续保持 subscription-managed 且不进入 Provider API Key 配置流。Models 页面同时保留服务商搜索/有限高滚动，Copilot Provider/Model 选择在搜索过滤时保留当前选择，避免隐形提交。
 > 2026-05-17 补充：Feishu Project Manager Copilot 规格与实施计划已确认，已完成 Feishu CLI 只读发现、`/api/v1/integrations/feishu/status`、Settings 页飞书集成诊断卡片、诊断导出中的安全飞书能力摘要、Feishu 集成配置/用户映射持久化、租户隔离和审计记录，以及审批受控的 outbound message/doc/task action。当前仍不开放飞书入站控制、未批准终端输入、模型生成原始 Feishu CLI 命令或无人值守开发循环；后续按计划进入飞书入站命令桥和项目管理者状态。
-> 2026-06-13 补充：竞品对标后，OpenForge 后续差异化不应定位为另一个 AI IDE，而应定位为 local-first AI CLI operations cockpit：围绕本地 tmux 会话可恢复、多 CLI/Agent 治理、任务包到会话的连续性、可审计 handoff/evidence pack，以及飞书 bot 长连接协作形成差异化。v1.6 候选排期见 `docs/COMPETITIVE-DIFFERENTIATION-PLAN.md` 和 `.planning/ROADMAP.md` Phase 38-42；除非用户明确调整优先级，仍优先完成 v1.5 真实首批用户反馈包与外部证据 gate 闭环。
+> 2026-06-13 补充：竞品对标后，ForgeBadger 后续差异化不应定位为另一个 AI IDE，而应定位为 local-first AI CLI operations cockpit：围绕本地 tmux 会话可恢复、多 CLI/Agent 治理、任务包到会话的连续性、可审计 handoff/evidence pack，以及飞书 bot 长连接协作形成差异化。v1.6 候选排期见 `docs/COMPETITIVE-DIFFERENTIATION-PLAN.md` 和 `.planning/ROADMAP.md` Phase 38-42；除非用户明确调整优先级，仍优先完成 v1.5 真实首批用户反馈包与外部证据 gate 闭环。
 > 2026-06-14 补充：用户已明确优先推进产品差异化迭代。v1.6 Phase 38/39/40/42 已完成本地 first-value activation、task packet/work queue、session handoff/evidence pack 和 starter packs 分发闭环；Phase 41 已补官方 Feishu/Lark SDK live smoke 入口 `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output <report.json>`、报告审计入口 `pnpm evidence:feishu-bot-live-audit -- <report.json>` 和 Markdown maintainer report 入口 `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output <report.md>`，但仍需真实飞书 bot 长连接证据，`FEISHU-BOT-WS` 保持 Caveat，其他外部证据 gate 不变。
 
 ---
@@ -245,7 +245,7 @@ Plan B: 降级方案
 | 维度 | 方案 |
 |------|------|
 | 库 | `better-sqlite3` + `drizzle-orm` + `drizzle-kit` |
-| 数据库 | SQLite WAL 模式，路径 `~/.openforge/openforge.db` |
+| 数据库 | SQLite WAL 模式，路径 `~/.forgebadger/forgebadger.db` |
 | 迁移 | `drizzle-kit generate` → `drizzle-kit migrate` |
 | 表结构 | 按 TECH-ARCHITECTURE.md 第二章完整表定义 |
 
@@ -319,7 +319,7 @@ Plan B: 降级方案
 
 #### 技术要点
 
-1. **API Key 加密存储** — AES-256-GCM 加密，密钥从 `OPENFORGE_MASTER_KEY` 环境变量读取
+1. **API Key 加密存储** — AES-256-GCM 加密，密钥从 `FORGEBADGER_MASTER_KEY` 环境变量读取
 2. **环境变量注入** — 启动 CLI 进程时将解密的 API Key 作为环境变量注入（如 `ANTHROPIC_API_KEY`）
 3. **模型切换** — 运行时切换模型，无需重启会话
 4. **安全红线** — 不在日志、数据库、配置文件中存储明文 Key
@@ -328,7 +328,7 @@ Plan B: 降级方案
 
 | 维度 | 方案 |
 |------|------|
-| 加密 | `crypto` 模块 AES-256-GCM，密钥 = `OPENFORGE_MASTER_KEY`（推荐 64 字符 hex），随机 IV + Auth Tag |
+| 加密 | `crypto` 模块 AES-256-GCM，密钥 = `FORGEBADGER_MASTER_KEY`（推荐 64 字符 hex），随机 IV + Auth Tag |
 | 数据表 | `models`、`api_keys` |
 | API | `GET/POST /api/v1/models`、`PUT/DELETE /api/v1/models/:id`、`POST /api/v1/api-keys`、`POST /api/v1/models/:id/set-default` |
 | 前端 | `/models`（列表）、`/models/new`（添加） |
@@ -701,7 +701,7 @@ Plan B: 降级方案
 | **前端加载** | 首屏加载 < 3 秒（localhost） |
 | **数据库** | WAL 模式，零手动维护 |
 | **安全** | API Key 加密存储，密码 bcrypt，JWT 鉴权 |
-| **部署** | `openforge start` 一键启动 |
+| **部署** | `forgebadger start` 一键启动 |
 
 ---
 
@@ -720,12 +720,12 @@ Plan B: 降级方案
 
 | 变量 | 必需 | 默认值 | 说明 |
 |------|------|--------|------|
-| `OPENFORGE_PORT` | ❌ | 3000 | Gateway 端口 |
-| `OPENFORGE_DB_PATH` | ❌ | `~/.openforge/openforge.db` | SQLite 路径 |
-| `OPENFORGE_MASTER_KEY` | ✅ | — | AES 加密密钥（推荐 64 字符 hex） |
-| `OPENFORGE_JWT_SECRET` | ✅ | — | JWT 签名密钥 |
-| `OPENFORGE_LOG_LEVEL` | ❌ | info | 日志级别 |
-| `OPENFORGE_TMUX_PREFIX` | ❌ | of- | tmux 前缀 |
+| `FORGEBADGER_PORT` | ❌ | 3000 | Gateway 端口 |
+| `FORGEBADGER_DB_PATH` | ❌ | `~/.forgebadger/forgebadger.db` | SQLite 路径 |
+| `FORGEBADGER_MASTER_KEY` | ✅ | — | AES 加密密钥（推荐 64 字符 hex） |
+| `FORGEBADGER_JWT_SECRET` | ✅ | — | JWT 签名密钥 |
+| `FORGEBADGER_LOG_LEVEL` | ❌ | info | 日志级别 |
+| `FORGEBADGER_TMUX_PREFIX` | ❌ | of- | tmux 前缀 |
 
 ### 11.3 P0 功能完整清单
 

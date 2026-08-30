@@ -5,7 +5,7 @@ import { ProjectRepository } from "../db/repositories/project-repository.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
 import type { Database } from "../db/types.js";
 import { recordActivity } from "./activity-events.js";
-import type { OpenForgeEventBus } from "./event-bus.js";
+import type { ForgeBadgerEventBus } from "./event-bus.js";
 import { buildConfigSyncSummary, buildProjectConfigRenderPlan } from "./project-config-render.js";
 
 export const MAX_SYNC_PROJECTS = 20;
@@ -58,7 +58,7 @@ export interface TemplateSyncOptions {
   projectIds?: string[];
   credentialMode?: CredentialMode;
   decisions?: TemplateSyncDecisions;
-  eventBus?: OpenForgeEventBus;
+  eventBus?: ForgeBadgerEventBus;
   ipAddress?: string;
 }
 

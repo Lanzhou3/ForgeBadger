@@ -1,10 +1,10 @@
-export interface OpenForgeRuntimeConfig {
+export interface ForgeBadgerRuntimeConfig {
   gatewayBaseUrl?: string;
 }
 
 declare global {
   interface Window {
-    __OPENFORGE_RUNTIME__?: OpenForgeRuntimeConfig;
+    __FORGEBADGER_RUNTIME__?: ForgeBadgerRuntimeConfig;
   }
 }
 
@@ -17,7 +17,7 @@ function nonEmpty(value: string | undefined): string | undefined {
 
 export function getGatewayBaseUrl(): string {
   if (typeof window !== "undefined") {
-    const runtimeGatewayBaseUrl = nonEmpty(window.__OPENFORGE_RUNTIME__?.gatewayBaseUrl);
+    const runtimeGatewayBaseUrl = nonEmpty(window.__FORGEBADGER_RUNTIME__?.gatewayBaseUrl);
     if (runtimeGatewayBaseUrl) {
       return runtimeGatewayBaseUrl;
     }

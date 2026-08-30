@@ -19,7 +19,7 @@ describe("detectConfigConflicts", () => {
       templateId: "claude-default",
       credentialMode: "host_environment",
       dryRun: true,
-      variables: { projectName: "OpenForge" },
+      variables: { projectName: "ForgeBadger" },
       templateFiles: [
         {
           id: "template_file_1",
@@ -38,14 +38,14 @@ describe("detectConfigConflicts", () => {
   it("reports exists when existing content matches incoming content", async () => {
     const root = await projectRoot();
     await mkdir(join(root, ".claude"), { recursive: true });
-    await writeFile(join(root, ".claude", "CLAUDE.md"), "# OpenForge", "utf8");
+    await writeFile(join(root, ".claude", "CLAUDE.md"), "# ForgeBadger", "utf8");
     const plan = createRenderPlan({
       projectId: "project_1",
       targetRoot: root,
       templateId: "claude-default",
       credentialMode: "host_environment",
       dryRun: true,
-      variables: { projectName: "OpenForge" },
+      variables: { projectName: "ForgeBadger" },
       templateFiles: [
         {
           id: "template_file_1",
@@ -60,8 +60,8 @@ describe("detectConfigConflicts", () => {
     assert.deepEqual(conflicts, [
       {
         relativePath: ".claude/CLAUDE.md",
-        existingSha256: sha256("# OpenForge"),
-        incomingSha256: sha256("# OpenForge"),
+        existingSha256: sha256("# ForgeBadger"),
+        incomingSha256: sha256("# ForgeBadger"),
         conflictType: "exists",
         allowedActions: ["skip"]
       }
@@ -179,5 +179,5 @@ describe("detectConfigConflicts", () => {
 });
 
 async function projectRoot(): Promise<string> {
-  return mkdtemp(join(tmpdir(), "openforge-gate-b-"));
+  return mkdtemp(join(tmpdir(), "forgebadger-gate-b-"));
 }

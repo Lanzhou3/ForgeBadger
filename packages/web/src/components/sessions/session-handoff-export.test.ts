@@ -11,7 +11,7 @@ const session: Session = {
   id: "session-1",
   name: "Task: Review launch",
   projectId: "project-1",
-  projectName: "OpenForge",
+  projectName: "ForgeBadger",
   status: "stopped",
   aiTool: "claude",
   modelId: "claude-sonnet",
@@ -68,7 +68,7 @@ describe("session handoff export helpers", () => {
       operatorNotes: "$ pnpm test\nsecret sk-test123456",
       session,
       taskPacket,
-      verificationNotes: "OPENFORGE_ATTACH_TOKEN=abc123",
+      verificationNotes: "FORGEBADGER_ATTACH_TOKEN=abc123\nOPENFORGE_ATTACH_TOKEN=legacy123",
     });
 
     expect(issues).toEqual([
@@ -82,7 +82,7 @@ describe("session handoff export helpers", () => {
     expect(sessionHandoffMarkdownFilename({
       generatedAt: "2026-06-14T00:00:00.000Z",
       taskPacket,
-    })).toBe("openforge-session-handoff-review-launch-2026-06-14T00-00-00-000Z.md");
+    })).toBe("forgebadger-session-handoff-review-launch-2026-06-14T00-00-00-000Z.md");
   });
 
   it("audits task packet content and uses a fence longer than embedded backticks", () => {

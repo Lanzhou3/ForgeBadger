@@ -9,7 +9,7 @@ interface RecoveryIndexFile {
 }
 
 export function createJsonSessionRecoveryStore(projectRoot: string): SessionRecoveryStore {
-  return new JsonSessionRecoveryStore(join(projectRoot, ".openforge", "gate-a-sessions.json"));
+  return new JsonSessionRecoveryStore(join(projectRoot, ".forgebadger", "gate-a-sessions.json"));
 }
 
 class JsonSessionRecoveryStore implements SessionRecoveryStore {

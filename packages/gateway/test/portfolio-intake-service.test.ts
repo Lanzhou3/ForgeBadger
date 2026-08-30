@@ -129,7 +129,7 @@ describe("PortfolioIntakeService", () => {
     other = users.create("portfolio-intake-other@example.com", "hash");
     projectId = new ProjectRepository(db, owner.id).create({
       name: "Portfolio intake project",
-      path: "/tmp/openforge-portfolio-intake",
+      path: "/tmp/forgebadger-portfolio-intake",
       aiTool: "claude"
     }).id;
     service = new PortfolioIntakeService(db, owner.id);
@@ -187,22 +187,22 @@ describe("PortfolioIntakeService", () => {
     // Arrange
     const missingEvidenceProjectId = new ProjectRepository(db, owner.id).create({
       name: "Missing enrollment evidence",
-      path: "/tmp/openforge-portfolio-enrollment-missing-evidence",
+      path: "/tmp/forgebadger-portfolio-enrollment-missing-evidence",
       aiTool: "claude"
     }).id;
     const emptyStateProjectId = new ProjectRepository(db, owner.id).create({
       name: "Empty enrollment observed state",
-      path: "/tmp/openforge-portfolio-enrollment-empty-state",
+      path: "/tmp/forgebadger-portfolio-enrollment-empty-state",
       aiTool: "claude"
     }).id;
     const staleEvidenceProjectId = new ProjectRepository(db, owner.id).create({
       name: "Stale enrollment evidence",
-      path: "/tmp/openforge-portfolio-enrollment-stale-evidence",
+      path: "/tmp/forgebadger-portfolio-enrollment-stale-evidence",
       aiTool: "claude"
     }).id;
     const evidenceOnlyStateProjectId = new ProjectRepository(db, owner.id).create({
       name: "Evidence-only enrollment observed state",
-      path: "/tmp/openforge-portfolio-enrollment-evidence-only-state",
+      path: "/tmp/forgebadger-portfolio-enrollment-evidence-only-state",
       aiTool: "claude"
     }).id;
     const rawRepository = new PortfolioRepository(db, owner.id) as unknown as {
@@ -284,7 +284,7 @@ describe("PortfolioIntakeService", () => {
     for (const [label, observedState] of nonMaterialObservedStates) {
       const invalidProjectId = new ProjectRepository(db, owner.id).create({
         name: `Non-material enrollment ${label}`,
-        path: `/tmp/openforge-portfolio-non-material-enrollment-${label}`,
+        path: `/tmp/forgebadger-portfolio-non-material-enrollment-${label}`,
         aiTool: "claude"
       }).id;
       const idempotencyKey = `enrollment:non-material:${label}`;
@@ -643,7 +643,7 @@ describe("PortfolioIntakeService", () => {
     });
     const secondProjectId = new ProjectRepository(db, owner.id).create({
       name: "Request routing target",
-      path: "/tmp/openforge-portfolio-request-routing-target",
+      path: "/tmp/forgebadger-portfolio-request-routing-target",
       aiTool: "claude"
     }).id;
     enrollProject(service, {
@@ -805,7 +805,7 @@ describe("PortfolioIntakeService", () => {
     });
     const secondProjectId = new ProjectRepository(db, owner.id).create({
       name: "Conflicting pre-bound intake project",
-      path: "/tmp/openforge-portfolio-pre-bound-intake-second",
+      path: "/tmp/forgebadger-portfolio-pre-bound-intake-second",
       aiTool: "claude"
     }).id;
     enrollProject(service, {
@@ -975,7 +975,7 @@ describe("PortfolioIntakeService", () => {
     });
     const secondProjectId = new ProjectRepository(db, owner.id).create({
       name: "Second evidence candidate",
-      path: "/tmp/openforge-portfolio-evidence-second",
+      path: "/tmp/forgebadger-portfolio-evidence-second",
       aiTool: "claude"
     }).id;
     enrollProject(service, {
@@ -987,7 +987,7 @@ describe("PortfolioIntakeService", () => {
     });
     const foreignProjectId = new ProjectRepository(db, other.id).create({
       name: "Foreign evidence project",
-      path: "/tmp/openforge-portfolio-evidence-foreign",
+      path: "/tmp/forgebadger-portfolio-evidence-foreign",
       aiTool: "claude"
     }).id;
     const foreignService = new PortfolioIntakeService(db, other.id);
@@ -1050,7 +1050,7 @@ describe("PortfolioIntakeService", () => {
     });
     const secondProjectId = new ProjectRepository(db, owner.id).create({
       name: "Alternate owner decision project",
-      path: "/tmp/openforge-portfolio-owner-replay-second",
+      path: "/tmp/forgebadger-portfolio-owner-replay-second",
       aiTool: "claude"
     }).id;
     enrollProject(service, {
@@ -1112,7 +1112,7 @@ describe("PortfolioIntakeService", () => {
     });
     const secondProjectId = new ProjectRepository(db, owner.id).create({
       name: "Second intake candidate",
-      path: "/tmp/openforge-portfolio-intake-second",
+      path: "/tmp/forgebadger-portfolio-intake-second",
       aiTool: "claude"
     }).id;
     enrollProject(service, {
@@ -1124,7 +1124,7 @@ describe("PortfolioIntakeService", () => {
     });
     const unenrolledProjectId = new ProjectRepository(db, owner.id).create({
       name: "Unenrolled intake candidate",
-      path: "/tmp/openforge-portfolio-intake-unenrolled",
+      path: "/tmp/forgebadger-portfolio-intake-unenrolled",
       aiTool: "claude"
     }).id;
     const ambiguous = service.createRequest({ source: "web", requestText: "Which project should own this shared change?", correlationId: "corr:ambiguous", idempotencyKey: "request:ambiguous" });
@@ -1176,7 +1176,7 @@ describe("PortfolioIntakeService", () => {
       scope: { roots: ["packages/gateway"] },
       idempotencyKey: "enrollment:safe-timeline"
     });
-    const rawTerminalTranscript = "$ cat ~/.config/openforge/token\\nterminal-session-secret-123";
+    const rawTerminalTranscript = "$ cat ~/.config/forgebadger/token\\nterminal-session-secret-123";
     const request = service.createRequest({
       source: "web",
       requesterId: owner.id,
@@ -1206,7 +1206,7 @@ describe("PortfolioIntakeService", () => {
       /PORTFOLIO_REQUEST_NOT_FOUND/
     );
     const projection = JSON.stringify(timeline);
-    assert.doesNotMatch(projection, /terminal-session-secret-123|terminalOutput|apiKey|cat ~\/\.config\/openforge\/token/);
+    assert.doesNotMatch(projection, /terminal-session-secret-123|terminalOutput|apiKey|cat ~\/\.config\/forgebadger\/token/);
     assert.ok(projection.includes(request.id));
   });
 });

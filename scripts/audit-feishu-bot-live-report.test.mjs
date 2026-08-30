@@ -109,13 +109,13 @@ function buildGateClearingReport() {
     },
     checks: [
       { name: "connection_connected", ok: true, state: "connected" },
-      { name: "receive_route", ok: true, route: "status", replyPreview: "OpenForge status\nProjects: 1" },
+      { name: "receive_route", ok: true, route: "status", replyPreview: "ForgeBadger status\nProjects: 1" },
       { name: "bounded_reply_sent", ok: true, msgType: "text", receiveIdType: "chat_id" },
       {
         name: "terminal_input_rejected",
         ok: true,
         rejectionCode: "feishu_terminal_input_rejected",
-        replyPreview: "OpenForge rejected terminal input from Feishu."
+        replyPreview: "ForgeBadger rejected terminal input from Feishu."
       },
       { name: "rejection_reply_sent", ok: true, msgType: "text", receiveIdType: "chat_id" },
       { name: "connection_reconnecting", ok: true, state: "reconnecting" },

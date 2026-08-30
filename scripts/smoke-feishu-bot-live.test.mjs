@@ -13,7 +13,7 @@ import {
 describe("Feishu bot live long-connection smoke helper", () => {
   it("fails closed when required live credentials are missing", () => {
     const config = resolveFeishuBotLiveConfig({
-      OPENFORGE_TOKEN: "token"
+      FORGEBADGER_TOKEN: "token"
     });
 
     assert.equal(config.ok, false);
@@ -23,7 +23,7 @@ describe("Feishu bot live long-connection smoke helper", () => {
 
   it("parses an optional output path for saving the redacted live report", () => {
     const config = resolveFeishuBotLiveConfig({
-      OPENFORGE_TOKEN: "token",
+      FORGEBADGER_TOKEN: "token",
       FEISHU_APP_ID: "cli_a_live_app",
       FEISHU_APP_SECRET: "live-app-secret"
     }, ["--output", "docs/reports/feishu-live-report.json"]);
@@ -32,8 +32,22 @@ describe("Feishu bot live long-connection smoke helper", () => {
     assert.equal(config.config.outputPath, "docs/reports/feishu-live-report.json");
   });
 
+  it("accepts legacy OpenForge smoke variables while preferring ForgeBadger values", () => {
+    const config = resolveFeishuBotLiveConfig({
+      OPENFORGE_TOKEN: "legacy-token",
+      OPENFORGE_GATEWAY_URL: "http://legacy.example:48731",
+      FORGEBADGER_GATEWAY_URL: "http://current.example:48731",
+      FEISHU_APP_ID: "cli_a_live_app",
+      FEISHU_APP_SECRET: "live-app-secret"
+    });
+
+    assert.equal(config.ok, true);
+    assert.equal(config.config.token, "legacy-token");
+    assert.equal(config.config.gatewayUrl, "http://current.example:48731");
+  });
+
   it("writes the redacted live report to a 0600 JSON file and creates parent directories", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openforge-feishu-live-"));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgebadger-feishu-live-"));
     const outputPath = path.join(tmpDir, "nested", "report.json");
 
     writeFeishuBotLiveSmokeReport({
@@ -60,7 +74,7 @@ describe("Feishu bot live long-connection smoke helper", () => {
             message_id: "om_live_status",
             chat_id: "oc_live_chat",
             message_type: "text",
-            content: JSON.stringify({ text: "/openforge status" })
+            content: JSON.stringify({ text: "/forgebadger status" })
           }
         },
         {
@@ -69,7 +83,7 @@ describe("Feishu bot live long-connection smoke helper", () => {
             message_id: "om_live_terminal",
             chat_id: "oc_live_chat",
             message_type: "text",
-            content: JSON.stringify({ text: "/openforge terminal session-1 continue app_secret=unsafe" })
+            content: JSON.stringify({ text: "/forgebadger terminal session-1 continue app_secret=unsafe" })
           }
         }
       ]
@@ -105,7 +119,7 @@ describe("Feishu bot live long-connection smoke helper", () => {
                 receiveId: "oc_live_chat",
                 receiveIdType: "chat_id",
                 msgType: "text",
-                text: "OpenForge rejected terminal input from Feishu."
+                text: "ForgeBadger rejected terminal input from Feishu."
               }
             }
           });
@@ -118,7 +132,7 @@ describe("Feishu bot live long-connection smoke helper", () => {
               receiveId: "oc_live_chat",
               receiveIdType: "chat_id",
               msgType: "text",
-              text: "OpenForge status\nProjects: 1\napp_secret=must-redact"
+              text: "ForgeBadger status\nProjects: 1\napp_secret=must-redact"
             }
           },
           message: ""
@@ -139,7 +153,7 @@ describe("Feishu bot live long-connection smoke helper", () => {
     assert.deepEqual(sentMessages[0].params, { receive_id_type: "chat_id" });
     assert.equal(sentMessages[0].data.receive_id, "oc_live_chat");
     assert.equal(sentMessages[0].data.msg_type, "text");
-    assert.equal(JSON.parse(sentMessages[0].data.content).text.includes("OpenForge status"), true);
+    assert.equal(JSON.parse(sentMessages[0].data.content).text.includes("ForgeBadger status"), true);
     assert.equal(requests.some((request) => request.url.endsWith("/bot-websocket/events")), true);
     assert.equal(requests.some((request) => request.url.endsWith("/bot-websocket/connection-events")), true);
     assert.equal(serialized.includes("live-token-secret"), false);
@@ -151,7 +165,7 @@ describe("Feishu bot live long-connection smoke helper", () => {
 
   it("enables send-replies and reconnect requirements when --require-gate-evidence is set", () => {
     const config = resolveFeishuBotLiveConfig({
-      OPENFORGE_TOKEN: "token",
+      FORGEBADGER_TOKEN: "token",
       FEISHU_APP_ID: "cli_a_live_app",
       FEISHU_APP_SECRET: "live-app-secret"
     }, ["--require-gate-evidence"]);
@@ -174,7 +188,7 @@ describe("Feishu bot live long-connection smoke helper", () => {
             message_id: "om_live_status",
             chat_id: "oc_live_chat",
             message_type: "text",
-            content: JSON.stringify({ text: "/openforge status" })
+            content: JSON.stringify({ text: "/forgebadger status" })
           }
         }
       ]
@@ -201,7 +215,7 @@ describe("Feishu bot live long-connection smoke helper", () => {
               receiveId: "oc_live_chat",
               receiveIdType: "chat_id",
               msgType: "text",
-              text: "OpenForge status"
+              text: "ForgeBadger status"
             }
           },
           message: ""

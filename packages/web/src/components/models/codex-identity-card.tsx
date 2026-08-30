@@ -16,7 +16,7 @@ export function CodexIdentityCard({
   t: Translate;
 }) {
   return (
-    <Card className="of-animate-in" style={{ animationDelay: "80ms" }}>
+    <Card className="forgebadger-animate-in" style={{ animationDelay: "80ms" }}>
       <CardHeader className="pb-3">
         <div className="flex items-center gap-3">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">

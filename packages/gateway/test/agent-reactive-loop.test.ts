@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 
-import { OpenForgeEventBus } from "../src/services/event-bus.js";
+import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
 import { attachCopilotReactiveLoop, PROACTIVE_CONVERSATION_TITLE } from "../src/services/agent/reactive-loop.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
@@ -27,7 +27,7 @@ describe("copilot reactive loop", () => {
   function setup(overrides: { cooldownMs?: number } = {}) {
     const db = createTestDb();
     const user = new UserRepository(db).create("loop@example.com", "hash");
-    const bus = new OpenForgeEventBus();
+    const bus = new ForgeBadgerEventBus();
     const log = new CopilotConversationLog(db, user.id);
     const runCalls: Array<{ userId: string; conversationId: string; source?: string; userText: string }> = [];
     const stack = {
@@ -158,7 +158,7 @@ describe("copilot reactive loop", () => {
     const userRepository = new UserRepository(db);
     const userA = userRepository.create("loop-a@example.com", "hash");
     const userB = userRepository.create("loop-b@example.com", "hash");
-    const bus = new OpenForgeEventBus();
+    const bus = new ForgeBadgerEventBus();
     const runCalls: Array<{ userId: string; conversationId: string }> = [];
     const stackFor = (userId: string) => ({
       log: new CopilotConversationLog(db, userId),
@@ -195,7 +195,7 @@ describe("copilot reactive loop", () => {
     // Arrange
     const db = createTestDb();
     const user = new UserRepository(db).create("loop-dsh@example.com", "hash");
-    const bus = new OpenForgeEventBus();
+    const bus = new ForgeBadgerEventBus();
     const log = new CopilotConversationLog(db, user.id);
     const bffCalls: Array<{ userId: string; conversationId: string; content: string; source?: string }> = [];
     const runCalls: unknown[] = [];

@@ -107,7 +107,7 @@ describe("session adapter decoupling", () => {
 
   it("creates project records without runtime CLI or template binding", async () => {
     const token = await register("adapter-project-default@example.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-project-default-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-project-default-"));
 
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
@@ -126,8 +126,8 @@ describe("session adapter decoupling", () => {
 
   it("ignores legacy runtime CLI/template fields on project create/import", async () => {
     const token = await register("adapter-project-legacy@example.com");
-    const createPath = await mkdtemp(path.join(tmpdir(), "openforge-project-legacy-create-"));
-    const importPath = await mkdtemp(path.join(tmpdir(), "openforge-project-legacy-import-"));
+    const createPath = await mkdtemp(path.join(tmpdir(), "forgebadger-project-legacy-create-"));
+    const importPath = await mkdtemp(path.join(tmpdir(), "forgebadger-project-legacy-import-"));
 
     const createRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
@@ -162,7 +162,7 @@ describe("session adapter decoupling", () => {
 
   it("requires an explicit runtime CLI when the project has no adapter hint", async () => {
     const token = await register("adapter-explicit-required@example.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-adapter-explicit-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-adapter-explicit-"));
 
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
@@ -190,7 +190,7 @@ describe("session adapter decoupling", () => {
 
   it("rejects config sync for projects tracking no template", async () => {
     const token = await register("adapter-sync-untracked@example.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-adapter-sync-untracked-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-adapter-sync-untracked-"));
 
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
@@ -221,7 +221,7 @@ describe("session adapter decoupling", () => {
 
   it("launches a requested session adapter instead of the project default adapter", async () => {
     const token = await register("adapter-decoupling@example.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-adapter-session-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-adapter-session-"));
 
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
@@ -254,7 +254,7 @@ describe("session adapter decoupling", () => {
   it("rejects provider credentials and model overrides for Codex terminal sessions", async () => {
     const beforeCreateCount = tmuxCreates.length;
     const token = await register("adapter-codex-provider-boundary@example.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-codex-provider-boundary-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-codex-provider-boundary-"));
 
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
@@ -338,7 +338,7 @@ describe("session adapter decoupling", () => {
   it("rejects provider credentials and model overrides for Kimi Code terminal sessions", async () => {
     const beforeCreateCount = tmuxCreates.length;
     const token = await register("adapter-kimi-provider-boundary@example.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-kimi-provider-boundary-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-kimi-provider-boundary-"));
 
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
@@ -421,7 +421,7 @@ describe("session adapter decoupling", () => {
 
   it("launches provider-backed OpenCode sessions without a legacy api key id", async () => {
     const token = await register("adapter-provider-credential@example.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "openforge-provider-session-"));
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-provider-session-"));
 
     const providerRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
       method: "POST",

@@ -13,7 +13,7 @@ describe("trusted Feishu card renderers", () => {
   it("renders markdown and project-manager cards from bounded typed inputs", () => {
     const markdown = renderFeishuMarkdownCard({ title: "Weekly report", markdown: "**Done**" });
     const project = renderFeishuProjectManagerCard({
-      projectName: "OpenForge",
+      projectName: "ForgeBadger",
       status: "On track",
       summary: "Gateway work completed",
       blockers: ["Live Feishu evidence pending"]
@@ -24,7 +24,7 @@ describe("trusted Feishu card renderers", () => {
     assert.equal(markdown.elements[0]?.tag, "markdown");
     assert.equal("schema" in markdown, false);
     assert.equal("body" in markdown, false);
-    assert.equal(project.header.title.content, "OpenForge · On track");
+    assert.equal(project.header.title.content, "ForgeBadger · On track");
   });
 
   it("puts only version and opaque action id in card buttons", () => {

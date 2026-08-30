@@ -238,7 +238,7 @@ function DirectoryNode({
         aria-expanded={expanded}
         title={entry.path}
         className={cn(
-          "of-animate-in flex w-full items-center gap-1 rounded pr-2 text-left transition-colors hover:bg-muted/40",
+          "forgebadger-animate-in flex w-full items-center gap-1 rounded pr-2 text-left transition-colors hover:bg-muted/40",
           ctx.compact ? "h-7 text-[11px]" : "h-8 text-xs"
         )}
         style={{
@@ -262,7 +262,7 @@ function DirectoryNode({
           <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
         ) : null}
       </button>
-      <div className="of-collapse-grid" data-open={expanded}>
+      <div className="forgebadger-collapse-grid" data-open={expanded}>
         <div>
           <div
             className="border-l border-border/50"
@@ -311,7 +311,7 @@ function FileNode({
       aria-current={selected ? "true" : undefined}
       title={ctx.compact ? t("projects.workspaceOpenViewer") : entry.path}
       className={cn(
-        "of-animate-in flex w-full items-center gap-1.5 rounded pr-2 text-left transition-colors hover:bg-muted/40",
+        "forgebadger-animate-in flex w-full items-center gap-1.5 rounded pr-2 text-left transition-colors hover:bg-muted/40",
         ctx.compact ? "h-7 text-[11px]" : "h-8 text-xs",
         selected ? "bg-brand/10 text-brand" : "text-foreground/90"
       )}
@@ -346,7 +346,7 @@ function MutedNode({
     <div
       title={entry.path}
       className={cn(
-        "of-animate-in flex w-full items-center gap-1.5 rounded pr-2 text-muted-foreground/70",
+        "forgebadger-animate-in flex w-full items-center gap-1.5 rounded pr-2 text-muted-foreground/70",
         compact ? "h-7 text-[11px]" : "h-8 text-xs"
       )}
       style={{
@@ -382,7 +382,7 @@ function SearchResultRow({
       onClick={onSelect}
       title={entry.path}
       className={cn(
-        "of-animate-in flex w-full items-center gap-1.5 rounded px-2 text-left transition-colors hover:bg-muted/40",
+        "forgebadger-animate-in flex w-full items-center gap-1.5 rounded px-2 text-left transition-colors hover:bg-muted/40",
         compact ? "h-7 text-[11px]" : "h-8 text-xs",
         selected && "bg-brand/10 text-brand"
       )}

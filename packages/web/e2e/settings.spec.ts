@@ -2,9 +2,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.localStorage.setItem("openforge-language", "en");
-    window.localStorage.setItem("openforge.token", "e2e-token");
-    window.localStorage.setItem("openforge.user", JSON.stringify({
+    window.localStorage.setItem("forgebadger-language", "en");
+    window.localStorage.setItem("forgebadger.token", "e2e-token");
+    window.localStorage.setItem("forgebadger.user", JSON.stringify({
       id: "user-e2e",
       email: "settings-e2e@example.com",
       role: "admin",
@@ -100,7 +100,7 @@ async function mockSettingsApis(page: Page) {
             emergencyDisabled: false,
             identityMode: "bot",
             allowedChatIds: [],
-            commandPrefix: "/openforge",
+            commandPrefix: "/forgebadger",
           },
         }),
       });

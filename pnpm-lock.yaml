@@ -14,12 +14,18 @@ importers:
 
   packages/cli:
     dependencies:
+      '@larksuiteoapi/node-sdk':
+        specifier: 1.71.1
+        version: 1.71.1
       bcryptjs:
         specifier: ^3.0.2
         version: 3.0.3
       better-sqlite3:
         specifier: ^11.7.0
         version: 11.10.0
+      croner:
+        specifier: 10.0.1
+        version: 10.0.1
       drizzle-orm:
         specifier: ^0.36.4
         version: 0.36.4(@types/better-sqlite3@7.6.13)(@types/react@19.2.14)(better-sqlite3@11.10.0)(react@19.2.5)
@@ -32,97 +38,15 @@ importers:
       node-pty:
         specifier: ^1.0.0
         version: 1.1.0
+      smol-toml:
+        specifier: ^1.7.1
+        version: 1.7.1
       ws:
         specifier: ^8.18.0
         version: 8.20.0
       zod:
         specifier: ^3.24.1
         version: 3.25.76
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.17
-      tsx:
-        specifier: ^4.19.2
-        version: 4.21.0
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-
-  packages/dsh-bridge:
-    dependencies:
-      '@deepseek-ai/cordis':
-        specifier: link:../../../github_project/deepseek-harness/vendor/cordis
-        version: link:../../../github_project/deepseek-harness/vendor/cordis
-      '@deepseek-ai/dsh-agent':
-        specifier: link:../../../github_project/deepseek-harness/packages/core/agent
-        version: link:../../../github_project/deepseek-harness/packages/core/agent
-      '@deepseek-ai/dsh-agent-spine-demo':
-        specifier: link:../../../github_project/deepseek-harness/packages/examples/agent-spine-demo
-        version: link:../../../github_project/deepseek-harness/packages/examples/agent-spine-demo
-      '@deepseek-ai/dsh-app-boot':
-        specifier: link:../../../github_project/deepseek-harness/packages/boot/app-boot
-        version: link:../../../github_project/deepseek-harness/packages/boot/app-boot
-      '@deepseek-ai/dsh-bash-local':
-        specifier: link:../../../github_project/deepseek-harness/packages/shell/bash-local
-        version: link:../../../github_project/deepseek-harness/packages/shell/bash-local
-      '@deepseek-ai/dsh-compaction-basic':
-        specifier: link:../../../github_project/deepseek-harness/packages/compaction/compaction-basic
-        version: link:../../../github_project/deepseek-harness/packages/compaction/compaction-basic
-      '@deepseek-ai/dsh-fs-local':
-        specifier: link:../../../github_project/deepseek-harness/packages/fs/fs-local
-        version: link:../../../github_project/deepseek-harness/packages/fs/fs-local
-      '@deepseek-ai/dsh-fs-observation-policy':
-        specifier: link:../../../github_project/deepseek-harness/packages/fs/fs-observation-policy
-        version: link:../../../github_project/deepseek-harness/packages/fs/fs-observation-policy
-      '@deepseek-ai/dsh-llm':
-        specifier: link:../../../github_project/deepseek-harness/packages/llm/llm
-        version: link:../../../github_project/deepseek-harness/packages/llm/llm
-      '@deepseek-ai/dsh-llm-pi-ai':
-        specifier: link:../../../github_project/deepseek-harness/packages/llm/llm-pi-ai
-        version: link:../../../github_project/deepseek-harness/packages/llm/llm-pi-ai
-      '@deepseek-ai/dsh-sdk-protocol':
-        specifier: link:../../../github_project/deepseek-harness/packages/sdk/protocol
-        version: link:../../../github_project/deepseek-harness/packages/sdk/protocol
-      '@deepseek-ai/dsh-session':
-        specifier: link:../../../github_project/deepseek-harness/packages/core/session
-        version: link:../../../github_project/deepseek-harness/packages/core/session
-      '@deepseek-ai/dsh-session-checkpoint-policy':
-        specifier: link:../../../github_project/deepseek-harness/packages/session/session-checkpoint-policy
-        version: link:../../../github_project/deepseek-harness/packages/session/session-checkpoint-policy
-      '@deepseek-ai/dsh-session-persistence':
-        specifier: link:../../../github_project/deepseek-harness/packages/session/session-persistence
-        version: link:../../../github_project/deepseek-harness/packages/session/session-persistence
-      '@deepseek-ai/dsh-session-persistence-jsonl':
-        specifier: link:../../../github_project/deepseek-harness/packages/session/session-persistence-jsonl
-        version: link:../../../github_project/deepseek-harness/packages/session/session-persistence-jsonl
-      '@deepseek-ai/dsh-subagent':
-        specifier: link:../../../github_project/deepseek-harness/packages/subagent/subagent
-        version: link:../../../github_project/deepseek-harness/packages/subagent/subagent
-      '@deepseek-ai/dsh-subagent-spawn-in-process':
-        specifier: link:../../../github_project/deepseek-harness/packages/subagent/subagent-spawn-in-process
-        version: link:../../../github_project/deepseek-harness/packages/subagent/subagent-spawn-in-process
-      '@deepseek-ai/dsh-subprocess-local':
-        specifier: link:../../../github_project/deepseek-harness/packages/subprocess/subprocess-local
-        version: link:../../../github_project/deepseek-harness/packages/subprocess/subprocess-local
-      '@deepseek-ai/dsh-token-meter':
-        specifier: link:../../../github_project/deepseek-harness/packages/llm/token-meter
-        version: link:../../../github_project/deepseek-harness/packages/llm/token-meter
-      '@deepseek-ai/dsh-tool-fs':
-        specifier: link:../../../github_project/deepseek-harness/packages/fs/tool-fs
-        version: link:../../../github_project/deepseek-harness/packages/fs/tool-fs
-      '@deepseek-ai/dsh-tool-subagent':
-        specifier: link:../../../github_project/deepseek-harness/packages/subagent/tool-subagent
-        version: link:../../../github_project/deepseek-harness/packages/subagent/tool-subagent
-      '@deepseek-ai/dsh-tool-todo':
-        specifier: link:../../../github_project/deepseek-harness/packages/todo/tool-todo
-        version: link:../../../github_project/deepseek-harness/packages/todo/tool-todo
-      '@deepseek-ai/dsh-tools':
-        specifier: link:../../../github_project/deepseek-harness/packages/core/tools
-        version: link:../../../github_project/deepseek-harness/packages/core/tools
-      '@deepseek-ai/dsh-user-approval':
-        specifier: link:../../../github_project/deepseek-harness/packages/interaction/user-approval
-        version: link:../../../github_project/deepseek-harness/packages/interaction/user-approval
     devDependencies:
       '@types/node':
         specifier: ^22.10.2

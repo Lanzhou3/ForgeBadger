@@ -16,15 +16,15 @@ import { InMemorySessionManager } from "../src/services/session-manager.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
-import type { OpenForgeEvent } from "../src/services/event-bus.js";
+import type { ForgeBadgerEvent } from "../src/services/event-bus.js";
 import { DshProcessManager } from "../src/services/dsh-copilot/process-manager.js";
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 const bridgeToken = "dsh-copilot-test-bridge-token-0123456789abcdef";
 
-process.env.OPENFORGE_JWT_SECRET = jwtSecret;
-process.env.OPENFORGE_MASTER_KEY = masterKey;
+process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
+process.env.FORGEBADGER_MASTER_KEY = masterKey;
 
 const FAKE_LAUNCHER = path.join(path.dirname(fileURLToPath(import.meta.url)), "helpers", "fake-dsh-runtime.mjs");
 
@@ -70,7 +70,7 @@ function createControlledDshChild(): {
 
 describe("DshProcessManager shutdown guard", () => {
   it("never spawns a runtime after disposeAll begins", async () => {
-    const stateDir = mkdtempSync(path.join(tmpdir(), "openforge-dsh-closing-"));
+    const stateDir = mkdtempSync(path.join(tmpdir(), "forgebadger-dsh-closing-"));
     let spawnCalls = 0;
     const manager = new DshProcessManager({
       launcherPath: FAKE_LAUNCHER,
@@ -103,7 +103,7 @@ describe("DshProcessManager shutdown guard", () => {
   });
 
   it("escalates a stubborn live child from SIGTERM to SIGKILL", async () => {
-    const stateDir = mkdtempSync(path.join(tmpdir(), "openforge-dsh-stubborn-"));
+    const stateDir = mkdtempSync(path.join(tmpdir(), "forgebadger-dsh-stubborn-"));
     const signals: Array<NodeJS.Signals | number | undefined> = [];
     let child: ChildProcess | undefined;
     const manager = new DshProcessManager({
@@ -146,7 +146,7 @@ describe("DshProcessManager shutdown guard", () => {
   });
 
   it("does not let a replaced runtime's late exit delete the current generation", async () => {
-    const stateDir = mkdtempSync(path.join(tmpdir(), "openforge-dsh-generation-"));
+    const stateDir = mkdtempSync(path.join(tmpdir(), "forgebadger-dsh-generation-"));
     const children: ReturnType<typeof createControlledDshChild>[] = [];
     const manager = new DshProcessManager({
       launcherPath: FAKE_LAUNCHER,
@@ -199,7 +199,7 @@ interface Harness {
   db: Database.Database;
   stateDir: string;
   logPath: string;
-  events: OpenForgeEvent[];
+  events: ForgeBadgerEvent[];
 }
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -219,9 +219,9 @@ function createTestDb(): Database.Database {
 /** Boot a gateway with the dsh copilot BFF wired to the fake runtime. */
 async function bootDshGateway(input: { scenario: string; idleMs?: number }): Promise<Harness> {
   const db = createTestDb();
-  const stateDir = mkdtempSync(path.join(tmpdir(), "openforge-dsh-test-"));
+  const stateDir = mkdtempSync(path.join(tmpdir(), "forgebadger-dsh-test-"));
   const logPath = path.join(stateDir, "fake-runtime.jsonl");
-  const events: OpenForgeEvent[] = [];
+  const events: ForgeBadgerEvent[] = [];
   const app = createGatewayApp({
     jwtSecret,
     masterKey,
@@ -364,8 +364,8 @@ describe("dsh copilot BFF (fake runtime)", () => {
     assert.equal(env.llmBaseUrl, "https://stub.example");
     assert.equal(env.llmModel, "stub-model");
     assert.equal(env.hasBridgeToken, true);
-    assert.equal(env.hasMasterKey, false, "OPENFORGE_MASTER_KEY must not leak into the child env");
-    assert.equal(env.hasJwtSecret, false, "OPENFORGE_JWT_SECRET must not leak into the child env");
+    assert.equal(env.hasMasterKey, false, "FORGEBADGER_MASTER_KEY must not leak into the child env");
+    assert.equal(env.hasJwtSecret, false, "FORGEBADGER_JWT_SECRET must not leak into the child env");
   });
 
   it("resumes the same dsh session across messages within one runtime", async () => {

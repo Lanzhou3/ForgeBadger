@@ -1,4 +1,4 @@
-# OpenForge Release Plan
+# ForgeBadger Release Plan
 
 > Status: local-first beta release readiness | Date: 2026-05-10
 
@@ -16,7 +16,7 @@ Gateway prototype route.
 
 Release artifacts:
 
-- npm package tarball for the publishable `openforge` CLI.
+- npm package tarball for the publishable `forgebadger` CLI.
 - CLI build output: `packages/cli/dist`.
 - Gateway build output: `packages/gateway/dist`.
 - Web build output: `packages/web/.next`.
@@ -25,14 +25,19 @@ Release artifacts:
 
 Operational runtime state:
 
-- SQLite data file at `OPENFORGE_DB_PATH`.
+- SQLite data file at `FORGEBADGER_DB_PATH`.
 - Project-generated config files under user-approved project directories.
-- Runtime tmux sessions named with `OPENFORGE_TMUX_PREFIX`, default `of-`.
+- Runtime tmux sessions named with `FORGEBADGER_TMUX_PREFIX`, default `of-`.
 - User agent configuration directories such as `.claude`, `.codex`, and
   `.opencode`.
 - Local API keys, credentials, and user configuration files.
 
 Operational runtime state is never part of the npm package or release artifact.
+
+When multiple ForgeBadger instances share one operating-system account, assign
+each instance a unique `FORGEBADGER_TMUX_PREFIX`. Separate state or database
+paths do not isolate tmux's global server, and reusing the default `of-` prefix
+can make one instance treat another instance's sessions as orphans.
 
 The Gateway owns all API and WebSocket behavior. The Web console is a pure
 Next.js client that talks to the Gateway through `NEXT_PUBLIC_GATEWAY_URL`.
@@ -41,12 +46,12 @@ Next.js client that talks to the Gateway through `NEXT_PUBLIC_GATEWAY_URL`.
 
 Minimum runtime dependencies:
 
-- Node.js 20 or newer.
-- pnpm 9 or newer.
+- Node.js 20.12 through 24.
+- pnpm 10 or newer.
 - tmux 3.2 or newer.
 - Claude Code CLI on `PATH` for Claude sessions.
 - OpenCode and/or Codex CLI on `PATH` only when those adapters are in scope.
-- SQLite-compatible filesystem for `OPENFORGE_DB_PATH`.
+- SQLite-compatible filesystem for `FORGEBADGER_DB_PATH`.
 
 Windows native hosts can run management UI workflows, but the built-in browser
 terminal requires WSL because terminal persistence depends on tmux. Run release
@@ -56,23 +61,23 @@ Required secrets:
 
 | Variable | Requirement |
 |----------|-------------|
-| `OPENFORGE_MASTER_KEY` | Preferred: 64 hex characters from `openssl rand -hex 32`. Legacy 32-byte strings are still accepted for existing local installs. |
-| `OPENFORGE_JWT_SECRET` | 32 or more high-entropy characters. |
+| `FORGEBADGER_MASTER_KEY` | Preferred: 64 hex characters from `openssl rand -hex 32`. Legacy 32-byte strings are still accepted for existing local installs. |
+| `FORGEBADGER_JWT_SECRET` | 32 or more high-entropy characters. |
 
 Typical local `.env` shape:
 
 ```bash
-OPENFORGE_HOST=127.0.0.1
-OPENFORGE_PORT=48731
-OPENFORGE_WEB_HOST=127.0.0.1
-OPENFORGE_WEB_PORT=48732
-OPENFORGE_GATEWAY_URL=http://127.0.0.1:48731
+FORGEBADGER_HOST=127.0.0.1
+FORGEBADGER_PORT=48731
+FORGEBADGER_WEB_HOST=127.0.0.1
+FORGEBADGER_WEB_PORT=48732
+FORGEBADGER_GATEWAY_URL=http://127.0.0.1:48731
 NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
-OPENFORGE_DB_PATH=/absolute/path/to/openforge.db
-OPENFORGE_MASTER_KEY=<64-hex-characters>
-OPENFORGE_JWT_SECRET=<32+-character-secret>
-OPENFORGE_LOG_LEVEL=info
-OPENFORGE_TMUX_PREFIX=of-
+FORGEBADGER_DB_PATH=/absolute/path/to/forgebadger.db
+FORGEBADGER_MASTER_KEY=<64-hex-characters>
+FORGEBADGER_JWT_SECRET=<32+-character-secret>
+FORGEBADGER_LOG_LEVEL=info
+FORGEBADGER_TMUX_PREFIX=of-
 ```
 
 Do not commit `.env`, database files, API keys, JWTs, or generated user
@@ -85,7 +90,7 @@ Native dependency notes:
 - `tmux` is a system dependency and is not installed by npm.
 - If prebuilt native binaries are unavailable for the operator's platform,
   dependency installation requires a working C/C++ build toolchain compatible
-  with Node.js 20 or newer.
+  with a supported Node.js release.
 
 ## 3. Preflight Checklist
 
@@ -125,7 +130,7 @@ git diff --check
 ```
 
 Database migrations are embedded in the Gateway build and run when Gateway
-opens `OPENFORGE_DB_PATH`. Before restarting an existing install, back up the
+opens `FORGEBADGER_DB_PATH`. Before restarting an existing install, back up the
 database file and keep the previous release commit available for rollback.
 
 ## 5. Start Or Restart
@@ -133,18 +138,18 @@ database file and keep the previous release commit available for rollback.
 Build first, then start each process with the same `.env`:
 
 ```bash
-pnpm --filter @openforge/gateway start
-pnpm --filter @openforge/web start
+pnpm --filter @forgebadger/gateway start
+pnpm --filter @forgebadger/web start
 ```
 
 For development or manual smoke:
 
 ```bash
-pnpm --filter @openforge/gateway dev
-pnpm --filter @openforge/web dev --port 48732
+pnpm --filter @forgebadger/gateway dev
+FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=48732 pnpm --filter @forgebadger/web dev
 ```
 
-The Gateway must be reachable at `OPENFORGE_GATEWAY_URL`. The browser must load
+The Gateway must be reachable at `FORGEBADGER_GATEWAY_URL`. The browser must load
 the Web console at `http://localhost:48732` or the forwarded host configured by
 the operator.
 
@@ -164,8 +169,10 @@ pnpm smoke:npm
 
 Before publishing, inspect the `npm pack --dry-run` output from `pnpm pack:npm`
 and confirm the package does not include local config, database files, logs,
-API keys, `.claude`, `.codex`, `.opencode`, SQLite databases, or internal
-development artifacts.
+API keys, `.claude`, `.codex`, `.opencode`, SQLite databases, internal
+development artifacts, symlinks, or build-host-native Web binaries. The
+verifier also requires the published CLI to declare every direct Gateway
+runtime dependency.
 
 ## 7. Release Acceptance
 
@@ -180,7 +187,7 @@ A release candidate is acceptable only when:
   removing the current platform caveat.
 - Existing projects can still render config previews and apply config sync with
   explicit conflict decisions.
-- Existing stored API keys decrypt with the configured `OPENFORGE_MASTER_KEY`.
+- Existing stored API keys decrypt with the configured `FORGEBADGER_MASTER_KEY`.
 - No hardcoded secrets or plaintext credentials are introduced.
 
 ## 8. Phase C Entry Criteria

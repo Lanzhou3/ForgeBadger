@@ -14,7 +14,7 @@ import { ApiKeyRepository } from "../db/repositories/api-key-repository.js";
 import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
 import { SessionConflictError } from "../services/session-manager.js";
-import type { OpenForgeEventBus } from "../services/event-bus.js";
+import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import type { CredentialMode } from "../config-generation/types.js";
 import { recordActivity } from "../services/activity-events.js";
 import { recordSessionSnapshot } from "../services/session-snapshots.js";
@@ -71,7 +71,7 @@ export function createSessionRoutes(
   db: Database,
   masterKey: string,
   sessionManager: InMemorySessionManager,
-  eventBus?: OpenForgeEventBus,
+  eventBus?: ForgeBadgerEventBus,
   adapterCommandRunner?: CommandRunner
 ): Router {
   const router = Router();
@@ -642,7 +642,7 @@ export function createSessionRoutes(
 
 function recordSessionActivity(
   db: Database,
-  eventBus: OpenForgeEventBus | undefined,
+  eventBus: ForgeBadgerEventBus | undefined,
   userId: string,
   session: Session,
   type: string,
@@ -691,13 +691,13 @@ export function createGateASessionRoutes(sessionManager: InMemorySessionManager)
         ? createClaudeLaunchPlan({
             projectRoot: resolvedCwd,
             credentialMode: "host_environment",
-            env: { OPENFORGE_SESSION_ID: sessionId }
+            env: { FORGEBADGER_SESSION_ID: sessionId }
           })
         : {
             command: "bash",
             args: [],
             cwd: resolvedCwd,
-            env: { OPENFORGE_SESSION_ID: sessionId },
+            env: { FORGEBADGER_SESSION_ID: sessionId },
             secretEnvNames: [],
             credentialMode: "host_environment" as CredentialMode
           };

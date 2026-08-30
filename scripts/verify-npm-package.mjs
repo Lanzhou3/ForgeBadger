@@ -13,7 +13,7 @@ const required = [
   { path: "dist/web/standalone/packages/web/node_modules/next/package.json", type: "file" },
   { path: "dist/web/standalone/node_modules/@swc/helpers/package.json", type: "file" },
   { path: "dist/web/standalone/packages/web/public", type: "directory", nonEmpty: true },
-  { path: "dist/web/standalone/packages/web/public/openforge-runtime.js", type: "file" },
+  { path: "dist/web/standalone/packages/web/public/forgebadger-runtime.js", type: "file" },
   { path: "README.md", type: "file" },
   { path: "LICENSE", type: "file" },
   { path: "docs/README.zh-CN.md", type: "file" },
@@ -27,20 +27,23 @@ const forbiddenNames = new Set([
   ".claude",
   ".codex",
   ".opencode",
-  ".openforge",
+  ".forgebadger",
   "logs",
   "reports"
 ]);
 
 const forbiddenFilePatterns = [
   /\.(?:db|sqlite|sqlite3)(?:-(?:wal|shm))?$/,
-  /\.log$/
+  /\.log$/,
+  /\.(?:node|dylib|dll)$/,
+  /\.so(?:\.\d+)*$/
 ];
 
 const forbiddenRuntimeDependencies = new Set(["next", "react", "react-dom"]);
 
 export async function verifyNpmPackage(options = {}) {
   const cliPackageRoot = path.resolve(options.cliPackageRoot ?? "packages/cli");
+  const gatewayPackageRoot = path.resolve(options.gatewayPackageRoot ?? path.join(cliPackageRoot, "..", "gateway"));
   const packageJson = readPackageJson(cliPackageRoot);
   const errors = [];
 
@@ -59,8 +62,27 @@ export async function verifyNpmPackage(options = {}) {
     errors.push("packages/cli/package.json files whitelist does not match npm package artifacts");
   }
   verifyForbiddenRuntimeDependencies(packageJson, errors);
+  verifyGatewayRuntimeDependencies(packageJson, gatewayPackageRoot, errors);
 
   return { ok: errors.length === 0, errors };
+}
+
+function verifyGatewayRuntimeDependencies(cliPackageJson, gatewayPackageRoot, errors) {
+  if (!existsSync(path.join(gatewayPackageRoot, "package.json"))) {
+    return;
+  }
+  const gatewayPackageJson = readPackageJson(gatewayPackageRoot);
+  const cliDependencies = cliPackageJson.dependencies ?? {};
+  const gatewayDependencies = gatewayPackageJson.dependencies ?? {};
+  for (const [dependencyName, dependencyVersion] of Object.entries(gatewayDependencies)) {
+    if (!(dependencyName in cliDependencies)) {
+      errors.push(`missing Gateway runtime dependency: ${dependencyName}`);
+      continue;
+    }
+    if (cliDependencies[dependencyName] !== dependencyVersion) {
+      errors.push(`Gateway runtime dependency version mismatch: ${dependencyName}`);
+    }
+  }
 }
 
 async function verifyRequiredArtifact(cliPackageRoot, artifact, errors) {

@@ -146,7 +146,7 @@ export class FeishuSdkFactory {
       autoReconnect: true,
       handshakeTimeoutMs: clamp(config.handshakeTimeoutMs ?? 15_000, 1_000, 60_000),
       loggerLevel: this.sdk.LoggerLevel.warn,
-      source: "openforge",
+      source: "forgebadger",
       wsConfig: { pingTimeout: 5 },
       ...(config.proxyAgent ? { agent: config.proxyAgent } : {})
     });

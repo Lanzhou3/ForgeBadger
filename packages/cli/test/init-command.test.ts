@@ -29,14 +29,14 @@ describe("init command delegation", () => {
     assert.deepEqual(seen, [["init", "--path", "/tmp/project", "--dry-run"]]);
   });
 
-  it("dynamically imports the installed gateway init module and calls runOpenForgeCli", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "openforge-init-command-"));
+  it("dynamically imports the installed gateway init module and calls runForgeBadgerCli", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "forgebadger-init-command-"));
     const argsPath = path.join(tempDir, "args.json");
     const modulePath = path.join(tempDir, "gateway-init.mjs");
     await writeFile(
       modulePath,
       `import { writeFile } from "node:fs/promises";
-export async function runOpenForgeCli(args) {
+export async function runForgeBadgerCli(args) {
   await writeFile(${JSON.stringify(argsPath)}, JSON.stringify(args), "utf8");
   return 23;
 }
@@ -59,7 +59,7 @@ export async function runOpenForgeCli(args) {
   });
 
   it("rejects gateway init entries outside the installed package root", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "openforge-init-command-"));
+    const tempDir = await mkdtemp(path.join(tmpdir(), "forgebadger-init-command-"));
 
     await assert.rejects(
       () => runInit(["init"], {

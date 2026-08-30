@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -195,8 +196,8 @@ export async function applyModelProviderConfig(input: ModelConfigApplyInput): Pr
   const scope = preview.scope;
   const root = resolveApplyRoot({ adapter: preview.adapter, scope, projectRoot: input.projectRoot });
   const backupPath = scope === "user-global"
-    ? path.join(homedir(), ".openforge", "backups", "model-provider-apply", new Date().toISOString().replace(/[:.]/g, "-"))
-    : path.join(root, ".openforge", "backups", "model-provider-apply", new Date().toISOString().replace(/[:.]/g, "-"));
+    ? path.join(resolveForgeBadgerStateDir(), "backups", "model-provider-apply", new Date().toISOString().replace(/[:.]/g, "-"))
+    : path.join(root, ".forgebadger", "backups", "model-provider-apply", new Date().toISOString().replace(/[:.]/g, "-"));
   await mkdir(backupPath, { recursive: true });
 
   const written: Array<{ absolutePath: string; backupFile?: string | undefined }> = [];
@@ -213,6 +214,14 @@ export async function applyModelProviderConfig(input: ModelConfigApplyInput): Pr
   }
 
   return { ...preview, backupPath };
+}
+
+function resolveForgeBadgerStateDir(): string {
+  const configured = process.env.FORGEBADGER_STATE_DIR ?? process.env.OPENFORGE_STATE_DIR;
+  if (configured) return path.resolve(configured);
+  const currentDir = path.join(homedir(), ".forgebadger");
+  const legacyDir = path.join(homedir(), ".openforge");
+  return !existsSync(currentDir) && existsSync(legacyDir) ? legacyDir : currentDir;
 }
 
 async function buildOpenCodePlan(input: ModelConfigApplyInput): Promise<Omit<ModelConfigApplyPreview, "scope" | "changedFiles">> {

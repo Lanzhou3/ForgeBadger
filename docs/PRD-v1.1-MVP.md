@@ -1,4 +1,4 @@
-# OpenForge — 产品需求文档
+# ForgeBadger — 产品需求文档
 
 > 版本：v1.1 (MVP 收窄版) | 2026-04-23
 > 状态：架构已确认（Gateway + Web 控制台），等待开发排期
@@ -8,7 +8,7 @@
 
 ## 零、MVP-0 硬范围（2026-04-26）
 
-MVP-0 的目标是验证 OpenForge 的核心产品承诺：**用 Web 控制台管理本地 Claude Code CLI 会话，并在断连/重启后保持会话可恢复**。
+MVP-0 的目标是验证 ForgeBadger 的核心产品承诺：**用 Web 控制台管理本地 Claude Code CLI 会话，并在断连/重启后保持会话可恢复**。
 
 ### MVP-0 用户闭环
 
@@ -266,7 +266,7 @@ MVP-1 在 MVP-0 通过 Gate D 后展开：
 └─────────────────────┬───────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────┐
-│           OpenForge Gateway 服务                 │
+│           ForgeBadger Gateway 服务                 │
 │  后台运行，管理所有 AI CLI 实例                    │
 │                                                 │
 │  ┌──────────────┐  ┌──────────────────────────┐ │
@@ -368,7 +368,7 @@ Day 1 必须先做：
 
 ## 九、与竞品的差异化
 
-| 维度 | 竞品（cc-switch 等） | OpenForge |
+| 维度 | 竞品（cc-switch 等） | ForgeBadger |
 |------|---------------------|-----------|
 | **项目初始化** | ❌ 无 | ✅ 核心功能 |
 | **已有项目导入** | ❌ 无 | ✅ 核心功能 |
@@ -433,11 +433,11 @@ _需求已确认，架构已确认（Gateway + Web 控制台），MVP 范围 ~17
 
 | 术语 | 定义 |
 |------|------|
-| Gateway | OpenForge 后台服务，管理所有 AI CLI 实例、终端转发、配置生成 |
+| Gateway | ForgeBadger 后台服务，管理所有 AI CLI 实例、终端转发、配置生成 |
 | Vibe Coding | 心流优先、快速迭代的 AI 辅助编程方式 |
 | Harness Engineering | 将 AI 编码工具放入工程约束体系中稳定交付的方法论 |
 | Agent | AI CLI 内部的角色定义（如 planner、code-reviewer），通过 /agent 命令切换 |
 | Skill | AI CLI 的技能扩展（SKILL.md 文件），通过 /skill-name 调用 |
 | 项目初始化 | 创建新项目时一键注入规范配置（.claude/ 等目录） |
-| 项目导入 | 将已有项目接入 OpenForge 管理，补充缺失配置 |
+| 项目导入 | 将已有项目接入 ForgeBadger 管理，补充缺失配置 |
 | 模型 | AI CLI 接入的 LLM 模型（如 Claude Sonnet、GPT-4 等） |

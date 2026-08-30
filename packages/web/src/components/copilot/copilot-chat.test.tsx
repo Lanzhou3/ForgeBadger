@@ -105,9 +105,9 @@ const baseUserMessage = {
 
 const baseDshConfig = {
   defaultModelId: "model-1",
-  plugins: { "openforge-bridge": true },
+  plugins: { "forgebadger-bridge": true },
   availablePlugins: [
-    { id: "openforge-bridge", label: "OpenForge Bridge", description: "平台工具" },
+    { id: "forgebadger-bridge", label: "ForgeBadger Bridge", description: "平台工具" },
   ],
   runtime: { status: "running" as const },
 };

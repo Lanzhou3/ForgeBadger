@@ -56,10 +56,10 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
   useEffect(() => {
     refreshTabs();
     window.addEventListener("storage", refreshTabs);
-    window.addEventListener("openforge-session-tabs-changed", refreshTabs);
+    window.addEventListener("forgebadger-session-tabs-changed", refreshTabs);
     return () => {
       window.removeEventListener("storage", refreshTabs);
-      window.removeEventListener("openforge-session-tabs-changed", refreshTabs);
+      window.removeEventListener("forgebadger-session-tabs-changed", refreshTabs);
     };
   }, [refreshTabs]);
 

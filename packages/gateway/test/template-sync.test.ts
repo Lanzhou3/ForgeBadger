@@ -56,9 +56,9 @@ async function createFixture(): Promise<Fixture> {
 
   const projectRepo = new ProjectRepository(db, userA.id);
   const dirs = {
-    compliant: await mkdtemp(path.join(tmpdir(), "openforge-tpl-sync-ok-")),
-    stale: await mkdtemp(path.join(tmpdir(), "openforge-tpl-sync-stale-")),
-    missing: await mkdtemp(path.join(tmpdir(), "openforge-tpl-sync-missing-"))
+    compliant: await mkdtemp(path.join(tmpdir(), "forgebadger-tpl-sync-ok-")),
+    stale: await mkdtemp(path.join(tmpdir(), "forgebadger-tpl-sync-stale-")),
+    missing: await mkdtemp(path.join(tmpdir(), "forgebadger-tpl-sync-missing-"))
   };
   await writeFile(path.join(dirs.compliant, "CLAUDE.md"), "T\n");
   await writeFile(path.join(dirs.stale, "CLAUDE.md"), "DIFFERENT\n");
@@ -265,7 +265,7 @@ describe("template sync apply", () => {
 
   it("continues with other projects when one project fails", async () => {
     const fixture = await createFixture();
-    const blockedParent = await mkdtemp(path.join(tmpdir(), "openforge-tpl-sync-blocked-"));
+    const blockedParent = await mkdtemp(path.join(tmpdir(), "forgebadger-tpl-sync-blocked-"));
     const blockedPath = path.join(blockedParent, "not-a-directory");
     await writeFile(blockedPath, "x");
     const pBad = fixture.projectRepo.create({

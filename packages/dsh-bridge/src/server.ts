@@ -1,5 +1,5 @@
 /**
- * Resume-aware SDK JSON-RPC server plugin for the OpenForge dsh runtime.
+ * Resume-aware SDK JSON-RPC server plugin for the ForgeBadger dsh runtime.
  *
  * The stock `@deepseek-ai/dsh-sdk-jsonrpc-server` creates every incoming
  * sessionId through `ctx.agents.create()`, which rejects an id that already
@@ -34,7 +34,7 @@ import { JsonRpcLineTransport } from "@deepseek-ai/dsh-sdk-protocol";
 
 import { setApprovalTransport } from "./approval-bridge.js";
 
-export const name = "openforge-dsh-jsonrpc-server";
+export const name = "forgebadger-dsh-jsonrpc-server";
 export const inject = ["agents"];
 
 interface SessionRecord {
@@ -153,7 +153,7 @@ export class ResumeAwareSdkServer {
     const rec = await this.getOrCreateSession(params.sessionId);
     const message = createUserMessage({
       content: [{ type: "text", text: params.text }],
-      source: { kind: "plugin", plugin: "openforge-bridge" },
+      source: { kind: "plugin", plugin: "forgebadger-bridge" },
     });
     rec.handle.agent.inject(message);
     return { injected: true };

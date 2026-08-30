@@ -34,7 +34,7 @@ export interface TerminalRuntimeStatus {
   message: string;
 }
 
-export interface OpenForgeDependencyReport {
+export interface ForgeBadgerDependencyReport {
   dependencies: DependencyStatus[];
   terminalRuntime: TerminalRuntimeStatus;
 }
@@ -45,7 +45,7 @@ interface DependencyCheck {
   required: boolean;
 }
 
-const OPENFORGE_DEPENDENCY_CHECKS: DependencyCheck[] = [
+const FORGEBADGER_DEPENDENCY_CHECKS: DependencyCheck[] = [
   { command: "tmux", args: ["-V"], required: true },
   { command: "claude", args: ["--version"], required: false },
   { command: "opencode", args: ["--version"], required: false },
@@ -101,22 +101,22 @@ export async function checkGateADependencies(
   ]);
 }
 
-export async function checkOpenForgeDependencies(
+export async function checkForgeBadgerDependencies(
   runner: CommandRunner = runCommand
 ): Promise<DependencyStatus[]> {
   return Promise.all(
-    OPENFORGE_DEPENDENCY_CHECKS.map(async (check) => ({
+    FORGEBADGER_DEPENDENCY_CHECKS.map(async (check) => ({
       ...(await checkCommand(check.command, check.args, runner)),
       required: check.required
     }))
   );
 }
 
-export async function checkOpenForgeRuntimeDependencies(
+export async function checkForgeBadgerRuntimeDependencies(
   runner: CommandRunner = runCommand,
   platform: NodeJS.Platform = process.platform
-): Promise<OpenForgeDependencyReport> {
-  const dependencies = await checkOpenForgeDependencies(runner);
+): Promise<ForgeBadgerDependencyReport> {
+  const dependencies = await checkForgeBadgerDependencies(runner);
   return {
     dependencies,
     terminalRuntime: describeTerminalRuntime(dependencies, platform)
@@ -200,7 +200,7 @@ function describeTerminalRuntime(
       persistence: "tmux",
       mode: "wsl_required",
       supported: false,
-      message: "Native Windows terminals require WSL because OpenForge persists sessions with tmux."
+      message: "Native Windows terminals require WSL because ForgeBadger persists sessions with tmux."
     };
   }
 

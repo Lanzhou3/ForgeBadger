@@ -36,7 +36,7 @@ export function ProviderList({
   t,
 }: ProviderListProps) {
   return (
-    <Card className="min-w-0 of-animate-in xl:sticky xl:top-4">
+    <Card className="min-w-0 forgebadger-animate-in xl:sticky xl:top-4">
       <CardHeader>
         <div className="flex items-center gap-3">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
@@ -73,7 +73,7 @@ export function ProviderList({
                 return (
                   <div
                     key={provider.id}
-                    className={`flex w-full items-center gap-2 px-3 py-2.5 text-sm transition-colors of-animate-in ${
+                    className={`flex w-full items-center gap-2 px-3 py-2.5 text-sm transition-colors forgebadger-animate-in ${
                       isSelected ? "bg-brand/5" : "hover:bg-muted/40"
                     }`}
                     style={{ animationDelay: `${index * 40}ms` }}

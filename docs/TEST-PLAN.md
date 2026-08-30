@@ -1,4 +1,4 @@
-# OpenForge TDD 测试计划
+# ForgeBadger TDD 测试计划
 
 > 版本：v2.1 | 日期：2026-04-25 | 状态：**已通过复审，可进入执行阶段**
 > 变更说明：v2.0 根据煊璃复审报告（docs/XUANLI-REVIEW-V2.md）修补 3 项遗留问题 + 2 项可选建议

@@ -37,7 +37,7 @@ export async function ensureCodexNotificationSettings(
   projectRoot: string
 ): Promise<{ path: string; changed: boolean }> {
   const hooksPath = safeResolve(projectRoot, ".codex/hooks.json");
-  const scriptPath = safeResolve(projectRoot, ".codex/hooks/openforge-notify.mjs");
+  const scriptPath = safeResolve(projectRoot, ".codex/hooks/forgebadger-notify.mjs");
   try {
     const existing = await readJsonObject(hooksPath);
     const next = mergeCodexHooks(existing, scriptPath);
@@ -60,8 +60,8 @@ export async function ensureCodexNotificationSettings(
  * (`$KIMI_CODE_HOME/config.toml`, default `~/.kimi-code/config.toml`) — a
  * project-level `.kimi-code/config.toml` hook block is silently never read.
  * The managed block therefore lives in the global config and points at one
- * shared forwarding script in the OpenForge state dir; session identity comes
- * from tmux env at runtime, so non-OpenForge Kimi sessions no-op quietly.
+ * shared forwarding script in the ForgeBadger state dir; session identity comes
+ * from tmux env at runtime, so non-ForgeBadger Kimi sessions no-op quietly.
  *
  * Also strips the obsolete per-project managed block that earlier versions
  * wrote into `<project>/.kimi-code/config.toml`.
@@ -70,7 +70,10 @@ export async function ensureKimiNotificationSettings(
   projectRoot: string
 ): Promise<{ path: string; changed: boolean }> {
   const kimiHome = process.env.KIMI_CODE_HOME?.trim() || path.join(os.homedir(), ".kimi-code");
-  const stateDir = process.env.OPENFORGE_STATE_DIR?.trim() || path.join(os.homedir(), ".openforge");
+  const stateDir =
+    process.env.FORGEBADGER_STATE_DIR?.trim() ||
+    process.env.OPENFORGE_STATE_DIR?.trim() ||
+    path.join(os.homedir(), ".forgebadger");
   const configPath = path.join(kimiHome, "config.toml");
   const scriptPath = path.join(stateDir, "hooks", "kimi-notify.mjs");
   try {
@@ -98,7 +101,7 @@ async function stripProjectKimiHookBlock(projectRoot: string): Promise<boolean> 
     const existingText = await readText(configPath);
     if (!existingText) return false;
     const stripped = existingText
-      .replace(/\n?# OpenForge managed notification hooks: start\n[\s\S]*?# OpenForge managed notification hooks: end\n?/u, "")
+      .replace(/\n?# (?:ForgeBadger|OpenForge) managed notification hooks: start\n[\s\S]*?# (?:ForgeBadger|OpenForge) managed notification hooks: end\n?/u, "")
       .replace(/\n+$/u, "");
     if (stripped === existingText) return false;
     await writeFile(configPath, stripped.length > 0 ? `${stripped}\n` : stripped, "utf8");
@@ -124,7 +127,7 @@ function mergeCodexHooks(existing: Record<string, unknown>, scriptPath: string):
   return next;
 }
 
-// A Codex event may have several matcher groups. OpenForge has no matcher, so
+// A Codex event may have several matcher groups. ForgeBadger has no matcher, so
 // its command belongs in the first catch-all group while every other group is
 // retained unchanged.
 function mergeCodexHookGroups(value: unknown, command: CodexHookCommand): CodexHookGroup[] {
@@ -136,14 +139,14 @@ function mergeCodexHookGroups(value: unknown, command: CodexHookCommand): CodexH
   return groups.map((group, index) => {
     if (index !== 0) return group as CodexHookGroup;
     const existingHooks = Array.isArray(group.hooks) ? group.hooks.filter(isRecord) : [];
-    const hooks = existingHooks.filter((hook) => !isOpenForgeCommand(hook.command));
+    const hooks = existingHooks.filter((hook) => !isForgeBadgerCommand(hook.command));
     return { ...group, hooks: [...hooks, command] } as CodexHookGroup;
   });
 }
 
 function mergeKimiHookText(existing: string, scriptPath: string): string {
   const preserved = existing
-    .replace(/\n?# OpenForge managed notification hooks: start\n[\s\S]*?# OpenForge managed notification hooks: end\n?/u, "")
+    .replace(/\n?# (?:ForgeBadger|OpenForge) managed notification hooks: start\n[\s\S]*?# (?:ForgeBadger|OpenForge) managed notification hooks: end\n?/u, "")
     .replace(/\n+$/u, "");
   const command = `node ${shellQuote(scriptPath)}`;
   const managed = kimiHookEvents.flatMap((event) => [
@@ -154,21 +157,21 @@ function mergeKimiHookText(existing: string, scriptPath: string): string {
     ""
   ]);
   const prefix = preserved.length > 0 ? `${preserved}\n\n` : "";
-  return `${prefix}# OpenForge managed notification hooks: start\n${managed.join("\n")}# OpenForge managed notification hooks: end\n`;
+  return `${prefix}# ForgeBadger managed notification hooks: start\n${managed.join("\n")}# ForgeBadger managed notification hooks: end\n`;
 }
 
 function forwardingScript(adapter: NotificationAdapter): string {
   // The generated hook has no project secrets embedded in it. Session identity,
   // Gateway location, and the short-lived attach token come from tmux env at
   // runtime, matching the existing Claude and OpenCode notification paths.
-  return `// OpenForge managed lifecycle hook — do not edit by hand
+  return `// ForgeBadger managed lifecycle hook — do not edit by hand
 const chunks = [];
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => chunks.push(chunk));
 process.stdin.on("end", async () => {
-  const gatewayUrl = process.env.OPENFORGE_GATEWAY_URL || "";
-  const sessionId = process.env.OPENFORGE_SESSION_ID || "";
-  const attachToken = process.env.OPENFORGE_ATTACH_TOKEN || "";
+  const gatewayUrl = process.env.FORGEBADGER_GATEWAY_URL || "";
+  const sessionId = process.env.FORGEBADGER_SESSION_ID || "";
+  const attachToken = process.env.FORGEBADGER_ATTACH_TOKEN || "";
   if (!gatewayUrl || !sessionId || !attachToken) return;
 
   let payload = {};
@@ -180,8 +183,8 @@ process.stdin.on("end", async () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-openforge-session-id": sessionId,
-          "x-openforge-session-token": attachToken
+          "x-forgebadger-session-id": sessionId,
+          "x-forgebadger-session-token": attachToken
         },
         body: JSON.stringify({ ...payload, adapter: "${adapter}" }),
         signal: AbortSignal.timeout(4500)
@@ -224,8 +227,11 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function isOpenForgeCommand(value: unknown): boolean {
-  return typeof value === "string" && value.includes("openforge-notify.mjs");
+function isForgeBadgerCommand(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    (value.includes("forgebadger-notify.mjs") || value.includes("openforge-notify.mjs"))
+  );
 }
 
 function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {

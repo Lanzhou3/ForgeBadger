@@ -1,8 +1,8 @@
 /**
  * Internal Copilot bridge API — consumed by the deepseek-harness
- * openforge-bridge plugin over loopback HTTP. Auth is a static service token
- * (OPENFORGE_COPILOT_BRIDGE_TOKEN); the acting user arrives via the
- * X-OpenForge-User-Id header, which is trusted only after the service token
+ * forgebadger-bridge plugin over loopback HTTP. Auth is a static service token
+ * (FORGEBADGER_COPILOT_BRIDGE_TOKEN); the acting user arrives via the
+ * X-ForgeBadger-User-Id header, which is trusted only after the service token
  * passes. All data access goes through per-user repositories/facades, so
  * tenant isolation is identical to the user-facing API.
  *
@@ -559,9 +559,11 @@ function createBridgeAuthMiddleware(bridgeToken: string) {
       res.status(403).json({ code: 1, message: "Forbidden", details: { code: "BRIDGE_TOKEN_INVALID" } });
       return;
     }
-    const userId = req.header("x-openforge-user-id")?.trim();
+    const userId = (
+      req.header("x-forgebadger-user-id") ?? req.header("x-openforge-user-id")
+    )?.trim();
     if (!userId || userId.length > 128) {
-      res.status(400).json({ code: 1, message: "X-OpenForge-User-Id header is required", details: { code: "BRIDGE_USER_ID_REQUIRED" } });
+      res.status(400).json({ code: 1, message: "X-ForgeBadger-User-Id header is required", details: { code: "BRIDGE_USER_ID_REQUIRED" } });
       return;
     }
     (req as BridgeRequest).bridgeUserId = userId;

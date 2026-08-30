@@ -13,6 +13,7 @@ import {
   type ProjectManagerWorkItemUpdateInput,
 } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
+import { readMigratedStorageValue, writeMigratedStorageValue } from "@/lib/brand-storage";
 import {
   EVIDENCE_REFERENCE_TYPE_OPTIONS,
   LEDGER_FILTER_EVENTS,
@@ -229,7 +230,7 @@ export const UNSAFE_EVIDENCE_REFERENCE_PATTERNS = [
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/u,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/iu,
   /private key/iu,
-  /\bOPENFORGE_ATTACH_TOKEN=/u,
+  /\b(?:FORGEBADGER|OPENFORGE)_ATTACH_TOKEN=/u,
   /\b(api[_-]?key|token|password|secret|private[_-]?key|credential|event[_-]?encrypt[_-]?key)\b\s*[:=]/iu,
   /[\r\n\x00-\x08\x0B\x0C\x0E-\x1F]/u,
   /\b(raw terminal|terminal transcript|stdout|stderr|command output)\b/iu,
@@ -420,14 +421,22 @@ interface ProjectManagerViewPrefs {
 const WORK_ITEM_VIEW_MODES: WorkItemViewMode[] = ["board", "table", "queue"];
 
 export function projectManagerViewStorageKey(projectId: string) {
-  return `openforge:pm-view:${projectId}`;
+  return `forgebadger:pm-view:${projectId}`;
+}
+
+function legacyProjectManagerViewStorageKey(storageKey: string) {
+  return storageKey.replace(/^forgebadger:/u, "openforge:");
 }
 
 export function readProjectManagerViewPrefs(storageKey: string): Required<ProjectManagerViewPrefs> {
   const defaults: Required<ProjectManagerViewPrefs> = { statusFilter: "all", viewMode: "board" };
   if (typeof window === "undefined") return defaults;
   try {
-    const raw = window.localStorage.getItem(storageKey);
+    const raw = readMigratedStorageValue(
+      window.localStorage,
+      storageKey,
+      legacyProjectManagerViewStorageKey(storageKey)
+    );
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as ProjectManagerViewPrefs;
     return {
@@ -447,7 +456,12 @@ export function readProjectManagerViewPrefs(storageKey: string): Required<Projec
 export function writeProjectManagerViewPrefs(storageKey: string, prefs: Required<ProjectManagerViewPrefs>) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify(prefs));
+    writeMigratedStorageValue(
+      window.localStorage,
+      storageKey,
+      legacyProjectManagerViewStorageKey(storageKey),
+      JSON.stringify(prefs)
+    );
   } catch {
     // localStorage may be unavailable (private mode); persistence is best-effort.
   }

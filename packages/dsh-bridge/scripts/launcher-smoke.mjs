@@ -7,12 +7,12 @@ import { spawn } from "node:child_process";
 
 const env = {
   ...process.env,
-  OPENFORGE_GATEWAY_URL: "http://127.0.0.1:9", // unreachable on purpose: no call is made
-  OPENFORGE_COPILOT_BRIDGE_TOKEN: "smoke-token",
-  OPENFORGE_USER_ID: "smoke-user",
+  FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:9", // unreachable on purpose: no call is made
+  FORGEBADGER_COPILOT_BRIDGE_TOKEN: "smoke-token",
+  FORGEBADGER_USER_ID: "smoke-user",
   MINIMAX_API_KEY: "smoke-dummy-key",
-  DSH_SESSION_ROOT: "/tmp/openforge-dsh-bridge-smoke/.sessions",
-  DSH_CWD: "/tmp/openforge-dsh-bridge-smoke",
+  DSH_SESSION_ROOT: "/tmp/forgebadger-dsh-bridge-smoke/.sessions",
+  DSH_CWD: "/tmp/forgebadger-dsh-bridge-smoke",
 };
 
 const child = spawn(process.execPath, ["dist/launcher.js"], {
@@ -49,7 +49,7 @@ child.stdin.write(JSON.stringify({
   jsonrpc: "2.0",
   id: 1,
   method: "initialize",
-  params: { cwd: "/tmp/openforge-dsh-bridge-smoke", provider: "minimax", model: "MiniMax-M3" },
+  params: { cwd: "/tmp/forgebadger-dsh-bridge-smoke", provider: "minimax", model: "MiniMax-M3" },
 }) + "\n");
 
 setTimeout(() => {
