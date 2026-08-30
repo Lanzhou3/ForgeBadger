@@ -12,7 +12,6 @@ import { OPENFORGE_GATEWAY_EVENT } from "@/lib/gateway-events";
 import {
   toastDurationFor,
   toastToneFor,
-  toneAccentClassNames,
   toneIconClassNames,
   toneIcons,
   type NotificationToastTone,
@@ -46,9 +45,12 @@ import {
 import { cn } from "@/lib/utils";
 
 interface RobotWidgetProps {
+  /** Click/Enter on the robot: toggles the floating chat panel. */
   onActivate: () => void;
   /** When the Copilot page is open the robot stays visible but stays quiet. */
   suppressBubbles?: boolean;
+  /** While the chat panel is open, notification bubbles stay out of the way. */
+  panelOpen?: boolean;
 }
 
 type RobotMode = "stand" | "walk" | "sit";
@@ -70,10 +72,13 @@ interface DragState {
   moved: boolean;
 }
 
-export function RobotWidget({ onActivate, suppressBubbles = false }: RobotWidgetProps) {
+export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = false }: RobotWidgetProps) {
   const { t } = useLanguage();
   const router = useRouter();
   const { markRead } = useNotifications();
+
+  // Bubbles stay quiet on the Copilot page and while the chat panel is open.
+  const bubblesSuppressed = suppressBubbles || panelOpen;
 
   const [pos, setPos] = useState<RobotPosition | null>(null);
   const [corner, setCorner] = useState<RobotCorner>("bottom-right");
@@ -84,6 +89,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false }: RobotWidget
   const [walkFrame, setWalkFrame] = useState<RobotFrameKey>("walk1");
   const [sitFrame, setSitFrame] = useState<RobotFrameKey>("sit1");
   const [bubble, setBubble] = useState<RobotBubble | null>(null);
+  const bubbleRef = useRef<RobotBubble | null>(null);
   const [nudge, setNudge] = useState(false);
 
   const robotRef = useRef<HTMLDivElement | null>(null);
@@ -95,21 +101,25 @@ export function RobotWidget({ onActivate, suppressBubbles = false }: RobotWidget
   const cornerRef = useRef<RobotCorner>(corner);
   const suppressBubblesRef = useRef(suppressBubbles);
   const reducedMotionRef = useRef(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
 
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
 
   useEffect(() => {
-    suppressBubblesRef.current = suppressBubbles;
-    if (suppressBubbles) {
+    suppressBubblesRef.current = bubblesSuppressed;
+    if (bubblesSuppressed) {
+      bubbleRef.current = null;
       setBubble(null);
     }
-  }, [suppressBubbles]);
+  }, [bubblesSuppressed]);
 
   // Mount: restore the persisted corner and keep the robot pinned on resize.
   useEffect(() => {
-    reducedMotionRef.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    reducedMotionRef.current = prefersReducedMotion;
+    setReducedMotion(prefersReducedMotion);
     const stored = window.localStorage.getItem(ROBOT_CORNER_STORAGE_KEY);
     const initial = isRobotCorner(stored) ? stored : "bottom-right";
     setCorner(initial);
@@ -214,14 +224,16 @@ export function RobotWidget({ onActivate, suppressBubbles = false }: RobotWidget
           session: t("notifications.sessionContext"),
           cli: t("notifications.cliContext"),
         }).join(" · ");
-        setBubble({
+        const next: RobotBubble = {
           id: notification.id,
           title: t(notification.titleKey),
           description: [context, notification.message].filter(Boolean).join(" · "),
           href: notification.href,
           tone: toastToneFor(notification.notificationType, message),
           duration: toastDurationFor(notification.notificationType),
-        });
+        };
+        bubbleRef.current = next;
+        setBubble(next);
         if (!reducedMotionRef.current) {
           setNudge(true);
           if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
@@ -242,7 +254,10 @@ export function RobotWidget({ onActivate, suppressBubbles = false }: RobotWidget
   // Auto-dismiss the bubble; a new bubble replaces the timer.
   useEffect(() => {
     if (!bubble) return;
-    bubbleTimerRef.current = setTimeout(() => setBubble(null), bubble.duration);
+    bubbleTimerRef.current = setTimeout(() => {
+      bubbleRef.current = null;
+      setBubble(null);
+    }, bubble.duration);
     return () => {
       if (bubbleTimerRef.current) {
         clearTimeout(bubbleTimerRef.current);
@@ -261,14 +276,30 @@ export function RobotWidget({ onActivate, suppressBubbles = false }: RobotWidget
   }, []);
 
   const openBubble = useCallback(() => {
-    setBubble((current) => {
-      if (current) {
-        markRead(current.id);
-        router.push(current.href);
-      }
-      return null;
-    });
+    // Side effects (markRead / router.push touch other components' state) must
+    // run in the event handler, NOT inside the setBubble updater - React runs
+    // updaters during render and updating NotificationProvider from there is
+    // the "setState while rendering a different component" error.
+    const current = bubbleRef.current;
+    bubbleRef.current = null;
+    setBubble(null);
+    if (current) {
+      markRead(current.id);
+      router.push(current.href);
+    }
   }, [markRead, router]);
+
+  // Opening the chat panel counts as reading the notification bubble that is
+  // currently shown: dismiss it locally and mark it read, then toggle.
+  const activate = useCallback(() => {
+    const current = bubbleRef.current;
+    if (!panelOpen && current) {
+      bubbleRef.current = null;
+      setBubble(null);
+      markRead(current.id);
+    }
+    onActivate();
+  }, [panelOpen, markRead, onActivate]);
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0 || !pos) return;
@@ -311,7 +342,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false }: RobotWidget
     dragRef.current = null;
     robotRef.current?.releasePointerCapture(event.pointerId);
     if (!drag.moved) {
-      onActivate();
+      activate();
       interact();
       return;
     }
@@ -324,7 +355,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false }: RobotWidget
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      onActivate();
+      activate();
     }
   }
 
@@ -342,6 +373,23 @@ export function RobotWidget({ onActivate, suppressBubbles = false }: RobotWidget
   const placement = bubblePlacement(corner);
   const ToneIcon = bubble ? toneIcons[bubble.tone] : null;
 
+  // Comic layout: the bubble floats over the robot's head (or hangs below it
+  // when the robot lives in a top corner), horizontally centered on the robot
+  // and clamped to the viewport so it never spills off-screen near edges.
+  const viewportWidth = window.innerWidth;
+  const bubbleWidth = Math.min(288, Math.max(viewportWidth - 48, 160));
+  const minRelLeft = 12 - pos.x;
+  const maxRelLeft = viewportWidth - bubbleWidth - 12 - pos.x;
+  const bubbleRelLeft = clamp(
+    (ROBOT_SIZE_PX - bubbleWidth) / 2,
+    minRelLeft,
+    Math.max(minRelLeft, maxRelLeft)
+  );
+  const robotOnRight = corner.endsWith("right");
+  // Mirror the tail sprite whenever its fixed anchor side would make the tip
+  // lean away from the robot's body (e.g. tail bottom-left / top-right).
+  const mirrorTail = robotOnRight !== (placement.vertical === "above");
+
   return (
     <div
       className={cn(
@@ -355,9 +403,12 @@ export function RobotWidget({ onActivate, suppressBubbles = false }: RobotWidget
         role="button"
         tabIndex={0}
         aria-label={t("nav.copilot")}
+        aria-expanded={panelOpen}
         className={cn(
           "touch-none select-none rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          dragging ? "cursor-grabbing" : "cursor-grab"
+          dragging
+            ? "cursor-grabbing"
+            : "cursor-grab transition-transform duration-200 ease-out hover:-translate-y-0.5 active:translate-y-0 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
         )}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -371,59 +422,89 @@ export function RobotWidget({ onActivate, suppressBubbles = false }: RobotWidget
         onPointerEnter={interact}
         onKeyDown={onKeyDown}
       >
+        {/* Ground shadow: breathes counter-phase to the idle bob so the robot
+            reads as lifted off the surface instead of pasted on. */}
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute -bottom-1 left-1/2 h-[7px] w-[72%] -translate-x-1/2 rounded-full bg-black/60 blur-[3px]",
+            !dragging && mode === "stand" && !reducedMotion && "of-robot-ground-shadow"
+          )}
+        />
         <div className={nudge ? "of-robot-nudge" : undefined}>
-          <PixelRobot frame={frame} flip={flip} size={ROBOT_SIZE_PX} className="drop-shadow-lg" />
+          <div
+            className={cn(
+              !dragging && mode === "stand" && !reducedMotion && "of-robot-idle-bob",
+              bubble && "of-robot-alert rounded-md"
+            )}
+          >
+            <PixelRobot frame={frame} flip={flip} size={ROBOT_SIZE_PX} glow={!!bubble} />
+          </div>
         </div>
       </div>
       {bubble && ToneIcon && (
         <div
           className={cn(
-            "of-animate-in absolute w-64 max-w-[calc(100vw-6rem)] rounded-lg border border-border bg-card p-3 shadow-xl shadow-black/30",
-            toneAccentClassNames[bubble.tone],
-            placement.side === "left" ? "right-full mr-3" : "left-full ml-3",
-            placement.vertical === "above" ? "bottom-0" : "top-0"
+            "of-bubble-pop absolute rounded-lg border-[1.5px] border-zinc-900 bg-zinc-50 p-3 text-zinc-900 shadow-lg shadow-black/40",
+            placement.vertical === "above" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"
           )}
+          style={{ left: bubbleRelLeft, width: bubbleWidth }}
         >
-          <span
+          {/* Comic speech tail: a sharp spike jutting out of the bottom
+              (or top) corner on the robot's side, aimed straight down (or up)
+              at its head — as if the robot itself is speaking. The unstroked
+              edge tucks under the bubble border, leaving an inked opening
+              like real manga. */}
+          <svg
             aria-hidden="true"
+            viewBox="0 0 18 12"
             className={cn(
-              "absolute h-2.5 w-2.5 rotate-45 border-border bg-card",
-              placement.side === "left"
-                ? "-right-[6px] border-r border-t"
-                : "-left-[6px] border-b border-l",
-              placement.vertical === "above" ? "bottom-5" : "top-5"
+              "absolute h-3 w-[18px]",
+              robotOnRight ? "right-2.5" : "left-2.5",
+              placement.vertical === "above" ? "-bottom-[10px]" : "-top-[10px]",
+              mirrorTail && "-scale-x-100",
+              placement.vertical === "below" && "rotate-180"
             )}
-          />
-          <div className="flex items-start gap-2">
-            <ToneIcon
-              className={cn(toneIconClassNames[bubble.tone], "mt-0.5 shrink-0")}
-              aria-hidden="true"
+          >
+            <path d="M0 0 H18 L6 12 Z" fill="#fafafa" />
+            <path
+              d="M18 0 L6 12 L0 0"
+              fill="none"
+              stroke="#18181b"
+              strokeWidth="1.5"
+              strokeLinejoin="miter"
             />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-card-foreground">{bubble.title}</p>
-              {bubble.description && (
-                <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                  {bubble.description}
-                </p>
-              )}
-              <div className="mt-2 flex items-center gap-1.5">
-                <button
-                  type="button"
-                  className="rounded-md bg-brand px-2 py-1 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand/90"
-                  onClick={openBubble}
-                >
-                  {t("notifications.openSession")}
-                </button>
-                <button
-                  type="button"
-                  aria-label={t("common.close")}
-                  className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  onClick={() => setBubble(null)}
-                >
-                  <XIcon className="size-3.5" aria-hidden="true" />
-                </button>
-              </div>
-            </div>
+          </svg>
+          <div className="flex items-start justify-between gap-2">
+            <p className="flex items-start gap-1.5 text-sm font-semibold leading-snug">
+              <ToneIcon className={cn(toneIconClassNames[bubble.tone], "mt-px shrink-0")} />
+              {bubble.title}
+            </p>
+            <button
+              type="button"
+              aria-label={t("common.close")}
+              className="-mr-1 -mt-0.5 shrink-0 rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-900/10 hover:text-zinc-700"
+              onClick={() => {
+                bubbleRef.current = null;
+                setBubble(null);
+              }}
+            >
+              <XIcon className="size-3.5" aria-hidden="true" />
+            </button>
+          </div>
+          {bubble.description && (
+            <p className="mt-1 line-clamp-2 pl-[22px] text-xs leading-relaxed text-zinc-500">
+              {bubble.description}
+            </p>
+          )}
+          <div className="mt-2.5 flex items-center gap-1.5 pl-[22px]">
+            <button
+              type="button"
+              className="h-7 rounded-md bg-zinc-900 px-3 text-xs font-medium text-zinc-50 transition-colors hover:bg-zinc-700"
+              onClick={openBubble}
+            >
+              {t("notifications.openSession")}
+            </button>
           </div>
         </div>
       )}

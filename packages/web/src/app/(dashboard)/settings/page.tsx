@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
+import { AccountSecuritySettings } from "@/components/settings/AccountSecuritySettings";
 import { FeishuIntegrationSettings } from "@/components/settings/FeishuIntegrationSettings";
 import {
   Card,
@@ -234,6 +235,10 @@ export default function SettingsPage() {
               />
             </CardContent>
           </Card>
+
+          <div className="of-animate-in" style={{ animationDelay: "100ms" }}>
+            <AccountSecuritySettings />
+          </div>
 
           <Card className="of-animate-in" style={{ animationDelay: "120ms" }}>
             <CardHeader className="flex flex-wrap items-center gap-3 space-y-0">

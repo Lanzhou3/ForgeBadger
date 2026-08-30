@@ -1,3 +1,4 @@
+import { CliBrandIcon } from "@/components/cli-brand-icon";
 import { getCliBrand } from "@/lib/cli-brand";
 import { cn } from "@/lib/utils";
 
@@ -16,7 +17,11 @@ export function CliBrandChip({ aiTool, className }: Props) {
       )}
       title={brand.label}
     >
-      <span className="size-1.5 rounded-full" style={{ backgroundColor: brand.color }} />
+      {brand.id === "unknown" ? (
+        <span className="size-1.5 rounded-full" style={{ backgroundColor: brand.color }} />
+      ) : (
+        <CliBrandIcon aiTool={aiTool} className="size-3" />
+      )}
       {brand.label}
     </span>
   );

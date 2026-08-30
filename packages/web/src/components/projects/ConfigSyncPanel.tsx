@@ -1,8 +1,8 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { FileCode2, Unlink } from "lucide-react";
+import { FileCode2, ShieldCheck, Unlink } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,8 @@ interface ConfigSyncPanelProps {
   templateId: string | null;
   credentialMode: CredentialMode;
   onPendingChange?: (pending: { preview: boolean; compliance: boolean }) => void;
+  pendingAction?: "preview" | null;
+  onPendingActionConsumed?: () => void;
 }
 
 function shortHash(value: string): string {
@@ -46,13 +48,14 @@ function ComplianceMetric({ label, value }: { label: string; value: number }) {
 }
 
 export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanelProps>(function ConfigSyncPanel(
-  { projectId, templateId, credentialMode, onPendingChange },
+  { projectId, templateId, credentialMode, onPendingChange, pendingAction, onPendingActionConsumed },
   ref
 ) {
   const queryClient = useQueryClient();
   const { t } = useLanguage();
   const [configConflicts, setConfigConflicts] = useState<ConfigConflict[]>([]);
   const [configDecisions, setConfigDecisions] = useState<Record<string, ConfigDecision>>({});
+  const consumedPendingActionRef = useRef<string | null>(null);
 
   const isUntracked = templateId === null;
 
@@ -127,6 +130,20 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
     });
   }, [onPendingChange, previewConfigMutation.isPending, complianceMutation.isPending]);
 
+  const runPreview = previewConfigMutation.mutate;
+  useEffect(() => {
+    if (!pendingAction) {
+      consumedPendingActionRef.current = null;
+      return;
+    }
+    if (isUntracked || consumedPendingActionRef.current === pendingAction) return;
+    consumedPendingActionRef.current = pendingAction;
+    if (pendingAction === "preview") {
+      runPreview();
+    }
+    onPendingActionConsumed?.();
+  }, [pendingAction, isUntracked, runPreview, onPendingActionConsumed]);
+
   const handleUnbind = () => {
     if (window.confirm(t("projects.stopTrackingConfirm"))) {
       unbindMutation.mutate();
@@ -135,22 +152,43 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
 
   if (isUntracked) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("projects.untrackedConfigTitle")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <p className="text-sm text-muted-foreground">{t("projects.untrackedConfigDescription")}</p>
-          <p className="text-xs text-muted-foreground">{t("projects.untrackedConfigHint")}</p>
-        </CardContent>
-      </Card>
+      <p className="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{t("projects.untrackedConfigTitle")}</span>
+        {" · "}
+        {t("projects.untrackedConfigDescription")} {t("projects.untrackedConfigHint")}
+      </p>
     );
   }
 
   const hasBlockedConflicts = configConflicts.some((conflict) => conflict.allowedActions.length === 0);
 
   return (
-    <>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/70 bg-muted/30 px-3 py-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="shrink-0 text-sm font-medium">{t("projects.configSyncTitle")}</span>
+          <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{templateId}</span>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => complianceMutation.mutate()}
+          disabled={complianceMutation.isPending}
+        >
+          <ShieldCheck className="size-4" />
+          {complianceMutation.isPending ? t("projects.checkingCompliance") : t("projects.checkCompliance")}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => previewConfigMutation.mutate()}
+          disabled={previewConfigMutation.isPending}
+        >
+          <FileCode2 className="size-4" />
+          {previewConfigMutation.isPending ? t("projects.generating") : t("projects.previewConfig")}
+        </Button>
+      </div>
+
       {(previewConfigMutation.data || configConflicts.length > 0) && (
         <Card>
           <CardHeader>
@@ -353,6 +391,6 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
           {unbindMutation.isPending ? t("projects.unbinding") : t("projects.stopTrackingTemplate")}
         </Button>
       </div>
-    </>
+    </div>
   );
 });

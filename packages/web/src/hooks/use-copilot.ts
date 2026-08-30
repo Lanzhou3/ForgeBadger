@@ -6,6 +6,7 @@ import { OPENFORGE_GATEWAY_EVENT } from "@/lib/gateway-events";
 import {
   decidePendingAction,
   editMessage,
+  getRun,
   sendMessage,
   type CopilotPendingAction,
   type CopilotRunStatus,
@@ -44,17 +45,40 @@ export interface UseCopilotRunOptions {
   onTitleUpdated?: (input: { conversationId: string; title: string }) => void;
 }
 
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
+/** Placeholder runId for the optimistic pending state (before the POST returns). */
+const PENDING_RUN_ID = "";
+/**
+ * Last-resort cleanup: if no event for the active run arrives for this long
+ * (WS dead, gateway restarted mid-run), drop the streaming state instead of
+ * leaving "Copilot is thinking" stuck forever. awaiting_approval is a stable
+ * state and is never auto-cleared.
+ */
+export const RUN_STALE_TIMEOUT_MS = 5 * 60 * 1000;
+
 /**
  * Live state for the currently-running Copilot turn. Subscribes to the shared
  * gateway event stream (dispatched by NotificationProvider's /ws/events socket)
  * and folds `copilot_run_updated` frames into a single ActiveCopilotRun.
  * Proactive (`source: "reactive"`) runs are surfaced via onReactiveUpdate instead
  * of being folded into the active user run.
+ *
+ * Reliability: the send POST is blocking on some paths (the run may already be
+ * finished — terminal WS event consumed — before the POST returns the runId).
+ * To keep the streaming state consistent in both worlds:
+ * - events arriving before the runId is known are accepted and folded (matched
+ *   by payload, not dropped), and startRun never wipes already-streamed deltas;
+ * - terminal run ids are remembered so a late startRun cannot resurrect a
+ *   finished run into a stuck "running" state;
+ * - after the POST returns, the run is reconciled once against GET /runs/:id;
+ * - a sliding stale timer is the final fallback when no events arrive at all.
  */
 export function useCopilotRun(options?: UseCopilotRunOptions) {
   const [active, setActive] = useState<ActiveCopilotRun | null>(null);
   const activeRef = useRef<ActiveCopilotRun | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
+  const terminalRunIdsRef = useRef<Set<string>>(new Set());
+  const staleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onReactiveUpdateRef = useRef<UseCopilotRunOptions["onReactiveUpdate"]>(options?.onReactiveUpdate);
   const onTitleUpdatedRef = useRef<UseCopilotRunOptions["onTitleUpdated"]>(options?.onTitleUpdated);
   const clearActiveRef = useRef<(() => void) | null>(null);
@@ -68,6 +92,31 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       return next;
     });
   }, []);
+
+  const clearStaleTimer = useCallback(() => {
+    if (staleTimerRef.current) {
+      clearTimeout(staleTimerRef.current);
+      staleTimerRef.current = null;
+    }
+  }, []);
+
+  const armStaleTimer = useCallback(
+    (runId: string) => {
+      clearStaleTimer();
+      staleTimerRef.current = setTimeout(() => {
+        const current = activeRef.current;
+        if (
+          current &&
+          current.runId === runId &&
+          !current.pendingAction &&
+          (current.status === "running" || current.status === "pending")
+        ) {
+          clearActiveRef.current?.();
+        }
+      }, RUN_STALE_TIMEOUT_MS);
+    },
+    [clearStaleTimer]
+  );
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -89,6 +138,9 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       const runId = payload.run_id;
       if (!runId) return;
       if (currentRunIdRef.current !== null && runId !== currentRunIdRef.current) return;
+
+      // Events are flowing — the run is alive, re-arm the stale fallback.
+      armStaleTimer(runId);
 
       setActiveSafe((prev) => {
         const current = prev ?? { runId, conversationId: payload.conversation_id ?? "", status: "running", text: "", thinking: "", pendingAction: null };
@@ -113,25 +165,117 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       // so keeping `active` around would re-render the streaming bubble and
       // stack the same text on top of the persisted message — the chat would
       // look like it was still "thinking" while showing the answer twice.
-      if (
-        (payload.status === "completed" || payload.status === "failed" || payload.status === "cancelled") &&
-        !payload.pending_action_id
-      ) {
-        clearActiveRef.current?.();
+      if (TERMINAL_RUN_STATUSES.has(payload.status ?? "")) {
+        // Remember terminal run ids: on the blocking-POST path the terminal
+        // event can land before startRun has seen the response, and without
+        // this it would resurrect the finished run as a stuck "running".
+        const terminalIds = terminalRunIdsRef.current;
+        terminalIds.add(runId);
+        if (terminalIds.size > 50) {
+          const oldest = terminalIds.values().next().value;
+          if (oldest !== undefined) terminalIds.delete(oldest);
+        }
+        if (!payload.pending_action_id) {
+          clearActiveRef.current?.();
+        }
       }
     };
+
     window.addEventListener(OPENFORGE_GATEWAY_EVENT, handler);
     return () => window.removeEventListener(OPENFORGE_GATEWAY_EVENT, handler);
-  }, [setActiveSafe]);
+  }, [setActiveSafe, armStaleTimer]);
+
+  // Blocking-POST reconcile: the run may already be finished by the time the
+  // POST returned, with its terminal WS frame consumed before we adopted the
+  // runId. Ask the server once so the streaming state can never stick; the
+  // stale timer remains the last resort if this request fails.
+  // Gating uses currentRunIdRef (set synchronously by adoptRun), not
+  // activeRef: the adoptRun merge is queued right before this runs and React
+  // may not have flushed it yet, so activeRef can still hold the pending
+  // placeholder here.
+  const reconcileRun = useCallback(
+    async (runId: string) => {
+      try {
+        const { run, pendingActions } = await getRun(runId);
+        if (currentRunIdRef.current !== runId) return;
+        if (TERMINAL_RUN_STATUSES.has(run.status)) {
+          if (!activeRef.current?.pendingAction) clearActiveRef.current?.();
+          return;
+        }
+        // If the WS pending-action frame raced past us, adopt the server's
+        // pending action so the approval card still shows up. Merge onto
+        // whatever is on screen (possibly the pending placeholder).
+        if (run.status === "awaiting_approval") {
+          const pending = pendingActions.find((action) => action.status === "pending");
+          if (pending) {
+            setActiveSafe((prev) =>
+              prev && !prev.pendingAction
+                ? { ...prev, runId, status: "awaiting_approval", pendingAction: pending }
+                : prev
+            );
+          }
+        }
+      } catch {
+        // Best-effort; RUN_STALE_TIMEOUT_MS is the final fallback.
+      }
+    },
+    [setActiveSafe]
+  );
+
+  const adoptRun = useCallback(
+    async (runId: string, conversationId: string) => {
+      currentRunIdRef.current = runId;
+      if (terminalRunIdsRef.current.has(runId)) {
+        // The run already finished before we learned its id — stay cleared
+        // instead of resurrecting a stuck "running" bubble.
+        terminalRunIdsRef.current.delete(runId);
+        clearActiveRef.current?.();
+        return;
+      }
+      // Deltas (or the optimistic pending state) may already exist from while
+      // the POST was in flight; never wipe them with a fresh empty state. The
+      // POST has answered, so a bare pending placeholder graduates to running.
+      setActiveSafe((prev) =>
+        prev && (prev.runId === runId || prev.runId === PENDING_RUN_ID)
+          ? { ...prev, runId, conversationId, status: prev.status === "pending" ? "running" : prev.status }
+          : { runId, conversationId, status: "running", text: "", thinking: "", pendingAction: null }
+      );
+      armStaleTimer(runId);
+      await reconcileRun(runId);
+    },
+    [setActiveSafe, armStaleTimer, reconcileRun]
+  );
+
+  // Optimistic "thinking" state the instant the user hits send — before the
+  // POST returns and before any WS event arrives, so the UI never looks dead
+  // while the dsh runtime cold-starts. runId is PENDING_RUN_ID until the
+  // server responds or the first frame folds in.
+  const markPending = useCallback(
+    (conversationId: string) => {
+      setActiveSafe(
+        (prev) => prev ?? { runId: PENDING_RUN_ID, conversationId, status: "pending", text: "", thinking: "", pendingAction: null }
+      );
+      armStaleTimer(PENDING_RUN_ID);
+    },
+    [setActiveSafe, armStaleTimer]
+  );
 
   const startRun = useCallback(
     async (conversationId: string, text: string, modelId?: string) => {
-      const { runId } = await sendMessage(conversationId, text, modelId);
-      currentRunIdRef.current = runId;
-      setActiveSafe(() => ({ runId, conversationId, status: "running", text: "", thinking: "", pendingAction: null }));
+      markPending(conversationId);
+      let runId: string;
+      try {
+        ({ runId } = await sendMessage(conversationId, text, modelId));
+      } catch (error) {
+        // A failed send must drop the optimistic pending state immediately;
+        // the caller surfaces its own error affordance.
+        clearActiveRef.current?.();
+        throw error;
+      }
+      await adoptRun(runId, conversationId);
       return runId;
     },
-    [setActiveSafe]
+    [markPending, adoptRun]
   );
 
   // Edit/regenerate flow: the server truncates the target message in place and
@@ -139,12 +283,18 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
   // sendMessage, so we just hand off the returned runId to the same UI state.
   const startEditedRun = useCallback(
     async (conversationId: string, messageId: string, content: string) => {
-      const { runId } = await editMessage(conversationId, messageId, content);
-      currentRunIdRef.current = runId;
-      setActiveSafe(() => ({ runId, conversationId, status: "running", text: "", thinking: "", pendingAction: null }));
+      markPending(conversationId);
+      let runId: string;
+      try {
+        ({ runId } = await editMessage(conversationId, messageId, content));
+      } catch (error) {
+        clearActiveRef.current?.();
+        throw error;
+      }
+      await adoptRun(runId, conversationId);
       return runId;
     },
-    [setActiveSafe]
+    [markPending, adoptRun]
   );
 
   const approveAction = useCallback(
@@ -157,9 +307,12 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
 
   const clearActive = useCallback(() => {
     currentRunIdRef.current = null;
+    clearStaleTimer();
     setActiveSafe(() => null);
-  }, [setActiveSafe]);
+  }, [clearStaleTimer, setActiveSafe]);
   clearActiveRef.current = clearActive;
 
-  return { active, startRun, startEditedRun, approveAction, clearActive };
+  useEffect(() => clearStaleTimer, [clearStaleTimer]);
+
+  return { active, startRun, startEditedRun, approveAction, clearActive, markPending };
 }

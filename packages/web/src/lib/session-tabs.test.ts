@@ -122,6 +122,25 @@ describe("session tabs", () => {
     expect(tabs[0]?.projectName).toBe("Alpha");
   });
 
+  it("carries and preserves the project id for new-session actions", () => {
+    const storage = new MemoryStorage();
+
+    expect(
+      sessionToTab(
+        { id: "session-1", status: "running", name: "s1", projectId: "proj-1", projectName: "Alpha" },
+        10
+      )
+    ).toMatchObject({ projectId: "proj-1", projectName: "Alpha" });
+
+    upsertSessionTab(
+      { id: "a", label: "A", projectId: "proj-1", projectName: "Alpha", updatedAt: 1 },
+      storage
+    );
+    const tabs = upsertSessionTab({ id: "a", label: "A2", status: "running", updatedAt: 2 }, storage);
+
+    expect(tabs[0]?.projectId).toBe("proj-1");
+  });
+
   it("drops captured terminal query responses when reading tabs", () => {
     const storage = new MemoryStorage();
 

@@ -1,7 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const PROJECT_ID = "project-123";
-const SESSION_ID = "session-123";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -16,7 +15,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("project detail exposes a safe workspace sidecar and bounded file preview", async ({ page }) => {
+test("project detail exposes a safe workspace sidecar with lazy tree and sheet viewer", async ({ page }) => {
   const unhandledApiRoutes = await mockWorkspaceApis(page);
 
   await page.goto(`/projects/${PROJECT_ID}`);
@@ -24,20 +23,29 @@ test("project detail exposes a safe workspace sidecar and bounded file preview",
   const panel = page.getByTestId("workspace-context-panel");
   await expect(panel.getByRole("heading", { name: "Workspace" })).toBeVisible();
   await expect(panel.getByText("/workspace/openforge")).toBeVisible();
-  await panel.getByRole("button", { name: "src/index.ts" }).click();
-  await expect(panel.getByText("export const workspace = true;")).toBeVisible();
+
+  // Directories expand lazily; files open in the sheet viewer.
+  await panel.getByRole("button", { name: "src", exact: true }).click();
+  await panel.getByRole("button", { name: /index\.ts/ }).click();
+  await expect(page.getByTestId("workspace-file-viewer")).toContainText("export const workspace = true;");
   expect(unhandledApiRoutes).toEqual([]);
 });
 
-test("session detail exposes the same workspace sidecar from the session project", async ({ page }) => {
+test("files tab renders the workspace explorer with an inline viewer", async ({ page }) => {
   const unhandledApiRoutes = await mockWorkspaceApis(page);
 
-  await page.goto(`/sessions/${SESSION_ID}`);
+  await page.goto(`/projects/${PROJECT_ID}?tab=files`);
 
-  const panel = page.getByTestId("workspace-context-panel");
-  await expect(panel.getByRole("heading", { name: "Workspace" })).toBeVisible();
-  await panel.getByRole("button", { name: "src/index.ts" }).click();
-  await expect(panel.getByText("export const workspace = true;")).toBeVisible();
+  const explorer = page.getByTestId("workspace-explorer");
+  await expect(explorer).toBeVisible();
+  await expect(explorer.getByRole("button", { name: "src", exact: true })).toBeVisible();
+
+  await explorer.getByRole("button", { name: "src", exact: true }).click();
+  await explorer.getByRole("button", { name: /index\.ts/ }).click();
+
+  const viewer = explorer.getByTestId("workspace-file-viewer");
+  await expect(viewer.getByRole("navigation", { name: "File path" })).toContainText("src");
+  await expect(viewer).toContainText("export const workspace = true;");
   expect(unhandledApiRoutes).toEqual([]);
 });
 
@@ -103,6 +111,24 @@ async function mockWorkspaceApis(page: Page) {
     }
 
     if (url.pathname === `/api/v1/projects/${PROJECT_ID}/workspace/tree` && method === "GET") {
+      if (url.searchParams.get("path") === "src") {
+        await route.fulfill({
+          json: envelope({
+            projectId: PROJECT_ID,
+            rootPath: "/workspace/openforge",
+            path: "src",
+            truncated: false,
+            entries: [{
+              name: "index.ts",
+              path: "src/index.ts",
+              kind: "file",
+              sizeBytes: 31,
+              updatedAt: "2026-05-29T00:00:00.000Z",
+            }],
+          }),
+        });
+        return;
+      }
       await route.fulfill({
         json: envelope({
           projectId: PROJECT_ID,
@@ -114,13 +140,6 @@ async function mockWorkspaceApis(page: Page) {
             path: "src",
             kind: "directory",
             updatedAt: "2026-05-29T00:00:00.000Z",
-            children: [{
-              name: "index.ts",
-              path: "src/index.ts",
-              kind: "file",
-              sizeBytes: 31,
-              updatedAt: "2026-05-29T00:00:00.000Z",
-            }],
           }, {
             name: "README.md",
             path: "README.md",
@@ -157,16 +176,6 @@ async function mockWorkspaceApis(page: Page) {
       return;
     }
 
-    if (url.pathname === `/api/v1/sessions/${SESSION_ID}` && method === "GET") {
-      await route.fulfill({ json: envelope({ session: sessionPayload() }) });
-      return;
-    }
-
-    if (url.pathname === `/api/v1/sessions/${SESSION_ID}/connect` && method === "POST") {
-      await route.fulfill({ json: envelope({ session: sessionPayload() }) });
-      return;
-    }
-
     if (url.pathname === "/api/v1/activities" && method === "GET") {
       await route.fulfill({ json: envelope({ activities: [] }) });
       return;
@@ -200,20 +209,6 @@ async function mockWorkspaceApis(page: Page) {
   });
 
   return unhandledApiRoutes;
-}
-
-function sessionPayload() {
-  return {
-    id: SESSION_ID,
-    attachToken: "attach-token",
-    tmuxName: "of-session-123",
-    tmuxSession: "of-session-123",
-    status: "running",
-    name: "Workspace Session",
-    projectId: PROJECT_ID,
-    projectName: "Workspace E2E",
-    aiTool: "claude",
-  };
 }
 
 function envelope(data: unknown) {

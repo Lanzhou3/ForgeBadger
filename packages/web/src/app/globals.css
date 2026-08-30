@@ -134,6 +134,37 @@
   }
 }
 
+@keyframes of-slide-up-toolbar {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@keyframes of-lane-drop-highlight {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--brand) / 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px hsl(var(--brand) / 0.35);
+  }
+}
+
+@keyframes of-pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
 @keyframes of-robot-nudge {
   0% {
     transform: translateY(0) rotate(0deg);
@@ -149,6 +180,91 @@
   }
 }
 
+/* --- Pixel robot companion polish ------------------------------------- */
+
+@keyframes of-robot-idle-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes of-robot-shadow-bob {
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scaleX(0.84);
+    opacity: 0.32;
+  }
+}
+
+@keyframes of-robot-glow-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 4px hsl(var(--brand) / 0.55));
+  }
+  50% {
+    filter: drop-shadow(0 0 9px hsl(var(--brand) / 0.8));
+  }
+}
+
+@keyframes of-robot-accent-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Chat-bubble pop: springy overshoot, like a fresh message arriving. */
+@keyframes of-bubble-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.86) translateY(8px);
+  }
+  62% {
+    opacity: 1;
+    transform: scale(1.03) translateY(-1px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Gentle hover-in-place bob while standing; the ground shadow breathes in
+     counter-phase so the robot reads as lifted off the surface. */
+  .of-robot-idle-bob {
+    animation: of-robot-idle-bob 3.2s ease-in-out infinite;
+  }
+
+  .of-robot-ground-shadow {
+    animation: of-robot-shadow-bob 3.2s ease-in-out infinite;
+  }
+
+  /* Antenna tip / chest dots shimmer slowly. */
+  .of-robot-accent-pulse {
+    animation: of-robot-accent-pulse 2.4s ease-in-out infinite;
+  }
+
+  .of-robot-alert {
+    animation: of-robot-glow-pulse 1.6s ease-in-out infinite;
+  }
+
+  .of-bubble-pop {
+    animation: of-bubble-pop 0.24s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+}
+
 @layer utilities {
   .of-animate-in {
     animation: of-fade-up 0.35s ease-out both;
@@ -156,6 +272,45 @@
 
   .of-robot-nudge {
     animation: of-robot-nudge 0.45s ease-out;
+  }
+
+  /* Bloom pass for the robot's emissive pixels (eyes / chest / screen). */
+  .of-robot-glow-layer {
+    filter: drop-shadow(0 0 0.7px hsl(var(--brand) / 0.85));
+  }
+
+  /* Floating batch-action toolbar entrance (element must be positioned with
+     left-1/2 so the translate(-50%, ...) keeps it centered). */
+  .of-slide-up-toolbar {
+    animation: of-slide-up-toolbar 0.25s ease-out both;
+  }
+
+  /* Pulsing ring used to mark a drop/move target lane. */
+  .of-lane-drop-highlight {
+    animation: of-lane-drop-highlight 0.9s ease-in-out infinite;
+  }
+
+  /* Soft pulsing status dot (e.g. active stage). */
+  .of-pulse-dot {
+    animation: of-pulse-dot 1.6s ease-in-out infinite;
+  }
+
+  /* Height collapse/expand transition without JS measurements:
+     pair `of-collapse-grid` on the outer grid wrapper with a single
+     `overflow-hidden` child. */
+  .of-collapse-grid {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.25s ease-out;
+  }
+
+  .of-collapse-grid[data-open="true"] {
+    grid-template-rows: 1fr;
+  }
+
+  .of-collapse-grid > * {
+    overflow: hidden;
+    min-height: 0;
   }
 
   /* Pixel comic bubble for the robot companion: hard 2px outline, square
@@ -178,6 +333,22 @@
     .of-robot-nudge {
       animation: none;
     }
+
+    .of-slide-up-toolbar {
+      animation: none;
+    }
+
+    .of-lane-drop-highlight {
+      animation: none;
+    }
+
+    .of-pulse-dot {
+      animation: none;
+    }
+
+    .of-collapse-grid {
+      transition: none;
+    }
   }
 }
 
@@ -190,4 +361,10 @@
     overflow-x: hidden;
     @apply bg-background text-foreground antialiased;
   }
+}
+
+/* Session-page focus mode is a full-width terminal; the floating copilot
+   (fixed bottom-right) would cover the terminal's bottom-right content. */
+body[data-session-focus-mode] [data-floating-copilot] {
+  display: none;
 }

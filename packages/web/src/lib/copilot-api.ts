@@ -85,6 +85,8 @@ export interface CopilotToolInfo {
   description: string;
   risk: "read" | "operate";
   requiresApproval: boolean;
+  /** Owner's per-tool switch; absent-row default is true (server always sends it). */
+  enabled: boolean;
 }
 
 export function listConversations() {
@@ -203,6 +205,14 @@ export function editMessage(conversationId: string, messageId: string, content: 
 
 export function getCopilotCapabilities() {
   return fetchJson<{ tools: CopilotToolInfo[] }>("/api/v1/copilot/capabilities");
+}
+
+/** Toggle one Copilot tool for the current user (owner switch). */
+export function setCopilotToolEnabled(toolName: string, enabled: boolean) {
+  return fetchJson<{ toolName: string; enabled: boolean }>(
+    `/api/v1/copilot/capabilities/${encodeURIComponent(toolName)}/enabled`,
+    { method: "PUT", body: JSON.stringify({ enabled }) }
+  );
 }
 
 // --- dsh kernel configuration (gated by OPENFORGE_DSH_COPILOT_ENABLED; 404 when off) ---

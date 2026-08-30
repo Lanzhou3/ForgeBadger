@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+
 import {
   PIXEL_GRID_SIZE,
   ROBOT_FRAMES,
@@ -10,6 +12,8 @@ interface PixelRobotProps {
   frame: RobotFrameKey;
   flip?: boolean;
   size?: number;
+  /** Extra brand aura, e.g. while an unread notification bubble is visible. */
+  glow?: boolean;
   className?: string;
 }
 
@@ -25,8 +29,31 @@ const PIXEL_COLORS: Record<PixelPaletteKey, string> = {
   L: "hsl(240 5% 55%)", // laptop shell (zinc-500)
 };
 
-export function PixelRobot({ frame, flip = false, size = ROBOT_SIZE_PX, className }: PixelRobotProps) {
+/** Emissive palette keys: eyes / chest core / laptop screen get a bloom pass. */
+const GLOW_KEYS: ReadonlySet<PixelPaletteKey> = new Set<PixelPaletteKey>(["E", "S"]);
+
+export function PixelRobot({ frame, flip = false, size = ROBOT_SIZE_PX, glow = false, className }: PixelRobotProps) {
   const grid = ROBOT_FRAMES[frame];
+
+  // Group cells by palette key so each material renders as one layer that can
+  // be styled as a whole (bloom on emissive parts, flat fill on the shell).
+  const layers = useMemo(() => {
+    const cellsByKey = new Map<PixelPaletteKey, Array<{ x: number; y: number }>>();
+    grid.forEach((row, y) => {
+      [...row].forEach((cell, x) => {
+        if (cell === ".") return;
+        const key = cell as PixelPaletteKey;
+        const cells = cellsByKey.get(key);
+        if (cells) {
+          cells.push({ x, y });
+        } else {
+          cellsByKey.set(key, [{ x, y }]);
+        }
+      });
+    });
+    return [...cellsByKey.entries()];
+  }, [grid]);
+
   return (
     <svg
       width={size}
@@ -36,25 +63,40 @@ export function PixelRobot({ frame, flip = false, size = ROBOT_SIZE_PX, classNam
       className={className}
       style={{
         ...(flip ? { transform: "scaleX(-1)" } : undefined),
-        // Soft brand aura around the sprite silhouette (eyes/screen glow).
-        filter: "drop-shadow(0 0 2px hsl(var(--brand) / 0.35))",
+        // Layered depth: brand aura hugging the silhouette (eyes/screen glow),
+        // a faint cool rim lifting the sprite off near-black backgrounds, and
+        // a tight dark shadow for grounding.
+        filter: [
+          "drop-shadow(0 0 3px hsl(var(--brand) / 0.4))",
+          "drop-shadow(0 -1px 0 rgb(255 255 255 / 0.05))",
+          "drop-shadow(0 1px 1px rgb(0 0 0 / 0.35))",
+        ].join(" "),
       }}
       aria-hidden="true"
     >
-      {grid.flatMap((row, y) =>
-        [...row].map((cell, x) =>
-          cell === "." ? null : (
+      {layers.map(([key, cells]) => (
+        <g
+          key={key}
+          className={
+            GLOW_KEYS.has(key)
+              ? "of-robot-glow-layer"
+              : key === "O"
+                ? "of-robot-accent-pulse"
+                : undefined
+          }
+        >
+          {cells.map(({ x, y }) => (
             <rect
               key={`${x}-${y}`}
               x={x}
               y={y}
               width={1}
               height={1}
-              fill={PIXEL_COLORS[cell as PixelPaletteKey]}
+              fill={PIXEL_COLORS[key]}
             />
-          )
-        )
-      )}
+          ))}
+        </g>
+      ))}
     </svg>
   );
 }

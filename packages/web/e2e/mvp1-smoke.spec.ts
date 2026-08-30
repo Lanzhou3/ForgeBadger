@@ -68,6 +68,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await page.getByRole("tab", { name: "Skills" }).click();
   await page.getByRole("row", { name: /safe-review/ }).getByRole("switch").check();
 
+  await page.getByRole("tab", { name: "AI Config" }).click();
   await page.getByRole("button", { name: "Preview Config" }).click();
   await expect(page.getByText("Config Preview")).toBeVisible();
   await page.getByRole("button", { name: "Apply Config" }).click();

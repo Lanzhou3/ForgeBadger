@@ -5,17 +5,26 @@ import type { UIEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Eye, FileCode2, FileText, Globe2, History, Link2, Pencil, Plus, Save, ShieldCheck, TerminalSquare, Trash2, Wrench } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, Eye, FileCode2, FileText, Globe2, History, Link2, MoreHorizontal, Pencil, Plus, Save, TerminalSquare, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CliBrandChip } from "@/components/cli-brand-chip";
+import { CliBrandIcon } from "@/components/cli-brand-icon";
 import { ProjectManagerPanel } from "@/components/projects/ProjectManagerPanel";
 import { ConfigSyncPanel, type ConfigSyncPanelHandle } from "@/components/projects/ConfigSyncPanel";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
-import { Label } from "@/components/ui/label";
+import { WorkspaceExplorer } from "@/components/projects/workspace";
+import { ProjectGraphPanel } from "@/components/projects/graph/ProjectGraphPanel";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -41,6 +50,7 @@ import {
   type ProjectManagerTaskPacket,
   type SessionActivity,
 } from "@/lib/api";
+import { runtimeAdapterLabel } from "@/lib/cli-brand";
 import { findSessionTaskPacket, sessionTaskPacketProjectManagerHref } from "@/components/sessions/session-task-packet";
 import { useLanguage } from "@/hooks/use-language";
 import { normalizeSessionStatus } from "@/lib/session-status";
@@ -51,6 +61,8 @@ import { MarkdownRenderer } from "@/components/projects/markdown-renderer";
 
 const PROJECT_DETAIL_TABS = [
   "sessions",
+  "files",
+  "graph",
   "project-manager",
   "skills",
   "config",
@@ -72,7 +84,7 @@ export default function ProjectDetailPage() {
   const [selectedRuntimeAdapter, setSelectedRuntimeAdapter] = useState<RuntimeAdapterId | "">("");
   const [selectedConfigPath, setSelectedConfigPath] = useState("");
   const [configDraft, setConfigDraft] = useState("");
-  const [syncPending, setSyncPending] = useState({ preview: false, compliance: false });
+  const [pendingConfigAction, setPendingConfigAction] = useState<"preview" | null>(null);
   const configSyncRef = useRef<ConfigSyncPanelHandle>(null);
 
   const { data: projectData, isLoading: projectLoading } = useQuery({
@@ -229,10 +241,12 @@ export default function ProjectDetailPage() {
     if (!nextTab) return;
     setActiveTab(nextTab);
     const nextSearchParams = new URLSearchParams(searchParams.toString());
-    if (nextTab === "project-manager") {
-      nextSearchParams.set("tab", "project-manager");
-    } else {
+    if (nextTab === "sessions") {
       nextSearchParams.delete("tab");
+    } else {
+      nextSearchParams.set("tab", nextTab);
+    }
+    if (nextTab !== "project-manager") {
       nextSearchParams.delete("workItemId");
     }
     const query = nextSearchParams.toString();
@@ -262,34 +276,8 @@ export default function ProjectDetailPage() {
     setConfigDraft((current) => current === nextDraft ? current : nextDraft);
   }, [selectedConfigFile?.content, selectedConfigFile?.relativePath]);
 
-  const projectStats = [
-    {
-      label: t("nav.sessions"),
-      value: projectSessions.length,
-      sub: t("dashboard.runningNow").replace("{count}", String(runningSessionCount)),
-      icon: TerminalSquare,
-    },
-    {
-      label: t("nav.skills"),
-      value: enabledSkillCount,
-      icon: Wrench,
-    },
-  ];
-
   return (
-    <div className="mx-auto max-w-7xl space-y-6 p-6">
-      <div className="of-animate-in">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-2 text-muted-foreground"
-          onClick={() => router.push("/projects")}
-        >
-          <ArrowLeft className="size-4" />
-          {t("projects.back")}
-        </Button>
-      </div>
-
+    <div className="mx-auto max-w-7xl space-y-4 p-6">
       {projectLoading ? (
         <Card className="of-animate-in">
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
@@ -304,17 +292,61 @@ export default function ProjectDetailPage() {
         </Card>
       ) : (
         <>
-          <div className="flex flex-wrap items-start justify-between gap-3 of-animate-in">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="break-words text-xl font-semibold tracking-tight">{project.name}</h1>
-                {project.status && <Badge variant="outline">{project.status}</Badge>}
-              </div>
-              <p className="mt-1 break-all font-mono text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 of-animate-in">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="-ml-2 size-8 shrink-0 text-muted-foreground hover:text-foreground"
+              aria-label={t("projects.back")}
+              onClick={() => router.push("/projects")}
+            >
+              <ArrowLeft className="size-4" />
+            </Button>
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <h1 className="truncate text-lg font-semibold tracking-tight">{project.name}</h1>
+              {project.status && <Badge variant="outline" className="shrink-0">{project.status}</Badge>}
+              <span
+                className="hidden min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground sm:inline"
+                title={project.path ?? project.rootPath}
+              >
                 {project.path ?? project.rootPath}
-              </p>
+              </span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={selectedRuntimeAdapter || undefined}
+                onValueChange={(value) => setSelectedRuntimeAdapter(value as RuntimeAdapterId)}
+                disabled={adapterDiscoveryLoading || runtimeAdapters.length === 0}
+              >
+                <SelectTrigger
+                  id="runtime-adapter"
+                  aria-label={t("projects.selectRuntimeCli")}
+                  size="sm"
+                  className="h-8 w-52"
+                >
+                  {/* Reflects the selected item's icon + label (see SelectItem below). */}
+                  <SelectValue
+                    placeholder={
+                      adapterDiscoveryLoading
+                        ? t("projects.loadingRuntimeCli")
+                        : t("projects.selectRuntimeCli")
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {runtimeAdapters.map((adapter) => (
+                    <SelectItem
+                      key={adapter.id}
+                      value={adapter.id}
+                      disabled={!isAdapterLaunchable(adapter)}
+                      className="pr-8"
+                    >
+                      <CliBrandIcon aiTool={adapter.id} />
+                      {runtimeAdapterLabel(adapter, t)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button
                 size="sm"
                 className="bg-brand text-brand-foreground hover:bg-brand/90"
@@ -324,141 +356,64 @@ export default function ProjectDetailPage() {
                 <Plus className="size-4" />
                 {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
               </Button>
-              {!isUntrackedTemplate && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => configSyncRef.current?.checkCompliance()}
-                  disabled={syncPending.compliance}
-                >
-                  <ShieldCheck className="size-4" />
-                  {syncPending.compliance ? t("projects.checkingCompliance") : t("projects.checkCompliance")}
-                </Button>
-              )}
-              {!isUntrackedTemplate && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => configSyncRef.current?.preview()}
-                  disabled={syncPending.preview}
-                >
-                  <FileCode2 className="size-4" />
-                  {syncPending.preview ? t("projects.generating") : t("projects.previewConfig")}
-                </Button>
-              )}
-              <Button asChild size="sm" variant="ghost">
-                <Link href={`/history?projectId=${project.id}`}>
-                  <History className="size-4" />
-                  {t("nav.history")}
-                </Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-destructive hover:text-destructive"
-                onClick={() => {
-                  if (window.confirm(t("projects.deleteConfirm"))) {
-                    deleteMutation.mutate();
-                  }
-                }}
-                disabled={deleteMutation.isPending}
-              >
-                <Trash2 className="size-4" />
-                {deleteMutation.isPending ? t("projects.deleting") : t("projects.deleteRecord")}
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 text-muted-foreground hover:text-foreground"
+                    aria-label={t("projects.moreActions")}
+                  >
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem asChild>
+                    <Link href={`/history?projectId=${project.id}`}>
+                      <History className="size-4" />
+                      {t("nav.history")}
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={deleteMutation.isPending}
+                    onSelect={() => {
+                      if (window.confirm(t("projects.deleteConfirm"))) {
+                        deleteMutation.mutate();
+                      }
+                    }}
+                  >
+                    <Trash2 className="size-4" />
+                    {deleteMutation.isPending ? t("projects.deleting") : t("projects.deleteRecord")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 
-          {/* Project stats */}
-          <div className="grid grid-cols-3 gap-3">
-            {projectStats.map((stat, index) => (
-              <Card
-                key={stat.label}
-                className="of-animate-in"
-                style={{ animationDelay: `${index * 50}ms` }}
-              >
-                <CardContent className="flex items-center gap-3 p-4">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
-                    <stat.icon className="size-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-2xl font-semibold leading-none tabular-nums">{stat.value}</div>
-                    <div className="mt-1.5 truncate text-xs text-muted-foreground">
-                      {stat.label}
-                      {stat.sub ? <span className="text-muted-foreground/70"> · {stat.sub}</span> : null}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {/* Launch options */}
-          <Card className="of-animate-in" style={{ animationDelay: "150ms" }}>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold">
-                <Label htmlFor="runtime-adapter" className="cursor-pointer">
-                  {t("projects.launchOptions")}
-                </Label>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <select
-                id="runtime-adapter"
-                className="h-9 w-full max-w-xl rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
-                value={selectedRuntimeAdapter}
-                onChange={(event) => setSelectedRuntimeAdapter(event.target.value as RuntimeAdapterId)}
-                disabled={adapterDiscoveryLoading || runtimeAdapters.length === 0}
-              >
-                <option value="">
-                  {adapterDiscoveryLoading
-                    ? t("projects.loadingRuntimeCli")
-                    : t("projects.selectRuntimeCli")}
-                </option>
-                {runtimeAdapters.map((adapter) => (
-                  <option
-                    key={adapter.id}
-                    value={adapter.id}
-                    disabled={!isAdapterLaunchable(adapter)}
-                  >
-                    {adapter.label}
-                    {!adapter.available
-                      ? ` (${t("projects.runtimeUnavailable")})`
-                      : !adapter.launchEnabled
-                        ? ` (${t("projects.runtimeLaunchDisabled")})`
-                        : ""}
-                  </option>
-                ))}
-              </select>
-              {launchableRuntimeAdapters.length === 0 && !adapterDiscoveryLoading ? (
-                <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
-                  <p className="flex items-center gap-1.5 text-xs font-medium text-destructive">
-                    <AlertTriangle className="size-3.5" />
-                    {!dependenciesLoading && terminalSetupGuidance.blocked
-                      ? t(terminalSetupGuidance.titleKey)
-                      : t("projects.noLaunchableRuntimeCli")}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {!dependenciesLoading && terminalSetupGuidance.blocked
-                      ? t(terminalSetupGuidance.descriptionKey)
-                      : t("projects.runtimeCliRecoveryDescription")}
-                  </p>
-                  {!dependenciesLoading && terminalSetupGuidance.blocked && (
-                    <RuntimeSetupCommands guidance={terminalSetupGuidance} />
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    <Button asChild variant="outline" size="sm">
-                      <Link href="/settings">{t("projects.openSettings")}</Link>
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {t("projects.runtimeCliDescription")}
-                </p>
+          {launchableRuntimeAdapters.length === 0 && !adapterDiscoveryLoading && (
+            <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 of-animate-in">
+              <p className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+                <AlertTriangle className="size-3.5" />
+                {!dependenciesLoading && terminalSetupGuidance.blocked
+                  ? t(terminalSetupGuidance.titleKey)
+                  : t("projects.noLaunchableRuntimeCli")}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {!dependenciesLoading && terminalSetupGuidance.blocked
+                  ? t(terminalSetupGuidance.descriptionKey)
+                  : t("projects.runtimeCliRecoveryDescription")}
+              </p>
+              {!dependenciesLoading && terminalSetupGuidance.blocked && (
+                <RuntimeSetupCommands guidance={terminalSetupGuidance} />
               )}
-            </CardContent>
-          </Card>
+              <div className="flex flex-wrap gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/settings">{t("projects.openSettings")}</Link>
+                </Button>
+              </div>
+            </div>
+          )}
 
           {configNeedsReview && !isUntrackedTemplate && (
             <Card className="of-animate-in border-amber-500/40 bg-amber-500/10">
@@ -477,25 +432,17 @@ export default function ProjectDetailPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => configSyncRef.current?.preview()}
-                  disabled={syncPending.preview}
+                  onClick={() => {
+                    handleTabChange("config");
+                    setPendingConfigAction("preview");
+                  }}
                 >
                   <FileCode2 className="size-4" />
-                  {syncPending.preview
-                    ? t("projects.generating")
-                    : t("projects.reviewConfig")}
+                  {t("projects.reviewConfig")}
                 </Button>
               </CardContent>
             </Card>
           )}
-
-          <ConfigSyncPanel
-            ref={configSyncRef}
-            projectId={id}
-            templateId={resolvedTemplateId}
-            credentialMode="host_environment"
-            onPendingChange={setSyncPending}
-          />
 
           {createSessionMutation.isError && (
             <p className="text-sm text-destructive">
@@ -516,15 +463,36 @@ export default function ProjectDetailPage() {
           <Tabs value={activeTab} onValueChange={handleTabChange}>
             <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:thin]">
             <TabsList className="min-w-max">
-              <TabsTrigger value="sessions">{t("nav.sessions")}</TabsTrigger>
+              <TabsTrigger value="sessions">
+                {t("nav.sessions")}
+                {projectSessions.length > 0 && (
+                  <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground tabular-nums">
+                    {projectSessions.length}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="files">{t("projects.filesTab")}</TabsTrigger>
+              <TabsTrigger value="graph">{t("projects.graphTab")}</TabsTrigger>
               <TabsTrigger value="project-manager">{t("projects.devTasks")}</TabsTrigger>
-              <TabsTrigger value="skills">{t("nav.skills")}</TabsTrigger>
+              <TabsTrigger value="skills">
+                {t("nav.skills")}
+                {enabledSkillCount > 0 && (
+                  <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground tabular-nums">
+                    {enabledSkillCount}
+                  </span>
+                )}
+              </TabsTrigger>
               <TabsTrigger value="config">{t("projects.aiConfig")}</TabsTrigger>
               <TabsTrigger value="activity">{t("sessions.activity")}</TabsTrigger>
             </TabsList>
             </div>
 
             <TabsContent value="sessions" className="mt-4">
+              <p className="mb-3 text-xs text-muted-foreground">
+                {t("projects.sessionsSummary")
+                  .replace("{total}", String(projectSessions.length))
+                  .replace("{running}", String(runningSessionCount))}
+              </p>
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
                 {projectSessions.length === 0 ? (
                   <Card className="of-animate-in">
@@ -572,6 +540,14 @@ export default function ProjectDetailPage() {
                 )}
                 <WorkspaceContextPanel projectId={id} enabled={activeTab === "sessions"} />
               </div>
+            </TabsContent>
+
+            <TabsContent value="files" className="mt-4">
+              <WorkspaceExplorer projectId={id} enabled={activeTab === "files"} />
+            </TabsContent>
+
+            <TabsContent value="graph" className="mt-4">
+              <ProjectGraphPanel projectId={id} enabled={activeTab === "graph"} />
             </TabsContent>
 
             <TabsContent value="project-manager" className="mt-4">
@@ -634,7 +610,15 @@ export default function ProjectDetailPage() {
               )}
             </TabsContent>
 
-            <TabsContent value="config" className="mt-4">
+            <TabsContent value="config" className="mt-4 space-y-4">
+              <ConfigSyncPanel
+                ref={configSyncRef}
+                projectId={id}
+                templateId={resolvedTemplateId}
+                credentialMode="host_environment"
+                pendingAction={pendingConfigAction}
+                onPendingActionConsumed={() => setPendingConfigAction(null)}
+              />
               <ProjectConfigPanel
                 projectConfig={projectAiConfig}
                 globalConfig={globalAiConfig}

@@ -3,6 +3,7 @@ import type { Session } from "@/lib/api";
 export interface SessionTab {
   id: string;
   label: string;
+  projectId?: string;
   projectName?: string;
   aiTool?: string;
   status?: string;
@@ -18,6 +19,7 @@ export function sessionToTab(session: Session, now = Date.now()): SessionTab {
   return {
     id: session.id,
     label: session.name || session.tmuxName || session.tmuxSession || session.id,
+    ...(session.projectId ? { projectId: session.projectId } : {}),
     ...(session.projectName ? { projectName: session.projectName } : {}),
     ...(session.aiTool ? { aiTool: session.aiTool } : {}),
     ...(session.status ? { status: session.status } : {}),
@@ -64,12 +66,15 @@ export function upsertSessionTab(
     const previous = existing[currentIndex];
     const preservedPrompt =
       tab.lastPrompt === undefined ? previous?.lastPrompt : tab.lastPrompt;
+    const preservedProjectId =
+      tab.projectId === undefined ? previous?.projectId : tab.projectId;
     const preservedProject =
       tab.projectName === undefined ? previous?.projectName : tab.projectName;
     const nextTabs = [...existing];
     nextTabs[currentIndex] = {
       ...tab,
       ...(preservedPrompt !== undefined ? { lastPrompt: preservedPrompt } : {}),
+      ...(preservedProjectId !== undefined ? { projectId: preservedProjectId } : {}),
       ...(preservedProject !== undefined ? { projectName: preservedProject } : {}),
     };
     return writeSessionTabs(nextTabs, storage);

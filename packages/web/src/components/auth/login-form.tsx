@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ type FormData = z.infer<typeof schema>;
 
 export function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { login } = useAuth();
   const [isHydrated, setIsHydrated] = useState(false);
   const {
@@ -39,7 +40,7 @@ export function LoginForm() {
     try {
       const result = await login({ email: data.email, password: data.password });
       if (result.code === 0) {
-        router.replace("/");
+        router.replace(safeRedirectTarget(searchParams.get("next")));
       } else {
         setError("root", { message: result.message || "Login failed" });
       }
@@ -105,4 +106,13 @@ export function LoginForm() {
       </p>
     </form>
   );
+}
+
+/**
+ * Only same-origin app paths are honored as post-login redirect targets:
+ * must start with "/" but not "//" (protocol-relative) to avoid open redirects.
+ */
+function safeRedirectTarget(next: string | null): string {
+  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/";
+  return next;
 }

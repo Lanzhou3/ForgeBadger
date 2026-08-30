@@ -8,6 +8,7 @@ import { ProjectManagerPanel } from "./ProjectManagerPanel";
 
 const {
   getProjectManagerGoalMock,
+  discoverAdaptersMock,
   listProjectManagerWorkItemsMock,
   listProjectManagerTaskPacketsMock,
   listProjectManagerStagesMock,
@@ -16,11 +17,13 @@ const {
   getProjectManagerTaskPacketMock,
   listSessionsMock,
   seedProjectManagerStageTemplateMock,
+  startProjectManagerTaskPacketMock,
   updateProjectManagerWorkItemMock,
   addProjectManagerWorkItemDependencyMock,
   removeProjectManagerWorkItemDependencyMock,
 } = vi.hoisted(() => ({
   getProjectManagerGoalMock: vi.fn(),
+  discoverAdaptersMock: vi.fn(),
   listProjectManagerWorkItemsMock: vi.fn(),
   listProjectManagerTaskPacketsMock: vi.fn(),
   listProjectManagerStagesMock: vi.fn(),
@@ -29,6 +32,7 @@ const {
   getProjectManagerTaskPacketMock: vi.fn(),
   listSessionsMock: vi.fn(),
   seedProjectManagerStageTemplateMock: vi.fn(),
+  startProjectManagerTaskPacketMock: vi.fn(),
   updateProjectManagerWorkItemMock: vi.fn(),
   addProjectManagerWorkItemDependencyMock: vi.fn(),
   removeProjectManagerWorkItemDependencyMock: vi.fn(),
@@ -39,6 +43,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   return {
     ...actual,
     getProjectManagerGoal: getProjectManagerGoalMock,
+    discoverAdapters: discoverAdaptersMock,
     listProjectManagerWorkItems: listProjectManagerWorkItemsMock,
     listProjectManagerTaskPackets: listProjectManagerTaskPacketsMock,
     listProjectManagerStages: listProjectManagerStagesMock,
@@ -47,6 +52,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getProjectManagerTaskPacket: getProjectManagerTaskPacketMock,
     listSessions: listSessionsMock,
     seedProjectManagerStageTemplate: seedProjectManagerStageTemplateMock,
+    startProjectManagerTaskPacket: startProjectManagerTaskPacketMock,
     updateProjectManagerWorkItem: updateProjectManagerWorkItemMock,
     addProjectManagerWorkItemDependency: addProjectManagerWorkItemDependencyMock,
     removeProjectManagerWorkItemDependency: removeProjectManagerWorkItemDependencyMock,
@@ -136,6 +142,48 @@ const taskPackets = [
     sessionLink: { sessionId: "session-1", status: "running", aiTool: "claude", href: "/sessions/session-1" },
     blockedReason: null,
   },
+  {
+    id: "item-2:task-packet",
+    projectId: "project-1",
+    workItemId: "item-2",
+    workItemStatus: "todo",
+    queueStatus: "planned",
+    title: "整理需求",
+    updatedAt: 2,
+    prompt: "Task: 整理需求",
+    acceptanceCriteria: [],
+    expectedVerification: [],
+    evidenceRequirements: [],
+    runtime: { adapter: "claude", templateId: null },
+    sessionLink: null,
+    blockedReason: "no_linked_session",
+  },
+];
+
+const adapters = [
+  {
+    id: "claude",
+    label: "Claude Code",
+    command: "claude",
+    supportLevel: "supported",
+    launchEnabled: true,
+    configDir: ".claude",
+    runtimeModes: ["terminal"],
+    available: true,
+    status: "available",
+    version: "1.2.0",
+  },
+  {
+    id: "opencode",
+    label: "OpenCode",
+    command: "opencode",
+    supportLevel: "supported",
+    launchEnabled: false,
+    configDir: ".opencode",
+    runtimeModes: ["terminal"],
+    available: true,
+    status: "available",
+  },
 ];
 
 function createQueryClient() {
@@ -155,8 +203,10 @@ function renderPanel() {
 describe("ProjectManagerPanel stages and dependencies", () => {
   beforeEach(() => {
     cleanup();
+    window.localStorage.clear();
     vi.clearAllMocks();
     getProjectManagerGoalMock.mockResolvedValue({ goal: null });
+    discoverAdaptersMock.mockResolvedValue({ adapters });
     listProjectManagerWorkItemsMock.mockResolvedValue({ workItems });
     listProjectManagerTaskPacketsMock.mockResolvedValue({ taskPackets });
     listProjectManagerStagesMock.mockResolvedValue({ stages });
@@ -168,6 +218,21 @@ describe("ProjectManagerPanel stages and dependencies", () => {
     removeProjectManagerWorkItemDependencyMock.mockResolvedValue({});
     addProjectManagerWorkItemDependencyMock.mockResolvedValue({ link: links[0] });
     seedProjectManagerStageTemplateMock.mockResolvedValue({ stages });
+    startProjectManagerTaskPacketMock.mockResolvedValue({
+      taskPacket: {
+        ...taskPackets[1],
+        sessionLink: { sessionId: "session-2", status: "idle", aiTool: "claude", href: "/sessions/session-2" },
+        blockedReason: null,
+      },
+      session: {
+        id: "session-2",
+        status: "idle",
+        name: "Task: 整理需求",
+        projectId: "project-1",
+        projectName: "project-1",
+        aiTool: "claude",
+      },
+    });
   });
 
   it("groups work items into stage lanes with dependency badges and session chips", async () => {
@@ -229,5 +294,33 @@ describe("ProjectManagerPanel stages and dependencies", () => {
     await waitFor(() => {
       expect(seedProjectManagerStageTemplateMock).toHaveBeenCalledWith("project-1");
     });
+  });
+
+  it("creates a CLI session directly from a todo work item board card after choosing the CLI", async () => {
+    renderPanel();
+
+    const todoCard = await screen.findByTestId("project-manager-board-card-item-2");
+    fireEvent.click(within(todoCard).getByText("创建会话"));
+
+    expect(await screen.findByText("选择 Code CLI")).not.toBeNull();
+    const claudeOption = await screen.findByTestId("quick-start-cli-option-claude");
+    expect((claudeOption.querySelector("input") as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByTestId("quick-start-cli-option-opencode")).toBeNull();
+
+    const confirmButton = screen.getByRole("button", { name: "创建任务会话" }) as HTMLButtonElement;
+    await waitFor(() => expect(confirmButton.disabled).toBe(false));
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(startProjectManagerTaskPacketMock).toHaveBeenCalledWith("project-1", "item-2", { aiTool: "claude" });
+    });
+  });
+
+  it("links to the running session instead of offering creation when one is linked", async () => {
+    renderPanel();
+
+    const runningCard = await screen.findByTestId("project-manager-board-card-item-1");
+    expect(within(runningCard).getByText("打开关联会话")).not.toBeNull();
+    expect(within(runningCard).queryByText("创建会话")).toBeNull();
   });
 });

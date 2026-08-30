@@ -1,4 +1,4 @@
-import { getToken } from "@/lib/auth";
+import { clearToken, clearUser, getToken } from "@/lib/auth";
 import type { StoredNotification } from "@/lib/notifications";
 import { getGatewayBaseUrl } from "@/lib/runtime-config";
 
@@ -1087,6 +1087,7 @@ export async function fetchJson<T = unknown>(path: string, options: ApiRequestOp
   const res = await fetch(apiUrl(path), request).catch(normalizeFetchError).finally(cleanup);
   const envelope = await readApiEnvelope<T>(res);
   if (!res.ok) {
+    handleUnauthorized(path, token !== null, res.status);
     throw errorFromResponse(res, envelope);
   }
   if (!envelope) {
@@ -1104,6 +1105,7 @@ export async function fetchEnvelope<T = unknown>(path: string, options: ApiReque
   const res = await fetch(apiUrl(path), request).catch(normalizeFetchError).finally(cleanup);
   const envelope = await readApiEnvelope<T>(res);
   if (!res.ok) {
+    handleUnauthorized(path, token !== null, res.status);
     throw errorFromResponse(res, envelope);
   }
   if (!envelope) {
@@ -1144,6 +1146,34 @@ function buildApiRequest(options: ApiRequestOptions, token: string | null): {
 
 function formatHttpError(res: Response): string {
   return `Gateway request failed with HTTP ${res.status}`;
+}
+
+/**
+ * A 401 with a locally stored token means the token is expired or revoked.
+ * Clear the stale session and bounce to the login page (with a return path)
+ * instead of leaving the dashboard in a half-broken pseudo-logged-in state.
+ * Auth endpoints manage their own credentials state and are exempt: a failed
+ * login attempt must not trigger a redirect loop.
+ */
+/** Login/register/logout carry the credentials themselves; a 401 there is a
+ * wrong password, not a stale session, and must not trigger a redirect.
+ * change-password likewise answers 401 for a wrong current password. */
+const AUTH_CREDENTIAL_PATHS = [
+  "/api/v1/auth/login",
+  "/api/v1/auth/register",
+  "/api/v1/auth/logout",
+  "/api/v1/auth/change-password"
+];
+
+function handleUnauthorized(path: string, hadToken: boolean, status: number): void {
+  if (status !== 401 || !hadToken) return;
+  if (AUTH_CREDENTIAL_PATHS.some((authPath) => path.startsWith(authPath))) return;
+  if (typeof window === "undefined") return;
+  clearToken();
+  clearUser();
+  if (window.location.pathname.startsWith("/login")) return;
+  const next = window.location.pathname + window.location.search;
+  window.location.href = `/login?next=${encodeURIComponent(next)}`;
 }
 
 function normalizeFetchError(error: unknown): never {
@@ -1192,6 +1222,39 @@ export async function register(email: string, password: string) {
 
 export async function getMe() {
   return fetchEnvelope<User>("/api/v1/auth/me", { method: "GET" });
+}
+
+export interface AuthSessionSummary {
+  id: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  userAgent: string | null;
+  current: boolean;
+}
+
+export async function listAuthSessions(): Promise<{ sessions: AuthSessionSummary[] }> {
+  return fetchJson("/api/v1/auth/sessions") as Promise<{ sessions: AuthSessionSummary[] }>;
+}
+
+export async function revokeAuthSession(id: string): Promise<{ revoked: number }> {
+  return fetchJson(`/api/v1/auth/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  }) as Promise<{ revoked: number }>;
+}
+
+export async function revokeOtherAuthSessions(): Promise<{ revoked: number }> {
+  return fetchJson("/api/v1/auth/sessions", { method: "DELETE" }) as Promise<{ revoked: number }>;
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string
+): Promise<{ revokedSessions: boolean }> {
+  return fetchJson("/api/v1/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, newPassword })
+  }) as Promise<{ revokedSessions: boolean }>;
 }
 
 export async function getDependencies(): Promise<DependencyReport> {
@@ -1714,6 +1777,158 @@ export async function getProjectWorkspaceFile(
   return fetchJson(projectWorkspacePath(id, `/file?${searchParams.toString()}`)) as Promise<WorkspaceFileSnapshot>;
 }
 
+// ---- Project graph (read-only CodeGraph index) ----
+
+export interface GraphDistributionEntry {
+  key: string;
+  count: number;
+}
+
+export interface GraphSymbolRef {
+  id: string;
+  name: string;
+  qualifiedName: string;
+  kind: string;
+  filePath: string;
+  startLine: number;
+  signature?: string | null;
+}
+
+export type GraphUnavailableReason =
+  | "not_initialized"
+  | "schema_unsupported"
+  | "not_found"
+  | "error";
+
+export interface ProjectGraphOverview {
+  available: true;
+  indexState: string | null;
+  indexedAt: number | null;
+  files: { total: number; byLanguage: GraphDistributionEntry[] };
+  nodes: { total: number; byKind: GraphDistributionEntry[] };
+  edges: { total: number; byKind: GraphDistributionEntry[] };
+}
+
+export interface ProjectGraphSearchResult {
+  available: true;
+  symbols: GraphSymbolRef[];
+}
+
+export interface GraphNeighborRef extends GraphSymbolRef {
+  edgeKind: string;
+}
+
+export interface ProjectGraphSymbolDetail {
+  available: true;
+  symbol: GraphSymbolRef;
+  callers: GraphNeighborRef[];
+  callees: GraphNeighborRef[];
+}
+
+export interface ProjectGraphImpact {
+  available: true;
+  rootId: string;
+  depth: number;
+  nodes: Array<GraphSymbolRef & { depth: number }>;
+  edges: Array<{ source: string; target: string; kind: string }>;
+  truncated: boolean;
+}
+
+export interface ProjectGraphFileGraph {
+  available: true;
+  nodes: Array<{ path: string; language?: string | null }>;
+  edges: Array<{
+    source: string;
+    target: string;
+    weight: number;
+    kinds: Record<string, number>;
+  }>;
+  truncated: boolean;
+}
+
+export interface ProjectGraphAffected {
+  available: true;
+  seededFiles: number;
+  seededSymbols: number;
+  depth: number;
+  nodes: Array<GraphSymbolRef & { depth: number }>;
+  edges: Array<{ source: string; target: string; kind: string }>;
+  truncated: boolean;
+}
+
+export type GraphUnavailable = {
+  available: false;
+  reason: GraphUnavailableReason;
+};
+
+function projectGraphPath(id: string, suffix: string): string {
+  return `/api/v1/projects/${encodeURIComponent(id)}/graph${suffix}`;
+}
+
+export async function getProjectGraphOverview(
+  id: string
+): Promise<ProjectGraphOverview | GraphUnavailable> {
+  return fetchJson(projectGraphPath(id, "/overview")) as Promise<
+    ProjectGraphOverview | GraphUnavailable
+  >;
+}
+
+export async function searchProjectGraphSymbols(
+  id: string,
+  params: { q: string; kind?: string; limit?: number }
+): Promise<ProjectGraphSearchResult | GraphUnavailable> {
+  const searchParams = new URLSearchParams({ q: params.q });
+  if (params.kind) searchParams.set("kind", params.kind);
+  if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
+  return fetchJson(projectGraphPath(id, `/search?${searchParams.toString()}`)) as Promise<
+    ProjectGraphSearchResult | GraphUnavailable
+  >;
+}
+
+export async function getProjectGraphSymbolDetail(
+  id: string,
+  symbolId: string
+): Promise<ProjectGraphSymbolDetail | GraphUnavailable> {
+  return fetchJson(
+    projectGraphPath(id, `/symbols/${encodeURIComponent(symbolId)}`)
+  ) as Promise<ProjectGraphSymbolDetail | GraphUnavailable>;
+}
+
+export async function getProjectGraphImpact(
+  id: string,
+  symbolId: string,
+  depth?: number
+): Promise<ProjectGraphImpact | GraphUnavailable> {
+  const query = depth !== undefined ? `?depth=${depth}` : "";
+  return fetchJson(
+    projectGraphPath(id, `/symbols/${encodeURIComponent(symbolId)}/impact${query}`)
+  ) as Promise<ProjectGraphImpact | GraphUnavailable>;
+}
+
+export async function getProjectGraphFileGraph(
+  id: string,
+  limit?: number
+): Promise<ProjectGraphFileGraph | GraphUnavailable> {
+  const query = limit !== undefined ? `?limit=${limit}` : "";
+  return fetchJson(projectGraphPath(id, `/file-graph${query}`)) as Promise<
+    ProjectGraphFileGraph | GraphUnavailable
+  >;
+}
+
+export async function getProjectGraphAffected(
+  id: string,
+  paths: string[],
+  depth?: number
+): Promise<ProjectGraphAffected | GraphUnavailable> {
+  return fetchJson(projectGraphPath(id, "/affected"), {
+    method: "POST",
+    body: JSON.stringify({
+      paths,
+      ...(depth !== undefined ? { depth } : {})
+    })
+  }) as Promise<ProjectGraphAffected | GraphUnavailable>;
+}
+
 export interface GitWorkingTreeEntry {
   path: string;
   status: string;
@@ -1943,13 +2158,15 @@ export async function linkProjectManagerTaskPacketSession(
 
 export async function startProjectManagerTaskPacket(
   projectId: string,
-  workItemId: string
+  workItemId: string,
+  data: { aiTool?: RuntimeAdapterId } = {}
 ): Promise<{ taskPacket: ProjectManagerTaskPacket; session: Session }> {
   return fetchJson(projectManagerPath(
     projectId,
     `/work-items/${encodeURIComponent(workItemId)}/task-packet/start`
   ), {
     method: "POST",
+    body: JSON.stringify(data),
   }) as Promise<{ taskPacket: ProjectManagerTaskPacket; session: Session }>;
 }
 

@@ -2,8 +2,7 @@
 import { createRef } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { LanguageProvider } from "@/hooks/use-language";
 import { ConfigSyncPanel, type ConfigSyncPanelHandle } from "./ConfigSyncPanel";
 
@@ -103,9 +102,9 @@ describe("ConfigSyncPanel", () => {
   });
 
   it("previews conflicts and applies with default skip decisions", async () => {
-    const { ref } = renderPanel();
+    renderPanel();
 
-    act(() => ref.current?.preview());
+    fireEvent.click(screen.getByRole("button", { name: /预览配置/ }));
 
     await waitFor(() => expect(screen.getByText(".claude/settings.json")).toBeTruthy());
     expect(previewConfigSyncMock).toHaveBeenCalledWith(
@@ -125,10 +124,31 @@ describe("ConfigSyncPanel", () => {
     );
   });
 
-  it("checks compliance and renders the metrics card", async () => {
-    const { ref } = renderPanel();
+  it("runs a pending preview action once and reports consumption", async () => {
+    const onPendingActionConsumed = vi.fn();
+    renderPanel({ pendingAction: "preview", onPendingActionConsumed });
 
-    act(() => ref.current?.checkCompliance());
+    await waitFor(() => expect(previewConfigSyncMock).toHaveBeenCalledTimes(1));
+    expect(previewConfigSyncMock).toHaveBeenCalledWith(
+      "project-1",
+      "builtin-claude-code",
+      "host_environment"
+    );
+    expect(onPendingActionConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores pending actions when no template is tracked", async () => {
+    const onPendingActionConsumed = vi.fn();
+    renderPanel({ templateId: null, pendingAction: "preview", onPendingActionConsumed });
+
+    await waitFor(() => expect(screen.getByText("独立配置")).toBeTruthy());
+    expect(previewConfigSyncMock).not.toHaveBeenCalled();
+  });
+
+  it("checks compliance and renders the metrics card", async () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: /检查合规/ }));
 
     await waitFor(() => expect(screen.getByText("需要处理")).toBeTruthy());
     expect(getConfigComplianceMock).toHaveBeenCalledWith("project-1", {
@@ -142,7 +162,7 @@ describe("ConfigSyncPanel", () => {
   it("clears conflicts when the template changes", async () => {
     const { ref, rerender } = renderPanel();
 
-    act(() => ref.current?.preview());
+    fireEvent.click(screen.getByRole("button", { name: /预览配置/ }));
     await waitFor(() => expect(screen.getByText(".claude/settings.json")).toBeTruthy());
 
     rerender(
@@ -163,9 +183,9 @@ describe("ConfigSyncPanel", () => {
 
   it("notifies the page about pending preview/compliance state", async () => {
     const onPendingChange = vi.fn();
-    const { ref } = renderPanel({ onPendingChange });
+    renderPanel({ onPendingChange });
 
-    act(() => ref.current?.checkCompliance());
+    fireEvent.click(screen.getByRole("button", { name: /检查合规/ }));
     await waitFor(() => expect(getConfigComplianceMock).toHaveBeenCalled());
 
     expect(onPendingChange).toHaveBeenCalled();
@@ -175,7 +195,7 @@ describe("ConfigSyncPanel", () => {
     }
   });
 
-  it("renders the independent config card when no template is tracked", async () => {
+  it("renders the independent config note when no template is tracked", async () => {
     renderPanel({ templateId: null });
 
     expect(screen.getByText("独立配置")).toBeTruthy();

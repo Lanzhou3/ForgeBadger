@@ -1,17 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowDown, Brain, CheckCircle2, ChevronDown, ChevronRight, Loader2, Pencil, Square, Wrench } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { ArrowDown, ArrowUp, Bot, MessageSquare, PanelLeft, Square } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { CopilotStatusBar } from "@/components/copilot/copilot-kernel-panel";
+import {
+  MessageRow,
+  PendingActionRow,
+  StreamingMessage,
+  ThinkingSection,
+  indexToolResults,
+} from "@/components/copilot/copilot-message-primitives";
 import { CopilotSettings } from "@/components/copilot/copilot-settings";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
-import { MarkdownRenderer } from "@/components/projects/markdown-renderer";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
+import { GatewayApiError } from "@/lib/api";
 import {
   cancelRun,
   createConversation,
@@ -21,19 +31,26 @@ import {
   renameConversation,
   type CopilotConversation,
   type CopilotMessage,
-  type CopilotPendingAction,
 } from "@/lib/copilot-api";
 
 const AUTO_TITLE_MAX_CHARS = 24;
 
 /**
- * Copilot chat — the primary conversational surface. A ChatGPT-style
- * two-pane layout: conversation history management on the left (new / search /
- * rename / delete), and the message stream with markdown rendering, collapsible
- * tool steps, approval cards, and a stop control on the right.
+ * Copilot console — the primary conversational surface, laid out as a
+ * ChatGPT/Claude-style two-column workbench: conversation history management
+ * on the left (new / search / rename / delete, collapsible on desktop and a
+ * Sheet on mobile), and a centered, width-capped message stream in the middle
+ * with a kernel status bar, markdown rendering, collapsible tool steps,
+ * approval cards, streaming tolerance, and a floating composer card. All
+ * Copilot preferences (heartbeat, dsh kernel, capabilities) live behind the
+ * top-right gear button on the dedicated /copilot/settings page.
  */
 export function CopilotChat() {
   const { t } = useLanguage();
+  const searchParams = useSearchParams();
+  // Deep link: /copilot?c=<conversationId> (e.g. "expand to full console" from
+  // the robot chat panel) selects that conversation.
+  const requestedConversationId = searchParams.get("c");
 
   const [conversations, setConversations] = useState<CopilotConversation[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -48,19 +65,26 @@ export function CopilotChat() {
   const [editDraft, setEditDraft] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarSheetOpen, setSidebarSheetOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastSentRef = useRef<string>("");
   const conversationIdRef = useRef<string | null>(null);
   conversationIdRef.current = conversationId;
+  const requestedConversationRef = useRef<string | null>(null);
+  requestedConversationRef.current = requestedConversationId;
 
   const refreshConversations = useCallback(async () => {
     try {
       const { conversations: next } = await listConversations();
       setConversations(next);
-      const first = next[0];
-      if (!conversationIdRef.current && first) {
-        void selectConversation(first.id);
+      if (!conversationIdRef.current) {
+        const requested = requestedConversationRef.current;
+        const target = (requested ? next.find((item) => item.id === requested) : undefined) ?? next[0];
+        if (target) {
+          void selectConversation(target.id);
+        }
       }
     } catch {
       setLoadError(t("copilot.loadError"));
@@ -85,9 +109,27 @@ export function CopilotChat() {
     void refreshConversations();
   }, [refreshConversations]);
 
+  // Deep-link follow-up: same-page client navigation (robot panel "expand"
+  // while already on /copilot) does not remount this component, so react to
+  // search-param changes explicitly. If the id is not in the loaded list it
+  // may simply be stale (e.g. the panel just created it server-side), so
+  // refresh the list once per requested id before giving up.
+  const deepLinkRetriedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!requestedConversationId || requestedConversationId === conversationId) return;
+    if (conversations.some((item) => item.id === requestedConversationId)) {
+      void selectConversation(requestedConversationId);
+      return;
+    }
+    if (deepLinkRetriedRef.current !== requestedConversationId) {
+      deepLinkRetriedRef.current = requestedConversationId;
+      void refreshConversations();
+    }
+  }, [requestedConversationId, conversations, conversationId, selectConversation, refreshConversations]);
+
   // Refresh the conversation list when the reactive loop opens a fresh
   // proactive conversation, so its report becomes visible.
-  const { active, startRun, startEditedRun, approveAction, clearActive } = useCopilotRun({
+  const { active, startRun, startEditedRun, approveAction, clearActive, markPending } = useCopilotRun({
     onReactiveUpdate: refreshConversations,
     onTitleUpdated: ({ conversationId, title }) => {
       // Patch the in-memory list first so the sidebar + header update without
@@ -138,6 +180,9 @@ export function CopilotChat() {
     setSending(true);
     setSendError(false);
     clearActive();
+    // Show the "thinking" pulse immediately; the first run event can lag the
+    // POST noticeably while the dsh runtime cold-starts.
+    markPending(id);
     try {
       await startRun(id, text);
       const wasUntitled = !conversations.find((item) => item.id === id)?.title;
@@ -146,11 +191,12 @@ export function CopilotChat() {
       }
       await reloadActiveConversation(id);
     } catch {
+      clearActive();
       setSendError(true);
     } finally {
       setSending(false);
     }
-  }, [input, conversationId, sending, conversations, startRun, clearActive, reloadActiveConversation]);
+  }, [input, conversationId, sending, conversations, startRun, clearActive, markPending, reloadActiveConversation]);
 
   const onRename = useCallback(async (id: string, title: string) => {
     await renameConversation(id, title).catch(() => undefined);
@@ -209,8 +255,19 @@ export function CopilotChat() {
       setEditDraft("");
       const id2 = conversationIdRef.current;
       if (id2) await reloadActiveConversation(id2);
-    } catch {
-      setEditError(t("copilot.editFailed"));
+    } catch (error) {
+      // The dsh copilot path answers edit-message with 501 +
+      // DSH_EDIT_MESSAGE_UNSUPPORTED; surface a targeted hint instead of the
+      // generic failure message.
+      if (
+        error instanceof GatewayApiError &&
+        error.status === 501 &&
+        error.details?.code === "DSH_EDIT_MESSAGE_UNSUPPORTED"
+      ) {
+        setEditError(t("copilot.editUnsupported"));
+      } else {
+        setEditError(t("copilot.editFailed"));
+      }
     } finally {
       setEditSubmitting(false);
     }
@@ -243,41 +300,61 @@ export function CopilotChat() {
     setPinnedToBottom(true);
   }, []);
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((prev) => !prev);
+  }, []);
+
   const activeConversation = conversations.find((item) => item.id === conversationId);
   const isRunning = active && (active.status === "running" || active.status === "pending");
 
   // Index tool_result rows by their provider toolCallId so MessageRow can pair
   // them with the corresponding tool_call row and render a single status
   // icon (running / ok / error / denied) instead of two loose <details>.
-  const toolResultById = useMemo(() => {
-    const map = new Map<string, CopilotMessage>();
-    for (const message of messages) {
-      if (message.kind === "tool_result" && message.toolCallId) {
-        map.set(message.toolCallId, message);
-      }
-    }
-    return map;
-  }, [messages]);
+  const toolResultById = useMemo(() => indexToolResults(messages), [messages]);
 
   return (
-    <div className="mx-auto grid h-full max-w-7xl grid-cols-[280px_1fr] gap-4 p-6">
-      <Card className="flex max-h-[calc(100vh-6rem)] flex-col overflow-hidden">
-        <ConversationSidebar
-          conversations={conversations}
-          activeId={conversationId}
-          creating={creating}
-          onSelect={(id) => void selectConversation(id)}
-          onCreate={() => void newConversation()}
-          onRename={onRename}
-          onDelete={onDelete}
-        />
-      </Card>
+    <div className="mx-auto flex h-full w-full max-w-[1600px] gap-4 p-4 md:p-6">
+      {sidebarOpen && (
+        <Card className="hidden max-h-[calc(100vh-6rem)] w-[280px] shrink-0 flex-col overflow-hidden md:flex">
+          <ConversationSidebar
+            conversations={conversations}
+            activeId={conversationId}
+            creating={creating}
+            onSelect={(id) => void selectConversation(id)}
+            onCreate={() => void newConversation()}
+            onRename={onRename}
+            onDelete={onDelete}
+          />
+        </Card>
+      )}
 
-      <Card className="flex max-h-[calc(100vh-6rem)] flex-col overflow-hidden">
-        <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5">
-          <span className="truncate text-sm font-semibold">
-            {activeConversation?.title || t("copilot.untitled")}
-          </span>
+      <Card className="flex max-h-[calc(100vh-6rem)] min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex items-center justify-between gap-3 border-b px-3 py-2.5">
+          <div className="flex min-w-0 items-center gap-1">
+            {/* Mobile: opens the conversation Sheet; desktop: toggles the column. */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0 md:hidden"
+              aria-label={t("copilot.conversations")}
+              onClick={() => setSidebarSheetOpen(true)}
+            >
+              <PanelLeft className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden shrink-0 md:inline-flex"
+              aria-label={t("copilot.toggleConversations")}
+              onClick={toggleSidebar}
+            >
+              <PanelLeft className="size-4" />
+            </Button>
+            <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold">
+              <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+              {activeConversation?.title || t("copilot.untitled")}
+            </span>
+          </div>
           <div className="flex items-center gap-1">
             {isRunning ? (
               <Badge variant="outline" className="gap-1 border-brand/40 text-xs">
@@ -289,62 +366,66 @@ export function CopilotChat() {
           </div>
         </div>
 
+        <CopilotStatusBar />
+
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <div ref={scrollRef} onScroll={onScroll} className="flex-1 space-y-3 overflow-y-auto p-4">
-            {loadError && <p className="text-sm text-destructive">{loadError}</p>}
-            {!loadError && messages.length === 0 && !active && (
-              <EmptyState onSuggestion={(text) => void send(text)} />
-            )}
-            {messages.map((message) => {
-              const pairedResultId = message.toolCallId && toolResultById.has(message.toolCallId)
-                ? toolResultById.get(message.toolCallId)!.id
-                : null;
-              return (
-                <MessageRow
-                  key={message.id}
-                  message={message}
-                  pairedResult={pairedResultId === null ? null : (toolResultById.get(message.toolCallId!) ?? null)}
-                  suppressRender={pairedResultId === message.id}
-                  isEditing={editingMessageId === message.id}
-                  editDraft={editDraft}
-                  editError={editError}
-                  editSubmitting={editSubmitting}
-                  canEdit={!isRunning && editingMessageId === null}
-                  onBeginEdit={beginEditMessage}
-                  onChangeDraft={setEditDraft}
-                  onSubmitEdit={submitEditMessage}
-                  onCancelEdit={cancelEditMessage}
-                />
-              );
-            })}
-            {active?.thinking ? (
-              <ThinkingSection text={active.thinking} />
-            ) : null}
-            {active?.text ? (
-              <StreamingMessage text={active.text} />
-            ) : isRunning ? (
-              <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="size-1.5 animate-pulse rounded-full bg-brand" />
-                {t("copilot.running")}
-              </p>
-            ) : null}
-            {active?.pendingAction && (
-              <PendingActionRow action={active.pendingAction} onDecide={onDecide} />
-            )}
-            {sendError && (
-              <div className="flex items-center gap-2">
-                <p className="text-sm text-destructive">{t("copilot.sendError")}</p>
-                <Button variant="outline" size="sm" onClick={() => void send(lastSentRef.current)}>
-                  {t("copilot.retry")}
-                </Button>
-              </div>
-            )}
+          <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-3 py-4">
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+              {loadError && <p className="text-sm text-destructive">{loadError}</p>}
+              {!loadError && messages.length === 0 && !active && (
+                <EmptyState onSuggestion={(text) => void send(text)} />
+              )}
+              {messages.map((message) => {
+                const pairedResultId = message.toolCallId && toolResultById.has(message.toolCallId)
+                  ? toolResultById.get(message.toolCallId)!.id
+                  : null;
+                return (
+                  <MessageRow
+                    key={message.id}
+                    message={message}
+                    pairedResult={pairedResultId === null ? null : (toolResultById.get(message.toolCallId!) ?? null)}
+                    suppressRender={pairedResultId === message.id}
+                    isEditing={editingMessageId === message.id}
+                    editDraft={editDraft}
+                    editError={editError}
+                    editSubmitting={editSubmitting}
+                    canEdit={!isRunning && editingMessageId === null}
+                    onBeginEdit={beginEditMessage}
+                    onChangeDraft={setEditDraft}
+                    onSubmitEdit={submitEditMessage}
+                    onCancelEdit={cancelEditMessage}
+                  />
+                );
+              })}
+              {active?.thinking ? (
+                <ThinkingSection text={active.thinking} />
+              ) : null}
+              {active?.text ? (
+                <StreamingMessage text={active.text} />
+              ) : isRunning ? (
+                <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+                  {t("copilot.running")}
+                </p>
+              ) : null}
+              {active?.pendingAction && (
+                <PendingActionRow action={active.pendingAction} onDecide={onDecide} />
+              )}
+              {sendError && (
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-destructive">{t("copilot.sendError")}</p>
+                  <Button variant="outline" size="sm" onClick={() => void send(lastSentRef.current)}>
+                    {t("copilot.retry")}
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
           {!pinnedToBottom && (
             <Button
               variant="outline"
               size="icon"
-              className="absolute bottom-3 right-3 size-8 rounded-full shadow"
+              className="absolute bottom-3 right-3 z-10 size-8 rounded-full shadow"
               onClick={scrollToBottom}
               aria-label={t("copilot.scrollDown")}
             >
@@ -353,8 +434,18 @@ export function CopilotChat() {
           )}
         </div>
 
-        <div className="border-t p-3">
-          <div className="flex items-end gap-2">
+        {/* Floating composer: no docked bottom bar; the upward gradient fades
+            messages out beneath the elevated input card, which lifts on hover
+            and glows brand on focus. */}
+        <div className="relative shrink-0 px-3 pb-3 pt-1">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-full h-10 bg-gradient-to-t from-card via-card/80 to-transparent"
+          />
+          <div
+            data-testid="copilot-composer"
+            className="flex items-end gap-2 rounded-xl border border-border/70 bg-card/90 px-2.5 py-2 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
+          >
             <Textarea
               value={input}
               onChange={(event) => setInput(event.target.value)}
@@ -365,41 +456,80 @@ export function CopilotChat() {
                 }
               }}
               placeholder={t("copilot.placeholder")}
-              className="min-h-[48px] max-h-40 flex-1 resize-none"
+              aria-label={t("copilot.placeholder")}
+              className="min-h-[44px] max-h-40 flex-1 resize-none rounded-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
               rows={2}
             />
             {isRunning ? (
-              <Button variant="outline" onClick={() => void stopRun()} aria-label={t("copilot.stop")}>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-9 shrink-0 rounded-full"
+                onClick={() => void stopRun()}
+                aria-label={t("copilot.stop")}
+                title={t("copilot.stop")}
+              >
                 <Square className="size-4" />
-                {t("copilot.stop")}
               </Button>
             ) : (
-              <Button onClick={() => void send()} disabled={sending || !input.trim() || !conversationId}>
-                {t("copilot.send")}
+              <Button
+                size="icon"
+                className="size-9 shrink-0 rounded-full"
+                onClick={() => void send()}
+                disabled={sending || !input.trim() || !conversationId}
+                aria-label={t("copilot.send")}
+                title={t("copilot.send")}
+              >
+                <ArrowUp className="size-4" />
               </Button>
             )}
           </div>
         </div>
       </Card>
+
+      <Sheet open={sidebarSheetOpen} onOpenChange={setSidebarSheetOpen}>
+        <SheetContent side="left" className="w-80 p-0">
+          <SheetTitle className="sr-only">{t("copilot.conversations")}</SheetTitle>
+          <ConversationSidebar
+            conversations={conversations}
+            activeId={conversationId}
+            creating={creating}
+            onSelect={(id) => {
+              setSidebarSheetOpen(false);
+              void selectConversation(id);
+            }}
+            onCreate={() => {
+              setSidebarSheetOpen(false);
+              void newConversation();
+            }}
+            onRename={onRename}
+            onDelete={onDelete}
+          />
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
-
 function EmptyState({ onSuggestion }: { onSuggestion: (text: string) => void }) {
   const { t } = useLanguage();
   const suggestions = [t("copilot.suggestion1"), t("copilot.suggestion2"), t("copilot.suggestion3")];
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+    <div className="flex h-full flex-col items-center justify-center gap-5 py-10 text-center">
+      <span className="flex size-12 items-center justify-center rounded-xl border border-border/60 bg-muted/60 shadow-inner">
+        <Bot className="size-6 text-muted-foreground" />
+      </span>
       <div>
-        <p className="text-base font-medium">{t("copilot.welcomeTitle")}</p>
-        <p className="mt-1 max-w-md text-sm text-muted-foreground">{t("copilot.welcomeSubtitle")}</p>
+        <p className="text-base font-semibold">{t("copilot.welcomeTitle")}</p>
+        <p className="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">
+          {t("copilot.welcomeSubtitle")}
+        </p>
       </div>
       <div className="flex flex-wrap justify-center gap-2">
         {suggestions.map((suggestion) => (
           <button
             key={suggestion}
             onClick={() => onSuggestion(suggestion)}
-            className="rounded-full border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-brand/60 hover:text-foreground"
+            className="rounded-full border border-border/70 bg-card px-3.5 py-1.5 text-sm text-muted-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand/60 hover:text-foreground hover:shadow-md"
           >
             {suggestion}
           </button>
@@ -407,231 +537,4 @@ function EmptyState({ onSuggestion }: { onSuggestion: (text: string) => void }) 
       </div>
     </div>
   );
-}
-
-function StreamingMessage({ text }: { text: string }) {
-  return (
-    <div className="flex justify-start">
-      <div className="max-w-[80%] rounded-lg bg-muted px-3 py-2 text-sm">
-        <MarkdownRenderer content={text} />
-        <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-[1px] bg-foreground/70 align-text-bottom" />
-      </div>
-    </div>
-  );
-}
-
-/**
- * Collapsible reasoning block. Streams the model's internal thinking (Anthropic
- * extended thinking, OpenAI reasoning_content) separately from the final answer
- * so the chat is not a wall of text. Default collapsed — the brain icon +
- * character count is enough to confirm the model is reasoning without dumping
- * the entire chain of thought into the viewport.
- */
-function ThinkingSection({ text }: { text: string }) {
-  const { t } = useLanguage();
-  const [open, setOpen] = useState(false);
-  const chars = text.length;
-  return (
-    <div className="rounded-md border border-dashed border-border/60 bg-muted/30 text-xs text-muted-foreground">
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/60"
-      >
-        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        <Brain className="size-3" />
-        <span className="font-medium">{t("copilot.thinkingCount").replace("{chars}", String(chars))}</span>
-      </button>
-      {open && (
-        <pre className="max-h-40 overflow-auto whitespace-pre-wrap border-t border-border/60 bg-background/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground/80">
-          {text}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-function MessageRow({
-  message,
-  pairedResult,
-  suppressRender,
-  isEditing,
-  editDraft,
-  editError,
-  editSubmitting,
-  canEdit,
-  onBeginEdit,
-  onChangeDraft,
-  onSubmitEdit,
-  onCancelEdit,
-}: {
-  message: CopilotMessage;
-  pairedResult: CopilotMessage | null;
-  suppressRender: boolean;
-  isEditing: boolean;
-  editDraft: string;
-  editError: string | null;
-  editSubmitting: boolean;
-  canEdit: boolean;
-  onBeginEdit: (message: CopilotMessage) => void;
-  onChangeDraft: (value: string) => void;
-  onSubmitEdit: () => void;
-  onCancelEdit: () => void;
-}) {
-  const { t } = useLanguage();
-  const isUser = message.role === "user";
-
-  // tool_result rows that have been merged into their tool_call row above are
-  // suppressed; the merged card already shows the result.
-  if (suppressRender) return null;
-
-  if (message.kind === "tool_call") {
-    const status = pairedResult ? deriveToolStatus(pairedResult.content) : "running";
-    return (
-      <details className="rounded-md border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
-        <summary className="flex cursor-pointer items-center gap-1.5 font-medium">
-          <ToolStatusIcon status={status} />
-          <Wrench className="size-3" />
-          <span>{t("copilot.toolCall")}{message.toolName ? `：${message.toolName}` : ""}</span>
-        </summary>
-        {message.toolInputJson && (
-          <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[11px]">{message.toolInputJson}</pre>
-        )}
-        {pairedResult && (
-          <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[11px]">{pairedResult.content}</pre>
-        )}
-      </details>
-    );
-  }
-  if (message.kind === "tool_result") {
-    return (
-      <details className="max-w-[85%] rounded-md bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
-        <summary className="cursor-pointer font-medium">
-          {t("copilot.toolResult")} — {truncateContent(message.content)}
-        </summary>
-        <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[11px]">{message.content}</pre>
-      </details>
-    );
-  }
-  if (message.kind === "error") {
-    return <div className="text-sm text-destructive">{message.content}</div>;
-  }
-
-  if (isUser && isEditing) {
-    return (
-      <div className="flex flex-col items-end gap-1">
-        <Textarea
-          value={editDraft}
-          onChange={(event) => onChangeDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              void onSubmitEdit();
-            } else if (event.key === "Escape") {
-              event.preventDefault();
-              onCancelEdit();
-            }
-          }}
-          className="max-w-[80%] min-h-[80px] resize-y"
-          rows={3}
-          disabled={editSubmitting}
-          autoFocus
-        />
-        <div className="flex items-center gap-2 text-xs">
-          <Button size="sm" onClick={() => void onSubmitEdit()} disabled={editSubmitting || !editDraft.trim()}>
-            {t("copilot.editSubmit")}
-          </Button>
-          <Button size="sm" variant="outline" onClick={onCancelEdit} disabled={editSubmitting}>
-            {t("copilot.editCancel")}
-          </Button>
-          {editError && <span className="text-destructive">{editError}</span>}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div className="relative max-w-[80%]">
-        <div
-          className={`rounded-lg px-3 py-2 text-sm ${
-            isUser ? "whitespace-pre-wrap bg-primary text-primary-foreground" : "bg-muted"
-          }`}
-        >
-          {isUser ? message.content : <MarkdownRenderer content={message.content} />}
-        </div>
-        {isUser && canEdit && (
-          <button
-            type="button"
-            aria-label={t("copilot.editPrompt")}
-            title={t("copilot.editPrompt")}
-            onClick={() => onBeginEdit(message)}
-            className="absolute -left-9 top-1.5 hidden size-7 items-center justify-center rounded-md border border-border/60 bg-background/80 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 md:flex"
-          >
-            <Pencil className="size-3.5" />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function PendingActionRow({
-  action,
-  onDecide,
-}: {
-  action: CopilotPendingAction;
-  onDecide: (approved: boolean) => void;
-}) {
-  const { t } = useLanguage();
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950/30">
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-300">
-          {t("copilot.approvalRequired")}
-        </Badge>
-        <span className="text-sm font-medium">{action.tool}</span>
-      </div>
-      {action.inputJson && (
-        <pre className="max-h-40 overflow-auto rounded bg-background p-2 text-xs">{action.inputJson}</pre>
-      )}
-      <div className="flex gap-2">
-        <Button size="sm" onClick={() => void onDecide(true)}>
-          {t("copilot.approve")}
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => void onDecide(false)}>
-          {t("copilot.reject")}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function truncateContent(content: string): string {
-  const max = 80;
-  return content.length > max ? `${content.slice(0, max)}…` : content;
-}
-
-type ToolStatus = "running" | "ok" | "error" | "denied";
-
-function deriveToolStatus(resultContent: string): ToolStatus {
-  // The orchestrator prefixes tool_result content so the UI can detect the
-  // outcome without re-running security-policy or error parsing. Anything
-  // else (real tool JSON output) is treated as a successful read.
-  if (/^Denied by security policy:/u.test(resultContent)) return "denied";
-  if (/^Tool error:/u.test(resultContent) || /^Unknown tool:/u.test(resultContent)) return "error";
-  return "ok";
-}
-
-function ToolStatusIcon({ status }: { status: ToolStatus }) {
-  if (status === "running") {
-    return <Loader2 className="size-3 animate-spin text-muted-foreground" aria-label="running" />;
-  }
-  if (status === "ok") {
-    return <CheckCircle2 className="size-3 text-emerald-600 dark:text-emerald-400" aria-label="ok" />;
-  }
-  // denied + error both surface as a warning; color is uniform because the
-  // text body is the authoritative explanation.
-  return <AlertTriangle className="size-3 text-amber-600 dark:text-amber-400" aria-label={status} />;
 }
