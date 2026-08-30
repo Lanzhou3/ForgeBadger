@@ -241,10 +241,15 @@ task packet. Cross-project, cross-tenant, or missing sessions return `404`.
 `POST /task-packet/start` creates one `idle` task session when no linked session
 exists, stores only bounded context metadata such as a context reference,
 prompt digest, counts, adapter/template, and session id in the work-item
-details, and returns the derived task packet plus the created session. It does
-not start tmux, write terminal input, inject secrets, or grant autonomous host
-execution authority; the operator still starts/connects the session through
-the existing session lifecycle.
+details, and returns the derived task packet plus the created session. The
+optional JSON body `{ "aiTool": "claude" | "opencode" | "codex" | "kimi" }`
+selects the CLI for the new session; it falls back to the project's `aiTool`,
+and returns `400` when neither is a known adapter. The selected adapter is
+gated by adapter discovery (`available` + launch-enabled + terminal support)
+and returns `409` with adapter details when unavailable. It does not start
+tmux, write terminal input, inject secrets, or grant autonomous host execution
+authority; the operator still starts/connects the session through the existing
+session lifecycle.
 
 The Web session detail page may read `GET /task-packets` for the session's
 project and display the task packet linked to the current session as a manual
@@ -467,6 +472,23 @@ The reaction is removed after the assistant result is persisted and its final
 reply is queued in the durable Outbox. Reaction add/remove failures are
 best-effort, redacted diagnostics and never change the Copilot or Outbox result;
 rejected and logically duplicated messages receive no new reaction.
+
+For an accepted Copilot turn, the channel creates one mutable Schema 2.0
+interactive card in `running` state. Throttled stream refreshes and the final
+state use Feishu `message.patch` against the same provider-returned
+`message_id`, rather than posting the completed answer as another message. A
+normal lifecycle is `running -> done` (or `failed`). A run that requests an
+operation moves the run card to `awaiting_approval` and sends a separate
+approval card; an approved decision patches that approval card through
+approved-running and then `completed`, `failed`, `cancelled`, or
+still-running, while rejection patches it to the rejected state.
+
+Reasoning-wrapper removal and secret redaction apply only to Feishu outbound
+card/text projections, including approval input and tool-result content; the
+persisted Copilot assistant and tool messages remain unchanged. If the final
+card PATCH fails, the channel sends at most one bounded, sanitized plain-text
+fallback after filtering and before truncation. It does not create a replacement
+card or split that final fallback into multiple messages.
 
 These endpoints do not execute Feishu writes, accept model-generated command
 strings, send terminal input, approve actions from Feishu text, or start
@@ -744,6 +766,7 @@ actions remain controlled by the OpenForge approval routes.
 ### Copilot Agent API
 
 - `GET /api/v1/copilot/capabilities`
+- `PUT /api/v1/copilot/capabilities/:toolName/enabled`
 - `GET /api/v1/copilot/conversations`
 - `POST /api/v1/copilot/conversations`
 - `PATCH /api/v1/copilot/conversations/:id`
@@ -1103,6 +1126,12 @@ adapter reports the `terminal` runtime mode; the former Codex
 - `POST /api/v1/projects/:id/agents/default-pack`
 - `GET /api/v1/projects/:id/skills`
 - `POST /api/v1/projects/:id/skills/:skillId`
+- `GET /api/v1/projects/:id/graph/overview`
+- `GET /api/v1/projects/:id/graph/search`
+- `GET /api/v1/projects/:id/graph/symbols/:symbolId`
+- `GET /api/v1/projects/:id/graph/symbols/:symbolId/impact`
+- `GET /api/v1/projects/:id/graph/file-graph`
+- `POST /api/v1/projects/:id/graph/affected`
 
 Import behavior:
 
@@ -1115,6 +1144,37 @@ Import behavior:
 - Config sync preview/apply, like compliance, returns `404` with
   `TEMPLATE_NOT_TRACKED` when the project tracks no template and the request
   supplies no explicit `templateId`.
+
+Project graph (read-only CodeGraph index):
+
+- All five endpoints are read-only. The Gateway opens the project's local
+  `{projectPath}/.codegraph/codegraph.db` with SQLite `readonly`; it never
+  triggers indexing or writes to the index. Indexing stays owned by the user's
+  CodeGraph CLI/daemon.
+- Degraded states return `200` with
+  `{ "available": false, "reason": "not_initialized" | "schema_unsupported" |
+  "error" }` so clients can render setup guidance; the Gateway never treats a
+  missing third-party index as a server error.
+- A configured project path that resolves to a denied system root returns
+  `400` ("Invalid project path configuration").
+- `GET .../graph/search` accepts `q` (required, 1..100 chars), optional `kind`,
+  and optional `limit` (<=50). Queries run through FTS5 phrase escaping plus a
+  substring fallback; injection payloads are neutralized into literal text.
+- `GET .../graph/symbols/:symbolId/impact` walks reverse call/reference edges
+  as a recursive CTE bounded to `depth <= 3` and 500 affected nodes.
+- `GET .../graph/file-graph?limit=` aggregates cross-file imports/references
+  into file-level dependency pairs, keeping the top-N highest-degree files
+  (`limit <= 200`) and flagging truncation. Each edge carries a per-kind
+  weight breakdown so clients can filter by relation type.
+- `POST .../graph/affected` takes `{ paths: string[1..50], depth?: 1..3 }`
+  (project-relative changed paths, typically from git status), seeds with every
+  symbol defined in those files, and returns the reverse call/reference closure
+  plus `seededFiles`/`seededSymbols` counters. Traversal segments (`..`) and
+  absolute paths are rejected with 400. This powers the Web "Change impact"
+  view.
+- Symbol ids are opaque CodeGraph node identifiers (`<kind>:<hash>`); clients
+  must treat them as opaque strings and URL-encode them.
+- Responses carry project-relative file paths only.
 
 Project template binding:
 
@@ -1910,18 +1970,62 @@ Base path: `/api/internal/v1/copilot-bridge`.
 - `GET /sessions?projectId=&limit=` — the acting user's AI CLI sessions
   (`{ sessions, count }`; id, name, aiTool, status, projectId, projectName,
   modelId).
+- `GET /usage/summary?days=` — usage statistics for the acting user
+  (`{ sessionUsage, tokenUsage }`, optionally `tokenWindowDays`): session
+  duration and estimated cost by adapter/project/model (all time) plus token
+  consumption totals and top buckets. Mirrors the Copilot
+  `get_usage_summary` tool; per-tool owner switches apply (`BRIDGE_TOOL_DISABLED`).
 - `GET /sessions/:id` — session detail; 404 when missing or owned by another
   user.
 - `POST /sessions/:id/dispatch` — body `{ "message": "..." }` (required, 1–4000
-  chars after trim). Verifies the session belongs to the acting user (404
-  otherwise), then injects the message plus a submitting newline into the
-  session terminal via the session-manager → tmux `send-keys` path, and confirms
-  delivery by polling `tmux capture-pane` until the injected text is observed on
-  the target pane (bounded budget). Returns
-  `{ dispatched: true, sessionId, delivery: "confirmed" }`. Errors: 409
-  `BRIDGE_SESSION_NOT_ACTIVE` when the session is not live in this Gateway
-  process; 409 `PORTFOLIO_WRITER_FENCE_REJECTED` when the session is leased to a
-  Portfolio worker; 502 `BRIDGE_DELIVERY_UNCONFIRMED`
-  (`details.reason = "delivery_unconfirmed"`) when the text never appears on the
-  pane within the confirmation budget — typically a modal dialog (vim, prompt)
-  swallowing the input; the message explains the cause for the calling model.
+  chars after trim). It resolves the acting user's tenant-scoped session and
+  durable adapter (404 for a missing/foreign session), verifies that adapter
+  matches the active launch command, and requires the adapter-specific CLI
+  composer to be ready. The session manager rejects programmatic task text
+  containing C0/C1 controls except LF/TAB (including CR and ESC) before any
+  terminal write. It then stages the whole task as one explicit bracketed paste:
+  UTF-8 bytes are encoded into a tmux `send-keys -H` control command carried on
+  tmux control-mode stdin, so the task body is not placed in process arguments
+  or a tmux paste buffer. After the per-adapter settle interval, it verifies the
+  task reached the current composer. Codex collapses pastes over 1000 characters
+  to `[Pasted Content N chars]`; this counts as staged only when `N` equals the
+  submitted task's Unicode scalar count. The Gateway then sends exactly one `Enter` and polls
+  `tmux capture-pane` with an adapter-aware classifier. Seeing task text anywhere
+  in scrollback is not success; the current composer must have consumed it.
+  Returns `{ dispatched: true, sessionId, delivery: "consumed" }` only after
+  that confirmation. Raw browser WebSocket terminal input remains unchanged and
+  writes directly to the attached node-pty; the separate existing
+  `SessionManager`/`TmuxClient.sendInput` path is also preserved.
+
+  Errors: 400 `PROGRAMMATIC_SUBMIT_UNSAFE_INPUT` for prohibited terminal
+  controls; 409 `BRIDGE_SESSION_NOT_ACTIVE` when the session is not live in this
+  Gateway process; 409 `PORTFOLIO_WRITER_FENCE_REJECTED` when a Portfolio worker
+  owns the input lease; and 409 `PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH`,
+  `PROGRAMMATIC_SUBMIT_NOT_READY`, or `PROGRAMMATIC_SUBMIT_STAGING_FAILED` for a
+  pre-write rejection. A failure after staging begins, or a bounded
+  post-submit poll that cannot prove composer consumption, returns 502
+  `BRIDGE_DELIVERY_UNCONFIRMED` with
+  `details.reason = "submission_indeterminate"` and
+  `details.retryable = false`. The response explicitly tells callers to inspect
+  the terminal and not retry automatically because the task may already be
+  executing.
+
+Tool-parity surface (post-M4): the remaining endpoints back the dsh plugin's
+read/write tools so the dsh path matches the in-process Copilot harness tool
+set. Schemas mirror the harness tool inputs; all data access is user scoped.
+
+- `GET /projects?limit=` / `GET /projects/:id` — the acting user's projects
+  (`{ projects, count }`; detail is 200 `{ found: false, project: null }` for
+  missing/foreign ids, mirroring the `get_project` tool). `POST /projects`
+  (operate; approval-gated on the dsh side) — body
+  `{ "name", "path", "description?" }`, returns 201 `{ created, projectId, name }`.
+- `GET /portfolio/requests?projectId=&limit=` — portfolio requests
+  (`{ requests, count }`). `GET /portfolio/projects/:id/dossier` — the project
+  dossier (`{ dossier }`).
+- `GET /memory/entries?scope=&projectId=&limit=` — scoped memory entries
+  (`{ entries }`; scope `global|project|session`, default `global`).
+  `GET /memory/search?q=&scope=&projectId=&limit=` — FTS keyword search
+  (`{ entries }`). `POST /memory/entries` (operate; approval-gated on the dsh
+  side) — body `{ "kind", "scope", "text", "projectId?", "metadata?" }`,
+  returns 201 `{ saved, id }`; repository validation failures (empty/oversized
+  text, project scope without projectId) return 400 `AGENT_MEMORY_*`.
