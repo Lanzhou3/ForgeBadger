@@ -122,12 +122,16 @@ describe("cli-config apply service", () => {
       assert.equal(existsSync(target), false);
     });
 
-    it("applies Codex config.toml and auth.json together and preserves other auth fields", async () => {
+    it("applies Codex config.toml with a bearer token and strips the legacy auth.json key", async () => {
       const db = createTestDb();
       const user = new UserRepository(db).create("apply-codex@example.com", "hash");
       const root = await useConfigRoot("CODEX_HOME", "forgebadger-apply-codex-");
       const fixture = createFixture(db, user.id, "codex");
-      await writeFile(path.join(root, "auth.json"), JSON.stringify({ OTHER_FIELD: "keep-me" }), "utf8");
+      await writeFile(
+        path.join(root, "auth.json"),
+        JSON.stringify({ OPENAI_API_KEY: "sk-stale", OTHER_FIELD: "keep-me" }),
+        "utf8"
+      );
 
       const result = await applyCliConfigToAdapter({
         db, userId: user.id, masterKey, adapter: "codex",
@@ -143,12 +147,39 @@ describe("cli-config apply service", () => {
       assert.match(configToml, /\[model_providers\.codex-provider\]/u);
       assert.match(configToml, /base_url = "https:\/\/api\.deepseek\.com\/v1"/u);
       assert.match(configToml, /wire_api = "responses"/u);
+      // cc-switch semantics (Codex 0.149+): third-party keys live in the
+      // provider table, not in auth.json.
+      assert.match(configToml, /experimental_bearer_token = "sk-codex-secret"/u);
       const auth = JSON.parse(await readFile(path.join(root, "auth.json"), "utf8")) as Record<string, string>;
-      assert.equal(auth.OPENAI_API_KEY, "sk-codex-secret");
+      assert.equal(auth.OPENAI_API_KEY, undefined);
       assert.equal(auth.OTHER_FIELD, "keep-me");
       assert.equal(modeOf(path.join(root, "config.toml")), 0o600);
       assert.equal(modeOf(path.join(root, "auth.json")), 0o600);
       assert.equal(result.files.length, 2);
+      assert.equal(result.files[1]?.operation, "update");
+    });
+
+    it("deletes a Codex auth.json that only carried the managed key", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-codex-delete@example.com", "hash");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-apply-codex-delete-");
+      const fixture = createFixture(db, user.id, "codex");
+      await writeFile(path.join(root, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-stale" }), "utf8");
+
+      const result = await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "codex",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+
+      // Codex errors on an empty auth.json but shows the login screen when the
+      // file is missing, so an emptied file is deleted outright.
+      assert.equal(existsSync(path.join(root, "auth.json")), false);
+      assert.equal(result.files[1]?.operation, "delete");
+
+      const rolledBack = rollbackCliConfigApply({ masterKey, adapter: "codex", backupId: result.backupId });
+      assert.ok(rolledBack.restoredFiles.includes(path.join(root, "auth.json")));
+      const restored = JSON.parse(await readFile(path.join(root, "auth.json"), "utf8")) as Record<string, string>;
+      assert.equal(restored.OPENAI_API_KEY, "sk-stale");
     });
 
     it("refuses a symlinked Codex auth.json without writing config.toml", async () => {
@@ -182,12 +213,19 @@ describe("cli-config apply service", () => {
       });
 
       const doc = JSON.parse(await readFile(path.join(root, "opencode.json"), "utf8")) as {
-        provider: Record<string, { npm: string; options: Record<string, string> }>;
+        provider: Record<string, {
+          npm: string;
+          name: string;
+          options: Record<string, string>;
+          models: Record<string, { name: string }>;
+        }>;
         model: string;
       };
       assert.equal(doc.provider["opencode-provider"]?.npm, "@ai-sdk/openai-compatible");
+      assert.equal(doc.provider["opencode-provider"]?.name, "opencode provider");
       assert.equal(doc.provider["opencode-provider"]?.options.baseURL, "https://api.deepseek.com/v1");
       assert.equal(doc.provider["opencode-provider"]?.options.apiKey, "sk-opencode-secret");
+      assert.equal(doc.provider["opencode-provider"]?.models["opencode-model-1"]?.name, "Default Model");
       assert.equal(doc.model, "opencode-provider/opencode-model-1");
     });
 
@@ -208,6 +246,111 @@ describe("cli-config apply service", () => {
       assert.match(configToml, /type = "anthropic"/u);
       assert.match(configToml, /api_key = "sk-kimi-secret"/u);
       assert.match(configToml, /base_url = "https:\/\/api\.deepseek\.com\/v1"/u);
+    });
+
+    it("removes a stale ANTHROPIC_API_KEY when applying a token-based provider", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-claude-stale@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-claude-stale-");
+      await writeFile(path.join(root, "settings.json"), JSON.stringify({
+        env: { ANTHROPIC_API_KEY: "sk-ant-stale", ANTHROPIC_BASE_URL: "https://old.example.com" }
+      }), "utf8");
+      const fixture = createFixture(db, user.id, "claude");
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(doc.env.ANTHROPIC_API_KEY, undefined);
+      assert.equal(doc.env.ANTHROPIC_AUTH_TOKEN, "sk-claude-secret");
+      assert.equal(doc.env.ANTHROPIC_BASE_URL, "https://api.deepseek.com/anthropic");
+    });
+
+    it("injects the 256k context window for the Kimi For Coding endpoint", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-kimi-coding@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-kimi-coding-");
+      const repo = new ModelProviderRepository(db, user.id, masterKey);
+      const provider = repo.createProviderProfile({
+        name: "Kimi For Coding",
+        providerKey: "kimi-code",
+        anthropicBaseUrl: "https://api.kimi.com/coding/",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"]
+      });
+      repo.createModelProfile({ providerProfileId: provider.id, name: "K3", modelId: "k3", isDefault: true });
+      repo.createCredential({ providerProfileId: provider.id, plaintextSecret: "sk-kimi-coding" });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: provider.id, resolveHost: publicResolver
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "262144");
+      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, "262144");
+
+      // Switching to a non-Kimi provider strips only the injected defaults.
+      const fixture = createFixture(db, user.id, "claude");
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+      const switched = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(switched.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, undefined);
+      assert.equal(switched.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
+    });
+
+    it("never overwrites an explicit user context window setting", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-kimi-explicit@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-kimi-explicit-");
+      await writeFile(path.join(root, "settings.json"), JSON.stringify({
+        env: { CLAUDE_CODE_MAX_CONTEXT_TOKENS: "100000" }
+      }), "utf8");
+      const repo = new ModelProviderRepository(db, user.id, masterKey);
+      const provider = repo.createProviderProfile({
+        name: "Kimi For Coding",
+        providerKey: "kimi-code",
+        anthropicBaseUrl: "https://api.kimi.com/coding/",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"]
+      });
+      repo.createModelProfile({ providerProfileId: provider.id, name: "K3", modelId: "k3", isDefault: true });
+      repo.createCredential({ providerProfileId: provider.id, plaintextSecret: "sk-kimi-coding" });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: provider.id, resolveHost: publicResolver
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "100000");
+      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, "262144");
+
+      // Switching away keeps the explicit value but strips the injected one.
+      const fixture = createFixture(db, user.id, "claude");
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+      const switched = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(switched.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "100000");
+      assert.equal(switched.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
     });
 
     it("falls back to the default model and oldest active credential when ids are omitted", async () => {
@@ -351,6 +494,35 @@ describe("cli-config apply service", () => {
       assert.ok(file.current !== null);
       assert.equal(file.current?.includes("sk-old-secret"), false);
       assert.ok(file.changedFields.includes("env.ANTHROPIC_BASE_URL"));
+    });
+    it("masks the Codex bearer token and marks an emptied auth.json for deletion", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("preview-codex@example.com", "hash");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-preview-codex-");
+      await writeFile(path.join(root, "auth.json"), JSON.stringify({
+        OPENAI_API_KEY: "sk-old-secret",
+        tokens: { access_token: "at-secret", refresh_token: "rt-secret" }
+      }), "utf8");
+      const fixture = createFixture(db, user.id, "codex");
+
+      const preview = await previewCliConfigApply({
+        db, userId: user.id, masterKey, adapter: "codex",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+
+      assert.equal(preview.files.length, 2);
+      const config = preview.files[0];
+      const auth = preview.files[1];
+      assert.ok(config && auth);
+      assert.equal(config.fileType, "toml");
+      // The placeholder secret and the stored key must never appear in previews.
+      assert.equal(config.proposed.includes("__FORGEBADGER_APPLY_PREVIEW__"), false);
+      assert.ok(config.changedFields.includes("model_providers.codex-provider.experimental_bearer_token"));
+      // ChatGPT tokens in the current auth.json are masked as well.
+      assert.equal(auth.current?.includes("at-secret"), false);
+      assert.equal(auth.current?.includes("rt-secret"), false);
+      // tokens remain, so the file is updated (not deleted).
+      assert.equal(auth.operation, "update");
     });
   });
 

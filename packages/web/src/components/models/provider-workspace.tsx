@@ -1,17 +1,23 @@
-import { RefreshCw, ServerCog, ShieldCheck, Trash2 } from "lucide-react";
+import { RefreshCw, ServerCog, ShieldCheck, Trash2, Wallet } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { ModelProviderReadiness, ProviderProfile } from "@/lib/api";
+import type {
+  ModelProviderReadiness,
+  ProviderBalanceEntry,
+  ProviderBalanceResult,
+  ProviderProfile,
+} from "@/lib/api";
 
 import { CredentialTab } from "./credential-tab";
 import { ModelsTab } from "./models-tab";
 import {
   EmptyLine,
   applyTargetsForProvider,
+  balanceEntryUsedPercent,
   formatCheckedAt,
   isReadyCheckValue,
   productTypeLabel,
@@ -28,9 +34,13 @@ interface ProviderWorkspaceProps {
   isCheckingReadiness: boolean;
   isSyncing: boolean;
   syncDisabled: boolean;
+  balance: ProviderBalanceResult | null;
+  balanceError: string | null;
+  isCheckingBalance: boolean;
   isDeletingProvider: boolean;
   onCheckReadiness: () => void;
   onSync: () => void;
+  onCheckBalance: () => void;
   onDeleteProvider: () => void;
   onApplyToCli: () => void;
   modelsTab: Omit<ModelsTabProps, "t">;
@@ -44,9 +54,13 @@ export function ProviderWorkspace({
   isCheckingReadiness,
   isSyncing,
   syncDisabled,
+  balance,
+  balanceError,
+  isCheckingBalance,
   isDeletingProvider,
   onCheckReadiness,
   onSync,
+  onCheckBalance,
   onDeleteProvider,
   onApplyToCli,
   modelsTab,
@@ -102,6 +116,16 @@ export function ProviderWorkspace({
               <Button
                 type="button"
                 size="sm"
+                variant="outline"
+                disabled={isCheckingBalance}
+                onClick={onCheckBalance}
+              >
+                <Wallet className="size-4" />
+                {t("models.checkBalance")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
                 variant="ghost"
                 className="text-destructive hover:text-destructive"
                 disabled={isDeletingProvider}
@@ -121,6 +145,27 @@ export function ProviderWorkspace({
               <CliBrandChip key={adapter} aiTool={adapter} />
             ))}
           </div>
+          {(balance || balanceError) && (
+            <div className="space-y-2" data-testid="provider-balance-row">
+              {balanceError ? (
+                <span className="text-xs text-destructive">{balanceError}</span>
+              ) : balance && !balance.supported ? (
+                <span className="text-xs text-muted-foreground">{t("models.balanceNotSupported")}</span>
+              ) : balance && balance.balances.length === 0 ? (
+                <span className="text-xs text-muted-foreground">{t("models.balanceEmpty")}</span>
+              ) : (
+                balance?.balances.map((entry) => (
+                  <BalanceMeter key={`${entry.label}-${entry.resetsAt ?? ""}`} entry={entry} t={t} />
+                ))
+              )}
+              {balance?.supported && (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {isCheckingBalance && <RefreshCw className="size-3 animate-spin" />}
+                  <span>{formatCheckedAt(balance.checkedAt)}</span>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -140,6 +185,43 @@ export function ProviderWorkspace({
           <CredentialTab {...credentialTab} t={t} />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function BalanceMeter({ entry, t }: { entry: ProviderBalanceEntry; t: Translate }) {
+  const usedPercent = balanceEntryUsedPercent(entry);
+  const unavailable = entry.isAvailable === false;
+  const valueText =
+    usedPercent !== undefined ? `${Math.round(usedPercent)}%` : `${entry.remaining} ${entry.unit}`;
+  const barColor =
+    usedPercent === undefined
+      ? ""
+      : usedPercent >= 80
+        ? "bg-red-500"
+        : usedPercent >= 50
+          ? "bg-amber-500"
+          : "bg-emerald-500";
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+        <span className={unavailable ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}>
+          {entry.label}
+          {unavailable ? ` · ${t("models.balanceUnavailable")}` : ""}
+          {entry.resetsAt ? ` · ${t("models.balanceResetsAt")}: ${formatCheckedAt(entry.resetsAt)}` : ""}
+        </span>
+        <span className={`font-medium ${unavailable ? "text-amber-700 dark:text-amber-300" : ""}`}>
+          {valueText}
+        </span>
+      </div>
+      {usedPercent !== undefined && (
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/40">
+          <div
+            className={`h-full rounded-full transition-[width] duration-500 ${barColor}`}
+            style={{ width: `${usedPercent}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }

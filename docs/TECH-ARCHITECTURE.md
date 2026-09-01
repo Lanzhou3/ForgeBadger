@@ -828,7 +828,7 @@ Model Providers 接口：
 | Method | Path | 描述 |
 |--------|------|------|
 | GET | `/api/v1/model-providers` | Provider / Model / Credential 全量清单 |
-| POST | `/api/v1/model-providers` | 创建 Provider（catalogId 或手动） |
+| POST | `/api/v1/model-providers` | 创建 Provider（手动填写配置，无预设目录） |
 | POST | `/api/v1/model-providers/:id/models` | 添加模型 |
 | PATCH | `/api/v1/model-providers/:id/models/:modelId` | 更新模型 |
 | POST | `/api/v1/model-providers/:id/models/:modelId/set-default` | 设为默认 |
@@ -845,11 +845,19 @@ live 代码不再读写。Provider 只保存服务商元数据、模型与加密
 的应用是 per-CLI、user-global 的显式操作：`POST /api/v1/cli-config/:adapter/apply-provider`
 （及 `/apply-provider/preview`、`/apply-provider/rollback`）把选中的
 `providerProfileId`、`modelProfileId?`、`credentialId?` 按各 CLI 原生格式写入全局
-配置文件（claude `~/.claude/settings.json`、codex `~/.codex/config.toml` +
-`~/.codex/auth.json`、opencode `opencode.json`、kimi `~/.kimi-code/config.toml`）。
+配置文件（claude `~/.claude/settings.json`、codex `~/.codex/config.toml`、
+opencode `opencode.json`、kimi `~/.kimi-code/config.toml`）。
 
 凭据按 cc-switch 方式明文写入 CLI 配置文件：写前对现有配置做 AES-256-GCM 加密
 备份，使用原子 `0600` 写入，失败可 rollback；preview 掩码密钥且不落盘。
+具体到各 CLI 的写入语义：claude 写入 `ANTHROPIC_AUTH_TOKEN` 时同步删除残留的
+`ANTHROPIC_API_KEY`，并对 Kimi For Coding 端点注入 256k 上下文窗口覆盖
+（`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`，不覆盖
+用户显式值，切走时仅剥离注入默认值）；codex 采用 0.149+ 布局，把 key 写入
+`model_providers.<id>.experimental_bearer_token`，并从 `~/.codex/auth.json`
+移除遗留 `OPENAI_API_KEY`（保留 ChatGPT 登录 tokens 等其它字段，若因此清空则
+直接删除该文件——Codex 对空 auth.json 报错、缺文件才显示登录页）；opencode
+按 additive 语义 upsert provider 条目（含 `name`/`models`，重复 apply 累加模型）。
 `/api/v1/cli-config/*` 不再 claim-gated，instance-admin 即可读写，语义写
 （providers/models/default-model）已开放。Session 创建只收
 `projectId` + `aiTool`，一律 `host_environment` 启动，不注入任何
@@ -857,7 +865,7 @@ provider/model/credential 环境变量；`switch-model` 端点已删除，历史
 restart 退化为普通 host-environment 会话。
 
 OpenAI 作为普通 Provider 接入 Codex，apply-provider 会把所选凭据按 Codex 原生
-格式写入 `~/.codex/config.toml` 与 `~/.codex/auth.json`；ForgeBadger 不读取系统
+格式写入 `~/.codex/config.toml` 的 `model_providers.<id>` 表；ForgeBadger 不读取系统
 keyring。官方边界见
 [Codex authentication](https://learn.chatgpt.com/docs/auth) 与
 [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)。

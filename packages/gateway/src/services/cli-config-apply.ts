@@ -29,6 +29,9 @@ import {
 const backupMaxAgeMs = 7 * 24 * 60 * 60 * 1000;
 const inProcessLocks = new Map<string, Promise<void>>();
 
+/** cc-switch parity: Kimi For Coding exposes a 256k context window. */
+const kimiCodingContextTokens = "262144";
+
 export class CliConfigApplyError extends Error {
   constructor(readonly code: string, message = code) {
     super(message);
@@ -49,10 +52,10 @@ export interface CliConfigApplyInput {
 export interface CliConfigApplyFilePreview {
   targetPath: string;
   fileType: "json" | "toml";
-  operation: "create" | "update" | "none";
+  operation: "create" | "update" | "delete" | "none";
   /** Observed content with credential values masked; null when the file does not exist. */
   current: string | null;
-  /** Proposed content with credential values masked. */
+  /** Proposed content with credential values masked; empty when the file will be deleted. */
   proposed: string;
   changedFields: string[];
 }
@@ -70,7 +73,7 @@ export interface CliConfigApplyResult {
   adapter: AdapterId;
   backupId: string;
   changed: boolean;
-  files: Array<{ targetPath: string; operation: "create" | "update" | "none" }>;
+  files: Array<{ targetPath: string; operation: "create" | "update" | "delete" | "none" }>;
 }
 
 export interface CliConfigRollbackResult {
@@ -94,6 +97,12 @@ interface ApplyTarget {
   role: "config" | "auth";
 }
 
+interface ApplyDocumentPlan {
+  target: ApplyTarget;
+  /** null means the file should be deleted (e.g. an emptied Codex auth.json). */
+  serialized: string | null;
+}
+
 /** Dry-run: resolves the selection, SSRF-checks the endpoint, and diffs without touching disk. */
 export async function previewCliConfigApply(input: CliConfigApplyInput): Promise<CliConfigApplyPreview> {
   const context = await resolveApplyContext(input);
@@ -101,16 +110,16 @@ export async function previewCliConfigApply(input: CliConfigApplyInput): Promise
   const files = planApplyDocuments(context, null).map((plan) => {
     const observed = readObservedConfig(plan.target.targetPath);
     const current = observed.existed
-      ? maskSecrets(plan.target, serializeDocument(plan.target.fileType, parseDocument(plan.target.fileType, observed.content, plan.target.targetPath)))
+      ? maskSecrets(plan.target.fileType, serializeDocument(plan.target.fileType, parseDocument(plan.target.fileType, observed.content, plan.target.targetPath)))
       : null;
-    const proposed = maskSecrets(plan.target, plan.serialized);
+    const proposed = plan.serialized === null ? "" : maskSecrets(plan.target.fileType, plan.serialized);
     return {
       targetPath: plan.target.targetPath,
       fileType: plan.target.fileType,
-      operation: (!observed.existed ? "create" : observed.content === plan.serialized ? "none" : "update") as "create" | "update" | "none",
+      operation: planOperation(observed, plan.serialized),
       current,
       proposed,
-      changedFields: diffDocuments(plan.target.fileType, observed.content, plan.serialized)
+      changedFields: diffDocuments(plan.target.fileType, observed.content, plan.serialized ?? "")
     };
   });
   if (files.some((file) => file.fileType === "toml" && file.operation !== "none")) {
@@ -129,8 +138,9 @@ export async function previewCliConfigApply(input: CliConfigApplyInput): Promise
 /**
  * Applies the selected provider/model/credential to the adapter's global CLI
  * config with plaintext credentials (cc-switch semantics): encrypted backup
- * first, then atomic 0600 writes with read-back verification. A failure on a
- * later file (Codex auth.json) rolls back the files already written.
+ * first, then atomic 0600 writes (or deletes for emptied auth files) with
+ * read-back verification. A failure on a later file (Codex auth.json) rolls
+ * back the files already written.
  */
 export async function applyCliConfigToAdapter(input: CliConfigApplyInput): Promise<CliConfigApplyResult> {
   const context = await resolveApplyContext(input);
@@ -138,28 +148,35 @@ export async function applyCliConfigToAdapter(input: CliConfigApplyInput): Promi
     .decryptCredential(context.credential.id);
   const primaryTarget = cliConfigTargetPath({ adapter: context.adapter, scope: "global" });
   return withInProcessLock(primaryTarget, async () => {
-    const targets = applyTargets(context.adapter);
-    // Plan, write, and verify one file at a time so a failure on a later file
-    // (e.g. Codex auth.json) still has in-memory observed state to roll back.
-    const planned: Array<{ target: ApplyTarget; observed: { existed: boolean; content: string }; serialized: string }> = [];
-    const backupFiles: Array<{ targetPath: string; existed: boolean; content: string }> = [];
-    for (const target of targets) {
-      const observed = readObservedConfig(target.targetPath);
-      const doc = parseDocument(target.fileType, observed.content, target.targetPath);
-      buildApplyDocument(context, target, doc, secret);
-      planned.push({ target, observed, serialized: serializeDocument(target.fileType, doc) });
-      backupFiles.push({ targetPath: target.targetPath, existed: observed.existed, content: observed.content });
-    }
-    const changed = planned.some(({ observed, serialized }) => !observed.existed || observed.content !== serialized);
+    // Plan every file up front, then write and verify one at a time so a
+    // failure on a later file (e.g. Codex auth.json) still has in-memory
+    // observed state to roll back.
+    const planned = planApplyDocuments(context, secret).map((plan) => {
+      const observed = readObservedConfig(plan.target.targetPath);
+      return { ...plan, observed, operation: planOperation(observed, plan.serialized) };
+    });
+    const backupFiles = planned.map(({ target, observed }) => ({
+      targetPath: target.targetPath,
+      existed: observed.existed,
+      content: observed.content
+    }));
+    const changed = planned.some(({ operation }) => operation !== "none");
     const backupId = writeApplyBackup(context.adapter, backupFiles, input.masterKey);
     const written: Array<{ targetPath: string; existed: boolean; content: string }> = [];
     try {
-      for (const { target, observed, serialized } of planned) {
-        if (observed.existed && observed.content === serialized) continue;
-        atomicWriteConfig(target.targetPath, serialized);
-        const reread = readObservedConfig(target.targetPath);
-        if (reread.content !== serialized) {
-          throw new CliConfigApplyError("CLI_CONFIG_APPLY_VERIFY_FAILED", "CLI config read-back verification failed");
+      for (const { target, observed, serialized, operation } of planned) {
+        if (operation === "none") continue;
+        if (operation === "delete") {
+          safeUnlink(target.targetPath);
+          if (readObservedConfig(target.targetPath).existed) {
+            throw new CliConfigApplyError("CLI_CONFIG_APPLY_VERIFY_FAILED", "CLI config delete verification failed");
+          }
+        } else if (serialized !== null) {
+          atomicWriteConfig(target.targetPath, serialized);
+          const reread = readObservedConfig(target.targetPath);
+          if (reread.content !== serialized) {
+            throw new CliConfigApplyError("CLI_CONFIG_APPLY_VERIFY_FAILED", "CLI config read-back verification failed");
+          }
         }
         written.push({ targetPath: target.targetPath, existed: observed.existed, content: observed.content });
       }
@@ -179,10 +196,7 @@ export async function applyCliConfigToAdapter(input: CliConfigApplyInput): Promi
       adapter: context.adapter,
       backupId,
       changed,
-      files: planned.map(({ target, observed, serialized }) => ({
-        targetPath: target.targetPath,
-        operation: (!observed.existed ? "create" : observed.content === serialized ? "none" : "update") as "create" | "update" | "none"
-      }))
+      files: planned.map(({ target, operation }) => ({ targetPath: target.targetPath, operation }))
     };
   });
 }
@@ -317,19 +331,29 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
   };
 }
 
-interface ApplyDocumentPlan {
-  target: ApplyTarget;
-  serialized: string;
-}
-
 function planApplyDocuments(context: ApplyContext, plaintextSecret: string | null): ApplyDocumentPlan[] {
   const targets = applyTargets(context.adapter);
   return targets.map((target) => {
     const observed = readObservedConfig(target.targetPath);
     const doc = parseDocument(target.fileType, observed.content, target.targetPath);
     buildApplyDocument(context, target, doc, plaintextSecret);
-    return { target, serialized: serializeDocument(target.fileType, doc) };
+    // An auth file whose last managed field was removed is deleted outright:
+    // Codex reports an error for an empty auth.json but shows the login screen
+    // when the file is missing (cc-switch behavior).
+    const serialized = target.role === "auth" && Object.keys(doc).length === 0
+      ? null
+      : serializeDocument(target.fileType, doc);
+    return { target, serialized };
   });
+}
+
+function planOperation(
+  observed: { existed: boolean; content: string },
+  serialized: string | null
+): "create" | "update" | "delete" | "none" {
+  if (serialized === null) return observed.existed ? "delete" : "none";
+  if (!observed.existed) return "create";
+  return observed.content === serialized ? "none" : "update";
 }
 
 function applyTargets(adapter: AdapterId): ApplyTarget[] {
@@ -359,6 +383,9 @@ function buildApplyDocument(
     if (context.baseUrl) env.ANTHROPIC_BASE_URL = context.baseUrl;
     else delete env.ANTHROPIC_BASE_URL;
     env.ANTHROPIC_AUTH_TOKEN = secret;
+    // A stale ANTHROPIC_API_KEY left by a previous apply (or by hand) must not
+    // shadow the freshly written token.
+    delete env.ANTHROPIC_API_KEY;
     env.ANTHROPIC_MODEL = context.model.modelId;
     env.ANTHROPIC_SMALL_FAST_MODEL = context.model.modelId;
     env.ANTHROPIC_DEFAULT_SONNET_MODEL = context.model.modelId;
@@ -367,12 +394,17 @@ function buildApplyDocument(
     const timeout = claudeTimeout(context.provider.providerKey);
     if (timeout) env.API_TIMEOUT_MS = timeout;
     else delete env.API_TIMEOUT_MS;
+    applyKimiCodingContextWindow(env, context.baseUrl);
     doc.env = env;
     return;
   }
   if (context.adapter === "codex") {
     if (target.role === "auth") {
-      doc.OPENAI_API_KEY = secret;
+      // cc-switch semantics (Codex 0.149+): third-party credentials live in
+      // model_providers.<id>.experimental_bearer_token, not in auth.json.
+      // Remove the legacy OPENAI_API_KEY slot but preserve other auth material
+      // (e.g. ChatGPT login tokens); the planner deletes an emptied file.
+      delete doc.OPENAI_API_KEY;
       return;
     }
     if (!context.baseUrl) {
@@ -384,7 +416,8 @@ function buildApplyDocument(
     providers[context.providerKey] = {
       name: context.provider.name,
       base_url: context.baseUrl,
-      wire_api: "responses"
+      wire_api: "responses",
+      experimental_bearer_token: secret
     };
     doc.model_providers = providers;
     return;
@@ -393,9 +426,20 @@ function buildApplyDocument(
     const providers = record(doc.provider);
     const options: Record<string, unknown> = { apiKey: secret };
     if (context.baseUrl) options.baseURL = context.baseUrl;
+    const existing = record(providers[context.providerKey]);
+    // Merge into the provider's model map so repeated applies accumulate
+    // models instead of dropping the previously applied ones (cc-switch
+    // additive semantics for shared config files).
+    const models = record(existing.models);
+    models[context.model.modelId] = {
+      name: context.model.name,
+      ...(context.model.contextWindow ? { limit: { context: context.model.contextWindow } } : {})
+    };
     providers[context.providerKey] = {
       npm: context.provider.opencodeNpm ?? openCodePackage(context.provider.apiFormat),
-      options
+      name: context.provider.name,
+      options,
+      models
     };
     doc.provider = providers;
     doc.model = `${context.providerKey}/${context.model.modelId}`;
@@ -416,6 +460,32 @@ function buildApplyDocument(
   doc.default_model = alias;
 }
 
+/**
+ * cc-switch parity: the Kimi For Coding endpoint exposes a 256k context
+ * window, so fill in the Claude Code context-window overrides when applying
+ * it. Explicit user values are never overwritten; when switching away, only
+ * values equal to the injected default are stripped.
+ */
+function applyKimiCodingContextWindow(env: Record<string, unknown>, baseUrl: string | null): void {
+  if (isKimiCodingEndpoint(baseUrl)) {
+    env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ??= kimiCodingContextTokens;
+    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??= kimiCodingContextTokens;
+    return;
+  }
+  if (env.CLAUDE_CODE_MAX_CONTEXT_TOKENS === kimiCodingContextTokens) delete env.CLAUDE_CODE_MAX_CONTEXT_TOKENS;
+  if (env.CLAUDE_CODE_AUTO_COMPACT_WINDOW === kimiCodingContextTokens) delete env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+}
+
+function isKimiCodingEndpoint(baseUrl: string | null): boolean {
+  if (!baseUrl) return false;
+  try {
+    const url = new URL(baseUrl);
+    return url.hostname.toLowerCase() === "api.kimi.com" && url.pathname.startsWith("/coding");
+  } catch {
+    return false;
+  }
+}
+
 function parseDocument(fileType: "json" | "toml", content: string, targetPath: string): Record<string, unknown> {
   if (!content.trim()) return {};
   try {
@@ -434,21 +504,19 @@ function serializeDocument(fileType: "json" | "toml", doc: Record<string, unknow
 }
 
 /** Masks credential values so previews never surface plaintext secrets. */
-function maskSecrets(target: ApplyTarget, content: string): string {
-  const doc = parseDocument(target.fileType, content, target.targetPath);
-  if (target.role === "auth") {
-    maskValue(doc, "OPENAI_API_KEY");
-    return serializeDocument(target.fileType, doc);
-  }
+function maskSecrets(fileType: "json" | "toml", content: string): string {
+  const doc = parseDocument(fileType, content, "");
   maskSecretsDeep(doc);
-  return serializeDocument(target.fileType, doc);
+  return serializeDocument(fileType, doc);
 }
 
 function maskSecretsDeep(value: Record<string, unknown>): void {
   for (const [key, child] of Object.entries(value)) {
     const normalized = key.replace(/[^a-z0-9]/giu, "").toLowerCase();
-    if ((normalized === "apikey" || normalized === "authtoken" || normalized.endsWith("apikey")
-      || normalized.endsWith("authtoken"))
+    // Suffix-match instead of a fixed allowlist: api_key / auth_token /
+    // bearer_token / access_token / refresh_token and any future *-key/*-token
+    // field are all masked (cc-switch sensitive-key convention).
+    if ((normalized === "apikey" || normalized.endsWith("apikey") || normalized.endsWith("token"))
       && typeof child === "string" && child.length > 0) {
       value[key] = "[redacted]";
       continue;
@@ -457,10 +525,6 @@ function maskSecretsDeep(value: Record<string, unknown>): void {
       maskSecretsDeep(child as Record<string, unknown>);
     }
   }
-}
-
-function maskValue(doc: Record<string, unknown>, key: string): void {
-  if (typeof doc[key] === "string" && (doc[key] as string).length > 0) doc[key] = "[redacted]";
 }
 
 function diffDocuments(fileType: "json" | "toml", currentContent: string, proposedContent: string): string[] {

@@ -13,24 +13,46 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("Models provider catalog supports direct search through a long verified provider registry", async ({ page }) => {
-  await mockModelsApis(page);
+test("Models provider can be created manually with an optional credential and model sync", async ({ page }) => {
+  const requests = await mockModelsApis(page);
 
   await page.goto("/models");
 
   await page.getByRole("button", { name: "Add provider" }).first().click();
-  const dialog = page.getByRole("dialog", { name: "Provider Catalog" });
+  const dialog = page.getByRole("dialog", { name: "Add provider" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("40/40 matches")).toBeVisible();
 
-  await dialog.getByPlaceholder("Type a provider, model, endpoint, or API format").fill("provider-39");
+  const submitButton = dialog.getByRole("button", { name: "Save and sync models" });
+  // A base URL is required before the manual form can be submitted.
+  await expect(submitButton).toBeDisabled();
 
-  await expect(dialog.getByText("1/40 matches")).toBeVisible();
-  await expect(dialog.getByText("Provider 39", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("Provider 01")).toHaveCount(0);
+  await dialog.getByLabel("Name", { exact: true }).fill("My Provider");
+  // providerKey is derived from the name but stays editable.
+  await expect(dialog.getByLabel("Provider Key")).toHaveValue("my-provider");
+  await dialog.getByLabel("API Format").selectOption("openai-compatible");
+  await dialog.getByLabel("OpenAI-compatible base URL").fill("https://provider-01.example.com/v1");
+  await dialog.getByLabel("OpenCode").check();
+  await dialog.getByLabel("API Key").fill("sk-e2e-secret");
 
-  const catalogScrollArea = dialog.getByTestId("provider-catalog-list");
-  await expect(catalogScrollArea).toHaveCSS("overflow-y", "auto");
+  await submitButton.click();
+
+  // Wait for the full create -> credential -> sync chain to settle.
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("Provider created")).toBeVisible();
+
+  expect(requests.providerCreate).toEqual({
+    name: "My Provider",
+    providerKey: "my-provider",
+    authType: "api_key",
+    apiFormat: "openai-compatible",
+    baseUrl: "https://provider-01.example.com/v1",
+    openaiBaseUrl: "https://provider-01.example.com/v1",
+    supportedAdapters: ["claude", "opencode"],
+  });
+  expect(requests.credentialCreate).toEqual({
+    plaintextSecret: "sk-e2e-secret",
+  });
+  expect(requests.syncModels).toEqual({ credentialId: "credential-1" });
 });
 
 test("Models configured provider list stays usable with many providers", async ({ page }) => {
@@ -291,54 +313,6 @@ async function mockModelsApis(
       return;
     }
 
-    if (url.pathname === "/api/v1/model-providers/catalog") {
-      await route.fulfill({
-        json: envelope({
-          providers: Array.from({ length: 40 }, (_item, index) => {
-            const number = String(index + 1).padStart(2, "0");
-            return {
-              id: `provider-${number}`,
-              name: `Provider ${number}`,
-              description: `Provider ${number} verified dual-protocol preset`,
-              baseUrl: `https://provider-${number}.example.com/anthropic`,
-              authType: "api_key",
-              apiFormat: "openai-compatible",
-              supportedAdapters: ["claude", "opencode"],
-              modelSource: "static",
-              source: "verified",
-              region: "global",
-              productType: "payg_api",
-              endpoints: {
-                anthropic: { baseUrl: `https://provider-${number}.example.com/anthropic` },
-                openai: { baseUrl: `https://provider-${number}.example.com/v1` },
-              },
-              claude: {
-                env: {
-                  baseUrl: "ANTHROPIC_BASE_URL",
-                  authToken: "ANTHROPIC_AUTH_TOKEN",
-                  model: "ANTHROPIC_MODEL",
-                  smallFastModel: "ANTHROPIC_SMALL_FAST_MODEL",
-                  defaultSonnetModel: "ANTHROPIC_DEFAULT_SONNET_MODEL",
-                  defaultHaikuModel: "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-                  defaultOpusModel: "ANTHROPIC_DEFAULT_OPUS_MODEL",
-                  apiTimeoutMs: "API_TIMEOUT_MS",
-                },
-              },
-              defaultModels: [
-                {
-                  id: `provider-${number}-model`,
-                  name: `Provider ${number} Model`,
-                  modelId: `provider-${number}-model`,
-                  capabilities: ["chat", "code"],
-                },
-              ],
-            };
-          }),
-        }),
-      });
-      return;
-    }
-
     if (url.pathname === "/api/v1/cli-config/claude/apply-provider/preview" && method === "POST") {
       requests.applyPreview = route.request().postDataJSON();
       await route.fulfill({
@@ -388,7 +362,6 @@ async function mockModelsApis(
         await route.fulfill({
           json: envelope({
             provider: configuredProviders[0],
-            models: [],
           }),
         });
         return;

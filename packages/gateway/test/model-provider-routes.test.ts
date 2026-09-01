@@ -13,86 +13,31 @@ import { beforeEach, describe, it } from "node:test";
 import { signJwt } from "../src/auth/jwt.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createModelProviderRoutes } from "../src/routes/model-providers.js";
-import type { ProviderCatalogPreset } from "../src/services/model-catalog.js";
 import type { FetchProviderModelsInput } from "../src/services/provider-model-fetch.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
-const testProviderCatalog: ProviderCatalogPreset[] = [
-  {
-    id: "deepseek",
-    name: "DeepSeek",
-    description: "DeepSeek test provider from models.dev.",
-    baseUrl: "https://api.deepseek.com",
-    region: "global",
-    productType: "payg_api",
-    authType: "api_key",
-    apiFormat: "openai-compatible",
-    supportedAdapters: ["claude", "opencode"],
-    modelSource: "models.dev",
-    source: "models.dev",
-    endpoints: {
-      anthropic: { baseUrl: "https://api.deepseek.com/anthropic" },
-      openai: { baseUrl: "https://api.deepseek.com" }
-    },
-    modelFetch: { strategy: "openai-compatible", modelsUrl: "https://api.deepseek.com/models" },
-    opencode: { npm: "@ai-sdk/openai-compatible", env: ["DEEPSEEK_API_KEY"] },
-    defaultModels: []
-  },
-  {
-    id: "openai",
-    name: "OpenAI",
-    description: "OpenAI test provider from models.dev.",
-    baseUrl: "https://api.openai.com/v1",
-    region: "global",
-    productType: "payg_api",
-    authType: "api_key",
-    apiFormat: "openai",
-    supportedAdapters: ["opencode", "codex"],
-    modelSource: "models.dev",
-    source: "models.dev",
-    endpoints: {
-      openai: { baseUrl: "https://api.openai.com/v1" }
-    },
-    modelFetch: { strategy: "openai-compatible" },
-    opencode: { npm: "@ai-sdk/openai", env: ["OPENAI_API_KEY"] },
-    defaultModels: []
-  },
-  {
-    id: "qwen-coding-plan-cn",
-    name: "Qwen Coding Plan 中国大陆",
-    description: "Qwen Coding Plan endpoint for mainland China.",
-    baseUrl: "https://coding.dashscope.aliyuncs.com/v1",
-    region: "cn",
-    productType: "coding_plan",
-    authType: "api_key",
-    apiFormat: "openai-compatible",
-    supportedAdapters: ["claude", "opencode"],
-    modelSource: "static",
-    source: "verified",
-    endpoints: {
-      anthropic: { baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic" },
-      openai: { baseUrl: "https://coding.dashscope.aliyuncs.com/v1" }
-    },
-    opencode: { npm: "@ai-sdk/openai-compatible", env: ["DASHSCOPE_API_KEY"] },
-    defaultModels: [
-      {
-        id: "qwen3.6-plus",
-        name: "Qwen3.6 Plus",
-        modelId: "qwen3.6-plus",
-        capabilities: ["chat", "code", "reasoning"],
-        contextWindow: 256000
-      },
-      {
-        id: "qwen3-coder-plus",
-        name: "Qwen3 Coder Plus",
-        modelId: "qwen3-coder-plus",
-        capabilities: ["chat", "code"],
-        contextWindow: 256000
-      }
-    ]
-  }
-];
+
+const deepseekProviderInput = {
+  name: "DeepSeek",
+  providerKey: "deepseek",
+  baseUrl: "https://api.deepseek.com",
+  anthropicBaseUrl: "https://api.deepseek.com/anthropic",
+  openaiBaseUrl: "https://api.deepseek.com",
+  authType: "api_key",
+  apiFormat: "openai-compatible",
+  supportedAdapters: ["claude", "opencode"]
+};
+
+const openaiProviderInput = {
+  name: "OpenAI",
+  providerKey: "openai",
+  baseUrl: "https://api.openai.com/v1",
+  openaiBaseUrl: "https://api.openai.com/v1",
+  authType: "api_key",
+  apiFormat: "openai",
+  supportedAdapters: ["opencode", "codex"]
+};
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
@@ -120,24 +65,18 @@ describe("model provider routes", () => {
     app = express();
     app.locals.jwtSecret = secret;
     app.use(express.json());
-    app.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => testProviderCatalog
-    }));
+    app.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey));
   });
 
-  it("creates a provider from catalog and retires legacy OpenCode preview apply", async () => {
+  it("creates a custom provider without seeding models and retires legacy OpenCode preview apply", async () => {
     const catalog = await makeRequest(app, "GET", "/api/v1/model-providers/catalog", undefined, authHeaders());
-    assert.equal(catalog.status, 200);
-    assert.equal(catalog.body.code, 0);
-    assert.ok(catalog.body.data.providers.some((provider: { id: string }) => provider.id === "deepseek"));
+    assert.equal(catalog.status, 404);
 
-    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
     assert.equal(created.status, 201);
     const provider = created.body.data.provider;
     assert.equal(provider.providerKey, "deepseek");
-    assert.equal(created.body.data.models.length, 0);
+    assert.equal(created.body.data.models, undefined);
     const model = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/models`, {
       name: "DeepSeek Chat",
       modelId: "deepseek-chat",
@@ -217,9 +156,7 @@ describe("model provider routes", () => {
   });
 
   it("treats a missing project root as user-global for Claude and OpenCode preview", async () => {
-    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
     const provider = created.body.data.provider;
     const model = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/models`, {
       name: "DeepSeek Chat",
@@ -246,55 +183,8 @@ describe("model provider routes", () => {
     assert.equal(opencodePreview.status, 404);
   });
 
-  it("treats adding the same catalog provider as idempotent", async () => {
-    const first = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
-    const second = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
-
-    assert.equal(first.status, 201);
-    assert.equal(second.status, 201);
-    assert.equal(second.body.code, 0);
-    assert.equal(second.body.data.provider.id, first.body.data.provider.id);
-
-    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
-    assert.equal(
-      listed.body.data.providers.filter((provider: { providerKey: string }) => provider.providerKey === "deepseek").length,
-      1
-    );
-  });
-
-  it("treats repeated Qwen Coding Plan setup as idempotent", async () => {
-    const first = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "qwen-coding-plan-cn"
-    }, authHeaders());
-    const second = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "qwen-coding-plan-cn"
-    }, authHeaders());
-
-    assert.equal(first.status, 201);
-    assert.equal(second.status, 201);
-    assert.equal(second.body.code, 0);
-    assert.equal(second.body.data.provider.id, first.body.data.provider.id);
-    assert.equal(second.body.data.models.length, 0);
-
-    const listed = await makeRequest(app, "GET", "/api/v1/model-providers", undefined, authHeaders());
-    assert.equal(
-      listed.body.data.providers.filter((provider: { providerKey: string }) => provider.providerKey === "qwen-coding-plan-cn").length,
-      1
-    );
-    assert.equal(
-      listed.body.data.models.filter((model: { providerProfileId: string }) => model.providerProfileId === first.body.data.provider.id).length,
-      2
-    );
-  });
-
   it("uses adapter-specific endpoints for dual protocol provider products", async () => {
-    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
     const provider = created.body.data.provider;
     const model = await makeRequest(app, "POST", `/api/v1/model-providers/${provider.id}/models`, {
       name: "DeepSeek Chat",
@@ -339,12 +229,8 @@ describe("model provider routes", () => {
   });
 
   it("rejects apply requests that reference another provider's model or credential", async () => {
-    const deepseek = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
-    const openai = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "openai"
-    }, authHeaders());
+    const deepseek = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
+    const openai = await makeRequest(app, "POST", "/api/v1/model-providers", openaiProviderInput, authHeaders());
     const deepseekModel = await makeRequest(app, "POST", `/api/v1/model-providers/${deepseek.body.data.provider.id}/models`, {
       name: "DeepSeek Chat",
       modelId: "deepseek-chat"
@@ -375,9 +261,7 @@ describe("model provider routes", () => {
   });
 
   it("deletes an added provider profile with its models and credentials", async () => {
-    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
     const providerId = created.body.data.provider.id;
     await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
       name: "DeepSeek Chat",
@@ -404,7 +288,6 @@ describe("model provider routes", () => {
     syncApp.locals.jwtSecret = secret;
     syncApp.use(express.json());
     syncApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => testProviderCatalog,
       fetchProviderModels: async (input) => {
         fetchedInputs.push(input);
         return [
@@ -413,9 +296,7 @@ describe("model provider routes", () => {
         ];
       },
     }));
-    const created = await makeRequest(syncApp, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
+    const created = await makeRequest(syncApp, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
     const providerId = created.body.data.provider.id;
     const credential = await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
       plaintextSecret: "sk-deepseek"
@@ -431,11 +312,69 @@ describe("model provider routes", () => {
     assert.equal(synced.body.data.createdCount, 2);
     assert.equal(fetchedInputs[0]?.apiKey, "sk-deepseek");
     assert.equal(fetchedInputs[0]?.baseUrl, "https://api.deepseek.com");
-    assert.equal(fetchedInputs[0]?.modelsUrl, "https://api.deepseek.com/models");
     assert.deepEqual(
       synced.body.data.models.map((model: { modelId: string }) => model.modelId),
       ["deepseek-v4-flash", "deepseek-v4-pro"]
     );
+  });
+
+  it("syncs an Anthropic provider from its Anthropic endpoint", async () => {
+    const fetchedInputs: FetchProviderModelsInput[] = [];
+    const syncApp = express();
+    syncApp.locals.jwtSecret = secret;
+    syncApp.use(express.json());
+    syncApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
+      fetchProviderModels: async (input) => {
+        fetchedInputs.push(input);
+        return [{ id: "claude-test", ownedBy: "anthropic" }];
+      },
+    }));
+    const created = await makeRequest(syncApp, "POST", "/api/v1/model-providers", {
+      name: "Anthropic API",
+      providerKey: "anthropic-api",
+      anthropicBaseUrl: "https://api.anthropic.com/v1",
+      authType: "api_key",
+      apiFormat: "anthropic",
+      supportedAdapters: ["claude"],
+    }, authHeaders());
+    const providerId = created.body.data.provider.id;
+    const credential = await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
+      plaintextSecret: "sk-anthropic"
+    }, authHeaders());
+
+    const synced = await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/models/sync`, {
+      credentialId: credential.body.data.credential.id
+    }, authHeaders());
+
+    assert.equal(synced.status, 200);
+    assert.equal(fetchedInputs[0]?.baseUrl, "https://api.anthropic.com/v1");
+    assert.equal(fetchedInputs[0]?.apiFormat, "anthropic");
+  });
+
+  it("surfaces model sync failures from the provider endpoint as errors", async () => {
+    const syncApp = express();
+    syncApp.locals.jwtSecret = secret;
+    syncApp.use(express.json());
+    syncApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
+      fetchProviderModels: async () => {
+        throw new Error("Provider model endpoint returned HTTP 500 for sk-model-sync-secret");
+      },
+    }));
+    const created = await makeRequest(syncApp, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
+    const providerId = created.body.data.provider.id;
+    const credential = await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
+      plaintextSecret: "sk-deepseek"
+    }, authHeaders());
+
+    const synced = await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/models/sync`, {
+      credentialId: credential.body.data.credential.id
+    }, authHeaders());
+
+    assert.equal(synced.status, 400);
+    assert.equal(synced.body.code, 1);
+    assert.match(synced.body.message, /HTTP 500/);
+    assert.match(synced.body.message, /\[REDACTED\]/);
+    assert.equal(synced.body.message.includes("sk-model-sync-secret"), false);
   });
 
   it("rejects a revoked explicit credential before model sync performs any fetch", async () => {
@@ -444,12 +383,9 @@ describe("model provider routes", () => {
     syncApp.locals.jwtSecret = secret;
     syncApp.use(express.json());
     syncApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => testProviderCatalog,
       fetchProviderModels: async () => { fetchCalled = true; return []; }
     }));
-    const created = await makeRequest(syncApp, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
+    const created = await makeRequest(syncApp, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
     const providerId = created.body.data.provider.id;
     const credential = await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
       plaintextSecret: "revoked-sync-secret"
@@ -472,7 +408,6 @@ describe("model provider routes", () => {
     readinessApp.locals.jwtSecret = secret;
     readinessApp.use(express.json());
     readinessApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => testProviderCatalog,
       fetchProviderModels: async (input) => {
         fetchedInputs.push(input);
         return [
@@ -481,9 +416,7 @@ describe("model provider routes", () => {
         ];
       }
     }));
-    const created = await makeRequest(readinessApp, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
+    const created = await makeRequest(readinessApp, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
     const providerId = created.body.data.provider.id;
     const model = await makeRequest(readinessApp, "POST", `/api/v1/model-providers/${providerId}/models`, {
       name: "DeepSeek Chat",
@@ -509,7 +442,6 @@ describe("model provider routes", () => {
     assert.equal(readiness.body.data.readiness.remote.modelCount, 2);
     assert.equal(readiness.body.data.readiness.remote.matchedModelId, "deepseek-chat");
     assert.equal(fetchedInputs[0]?.apiKey, "sk-deepseek");
-    assert.equal(fetchedInputs[0]?.modelsUrl, "https://api.deepseek.com/models");
     assert.equal(JSON.stringify(readiness.body).includes("sk-deepseek"), false);
   });
 
@@ -519,15 +451,12 @@ describe("model provider routes", () => {
     readinessApp.locals.jwtSecret = secret;
     readinessApp.use(express.json());
     readinessApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => testProviderCatalog,
       fetchProviderModels: async () => {
         fetchCalled = true;
         return [];
       }
     }));
-    const created = await makeRequest(readinessApp, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
+    const created = await makeRequest(readinessApp, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
     const providerId = created.body.data.provider.id;
     const model = await makeRequest(readinessApp, "POST", `/api/v1/model-providers/${providerId}/models`, {
       name: "DeepSeek Chat",
@@ -555,15 +484,12 @@ describe("model provider routes", () => {
     readinessApp.locals.jwtSecret = secret;
     readinessApp.use(express.json());
     readinessApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => testProviderCatalog,
       fetchProviderModels: async () => {
         fetchCalled = true;
         return [{ id: "gpt-5.1-codex", ownedBy: "openai" }];
       }
     }));
-    const created = await makeRequest(readinessApp, "POST", "/api/v1/model-providers", {
-      catalogId: "openai"
-    }, authHeaders());
+    const created = await makeRequest(readinessApp, "POST", "/api/v1/model-providers", openaiProviderInput, authHeaders());
     const providerId = created.body.data.provider.id;
     const model = await makeRequest(readinessApp, "POST", `/api/v1/model-providers/${providerId}/models`, {
       name: "GPT Codex",
@@ -599,278 +525,19 @@ describe("model provider routes", () => {
     assert.equal(fetchCalled, false);
   });
 
-  it("syncs static catalog models without calling a provider model endpoint", async () => {
-    let fetchCalled = false;
-    const syncApp = express();
-    syncApp.locals.jwtSecret = secret;
-    syncApp.use(express.json());
-    syncApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => testProviderCatalog,
-      fetchProviderModels: async () => {
-        fetchCalled = true;
-        throw new Error("static providers must not fetch remote models");
-      },
-    }));
-    const created = await makeRequest(syncApp, "POST", "/api/v1/model-providers", {
-      catalogId: "qwen-coding-plan-cn"
-    }, authHeaders());
-    const providerId = created.body.data.provider.id;
-
-    const synced = await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/models/sync`, {}, authHeaders());
-
-    assert.equal(synced.status, 200);
-    assert.equal(synced.body.code, 0);
-    assert.equal(fetchCalled, false);
-    assert.equal(synced.body.data.fetchedCount, 2);
-    assert.equal(synced.body.data.createdCount, 0);
-    assert.deepEqual(
-      synced.body.data.models.map((model: { modelId: string }) => model.modelId),
-      ["qwen3.6-plus", "qwen3-coder-plus"]
-    );
-  });
-
-  it("serves provider catalog from an injected dynamic catalog loader", async () => {
-    const catalogApp = express();
-    catalogApp.locals.jwtSecret = secret;
-    catalogApp.use(express.json());
-    catalogApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => [
-        {
-          id: "openrouter",
-          name: "OpenRouter",
-          description: "OpenRouter from models.dev",
-          baseUrl: "https://openrouter.ai/api/v1",
-          authType: "api_key",
-          apiFormat: "openai-compatible",
-          supportedAdapters: ["opencode"],
-          modelSource: "models.dev",
-          source: "models.dev",
-          opencode: { npm: "@openrouter/ai-sdk-provider", env: ["OPENROUTER_API_KEY"] },
-          defaultModels: [
-            {
-              id: "anthropic/claude-sonnet-4.5",
-              name: "Claude Sonnet 4.5",
-              modelId: "anthropic/claude-sonnet-4.5",
-              capabilities: ["chat", "code"],
-              contextWindow: 200000
-            }
-          ]
-        }
-      ]
-    }));
-
-    const catalog = await makeRequest(catalogApp, "GET", "/api/v1/model-providers/catalog", undefined, authHeaders());
-
-    assert.equal(catalog.status, 200);
-    assert.equal(catalog.body.code, 0);
-    assert.equal(catalog.body.data.providers[0].id, "openrouter");
-    assert.equal(catalog.body.data.providers[0].source, "models.dev");
-    assert.equal(catalog.body.data.providers[0].opencode.npm, "@openrouter/ai-sdk-provider");
-
-    const created = await makeRequest(catalogApp, "POST", "/api/v1/model-providers", {
-      catalogId: "openrouter"
-    }, authHeaders());
-    const providerId = created.body.data.provider.id;
-    const credential = await makeRequest(catalogApp, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
-      plaintextSecret: "explicit-openrouter-secret"
-    }, authHeaders());
-    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-provider-route-"));
-    const preview = await makeRequest(catalogApp, "POST", `/api/v1/model-providers/${providerId}/preview-apply`, {
-      adapter: "opencode",
-      projectRoot: root,
-      modelProfileId: created.body.data.models[0].id,
-      credentialId: credential.body.data.credential.id
-    }, authHeaders());
-    assert.equal(created.body.data.provider.opencodeNpm, "@openrouter/ai-sdk-provider");
-    assert.equal(created.body.data.models[0].modelId, "anthropic/claude-sonnet-4.5");
-    assert.equal(preview.status, 404);
-  });
-
-  it("creates a Claude Code preset with default models and previews Claude settings", async () => {
-    const catalogApp = express();
-    catalogApp.locals.jwtSecret = secret;
-    catalogApp.use(express.json());
-    catalogApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => [
-        {
-          id: "moonshot-kimi",
-          name: "Kimi",
-          description: "Kimi Claude Code-compatible preset.",
-          baseUrl: "https://api.moonshot.ai/anthropic",
-          authType: "api_key",
-          apiFormat: "anthropic",
-          supportedAdapters: ["claude"],
-          modelSource: "static",
-          source: "cc-switch",
-          defaultModels: [
-            {
-              id: "kimi-k2-0905-preview",
-              name: "Kimi K2",
-              modelId: "kimi-k2-0905-preview",
-              capabilities: ["chat", "code", "reasoning"],
-              contextWindow: 128000
-            }
-          ],
-          claude: {
-            env: {
-              baseUrl: "ANTHROPIC_BASE_URL",
-              authToken: "ANTHROPIC_AUTH_TOKEN",
-              model: "ANTHROPIC_MODEL",
-              smallFastModel: "ANTHROPIC_SMALL_FAST_MODEL",
-              defaultSonnetModel: "ANTHROPIC_DEFAULT_SONNET_MODEL",
-              defaultHaikuModel: "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-              defaultOpusModel: "ANTHROPIC_DEFAULT_OPUS_MODEL",
-              apiTimeoutMs: "API_TIMEOUT_MS"
-            },
-            defaultSmallFastModel: "kimi-k2-0905-preview"
-          }
-        }
-      ]
-    }));
-
-    const created = await makeRequest(catalogApp, "POST", "/api/v1/model-providers", {
-      catalogId: "moonshot-kimi"
-    }, authHeaders());
-    const providerId = created.body.data.provider.id;
-    const credential = await makeRequest(catalogApp, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
-      plaintextSecret: "sk-kimi"
-    }, authHeaders());
-    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-provider-route-"));
-    const preview = await makeRequest(catalogApp, "POST", `/api/v1/model-providers/${providerId}/preview-apply`, {
-      adapter: "claude",
-      projectRoot: root,
-      modelProfileId: created.body.data.models[0].id,
-      credentialId: credential.body.data.credential.id
-    }, authHeaders());
-    assert.equal(created.status, 201);
-    assert.deepEqual(created.body.data.provider.supportedAdapters, ["claude"]);
-    assert.equal(created.body.data.models[0].modelId, "kimi-k2-0905-preview");
-    assert.equal(preview.status, 404);
-  });
-
-  it("seeds one default model when creating a provider from the models.dev catalog", async () => {
-    const catalogApp = express();
-    catalogApp.locals.jwtSecret = secret;
-    catalogApp.use(express.json());
-    catalogApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => [
-        {
-          id: "openai",
-          name: "OpenAI",
-          description: "OpenAI from models.dev",
-          baseUrl: "https://api.openai.com/v1",
-          authType: "api_key",
-          apiFormat: "openai",
-          supportedAdapters: ["opencode"],
-          modelSource: "models.dev",
-          source: "models.dev",
-          opencode: { npm: "@ai-sdk/openai", env: ["OPENAI_API_KEY"] },
-          defaultModels: [
-            {
-              id: "gpt-5.1",
-              name: "GPT-5.1",
-              modelId: "gpt-5.1",
-              capabilities: ["chat", "code", "reasoning"],
-              contextWindow: 400000
-            },
-            {
-              id: "gpt-4.1",
-              name: "GPT-4.1",
-              modelId: "gpt-4.1",
-              capabilities: ["chat", "code"],
-              contextWindow: 100000
-            }
-          ]
-        }
-      ]
-    }));
-
-    const created = await makeRequest(catalogApp, "POST", "/api/v1/model-providers", {
-      catalogId: "openai"
-    }, authHeaders());
-
-    assert.equal(created.status, 201);
-    assert.equal(created.body.data.models.length, 1);
-    assert.equal(created.body.data.models[0].modelId, "gpt-5.1");
-    assert.equal(created.body.data.models[0].isDefault, true);
-    assert.deepEqual(created.body.data.models[0].capabilities, ["chat", "code", "reasoning"]);
-  });
-
-  it("rejects catalog provider creation when the external catalog does not contain the id", async () => {
-    const catalogApp = express();
-    catalogApp.locals.jwtSecret = secret;
-    catalogApp.use(express.json());
-    catalogApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => []
-    }));
-
-    const created = await makeRequest(catalogApp, "POST", "/api/v1/model-providers", {
+  it("rejects catalogId payloads because preset providers are retired", async () => {
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
       catalogId: "deepseek"
     }, authHeaders());
 
     assert.equal(created.status, 400);
     assert.equal(created.body.code, 1);
-    assert.match(created.body.message, /Catalog provider not found/i);
-  });
-
-  it("rejects catalog providers with sensitive default headers or invalid OpenCode npm packages", async () => {
-    const catalogApp = express();
-    catalogApp.locals.jwtSecret = secret;
-    catalogApp.use(express.json());
-    catalogApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
-      loadProviderCatalog: async () => [
-        {
-          id: "header-secret",
-          name: "Header Secret",
-          description: "Invalid provider with credential-bearing headers.",
-          baseUrl: "https://header-secret.example",
-          authType: "api_key",
-          apiFormat: "openai-compatible",
-          supportedAdapters: ["opencode"],
-          modelSource: "models.dev",
-          source: "models.dev",
-          headers: { Authorization: "Bearer leaked-token" },
-          opencode: { npm: "@ai-sdk/openai-compatible", env: ["HEADER_SECRET_API_KEY"] },
-          defaultModels: []
-        },
-        {
-          id: "invalid-npm",
-          name: "Invalid NPM",
-          description: "Invalid provider with shell-like package name.",
-          baseUrl: "https://invalid-npm.example",
-          authType: "api_key",
-          apiFormat: "openai-compatible",
-          supportedAdapters: ["opencode"],
-          modelSource: "models.dev",
-          source: "models.dev",
-          opencode: { npm: "@ai-sdk/openai-compatible; touch /tmp/owned", env: ["INVALID_NPM_API_KEY"] },
-          defaultModels: []
-        }
-      ]
-    }));
-
-    const headerSecret = await makeRequest(catalogApp, "POST", "/api/v1/model-providers", {
-      catalogId: "header-secret"
-    }, authHeaders());
-    const invalidNpm = await makeRequest(catalogApp, "POST", "/api/v1/model-providers", {
-      catalogId: "invalid-npm"
-    }, authHeaders());
-
-    assert.equal(headerSecret.status, 400);
-    assert.equal(headerSecret.body.code, 1);
-    assert.match(headerSecret.body.message, /default headers/i);
-    assert.equal(invalidNpm.status, 400);
-    assert.equal(invalidNpm.body.code, 1);
-    assert.match(invalidNpm.body.message, /OpenCode npm/i);
+    assert.match(created.body.message, /Custom provider requires/i);
   });
 
   it("manages provider-scoped model defaults, updates, and deletion", async () => {
-    const deepseek = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
-    const openai = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "openai"
-    }, authHeaders());
+    const deepseek = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
+    const openai = await makeRequest(app, "POST", "/api/v1/model-providers", openaiProviderInput, authHeaders());
     const providerId = deepseek.body.data.provider.id;
     const modelA = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
       name: "DeepSeek Chat",
@@ -908,12 +575,8 @@ describe("model provider routes", () => {
   });
 
   it("deletes and rotates credentials only within the selected provider", async () => {
-    const deepseek = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
-    const openai = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "openai"
-    }, authHeaders());
+    const deepseek = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
+    const openai = await makeRequest(app, "POST", "/api/v1/model-providers", openaiProviderInput, authHeaders());
     const providerId = deepseek.body.data.provider.id;
     const credential = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
       label: "old",
@@ -951,20 +614,12 @@ describe("model provider routes", () => {
       apiFormat: "anthropic",
       supportedAdapters: ["unknown"]
     }, authHeaders());
-    const reservedProvider = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      name: "Fake OpenAI", providerKey: "openai", baseUrl: "https://attacker.example/v1",
-      authType: "api_key", apiFormat: "openai", supportedAdapters: ["codex"]
-    }, authHeaders());
     assert.equal(invalidCustom.status, 400);
     assert.equal(invalidCustom.body.code, 1);
     assert.equal(invalidAdapter.status, 400);
     assert.equal(invalidAdapter.body.code, 1);
-    assert.equal(reservedProvider.status, 400);
-    assert.match(reservedProvider.body.message, /Reserved provider keys/i);
 
-    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
-      catalogId: "deepseek"
-    }, authHeaders());
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
     const retired = await makeRequest(app, "POST", `/api/v1/model-providers/${created.body.data.provider.id}/preview-apply`, {
       adapter: "opencode",
       projectRoot: "/"

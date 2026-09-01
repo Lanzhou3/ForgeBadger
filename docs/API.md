@@ -783,12 +783,16 @@ the same body:
 `modelProfileId` defaults to the provider's default model and `credentialId`
 to its first active credential. Preview returns `{ preview }` with per-file
 `targetPath`, redacted `current`/`proposed` content, `changedFields`, and
-`warnings`, without touching disk. Apply validates the provider base URL
+`warnings`, without touching disk; per-file `operation` is one of
+`create | update | delete | none` (`delete` applies to a Codex `auth.json`
+whose last managed field was removed — Codex errors on an empty `auth.json`
+but shows the login screen when the file is missing). Apply validates the
+provider base URL
 through the SSRF guard, takes an exclusive cross-process target lock, writes
 an AES-256-GCM-encrypted backup under the state directory, then atomically
 writes each target file with mode `0600` — including the plaintext credential,
-matching each CLI's native config format (Codex also writes
-`~/.codex/auth.json`). Unsafe targets (for example symlinks) are rejected
+matching each CLI's native config format. Unsafe targets (for example
+symlinks) are rejected
 before any write, and a multi-file failure rolls back the files already
 written. Apply returns `{ result: { adapter, backupId, changed, files } }`.
 Rollback accepts an optional `{ "backupId": "..." }` and restores the given (or
@@ -800,10 +804,13 @@ For Claude Code sessions, both create and restart paths merge ForgeBadger comman
 hooks into `.claude/settings.local.json` before platform-multiplexer launch.
 
 OpenAI is a normal verified provider. Applying a provider to Codex writes
-`model`, `model_provider`, and a `model_providers.<id>` entry with `base_url`
-and `wire_api = "responses"` into `~/.codex/config.toml`, and writes the API
-key as `OPENAI_API_KEY` into `~/.codex/auth.json` (other existing `auth.json`
-fields are preserved). Provider/model configuration is user-global because
+`model`, `model_provider`, and a `model_providers.<id>` entry with `base_url`,
+`wire_api = "responses"`, and `experimental_bearer_token` (the API key) into
+`~/.codex/config.toml` — the cc-switch Codex 0.149+ layout, where third-party
+credentials live in the provider table. The legacy `OPENAI_API_KEY` slot is
+removed from `~/.codex/auth.json` (other existing `auth.json` fields such as
+ChatGPT login tokens are preserved); an `auth.json` left empty by that removal
+is deleted outright. Provider/model configuration is user-global because
 Codex does not permit those keys to be overridden by project configuration.
 The retired `/api/v1/codex/subscription/**` route is not mounted and returns the
 normal 404 behavior.
@@ -820,7 +827,6 @@ the full provider/profile/model/credential inventory.
 
 ### Model Providers
 
-- `GET /api/v1/model-providers/catalog`
 - `GET /api/v1/model-providers/capabilities`
 - `GET /api/v1/model-providers`
 - `POST /api/v1/model-providers`
@@ -835,6 +841,30 @@ the full provider/profile/model/credential inventory.
   MODEL_IN_USE_BY_SESSION` takes precedence over `MODEL_IN_USE_BY_BINDING`.
 - `POST /api/v1/model-providers/:id/models/sync`
 - `POST /api/v1/model-providers/:id/readiness`
+- `POST /api/v1/model-providers/:id/balance`
+
+Model sync fetches the provider's model list through its OpenAI-compatible
+`/v1/models` endpoint (version-segment aware, so bases like
+`https://api.z.ai/api/paas/v4` resolve to `/paas/v4/models`). Authentication
+follows the provider's API format: Anthropic-format providers send
+`x-api-key` + `anthropic-version`, Google-format providers send
+`x-goog-api-key`, and everything else sends `Authorization: Bearer`.
+Anthropic-format responses are paginated (`has_more`/`last_id` cursors,
+bounded at 20 pages) so full model inventories are collected. Sync only adds
+missing models; existing model profiles are left untouched.
+
+`POST /api/v1/model-providers/:id/balance` checks the remaining balance or
+subscription quota for providers with a known endpoint, detected from the
+provider base URL host. Balance endpoints: DeepSeek, StepFun, SiliconFlow,
+OpenRouter, Novita AI. Coding-plan quota windows: Kimi For Coding
+(`limits[].detail` 5-hour window + `usage` weekly window) and MiniMax
+(`coding_plan/remains`, general bucket 5-hour/weekly remaining percentages).
+Quota entries may carry `limit` and `resetsAt`. The request body accepts an
+optional `credentialId` and `timeoutMs`; the credential is decrypted only in
+memory. The response is `{ supported, detectedProvider?, balances: [{ label,
+remaining, unit, isAvailable?, limit?, resetsAt? }], checkedAt }`;
+unsupported providers return `supported: false` with an empty list, and
+upstream failures return `502` with a redacted message.
 
 The retired provider-level `preview-apply`/`apply` routes are no longer
 mounted and return the normal 404 behavior.
@@ -847,30 +877,13 @@ four CLIs. Historical `PROVIDER_IN_USE_BY_BINDING` /
 `MODEL_IN_USE_BY_BINDING` conflicts can still be returned for rows referenced
 by pre-decoupling records; those references remain intact.
 
-`GET /model-providers/catalog` returns verified presets including OpenAI,
-Anthropic API, Kimi, DeepSeek, Qwen, z.ai, OpenRouter, and Ollama with endpoint,
-env metadata, compatible adapters, and default models already filled in. When
-models.dev is reachable, OpenCode-compatible provider entries
-are appended as secondary catalog entries. Catalog OpenCode npm package names
-are sanitized before exposure and revalidated before provider creation; unsafe
-package names fall back to the OpenCode OpenAI-compatible provider package.
+The web console ships a static, client-side list of provider presets
+(endpoints, auth type, API format) that prefill the add-provider form,
+cc-switch style. Presets never carry model lists, there is no server-side
+preset catalog API, and no models are seeded at creation — the model list is
+always synced live from the configured provider endpoint.
 
-Creating from a catalog entry:
-
-```json
-{
-  "catalogId": "openrouter"
-}
-```
-
-`catalogId` must exist in the currently loaded catalog. Missing catalog entries
-return a validation error. Catalog-created Claude Code providers seed all static
-default models from the preset so users do not have to type model IDs manually.
-Catalog-created models.dev providers still seed only the first advertised model
-to keep large external catalogs manageable; users can use model sync or manual
-model creation to add the full provider model list.
-
-Creating a custom Provider Profile:
+Creating a Provider Profile:
 
 ```json
 {
@@ -883,9 +896,16 @@ Creating a custom Provider Profile:
 }
 ```
 
-Model sync uses the selected Provider Profile base URL, saved credential, and
-current catalog metadata when available. Plaintext credentials are decrypted
-only inside Gateway memory for the outbound provider request.
+`name`, `providerKey`, `authType`, and `apiFormat` are required; at least one
+of `baseUrl` / `openaiBaseUrl` / `anthropicBaseUrl` should be supplied for
+model sync to work.
+
+Model sync uses the selected Provider Profile's OpenAI-compatible base URL; an
+Anthropic-format provider uses its Anthropic base URL instead. It uses the
+saved credential and fails with an error instead of falling back to built-in
+defaults when the model-list endpoint cannot be fetched.
+Plaintext credentials are decrypted only inside Gateway memory for the
+outbound provider request.
 
 `POST /api/v1/model-providers/:id/readiness` evaluates a Provider Profile,
 target adapter, selected model, selected credential, and optional remote

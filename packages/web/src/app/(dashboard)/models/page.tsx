@@ -29,8 +29,10 @@ import {
   type ModelForm,
 } from "@/components/models/shared";
 import { useLanguage } from "@/hooks/use-language";
+import { toast } from "sonner";
 import {
   checkModelProviderReadiness,
+  checkProviderBalance,
   createModelProvider,
   createProviderCredential,
   createProviderModel,
@@ -38,22 +40,13 @@ import {
   deleteProviderModel,
   deleteModelProvider,
   listModelProviders,
-  listProviderCatalog,
   rotateProviderCredential,
   setDefaultProviderModel,
   syncProviderModels,
   updateProviderModel,
   type ModelProviderReadiness,
-  type ProviderCatalogPreset,
   type ProviderSupportedAdapter,
 } from "@/lib/api";
-import {
-  buildConfiguredProviderMap,
-  filterProviderCatalog,
-  type ProviderCatalogAdapterFilter,
-  type ProviderCatalogConfiguredFilter,
-  type ProviderCatalogSourceFilter,
-} from "@/lib/model-provider-catalog";
 
 export default function ModelsPage() {
   const { t } = useLanguage();
@@ -68,12 +61,6 @@ export default function ModelsPage() {
   const [providerReadiness, setProviderReadiness] = useState<ModelProviderReadiness | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [providerQueryText, setProviderQueryText] = useState("");
-  const [catalogQueryText, setCatalogQueryText] = useState("");
-  const [catalogAdapterFilter, setCatalogAdapterFilter] = useState<ProviderCatalogAdapterFilter>("all");
-  const [catalogFormatFilter, setCatalogFormatFilter] = useState("all");
-  const [catalogSourceFilter, setCatalogSourceFilter] = useState<ProviderCatalogSourceFilter>("verified");
-  const [catalogConfiguredFilter, setCatalogConfiguredFilter] = useState<ProviderCatalogConfiguredFilter>("all");
-  const [pendingPreset, setPendingPreset] = useState<ProviderCatalogPreset | null>(null);
   const [setupCredentialForm, setSetupCredentialForm] = useState<CredentialForm>(emptyCredential);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [addProviderOpen, setAddProviderOpen] = useState(false);
@@ -85,14 +72,9 @@ export default function ModelsPage() {
     queryKey: ["model-providers"],
     queryFn: listModelProviders,
   });
-  const catalogQuery = useQuery({
-    queryKey: ["model-provider-catalog"],
-    queryFn: listProviderCatalog,
-  });
   const providers = providerQuery.data?.providers ?? [];
   const models = providerQuery.data?.models ?? [];
   const credentials = providerQuery.data?.credentials ?? [];
-  const catalog = catalogQuery.data?.providers ?? [];
   const filteredProviders = useMemo(() => {
     const query = providerQueryText.trim().toLowerCase();
     if (!query) return providers;
@@ -104,22 +86,6 @@ export default function ModelsPage() {
         .includes(query)
     );
   }, [providerQueryText, providers]);
-  const configuredProviderMap = useMemo(() => buildConfiguredProviderMap(providers), [providers]);
-  const filteredCatalog = useMemo(
-    () =>
-      filterProviderCatalog(catalog, configuredProviderMap, {
-        query: catalogQueryText,
-        adapter: catalogAdapterFilter,
-        apiFormat: catalogFormatFilter,
-        source: catalogSourceFilter,
-        configured: catalogConfiguredFilter,
-      }),
-    [catalog, configuredProviderMap, catalogAdapterFilter, catalogConfiguredFilter, catalogFormatFilter, catalogQueryText, catalogSourceFilter]
-  );
-  const catalogApiFormats = useMemo(
-    () => Array.from(new Set(catalog.map((provider) => provider.apiFormat))).sort(),
-    [catalog]
-  );
 
   useEffect(() => {
     if (!selectedProviderId && providers[0]) {
@@ -193,47 +159,55 @@ export default function ModelsPage() {
     }
   }, [selectedCredential]);
 
-  const addPresetMutation = useMutation({
-    mutationFn: async (input: { preset: ProviderCatalogPreset; credential: CredentialForm }) => {
-      const created = await createModelProvider({ catalogId: input.preset.id });
+  const createProviderMutation = useMutation({
+    mutationFn: async () => {
+      const anthropicBaseUrl = customProvider.anthropicBaseUrl.trim();
+      const openaiBaseUrl = customProvider.openaiBaseUrl.trim();
+      const created = await createModelProvider({
+        name: customProvider.name.trim(),
+        providerKey: customProvider.providerKey.trim(),
+        authType: customProvider.authType,
+        apiFormat: customProvider.apiFormat,
+        baseUrl: anthropicBaseUrl || openaiBaseUrl,
+        ...(anthropicBaseUrl ? { anthropicBaseUrl } : {}),
+        ...(openaiBaseUrl ? { openaiBaseUrl } : {}),
+        supportedAdapters: customProvider.supportedAdapters,
+      });
+      const secret = setupCredentialForm.plaintextSecret.trim();
       const credential =
-        created.provider.authType === "none" || input.preset.id === "openai"
+        created.provider.authType === "none" || !secret
           ? undefined
           : (await createProviderCredential(created.provider.id, {
-            label: input.credential.label.trim() || undefined,
-            plaintextSecret: input.credential.plaintextSecret,
-          })).credential;
-      if (!credential) return { provider: created.provider, credential, models: created.models };
-      const syncResult = await syncProviderModels(created.provider.id, { credentialId: credential.id });
-      return { provider: created.provider, credential, models: syncResult.models };
+              label: setupCredentialForm.label.trim() || undefined,
+              plaintextSecret: secret,
+            })).credential;
+      // Model sync always fetches the provider's live model list; a failure
+      // here must not hide the fact that the provider was already created.
+      let syncError: unknown;
+      if (credential || created.provider.authType === "none") {
+        try {
+          await syncProviderModels(created.provider.id, {
+            credentialId: credential?.id,
+          });
+        } catch (error) {
+          syncError = error;
+        }
+      }
+      return { provider: created.provider, credential, syncError };
     },
     onSuccess: async (result) => {
       setSelectedProviderId(result.provider.id);
       setSelectedCredentialId(result.credential?.id ?? "");
-      setSelectedModelId(result.models[0]?.id ?? "");
-      setPendingPreset(null);
+      setSelectedModelId("");
+      setCustomProvider(emptyCustomProvider);
       setSetupCredentialForm(emptyCredential);
       setAddProviderOpen(false);
-      setNotice(t("models.providerConfigured"));
-      await refreshProviders();
-    },
-  });
-
-  const customProviderMutation = useMutation({
-    mutationFn: () =>
-      createModelProvider({
-        name: customProvider.name.trim(),
-        providerKey: customProvider.providerKey.trim(),
-        baseUrl: customProvider.baseUrl.trim(),
-        authType: "api_key",
-        apiFormat: "anthropic",
-        supportedAdapters: ["claude"],
-      }),
-    onSuccess: async (result) => {
-      setCustomProvider(emptyCustomProvider);
-      setSelectedProviderId(result.provider.id);
-      setAddProviderOpen(false);
       setNotice(t("models.providerCreated"));
+      if (result.syncError) {
+        toast.error(
+          result.syncError instanceof Error ? result.syncError.message : t("models.modelSyncFailed")
+        );
+      }
       await refreshProviders();
     },
   });
@@ -407,6 +381,25 @@ export default function ModelsPage() {
     },
   });
 
+  const activeBalanceCredential = providerCredentials.find((credential) => credential.status === "active");
+  // Balance is polled in near-real-time: fetch as soon as a provider (with a
+  // usable credential) is selected, then refresh every 60s while the tab is
+  // visible. Unsupported providers stop polling; failures surface inline in
+  // the workspace instead of toast spam.
+  const balanceQuery = useQuery({
+    queryKey: ["provider-balance", selectedProviderId, activeBalanceCredential?.id ?? ""],
+    queryFn: () =>
+      checkProviderBalance(
+        selectedProviderId,
+        activeBalanceCredential ? { credentialId: activeBalanceCredential.id } : {}
+      ),
+    enabled:
+      Boolean(selectedProvider) &&
+      (selectedProvider?.authType === "none" || Boolean(activeBalanceCredential)),
+    refetchInterval: (query) => (query.state.data?.supported === false ? false : 60_000),
+    retry: false,
+  });
+
   function refreshProviders() {
     setProviderReadiness(null);
     return queryClient.invalidateQueries({ queryKey: ["model-providers"] });
@@ -414,13 +407,7 @@ export default function ModelsPage() {
 
   function submitCustomProvider(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    customProviderMutation.mutate();
-  }
-
-  function submitPresetSetup(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!pendingPreset) return;
-    addPresetMutation.mutate({ preset: pendingPreset, credential: setupCredentialForm });
+    createProviderMutation.mutate();
   }
 
   function submitCredential(event: FormEvent<HTMLFormElement>) {
@@ -438,17 +425,13 @@ export default function ModelsPage() {
   }
 
   function openAddProviderDialog() {
-    setPendingPreset(null);
+    setCustomProvider(emptyCustomProvider);
     setSetupCredentialForm(emptyCredential);
     setAddProviderOpen(true);
   }
 
   function handleAddProviderOpenChange(open: boolean) {
-    if (!open && addPresetMutation.isPending) return;
-    if (!open) {
-      setPendingPreset(null);
-      setSetupCredentialForm(emptyCredential);
-    }
+    if (!open && createProviderMutation.isPending) return;
     setAddProviderOpen(open);
   }
 
@@ -471,9 +454,7 @@ export default function ModelsPage() {
 
   const currentError =
     providerQuery.error ??
-    catalogQuery.error ??
-    addPresetMutation.error ??
-    customProviderMutation.error ??
+    createProviderMutation.error ??
     deleteProviderMutation.error ??
     credentialMutation.error ??
     rotateCredentialMutation.error ??
@@ -542,7 +523,7 @@ export default function ModelsPage() {
             modelCounts={modelCountsByProvider}
             queryText={providerQueryText}
             selectedProviderId={selectedProviderId}
-            isLoading={providerQuery.isLoading || catalogQuery.isLoading}
+            isLoading={providerQuery.isLoading}
             isDeleting={deleteProviderMutation.isPending}
             onQueryTextChange={setProviderQueryText}
             onSelectProvider={setSelectedProviderId}
@@ -562,8 +543,18 @@ export default function ModelsPage() {
                 selectedProvider.authType !== "none" && !selectedCredentialId
               }
               isDeletingProvider={deleteProviderMutation.isPending}
+              balance={balanceQuery.data ?? null}
+              balanceError={
+                balanceQuery.isError
+                  ? balanceQuery.error instanceof Error
+                    ? balanceQuery.error.message
+                    : t("models.balanceCheckFailed")
+                  : null
+              }
+              isCheckingBalance={balanceQuery.isFetching}
               onCheckReadiness={() => readinessMutation.mutate()}
               onSync={() => syncModelsMutation.mutate()}
+              onCheckBalance={() => void balanceQuery.refetch()}
               onDeleteProvider={() => openDeleteDialog({ kind: "provider", providerId: selectedProvider.id })}
               onApplyToCli={() => setApplyDialogOpen(true)}
               modelsTab={{
@@ -625,42 +616,13 @@ export default function ModelsPage() {
 
       <AddProviderDialog
         open={addProviderOpen}
-        pendingPreset={pendingPreset}
-        catalog={filteredCatalog}
-        catalogCount={catalog.length}
-        apiFormats={catalogApiFormats}
-        queryText={catalogQueryText}
-        adapterFilter={catalogAdapterFilter}
-        apiFormatFilter={catalogFormatFilter}
-        sourceFilter={catalogSourceFilter}
-        configuredFilter={catalogConfiguredFilter}
-        isLoading={catalogQuery.isLoading}
-        isAdding={addPresetMutation.isPending}
         customProvider={customProvider}
-        isCreatingCustom={customProviderMutation.isPending}
         setupCredential={setupCredentialForm}
+        isCreating={createProviderMutation.isPending}
         onOpenChange={handleAddProviderOpenChange}
-        onQueryTextChange={setCatalogQueryText}
-        onAdapterFilterChange={setCatalogAdapterFilter}
-        onApiFormatFilterChange={setCatalogFormatFilter}
-        onSourceFilterChange={setCatalogSourceFilter}
-        onConfiguredFilterChange={setCatalogConfiguredFilter}
-        onAddPreset={(preset) => {
-          setPendingPreset(preset);
-          setSetupCredentialForm({
-            label: preset.productType === "subscription" ? t("models.subscriptionCredentialLabel") : "",
-            plaintextSecret: "",
-          });
-        }}
-        onSelectProvider={(providerId) => {
-          setSelectedProviderId(providerId);
-          setAddProviderOpen(false);
-        }}
         onCustomProviderChange={setCustomProvider}
-        onSubmitCustomProvider={submitCustomProvider}
         onSetupCredentialChange={setSetupCredentialForm}
-        onSubmitSetup={submitPresetSetup}
-        onBackToCatalog={() => setPendingPreset(null)}
+        onSubmit={submitCustomProvider}
         t={t}
       />
       <DeleteConfirmDialog

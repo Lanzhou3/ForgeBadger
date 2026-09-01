@@ -4,7 +4,9 @@ import * as apiModule from "./api";
 import {
   createApiKey,
   checkModelProviderReadiness,
+  checkProviderBalance,
   cloneTemplate,
+  createModelProvider,
   createProject,
   createSkill,
   createTemplate,
@@ -180,6 +182,34 @@ describe("api client", () => {
     );
   });
 
+  it("creates model provider profiles with manual fields only", async () => {
+    await createModelProvider({
+      name: "My Provider",
+      providerKey: "my-provider",
+      authType: "api_key",
+      apiFormat: "openai-compatible",
+      baseUrl: "https://provider.example.com/v1",
+      openaiBaseUrl: "https://provider.example.com/v1",
+      supportedAdapters: ["claude", "opencode"],
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "My Provider",
+          providerKey: "my-provider",
+          authType: "api_key",
+          apiFormat: "openai-compatible",
+          baseUrl: "https://provider.example.com/v1",
+          openaiBaseUrl: "https://provider.example.com/v1",
+          supportedAdapters: ["claude", "opencode"],
+        }),
+      })
+    );
+  });
+
   it("deletes model provider profiles through REST", async () => {
     await deleteModelProvider("provider-1");
 
@@ -199,6 +229,64 @@ describe("api client", () => {
         body: JSON.stringify({ credentialId: "credential-1" }),
       })
     );
+  });
+
+  it("checks provider balance through REST", async () => {
+    const balanceData = {
+      supported: true,
+      detectedProvider: "deepseek",
+      balances: [{ label: "余额", remaining: 12.5, unit: "CNY" }],
+      checkedAt: "2026-09-01T00:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope(balanceData)));
+
+    const result = await checkProviderBalance("provider-1", { credentialId: "credential-1" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/balance",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ credentialId: "credential-1" }),
+      })
+    );
+    expect(result).toEqual(balanceData);
+  });
+
+  it("returns an unsupported provider balance result without throwing", async () => {
+    vi.stubGlobal("fetch", vi.fn(() =>
+      mockEnvelope({ supported: false, balances: [], checkedAt: "2026-09-01T00:00:00.000Z" })
+    ));
+
+    const result = await checkProviderBalance("provider-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/balance",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({}) })
+    );
+    expect(result.supported).toBe(false);
+    expect(result.balances).toEqual([]);
+  });
+
+  it("surfaces the sanitized upstream message when a balance check fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 502,
+          json: () => Promise.resolve({
+            code: 1,
+            message: "Balance upstream request failed",
+            details: {},
+          }),
+        } as Response)
+      )
+    );
+
+    await expect(checkProviderBalance("provider-1")).rejects.toMatchObject({
+      message: "Balance upstream request failed",
+      status: 502,
+    });
   });
 
   it("checks model provider readiness through REST", async () => {

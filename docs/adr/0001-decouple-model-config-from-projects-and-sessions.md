@@ -30,8 +30,15 @@ launch path.
   `POST /api/v1/cli-config/:adapter/apply-provider` (plus `/preview` and
   `/rollback`) writes a selected provider/model/credential into the CLI's
   native global config files: Claude `~/.claude/settings.json`, Codex
-  `~/.codex/config.toml` + `~/.codex/auth.json`, OpenCode `opencode.json`,
-  Kimi `~/.kimi-code/config.toml`.
+  `~/.codex/config.toml` (credential as
+  `model_providers.<id>.experimental_bearer_token`; the legacy
+  `~/.codex/auth.json` `OPENAI_API_KEY` slot is removed and an emptied
+  `auth.json` is deleted), OpenCode `opencode.json` (additive provider entry
+  with `name`/`models`), Kimi `~/.kimi-code/config.toml`. Applying the Kimi
+  For Coding endpoint to Claude also fills in the 256k context-window
+  overrides (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`)
+  without overwriting explicit user values, and a stale `ANTHROPIC_API_KEY`
+  is removed whenever a new `ANTHROPIC_AUTH_TOKEN` is written.
 - Credentials are written plaintext into the CLI config file (cc-switch
   parity), via atomic mode-`0600` writes after an AES-256-GCM-encrypted backup
   under the state directory. Plaintext keys still never touch the database,

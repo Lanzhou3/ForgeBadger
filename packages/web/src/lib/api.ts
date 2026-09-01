@@ -548,55 +548,6 @@ export type ProviderReadinessCheckStatus =
   | "failed"
   | "skipped";
 
-export interface ProviderCatalogModel {
-  id: string;
-  name: string;
-  modelId: string;
-  capabilities: string[];
-  contextWindow?: number;
-}
-
-export interface ProviderCatalogPreset {
-  id: string;
-  name: string;
-  description: string;
-  baseUrl: string;
-  region: string;
-  productType: ProviderProductType;
-  authType: ProviderAuthType;
-  apiFormat: ProviderApiFormat;
-  supportedAdapters: ProviderSupportedAdapter[];
-  modelSource: "static" | "dynamic" | "models.dev";
-  endpoints: {
-    anthropic?: { baseUrl: string };
-    openai?: { baseUrl: string };
-  };
-  modelFetch?: {
-    strategy: "openai-compatible";
-    modelsUrl?: string;
-  };
-  defaultModels: ProviderCatalogModel[];
-  source?: "verified" | "models.dev";
-  claude?: {
-    env: {
-      baseUrl: string;
-      authToken: string;
-      model: string;
-      smallFastModel: string;
-      defaultSonnetModel: string;
-      defaultHaikuModel: string;
-      defaultOpusModel: string;
-      apiTimeoutMs: string;
-    };
-    defaultSmallFastModel?: string;
-  };
-  opencode?: {
-    npm: string;
-    api?: string;
-    env: string[];
-  };
-}
-
 export interface ProviderProfile {
   id: string;
   providerKey: string;
@@ -632,6 +583,22 @@ export interface ProviderModelSyncResult {
   fetchedCount: number;
   createdCount: number;
   models: ModelProfile[];
+}
+
+export interface ProviderBalanceEntry {
+  label: string;
+  remaining: number;
+  unit: string;
+  isAvailable?: boolean;
+  limit?: number;
+  resetsAt?: string;
+}
+
+export interface ProviderBalanceResult {
+  supported: boolean;
+  detectedProvider?: string;
+  balances: ProviderBalanceEntry[];
+  checkedAt: string;
 }
 
 export interface ProviderCredentialSummary {
@@ -2634,10 +2601,6 @@ export async function deleteTemplate(id: string): Promise<unknown> {
   return fetchJson(`/api/v1/templates/${id}`, { method: "DELETE" });
 }
 
-export async function listProviderCatalog(): Promise<{ providers: ProviderCatalogPreset[] }> {
-  return fetchJson("/api/v1/model-providers/catalog") as Promise<{ providers: ProviderCatalogPreset[] }>;
-}
-
 export async function listModelProviders(): Promise<{
   providers: ProviderProfile[];
   models: ModelProfile[];
@@ -2651,22 +2614,21 @@ export async function listModelProviders(): Promise<{
 }
 
 export async function createModelProvider(data: {
-  catalogId?: string;
-  name?: string;
-  providerKey?: string;
+  name: string;
+  providerKey: string;
+  authType: ProviderAuthType;
+  apiFormat: ProviderApiFormat;
   baseUrl?: string;
   anthropicBaseUrl?: string;
   openaiBaseUrl?: string;
   region?: string;
   productType?: ProviderProductType;
-  authType?: ProviderAuthType;
-  apiFormat?: ProviderApiFormat;
   supportedAdapters?: ProviderSupportedAdapter[];
-}): Promise<{ provider: ProviderProfile; models: ModelProfile[] }> {
+}): Promise<{ provider: ProviderProfile }> {
   return fetchJson("/api/v1/model-providers", {
     method: "POST",
     body: JSON.stringify(data),
-  }) as Promise<{ provider: ProviderProfile; models: ModelProfile[] }>;
+  }) as Promise<{ provider: ProviderProfile }>;
 }
 
 export async function deleteModelProvider(providerId: string): Promise<unknown> {
@@ -2743,6 +2705,16 @@ export async function syncProviderModels(
     method: "POST",
     body: JSON.stringify(data),
   }) as Promise<ProviderModelSyncResult>;
+}
+
+export async function checkProviderBalance(
+  providerId: string,
+  data: { credentialId?: string; timeoutMs?: number } = {}
+): Promise<ProviderBalanceResult> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/balance`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<ProviderBalanceResult>;
 }
 
 export async function checkModelProviderReadiness(

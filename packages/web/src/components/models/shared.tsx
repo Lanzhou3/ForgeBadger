@@ -1,5 +1,8 @@
 import type {
   ModelProviderReadiness,
+  ProviderApiFormat,
+  ProviderAuthType,
+  ProviderBalanceEntry,
   ProviderProfile,
   ProviderSupportedAdapter,
 } from "@/lib/api";
@@ -7,7 +10,11 @@ import type {
 export interface CustomProviderForm {
   name: string;
   providerKey: string;
-  baseUrl: string;
+  apiFormat: ProviderApiFormat;
+  authType: ProviderAuthType;
+  anthropicBaseUrl: string;
+  openaiBaseUrl: string;
+  supportedAdapters: ProviderSupportedAdapter[];
 }
 
 export interface CredentialForm {
@@ -31,8 +38,24 @@ export type Translate = (key: any) => string;
 export const emptyCustomProvider: CustomProviderForm = {
   name: "",
   providerKey: "",
-  baseUrl: "",
+  apiFormat: "anthropic",
+  authType: "api_key",
+  anthropicBaseUrl: "",
+  openaiBaseUrl: "",
+  supportedAdapters: ["claude"],
 };
+
+export function slugifyProviderKey(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function customProviderHasEndpoint(form: CustomProviderForm): boolean {
+  return Boolean(form.anthropicBaseUrl.trim() || form.openaiBaseUrl.trim());
+}
 
 export const emptyCredential: CredentialForm = {
   label: "",
@@ -49,6 +72,7 @@ export function adapterLabel(adapter: ProviderSupportedAdapter): string {
   if (adapter === "claude") return "Claude Code";
   if (adapter === "opencode") return "OpenCode";
   if (adapter === "codex") return "Codex";
+  if (adapter === "kimi") return "Kimi Code";
   return adapter;
 }
 
@@ -77,6 +101,26 @@ export function isReadyCheckValue(value: string): boolean {
 export function formatCheckedAt(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+/**
+ * Derive the 0-100 *used* percentage for a balance entry. Percent-denominated
+ * entries (e.g. MiniMax quota windows report remaining %) are inverted;
+ * bounded quota windows (e.g. Kimi request limits) use 1 - remaining/limit.
+ * Plain currency balances have no bound and return undefined (no progress bar).
+ */
+export function balanceEntryUsedPercent(
+  entry: Pick<ProviderBalanceEntry, "remaining" | "unit" | "limit">
+): number | undefined {
+  if (entry.unit === "%") return clampPercent(100 - entry.remaining);
+  if (entry.limit !== undefined && entry.limit > 0) {
+    return clampPercent((1 - entry.remaining / entry.limit) * 100);
+  }
+  return undefined;
+}
+
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(0, value));
 }
 
 export function applyTargetsForProvider(provider: ProviderProfile | undefined): ProviderSupportedAdapter[] {
