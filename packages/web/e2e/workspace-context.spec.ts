@@ -73,6 +73,21 @@ async function mockWorkspaceApis(page: Page) {
       return;
     }
 
+    if (url.pathname === "/api/v1/model-providers" && method === "GET") {
+      await route.fulfill({ json: envelope({ providers: [], models: [], credentials: [] }) });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/task-packets` && method === "GET") {
+      await route.fulfill({ json: envelope({ taskPackets: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/gate-a/dependencies" && method === "GET") {
+      await route.fulfill({ json: envelope({ dependencies: [] }) });
+      return;
+    }
+
     if (url.pathname === `/api/v1/projects/${PROJECT_ID}` && method === "GET") {
       await route.fulfill({
         json: envelope({

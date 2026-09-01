@@ -9,15 +9,14 @@ import {
 } from "./smoke-feishu-bot-websocket.mjs";
 
 describe("Feishu bot WebSocket smoke helper", () => {
-  it("accepts legacy OpenForge smoke variables while preferring ForgeBadger values", () => {
+  it("uses only ForgeBadger smoke variables", () => {
     const result = resolveFeishuBotWebSocketSmokeConfig({
-      OPENFORGE_TOKEN: "legacy-token",
-      OPENFORGE_GATEWAY_URL: "http://legacy.example:48731",
+      FORGEBADGER_TOKEN: "current-token",
       FORGEBADGER_GATEWAY_URL: "http://current.example:48731"
     });
 
     assert.equal(result.ok, true);
-    assert.equal(result.config.token, "legacy-token");
+    assert.equal(result.config.token, "current-token");
     assert.equal(result.config.gatewayUrl, "http://current.example:48731");
   });
 

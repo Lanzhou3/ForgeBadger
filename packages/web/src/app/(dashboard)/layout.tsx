@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout/app-shell";
-import { CopilotRobotHost } from "@/components/copilot/copilot-robot-host";
 import { useAuth } from "@/hooks/use-auth";
 
 export default function DashboardLayout({
@@ -35,7 +34,6 @@ export default function DashboardLayout({
   return (
     <AppShell>
       {children}
-      <CopilotRobotHost />
     </AppShell>
   );
 }

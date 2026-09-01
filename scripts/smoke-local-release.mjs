@@ -27,7 +27,7 @@ export function buildSmokeEnvironment(options = {}) {
     FORGEBADGER_DB_PATH: path.join(root, "forgebadger-smoke.db"),
     FORGEBADGER_MASTER_KEY: masterKey,
     FORGEBADGER_JWT_SECRET: jwtSecret,
-    FORGEBADGER_TMUX_PREFIX: "of-smoke-"
+    FORGEBADGER_TMUX_PREFIX: "fb-smoke-"
   };
 }
 

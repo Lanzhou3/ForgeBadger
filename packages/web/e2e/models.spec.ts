@@ -65,47 +65,37 @@ test("Models configured provider list stays usable with many providers", async (
   await expect(page.getByRole("button", { name: /Configured Provider 35/ })).toBeVisible();
 });
 
-test("Models provider add dialog saves credential, syncs models, and previews Copilot without project root", async ({ page }) => {
-  const requests = await mockModelsApis(page);
+test("Models provider can be applied to a CLI config after a redacted preview", async ({ page }) => {
+  const requests = await mockModelsApis(page, {
+    configuredProviders: [providerProfile()],
+    configuredModels: [modelProfile()],
+    configuredCredentials: [credentialSummary()],
+  });
 
   await page.goto("/models");
-  await page.getByRole("button", { name: "Add provider" }).first().click();
-  const catalogDialog = page.getByRole("dialog", { name: "Provider Catalog" });
-  await catalogDialog.getByPlaceholder("Type a provider, model, endpoint, or API format").fill("provider-01");
-  await catalogDialog.getByRole("button", { name: "Add" }).click();
+  await page.getByRole("button", { name: "Apply to CLI" }).click();
 
-  const dialog = page.getByRole("dialog", { name: /Configure Provider 01/ });
+  const dialog = page.getByRole("dialog", { name: "Apply to CLI" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("Anthropic: https://provider-01.example.com/anthropic")).toBeVisible();
-  await expect(dialog.getByText("OpenAI: https://provider-01.example.com/v1")).toBeVisible();
-  await dialog.getByLabel("Credential name").fill("Minimax subscription");
-  await dialog.getByLabel("API key").fill("test-minimax-token");
-  await dialog.getByRole("button", { name: "Save and sync models" }).click();
+  await expect(dialog.getByText("/home/e2e/.claude/settings.json")).toBeVisible();
+  // The preview payload intentionally carries a plaintext-looking key; the UI must mask it.
+  await expect(dialog.getByText(/sk-live-secret/)).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Apply config" }).click();
 
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await page.getByRole("tab", { name: "Apply" }).click();
-  await expect(page.locator("#apply-model")).toHaveValue("model-1");
-  expect(requests.providerCreate).toEqual({ catalogId: "provider-01" });
-  expect(requests.credentialCreate).toEqual({
-    label: "Minimax subscription",
-    plaintextSecret: "test-minimax-token",
-  });
-  expect(requests.syncModels).toEqual({ credentialId: "credential-1" });
-
-  await page.getByLabel("Apply to").selectOption("forgebadger-copilot");
-  await expect(page.getByText("Copilot uses the ForgeBadger internal runtime default model and does not write project files or external CLI config.")).toBeVisible();
-  await page.getByRole("button", { name: "Preview" }).click();
-
-  expect(requests.previewApply).toEqual({
-    adapter: "forgebadger-copilot",
-    scope: "project",
+  expect(requests.applyPreview).toEqual({
+    providerProfileId: "provider-profile-1",
     modelProfileId: "model-1",
     credentialId: "credential-1",
   });
-  await expect(page.getByRole("button", { name: "Apply config" })).toBeEnabled();
+  expect(requests.applyProvider).toEqual({
+    providerProfileId: "provider-profile-1",
+    modelProfileId: "model-1",
+    credentialId: "credential-1",
+  });
+  await expect(dialog).toHaveCount(0);
 });
 
-test("Models provider readiness shows healthy remote model evidence and Codex identity", async ({ page }) => {
+test("Models provider readiness shows healthy remote model evidence without a separate Codex account card", async ({ page }) => {
   const requests = await mockModelsApis(page, {
     configuredProviders: [providerProfile()],
     configuredModels: [modelProfile()],
@@ -114,9 +104,7 @@ test("Models provider readiness shows healthy remote model evidence and Codex id
 
   await page.goto("/models");
 
-  await expect(page.getByText("Codex subscription account")).toBeVisible();
-  await expect(page.getByText("Provider apply disabled")).toBeVisible();
-  await expect(page.getByText("chatgpt_subscription_sdk")).toBeVisible();
+  await expect(page.getByText("Codex subscription account")).toHaveCount(0);
   await page.getByRole("button", { name: "Check readiness" }).click();
 
   expect(requests.readiness).toEqual({
@@ -279,8 +267,9 @@ async function mockModelsApis(
     providerCreate?: unknown;
     credentialCreate?: unknown;
     syncModels?: unknown;
-    previewApply?: unknown;
     readiness?: unknown;
+    applyPreview?: unknown;
+    applyProvider?: unknown;
   } = {};
   let configuredProviders = overrides.configuredProviders ?? [];
   let configuredModels: Array<Record<string, unknown>> = overrides.configuredModels ?? [];
@@ -345,6 +334,48 @@ async function mockModelsApis(
               ],
             };
           }),
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/cli-config/claude/apply-provider/preview" && method === "POST") {
+      requests.applyPreview = route.request().postDataJSON();
+      await route.fulfill({
+        json: envelope({
+          preview: {
+            adapter: "claude",
+            providerProfileId: "provider-profile-1",
+            modelProfileId: "model-1",
+            credentialId: "credential-1",
+            files: [
+              {
+                targetPath: "/home/e2e/.claude/settings.json",
+                fileType: "json",
+                operation: "update",
+                current: "{}",
+                // Intentionally carries a plaintext-looking key; the UI must mask it.
+                proposed: '{\n  "env": {\n    "ANTHROPIC_AUTH_TOKEN": "sk-live-secret",\n    "ANTHROPIC_MODEL": "provider-01-model"\n  }\n}',
+                changedFields: ["env"],
+              },
+            ],
+            warnings: [],
+          },
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/cli-config/claude/apply-provider" && method === "POST") {
+      requests.applyProvider = route.request().postDataJSON();
+      await route.fulfill({
+        json: envelope({
+          result: {
+            adapter: "claude",
+            backupId: "backup-1",
+            changed: true,
+            files: [{ targetPath: "/home/e2e/.claude/settings.json", operation: "update" }],
+          },
         }),
       });
       return;
@@ -434,51 +465,6 @@ async function mockModelsApis(
       });
       return;
     }
-
-    if (url.pathname === "/api/v1/codex/subscription/status") {
-      await route.fulfill({
-        json: envelope({
-          status: {
-            providerApplyEnabled: false,
-            identitySource: "chatgpt_subscription_sdk",
-            connectionState: "connected",
-            accountLabel: "Codex signed in",
-            canUseAppServerIdentity: true,
-            sdk: {
-              packageName: "@openai/codex-sdk",
-              installed: true,
-              docsUrl: "https://developers.openai.com/codex/sdk",
-              appServerDocsUrl: "https://developers.openai.com/codex",
-            },
-          },
-        }),
-      });
-      return;
-    }
-
-    if (url.pathname === "/api/v1/model-providers/provider-profile-1/preview-apply" && method === "POST") {
-      requests.previewApply = route.request().postDataJSON();
-      await route.fulfill({
-        json: envelope({
-          preview: {
-            adapter: "forgebadger-copilot",
-            env: {},
-            secretEnvNames: [],
-            changedFiles: [],
-            files: [],
-            internalDefault: {
-              scope: "user",
-              providerProfileId: "provider-profile-1",
-              modelProfileId: "model-1",
-              providerName: "Provider 01",
-              modelName: "Provider 01 Model",
-            },
-          },
-        }),
-      });
-      return;
-    }
-
     await route.fulfill({
       status: 404,
       json: {

@@ -22,7 +22,7 @@ export interface FeishuInboundCardAction {
   messageId?: string;
   senderOpenId: string;
   actionId: string;
-  /** Full button-value payload from the interactive card (copilot decisions ride here). */
+  /** Full button-value payload from an interactive card. */
   value?: Record<string, unknown>;
   laneKey: string;
 }

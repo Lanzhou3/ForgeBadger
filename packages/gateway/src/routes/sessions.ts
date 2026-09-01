@@ -9,55 +9,30 @@ import type { CommandRunner } from "../lib/dependency-check.js";
 import { validateProjectRoot } from "../lib/safe-resolve.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
 import { SessionRepository, type Session } from "../db/repositories/session-repository.js";
-import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
-import { ApiKeyRepository } from "../db/repositories/api-key-repository.js";
 import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
 import { SessionConflictError } from "../services/session-manager.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
+import type { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
 import type { CredentialMode } from "../config-generation/types.js";
 import { recordActivity } from "../services/activity-events.js";
 import { recordSessionSnapshot } from "../services/session-snapshots.js";
 import {
-  createClaudePortfolioWorkerLaunchConfiguration,
   createLaunchPlan,
   normalizeAdapter,
-  prepareAdapterLaunchExtras,
-  prepareClaudePortfolioWorkerLaunch,
-  validateSelfManagedAdapterCredentialBoundary
+  prepareAdapterLaunchExtras
 } from "../services/session-launch-plan.js";
 export {
-  createClaudePortfolioWorkerLaunchConfiguration,
   createLaunchPlan,
   normalizeAdapter,
-  prepareAdapterLaunchExtras,
-  prepareClaudePortfolioWorkerLaunch,
-  validateSelfManagedAdapterCredentialBoundary
+  prepareAdapterLaunchExtras
 };
-export type {
-  ClaudePortfolioWorkerLaunchConfiguration,
-  LaunchPlanInput
-} from "../services/session-launch-plan.js";
+export type { LaunchPlanInput } from "../services/session-launch-plan.js";
 
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
-  credentialMode: z.enum(["host_environment", "stored_encrypted_key"]),
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional(),
-  apiKeyId: z.string().min(1).optional(),
-  modelId: z.string().min(1).optional()
-}).superRefine((value, ctx) => {
-  if (value.credentialMode === "stored_encrypted_key" && !value.apiKeyId && !value.modelId) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["apiKeyId"],
-      message: "API key or provider-backed model is required for stored credentials"
-    });
-  }
-});
-
-const switchModelSchema = z.object({
-  modelId: z.string().min(1)
-});
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional()
+}).strict();
 
 const listSessionsQuerySchema = z.object({
   projectId: z.string().min(1).optional()
@@ -71,6 +46,7 @@ export function createSessionRoutes(
   db: Database,
   masterKey: string,
   sessionManager: InMemorySessionManager,
+  runtimeAuthorizationInvalidator: RuntimeAuthorizationInvalidator,
   eventBus?: ForgeBadgerEventBus,
   adapterCommandRunner?: CommandRunner
 ): Router {
@@ -104,7 +80,7 @@ export function createSessionRoutes(
       return;
     }
 
-    const { projectId, credentialMode, aiTool, apiKeyId, modelId } = parseResult.data;
+    const { projectId, aiTool } = parseResult.data;
     const projectRepo = new ProjectRepository(db, userId);
     const project = projectRepo.getById(projectId);
     if (!project) {
@@ -123,32 +99,6 @@ export function createSessionRoutes(
     if (!adapter) {
       res.status(400).json({ code: 1, message: "Unsupported project adapter" });
       return;
-    }
-    const credentialBoundary = validateSelfManagedAdapterCredentialBoundary({
-      adapter,
-      credentialMode,
-      apiKeyId,
-      modelId
-    });
-    if (!credentialBoundary.ok) {
-      res.status(400).json({ code: 1, message: credentialBoundary.message });
-      return;
-    }
-
-    if (modelId) {
-      const modelRepo = new ModelProviderRepository(db, userId, masterKey);
-      if (!modelRepo.getModelProfile(modelId)) {
-        res.status(404).json({ code: 1, message: "Model not found" });
-        return;
-      }
-    }
-
-    if (credentialMode === "stored_encrypted_key" && apiKeyId) {
-      const apiKeyRepo = new ApiKeyRepository(db, userId, masterKey);
-      if (!apiKeyRepo.getById(apiKeyId)) {
-        res.status(404).json({ code: 1, message: "API key not found" });
-        return;
-      }
     }
 
     const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner);
@@ -172,9 +122,7 @@ export function createSessionRoutes(
       name: project.name,
       aiTool: adapter,
       workingDir: project.path,
-      credentialMode,
-      ...(apiKeyId ? { apiKeyId } : {}),
-      ...(modelId ? { modelId } : {})
+      credentialMode: "host_environment"
     });
     recordSessionActivity(db, eventBus, userId, dbSession, "session_created", "info", `Session ${dbSession.name} created`);
 
@@ -189,15 +137,9 @@ export function createSessionRoutes(
     try {
       const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, project.path, dbSession.id);
       const launchPlan = createLaunchPlan({
-        db,
-        userId,
-        masterKey,
         adapter,
         projectRoot: project.path,
         sessionId: dbSession.id,
-        credentialMode,
-        ...(apiKeyId ? { apiKeyId } : {}),
-        ...(modelId ? { modelId } : {}),
         ...(pluginDirs.length > 0 ? { pluginDirs } : {})
       });
       const attachToken = randomUUID();
@@ -379,17 +321,6 @@ export function createSessionRoutes(
           (err as Error & { httpStatus?: number }).httpStatus = 400;
           throw err;
         }
-        const credentialBoundary = validateSelfManagedAdapterCredentialBoundary({
-          adapter,
-          credentialMode: dbSession.credentialMode,
-          ...(dbSession.apiKeyId ? { apiKeyId: dbSession.apiKeyId } : {}),
-          ...(dbSession.modelId ? { modelId: dbSession.modelId } : {})
-        });
-        if (!credentialBoundary.ok) {
-          const err = new Error(credentialBoundary.message);
-          (err as Error & { httpStatus?: number }).httpStatus = 400;
-          throw err;
-        }
         const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner);
         if (!launchStatus.launchEnabled) {
           const err = new Error(`${launchStatus.label} is not available for launch`);
@@ -405,15 +336,9 @@ export function createSessionRoutes(
 
         const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, dbSession.workingDir, dbSession.id);
         const launchPlan = createLaunchPlan({
-          db,
-          userId,
-          masterKey,
           adapter,
           projectRoot: dbSession.workingDir,
           sessionId: dbSession.id,
-          credentialMode: dbSession.credentialMode,
-          ...(dbSession.apiKeyId ? { apiKeyId: dbSession.apiKeyId } : {}),
-          ...(dbSession.modelId ? { modelId: dbSession.modelId } : {}),
           ...(pluginDirs.length > 0 ? { pluginDirs } : {})
         });
         const attachToken = randomUUID();
@@ -551,48 +476,6 @@ export function createSessionRoutes(
     }
   });
 
-  router.post("/:id/switch-model", (req, res) => {
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const parseResult = switchModelSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({ code: 1, message: "Invalid input" });
-      return;
-    }
-
-    const { modelId } = parseResult.data;
-    const modelRepo = new ModelProviderRepository(db, userId, masterKey);
-    const model = modelRepo.getModelProfile(modelId);
-    if (!model) {
-      res.status(404).json({ code: 1, message: "Model not found" });
-      return;
-    }
-
-    const sessionRepo = new SessionRepository(db, userId);
-    const dbSession = sessionRepo.getById(req.params.id);
-    if (!dbSession) {
-      res.status(404).json({ code: 1, message: "Session not found" });
-      return;
-    }
-    if (dbSession.aiTool === "codex") {
-      res.status(400).json({
-        code: 1,
-        message: "Codex sessions are subscription-managed; provider credentials and model overrides are not supported"
-      });
-      return;
-    }
-
-    const updated = sessionRepo.update(dbSession.id, { modelId });
-    recordSessionActivity(db, eventBus, userId, updated ?? dbSession, "model_switched", "info", `Model switched for ${dbSession.name}`, {
-      modelId
-    });
-
-    res.json({
-      code: 0,
-      data: { session: updated ? toSessionPayload(updated) : undefined },
-      message: ""
-    });
-  });
-
   router.delete("/:id", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const sessionRepo = new SessionRepository(db, userId);
@@ -624,6 +507,11 @@ export function createSessionRoutes(
     recordSessionActivity(db, eventBus, userId, dbSession, "session_deleted", "warning", `Session ${dbSession.name} deleted`);
     sessionManager.removeSessionOutput(req.params.id);
     sessionRepo.delete(req.params.id);
+    runtimeAuthorizationInvalidator.invalidate({
+      scope: "session",
+      userId,
+      sessionId: req.params.id
+    });
     eventBus?.emitEvent({
       type: "session_deleted",
       userId,
@@ -663,11 +551,24 @@ function recordSessionActivity(
   });
 }
 
-function toSessionPayload(session: Session, attachToken?: string): Omit<Session, "attachToken"> & {
+type SessionPayload = Omit<Session,
+  | "attachToken"
+  | "modelId"
+  | "apiKeyId"
+  | "credentialMode"
+> & {
   attachToken?: string;
   tmuxName: string | null;
-} {
-  const { attachToken: _attachToken, ...safe } = session;
+};
+
+function toSessionPayload(session: Session, attachToken?: string): SessionPayload {
+  const {
+    attachToken: _attachToken,
+    modelId: _modelId,
+    apiKeyId: _apiKeyId,
+    credentialMode: _credentialMode,
+    ...safe
+  } = session;
   return {
     ...safe,
     tmuxName: session.tmuxSession,

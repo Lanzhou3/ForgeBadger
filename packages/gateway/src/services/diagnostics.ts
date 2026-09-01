@@ -98,7 +98,7 @@ export function buildLocalDiagnosticsExport(
   input: LocalDiagnosticsExportInput
 ): LocalDiagnosticsExport {
   const now = input.now ?? new Date();
-  const summary = getDashboardSummary(input.db, input.userId, input.masterKey);
+  const summary = getDashboardSummary(input.db, input.userId);
   const modelProviderDiagnostics = buildModelProviderDiagnostics(input.db, input.userId, input.masterKey);
   return {
     generatedAt: now.toISOString(),

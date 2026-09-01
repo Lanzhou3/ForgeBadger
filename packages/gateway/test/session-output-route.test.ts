@@ -179,6 +179,20 @@ describe("session output route", () => {
     assert.equal(sessionManager.getSessionOutput(sessionId), undefined);
   });
 
+  it("rejects output reads for another user's live session", async () => {
+    const owner = await register("output-tenant-owner@example.com");
+    const other = await register("output-tenant-other@example.com");
+    const sessionId = createDbSession(owner);
+    await seedLiveSession(owner.userId, sessionId, ["must-not-be-returned\n"]);
+
+    const res = await fetch(`${baseUrl}/api/v1/sessions/${sessionId}/output`, {
+      headers: jsonHeaders(other.token)
+    });
+    const body = (await res.json()) as OutputBody;
+    assert.equal(res.status, 404);
+    assert.equal(JSON.stringify(body).includes("must-not-be-returned"), false);
+  });
+
   function createDbSession(auth: AuthContext): string {
     const project = new ProjectRepository(db, auth.userId).create({
       name: "Output Project",

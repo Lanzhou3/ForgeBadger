@@ -1,101 +1,23 @@
-## 1. Gate 1 Contract and Cutover Preparation
+## 1. Contract and inventory
 
-- [x] 1.1 Audit the current branch and the in-progress `add-project-manager-agent-control-loop` change; record the exact invariant mapping or conflict for every Project Manager record proposed for reuse.
-- [x] 1.2 Create a complete Legacy Copilot removal inventory covering Gateway route mounts, services, repositories, schema/migrations, events, schedulers, Web pages/components/types, tests, scripts, and documentation references.
-- [x] 1.3 Classify every inventory item as remove, retained shared foundation, or named Portfolio replacement; verify classifications with imports, route mounts, schema references, and Web navigation.
-- [x] 1.4 Define and review the legacy backup/export, checksum, retention, and disposable restore-test procedure without importing records into Portfolio Operations.
-- [x] 1.5 Add contract fixtures for Portfolio Request, ActionIntent, Evidence, Channel Action, safe event projection, and idempotency-key error responses.
-- [x] 1.6 Review the state-machine, authorization, and channel-action contract against repository security rules before creating persistence.
+- [x] 1.1 Confirm Copilot as the sole assistant and Portfolio Operations as fully retired.
+- [x] 1.2 Define historical migrations/schema declarations as the only allowed Portfolio persistence artifacts.
+- [x] 1.3 Inventory Portfolio-only files and mixed-file imports across Gateway, Web, tests, docs, and OpenSpec.
 
-## 2. Portfolio Persistence and State Gate
+## 2. Web retirement
 
-**Phase 2 boundary:** Persist the contract and State Gate only. Do not implement a scheduler/runner, CLI/tmux/adapter dispatch or terminal input, Feishu ingress/card/outbox delivery, Portfolio API/events, or Web behavior. Schema rows for future wakeup, assignment, channel, command, and delivery work have no Phase 2 runtime producer or consumer.
+- [x] 2.1 Remove `/portfolio`, its navigation entry, workspace, companion, components, hooks, clients, event handling, translations, and browser/unit tests.
+- [x] 2.2 Verify `/copilot` remains the native Copilot workspace and no Portfolio presentation is mounted globally.
 
-- [x] 2.1 Add tenant-scoped schema and migration(s) for Portfolio Requests, Intake Decisions, Project Dossiers, independent canonical `portfolio_work_items` (never legacy `project_manager_work_items`), Observation Profiles/Probes, Evidence, Risk Signals, Task Attempts, Task Packets, session assignments, Execution Authorizations, Workflow Wakeups, Heartbeat settings, Channel Bindings, Channel Actions, and delivery records. Include canonical ActionIntent records, command intents and observed dispatch receipts as separate records, Completion Candidates, immutable `portfolio_facts`, and scoped idempotency `portfolio_operation_records`; these persistence records do not activate the excluded Phase 2 runtimes.
-- [x] 2.2 Add indexes, foreign keys, uniqueness constraints, projection-version/CAS fields, idempotency keys, and lease-expiry fields required by the contract. Enable and verify SQLite foreign-key enforcement; for every applicable project-scoped relationship, require `FOREIGN KEY (user_id, project_id) REFERENCES projects(user_id, id)` (or the equivalently scoped Portfolio parent) and add the required parent `UNIQUE (user_id, id)` key. Enforce one active assignment lease per Task Attempt and per session, expected projection version for mutable aggregates, and `(user_id, operation, idempotency_key)` uniqueness with stored payload digest and replay result. Define the transaction boundary that atomically applies projection CAS, appends a fact, and writes any command/outbox intent.
-- [x] 2.3 Implement tenant-scoped repositories for the new records, including non-disclosing cross-tenant behavior and stable idempotent create/consume operations. All State Gate writes accept the expected projection version, enforce payload-digest-stable replay, and use one transaction for projection CAS, immutable fact append, and command/outbox intent creation; no repository method may dispatch, schedule, deliver, or call a CLI in Phase 2.
-- [x] 2.4 Implement immutable `portfolio_facts`/ledger append helpers and redacted audit serialization for decisions, ActionIntents, commands, dispatch receipts, Completion Candidates, evidence, claims, and deliveries. A successful State Gate mutation uses the same transaction for projection CAS, exactly one or more typed fact append(s), and the corresponding command/outbox intent; failed CAS, fact, or intent writes roll back the whole mutation. Facts are never updated or deleted through Portfolio repositories.
-- [x] 2.5 Implement the State Gate state-machine matrix for Portfolio Request, Work Item, Task Attempt, Execution Authorization, Workflow Wakeup, and Acceptance Decision records. Enumerate every valid edge and, for each edge, its permitted actor/owner authority, required precondition fact(s), expected projection version/CAS, idempotency operation, and terminal/invalid-edge behavior; routes, repositories, and client state cannot bypass this matrix.
-- [x] 2.6 Enforce Work Item transition preconditions: an observed, lease-valid dispatch receipt for `in_progress`; attributable blocker Evidence for `blocked`; a verified Completion Candidate plus required verification Evidence for `ready_for_review`; an accepted decision for `done`; and an owner-only cancellation decision. Each precondition must be tenant/project/attempt scoped and fact-backed rather than inferred from legacy Project Manager, session, tmux, browser, model, or channel state.
-- [x] 2.7 Add repository and State Gate tests for every valid transition, invalid transition, duplicate mutation, concurrent claim, idempotency replay, payload-drift rejection, and tenant-isolation case. Tests must verify `PRAGMA foreign_keys = ON`, reject cross-tenant composite project linkage, enforce one active attempt/session lease, prove `portfolio_facts` are immutable, assert an idempotency replay returns the stored result while the same key/operation with a different payload digest fails without mutation, and prove a failed CAS/fact/intent step cannot partially commit the transaction.
+## 3. Gateway retirement
 
-## 3. Intake, Dossiers, and Project Manager Workflow
+- [x] 3.1 Remove Portfolio routes, services, repositories, workers, scheduler, event projection, and Copilot tool integration.
+- [x] 3.2 Remove Portfolio dependencies from startup, server composition, sessions, hooks, adapter discovery, terminal WebSocket, and Feishu integration.
+- [x] 3.3 Preserve applied migrations and historical schema declarations without live readers or writers.
 
-- [x] 3.1 Implement Portfolio Project enrollment and Dossier services, including objective, owner, intended outcome, scope, and evidence-backed Observed State.
-- [x] 3.2 Implement immutable Web-originated Portfolio Request creation and timeline retrieval with correlation identifiers.
-- [x] 3.3 Implement Intake Decision creation, clear single-project automatic `todo` Work Item creation, and owner-decision handling for ambiguous, multi-project, missing-dossier, or scope-changing requests.
-- [x] 3.4 Integrate the existing Project Manager Work Item and ledger only through the audited invariant mapping; create a Portfolio-owned projection if existing persistence cannot uphold the State Gate contract.
-- [x] 3.5 Build deterministic request-to-work-item traceability queries and safe timeline DTOs.
-- [x] 3.6 Add intake, dossier, Work Item lifecycle, traceability, and tenant-isolation tests.
+## 4. Documentation and acceptance
 
-## 4. Governed Task Execution and Authorization
-
-- [x] 4.1 Implement deterministic Task Packet construction, source-version recording, digest validation, and immutable Task Attempt preparation.
-- [x] 4.2 Implement session-assignment lease acquisition, renewal, release, stale-lease rejection, and one-active-assignment constraints.
-- [x] 4.3 Define the adapter-facing semantic worker interface for readiness, dispatch, follow-up, interrupt, permission events, completion candidates, and bounded observations.
-- [x] 4.4 Implement conditional Claude `SessionStart` worker integration with a fixed authenticated readiness-forwarder and a distinct per-command/per-lease-generation HMAC worker ACK capability stored only as a digest and never exposed through connect, browser attach/WebSocket, or generic hook settings; default to `unverified_no_input`, keep unsupported adapters explicitly degraded, and reserve all real Claude/tmux evidence and verified-runtime enablement for Task 8.2.
-- [x] 4.5 Implement command-first, idempotent dispatch reconciliation whose `prepareDispatch` transaction atomically applies source/packet/lease CAS, canonical intent, authorization decision/consumption, command intent, expected worker signal, `dispatching`, and immutable facts; only after commit may the valid worker capability consume its bound ACK, submit exactly one canonical packet, and record a distinct receipt, with unknown-outcome reconciliation that never blindly resends.
-- [x] 4.6 Implement canonical ActionIntent construction and the three-tier Execution Authorization policy, including protected-action classification and expiry/consumption checks.
-- [x] 4.7 Implement versioned Skill registration/selection over server-owned Platform Tools; reject authority widening, unknown tools, and raw shell text.
-- [x] 4.8 Implement Completion Candidate and Acceptance Decision services that distinguish trusted evidence from candidate terminal/model assertions.
-- [x] 4.9 Add mocked/database integration tests with zero real CLI/tmux input for duplicate dispatch, packet drift, lease conflicts, stale approval, protected-action bypass, unsupported adapter capabilities, readiness-ACK binding/one-time use, attach-token ACK forgery, stale/out-of-order/wrong-generation ACKs, adapter/session mismatch, writer-fence rejection of browser raw terminal input and non-worker `sendInput`, fake worker writes followed by receipt-persistence failure or crash without a second write, and acceptance evidence thresholds.
-
-## 5. Evidence, Observations, and Durable Scheduling
-
-**Phase 5 boundary:** Implement only Gateway-internal, persisted-state reconciliation and fixed read-only V1 observations. Do not add a model runtime, generic hook/event trigger or producer-event identity contract, Feishu/Outbox delivery, terminal input/dispatch, or any Phase 6 Event Bus, HTTP API, WebSocket, or Web work.
-
-**Gate 1 implementation plan:** Follow [`phase-5-implementation-plan.md`](phase-5-implementation-plan.md) for the forward migration, repository/service ownership, Runtime dependency boundary, and fake-only test plan. It is planning only; all Phase 5 tasks below remain unchecked.
-
-- [ ] 5.1 Implement the closed V1 Observation Profile contract: only `platform_lifecycle_v1` (tenant persisted-state snapshot; no process) and `git_state_v1` (one server-owned non-shell Git recipe), each with `rootRef=project_root`, `argumentsJson={}`, project-root revalidation on every run, a 5-second timeout, 16 KiB ephemeral raw-capture cap, 1,024-character redacted persisted summary cap, and 5-minute/15-minute freshness windows respectively.
-- [ ] 5.2 Implement bounded Evidence persistence and Project Dossier reads that retain the latest source display status (`fresh`, `stale`, `unknown`, `timeout`, or `failed`) separately from a current-fact read; require that current-fact read for Intake, Task Packet, and Acceptance Decision gates.
-- [ ] 5.3 Implement advisory Risk Signal creation and enforce that it cannot call the State Gate or alter a Work Item or Acceptance Decision lifecycle.
-- [ ] 5.4 Persist immutable Task Attempt `tracking` (default `false`; only creation with `tracking=true` permits Wakeups) and implement durable Wakeups plus the shared Reconciliation Run ledger: source, source-record identity, idempotency slot, state, claim-token digest/60-second lease, attempt/budget, and safe result digest or stable error only. Implement 15-second ticks, batch size 20, coalescing, at most 3 retries/4 total claims, 60s/300s/1800s backoff, exhaustion, and restart recovery that records `unknown` before rescheduling only a fixed read-only observation.
-- [ ] 5.5 Implement user-scoped Portfolio Heartbeat settings with `enabled=false` by default, enabled cadence limited to 5–1,440 minutes, no recurring run when disabled, shared ledger/claim/idempotency rules, bounded no-change metadata, no notification, and no model call.
-- [ ] 5.6 Connect persisted-state `platform_lifecycle_v1`, fixed `git_state_v1`, tracking-eligible Workflow Wakeups, and enabled Heartbeats to the bounded reconciliation loop; reject generic lifecycle hook/event triggering and prevent reconciliation from dispatch, terminal input, model work, Feishu work, or delivery.
-- [ ] 5.7 Add fake-clock and restart tests for the fixed probe allowlist/root revalidation/caps, display-versus-current evidence reads, tracking default/immutability, due/overdue wakeups, 60-second lease contention, 15-second/20-item scheduling limit, 3-retry/4-claim backoff and exhaustion, `unknown` restart records, read-only-only rescheduling, advisory-only Risk Signals, disabled/no-change Heartbeat, and the no-Phase-6/no-model boundary.
-
-## 6. Portfolio API, Events, and Web Workflow
-
-**Phase 6 Gate 1 amendment (superseded presentation boundary):** `/portfolio` is the complete primary workspace. `/copilot` is retained as a Portfolio-only bookmark alias. The pet opens a Portfolio-only floating companion Dialog: submitted text MUST create a Portfolio Request, and acknowledgement/progress MUST come from that persisted Request's safe status rather than a legacy model-chat reply. The alias and Dialog MUST use only the restricted Portfolio API/read/event facade and Portfolio i18n, and MUST NOT restore a Copilot API route, runtime, provider loop, record access, Feishu handler, compatibility adapter, fallback reader, or dual write. They MUST not receive execution or terminal-write authority, and their feedback MUST exclude credentials, raw provider/terminal data, signed action material, and cross-tenant data. ServerDeps, routes, WebSocket publishers, and Web clients MUST NOT receive `PortfolioExecutionRuntime`, worker ACK/capabilities, worker dispatch ports, `sendInput`, tmux/node-pty, or any terminal writer. See [`phase-6-7-implementation-plan.md`](phase-6-7-implementation-plan.md). Fresh runtime tests, browser E2E, and smoke evidence remain deferred to the later integrated verification gate; this does not mark a task complete or record a passing result.
-
-- [ ] 6.1 Add authenticated `/api/v1/portfolio/**` routes for requests, intake decisions, dossiers, work items, attempts, authorizations, observations, risks, wakeups, heartbeat settings, and supported channel operations. Inject only the restricted Portfolio API/read/event facade into ServerDeps/routes; do not inject execution runtime, worker capabilities, or terminal writers.
-- [ ] 6.2 Validate every mutation with zod, enforce idempotency requirements, return the standard envelope, and publish stable domain error codes without leaking tenant data.
-- [ ] 6.3 Add safe `portfolio.*` Event Bus and WebSocket projection payloads with correlation IDs, ordering/version behavior, redaction, and reconnection semantics through the restricted event facade; WebSocket publishers never receive execution runtime, worker capability, or terminal-write access.
-- [ ] 6.4 Add `/portfolio` as the complete primary Portfolio Operations workspace; retain `/copilot` as its Portfolio-only alias. The pet opens a Portfolio-only floating companion Dialog whose text creates a Portfolio Request and whose timely feedback is the persisted Request's safe status. Use Portfolio i18n; do not treat it as a legacy model chat or couple any retained presentation to Legacy Copilot records, APIs, runtime, or provider behavior. The Dialog cannot receive execution/terminal-write authority or disclose credentials, raw provider/terminal data, signed action material, or cross-tenant data.
-- [ ] 6.5 Evolve the Project Manager board into the canonical workflow view: Request Inbox, Dossier, Work Item board, Attempt timeline, Evidence, Risk, Forecast, Authorization queue, and Heartbeat settings.
-- [ ] 6.6 Implement Web state/query clients, loading/empty/error states, permission-safe mutations, and responsive status-only mobile behavior.
-- [ ] 6.7 Add frontend unit tests and authenticated browser tests for request intake, owner decision, attempt preparation/dispatch, evidence/review, authorization, Heartbeat controls, and safe event updates.
-
-## 7. Native Feishu Channel Connector
-
-**Phase 7 Gate 1 amendment:** Add a forward migration for the verified provider-account registry and Portfolio channel bindings. The registry MUST globally uniquely assign `(provider, provider_account_id)` to one owning tenant, and an active binding MUST be unique for `(provider_account_id, external_identity, conversation_id)` and belong to that owner tenant. Use one Gateway-owned Feishu transport registry/selector for both WebSocket/long-connection and webhook ingress: it verifies exactly one provider account, then selects exactly one handler (legacy or Portfolio); Portfolio additionally requires exactly one active bound identity/conversation. Any missing, multiple, disabled, collision, or cross-tenant account/binding result fails closed. Portfolio MUST NOT create a second Feishu app/long-connection client, competing ingress callback, dual delivery path, or a handler race with Legacy Copilot. Fresh Feishu runtime/connection tests and smoke evidence are deferred to the later integrated verification gate; this does not mark a task complete or record a passing result.
-
-- [ ] 7.1 Add the append-only forward migration and tenant-scoped repository contract for the verified provider-account registry and Portfolio bindings: global `UNIQUE (provider, provider_account_id)` ownership, unique active `(provider_account_id, external_identity, conversation_id)` binding, and owner-tenant enforcement. Implement authenticated Feishu ingress through the shared transport registry/selector for both WebSocket/long-connection and webhook events: provider event-id idempotency and signature validation, exactly-one verified provider account, exactly-one legacy-or-Portfolio handler, then exactly-one tenant-scoped identity/allowed-conversation binding before the isolated Portfolio handler.
-- [ ] 7.2 Implement bound Feishu requirement capture that creates only Portfolio Requests and never interprets free text as terminal input or approval.
-- [ ] 7.3 Implement opaque signed, expiring, single-use Channel Actions that load and validate canonical stored decisions before atomic consumption.
-- [ ] 7.4 Implement durable Outbox delivery projection, deduplication, bounded retry, provider-result audit, and safe redacted summaries; the shared transport/handler boundary must prevent a Legacy Copilot and Portfolio path from delivering the same canonical Portfolio event.
-- [ ] 7.5 Add connector tests for provider-account global collision, account-owner mismatch, unbound/ambiguous ingress, invalid signature, duplicate event, forged/replayed/expired action, cross-tenant binding, no free-text approval, exactly-one account/binding/handler selection for both WebSocket and webhook ingress, no competing connection, and no duplicate delivery side effect. Execute fresh runtime/connection evidence only in the later integrated verification gate.
-
-## 8. Acceptance, Clean Cutover, and Removal
-
-**Current implementation note (2026-08-16):** The source-removal portion of
-Task 8.4 is complete for Gateway legacy Copilot logic: its route, runtime,
-data access, and legacy Feishu handler are removed, and Portfolio is the sole
-source-level API/runtime/data control plane. The Web deliberately retains
-`/portfolio` as the complete primary workspace, `/copilot` as its Portfolio-only
-alias, and a pet-triggered floating companion Dialog. The Dialog creates
-Portfolio Requests and renders only their persisted safe status; no retained
-surface may restore a Copilot API/runtime/data path, legacy model chat, or
-execution/terminal-write authority. Gate 2 static implementation review passed. The
-task checkbox remains open because historical Copilot tables/migrations/data
-are retained physically with no runtime access, and Task 8.1–8.7 integrated
-evidence, backup/restore, scans, and acceptance have not been completed. This
-note does not record a Clean Cutover acceptance.
-
-- [ ] 8.1 Run an end-to-end disposable-database path: Portfolio Request → Intake Decision → Work Item → Task Attempt → authorized dispatch → evidence → Completion Candidate → Acceptance Decision → Web/Feishu projection.
-- [ ] 8.2 Run safe real Claude/tmux evidence for the selected adapter; only this task may enable the verified input runtime after accepted evidence, and document capability caveats for other adapters without claiming unsupported automation.
-- [ ] 8.3 Execute the approved legacy backup/export and restore test; record checksum, restoration result, and evidence location.
-- [ ] 8.4 Complete the Legacy Copilot removal batch: unmount routes; remove Gateway runtime/data access, provider/conversation clients, tests, types, events, and schedulers; retain only the specified Portfolio-owned `/copilot` alias and pet-triggered floating companion Dialog. The Dialog creates Portfolio Requests and uses persisted safe Request status feedback with Portfolio i18n; it cannot restore legacy model chat/data/runtime or execution/terminal-write authority. Switch documentation and leave no runtime compatibility path.
-- [ ] 8.5 Run legacy-reference scans, migration verification, Gateway/Web tests, typechecks, builds, and relevant E2E suites; resolve every remaining inventory item.
-- [ ] 8.6 Perform Gate 2 implementation review and Gate 3 zero-trust acceptance, including negative tests for authorization bypass, cross-tenant access, duplicate dispatch, raw channel-to-terminal input, and enabled-by-default Heartbeat.
-- [ ] 8.7 Update phase tracking and operational documentation, then prepare an explicit, reviewable Cutover commit with fresh verification evidence.
+- [x] 4.1 Update current product, architecture, API, testing, operational, phase, and agent guidance to remove Portfolio as a live feature.
+- [x] 4.2 Run live-source Portfolio and DeepSeek Harness scans and classify all retained historical references.
+- [x] 4.3 Run relevant Gateway/Web tests, workspace typecheck/build, brand/operational validators, and a browser-level Copilot check.
+- [x] 4.4 Review the final diff for unrelated changes, regressions, and accidental destructive migration edits.

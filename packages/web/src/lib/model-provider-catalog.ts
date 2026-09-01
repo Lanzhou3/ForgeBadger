@@ -1,6 +1,6 @@
 import type { ProviderCatalogPreset, ProviderProfile } from "./api";
 
-export type ProviderCatalogAdapterFilter = "all" | "claude" | "opencode";
+export type ProviderCatalogAdapterFilter = "all" | "claude" | "opencode" | "codex" | "kimi";
 export type ProviderCatalogConfiguredFilter = "all" | "configured" | "not-configured";
 export type ProviderCatalogSourceFilter = "all" | "verified" | "models.dev";
 

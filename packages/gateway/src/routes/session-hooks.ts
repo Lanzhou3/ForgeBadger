@@ -8,7 +8,6 @@ import type { Database } from "../db/types.js";
 import type { Session } from "../db/repositories/session-repository.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import { recordActivity } from "../services/activity-events.js";
-import type { ClaudePortfolioWorker } from "../services/portfolio/claude-portfolio-worker.js";
 
 const claudeHookEventSchema = z.object({
   hook_event_name: z.string().optional(),
@@ -27,9 +26,6 @@ const wrappedClaudeNotificationSchema = z.object({
   sessionId: z.string().min(1),
   event: claudeHookEventSchema
 });
-const claudePortfolioWorkerStartSchema = z.object({
-  hook_event_name: z.literal("SessionStart")
-}).strict();
 
 interface ParsedClaudeHook {
   sessionId: string;
@@ -47,8 +43,7 @@ export interface ClaudeNotificationHookResult {
 
 export function createSessionHookRoutes(
   db: Database,
-  eventBus: ForgeBadgerEventBus,
-  claudePortfolioWorker?: ClaudePortfolioWorker
+  eventBus: ForgeBadgerEventBus
 ): Router {
   const router = Router();
 
@@ -101,22 +96,11 @@ export function createSessionHookRoutes(
     res.status(result.status).json(result.body);
   });
 
-  router.post("/claude-portfolio-worker/:sessionId", (req, res) => {
-    const result = handleClaudePortfolioWorkerSessionStart(
-      db,
-      req.params.sessionId,
-      req.body ?? {},
-      sessionHookHeader(req, "portfolio-worker-capability"),
-      claudePortfolioWorker
-    );
-    res.status(result.status).json(result.body);
-  });
-
   return router;
 }
 
 function sessionHookHeader(req: { header(name: string): string | undefined }, suffix: string): string | undefined {
-  return req.header(`x-forgebadger-${suffix}`) ?? req.header(`x-openforge-${suffix}`);
+  return req.header(`x-forgebadger-${suffix}`);
 }
 
 export function handleClaudeNotificationHook(
@@ -205,38 +189,6 @@ export function handleClaudeNotificationHook(
     }
   });
 
-  return { status: 200, body: { code: 0, data: { accepted: true }, message: "" } };
-}
-
-export function handleClaudePortfolioWorkerSessionStart(
-  db: Database,
-  sessionId: string,
-  body: unknown,
-  workerAckCapability: string | undefined,
-  worker: ClaudePortfolioWorker | undefined,
-): ClaudeNotificationHookResult {
-  if (!worker || !sessionId || !claudePortfolioWorkerStartSchema.safeParse(body).success) {
-    return { status: 400, body: { code: 1, message: "Invalid worker readiness input" } };
-  }
-  if (!workerAckCapability) {
-    return { status: 403, body: { code: 1, message: "Worker readiness rejected" } };
-  }
-  const session = drizzle(db)
-    .select({ session: sessions })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .get() as { session: Session } | undefined;
-  if (!session || session.session.aiTool !== "claude") {
-    return { status: 404, body: { code: 1, message: "Worker session not found" } };
-  }
-  const result = worker.forwardSessionStart({
-    userId: session.session.userId,
-    sessionId: session.session.id,
-    workerAckCapability
-  });
-  if (result.status !== "acknowledged") {
-    return { status: 403, body: { code: 1, message: "Worker readiness rejected" } };
-  }
   return { status: 200, body: { code: 0, data: { accepted: true }, message: "" } };
 }
 

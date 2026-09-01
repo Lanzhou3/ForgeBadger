@@ -34,15 +34,13 @@ describe("run-with-root-env", () => {
     assert.equal("UNDEFINED_VALUE" in env, false);
   });
 
-  it("maps legacy OpenForge variables to ForgeBadger names with new names winning", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-root-env-legacy-"));
+  it("does not synthesize ForgeBadger variables from unrelated prefixes", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-root-env-prefix-"));
     await writeFile(
       path.join(root, ".env"),
       [
-        "OPENFORGE_WEB_HOST=0.0.0.0",
-        "OPENFORGE_WEB_PORT=48733",
-        "OPENFORGE_PORT=48731",
-        "OPENFORGE_DB_PATH=/repo/openforge.db",
+        "OLD_PRODUCT_WEB_HOST=0.0.0.0",
+        "OLD_PRODUCT_WEB_PORT=48733",
         "FORGEBADGER_PORT=49831"
       ].join("\n")
     );
@@ -50,15 +48,14 @@ describe("run-with-root-env", () => {
     const env = await buildRootEnv({
       rootDir: root,
       env: {
-        OPENFORGE_WEB_PORT: "48734",
+        OLD_PRODUCT_WEB_PORT: "48734",
         FORGEBADGER_WEB_HOST: "127.0.0.1"
       }
     });
 
     assert.equal(env.FORGEBADGER_WEB_HOST, "127.0.0.1");
-    assert.equal(env.FORGEBADGER_WEB_PORT, "48734");
+    assert.equal(env.FORGEBADGER_WEB_PORT, undefined);
     assert.equal(env.FORGEBADGER_PORT, "49831");
-    assert.equal(env.FORGEBADGER_DB_PATH, "/repo/openforge.db");
   });
 
   it("builds direct and shell command invocations", () => {

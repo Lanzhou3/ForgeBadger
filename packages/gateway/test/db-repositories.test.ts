@@ -172,6 +172,13 @@ describe("db repositories", () => {
       assert.equal(repoA.markAllRead(), 2);
       assert.equal(repoA.unreadCount(), 0);
       assert.equal(repoB.unreadCount(), 1);
+      const updatedRows = db.prepare("SELECT updated_at FROM notifications WHERE user_id = ?")
+        .all(userA.id) as Array<{ updated_at: number }>;
+      assert.equal(
+        updatedRows.every((row) => row.updated_at < 100_000_000_000),
+        true,
+        "notification timestamps must use Unix seconds"
+      );
       assert.equal(repoA.clearAll(), 2);
       assert.equal(repoA.list().length, 0);
       assert.equal(repoB.list().length, 1);

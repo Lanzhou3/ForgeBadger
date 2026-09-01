@@ -1,5 +1,5 @@
 import type { TranslationKey } from "./i18n";
-import { readMigratedStorageValue, writeMigratedStorageValue, type BrandStorage } from "./brand-storage";
+import type { BrandStorage } from "./brand-storage";
 
 /**
  * Accent themes (shadcn/tweakcn-style): a curated palette that recolors the
@@ -32,7 +32,6 @@ export const ACCENT_THEMES: readonly AccentTheme[] = [
 ] as const;
 
 const ACCENT_STORAGE_KEY = "forgebadger.accent";
-const LEGACY_ACCENT_STORAGE_KEY = "openforge.accent";
 
 export function isAccentThemeId(value: string | null | undefined): value is string {
   return ACCENT_THEMES.some((theme) => theme.id === value);
@@ -44,7 +43,7 @@ export function getAccentTheme(id: string | null | undefined): AccentTheme {
 }
 
 export function readStoredAccent(storage: BrandStorage = window.localStorage): string {
-  const stored = readMigratedStorageValue(storage, ACCENT_STORAGE_KEY, LEGACY_ACCENT_STORAGE_KEY);
+  const stored = storage.getItem(ACCENT_STORAGE_KEY);
   return isAccentThemeId(stored) ? stored : DEFAULT_ACCENT_ID;
 }
 
@@ -54,6 +53,6 @@ export function applyAccentTheme(
 ): string {
   const themeId = isAccentThemeId(id) ? id : DEFAULT_ACCENT_ID;
   document.documentElement.dataset.accent = themeId;
-  writeMigratedStorageValue(storage, ACCENT_STORAGE_KEY, LEGACY_ACCENT_STORAGE_KEY, themeId);
+  storage.setItem(ACCENT_STORAGE_KEY, themeId);
   return themeId;
 }

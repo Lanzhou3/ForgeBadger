@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+import { Router } from "express";
 import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
@@ -27,17 +27,14 @@ import {
   type ProviderReadinessAdapter
 } from "../services/model-provider-readiness.js";
 import {
-  applyModelProviderConfig,
-  previewModelProviderConfig
-} from "../services/model-config-apply.js";
-import {
   fetchProviderModels as fetchProviderModelsFromEndpoint,
   type FetchedProviderModel,
   type FetchProviderModelsInput
 } from "../services/provider-model-fetch.js";
+import { getProviderCapabilities } from "../services/provider-capabilities.js";
 
 const adapterSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
-const providerAdapterSchema = z.enum(["claude", "opencode", "kimi"]);
+const providerAdapterSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
 const productTypeSchema = z.enum(["payg_api", "coding_plan", "token_plan", "subscription", "local"]);
 const createProviderSchema = z.object({
   catalogId: z.string().min(1).optional(),
@@ -66,16 +63,6 @@ const createCredentialSchema = z.object({
   plaintextSecret: z.string().min(1)
 });
 const rotateCredentialSchema = createCredentialSchema;
-const applySchema = z.object({
-  adapter: adapterSchema,
-  scope: z.enum(["project", "user-global"]).optional(),
-  projectRoot: z.preprocess(
-    (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
-    z.string().min(1).optional()
-  ),
-  modelProfileId: z.string().min(1).optional(),
-  credentialId: z.string().min(1).optional()
-});
 const endpointTestSchema = z.object({
   timeoutMs: z.number().int().min(100).max(15000).optional()
 });
@@ -105,13 +92,18 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
   // Rate-limit network-probing endpoints (they trigger real outbound requests
   // to provider endpoints, so a stolen JWT must not be usable to spray them).
   const probeLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 30 });
+  const globalProbeLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 300, keyFn: () => "global" });
   router.use("/:id/test", probeLimiter);
-  router.use("/:id/readiness", probeLimiter);
+  router.use("/:id/readiness", globalProbeLimiter, probeLimiter);
   router.use("/:id/models/sync", probeLimiter);
 
   router.get("/catalog", async (_req, res) => {
     const providers = await loadProviderCatalog();
     res.json({ code: 0, data: { providers }, message: "" });
+  });
+
+  router.get("/capabilities", (_req, res) => {
+    res.json({ code: 0, data: { adapters: getProviderCapabilities() }, message: "" });
   });
 
   router.get("/", (req, res) => {
@@ -152,6 +144,10 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       res.status(400).json({ code: 1, message: "Invalid provider payload" });
       return;
     }
+    if (parseResult.data.providerKey && isReservedProviderKey(parseResult.data.providerKey)) {
+      res.status(400).json({ code: 1, message: "Reserved provider keys can only be created from the verified catalog" });
+      return;
+    }
     const updateInput: Partial<CreateProviderProfileInput> = {};
     if (parseResult.data.name !== undefined) updateInput.name = parseResult.data.name;
     if (parseResult.data.providerKey !== undefined) updateInput.providerKey = parseResult.data.providerKey;
@@ -182,7 +178,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       if (isForeignKeyError(error)) {
         res.status(409).json({
           code: 1,
-          message: "Provider models are still referenced by a session and cannot be deleted"
+          message: "Provider is retained by historical records and cannot be deleted"
         });
         return;
       }
@@ -244,6 +240,10 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     const credential = selectCredential(repo, provider.id, parseResult.data.credentialId);
     if (parseResult.data.credentialId && !credential) {
       res.status(400).json({ code: 1, message: "Credential does not belong to the selected provider" });
+      return;
+    }
+    if (credential && credential.status !== "active") {
+      res.status(400).json({ code: 1, message: "An active provider credential is required to sync models" });
       return;
     }
 
@@ -360,7 +360,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       if (isForeignKeyError(error)) {
         res.status(409).json({
           code: 1,
-          message: "Model is still referenced by a session and cannot be deleted"
+          message: "Model is retained by historical records and cannot be deleted"
         });
         return;
       }
@@ -426,8 +426,21 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       res.status(400).json({ code: 1, message: "Credential does not belong to the selected provider" });
       return;
     }
-    repo.deleteCredential(credential.id);
-    res.json({ code: 0, data: {}, message: "" });
+    let disposition: "deleted" | "revoked" | "not_found";
+    try {
+      disposition = repo.deleteCredential(credential.id);
+    } catch (error) {
+      if (isForeignKeyError(error)) {
+        res.status(409).json({
+          code: 1,
+          message: "Credential is retained by historical records and cannot be deleted"
+        });
+        return;
+      }
+      res.status(500).json({ code: 1, message: "Failed to delete credential" });
+      return;
+    }
+    res.json({ code: 0, data: { disposition }, message: "" });
   });
 
   router.post("/:id/test", async (req, res) => {
@@ -477,14 +490,6 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       fetchProviderModels
     });
     res.json({ code: 0, data: { readiness }, message: "" });
-  });
-
-  router.post("/:id/preview-apply", async (req, res) => {
-    await handleApplyRequest({ db, masterKey, req, res, shouldApply: false });
-  });
-
-  router.post("/:id/apply", async (req, res) => {
-    await handleApplyRequest({ db, masterKey, req, res, shouldApply: true });
   });
 
   return router;
@@ -584,6 +589,9 @@ function createCustom(repo: ModelProviderRepository, input: z.infer<typeof creat
   if (!input.name || !input.providerKey || !input.authType || !input.apiFormat) {
     throw new Error("Custom provider requires name, providerKey, authType, and apiFormat");
   }
+  if (isReservedProviderKey(input.providerKey)) {
+    throw new Error("Reserved provider keys can only be created from the verified catalog");
+  }
   return repo.createProviderProfile({
     name: input.name,
     providerKey: input.providerKey,
@@ -598,84 +606,8 @@ function createCustom(repo: ModelProviderRepository, input: z.infer<typeof creat
   });
 }
 
-async function handleApplyRequest(input: {
-  db: Database;
-  masterKey: string;
-  req: Request;
-  res: Response;
-  shouldApply: boolean;
-}): Promise<void> {
-  const parseResult = applySchema.safeParse(input.req.body ?? {});
-  if (!parseResult.success) {
-    input.res.status(400).json({ code: 1, message: "Invalid apply payload" });
-    return;
-  }
-  const repo = repoFor(input.db, input.masterKey, input.req);
-  const providerId = input.req.params.id;
-  if (!providerId) {
-    input.res.status(404).json({ code: 1, message: "Provider not found" });
-    return;
-  }
-  const provider = repo.getProviderProfile(providerId);
-  if (!provider) {
-    input.res.status(404).json({ code: 1, message: "Provider not found" });
-    return;
-  }
-  if (parseResult.data.adapter === "codex") {
-    input.res.status(400).json({ code: 1, message: "Codex provider apply is disabled; Codex uses subscription SDK identity" });
-    return;
-  }
-  if (!provider.supportedAdapters.includes(parseResult.data.adapter)) {
-    input.res.status(400).json({ code: 1, message: "Provider does not support the selected adapter" });
-    return;
-  }
-  if (!parseResult.data.projectRoot && parseResult.data.scope !== "user-global") {
-    input.res.status(400).json({ code: 1, message: "Project path is required for project-scope provider apply" });
-    return;
-  }
-  const model = selectModel(repo, provider, parseResult.data.modelProfileId);
-  if (!model) {
-    input.res.status(parseResult.data.modelProfileId ? 400 : 404).json({
-      code: 1,
-      message: parseResult.data.modelProfileId
-        ? "Model does not belong to the selected provider"
-        : "Provider model not found"
-    });
-    return;
-  }
-  const credential = selectCredential(repo, provider.id, parseResult.data.credentialId);
-  if (parseResult.data.credentialId && !credential) {
-    input.res.status(400).json({ code: 1, message: "Credential does not belong to the selected provider" });
-    return;
-  }
-  const payload = {
-    projectRoot: parseResult.data.projectRoot ?? "",
-    adapter: parseResult.data.adapter,
-    scope: parseResult.data.scope ?? "project",
-    provider: {
-      id: provider.id,
-      providerKey: provider.providerKey,
-      baseUrl: provider.baseUrl,
-      anthropicBaseUrl: provider.anthropicBaseUrl,
-      openaiBaseUrl: provider.openaiBaseUrl,
-      authType: provider.authType,
-      apiFormat: provider.apiFormat,
-      opencodeNpm: provider.opencodeNpm
-    },
-    model: { id: model.id, modelId: model.modelId },
-    ...(credential ? { credential: { id: credential.id, envName: envNameFor(provider.providerKey, parseResult.data.adapter) } } : {})
-  };
-  try {
-    const result = input.shouldApply
-      ? await applyModelProviderConfig(payload)
-      : await previewModelProviderConfig(payload);
-    input.res.json({ code: 0, data: input.shouldApply ? { result } : { preview: result }, message: "" });
-  } catch (error) {
-    input.res.status(400).json({
-      code: 1,
-      message: error instanceof Error ? error.message : "Failed to apply provider config"
-    });
-  }
+function isReservedProviderKey(providerKey: string): boolean {
+  return ["openai", "ollama", "lmstudio"].includes(providerKey.trim().toLowerCase());
 }
 
 function selectModel(
@@ -735,12 +667,4 @@ function listPresetModels(
 function repoFor(db: Database, masterKey: string, req: unknown): ModelProviderRepository {
   const userId = (req as unknown as AuthenticatedRequest).userId;
   return new ModelProviderRepository(db, userId, masterKey);
-}
-
-function envNameFor(providerKey: string, adapter: string): string {
-  if (adapter === "claude") return "ANTHROPIC_AUTH_TOKEN";
-  const normalized = providerKey.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
-  if (normalized === "ANTHROPIC") return "ANTHROPIC_API_KEY";
-  if (normalized === "OPENAI") return "OPENAI_API_KEY";
-  return `${normalized}_API_KEY`;
 }

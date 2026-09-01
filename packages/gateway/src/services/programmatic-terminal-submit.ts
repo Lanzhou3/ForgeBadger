@@ -8,6 +8,17 @@ export const PROGRAMMATIC_SUBMIT_STAGING_FAILED = "PROGRAMMATIC_SUBMIT_STAGING_F
 export const PROGRAMMATIC_SUBMIT_UNSAFE_INPUT = "PROGRAMMATIC_SUBMIT_UNSAFE_INPUT";
 export const PROGRAMMATIC_SUBMIT_INDETERMINATE = "PROGRAMMATIC_SUBMIT_INDETERMINATE";
 
+export interface ProgrammaticConsumptionOptions {
+  timeoutMs: number;
+  intervalMs: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export const DEFAULT_PROGRAMMATIC_CONSUMPTION: Readonly<ProgrammaticConsumptionOptions> = Object.freeze({
+  timeoutMs: 4_000,
+  intervalMs: 300
+});
+
 const UNSAFE_PROGRAMMATIC_CONTROL = /[\u0000-\u0008\u000b\u000c\u000d-\u001f\u007f-\u009f]/u;
 
 export function assertSafeProgrammaticMessage(message: string): void {
@@ -147,4 +158,22 @@ export function isProgrammaticTaskConsumed(
 ): boolean {
   if (normalizeComparable(currentPane) === normalizeComparable(stagedPane)) return false;
   return !composerContainsNeedle(adapter, currentPane, needle);
+}
+
+/** Polls only the selected adapter's composer state; it owns no dispatch or terminal authority. */
+export async function confirmProgrammaticTaskConsumed(
+  capture: () => Promise<string>,
+  adapter: AdapterId,
+  stagedPane: string,
+  needle: string,
+  options: ProgrammaticConsumptionOptions
+): Promise<boolean> {
+  if (needle === "") return false;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const deadline = Date.now() + options.timeoutMs;
+  for (;;) {
+    if (isProgrammaticTaskConsumed(adapter, stagedPane, await capture(), needle)) return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(options.intervalMs);
+  }
 }

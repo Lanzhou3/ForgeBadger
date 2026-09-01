@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import { ClaudeCodeSource } from "../src/services/usage/claude-code-source.js";
 import { CodexSource } from "../src/services/usage/codex-source.js";
+import { KimiSource } from "../src/services/usage/kimi-source.js";
 import { OpenCodeSource } from "../src/services/usage/opencode-source.js";
 import { TokenUsageRepository, type TokenUsageSummary } from "../src/db/repositories/token-usage-repository.js";
 import { UserRepository } from "../src/db/repositories/index.js";
@@ -400,6 +401,167 @@ describe("CodexSource", () => {
     } finally {
       if (original === undefined) delete process.env.CODEX_HOME;
       else process.env.CODEX_HOME = original;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Kimi fixture
+// ---------------------------------------------------------------------------
+
+function writeKimiFixture(root: string, agent: string, lines: string[]): string {
+  const agentDir = path.join(
+    root,
+    "sessions",
+    "wd_forgebadger_abc123",
+    "session_kimi-1",
+    "agents",
+    agent
+  );
+  mkdirSync(agentDir, { recursive: true });
+  const file = path.join(agentDir, "wire.jsonl");
+  writeFileSync(file, lines.join("\n"));
+  return file;
+}
+
+function writeKimiStateJson(root: string): void {
+  const sessionDir = path.join(root, "sessions", "wd_forgebadger_abc123", "session_kimi-1");
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(
+    path.join(sessionDir, "state.json"),
+    JSON.stringify({ id: "session_kimi-1", cwd: "/Users/lanzhou/Project/ForgeBadger" })
+  );
+}
+
+const kimiUsageRecord = (
+  time: number,
+  usage: { inputOther: number; output: number; inputCacheRead: number; inputCacheCreation: number },
+  overrides: Record<string, unknown> = {}
+) =>
+  JSON.stringify({
+    type: "usage.record",
+    agentId: "main",
+    model: "kimi-code/k3",
+    usage,
+    usageScope: "turn",
+    time,
+    ...overrides
+  });
+
+describe("KimiSource", () => {
+  it("extracts turn-scope usage records with state.json cwd", () => {
+    const root = tempDir();
+    writeKimiStateJson(root);
+    writeKimiFixture(root, "main", [
+      kimiUsageRecord(1788105370568, { inputOther: 15723, output: 226, inputCacheRead: 11520, inputCacheCreation: 0 }),
+      kimiUsageRecord(1788105374421, { inputOther: 978, output: 97, inputCacheRead: 27179, inputCacheCreation: 40 }),
+      // Cumulative session snapshots must be skipped (would double count).
+      kimiUsageRecord(1788105375000, { inputOther: 2604, output: 1570, inputCacheRead: 210944, inputCacheCreation: 0 }, { usageScope: "session" }),
+      // All-zero usage carries nothing and must be skipped.
+      kimiUsageRecord(1788105376000, { inputOther: 0, output: 0, inputCacheRead: 0, inputCacheCreation: 0 }),
+      // Non-usage events must be ignored.
+      JSON.stringify({ type: "step.begin", agentId: "main", time: 1788105377000 })
+    ]);
+
+    const original = process.env.KIMI_CODE_HOME;
+    process.env.KIMI_CODE_HOME = root;
+    try {
+      const source = new KimiSource();
+      const result = source.scan(null);
+      assert.equal(result.records.length, 2);
+      const [first, second] = result.records;
+      assert.equal(first.adapter, "kimi");
+      assert.equal(first.sessionId, "session_kimi-1");
+      assert.equal(first.projectPath, "/Users/lanzhou/Project/ForgeBadger");
+      assert.equal(first.modelId, "kimi-code/k3");
+      assert.equal(first.inputTokens, 15723);
+      assert.equal(first.outputTokens, 226);
+      assert.equal(first.cacheReadTokens, 11520);
+      assert.equal(first.cacheWriteTokens, 0);
+      assert.equal(first.reasoningTokens, 0);
+      assert.equal(first.occurredAt.getTime(), 1788105370568);
+      assert.match(first.requestId, /wire\.jsonl@\d+$/);
+      assert.equal(second.cacheWriteTokens, 40);
+
+      // Watermark: unchanged file yields no duplicates on the next scan.
+      const again = source.scan(result.nextWatermark);
+      assert.equal(again.records.length, 0);
+    } finally {
+      if (original === undefined) delete process.env.KIMI_CODE_HOME;
+      else process.env.KIMI_CODE_HOME = original;
+    }
+  });
+
+  it("collects subagent wire files from the same session", () => {
+    const root = tempDir();
+    writeKimiStateJson(root);
+    writeKimiFixture(root, "main", [
+      kimiUsageRecord(1788105370568, { inputOther: 1000, output: 100, inputCacheRead: 0, inputCacheCreation: 0 })
+    ]);
+    writeKimiFixture(root, "agent-0", [
+      kimiUsageRecord(1788105370569, { inputOther: 7476, output: 245, inputCacheRead: 15872, inputCacheCreation: 0 }, { agentId: "agent-0" })
+    ]);
+
+    const original = process.env.KIMI_CODE_HOME;
+    process.env.KIMI_CODE_HOME = root;
+    try {
+      const source = new KimiSource();
+      const result = source.scan(null);
+      assert.equal(result.records.length, 2);
+      // Distinct request ids even though both files are named wire.jsonl.
+      assert.notEqual(result.records[0]?.requestId, result.records[1]?.requestId);
+    } finally {
+      if (original === undefined) delete process.env.KIMI_CODE_HOME;
+      else process.env.KIMI_CODE_HOME = original;
+    }
+  });
+
+  it("re-parses a changed file without duplicating request ids", () => {
+    const root = tempDir();
+    writeKimiStateJson(root);
+    const file = writeKimiFixture(root, "main", [
+      kimiUsageRecord(1788105370568, { inputOther: 100, output: 10, inputCacheRead: 0, inputCacheCreation: 0 })
+    ]);
+
+    const original = process.env.KIMI_CODE_HOME;
+    process.env.KIMI_CODE_HOME = root;
+    try {
+      const source = new KimiSource();
+      const first = source.scan(null);
+      assert.equal(first.records.length, 1);
+      const firstRequestId = first.records[0]!.requestId;
+
+      writeFileSync(
+        file,
+        [
+          kimiUsageRecord(1788105370568, { inputOther: 100, output: 10, inputCacheRead: 0, inputCacheCreation: 0 }),
+          kimiUsageRecord(1788105371000, { inputOther: 200, output: 20, inputCacheRead: 0, inputCacheCreation: 0 })
+        ].join("\n")
+      );
+      const now = Date.now();
+      utimesSync(file, now / 1000, now / 1000);
+
+      const second = source.scan(first.nextWatermark);
+      assert.equal(second.records.length, 2);
+      assert.equal(second.records[0]!.requestId, firstRequestId);
+      assert.equal(second.records[1]!.inputTokens, 200);
+    } finally {
+      if (original === undefined) delete process.env.KIMI_CODE_HOME;
+      else process.env.KIMI_CODE_HOME = original;
+    }
+  });
+
+  it("handles a missing sessions directory gracefully", () => {
+    const root = tempDir();
+    const original = process.env.KIMI_CODE_HOME;
+    process.env.KIMI_CODE_HOME = root;
+    try {
+      const source = new KimiSource();
+      const result = source.scan(null);
+      assert.deepEqual(result.records, []);
+    } finally {
+      if (original === undefined) delete process.env.KIMI_CODE_HOME;
+      else process.env.KIMI_CODE_HOME = original;
     }
   });
 });

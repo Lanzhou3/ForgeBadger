@@ -14,7 +14,8 @@ Phase 8 first-user readiness handoff is
 `docs/reports/v1.1-readiness-closeout-2026-05-21.md`; use it with
 `docs/TRIAL-CHECKLIST.md` and `docs/SUPPORT-DIAGNOSTICS.md` when routing trial
   support. The matrix remains the detailed manual/live gate source for live
-  provider, physical Windows/WSL, and Feishu bot long-connection evidence.
+  provider, physical Windows native psmux/WSL tmux, and Feishu bot
+  long-connection evidence.
 
 Run this checklist before asking a user to try the local console, or when a
 broader maintainer acceptance pass is needed. Use a disposable project
@@ -53,9 +54,33 @@ therefore takes precedence over the same key in `.env`.
 
 Open `http://127.0.0.1:48732`.
 
-Windows terminal acceptance must be run from WSL. Native Windows can be used
-for management UI checks, but it is not accepted as evidence for tmux-backed
-browser terminal sessions.
+Windows terminal acceptance has two explicit runtime variants: native Windows
+uses psmux 3.3.8 or newer over ConPTY; WSL uses tmux 3.2 or newer. Native psmux
+code/unit coverage is not acceptance evidence by itself. The external gate
+remains `Caveat` until a physical Windows run exercises the browser terminal
+and a real AI CLI through attach, input/output, resize, reconnect, Gateway
+restart recovery, stop, and cleanup.
+
+Before starting on the selected host:
+
+```text
+macOS/Linux/WSL: tmux -V
+native Windows:  psmux -V
+all platforms:   forgebadger doctor
+```
+
+On native Windows, install a missing runtime with
+`winget install --id marlocarlo.psmux --exact --source winget`, or upgrade an
+older runtime with
+`winget upgrade --id marlocarlo.psmux --exact --source winget`. For first-run
+prompt coverage, confirm `forgebadger start`/`init` defaults to No, accepts only
+explicit `y`/`yes` in a TTY outside CI, and rechecks after installation. Do not
+expect npm `postinstall` or `forgebadger doctor` to install system software.
+If readiness is still false, confirm `start`/`init` return non-zero and do not
+create runtime/project state or start Gateway/Web. Against an absent disposable
+state directory, confirm `doctor` reports `(not initialized)` and leaves the
+path absent. Direct Gateway source startup must likewise fail before account
+recovery, database/session recovery, or listen side effects.
 
 ## 2. Auth And Shell
 
@@ -145,60 +170,21 @@ permission prompt event.
 - Start or reconnect a session and confirm the snapshot list changes after
   Gateway records session state.
 
-## 9. Copilot
+## 9. Native Copilot
 
-- Maintainers can run the live provider harness before or during manual smoke:
-
-  ```bash
-  pnpm smoke:copilot-provider
-  ```
-
-  Without `FORGEBADGER_COPILOT_PROVIDER_SMOKE_API_KEY` or provider-specific
-  disposable credentials, the harness records a skipped result. To require live
-  evidence, set `FORGEBADGER_COPILOT_PROVIDER_SMOKE_REQUIRE=1` plus
-  `FORGEBADGER_COPILOT_PROVIDER_SMOKE_PROVIDER`, `FORGEBADGER_COPILOT_PROVIDER_SMOKE_MODEL`,
-  and a disposable API key. The command must not print the plaintext key.
-  Set `FORGEBADGER_COPILOT_PROVIDER_SMOKE_API_KEY` in your shell or secret
-  manager before running the command. OpenAI example:
-
-  ```bash
-  FORGEBADGER_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
-  FORGEBADGER_COPILOT_PROVIDER_SMOKE_PROVIDER=openai \
-  FORGEBADGER_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
-  pnpm smoke:copilot-provider
-  ```
-
-  Anthropic example:
-
-  ```bash
-  FORGEBADGER_COPILOT_PROVIDER_SMOKE_REQUIRE=1 \
-  FORGEBADGER_COPILOT_PROVIDER_SMOKE_PROVIDER=anthropic \
-  FORGEBADGER_COPILOT_PROVIDER_SMOKE_MODEL=<disposable-test-model> \
-  pnpm smoke:copilot-provider
-  ```
-
-  Record only the redacted JSON result, provider name, model id, pass/fail
-  status, and any sanitized failure reason.
-  For Phase 6 evidence reports, use only disposable or rotatable credentials
-  and copy only redacted JSON or public summary fields into
-  `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`, never plaintext
-  keys. Keep the live-provider row as `Caveat` or `Blocked` unless a disposable
-  live run succeeds.
-- Configure a disposable OpenAI or Anthropic provider profile with an active
-  model and active test credential.
-- Open `/copilot` from the sidebar.
-- Ask Copilot to diagnose project or session launch readiness.
-- Confirm the answer cites safe ForgeBadger state such as adapter discovery,
-  dashboard health, recent activity, project detail, session detail, or
-  diagnostics summary.
-- If Copilot proposes an action, confirm it appears as a pending action before
-  approval and that approve/reject updates the run without duplicate
-  submission.
-- If Copilot proposes a memory write, approve or reject it and confirm the
-  prompt, stored memory text, and visible details do not expose pasted secrets.
-- Confirm the page does not expose terminal input, raw shell execution,
-  filesystem write controls, automatic tmux input, or Codex app-server `/turn`
-  input.
+- Open `/copilot` from the sidebar and confirm conversation history, model
+  status, memory, tool activity, and approval UI render.
+- Confirm there is no Portfolio Operations navigation item and `/portfolio`
+  does not render an application workspace.
+- Send a bounded message through Copilot and confirm the request uses
+  `/api/v1/copilot/**` and the Gateway-owned runtime.
+- Exercise one approval-gated action and confirm free-form chat does not approve
+  it, duplicate decisions do not duplicate side effects, and rejection is
+  persisted.
+- Confirm Copilot and event payloads never expose credentials, raw provider
+  bodies, terminal transcripts, or cross-tenant data.
+- Confirm Feishu account/configuration administration works independently and
+  no Feishu message is routed into Copilot or terminal input.
 
 ## 10. Pass Criteria
 
@@ -210,20 +196,20 @@ Pass only when:
 - Terminal attach, refresh reconnect, stop, restart, and delete behavior match
   the UI state.
 - Permission notification smoke produces both notification and activity rows.
-- Copilot can answer with safe platform state when a disposable provider,
-  active model, and credential are configured, or any skipped Copilot step
-  records the provider/environment reason.
+- Copilot conversation, approval, memory, and safe event behavior match the canonical persisted state.
 - Any skipped step has a concrete environment reason.
 
 ## 11. Automation Boundary
 
-Automated CI can cover workspace tests, builds, npm package smoke, Provider
-regression, mocked Copilot page behavior, and the mocked Codex Background Tasks
-Web smoke. It cannot replace these manual checks:
+Automated CI can cover workspace tests, builds, npm package smoke, provider
+regression, native Copilot/Feishu account tests, and authenticated Copilot Web
+smoke. It cannot replace these manual checks:
+
+The current CI and `pnpm smoke:npm` runtime path is Ubuntu/Linux with tmux;
+neither command is native Windows psmux/ConPTY coverage.
 
 - real browser terminal attach, input/output, resize, refresh, and reconnect;
 - real Claude Code permission prompt behavior;
-- live Copilot prompt behavior against a disposable provider credential;
 - real Feishu bot long-connection/WebSocket receive, routing, reply or
   pending-action, and reconnect behavior; automated signed-route regressions,
   `pnpm smoke:feishu-bot-websocket`, authenticated `/bot-websocket/*` smoke
@@ -234,8 +220,10 @@ Web smoke. It cannot replace these manual checks:
   `pnpm evidence:feishu-bot-live-audit -- <report.json>` and
   `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
   <report.md>` before maintainer review;
-- physical Windows native versus WSL behavior;
+- physical Windows native ConPTY/psmux versus WSL tmux behavior;
 - local operator review that diagnostics and logs do not contain secrets.
 
-Record the host OS, shell, `forgebadger doctor` output, tmux version, Claude Code
-version, and any skipped steps in `docs/TRIAL-CHECKLIST.md`.
+Record the host OS, shell, `forgebadger doctor` output, selected runtime and
+version (`psmux -V` or `tmux -V`), AI CLI version, and any skipped steps in
+`docs/TRIAL-CHECKLIST.md`. Keep output bounded and redacted; do not attach raw
+terminal transcripts.

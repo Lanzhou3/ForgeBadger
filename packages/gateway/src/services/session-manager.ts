@@ -6,10 +6,6 @@ import { isAdapterId, type AdapterId } from "./adapter-discovery.js";
 import type { TmuxClient } from "./tmux.js";
 import type { ForgeBadgerEventBus } from "./event-bus.js";
 import { SessionOutputRing } from "./session-output-buffer.js";
-import type {
-  PortfolioSessionInputGate,
-  PortfolioWorkerInputCapability
-} from "./portfolio/session-input-gate.js";
 import {
   assertSafeProgrammaticMessage,
   composerContainsStagedTask,
@@ -80,7 +76,7 @@ export interface RecoveryResult {
 
 export interface SessionManagerOptions {
   tmuxPrefix?: string;
-  sessionInputGate?: PortfolioSessionInputGate;
+  runtimeInputAuthorizer?: (session: Readonly<GateASession>) => void;
   programmaticSubmitSettleMs?: Partial<Record<AdapterId, number>>;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -125,7 +121,7 @@ export class InMemorySessionManager {
   private readonly sessions = new Map<string, GateASession>();
   private readonly sessionOutputs = new Map<string, SessionOutputRing>();
   private readonly tmuxPrefix: string;
-  private readonly sessionInputGate: PortfolioSessionInputGate | undefined;
+  private readonly runtimeInputAuthorizer: ((session: Readonly<GateASession>) => void) | undefined;
   private readonly programmaticSubmitSettleMs: Readonly<Record<AdapterId, number>>;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly sessionLocks = new Map<string, Promise<unknown>>();
@@ -138,7 +134,7 @@ export class InMemorySessionManager {
     options: SessionManagerOptions = {}
   ) {
     this.tmuxPrefix = normalizeTmuxPrefix(options.tmuxPrefix);
-    this.sessionInputGate = options.sessionInputGate;
+    this.runtimeInputAuthorizer = options.runtimeInputAuthorizer;
     this.programmaticSubmitSettleMs = {
       ...DEFAULT_PROGRAMMATIC_SETTLE_MS,
       ...options.programmaticSubmitSettleMs
@@ -259,7 +255,7 @@ export class InMemorySessionManager {
   async attachExistingSession(input: AttachExistingSessionInput): Promise<GateASession> {
     const liveTmuxSessions = await this.tmux.listSessions();
     if (!liveTmuxSessions.includes(input.tmuxName)) {
-      throw new Error(`tmux session not found: ${input.tmuxName}`);
+      throw new Error(`terminal multiplexer session not found: ${input.tmuxName}`);
     }
 
     // Verify the tmux session belongs to this ForgeBadger session before adopting
@@ -267,14 +263,14 @@ export class InMemorySessionManager {
     // session id or a stale attach token (hook auth break).
     if (this.tmux.showEnvironment) {
       const env = await this.tmux.showEnvironment(input.tmuxName);
-      const storedSessionId = env.FORGEBADGER_SESSION_ID ?? env.OPENFORGE_SESSION_ID;
+      const storedSessionId = env.FORGEBADGER_SESSION_ID;
       if (storedSessionId && storedSessionId !== input.sessionId) {
-        throw new Error(`tmux session belongs to another ForgeBadger session: ${storedSessionId}`);
+        throw new Error(`terminal multiplexer session belongs to another ForgeBadger session: ${storedSessionId}`);
       }
-      const storedToken = env.FORGEBADGER_ATTACH_TOKEN ?? env.OPENFORGE_ATTACH_TOKEN;
+      const storedToken = env.FORGEBADGER_ATTACH_TOKEN;
       const requestedToken = input.attachToken ?? "";
       if (storedToken && requestedToken && storedToken !== requestedToken) {
-        throw new Error("tmux session attach token mismatch");
+        throw new Error("terminal multiplexer session attach token mismatch");
       }
     }
 
@@ -412,24 +408,12 @@ export class InMemorySessionManager {
     await this.tmux.resizeWindow?.(session.tmuxName, cols, rows);
   }
 
-  /**
-   * Direct callers may write only when the session has no active Portfolio
-   * assignment. A worker must present the gate-issued, one-use capability.
-   */
-  async sendInput(
-    id: string,
-    data: string,
-    capability?: PortfolioWorkerInputCapability
-  ): Promise<void> {
+  async sendInput(id: string, data: string): Promise<void> {
     const session = this.requireSession(id);
-    if (capability) {
-      this.sessionInputGate?.assertWorkerInputAllowed(session, capability);
-    } else {
-      this.sessionInputGate?.assertDirectInputAllowed(session);
-    }
     if (!this.tmux.sendInput) {
-      throw new Error("tmux input is not supported");
+      throw new Error("terminal multiplexer input is not supported");
     }
+    this.assertRuntimeInputAuthorized(session);
     await this.tmux.sendInput(session.tmuxName, data);
   }
 
@@ -440,7 +424,6 @@ export class InMemorySessionManager {
     assertSafeProgrammaticMessage(input.message);
     return this.runExclusive(id, async () => {
       const session = this.requireSession(id);
-      this.sessionInputGate?.assertDirectInputAllowed(session);
       const launchAdapter = adapterFromLaunchCommand(session.launchPlan.command);
       if (launchAdapter !== input.adapter) {
         throw new Error(PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH);
@@ -449,7 +432,7 @@ export class InMemorySessionManager {
         throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
       }
       if (!this.tmux.inspectPane || !this.tmux.stageProgrammaticInput || !this.tmux.pressEnter) {
-        throw new Error("tmux programmatic input is not supported");
+        throw new Error("terminal multiplexer programmatic input is not supported");
       }
 
       const before = await this.tmux.inspectPane(session.tmuxName);
@@ -461,6 +444,10 @@ export class InMemorySessionManager {
       if (needle === "") {
         throw new Error(PROGRAMMATIC_SUBMIT_STAGING_FAILED);
       }
+      // Pane inspection may await long enough for the binding to be revoked or
+      // host privilege to change. This is the final synchronous gate before
+      // the first terminal write, so pre-write rejection remains retry-safe.
+      this.assertRuntimeInputAuthorized(session);
       // Once staging starts, tmux may already have received some or all bytes.
       // Any later failure is therefore indeterminate and must never be exposed
       // as a safe-to-retry pre-write rejection.
@@ -477,6 +464,7 @@ export class InMemorySessionManager {
           throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
         }
 
+        this.assertRuntimeInputAuthorized(session);
         await this.tmux.pressEnter(session.tmuxName);
         return { adapter: input.adapter, needle, stagedPane: staged.content };
       } catch {
@@ -485,9 +473,8 @@ export class InMemorySessionManager {
     });
   }
 
-  assertBrowserInputAllowed(id: string): void {
-    const session = this.requireSession(id);
-    this.sessionInputGate?.assertBrowserInputAllowed(session);
+  private assertRuntimeInputAuthorized(session: GateASession): void {
+    this.runtimeInputAuthorizer?.(session);
   }
 
   async recoverForgeBadgerSessions(input: RecoverSessionsInput): Promise<RecoveryResult> {
@@ -580,7 +567,7 @@ function adapterFromLaunchCommand(command: string): AdapterId | undefined {
   return isAdapterId(executable) ? executable : undefined;
 }
 
-export function buildTmuxName(userId: string, sessionId: string, tmuxPrefix = "of-"): string {
+export function buildTmuxName(userId: string, sessionId: string, tmuxPrefix = "fb-"): string {
   return `${normalizeTmuxPrefix(tmuxPrefix)}${shortId(userId)}-${sanitizeId(sessionId)}`;
 }
 
@@ -596,9 +583,9 @@ function isForgeBadgerTmuxName(tmuxName: string, tmuxPrefix: string): boolean {
   return tmuxName.startsWith(tmuxPrefix);
 }
 
-function normalizeTmuxPrefix(value = "of-"): string {
+function normalizeTmuxPrefix(value = "fb-"): string {
   const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, "");
-  return sanitized || "of-";
+  return sanitized || "fb-";
 }
 
 function fallbackLaunchPlan(cwd: string, sessionId: string): LaunchPlan {

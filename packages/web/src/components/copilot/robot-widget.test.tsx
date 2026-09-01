@@ -4,10 +4,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 
 import { LanguageProvider } from "@/hooks/use-language";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
-import {
-  LEGACY_ROBOT_CORNER_STORAGE_KEY,
-  ROBOT_CORNER_STORAGE_KEY,
-} from "@/lib/pixel-robot";
 import { RobotWidget } from "@/components/copilot/robot-widget";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -105,16 +101,6 @@ describe("RobotWidget activation", () => {
     expect(onActivate).toHaveBeenCalledTimes(1);
     // The click no longer navigates; the host owns the chat panel.
     expect(routerPushMock).not.toHaveBeenCalled();
-  });
-
-  it("migrates the legacy robot corner on mount", async () => {
-    window.localStorage.setItem(LEGACY_ROBOT_CORNER_STORAGE_KEY, "top-left");
-
-    renderWidget();
-    await robotButton();
-
-    expect(window.localStorage.getItem(ROBOT_CORNER_STORAGE_KEY)).toBe("top-left");
-    expect(window.localStorage.getItem(LEGACY_ROBOT_CORNER_STORAGE_KEY)).toBeNull();
   });
 
   it("reflects the panel state through aria-expanded", async () => {

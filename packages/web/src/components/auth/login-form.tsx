@@ -1,28 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
+import { useLanguage } from "@/hooks/use-language";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const schema = z.object({
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(1, "Password is required"),
-});
-
-type FormData = z.infer<typeof schema>;
+interface FormData {
+  email: string;
+  password: string;
+}
 
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { login } = useAuth();
+  const { t } = useLanguage();
   const [isHydrated, setIsHydrated] = useState(false);
+  const schema = useMemo(() => z.object({
+    email: z.string().email(t("auth.emailInvalid")),
+    password: z.string().min(1, t("auth.passwordRequired"))
+  }), [t]);
   const {
     register,
     handleSubmit,
@@ -42,12 +46,10 @@ export function LoginForm() {
       if (result.code === 0) {
         router.replace(safeRedirectTarget(searchParams.get("next")));
       } else {
-        setError("root", { message: result.message || "Login failed" });
+        setError("root", { message: t("auth.loginFailed") });
       }
-    } catch (err) {
-      setError("root", {
-        message: err instanceof Error ? err.message : "Login failed",
-      });
+    } catch {
+      setError("root", { message: t("auth.loginFailed") });
     }
   };
 
@@ -60,7 +62,7 @@ export function LoginForm() {
     >
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="email" className="text-xs font-medium">
-          Email
+          {t("auth.email")}
         </Label>
         <Input
           id="email"
@@ -73,9 +75,17 @@ export function LoginForm() {
         )}
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="password" className="text-xs font-medium">
-          Password
-        </Label>
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="password" className="text-xs font-medium">
+            {t("auth.password")}
+          </Label>
+          <Link
+            href="/forgot-password"
+            className="text-xs font-medium text-brand underline-offset-4 hover:underline"
+          >
+            {t("auth.forgotPassword")}
+          </Link>
+        </div>
         <Input
           id="password"
           type="password"
@@ -86,6 +96,11 @@ export function LoginForm() {
           <p className="text-xs text-destructive">{errors.password.message}</p>
         )}
       </div>
+      {searchParams.get("passwordReset") === "1" && (
+        <p className="rounded-md border border-brand/40 bg-brand/10 px-3 py-2 text-xs text-foreground">
+          {t("auth.passwordResetSuccess")}
+        </p>
+      )}
       {errors.root && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {errors.root.message}
@@ -96,12 +111,12 @@ export function LoginForm() {
         disabled={!isHydrated || isSubmitting}
         className="mt-1 bg-brand text-brand-foreground hover:bg-brand/90"
       >
-        {isSubmitting ? "Signing in..." : "Sign in"}
+        {isSubmitting ? t("auth.signingIn") : t("auth.signIn")}
       </Button>
       <p className="text-xs text-muted-foreground">
-        Don&apos;t have an account?{" "}
+        {t("auth.noAccount")}{" "}
         <Link href="/register" className="font-medium text-brand underline-offset-4 hover:underline">
-          Register
+          {t("auth.register")}
         </Link>
       </p>
     </form>

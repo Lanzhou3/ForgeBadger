@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 import { fetchEnvelope, fetchJson } from "@/lib/api";
 
 export type AgentMessageRole = "user" | "assistant" | "tool";
@@ -213,56 +211,6 @@ export function setCopilotToolEnabled(toolName: string, enabled: boolean) {
     `/api/v1/copilot/capabilities/${encodeURIComponent(toolName)}/enabled`,
     { method: "PUT", body: JSON.stringify({ enabled }) }
   );
-}
-
-// --- dsh kernel configuration (gated by FORGEBADGER_DSH_COPILOT_ENABLED; 404 when off) ---
-
-export const dshConfigQueryKey = ["copilot", "dsh-config"] as const;
-
-export type DshRuntimeStatus = "running" | "idle" | "off";
-
-export interface DshPluginInfo {
-  id: string;
-  label: string;
-  description: string;
-}
-
-export interface DshConfig {
-  defaultModelId: string | null;
-  plugins: Record<string, boolean>;
-  availablePlugins: DshPluginInfo[];
-  runtime: { status: DshRuntimeStatus };
-}
-
-export interface UpdateDshConfigInput {
-  defaultModelId?: string | null;
-  plugins?: Record<string, boolean>;
-}
-
-const dshConfigSchema = z.object({
-  defaultModelId: z.string().nullable(),
-  plugins: z.record(z.string(), z.boolean()),
-  availablePlugins: z.array(
-    z.object({
-      id: z.string(),
-      label: z.string(),
-      description: z.string(),
-    })
-  ),
-  runtime: z.object({ status: z.enum(["running", "idle", "off"]) }),
-});
-
-export async function getDshConfig(): Promise<DshConfig> {
-  const data = await fetchJson<unknown>("/api/v1/copilot/dsh-config");
-  return dshConfigSchema.parse(data);
-}
-
-export async function updateDshConfig(input: UpdateDshConfigInput): Promise<DshConfig> {
-  const data = await fetchJson<unknown>("/api/v1/copilot/dsh-config", {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
-  return dshConfigSchema.parse(data);
 }
 
 export async function ensureConversationExists(conversationId: string | undefined): Promise<string> {

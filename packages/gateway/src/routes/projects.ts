@@ -20,6 +20,7 @@ import { TemplateRepository } from "../db/repositories/template-repository.js";
 import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
+import type { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
 import type { CredentialMode, WriteResult } from "../config-generation/types.js";
 import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } from "../services/project-ai-config.js";
 import { listWorkspaceTree, readWorkspaceFile } from "../services/workspace-context.js";
@@ -99,6 +100,7 @@ const rootInstructionFileNames = ["AGENT.md", "AGENTS.md", "CLAUDE.md"] as const
 
 export function createProjectRoutes(
   db: Database,
+  runtimeAuthorizationInvalidator: RuntimeAuthorizationInvalidator,
   sessionManager?: InMemorySessionManager,
   eventBus?: ForgeBadgerEventBus
 ): Router {
@@ -252,6 +254,11 @@ export function createProjectRoutes(
       }
     }
     repo.delete(req.params.id);
+    runtimeAuthorizationInvalidator.invalidate({
+      scope: "project",
+      userId,
+      projectId: project.id
+    });
     new AuditLogRepository(db, userId).create({
       action: "project.delete",
       resourceType: "project",

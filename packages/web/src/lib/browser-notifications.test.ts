@@ -51,15 +51,6 @@ describe("browser notifications", () => {
     expect(getBrowserNotificationPreference(storage)).toBe(false);
   });
 
-  it("migrates the legacy browser notification preference", () => {
-    const storage = memoryStorage();
-    storage.setItem("openforge.browserNotifications.enabled", "true");
-
-    expect(getBrowserNotificationPreference(storage)).toBe(true);
-    expect(storage.getItem(browserNotificationPreferenceKey)).toBe("true");
-    expect(storage.getItem("openforge.browserNotifications.enabled")).toBeNull();
-  });
-
   it("triggers for unread Claude permission prompts", () => {
     expect(
       shouldTriggerBrowserNotification(

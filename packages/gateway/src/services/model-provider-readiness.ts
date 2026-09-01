@@ -13,19 +13,18 @@ export type ProviderReadinessCode =
   | "unsupported_target"
   | "missing_model"
   | "missing_active_credential"
+  | "native_auth_not_ready"
   | "remote_validation_unavailable"
   | "remote_model_missing"
-  | "remote_validation_failed"
-  | "codex_subscription_managed";
+  | "remote_validation_failed";
 
-export type ProviderReadinessStatus = "ready" | "needs_attention" | "managed_elsewhere";
+export type ProviderReadinessStatus = "ready" | "needs_attention";
 
 export type ProviderReadinessCheckStatus =
   | "ready"
   | "disabled"
   | "supported"
   | "unsupported"
-  | "managed_elsewhere"
   | "selected"
   | "missing"
   | "not_required"
@@ -51,6 +50,7 @@ export interface ModelProviderReadiness {
     modelProfileId?: string;
     modelId?: string;
     credentialId?: string;
+    authMode?: "managed_credential" | "native_cli_login" | "host_environment" | "none";
   };
   checks: {
     provider: ProviderReadinessCheckStatus;
@@ -65,6 +65,10 @@ export interface ModelProviderReadiness {
     matchedModelId?: string;
     errorCode?: ProviderRemoteErrorCode;
     error?: string;
+  };
+  nativeAuth?: {
+    state: "ready" | "not_authenticated" | "cli_missing" | "unknown";
+    method: "chatgpt" | "api" | "unknown";
   };
   steps: string[];
 }
@@ -82,6 +86,8 @@ export interface ModelProviderReadinessInput {
   adapter: ProviderReadinessAdapter;
   modelProfileId?: string | undefined;
   credentialId?: string | undefined;
+  authMode?: "managed_credential" | "native_cli_login" | "host_environment" | "none" | undefined;
+  nativeAuth?: ModelProviderReadiness["nativeAuth"] | undefined;
   includeRemoteCheck?: boolean | undefined;
   timeoutMs?: number | undefined;
   modelsUrl?: string | undefined;
@@ -91,16 +97,6 @@ export interface ModelProviderReadinessInput {
 
 export async function buildModelProviderReadiness(input: ModelProviderReadinessInput): Promise<ModelProviderReadiness> {
   const base = baseReadiness(input);
-
-  if (input.adapter === "codex") {
-    return withResult(base, "managed_elsewhere", "codex_subscription_managed", {
-      adapterCheck: "managed_elsewhere",
-      remoteModelListCheck: "skipped",
-      steps: [
-        "Use the Codex subscription-managed runtime; provider API keys and model overrides are intentionally not applied to Codex."
-      ]
-    });
-  }
 
   if (input.provider.status !== "active") {
     return withResult(base, "needs_attention", "provider_disabled", {
@@ -123,7 +119,22 @@ export async function buildModelProviderReadiness(input: ModelProviderReadinessI
     });
   }
 
-  const credentialRequired = input.provider.authType !== "none";
+  if (input.authMode === "native_cli_login") {
+    if (input.nativeAuth?.state !== "ready") {
+      return withResult(base, "needs_attention", "native_auth_not_ready", {
+        credentialCheck: "not_required",
+        remoteModelListCheck: "skipped",
+        steps: ["Complete Codex native login on this host before launching the binding."]
+      });
+    }
+    return withResult(base, "ready", "ready", {
+      credentialCheck: "not_required",
+      remoteModelListCheck: "skipped",
+      steps: []
+    });
+  }
+
+  const credentialRequired = credentialRequiredFor(input);
   if (credentialRequired && (!input.credential || input.credential.status !== "active")) {
     return withResult(base, "needs_attention", "missing_active_credential", {
       credentialCheck: "missing",
@@ -198,19 +209,21 @@ function baseReadiness(input: ModelProviderReadinessInput): ModelProviderReadine
       adapter: input.adapter,
       ...(input.modelProfileId ? { modelProfileId: input.modelProfileId } : {}),
       ...(input.model?.modelId ? { modelId: input.model.modelId } : {}),
-      ...(input.credentialId ? { credentialId: input.credentialId } : {})
+      ...(input.credentialId ? { credentialId: input.credentialId } : {}),
+      ...(input.authMode ? { authMode: input.authMode } : {})
     },
     checks: {
       provider: input.provider.status === "active" ? "ready" : "disabled",
       adapter: supportsAdapter(input.provider, input.adapter) ? "supported" : "unsupported",
       model: input.model && input.model.status !== "disabled" ? "selected" : "missing",
-      credential: input.provider.authType === "none"
+      credential: !credentialRequiredFor(input)
         ? "not_required"
         : input.credential?.status === "active"
           ? "ready"
           : "missing",
       remoteModelList: "skipped"
     },
+    ...(input.nativeAuth ? { nativeAuth: input.nativeAuth } : {}),
     steps: []
   };
 }
@@ -242,12 +255,18 @@ function withResult(
       ...(patch.remoteModelListCheck ? { remoteModelList: patch.remoteModelListCheck } : {})
     },
     ...(patch.remote ? { remote: patch.remote } : {}),
+    ...(readiness.nativeAuth ? { nativeAuth: readiness.nativeAuth } : {}),
     steps: patch.steps ?? readiness.steps
   };
 }
 
+function credentialRequiredFor(input: ModelProviderReadinessInput): boolean {
+  if (input.authMode === "native_cli_login" || input.authMode === "host_environment" || input.authMode === "none") return false;
+  if (input.authMode === "managed_credential") return true;
+  return input.provider.authType !== "none";
+}
+
 function supportsAdapter(provider: ProviderProfile, adapter: ProviderReadinessAdapter): boolean {
-  if (adapter === "codex") return false;
   return provider.supportedAdapters.includes(adapter);
 }
 

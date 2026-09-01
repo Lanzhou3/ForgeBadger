@@ -7,14 +7,6 @@ import {
 
 export type AdapterId = "claude" | "opencode" | "codex" | "kimi";
 export type AdapterRuntimeMode = "terminal";
-export type PortfolioWorkerReadiness = "claude_session_start" | "unsupported";
-
-/** Phase 4 keeps every adapter input-disabled pending Task 8.2 evidence. */
-export interface PortfolioWorkerCapability {
-  readiness: PortfolioWorkerReadiness;
-  inputRuntime: "unverified_no_input";
-}
-
 export interface AdapterDefinition {
   id: AdapterId;
   label: string;
@@ -24,7 +16,6 @@ export interface AdapterDefinition {
   launchEnabled: boolean;
   configDir: string;
   runtimeModes: AdapterRuntimeMode[];
-  portfolioWorker: PortfolioWorkerCapability;
 }
 
 export interface AdapterDiscoveryResult extends AdapterDefinition {
@@ -43,8 +34,7 @@ const adapterDefinitions: AdapterDefinition[] = [
     supportLevel: "supported",
     launchEnabled: true,
     configDir: ".claude",
-    runtimeModes: ["terminal"],
-    portfolioWorker: { readiness: "claude_session_start", inputRuntime: "unverified_no_input" }
+    runtimeModes: ["terminal"]
   },
   {
     id: "opencode",
@@ -54,8 +44,7 @@ const adapterDefinitions: AdapterDefinition[] = [
     supportLevel: "supported",
     launchEnabled: true,
     configDir: ".opencode",
-    runtimeModes: ["terminal"],
-    portfolioWorker: { readiness: "unsupported", inputRuntime: "unverified_no_input" }
+    runtimeModes: ["terminal"]
   },
   {
     id: "codex",
@@ -65,8 +54,7 @@ const adapterDefinitions: AdapterDefinition[] = [
     supportLevel: "supported",
     launchEnabled: true,
     configDir: ".codex",
-    runtimeModes: ["terminal"],
-    portfolioWorker: { readiness: "unsupported", inputRuntime: "unverified_no_input" }
+    runtimeModes: ["terminal"]
   },
   {
     id: "kimi",
@@ -76,16 +64,14 @@ const adapterDefinitions: AdapterDefinition[] = [
     supportLevel: "supported",
     launchEnabled: true,
     configDir: ".kimi-code",
-    runtimeModes: ["terminal"],
-    portfolioWorker: { readiness: "unsupported", inputRuntime: "unverified_no_input" }
+    runtimeModes: ["terminal"]
   }
 ];
 
 export function listAdapterDefinitions(): AdapterDefinition[] {
   return adapterDefinitions.map((definition) => ({
     ...definition,
-    runtimeModes: [...definition.runtimeModes],
-    portfolioWorker: { ...definition.portfolioWorker }
+    runtimeModes: [...definition.runtimeModes]
   }));
 }
 
@@ -100,8 +86,7 @@ export function getAdapterDefinition(adapterId: AdapterId): AdapterDefinition {
   }
   return {
     ...definition,
-    runtimeModes: [...definition.runtimeModes],
-    portfolioWorker: { ...definition.portfolioWorker }
+    runtimeModes: [...definition.runtimeModes]
   };
 }
 
@@ -153,7 +138,6 @@ function toAdapterDiscoveryResult(
   return {
     ...definition,
     runtimeModes: [...definition.runtimeModes],
-    portfolioWorker: { ...definition.portfolioWorker },
     launchEnabled: definition.launchEnabled && status.available && terminalLaunchSupported,
     available: status.available,
     status: status.available ? "available" : "missing",

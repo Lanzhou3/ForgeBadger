@@ -4,6 +4,9 @@ import type { AdapterId } from "../services/adapter-discovery.js";
 export interface AdapterModelSelection {
   provider: string;
   modelId: string;
+  baseUrl?: string | undefined;
+  envName?: string | undefined;
+  wireApi?: string | undefined;
 }
 
 export interface AdapterLaunchPlanInput {
@@ -77,7 +80,16 @@ function modelArgs(
     return ["--model", modelId];
   }
   if (adapter === "codex") {
-    return ["-m", modelId];
+    const args = ["-m", modelId, "-c", `model_provider=${JSON.stringify(model.provider)}`];
+    if (model.provider !== "openai" && model.baseUrl && model.envName) {
+      const prefix = `model_providers.${model.provider}`;
+      args.push(
+        "-c", `${prefix}.base_url=${JSON.stringify(model.baseUrl)}`,
+        "-c", `${prefix}.env_key=${JSON.stringify(model.envName)}`,
+        "-c", `${prefix}.wire_api=${JSON.stringify(model.wireApi ?? "responses")}`
+      );
+    }
+    return args;
   }
   return [];
 }

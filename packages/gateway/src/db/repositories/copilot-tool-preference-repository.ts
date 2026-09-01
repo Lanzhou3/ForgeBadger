@@ -3,9 +3,8 @@ import type { Database } from "../types.js";
 /**
  * Per-user Copilot tool switches. One row per (user, tool) that was explicitly
  * toggled; an absent row means the tool is enabled at its registered default.
- * Enforced by both execution paths:
- *   - in-process orchestrator (model schemas + hard check at call time)
- *   - internal bridge routes (dsh runtime callbacks)
+ * Enforced by the Gateway-owned orchestrator in both its model schema and
+ * execution-time authorization check.
  *
  * Like every repository here, instances are constructed per user and all
  * statements carry `WHERE user_id = ?`.

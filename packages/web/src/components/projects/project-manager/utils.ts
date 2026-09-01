@@ -13,7 +13,6 @@ import {
   type ProjectManagerWorkItemUpdateInput,
 } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
-import { readMigratedStorageValue, writeMigratedStorageValue } from "@/lib/brand-storage";
 import {
   EVIDENCE_REFERENCE_TYPE_OPTIONS,
   LEDGER_FILTER_EVENTS,
@@ -424,19 +423,11 @@ export function projectManagerViewStorageKey(projectId: string) {
   return `forgebadger:pm-view:${projectId}`;
 }
 
-function legacyProjectManagerViewStorageKey(storageKey: string) {
-  return storageKey.replace(/^forgebadger:/u, "openforge:");
-}
-
 export function readProjectManagerViewPrefs(storageKey: string): Required<ProjectManagerViewPrefs> {
   const defaults: Required<ProjectManagerViewPrefs> = { statusFilter: "all", viewMode: "board" };
   if (typeof window === "undefined") return defaults;
   try {
-    const raw = readMigratedStorageValue(
-      window.localStorage,
-      storageKey,
-      legacyProjectManagerViewStorageKey(storageKey)
-    );
+    const raw = window.localStorage.getItem(storageKey);
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as ProjectManagerViewPrefs;
     return {
@@ -456,12 +447,7 @@ export function readProjectManagerViewPrefs(storageKey: string): Required<Projec
 export function writeProjectManagerViewPrefs(storageKey: string, prefs: Required<ProjectManagerViewPrefs>) {
   if (typeof window === "undefined") return;
   try {
-    writeMigratedStorageValue(
-      window.localStorage,
-      storageKey,
-      legacyProjectManagerViewStorageKey(storageKey),
-      JSON.stringify(prefs)
-    );
+    window.localStorage.setItem(storageKey, JSON.stringify(prefs));
   } catch {
     // localStorage may be unavailable (private mode); persistence is best-effort.
   }

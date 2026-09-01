@@ -34,8 +34,6 @@ export interface CopilotOrchestratorDependencies {
   llm: AgentLlmClient;
   eventBus: ForgeBadgerEventBus;
   maxSteps?: number;
-  /** User-scoping facade; each run gets the scoped api for its owner. */
-  portfolioApi?: { forUser(userId: string): unknown };
   /**
    * Owner's per-tool switches (copilot_tool_preferences). Disabled tools are
    * hidden from the model, and a call that still arrives is refused with a
@@ -86,8 +84,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         db: deps.db,
         masterKey: deps.masterKey,
         ...(deps.sessionManager !== undefined ? { sessionManager: deps.sessionManager } : {}),
-        ...(deps.adapterCommandRunner !== undefined ? { adapterCommandRunner: deps.adapterCommandRunner } : {}),
-        ...(deps.portfolioApi !== undefined ? { portfolioApi: deps.portfolioApi.forUser(userId) } : {})
+        ...(deps.adapterCommandRunner !== undefined ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
       };
 
       try {
@@ -329,8 +326,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
           db: deps.db,
           masterKey: deps.masterKey,
           ...(deps.sessionManager !== undefined ? { sessionManager: deps.sessionManager } : {}),
-          ...(deps.adapterCommandRunner !== undefined ? { adapterCommandRunner: deps.adapterCommandRunner } : {}),
-          ...(deps.portfolioApi !== undefined ? { portfolioApi: deps.portfolioApi.forUser(input.userId) } : {})
+          ...(deps.adapterCommandRunner !== undefined ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
         };
         const rawInput = safeParse(action.inputJson);
         const result = await executeAgentTool(tool, rawInput, context);

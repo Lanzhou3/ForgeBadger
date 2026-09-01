@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -52,19 +53,44 @@ describe("checkCliDependencies", () => {
       ]
     );
   });
+
+  it("checks psmux instead of tmux on native Windows", async () => {
+    const seen: Array<{ command: string; args: string[] }> = [];
+
+    await checkCliDependencies(async (command, args) => {
+      seen.push({ command, args });
+      return { exitCode: 0, stdout: `${command} ok\n`, stderr: "" };
+    }, "win32");
+
+    assert.deepEqual(seen[0], { command: "psmux", args: ["-V"] });
+    assert.equal(seen.some(({ command }) => command === "tmux"), false);
+  });
 });
 
 describe("describeCliTerminalRuntime", () => {
-  it("explains that native Windows needs WSL for tmux-backed terminals", () => {
+  it("reports native psmux support on Windows", () => {
     const runtime = describeCliTerminalRuntime([
-      { name: "tmux", available: true, required: true, version: "tmux 3.4" }
+      { name: "psmux", available: true, required: true, version: "psmux 3.3.8" }
     ], "win32");
 
     assert.deepEqual(runtime, {
-      persistence: "tmux",
-      mode: "wsl_required",
+      persistence: "psmux",
+      mode: "native_psmux",
+      supported: true,
+      message: "psmux is available for persistent browser terminals."
+    });
+  });
+
+  it("reports psmux_missing on Windows when psmux is absent", () => {
+    const runtime = describeCliTerminalRuntime([
+      { name: "psmux", available: false, required: true, error: "not found" }
+    ], "win32");
+
+    assert.deepEqual(runtime, {
+      persistence: "psmux",
+      mode: "psmux_missing",
       supported: false,
-      message: "Native Windows terminals require WSL because ForgeBadger persists sessions with tmux."
+      message: "Install psmux to enable persistent browser terminals."
     });
   });
 
@@ -99,20 +125,44 @@ describe("checkCliTerminalRuntime", () => {
     assert.equal(runtime.supported, true);
   });
 
-  it("does not shell out before reporting native Windows WSL guidance", async () => {
-    let called = false;
+  it("checks only psmux for native Windows terminal runtime startup warnings", async () => {
+    const seen: Array<{ command: string; args: string[] }> = [];
 
     const runtime = await checkCliTerminalRuntime({
       platform: "win32",
-      runner: async () => {
-        called = true;
-        return { exitCode: 0, stdout: "", stderr: "" };
+      runner: async (command, args) => {
+        seen.push({ command, args });
+        return { exitCode: 0, stdout: "psmux 3.3.8\n", stderr: "" };
       }
     });
 
-    assert.equal(called, false);
-    assert.equal(runtime.mode, "wsl_required");
-    assert.equal(runtime.supported, false);
+    assert.deepEqual(seen, [{ command: "psmux", args: ["-V"] }]);
+    assert.equal(runtime.mode, "native_psmux");
+    assert.equal(runtime.supported, true);
+  });
+
+  it("rejects psmux 3.3.7 even when the executable reports itself as tmux", async () => {
+    const runtime = await checkCliTerminalRuntime({
+      platform: "win32",
+      runner: async () => ({ exitCode: 0, stdout: "tmux 3.3.7\n", stderr: "" })
+    });
+
+    assert.deepEqual(runtime, {
+      persistence: "psmux",
+      mode: "psmux_outdated",
+      supported: false,
+      message: "Upgrade psmux to version 3.3.8 or newer for persistent browser terminals."
+    });
+  });
+
+  it("accepts psmux 3.3.8 when the executable reports itself as tmux", async () => {
+    const runtime = await checkCliTerminalRuntime({
+      platform: "win32",
+      runner: async () => ({ exitCode: 0, stdout: "tmux 3.3.8\n", stderr: "" })
+    });
+
+    assert.equal(runtime.mode, "native_psmux");
+    assert.equal(runtime.supported, true);
   });
 });
 
@@ -160,6 +210,31 @@ describe("runCommand", () => {
 });
 
 describe("runDoctor", () => {
+  it("reports an uninitialized state directory without creating it or config.json", async () => {
+    const parentDir = await mkdtemp(path.join(tmpdir(), "forgebadger-doctor-readonly-"));
+    const stateDir = path.join(parentDir, "state-that-does-not-exist");
+    const stdout = createMemoryWriter();
+    const stderr = createMemoryWriter();
+
+    const code = await runDoctor({
+      env: { FORGEBADGER_STATE_DIR: stateDir },
+      dependencyRunner: async (command) => ({
+        exitCode: command === "tmux" ? 0 : 127,
+        stdout: command === "tmux" ? "tmux 3.4\n" : "",
+        stderr: command === "tmux" ? "" : "not found"
+      }),
+      stdout,
+      stderr
+    });
+
+    assert.equal(code, 0);
+    assert.match(stdout.text, new RegExp(`ForgeBadger state: ${escapeRegex(stateDir)} \\(not initialized\\)`));
+    assert.match(stdout.text, /Diagnostic defaults: gateway=http:\/\/127\.0\.0\.1:48731 web=http:\/\/127\.0\.0\.1:48732/);
+    assert.equal(existsSync(stateDir), false);
+    assert.equal(existsSync(path.join(stateDir, "config.json")), false);
+    assert.equal(stderr.text, "");
+  });
+
   it("returns 0 and prints dependency status when required dependencies are available", async () => {
     const stdout = createMemoryWriter();
     const stderr = createMemoryWriter();
@@ -209,16 +284,16 @@ describe("runDoctor", () => {
     assert.match(stderr.text, /Required dependencies are missing/);
   });
 
-  it("prints native Windows WSL terminal guidance", async () => {
+  it("checks and prints native Windows psmux terminal readiness", async () => {
     const stdout = createMemoryWriter();
     const stderr = createMemoryWriter();
 
     const code = await runDoctor({
       loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       dependencyRunner: async (command) => ({
-        exitCode: 0,
-        stdout: `${command} ok\n`,
-        stderr: ""
+        exitCode: command === "psmux" || command !== "tmux" ? 0 : 127,
+        stdout: command === "psmux" ? "psmux 3.3.8\n" : `${command} ok\n`,
+        stderr: command === "tmux" ? "must not check tmux on Windows" : ""
       }),
       platform: "win32",
       stdout,
@@ -226,7 +301,9 @@ describe("runDoctor", () => {
     });
 
     assert.equal(code, 0);
-    assert.match(stdout.text, /terminal wsl_required - Native Windows terminals require WSL/);
+    assert.match(stdout.text, /ok psmux psmux 3\.3\.8/);
+    assert.match(stdout.text, /terminal native_psmux - psmux is available/);
+    assert.doesNotMatch(stdout.text, /tmux/);
     assert.equal(stderr.text, "");
   });
 });
@@ -274,4 +351,8 @@ function createMemoryWriter() {
       this.text += chunk;
     }
   };
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

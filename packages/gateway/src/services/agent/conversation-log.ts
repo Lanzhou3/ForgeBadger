@@ -2,8 +2,8 @@
  * Durable conversation log for the Copilot harness.
  *
  * An append-only store of conversations, messages, runs, and pending actions.
- * Following the deepseek-harness invariant, everything the model sees is logged
- * here, so model-visible history is always reconstructable from the log. All
+ * Everything the model sees is logged here, so model-visible history is always
+ * reconstructable from the ForgeBadger-owned log. All
  * access is scoped by user_id; message sequences are monotonically increasing
  * per conversation.
  */
@@ -25,7 +25,6 @@ interface ConversationRow {
   summary: string | null;
   summary_covered_sequence: number | null;
   last_summary_at: number | null;
-  dsh_session_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -111,22 +110,6 @@ export class CopilotConversationLog {
   renameConversation(id: string, title: string): boolean {
     const result = this.db.prepare(`UPDATE copilot_conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?`)
       .run(title, Date.now(), id, this.userId);
-    return result.changes > 0;
-  }
-
-  /**
-   * Bind a dsh kernel session id to a conversation (M2 BFF path). Idempotent
-   * per conversation: the first bind wins, later identical binds are no-ops,
-   * and a conflicting bind returns false so the caller can fail loud instead
-   * of silently splitting one conversation across two kernel sessions.
-   */
-  bindDshSession(id: string, dshSessionId: string): boolean {
-    const existing = this.getConversation(id);
-    if (!existing) return false;
-    if (existing.dsh_session_id === dshSessionId) return true;
-    if (existing.dsh_session_id !== null) return false;
-    const result = this.db.prepare(`UPDATE copilot_conversations SET dsh_session_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`)
-      .run(dshSessionId, Date.now(), id, this.userId);
     return result.changes > 0;
   }
 

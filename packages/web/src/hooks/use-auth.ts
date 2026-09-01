@@ -56,8 +56,8 @@ export function useAuth() {
   });
 
   const registerMutation = useMutation({
-    mutationFn: async (vars: { email: string; password: string }) =>
-      apiRegister(vars.email, vars.password),
+    mutationFn: async (vars: { email: string; password: string; recoveryKey: string }) =>
+      apiRegister(vars.email, vars.password, vars.recoveryKey),
     onSuccess: (data) => {
       if (data.code === 0 && data.data) {
         setToken(data.data.token);

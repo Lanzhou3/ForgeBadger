@@ -6,6 +6,9 @@ export default function RegisterPage() {
     <AuthShell
       title="Create account"
       description="Bootstrap a local user for this ForgeBadger instance."
+      titleKey="auth.registerTitle"
+      descriptionKey="auth.registerDescription"
+      showLanguageSwitcher
     >
       <RegisterForm />
     </AuthShell>

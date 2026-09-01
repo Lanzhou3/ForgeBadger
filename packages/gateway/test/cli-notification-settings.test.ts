@@ -28,7 +28,20 @@ describe("CLI lifecycle notification settings", () => {
     assert.match(settings.hooks.PermissionRequest[0].hooks.at(-1).command, /forgebadger-notify\.mjs/);
     assert.match(settings.hooks.Stop[0].hooks.at(-1).command, /forgebadger-notify\.mjs/);
     assert.match(settings.hooks.SessionEnd[0].hooks.at(-1).command, /forgebadger-notify\.mjs/);
-    assert.match(await readFile(path.join(root, ".codex", "hooks", "forgebadger-notify.mjs"), "utf8"), /adapter: "codex"/);
+    assert.equal(settings.hooks.PermissionRequest[0].hooks.at(-1).timeout, 5);
+    assert.equal(settings.hooks.Stop[0].hooks.at(-1).timeout, 5);
+    assert.equal(settings.hooks.SessionEnd[0].hooks.at(-1).timeout, 3);
+
+    const forwardingScript = await readFile(
+      path.join(root, ".codex", "hooks", "forgebadger-notify.mjs"),
+      "utf8"
+    );
+    assert.match(forwardingScript, /adapter: "codex"/);
+    assert.match(
+      forwardingScript,
+      /const requestTimeoutMs = payload\.hook_event_name === "SessionEnd" \? 2500 : 4500;/
+    );
+    assert.match(forwardingScript, /AbortSignal\.timeout\(requestTimeoutMs\)/);
     assert.equal((await ensureCodexNotificationSettings(root)).changed, false);
   });
 
@@ -64,7 +77,7 @@ describe("CLI lifecycle notification settings", () => {
       assert.match(await readFile(configPath, "utf8"), /# Keep this user comment/);
       assert.deepEqual(
         config.hooks?.map((hook) => hook.event).sort(),
-        ["Notification", "SessionEnd", "Stop", "StopFailure"].sort()
+        ["Interrupt", "Notification", "PermissionRequest", "SessionEnd", "Stop", "StopFailure"].sort()
       );
       assert.ok(config.hooks?.every((hook) => hook.matcher === undefined));
       assert.ok(
@@ -72,7 +85,12 @@ describe("CLI lifecycle notification settings", () => {
           hook.command?.includes(path.join(stateDir, "hooks", "kimi-notify.mjs"))
         )
       );
-      assert.match(await readFile(path.join(stateDir, "hooks", "kimi-notify.mjs"), "utf8"), /adapter: "kimi"/);
+      const forwardingScript = await readFile(
+        path.join(stateDir, "hooks", "kimi-notify.mjs"),
+        "utf8"
+      );
+      assert.match(forwardingScript, /adapter: "kimi"/);
+      assert.match(forwardingScript, /const requestTimeoutMs = 4500;/);
       // Legacy per-project block is removed because Kimi never reads it.
       assert.doesNotMatch(await readFile(projectConfigPath, "utf8"), /ForgeBadger managed notification hooks/);
       assert.equal((await ensureKimiNotificationSettings(projectRoot)).changed, false);

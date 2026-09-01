@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { once } from "node:events";
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import bcrypt from "bcryptjs";
 
 import { signJwt } from "../src/auth/jwt.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
@@ -13,6 +15,70 @@ import type { TmuxClient } from "../src/services/tmux.js";
 import { createGatewayRuntime } from "../src/runtime/start-gateway.js";
 
 describe("createGatewayRuntime", () => {
+  it("fails terminal runtime readiness before account recovery or session recovery", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-runtime-gate-"));
+    const tmux = createMockTmuxClient();
+
+    await assert.rejects(
+      createGatewayRuntime(gatewayEnv(root), {
+        tmuxClient: tmux.client,
+        terminalRuntimeCheck: async () => ({
+          persistence: "tmux",
+          mode: "tmux_missing",
+          supported: false,
+          message: "Install tmux to enable persistent browser terminals."
+        })
+      }),
+      /Install tmux to enable persistent browser terminals/
+    );
+
+    assert.equal(tmux.listSessionsCalls, 0);
+    assert.equal(existsSync(path.join(root, "account-recovery.key")), false);
+    assert.equal(existsSync(path.join(root, "forgebadger.db")), false);
+  });
+
+  it("mounts local account recovery in the production runtime", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-account-recovery-runtime-"));
+    const tmux = createMockTmuxClient();
+    const restorePath = await installFailingTmuxShim(root);
+    let runtime: Awaited<ReturnType<typeof createGatewayRuntime>> | undefined;
+
+    try {
+      runtime = await createGatewayRuntime(gatewayEnv(root), { tmuxClient: tmux.client });
+      runtime.server.listen(0, "127.0.0.1");
+      await once(runtime.server, "listening");
+      const address = runtime.server.address() as AddressInfo;
+      const db = runtime.app.locals.db as Database;
+      new UserRepository(db).create(
+        "runtime-owner@example.com",
+        await bcrypt.hash("old-password", 10),
+        { role: "admin" }
+      );
+      const recoveryKey = (await readFile(
+        path.join(root, "account-recovery.key"),
+        "utf8"
+      )).trim();
+
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/v1/auth/reset-password`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            email: "runtime-owner@example.com",
+            recoveryKey,
+            newPassword: "new-password-123"
+          })
+        }
+      );
+
+      assert.equal(response.status, 200);
+    } finally {
+      restorePath();
+      if (runtime) await runtime.close();
+    }
+  });
+
   it("returns 404 for removed API endpoints", async () => {
     // Arrange
     const root = await mkdtemp(path.join(tmpdir(), "forgebadger-gateway-cutover-"));
@@ -101,6 +167,25 @@ describe("createGatewayRuntime", () => {
     }
 
     assert.equal(rejected, true);
+    assert.equal(tmux.listSessionsCalls, 0);
+  });
+
+  it("rejects an invalid recovery key before starting runtime resources", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-invalid-recovery-key-"));
+    const tmux = createMockTmuxClient();
+    const restorePath = await installFailingTmuxShim(root);
+
+    try {
+      await writeFile(path.join(root, "account-recovery.key"), "invalid\n", "utf8");
+
+      await assert.rejects(
+        createGatewayRuntime(gatewayEnv(root), { tmuxClient: tmux.client }),
+        /account recovery key file is invalid/i
+      );
+    } finally {
+      restorePath();
+    }
+
     assert.equal(tmux.listSessionsCalls, 0);
   });
 });

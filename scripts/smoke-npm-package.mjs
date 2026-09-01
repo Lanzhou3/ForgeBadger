@@ -20,7 +20,7 @@ const packDir = path.join(smokeRoot, "pack");
 const npmPrefix = path.join(smokeRoot, "npm-prefix");
 const npmCache = path.join(smokeRoot, "npm-cache");
 const stateDir = path.join(smokeRoot, "state");
-const tmuxPrefix = `of-smoke-${process.pid}-`;
+const tmuxPrefix = `fb-smoke-${process.pid}-`;
 const commandTimeoutMs = readPositiveIntegerEnv(
   process.env,
   "FORGEBADGER_NPM_SMOKE_COMMAND_TIMEOUT_MS",

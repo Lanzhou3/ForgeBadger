@@ -14,7 +14,8 @@
 
 ### 0.5.1 Session Launch Contract
 
-Gateway 必须创建真实会话，不允许只验证手工创建的 tmux attach 路径。
+Gateway 必须创建真实会话，不允许只验证手工创建的平台终端复用器 attach 路径。
+macOS/Linux/WSL 使用 tmux；原生 Windows 使用 psmux ≥ 3.3.8。
 
 启动链路：
 
@@ -22,12 +23,12 @@ Gateway 必须创建真实会话，不允许只验证手工创建的 tmux attach
 2. Gateway 校验 JWT、项目归属、凭据模式、项目路径。
 3. Gateway 使用 `safeResolve` 和 realpath 校验工作目录。
 4. Claude adapter 返回结构化 launch plan。
-5. Gateway 创建 `of-{user_id_short}-{session_id_short}` tmux session。
-6. Gateway 使用 `tmux new-session -e KEY=value` 注入环境变量。
-7. Claude Code 在 tmux session 内启动。
+5. Gateway 通过平台 runtime profile 创建 `fb-{user_id_short}-{session_id_short}` multiplexer session。
+6. Gateway 使用选定复用器的 argv 形式 `new-session -e KEY=value` 注入环境变量。
+7. Claude Code 在该 multiplexer session 内启动。
 8. 浏览器连接 `/ws/terminal/:sessionId`。
-9. Gateway 校验 WebSocket 认证和 session 归属，用 node-pty attach 到 tmux。
-10. xterm.js ↔ WebSocket ↔ node-pty ↔ tmux ↔ Claude Code 传输终端 I/O。
+9. Gateway 校验 WebSocket 认证和 session 归属，用 node-pty attach 到选定复用器。
+10. xterm.js ↔ WebSocket ↔ node-pty ↔ tmux/psmux ↔ Claude Code 传输终端 I/O。
 
 ### 0.5.2 Structured Launch Plan
 
@@ -49,7 +50,7 @@ interface LaunchPlan {
 - Gateway 以 argv 方式使用 `command` + `args`，禁止拼接 shell 命令。
 - 用户输入不得插入 shell syntax。
 - `cwd` 必须位于 approved project root 内。
-- secret 值只允许在 tmux 创建时通过 `-e` 注入。
+- secret 值只允许在平台复用器创建会话时通过 `-e` 注入。
 - 日志允许记录 env name，禁止记录 env value。
 
 ### 0.5.3 Credential Policy
@@ -58,7 +59,7 @@ MVP-0 支持两种明确模式：
 
 | 模式 | 说明 | 要求 |
 |------|------|------|
-| `stored_encrypted_key` | API key 加密存储在 SQLite | Gateway 内存解密，只通过 tmux `-e` 注入 |
+| `stored_encrypted_key` | API key 加密存储在 SQLite | Gateway 内存解密，只通过选定复用器的 `new-session -e` 注入 |
 | `host_environment` | 使用机器已有环境变量 | UI 必须明确标记为 host-managed credentials |
 
 禁止 silent fallback。session 记录必须持久化本次启动使用的 credential mode。
@@ -155,37 +156,23 @@ interface RollbackResult {
 
 | Gate | 通过条件摘要 |
 |------|--------------|
-| Gate A Terminal Feasibility | Gateway 创建 tmux + Claude Code，浏览器终端可交互，浏览器/Gateway 重启后可恢复，orphan tmux 可清理 |
+| Gate A Terminal Feasibility | Gateway 通过平台复用器创建 Claude Code 会话，浏览器终端可交互，浏览器/Gateway 重启后可恢复，orphan tmux/psmux 可清理 |
 | Gate B Config Contract | RenderPlan/ConflictReport/WriteResult/RollbackResult 可用且测试覆盖 dry-run/冲突/回滚/路径安全 |
 | Gate C Security Baseline | API key 加密、日志脱敏、路径边界、WebSocket auth/ownership/限流、API envelope 冲突已修复 |
 | Gate D MVP-0 Acceptance | A/B/C 已通过，5 分钟闭环可演示，核心验证命令已运行或记录跳过原因 |
 
-### 0.5.7 Project Manager Agent Execution Contract（2026-08-12）
+### 0.5.7 Project Manager 与 Copilot 执行契约（2026-08-31）
 
-Project Manager Agent 采用持久化控制循环，而不是用一次 Copilot 对话或长驻模型调用充当执行状态机。
-
-```text
-Project goal / work item
-  -> task attempt (desired state + observed state)
-  -> session assignment (lease + adapter capability snapshot)
-  -> semantic command
-  -> SessionWorkerAdapter
-  -> CLI session managed by tmux
-  -> normalized lifecycle event
-  -> evaluator + acceptance result
-```
+ForgeBadger 保留两个清晰边界：Copilot 负责对话、记忆、只读查询与审批后的平台工具调用；Project Manager 负责目标、工作项、Task Packet 和看板状态。两者都通过 Gateway 服务访问项目与会话，不引入独立的 Portfolio 控制平面。
 
 架构约束：
 
-- task attempt、session assignment、command、wakeup 和 acceptance result 是执行事实源；Copilot conversation、Web 本地状态和 ledger event 只提供交互或审计投影。
-- Controller 必须通过幂等 reconcile 推进状态。外部副作用采用 command-first、稳定 idempotency key 和 assignment lease，重复或乱序事件不得重复创建 session 或提交任务。
-- Controller 只调用 `SessionWorkerAdapter` 的准备、启动、分派、跟进、打断、权限响应和观测接口，不直接拼接 tmux 字符输入。
-- adapter 必须显式报告结构化 turn、权限事件、完成事件、interrupt、resume、terminal fallback 和证据提取能力；降级能力不得伪装成完整支持。
-- Task Packet 的 prepare 不启动 CLI、不发送输入；dispatch 只有在 capability、policy、lease、payload digest 和 session readiness 校验通过后才能执行。
-- 所有副作用必须经过服务器端 Action Policy。默认策略为 `observe`；有期限的项目 `operate` 只允许明确列出的低风险可逆动作；删除、密钥、权限扩大、外部发布、跨项目操作和 raw shell 始终审批或拒绝。
-- CLI 的完成声明只产生 completion candidate。工作项进入 `done` 前必须有 accepted 或 verified acceptance result。
-- tmux 继续作为进程持久层和 terminal fallback。SQLite 只保存结构化状态、摘要、哈希、证据引用和审计，不保存完整终端日志。
-- `FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED` 默认 `false`，只有显式设置为字符串 `true` 才允许未来的自动 dispatch runner；无效布尔值必须使 Gateway 启动校验失败。
+- `/copilot` 与 `/api/v1/copilot/*` 是唯一助手入口，使用 Gateway 自有 provider、conversation、memory、approval、tool 与 event 服务。
+- Project Manager 的工作项与 Task Packet 继续使用现有 `/api/v1/projects/:projectId/manager/*` 路径和 tenant-scoped repository。
+- Session Manager 和平台复用器继续作为 CLI 生命周期与终端输入的唯一执行边界；浏览器与程序化输入都必须经过会话所有权和 runtime authorization 校验。
+- Portfolio Operations 的页面、API、仓储、worker、scheduler、event、Feishu handler 和 session fence 已退役，不得重新作为兼容层引入。
+- 已应用的 Portfolio migrations 与 schema declarations 仅为迁移连续性和数据安全保留；live runtime 不读取或写入这些表。
+- DeepSeek Harness 与 bridge 继续保持移除状态；DeepSeek 仅可作为普通可选模型 provider。
 
 ## 零、架构总览
 
@@ -216,7 +203,7 @@ Project goal / work item
 │  │         Core Engine Layer               │  │
 │  │  ┌──────────┐ ┌──────────────────────┐  │  │
 │  │  │ Config   │ │ Session Manager      │  │  │
-│  │  │ Generator│ │ (tmux + node-pty)    │  │  │
+│  │  │ Generator│ │ (mux + node-pty)     │  │  │
 │  │  └──────────┘ └──────────────────────┘  │  │
 │  │  ┌──────────┐ ┌──────────────────────┐  │  │
 │  │  │ Project  │ │ Terminal Proxy       │  │  │
@@ -239,8 +226,8 @@ Project goal / work item
 └────────────────────────────────────────────────┘
          │                    │
     ┌────▼────┐          ┌────▼────┐
-    │ tmux    │          │ AI CLI  │
-    │ sessions│          │ process │
+    │ tmux /  │          │ AI CLI  │
+    │ psmux   │          │ process │
     └─────────┘          └─────────┘
 ```
 
@@ -259,7 +246,9 @@ Project goal / work item
 │  └─────────────┬───────────────┘   │
 │                │                    │
 │  ┌─────────────▼───────────────┐   │
-│  │  tmux sessions (用户级)      │   │
+│  │  platform mux sessions       │   │
+│  │  tmux (mac/Linux/WSL)        │   │
+│  │  psmux ≥ 3.3.8 (Windows)     │   │
 │  │  ├── claude-session-1       │   │
 │  │  ├── claude-session-2       │   │
 │  │  └── codex-session-1        │   │
@@ -321,11 +310,22 @@ Project goal / work item
 - `zod` — 表单验证和 API 数据类型校验
 - `lucide-react` — 图标库
 
-### 1.3 终端方案：**xterm.js + WebSocket + node-pty + tmux**
+### 1.3 终端方案：**xterm.js + WebSocket + node-pty + 平台复用器**
+
+> 2026-08-31 平台适配补充：Gateway 在 `win32` 原生环境选择 psmux，
+> macOS、Linux 和 WSL 选择 tmux。现有数据库/API 字段中的 `tmux_session`
+> 以及部分 `TmuxClient` 兼容命名保持不变，不代表原生 Windows 仍启动 tmux。
+> 原生 Windows 要求 psmux ≥ 3.3.8；其普通 attach 使用 tmux 兼容参数，
+> programmatic submit 的 control mode 使用 `PSMUX_SESSION_NAME=<session>` +
+> `psmux -CC`。Gateway 会在启动/attach/control-mode 子进程前清除继承的
+> tmux/psmux 会话身份变量，避免错误嵌套。
+> `send-keys -H` 兼容依据见 psmux
+> [PR #524](https://github.com/psmux/psmux/pull/524)；最低版本基线见
+> [v3.3.8 release](https://github.com/psmux/psmux/releases/tag/v3.3.8)。
 
 **架构链路：**
 ```
-浏览器 xterm.js ←── WebSocket ──→ Gateway node-pty ←── pty ──→ tmux ←── AI CLI
+浏览器 xterm.js ←── WebSocket ──→ Gateway node-pty ←── pty ──→ tmux/psmux ←── AI CLI
 ```
 
 **可行性评估：**
@@ -335,57 +335,74 @@ Project goal / work item
 | 终端渲染 | xterm.js | ✅ 成熟，VS Code / GitHub Codespaces 同款 |
 | 数据传输 | WebSocket (ws) | ✅ 双向实时，适合终端 I/O |
 | pty 分配 | node-pty | ✅ VS Code 底层，百万级验证 |
-| 会话持久化 | tmux | ✅ 断线重连天然支持 |
-| 断线重连 | tmux attach + xterm 状态恢复 | ✅ tmux 保活，xterm 重建时恢复滚动 |
+| 会话持久化 | macOS/Linux/WSL: tmux；原生 Windows: psmux | ✅ 断线重连天然支持 |
+| 断线重连 | multiplexer attach + xterm 状态恢复 | ✅ 复用器保活，xterm 重建时恢复滚动 |
 | 多路复用 | 每个终端一个 WebSocket 连接 | ✅ 简单可靠 |
 
 **核心风险点：断线重连**
 - Web 端断开 → WebSocket 关闭 → xterm.js 停止渲染
-- tmux 会话继续运行（不受影响）
-- 重新连接 → 新 WebSocket → 新 xterm.js 实例 → `tmux attach -t <session>` → 恢复终端状态
-- **关键：** xterm.js 断线前的滚动缓冲区会丢失，但 tmux 的 scrollback 历史可保留（通过 `tmux capture-pane` 获取）
+- 平台复用器会话继续运行（不受影响）
+- 重新连接 → 新 WebSocket → 新 xterm.js 实例 → runtime profile 执行 attach → 恢复终端状态
+- **关键：** xterm.js 断线前的滚动缓冲区会丢失，但复用器的 scrollback 历史可通过其 tmux-compatible `capture-pane` 恢复
 
 **结论：可行，但需要 POC 验证。**
 
 ### 1.4 存储：**SQLite**
 
-**SQLite 是否够用？** — MVP 阶段完全够用。
+**SQLite 是否够用？** — 对 ForgeBadger 的本地单 Gateway、npm 安装形态完全够用，
+也是当前正式存储架构，不是等待替换的过渡方案。
 
 | 维度 | 评估 |
 |------|------|
 | 并发 | Gateway 单进程，better-sqlite3 同步读写，无并发冲突 |
 | 数据量 | MVP 预期：用户 < 100，项目 < 500/用户，会话 < 50/用户 → 总计 < 50MB |
 | 可靠性 | WAL 模式 + journal，崩溃安全 |
-| 备份 | 直接复制 .db 文件 |
-| 扩展性 | 用户量 > 1000 时可迁移到 PostgreSQL（ORM 兼容） |
+| 备份 | 运行中使用 SQLite backup API；离线复制前必须停止 Gateway 并完成 checkpoint |
+| 扩展性 | 通过查询聚合、精确索引和有界保留策略扩展；保持单 Gateway + SQLite |
 
 **选择理由：**
 - **零运维** — 不需要安装、配置、监控额外服务
 - **一键部署** — 符合 "npm install + 一键启动" 的目标
 - **性能足够** — better-sqlite3 比 node-sqlite3 快 5-10x
-- **迁移成本低** — 使用 `drizzle-orm` 或 `kysely`，后续迁移到 PostgreSQL 只需改连接字符串
+- **迁移可审计** — forward-only SQL、严格递增 journal 与 SHA manifest 共同保护已发布历史
+- **读取有界** — Dashboard 使用数据库计数而不物化业务行，Token Usage 在 SQLite 内聚合后再跨进程边界
+- **历史可保留** — nullable session/project 历史引用继续使用 `ON DELETE SET NULL`；迁移前脏数据守卫和所有权触发器阻止跨租户写入
+- **时间单位显式** — Drizzle `mode: "timestamp"` 列统一存 Unix 秒，绕过 ORM 的 raw SQL 必须使用 `sqliteTimestampSeconds()`；原生毫秒域继续保持毫秒，不按列名做全库猜测转换
+
+`0064_normalize_mixed_timestamp_units.sql` 只修复已证实被 raw SQL 写成毫秒的
+`sessions.updated_at` 与 `notifications.updated_at`。它通过数量级阈值保留正常秒值，
+不转换 Provider、Project Manager、Feishu 或历史 Copilot 的原生毫秒字段；session
+recovery 读取边界在迁移窗口内同时接受秒和旧毫秒值。
+
+`0065_project_manager_goals_tenant_fk.sql` 为 Project Manager Goals 补齐
+`(user_id, project_id) -> projects(user_id, id)` 复合外键，与 Work Items 的
+租户所有权约束保持一致；迁移先以 guard 拒绝跨租户或缺失项目的历史行，再保留
+合法 Goal 数据重建表。
 
 **具体选型：Drizzle ORM**
 - TypeScript 原生，类型推导
-- 支持 SQLite + PostgreSQL（平滑迁移）
-- 迁移工具内置
+- 当前项目只使用 SQLite dialect，避免为了未计划的数据库后端增加抽象
+- 迁移工具内置；`pnpm validate:db-migrations` 阻止历史 SQL 漂移和 journal 错位
 - 比 Prisma 轻量（启动快 3 倍）
 
 ### 1.5 部署方式：**npm install + 一键启动**
 
 ```bash
 # 安装
-npm install -g @forgebadger/gateway
+npm install -g forgebadger
 
 # 一键启动（自动完成以下动作）
 forgebadger start
 
 # forgebadger start 内部流程：
-# 1. 检查 node-pty 编译依赖（已 prebuild，无需编译）
-# 2. 检查 tmux 是否安装，未安装则提示
-# 3. 初始化 SQLite 数据库（首次运行自动迁移）
-# 4. 启动 Gateway 服务（后台进程）
-# 5. 自动打开浏览器 → http://localhost:3000
+# 1. 输出零依赖 ForgeBadger 文字 Logo（TTY 品牌色，非 TTY/NO_COLOR 纯文本）
+# 2. 检查 node-pty 编译依赖（已 prebuild，无需编译）
+# 3. 检查平台终端运行时（macOS/Linux/WSL: tmux；Windows: psmux）
+#    缺失时只在交互式、非 CI 环境显示固定安装命令并询问，默认 No
+#    安装/升级后复检；仍未就绪则返回非零并终止，以下步骤均不执行
+# 4. 仅在运行时 ready 后初始化 SQLite 数据库（首次运行自动迁移）
+# 5. 启动 Gateway 服务（后台进程）
+# 6. 自动打开浏览器 → http://localhost:3000
 
 # 停止
 forgebadger stop
@@ -399,7 +416,8 @@ forgebadger status
 | 依赖 | 必要性 | 说明 |
 |------|--------|------|
 | Node.js ≥ 20 | ✅ 必须 | 运行环境 |
-| tmux ≥ 3.2 | ✅ 必须 | 会话持久化 |
+| tmux ≥ 3.2 | ✅ macOS/Linux/WSL | 会话持久化 |
+| psmux ≥ 3.3.8 | ✅ 原生 Windows | ConPTY 原生会话持久化 |
 | npm/pnpm/yarn | ✅ 必须 | 包管理 |
 | gcc/g++/make | ⚠️ 首次安装 | 仅用于编译 node-pty（prebuild 可跳过） |
 | Python | ❌ 不需要 | 仅 node-gyp 编译时用，非运行时依赖 |
@@ -409,6 +427,22 @@ forgebadger status
 - `bin` 字段注册 `forgebadger` 命令
 - 使用 `pkg` 或 `nexe` 可选打包为单二进制文件（降低 Node.js 版本要求）
 - SQLite 数据库文件存储在 `~/.forgebadger/forgebadger.db`
+
+**系统依赖安装边界：** npm `postinstall` 不安装 tmux/psmux。
+`forgebadger doctor` 是只读检查。`forgebadger start` / `forgebadger init`
+仅在 TTY 且非 CI 时询问，默认拒绝，仅明确 `y`/`yes` 才用 `shell:false`
+执行固定参数并在完成后复检。复检仍失败时必须 fail closed：返回非零，
+且不得创建运行时配置/密钥/数据库、写项目文件或启动子进程。
+`doctor` 对不存在的状态目录只报告 `(not initialized)` 和诊断默认值，
+不得创建目录或任何状态。Windows 安装命令为
+`winget install --id marlocarlo.psmux --exact --source winget`；psmux 过旧时为
+`winget upgrade --id marlocarlo.psmux --exact --source winget`。Linux 只探测
+`apt-get`、`dnf`、`yum`、`pacman`、`zypper`、`apk` 固定白名单。
+
+**Gateway 直接启动边界：** `startGateway` / `createGatewayRuntime` 也必须
+在账户恢复密钥创建、SQLite 打开/迁移、session recovery、路由装配和 listen
+之前检查选定运行时。tmux/psmux 缺失或 psmux 低于 3.3.8 时直接抛错，
+不得以“仅管理 UI”模式继续启动。
 
 ---
 
@@ -528,7 +562,7 @@ CREATE TABLE sessions (
     model_id      TEXT REFERENCES models(id),          -- 当前使用的模型
     agent_id      TEXT REFERENCES agents(id),          -- 当前使用的 Agent
     status        TEXT NOT NULL DEFAULT 'idle',        -- idle | running | waiting | error | completed | stopped
-    tmux_session  TEXT,                                -- tmux 会话名
+    tmux_session  TEXT,                                -- 平台复用器会话名（历史兼容字段名）
     working_dir   TEXT NOT NULL,                       -- 工作目录（通常 = project.path）
     last_active   TEXT,                                -- 最后活跃时间
     error_message TEXT,                                -- 错误信息
@@ -540,7 +574,7 @@ CREATE INDEX idx_sessions_user_project ON sessions(user_id, project_id);
 CREATE INDEX idx_sessions_status ON sessions(status);
 
 -- terminal_logs 表已废弃（2026-04-24 架构评审确认删除）
--- 理由：终端输出不持久化到数据库，断线恢复通过 tmux capture-pane 实时获取。
+-- 理由：终端输出不持久化到数据库，断线恢复通过平台复用器 capture-pane 实时获取。
 -- 原 schema 保留在下方注释中供参考，实际不创建此表。
 --
 -- CREATE TABLE terminal_logs (
@@ -657,7 +691,7 @@ CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
 |------|----------|------|
 | 数据层 | `user_id` 外键 | 所有业务表强制 user_id 关联，删除用户时级联清理 |
 | 文件层 | 项目路径隔离 | 每个项目独立文件系统路径，不共享 |
-| 会话层 | tmux 会话命名隔离 | tmux session 命名格式：`of-{user_id}-{session_id}` |
+| 会话层 | 平台复用器会话命名隔离 | tmux/psmux session 命名格式：`fb-{user_id}-{session_id}` |
 | API 层 | 中间件鉴权 | 所有 API 请求通过中间件注入 `req.userId`，业务层无需手动过滤 |
 
 **API 中间件伪代码：**
@@ -672,6 +706,9 @@ const projects = await projectRepo.findByUserId(req.userId);
 ```
 
 **安全边界：**
+- Project Manager 等强父子关系使用复合租户外键；Activity、Snapshot、Token Usage
+  等需要在父对象删除后保留历史的 nullable 引用使用数据库 ownership trigger，
+  同时保留 `ON DELETE SET NULL`。迁移在安装触发器前必须拒绝已有跨租户或缺失父记录。
 - Gateway 以普通用户身份运行，不碰 `root` 权限
 - 文件系统访问限制在项目路径内（通过 `path.resolve` + 路径前缀校验）
 - API Key 加密存储（AES-256-GCM），密钥从环境变量 `FORGEBADGER_MASTER_KEY` 读取
@@ -692,10 +729,23 @@ const projects = await projectRepo.findByUserId(req.userId);
 
 | Method | Path | 描述 | 请求体 |
 |--------|------|------|--------|
-| POST | `/api/v1/auth/register` | 注册 | `{ username, email, password }` |
+| POST | `/api/v1/auth/register` | 本机所有者验证后注册 | `{ email, password, recoveryKey, inviteCode? }` |
 | POST | `/api/v1/auth/login` | 登录 | `{ email, password }` → 返回 JWT |
+| POST | `/api/v1/auth/reset-password` | 本机恢复密码 | `{ email, recoveryKey, newPassword }` |
 | POST | `/api/v1/auth/logout` | 登出 | — |
 | GET | `/api/v1/auth/me` | 当前用户信息 | — |
+
+本机密码恢复以运行 ForgeBadger 的操作系统账户作为恢复权威：Gateway 首次
+启动时在 `<FORGEBADGER_STATE_DIR>/account-recovery.key` 生成 256-bit 随机密钥，
+POSIX 文件权限收紧为 `0600`，后续启动复用。恢复接口只接受没有代理转发头的
+直接 loopback 连接；校验成功后先轮换密钥，再在同一个 SQLite 事务中更新
+bcrypt 密码哈希并删除该用户的全部认证会话。接口不会返回或记录密钥，也不会
+自动登录。该边界刻意不支持经反向代理或容器转发的远程恢复。
+
+注册接口复用同一个本机所有者边界：生产 Gateway 提供恢复服务时，注册请求
+也必须来自无代理转发头的直接 loopback 连接并携带有效 `recoveryKey`。注册只
+执行常量时间校验，不消费或轮换密钥；`off` / `invite` 策略在此门禁之后继续
+生效，invite 模式的后续用户需要同时提供恢复密钥和有效邀请码。
 
 #### 项目管理
 
@@ -714,11 +764,13 @@ const projects = await projectRepo.findByUserId(req.userId);
 | Method | Path | 描述 | 请求体 |
 |--------|------|------|--------|
 | GET | `/api/v1/sessions` | 会话列表 | `?project_id=&status=` |
-| POST | `/api/v1/sessions` | 创建会话 | `{ project_id, ai_tool, model_id, name }` |
+| POST | `/api/v1/sessions` | 创建会话 | `{ project_id, ai_tool?, name? }`（一律 host_environment 启动） |
 | GET | `/api/v1/sessions/:id` | 会话详情 | — |
 | POST | `/api/v1/sessions/:id/start` | 启动会话 | — |
 | POST | `/api/v1/sessions/:id/stop` | 停止会话 | — |
-| POST | `/api/v1/sessions/:id/switch-model` | 切换模型 | `{ model_id }` |
+
+模型/厂商配置不走会话：见下方「模型管理」的 Model Provider 与
+`/api/v1/cli-config/:adapter/apply-provider` 流程。
 
 #### Agent 管理
 
@@ -785,6 +837,30 @@ Model Providers 接口：
 | POST | `/api/v1/api-keys` | 添加 API Key |
 | POST | `/api/v1/api-keys/:id/rotate` | 轮换 API Key |
 | DELETE | `/api/v1/api-keys/:id` | 删除 API Key |
+
+模型服务商与 Code CLI 目标不再通过
+`model_provider_bindings` 关联：该表与 sessions 的 `launch_*` 列仅因迁移连续性
+和历史溯源保留（见 `docs/adr/0001-decouple-model-config-from-projects-and-sessions.md`），
+live 代码不再读写。Provider 只保存服务商元数据、模型与加密凭据；厂商/模型/凭据
+的应用是 per-CLI、user-global 的显式操作：`POST /api/v1/cli-config/:adapter/apply-provider`
+（及 `/apply-provider/preview`、`/apply-provider/rollback`）把选中的
+`providerProfileId`、`modelProfileId?`、`credentialId?` 按各 CLI 原生格式写入全局
+配置文件（claude `~/.claude/settings.json`、codex `~/.codex/config.toml` +
+`~/.codex/auth.json`、opencode `opencode.json`、kimi `~/.kimi-code/config.toml`）。
+
+凭据按 cc-switch 方式明文写入 CLI 配置文件：写前对现有配置做 AES-256-GCM 加密
+备份，使用原子 `0600` 写入，失败可 rollback；preview 掩码密钥且不落盘。
+`/api/v1/cli-config/*` 不再 claim-gated，instance-admin 即可读写，语义写
+（providers/models/default-model）已开放。Session 创建只收
+`projectId` + `aiTool`，一律 `host_environment` 启动，不注入任何
+provider/model/credential 环境变量；`switch-model` 端点已删除，历史 session
+restart 退化为普通 host-environment 会话。
+
+OpenAI 作为普通 Provider 接入 Codex，apply-provider 会把所选凭据按 Codex 原生
+格式写入 `~/.codex/config.toml` 与 `~/.codex/auth.json`；ForgeBadger 不读取系统
+keyring。官方边界见
+[Codex authentication](https://learn.chatgpt.com/docs/auth) 与
+[configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)。
 
 ### 3.2 WebSocket 接口
 
@@ -869,7 +945,7 @@ interface WSMessage {
 │                 Gateway (Node.js)                  │
 │                                                    │
 │  ┌──────────────┐    ┌──────────────────────────┐  │
-│  │ Session      │───▶│  tmux session            │  │
+│  │ Session      │───▶│  multiplexer session     │  │
 │  │ Manager      │    │  ┌────────────────────┐  │  │
 │  │              │    │  │  AI CLI process    │  │  │
 │  │  创建/销毁    │    │  │  (claude/opencode/  │  │  │
@@ -893,79 +969,96 @@ interface WSMessage {
 
 ### 4.2 子进程管理方案 — 方案 A（已选定）
 
-**选定方案：tmux 托管子进程，node-pty spawn `tmux attach -t <session>`**
+**选定方案：平台终端复用器托管子进程，node-pty attach 到选定 runtime。**
+macOS/Linux/WSL 使用 tmux；原生 Windows 使用 psmux ≥ 3.3.8。
 
 #### 方案对比
 
 | 方案 | 优点 | 缺点 | 推荐度 |
 |------|------|------|--------|
 | Gateway 直接 spawn 子进程 | 简单 | ❌ Gateway 重启 = 所有 CLI 进程丢失 | ⭐ |
-| **tmux 托管子进程（方案 A）** | ✅ Gateway 重启不影响 CLI<br>✅ 天然支持断线重连 | ⚠️ 需要 tmux 依赖 | ⭐⭐⭐⭐⭐ **已选定** |
+| **平台复用器托管子进程（方案 A）** | ✅ Gateway 重启不影响 CLI<br>✅ 天然支持断线重连 | ⚠️ 需要对应平台的 tmux 或 psmux 依赖 | ⭐⭐⭐⭐⭐ **已选定** |
 | systemd 管理 | 最稳定 | ❌ 复杂度高，不适合 MVP | ⭐⭐ |
 
-**推荐：tmux 托管子进程（非直接子进程）**
+**推荐：平台复用器托管子进程（非直接子进程）**
 
 | 方案 | 优点 | 缺点 | 推荐度 |
 |------|------|------|--------|
 | Gateway 直接 spawn 子进程 | 简单 | ❌ Gateway 重启 = 所有 CLI 进程丢失 | ⭐ |
-| **tmux 托管子进程** | ✅ Gateway 重启不影响 CLI<br>✅ 天然支持断线重连 | ⚠️ 需要 tmux 依赖 | ⭐⭐⭐⭐⭐ |
+| **平台复用器托管子进程** | ✅ Gateway 重启不影响 CLI<br>✅ 天然支持断线重连 | ⚠️ 需要 tmux 或 psmux 依赖 | ⭐⭐⭐⭐⭐ |
 | systemd 管理 | 最稳定 | ❌ 复杂度高，不适合 MVP | ⭐⭐ |
 
-**tmux 会话命名规范：**
+**平台复用器会话命名规范：**
 ```
-of-{user_id_short}-{session_id_short}
-例: of-a1b2c3d4-e5f6a7b8
+fb-{user_id_short}-{session_id_short}
+例: fb-a1b2c3d4-e5f6a7b8
 ```
 
 **会话生命周期：**
 
 ```
 1. 创建会话
-   → Gateway: tmux new-session -d -s of-{user}-{session} -c {working_dir}
+   → Gateway: <mux> new-session -d -s fb-{user}-{session} -c {working_dir}
    → 注入环境变量（API Key 等）
-   → 启动 AI CLI: tmux send-keys -t {session} "claude" Enter
+   → 启动 AI CLI: <mux> send-keys -t {session} "claude" Enter
 
 2. 监控状态
-   → 定时检查: tmux list-sessions | grep of-{user}-{session}
-   → 检查进程: tmux list-panes -t {session} -F '#{pane_pid}'
+   → 定时检查: <mux> list-sessions
+   → 检查进程: <mux> list-panes -t {session} -F '#{pane_pid}'
    → 状态推断: 进程存在=running, 不存在=stopped
 
 3. 停止会话
-   → tmux kill-session -t of-{user}-{session}
+   → <mux> kill-session -t fb-{user}-{session}
    → 清理数据库状态
 
 4. 断线恢复
-   → 用户重连 → Gateway 检查 tmux session 是否存在
+   → 用户重连 → Gateway 检查选定复用器 session 是否存在
    → 存在 → 新 WebSocket attach 到现有 pty
    → 不存在 → 提示用户重新创建
 ```
 
+上述 tmux-compatible 生命周期子命令中，`<mux>` 在 macOS/Linux/WSL 为
+`tmux`，在原生 Windows 为 `psmux`。普通交互 attach 两者均使用
+`attach-session -t <session>`；programmatic submit 的 control mode 不同：
+tmux 使用 `tmux -C attach-session -f no-output,ignore-size -t <session>`，
+psmux 使用 `PSMUX_SESSION_NAME=<session>` 配合 `psmux -CC`。所有命令均由
+runtime profile 以 argv 形式构造，不经过 shell 字符串拼接。
+
 ### 4.3 终端连接方案 — 方案 A（已选定）
 
-**核心方案：node-pty spawn `tmux attach -t <session>`**
+**核心方案：node-pty 按 runtime profile spawn `<mux> attach-session -t <session>`。**
 
 ```typescript
-// SessionManager.createSession()
-const pty = nodePty.spawn('tmux', ['attach', '-t', sessionName], {
+// SessionManager.createSession(); runtime.kind is tmux or psmux.
+const pty = nodePty.spawn(runtime.command, runtime.buildAttachArgs(sessionName), {
   name: 'xterm-256color',
   cols: 120,
   rows: 40,
   cwd: workingDir,
-  env: { ...process.env, ...sessionEnv }  // 注入 API Key 等环境变量（变体方案 D）
+  env: buildTmuxAttachEnv(process.env)  // 仅清理继承的复用器身份，不注入 secret
 });
 ```
 
+API key 等 secret 已在创建会话时通过选定复用器的 `new-session -e`
+argv 注入；attach 子进程不得再次接收 secret。`buildTmuxAttachEnv` 是历史兼容
+函数名，其结果同时清理继承的 tmux 与 psmux 会话身份变量。
+
 **方案对比：**
 
-| 关注点 | 方案 A（node-pty + tmux attach） | 方案 B（node-pty + 直接 CLI） |
+| 关注点 | 方案 A（node-pty + platform mux attach） | 方案 B（node-pty + 直接 CLI） |
 |--------|---------------------------------|------------------------------|
-| 断线重连 | ✅ tmux 保活，重连即 attach | ❌ pty 关闭 = 进程终止 |
-| Gateway 重启 | ✅ tmux 会话独立存活 | ❌ 所有 CLI 进程丢失 |
-| 滚动历史 | ✅ tmux 自带 scrollback | ❌ 无历史 |
-| 嵌套 pty | ✅ node-pty master → tmux → CLI pty，成熟稳定 | — |
-| 运维复杂度 | ⚠️ 需 tmux 依赖 | ✅ 零额外依赖 |
+| 断线重连 | ✅ 平台复用器保活，重连即 attach | ❌ pty 关闭 = 进程终止 |
+| Gateway 重启 | ✅ 复用器会话独立存活 | ❌ 所有 CLI 进程丢失 |
+| 滚动历史 | ✅ tmux/psmux scrollback | ❌ 无历史 |
+| 嵌套 pty | ✅ node-pty master → platform mux → CLI pty | — |
+| 运维复杂度 | ⚠️ 需对应平台的 tmux/psmux 依赖 | ✅ 零额外依赖 |
 
 **嵌套 pty 可行性分析：**
+
+以下层级是 macOS/Linux/WSL 的 tmux 变体；原生 Windows 将同一位置替换为
+psmux/ConPTY，普通 attach 参数兼容，control mode 使用上文的 psmux `-CC`
+分支。
+
 ```
 嵌套层级：
   node-pty master（由 node-pty 创建）
@@ -996,19 +1089,22 @@ AI CLI stdout → tmux pane pty → tmux server → tmux client stdout
 2. **窗口大小调整延迟**：node-pty resize() → SIGWINCH → tmux client → tmux server → pane resize，链路存在 ~10-50ms 延迟，实际使用中无感知。
 3. **字符编码**：tmux 渲染后的纯文本输出可能丢失 ANSI 颜色码，需要确认 `capture-pane -e` 选项保留 escape 序列。
 
-### 4.4 变体方案 D — tmux 环境变量注入（无需中间 bash）
+### 4.4 变体方案 D — 平台复用器环境变量注入（无需中间 shell）
 
-**方案说明：** 利用 `tmux new-session -d -s xxx -e` 直接注入环境变量，无需通过中间 bash 脚本包装。
+**方案说明：** runtime profile 使用复用器的 tmux-compatible
+`new-session -d -s xxx -e` 直接注入环境变量，无需通过中间 shell 包装。
+下列命令是 macOS/Linux/WSL 的 tmux 变体；原生 Windows 使用 `psmux`
+执行对应兼容子命令，并要求 psmux ≥ 3.3.8。
 ```bash
 # 推荐方案：直接注入环境变量
-tmux new-session -d -s of-{user}-{session} \
+tmux new-session -d -s fb-{user}-{session} \
   -c {working_dir} \
   -e ANTHROPIC_API_KEY="xxx" \
   -e OPENAI_API_KEY="yyy" \
   claude
 
 # 会话运行期间动态注入（适用于 API Key 轮换）
-tmux set-environment -t of-{user}-{session} MY_KEY "value"
+tmux set-environment -t fb-{user}-{session} MY_KEY "value"
 ```
 
 **废弃的中间 bash 方案：**
@@ -1020,14 +1116,14 @@ tmux new-session -d -s xxx "bash -c 'export KEY=xxx && claude'"
 **方案 D 优势：**
 | 优势 | 说明 |
 |------|------|
-| 无中间进程 | 不产生多余 bash 子进程，tmux pane 直接运行 AI CLI |
+| 无中间进程 | 不产生多余 shell 子进程，复用器 pane 直接运行 AI CLI |
 | 信号传递正确 | SIGINT/SIGTERM 直接到达 AI CLI，不需要 bash 转发 |
 | 退出状态准确 | AI CLI 退出码直接反映，不经过 bash 包装层扭曲 |
-| 简洁安全 | 环境变量通过 tmux 内部机制传递，不经过 shell 解析，无注入风险 |
-| 动态更新 | `tmux set-environment` 支持运行时调整（适用于 Key 轮换） |
+| 简洁安全 | 环境变量通过复用器内部机制传递，不经过 shell 解析，无注入风险 |
+| 动态更新 | tmux-compatible `set-environment` 支持运行时调整（适用于 Key 轮换） |
 
 **注意事项：**
-- tmux `-e` 在 3.2+ 版本完全支持，需确保 tmux ≥ 3.2
+- Unix/WSL 需确保 tmux ≥ 3.2；原生 Windows 需确保 psmux ≥ 3.3.8
 - 建议使用 `-E` 清除默认环境 + 逐条 `-e` 注入，确保最小权限：
   `tmux new-session -d -s xxx -E -c {dir} -e PATH="/usr/local/bin:/usr/bin" -e KEY="xxx" claude`
 
@@ -1040,12 +1136,12 @@ tmux new-session -d -s xxx "bash -c 'export KEY=xxx && claude'"
     ▼
 Gateway WebSocket Server
     │
-    │ node-pty.write(data)  ← 键盘输入  [方案 A: tmux attach]
-    │ node-pty.on('data')   → 终端输出   [tmux client stdout]
+    │ node-pty.write(data)  ← 键盘输入  [方案 A: platform mux attach]
+    │ node-pty.on('data')   → 终端输出   [multiplexer client stdout]
     ▼
-node-pty (伪终端 — 连接到 tmux attach)
+node-pty (伪终端 — 连接到 runtime-selected attach)
     │
-    │ pty ↔ tmux client ↔ tmux server ↔ tmux pane pty
+    │ pty ↔ tmux/psmux client ↔ multiplexer server ↔ pane pty
     ▼
 AI CLI 进程 (claude/opencode/codex)
 ```
@@ -1066,7 +1162,7 @@ AI CLI 进程 (claude/opencode/codex)
    ptyProcess.on('data', (data) => {
      ws.send(JSON.stringify({
        type: 'terminal_output',
-       payload: { data }  // 终端原始输出（tmux 渲染后的纯文本）
+       payload: { data }  // 终端原始输出（平台复用器渲染后的文本）
      }));
    });
    ```
@@ -1076,18 +1172,16 @@ AI CLI 进程 (claude/opencode/codex)
    ws.on('message', (msg) => {
      if (type === 'terminal_resize') {
        ptyProcess.resize(payload.cols, payload.rows);
-       // node-pty → SIGWINCH → tmux client → tmux server → pane resize
+       // node-pty → resize signal → multiplexer client/server → pane resize
      }
    });
    ```
 
 4. **断线重连恢复（capture-pane）：**
    ```typescript
-   // 客户端重连时，获取 tmux 历史缓冲区重建显示
+   // 客户端重连时，通过 runtime profile 获取复用器历史缓冲区
    async function restoreTerminal(sessionId: string): Promise<string> {
-     const { stdout } = await execAsync(
-       `tmux capture-pane -t of-${sessionId} -p -S -5000`
-     );
+     const stdout = await multiplexer.captureHistory(sessionId, 5000);
      return stdout;  // 返回给 xterm.js 恢复显示
    }
    ```
@@ -1101,7 +1195,7 @@ AI CLI 进程 (claude/opencode/codex)
 
 ### 4.6 架构建议与补充设计（2026-04-24 评审补充）
 
-#### 4.6.1 `tmux capture-pane` 限制与应对
+#### 4.6.1 平台复用器 `capture-pane` 限制与应对
 
 | 限制 | 影响 | 应对方案 |
 |------|------|----------|
@@ -1112,12 +1206,10 @@ AI CLI 进程 (claude/opencode/codex)
 
 **最佳实践：**
 ```typescript
-// 断线重连恢复 — 控制边界版
+// 断线重连恢复 — 控制边界版；runtime 在 Unix/WSL 选 tmux，在原生 Windows 选 psmux。
 async function restoreTerminal(sessionId: string, options?: { maxLines?: number }): Promise<string> {
   const maxLines = options?.maxLines ?? 500;
-  const { stdout } = await execAsync(
-    `tmux capture-pane -t of-${sessionId} -p -e -S -${maxLines}`
-  );
+  const stdout = await multiplexer.captureHistory(sessionId, maxLines);
   // 截断过长输出（安全兜底）
   if (stdout.length > 64 * 1024) {
     return stdout.slice(-64 * 1024);
@@ -1352,7 +1444,7 @@ interface CliAdapter {
 | # | 风险 | 影响 | 概率 | 严重度 | 应对方案 |
 |---|------|------|------|--------|----------|
 | 1 | **node-pty 编译失败** | Gateway 无法启动，终端功能完全不可用 | 中 | 🔴 致命 | ① 使用 prebuild 包跳过编译 ② 准备 fallback：如果 node-pty 不可用，降级为纯命令行模式（不嵌入终端，外部打开终端窗口） |
-| 2 | **tmux 会话泄漏** | 停止会话后 tmux 进程残留，占用资源 | 高 | 🟡 严重 | ① 所有 tmux 操作封装在 SessionManager 中，确保 create/destroy 配对 ② 定时巡检：每 5 分钟扫描孤立 tmux session 并清理 ③ Gateway 启动时清理上一次残留的 `of-*` 会话 |
+| 2 | **tmux 会话泄漏** | 停止会话后 tmux 进程残留，占用资源 | 高 | 🟡 严重 | ① 所有 tmux 操作封装在 SessionManager 中，确保 create/destroy 配对 ② 定时巡检：每 5 分钟扫描孤立 tmux session 并清理 ③ Gateway 启动时清理上一次残留的 `fb-*` 会话 |
 | 3 | **WebSocket 连接不稳定** | 终端卡顿、断连，用户体验差 | 高 | 🟡 严重 | ① 客户端自动重连（指数退避：1s → 2s → 4s → 8s → 最大 30s） ② tmux 保活：WebSocket 断连不影响 CLI 运行 ③ 重连后通过 `tmux capture-pane` 恢复终端显示 |
 | 4 | **API Key 安全存储** | 密钥泄露 → 资损 | 低 | 🔴 致命 | ① AES-256-GCM 加密，密钥来自环境变量 `FORGEBADGER_MASTER_KEY` ② 不在日志中打印密钥 ③ 内存中解密后通过环境变量注入 CLI 进程 ④ 支持 API Key 轮换 |
 | 5 | **MVP 工时压缩** | 项目跳票 | 高 | 🟡 严重 | ① MVP 只打透 Claude Code，OpenCode/Codex 适配器延后 ② 前端页面使用 shadcn/ui 快速搭建，不追求完美 UI ③ 严格 P0 范围，P1 功能不提前做 ④ 每周检查进度，必要时砍功能不砍质量 |
@@ -1381,8 +1473,8 @@ interface CliAdapter {
 防护层：
   1. 进程级：使用 SIGTERM 处理函数，优雅关闭所有 tmux session
   2. 定时巡检：setInterval(() => cleanupOrphanSessions(), 5 * 60 * 1000)
-  3. 启动时清理：启动时扫描所有 of-{user_id}-* 会话，对比数据库中的活跃会话，清理孤儿
-  4. 命名规范：所有 ForgeBadger 管理的 tmux session 以 of- 开头，便于识别和清理
+  3. 启动时清理：启动时扫描所有 fb-{user_id}-* 会话，对比数据库中的活跃会话，清理孤儿
+  4. 命名规范：所有 ForgeBadger 管理的 tmux session 以 fb- 开头，便于识别和清理
 ```
 
 #### 风险 3：WebSocket 连接不稳定
@@ -1647,7 +1739,7 @@ forgebadger/
 **选择理由：**
 1. 零运维：无需安装额外服务，符合一键部署目标
 2. better-sqlite3 同步 API：单线程 Gateway 无需处理异步并发
-3. Drizzle ORM：TypeScript 原生，支持 SQLite 和 PostgreSQL（平滑迁移路径）
+3. Drizzle ORM：TypeScript 原生，提供 SQLite schema 类型和 migration runner
 4. 性能：MVP 阶段（< 500 项目，< 5000 会话）完全够用
 
 **被否决方案：**
@@ -1656,15 +1748,16 @@ forgebadger/
 
 **后果：**
 - ✅ 部署简单，`npm install` 即
-- ✅ 迁移到 PostgreSQL 时只需改连接字符串（Drizzle 支持）
-- ⚠️ SQLite 不支持并发写入，但 Gateway 单进程无此问题
-- ⚠️ 如果未来需要多实例部署（水平扩展），需要迁移到 PostgreSQL
+- ✅ 本地 npm 服务保持单文件、零外部数据库依赖
+- ✅ WAL + 有限 busy timeout 适配单 Gateway 的短事务写入
+- ⚠️ migration 必须 forward-only；已发布 SQL 不允许原地改写
+- ⚠️ 若未来产品目标改为多主机共享状态，需要重新做完整存储架构评审，而不是替换连接字符串
 
 ---
 
-### ADR-004: 会话管理使用 tmux 而非直接子进程
+### ADR-004: 会话管理使用 tmux 而非直接子进程（历史决策记录）
 
-- **状态：** 提议
+- **状态：** 历史；核心决策已在 2026-08-31 泛化为平台终端复用器
 - **决策者：** 毕方
 - **日期：** 2026-04-24
 
@@ -1691,6 +1784,15 @@ forgebadger/
 - ✅ 用户体验好：断线重连无感知
 - ⚠️ 依赖 tmux，需要在安装文档中说明
 - ⚠️ tmux 会话泄漏需要防护（已制定清理策略）
+
+**2026-08-31 修订：** ADR 的核心选择是“由操作系统终端复用器托管会话，
+而不是由 Gateway 直接托管 CLI 子进程”。macOS/Linux/WSL 继续使用 tmux；
+原生 Windows 使用 psmux ≥ 3.3.8。复用器选择由
+`services/terminal-multiplexer-runtime.ts` 统一解析，创建、恢复、历史捕获、
+resize、停止、WebSocket attach 和 programmatic submit 复用同一运行时。
+当前 macOS 上的代码/单元测试通过不等于真实 Windows 验收；物理 Windows +
+ConPTY + psmux + 浏览器 + AI CLI 完整生命周期仍由 `WINDOWS-WSL` 外部证据门禁
+保持 `Caveat`。
 
 ---
 
@@ -1743,7 +1845,7 @@ forgebadger/
 | `FORGEBADGER_MASTER_KEY` | ✅ | — | AES 加密密钥（推荐 64 字符 hex） |
 | `FORGEBADGER_JWT_SECRET` | ✅ | — | JWT 签名密钥 |
 | `FORGEBADGER_LOG_LEVEL` | ❌ | info | 日志级别 |
-| `FORGEBADGER_TMUX_PREFIX` | ❌ | of- | tmux 会话名前缀 |
+| `FORGEBADGER_TMUX_PREFIX` | ❌ | fb- | tmux 会话名前缀 |
 
 ### 9.3 前端页面路由
 
@@ -1774,7 +1876,7 @@ forgebadger/
 
 1. **Gateway 用 Node.js + TypeScript** — 不是因为流行，而是因为 `node-pty`（VS Code 同款）是唯一生产级方案，且与 AI CLI 生态同源。
 2. **前端用 Next.js + shadcn/ui** — 不是要追求最新，而是要一人全栈高效开发。shadcn/ui 代码复制模式避免了组件库升级的绑架风险。
-3. **存储用 SQLite + Drizzle ORM** — MVP 零运维，后续可平滑迁移到 PostgreSQL。
+3. **存储用 SQLite + Drizzle ORM** — 这是本地 npm 服务的正式零运维架构；通过精确索引、SQLite 聚合和 forward-only migration 持续扩展。
 4. **终端方案可行但需要 POC** — xterm.js + WebSocket + node-pty + tmux 链路清晰，断线重连通过 tmux 天然支持。**Day 1-3 必须完成 POC，POC 不通过则整体方案需要调整。**
 5. **MVP 先打透 Claude Code** — 不三端同时做。Claude Code 适配器跑通后，OpenCode 和 Codex 只是接口适配问题。
 6. **认证 + 数据模型是 Day 1 前置任务** — 不确认这两个，所有业务模块的开发都会返工。

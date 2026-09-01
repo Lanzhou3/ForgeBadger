@@ -12,6 +12,7 @@ import { createGatewayApp, createServer } from "../src/server.js";
 import { attachEventsWebSocket } from "../src/websocket/events.js";
 import { signJwt } from "../src/auth/jwt.js";
 import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
+import { RuntimeAuthorizationInvalidator } from "../src/services/runtime-authorization-invalidation.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 
@@ -92,7 +93,8 @@ describe("events WebSocket", () => {
       masterKey,
       sessionManager,
       apiKeyStore,
-      eventBus
+      eventBus,
+      runtimeAuthorizationInvalidator: new RuntimeAuthorizationInvalidator()
     });
 
     await new Promise<void>((resolve) => {

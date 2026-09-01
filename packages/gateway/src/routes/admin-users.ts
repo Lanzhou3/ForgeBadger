@@ -7,6 +7,7 @@ import { UserRepository, type User } from "../db/repositories/user-repository.js
 import { AuthSessionRepository } from "../db/repositories/auth-session-repository.js";
 import { AuthInviteRepository } from "../db/repositories/auth-invite-repository.js";
 import type { Database } from "../db/types.js";
+import type { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
 
 const updateUserSchema = z.object({
   role: z.enum(["admin", "user"]).optional(),
@@ -19,7 +20,10 @@ const resetPasswordSchema = z.object({
   password: z.string().min(8)
 });
 
-export function createAdminUserRoutes(db: Database): Router {
+export function createAdminUserRoutes(
+  db: Database,
+  runtimeAuthorizationInvalidator: RuntimeAuthorizationInvalidator
+): Router {
   const router = Router();
   router.use(authenticate);
   router.use((req, res, next) => {
@@ -73,6 +77,7 @@ export function createAdminUserRoutes(db: Database): Router {
       res.status(404).json({ code: 1, message: "User not found" });
       return;
     }
+    runtimeAuthorizationInvalidator.invalidate({ scope: "user", userId: user.id });
 
     res.json({
       code: 0,

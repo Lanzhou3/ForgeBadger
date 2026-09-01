@@ -198,15 +198,11 @@ describe("loadOrCreateRuntimeConfig", () => {
 });
 
 describe("resolveStateDir", () => {
-  it("reuses a legacy state directory only while the ForgeBadger directory is absent", async () => {
+  it("uses the ForgeBadger state directory even when an old directory exists", async () => {
     const fakeHome = await mkdtemp(path.join(tmpdir(), "forgebadger-home-"));
-    const legacyDir = path.join(fakeHome, ".openforge");
     const currentDir = path.join(fakeHome, ".forgebadger");
-    await mkdir(legacyDir);
+    await mkdir(path.join(fakeHome, ".old-product-state"));
 
-    assert.equal(resolveStateDir(undefined, fakeHome, {}), legacyDir);
-
-    await mkdir(currentDir);
     assert.equal(resolveStateDir(undefined, fakeHome, {}), currentDir);
   });
 

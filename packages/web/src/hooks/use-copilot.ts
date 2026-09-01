@@ -248,7 +248,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
 
   // Optimistic "thinking" state the instant the user hits send — before the
   // POST returns and before any WS event arrives, so the UI never looks dead
-  // while the dsh runtime cold-starts. runId is PENDING_RUN_ID until the
+  // while the Gateway starts the model turn. runId is PENDING_RUN_ID until the
   // server responds or the first frame folds in.
   const markPending = useCallback(
     (conversationId: string) => {

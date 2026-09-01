@@ -78,7 +78,7 @@ export async function validateTrialIssueRoutes(options = {}) {
 }
 
 function fetchIssueWithGh(route, options) {
-  const repository = options.repository ?? process.env.FORGEBADGER_TRIAL_ISSUE_ROUTES_REPO ?? process.env.OPENFORGE_TRIAL_ISSUE_ROUTES_REPO ?? DEFAULT_REPOSITORY;
+  const repository = options.repository ?? process.env.FORGEBADGER_TRIAL_ISSUE_ROUTES_REPO ?? DEFAULT_REPOSITORY;
   const output = execFileSync(
     "gh",
     [

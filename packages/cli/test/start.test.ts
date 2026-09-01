@@ -7,7 +7,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { runStart } from "../src/commands/start.js";
+import { runStart, type RunStartOptions } from "../src/commands/start.js";
 import { runCli } from "../src/index.js";
 import type { RuntimeConfig } from "../src/runtime/config.js";
 import { resolveInstalledPaths } from "../src/runtime/paths.js";
@@ -96,7 +96,7 @@ describe("runStart", () => {
     delete process.env.FORGEBADGER_JWT_SECRET;
 
     try {
-      const codePromise = runStart({
+      const codePromise = runStartWithReadyRuntime({
         gatewayPort: 49931,
         webPort: 49932,
         host: "127.0.0.1",
@@ -213,7 +213,7 @@ describe("runStart", () => {
     process.env.FORGEBADGER_EXTRA_SECRET = "parent-forgebadger-extra";
 
     try {
-      const codePromise = runStart({
+      const codePromise = runStartWithReadyRuntime({
         loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
         resolvePaths: () => createInstalledPaths(),
         checkPort: async () => undefined,
@@ -252,7 +252,7 @@ describe("runStart", () => {
     const stdout = createMemoryWriter();
     const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
 
-    const codePromise = runStart({
+    const codePromise = runStartWithReadyRuntime({
       loadConfig: async () =>
         createRuntimeConfig("/tmp/forgebadger-state", {
           gateway: { host: "0.0.0.0", port: 48731 },
@@ -284,22 +284,27 @@ describe("runStart", () => {
     assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/127\.0\.0\.1:48731\n/);
   });
 
-  it("warns native Windows users to run terminal sessions inside WSL while starting management services", async () => {
+  it("fails closed before config loading or process spawn when psmux is unavailable non-interactively", async () => {
     const stderr = createMemoryWriter();
     const children: FakeChild[] = [];
     let dependencyChecks = 0;
+    let configLoaded = false;
 
     const codePromise = runStart({
-      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
+      loadConfig: async () => {
+        configLoaded = true;
+        return createRuntimeConfig("/tmp/forgebadger-state");
+      },
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
       prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
       writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
       dependencyRunner: async () => {
         dependencyChecks += 1;
-        return { exitCode: 0, stdout: "tmux 3.4\n", stderr: "" };
+        return { exitCode: 127, stdout: "", stderr: "psmux not found" };
       },
       platform: "win32",
+      isTTY: false,
       spawn: () => {
         const child = new FakeChild();
         children.push(child);
@@ -314,14 +319,16 @@ describe("runStart", () => {
 
     const code = await codePromise;
 
-    assert.equal(code, 0);
-    assert.equal(children.length, 2);
-    assert.equal(dependencyChecks, 0);
-    assert.match(stderr.text, /Native Windows terminals require WSL/);
+    assert.equal(code, 1);
+    assert.equal(configLoaded, false);
+    assert.equal(children.length, 0);
+    assert.equal(dependencyChecks, 1);
+    assert.match(stderr.text, /winget install --id marlocarlo\.psmux --exact --source winget/);
+    assert.match(stderr.text, /non-interactive|not installed/i);
     assert.match(stderr.text, /forgebadger doctor/);
   });
 
-  it("checks only tmux before warning about missing Unix terminal persistence", async () => {
+  it("fails closed after checking the Linux package-manager allowlist", async () => {
     const stderr = createMemoryWriter();
     const seen: Array<{ command: string; args: string[] }> = [];
 
@@ -346,9 +353,18 @@ describe("runStart", () => {
 
     const code = await codePromise;
 
-    assert.equal(code, 0);
-    assert.deepEqual(seen, [{ command: "tmux", args: ["-V"] }]);
-    assert.match(stderr.text, /Install tmux to enable persistent browser terminals/);
+    assert.equal(code, 1);
+    assert.deepEqual(seen, [
+      { command: "tmux", args: ["-V"] },
+      { command: "apt-get", args: ["--version"] },
+      { command: "dnf", args: ["--version"] },
+      { command: "yum", args: ["--version"] },
+      { command: "pacman", args: ["--version"] },
+      { command: "zypper", args: ["--version"] },
+      { command: "apk", args: ["--version"] }
+    ]);
+    assert.match(stderr.text, /Install tmux manually with your system package manager/);
+    assert.match(stderr.text, /aborted|cannot start/i);
     assert.match(stderr.text, /forgebadger doctor/);
   });
 
@@ -357,7 +373,7 @@ describe("runStart", () => {
     const stdout = createMemoryWriter();
     const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
 
-    const codePromise = runStart({
+    const codePromise = runStartWithReadyRuntime({
       loadConfig: async () =>
         createRuntimeConfig("/tmp/forgebadger-state", {
           gateway: { host: "::1", port: 48731 },
@@ -396,7 +412,7 @@ describe("runStart", () => {
     // Act / Assert
     await assert.rejects(
       () =>
-        runStart({
+        runStartWithReadyRuntime({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "127.0.0.1", port: 48731 },
@@ -426,7 +442,7 @@ describe("runStart", () => {
     // Act / Assert
     await assert.rejects(
       () =>
-        runStart({
+        runStartWithReadyRuntime({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "0.0.0.0", port: 48731 },
@@ -456,7 +472,7 @@ describe("runStart", () => {
     // Act / Assert
     await assert.rejects(
       () =>
-        runStart({
+        runStartWithReadyRuntime({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "localhost", port: 48731 },
@@ -486,7 +502,7 @@ describe("runStart", () => {
     // Act / Assert
     await assert.rejects(
       () =>
-        runStart({
+        runStartWithReadyRuntime({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "localhost", port: 48731 },
@@ -516,7 +532,7 @@ describe("runStart", () => {
     const children: FakeChild[] = [];
     const spawnError = new Error("gateway spawn failed");
 
-    const codePromise = runStart({
+    const codePromise = runStartWithReadyRuntime({
       loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
@@ -551,7 +567,7 @@ describe("runStart", () => {
     const originalSigtermCount = process.listenerCount("SIGTERM");
     const children: FakeChild[] = [];
 
-    const codePromise = runStart({
+    const codePromise = runStartWithReadyRuntime({
       loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
@@ -587,7 +603,7 @@ describe("runStart", () => {
     const originalSigtermCount = process.listenerCount("SIGTERM");
     const children: FakeChild[] = [];
 
-    const codePromise = runStart({
+    const codePromise = runStartWithReadyRuntime({
       loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
@@ -627,7 +643,7 @@ describe("runStart", () => {
     // Act / Assert
     await assert.rejects(
       () =>
-        runStart({
+        runStartWithReadyRuntime({
           loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
           resolvePaths: () => paths,
           checkPort: async () => undefined,
@@ -773,6 +789,21 @@ function createMemoryWriter() {
       this.text += chunk;
     }
   };
+}
+
+function runStartWithReadyRuntime(options: RunStartOptions): Promise<number> {
+  return runStart({
+    ensureTerminalRuntime: async () => ({
+      status: "ready",
+      runtime: {
+        persistence: "tmux",
+        mode: "native_tmux",
+        supported: true,
+        message: "tmux is available for persistent browser terminals."
+      }
+    }),
+    ...options
+  });
 }
 
 function captureEnv(names: string[]): Record<string, string | undefined> {

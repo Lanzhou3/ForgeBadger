@@ -118,10 +118,12 @@ async function restoreSnapshot(input: RestoreSnapshotInput): Promise<{
     throw new Error("Project not found");
   }
 
+  const snapshotMetadata = parseMetadata(input.snapshot.metadata);
+  const snapshotAdapter = readSnapshotAdapter(snapshotMetadata);
   const baseSession = existingSession ?? sessionRepo.create({
     projectId: project.id,
     name: project.name,
-    aiTool: project.aiTool,
+    aiTool: snapshotAdapter ?? project.aiTool,
     workingDir: project.path,
     ...(input.snapshot.modelId ? { modelId: input.snapshot.modelId } : {}),
     credentialMode: "host_environment"
@@ -140,7 +142,7 @@ async function restoreSnapshot(input: RestoreSnapshotInput): Promise<{
   }
 
   const nextModelId = input.snapshot.modelId ?? baseSession.modelId ?? undefined;
-  if (nextModelId) {
+  if (nextModelId && nextModelId !== baseSession.modelId) {
     sessionRepo.update(baseSession.id, {
       modelId: nextModelId
     });
@@ -153,15 +155,9 @@ async function restoreSnapshot(input: RestoreSnapshotInput): Promise<{
     baseSession.id
   );
   const launchPlan = createLaunchPlan({
-    db: input.db,
-    userId: input.userId,
-    masterKey: input.masterKey,
     adapter,
     projectRoot: baseSession.workingDir,
     sessionId: baseSession.id,
-    credentialMode: baseSession.credentialMode,
-    ...(baseSession.apiKeyId ? { apiKeyId: baseSession.apiKeyId } : {}),
-    ...(nextModelId ? { modelId: nextModelId } : {}),
     ...(pluginDirs.length > 0 ? { pluginDirs } : {})
   });
 
@@ -264,4 +260,10 @@ function parseMetadata(metadata: string | null): unknown {
   } catch {
     return null;
   }
+}
+
+function readSnapshotAdapter(metadata: unknown): string | undefined {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined;
+  const adapter = (metadata as Record<string, unknown>).adapter;
+  return typeof adapter === "string" ? adapter : undefined;
 }

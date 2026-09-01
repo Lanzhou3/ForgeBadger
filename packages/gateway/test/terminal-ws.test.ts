@@ -265,13 +265,13 @@ describe("extractWsAuthToken", () => {
     assert.equal(token, "protocol-token");
   });
 
-  it("accepts the legacy OpenForge terminal protocol during the rename window", () => {
+  it("rejects retired terminal protocols", () => {
     const token = extractWsAuthToken(
-      { "sec-websocket-protocol": "openforge-terminal, legacy-token" },
-      ["forgebadger-terminal", "openforge-terminal"]
+      { "sec-websocket-protocol": "old-product-terminal, old-token" },
+      "forgebadger-terminal"
     );
 
-    assert.equal(token, "legacy-token");
+    assert.equal(token, undefined);
   });
 
   it("returns undefined when protocol token is missing", () => {

@@ -11,7 +11,7 @@ export const DEFAULT_REPOSITORY = "Lanzhou3/ForgeBadger";
 const DEFAULT_LIMIT = 50;
 
 export async function auditTrialFeedbackIssues(options = {}) {
-  const repository = options.repository ?? process.env.FORGEBADGER_TRIAL_FEEDBACK_ISSUE_REPO ?? process.env.OPENFORGE_TRIAL_FEEDBACK_ISSUE_REPO ?? DEFAULT_REPOSITORY;
+  const repository = options.repository ?? process.env.FORGEBADGER_TRIAL_FEEDBACK_ISSUE_REPO ?? DEFAULT_REPOSITORY;
   const limit = options.limit ?? DEFAULT_LIMIT;
   const fetchIssues = options.fetchIssues ?? fetchTrialFeedbackIssuesWithGh;
   const auditIssue = options.auditIssue ?? auditTrialFeedbackIssue;

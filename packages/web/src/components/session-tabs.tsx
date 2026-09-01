@@ -3,25 +3,13 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useMutation, useQuery } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { CliBrandIcon } from "@/components/cli-brand-icon";
+import { SessionLaunchDialog } from "@/components/sessions/session-launch-dialog";
 import { useLanguage } from "@/hooks/use-language";
-import { getCliBrand, runtimeAdapterLabel } from "@/lib/cli-brand";
-import {
-  createSession,
-  discoverAdapters,
-  isAdapterLaunchable,
-  type RuntimeAdapterId,
-} from "@/lib/api";
+import { getCliBrand } from "@/lib/cli-brand";
 import {
   groupSessionTabs,
   notifySessionTabsChanged,
@@ -256,72 +244,30 @@ function NewCliSessionButton({
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
 
-  const { data: discoveryData, isLoading: adaptersLoading } = useQuery({
-    queryKey: ["adapters", "discovery"],
-    queryFn: discoverAdapters,
-    enabled: open,
-    staleTime: 30_000,
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (aiTool: RuntimeAdapterId) =>
-      createSession({ projectId, credentialMode: "host_environment", aiTool }),
-    onSuccess: ({ session }) => {
-      setOpen(false);
-      upsertSessionTab(sessionToTab(session));
-      notifySessionTabsChanged();
-      router.push(`/sessions/${session.id}`);
-    },
-  });
-
-  const adapters = discoveryData?.adapters ?? [];
   const label = `${t("projects.newSession")} · ${projectName}`;
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild disabled={createMutation.isPending}>
+    <>
         <Button
           variant="ghost"
           size="icon"
           className="mb-1 size-6 shrink-0 rounded-sm text-muted-foreground hover:text-foreground"
           title={label}
           aria-label={label}
+          onClick={() => setOpen(true)}
         >
           <Plus className="size-3.5" />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-48">
-        {adaptersLoading ? (
-          <DropdownMenuItem disabled className="text-muted-foreground">
-            {t("projects.loadingRuntimeCli")}
-          </DropdownMenuItem>
-        ) : adapters.length === 0 ? (
-          <DropdownMenuItem disabled className="text-muted-foreground">
-            {t("projects.noLaunchableRuntimeCli")}
-          </DropdownMenuItem>
-        ) : (
-          adapters.map((adapter) => {
-            const launchable = isAdapterLaunchable(adapter);
-            return (
-              <DropdownMenuItem
-                key={adapter.id}
-                disabled={!launchable || createMutation.isPending}
-                onSelect={() => createMutation.mutate(adapter.id as RuntimeAdapterId)}
-              >
-                <CliBrandIcon aiTool={adapter.id} />
-                {runtimeAdapterLabel(adapter, t)}
-              </DropdownMenuItem>
-            );
-          })
-        )}
-        {createMutation.isError && (
-          <p className="px-2 py-1.5 text-xs text-destructive">
-            {createMutation.error instanceof Error
-              ? createMutation.error.message
-              : t("projects.failedCreateSession")}
-          </p>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      <SessionLaunchDialog
+        projectId={projectId}
+        open={open}
+        onOpenChange={setOpen}
+        onCreated={(session) => {
+          upsertSessionTab(sessionToTab(session));
+          notifySessionTabsChanged();
+          router.push(`/sessions/${session.id}`);
+        }}
+      />
+    </>
   );
 }

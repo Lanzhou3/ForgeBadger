@@ -6,9 +6,9 @@ import {
   REQUIRED_GITHUB_FIELDS,
   REQUIRED_GITHUB_OPTIONS,
   REQUIRED_CAVEAT_OWNER_PHRASES,
-  REQUIRED_GITHUB_PORTFOLIO_PROMPTS,
+  REQUIRED_GITHUB_COPILOT_PROMPTS,
   REQUIRED_MARKDOWN_PHRASES,
-  REQUIRED_MARKDOWN_PORTFOLIO_PROMPTS,
+  REQUIRED_MARKDOWN_COPILOT_PROMPTS,
   REQUIRED_MARKDOWN_SECTIONS,
   REQUIRED_SAFETY_PHRASES,
   validateTrialFeedbackIntake
@@ -38,8 +38,8 @@ describe("validateTrialFeedbackIntake", () => {
     const githubIssueForm = buildIssueFormFixture()
       .replace("        - blocked", "        - blocked externally")
       .replace(
-        "        Confirmed no terminal/shell/Codex turn input in Portfolio:\n    validations:\n      required: true",
-        "        Confirmed no terminal/shell/Codex turn input in Portfolio:\n    validations:\n      required: false"
+        "        Confirmed no raw terminal input without approval:\n    validations:\n      required: true",
+        "        Confirmed no raw terminal input without approval:\n    validations:\n      required: false"
       );
     const markdownTemplate = buildMarkdownTemplateFixture();
 
@@ -50,7 +50,7 @@ describe("validateTrialFeedbackIntake", () => {
 
     assert.equal(result.ok, false);
     assert.match(result.errors.join("\n"), /result.*blocked/);
-    assert.match(result.errors.join("\n"), /portfolio.*required: true/);
+    assert.match(result.errors.join("\n"), /copilot.*required: true/);
   });
 
   it("rejects trial intake drift back to the old Feishu callback evidence route", () => {
@@ -248,12 +248,12 @@ describe("validateTrialFeedbackIntake", () => {
     );
   });
 
-  it("rejects intake materials that omit Portfolio evidence prompts", () => {
+  it("rejects intake materials that omit Copilot evidence prompts", () => {
     const result = validateTrialFeedbackIntake({
-      githubIssueForm: buildIssueFormFixture().replaceAll("Portfolio route availability:", "Portfolio route:"),
+      githubIssueForm: buildIssueFormFixture().replaceAll("Copilot route availability:", "Copilot route:"),
       markdownTemplate: buildMarkdownTemplateFixture().replaceAll(
-        "Portfolio route availability:",
-        "Portfolio route:"
+        "Copilot route availability:",
+        "Copilot route:"
       ),
       trialRunbook: buildTrialRunbookFixture(),
       trialChecklist: buildTrialChecklistFixture(),
@@ -262,8 +262,8 @@ describe("validateTrialFeedbackIntake", () => {
     });
 
     assert.equal(result.ok, false);
-    assert.match(result.errors.join("\n"), /GitHub issue form.*Portfolio route availability:/);
-    assert.match(result.errors.join("\n"), /Markdown trial feedback template.*Portfolio route availability:/);
+    assert.match(result.errors.join("\n"), /GitHub issue form.*Copilot route availability:/);
+    assert.match(result.errors.join("\n"), /Markdown trial feedback template.*Copilot route availability:/);
   });
 });
 
@@ -283,10 +283,10 @@ function buildIssueFormFixture() {
       for (const option of REQUIRED_GITHUB_OPTIONS[field]) {
         body.push(`        - ${option}`);
       }
-    } else if (field === "portfolio") {
+    } else if (field === "copilot") {
       body.push("    attributes:");
       body.push("      value: |");
-      for (const phrase of REQUIRED_GITHUB_PORTFOLIO_PROMPTS) body.push(`        ${phrase}`);
+      for (const phrase of REQUIRED_GITHUB_COPILOT_PROMPTS) body.push(`        ${phrase}`);
     } else if (field === "safety") {
       body.push("    attributes:");
       body.push("      options:");
@@ -318,7 +318,7 @@ function buildMarkdownTemplateFixture() {
   for (const phrase of REQUIRED_MARKDOWN_PHRASES) {
     body.push(phrase);
   }
-  for (const phrase of REQUIRED_MARKDOWN_PORTFOLIO_PROMPTS) body.push(phrase);
+  for (const phrase of REQUIRED_MARKDOWN_COPILOT_PROMPTS) body.push(phrase);
   return `${body.join("\n")}\n`;
 }
 
@@ -331,7 +331,6 @@ function buildTrialRunbookFixture() {
     "Maintainer-only fallback"
   ].join("\n");
 }
-
 function buildTrialChecklistFixture() {
   return [
     "# ForgeBadger Trial Checklist",

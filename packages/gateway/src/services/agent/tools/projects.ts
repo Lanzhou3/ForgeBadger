@@ -3,15 +3,14 @@
  * tool surface. Read tools expose project state; the operate tool (create
  * project) is approval-gated and only fires after the owner approves it.
  *
- * The queries/writes live in services/copilot-bridge/bridge-service.ts so the
- * internal copilot-bridge HTTP API and these tools share one implementation.
+ * Queries and writes use the native Copilot platform-access service.
  */
 import { z } from "zod";
 import {
   createProjectRecord,
   getProjectDetail,
   listProjectSummaries
-} from "../../copilot-bridge/bridge-service.js";
+} from "../platform-access.js";
 import type { Database } from "../../../db/types.js";
 import type { AgentTool, AgentToolContext } from "../tool-registry.js";
 

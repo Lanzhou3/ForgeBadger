@@ -57,7 +57,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Script harness tests
-        run: node --test scripts/audit-feishu-bot-live-report.test.mjs scripts/create-feishu-bot-live-evidence-report.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-feishu-bot-websocket.test.mjs scripts/smoke-feishu-bot-live.test.mjs scripts/smoke-local-release.test.mjs scripts/smoke-npm-package-runner.test.mjs scripts/verify-npm-package.test.mjs
+        run: node --test scripts/audit-feishu-bot-live-report.test.mjs scripts/create-feishu-bot-live-evidence-report.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-feishu-bot-websocket.test.mjs scripts/smoke-feishu-bot-live.test.mjs scripts/smoke-local-release.test.mjs scripts/smoke-npm-package-runner.test.mjs scripts/validate-db-migrations.test.mjs scripts/verify-npm-package.test.mjs
+
+      - name: Database migration contract
+        run: pnpm validate:db-migrations
 
       - name: ForgeBadger brand contract
         run: pnpm validate:brand
@@ -69,7 +72,7 @@ jobs:
         run: pnpm -r test
 
       - name: Provider and Codex boundary regression
-        run: pnpm --dir packages/gateway test test/model-provider-routes.test.ts test/model-provider-repository.test.ts test/model-config-apply.test.ts test/codex-provider-env.test.ts test/session-adapter-decoupling.test.ts
+        run: pnpm --dir packages/gateway test test/model-provider-routes.test.ts test/model-provider-repository.test.ts test/cli-config-apply.test.ts test/codex-provider-env.test.ts test/session-adapter-decoupling.test.ts
 
       - name: Workspace build
         run: pnpm -r build
@@ -158,9 +161,9 @@ jobs:
               echo "- Claude Code CLI: unavailable; real Claude session smoke is skipped in CI."
             fi
             if command -v codex >/dev/null 2>&1; then
-              echo "- Codex CLI: available"
+              echo "- Codex CLI: available; repository tests cover native-status normalization, but real account/provider evidence still requires an authorized smoke."
             else
-              echo "- Codex CLI: unavailable; real Codex app-server process smoke is skipped in CI."
+              echo "- Codex CLI: unavailable; real native-login status and OpenAI provider smoke are skipped in CI."
             fi
             echo "- Physical Windows/WSL smoke: not covered by Ubuntu CI; run docs/TRIAL-CHECKLIST.md on a Windows host before removing the platform caveat."
             echo "- Manual browser smoke: run docs/SMOKE-TEST.md on 48731/48732 before final release acceptance."

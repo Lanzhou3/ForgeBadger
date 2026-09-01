@@ -14,11 +14,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ModelProfile } from "@/lib/api";
 
-import { EmptyLine, type ModelForm, type ModelReferenceInfo, type Translate } from "./shared";
+import { EmptyLine, type ModelForm, type Translate } from "./shared";
 
 interface ModelsTabProps {
   models: ModelProfile[];
-  references: Map<string, ModelReferenceInfo>;
   selectedModelId: string;
   modelForm: ModelForm;
   dialogOpen: boolean;
@@ -37,7 +36,6 @@ interface ModelsTabProps {
 
 export function ModelsTab({
   models,
-  references,
   selectedModelId,
   modelForm,
   dialogOpen,
@@ -70,8 +68,6 @@ export function ModelsTab({
       ) : (
         <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
           {models.map((model, index) => {
-            const refs = references.get(model.id);
-            const referenceCount = refs?.sessions.length ?? 0;
             return (
               <div
                 key={model.id}
@@ -84,15 +80,6 @@ export function ModelsTab({
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="truncate text-sm font-medium">{model.name}</span>
                     {model.isDefault && <Badge className="shrink-0">{t("models.default")}</Badge>}
-                    {referenceCount > 0 && (
-                      <Badge
-                        variant="outline"
-                        className="shrink-0 border-amber-500/40 text-amber-600 dark:text-amber-400"
-                        title={t("models.deleteBlockedReferenceHint")}
-                      >
-                        {t("models.referencedModelBadge").replace("{count}", String(referenceCount))}
-                      </Badge>
-                    )}
                   </div>
                   <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{model.modelId}</div>
                 </div>
@@ -131,7 +118,7 @@ export function ModelsTab({
                     variant="ghost"
                     className="size-8 text-muted-foreground hover:text-destructive"
                     disabled={isDeleting}
-                    title={referenceCount > 0 ? t("models.deleteBlockedTitle") : t("models.deleteModel")}
+                    title={t("models.deleteModel")}
                     aria-label={t("models.deleteModel")}
                     onClick={() => onDeleteModel(model.id)}
                   >

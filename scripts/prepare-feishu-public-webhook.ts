@@ -105,15 +105,7 @@ export function resolvePrepareFeishuPublicWebhookConfig(
 function normalizeEnvironment(
   env: Record<string, string | undefined>
 ): Record<string, string | undefined> {
-  const normalized = { ...env };
-  for (const [name, value] of Object.entries(env)) {
-    if (!name.startsWith("OPENFORGE_") || value === undefined) continue;
-    const currentName = `FORGEBADGER_${name.slice("OPENFORGE_".length)}`;
-    normalized[currentName] ??= value;
-  }
-  normalized.FORGEBADGER_FEISHU_FORGEBADGER_USER_ID ??= env.OPENFORGE_FEISHU_OPENFORGE_USER_ID;
-  normalized.FORGEBADGER_FEISHU_FORGEBADGER_USER_EMAIL ??= env.OPENFORGE_FEISHU_OPENFORGE_USER_EMAIL;
-  return normalized;
+  return { ...env };
 }
 
 export function prepareFeishuPublicWebhook(

@@ -27,9 +27,9 @@ describe("InMemorySessionManager", () => {
       launchPlan: launchPlan()
     });
 
-    assert.equal(session.tmuxName, "of-user_123-session_abcdef");
+    assert.equal(session.tmuxName, "fb-user_123-session_abcdef");
     assert.equal(session.status, "running");
-    assert.deepEqual(calls, ["create:of-user_123-session_abcdef"]);
+    assert.deepEqual(calls, ["create:fb-user_123-session_abcdef"]);
   });
 
   it("clears NO_COLOR so CLI colors render in the Web terminal", async () => {
@@ -68,8 +68,8 @@ describe("InMemorySessionManager", () => {
     assert.equal(stopped.status, "exited");
     assert.equal(manager.getSession(session.id), undefined);
     assert.deepEqual(calls, [
-      "create:of-user_123-session_abcdef",
-      "kill:of-user_123-session_abcdef"
+      "create:fb-user_123-session_abcdef",
+      "kill:fb-user_123-session_abcdef"
     ]);
   });
 
@@ -79,13 +79,13 @@ describe("InMemorySessionManager", () => {
 
     const stopped = await manager.stopSession(
       "session_stale",
-      "of-user_123-session_stale",
+      "fb-user_123-session_stale",
       "user_123456"
     );
 
     assert.equal(stopped.status, "exited");
     assert.equal(stopped.userId, "user_123456");
-    assert.deepEqual(calls, ["kill:of-user_123-session_stale"]);
+    assert.deepEqual(calls, ["kill:fb-user_123-session_stale"]);
   });
 
   it("returns captured history from tmux", async () => {
@@ -118,8 +118,8 @@ describe("InMemorySessionManager", () => {
     await manager.resizeSession(session.id, 180, 50);
 
     assert.deepEqual(calls, [
-      "create:of-user_123-session_abcdef",
-      "resize:of-user_123-session_abcdef:180x50"
+      "create:fb-user_123-session_abcdef",
+      "resize:fb-user_123-session_abcdef:180x50"
     ]);
   });
 
@@ -140,8 +140,8 @@ describe("InMemorySessionManager", () => {
     await manager.sendInput(session.id, "pwd\n");
 
     assert.deepEqual(calls, [
-      "create:of-user_123-session_abcdef",
-      "send:of-user_123-session_abcdef:\"pwd\\n\""
+      "create:fb-user_123-session_abcdef",
+      "send:fb-user_123-session_abcdef:\"pwd\\n\""
     ]);
   });
 
@@ -180,6 +180,41 @@ describe("InMemorySessionManager", () => {
     assert.equal(receipt.adapter, "codex");
     assert.deepEqual(calls.filter((call) => call === "enter"), ["enter"]);
     assert.deepEqual(calls.slice(1), ["inspect", "stage:第一行\n第二行", "settle", "inspect", "enter"]);
+  });
+
+  it("rechecks runtime authorization after pane inspection and before programmatic input", async () => {
+    const terminalCalls: string[] = [];
+    let authorized = true;
+    const options = {
+      programmaticSubmitSettleMs: { codex: 0 },
+      runtimeInputAuthorizer() {
+        if (!authorized) {
+          const error = new Error("Binding authorization is unavailable");
+          Object.assign(error, { code: "INVALID_SESSION_LAUNCH_SELECTION" });
+          throw error;
+        }
+      }
+    };
+    const manager = new InMemorySessionManager({
+      ...fakeTmux([]),
+      async inspectPane() {
+        terminalCalls.push("inspect");
+        authorized = false;
+        return { content: "› Ask Codex to do anything\n\nmodel · cwd", dead: false, inMode: false };
+      },
+      async stageProgrammaticInput() { terminalCalls.push("stage"); },
+      async pressEnter() { terminalCalls.push("enter"); }
+    }, undefined, undefined, options);
+    const session = await manager.createSession({
+      userId: "user_123456", sessionId: "session_revoked_before_stage",
+      launchPlan: { ...launchPlan(), command: "codex" }
+    });
+
+    await assert.rejects(
+      () => manager.submitProgrammaticTask(session.id, { adapter: "codex", message: "hello" }),
+      (error) => error instanceof Error && "code" in error && error.code === "INVALID_SESSION_LAUNCH_SELECTION"
+    );
+    assert.deepEqual(terminalCalls, ["inspect"]);
   });
 
   it("submits a Codex large-paste placeholder after matching its character count", async () => {
@@ -364,7 +399,7 @@ describe("InMemorySessionManager", () => {
       {
         id: "session_recovered",
         userId: "gate-a-user",
-        tmuxName: "of-gate-a-u-session_recovered",
+        tmuxName: "fb-gate-a-u-session_recovered",
         launchPlan: launchPlan(),
         createdAt: "2026-04-27T00:00:00.000Z"
       }
@@ -376,7 +411,7 @@ describe("InMemorySessionManager", () => {
         return "";
       },
       async listSessions() {
-        return ["of-gate-a-u-session_recovered"];
+        return ["fb-gate-a-u-session_recovered"];
       },
       async configureSession(name) {
         configured.push(name);
@@ -391,7 +426,7 @@ describe("InMemorySessionManager", () => {
     assert.equal(recovered.recovered.length, 1);
     assert.equal(recovered.recovered[0]?.id, "session_recovered");
     assert.equal(manager.getSession("session_recovered")?.status, "detached");
-    assert.deepEqual(configured, ["of-gate-a-u-session_recovered"]);
+    assert.deepEqual(configured, ["fb-gate-a-u-session_recovered"]);
   });
 
   it("kills ForgeBadger tmux sessions missing from the recovery index", async () => {
@@ -405,13 +440,13 @@ describe("InMemorySessionManager", () => {
         return "";
       },
       async listSessions() {
-        return ["of-gate-a-u-session_known", "of-gate-a-u-session_orphan", "external"];
+        return ["fb-gate-a-u-session_known", "fb-gate-a-u-session_orphan", "external"];
       }
     }, new MemoryRecoveryStore([
       {
         id: "session_known",
         userId: "gate-a-user",
-        tmuxName: "of-gate-a-u-session_known",
+        tmuxName: "fb-gate-a-u-session_known",
         launchPlan: launchPlan(),
         createdAt: "2026-04-27T00:00:00.000Z"
       }
@@ -422,8 +457,8 @@ describe("InMemorySessionManager", () => {
       cwd: "/tmp"
     });
 
-    assert.deepEqual(result.killedOrphans, ["of-gate-a-u-session_orphan"]);
-    assert.deepEqual(calls, ["kill:of-gate-a-u-session_orphan"]);
+    assert.deepEqual(result.killedOrphans, ["fb-gate-a-u-session_orphan"]);
+    assert.deepEqual(calls, ["kill:fb-gate-a-u-session_orphan"]);
   });
 
   it("only recovers and kills sessions matching the configured tmux prefix", async () => {
@@ -437,7 +472,7 @@ describe("InMemorySessionManager", () => {
         return "";
       },
       async listSessions() {
-        return ["of-user123-session", "smoke-user123-known", "smoke-user123-orphan"];
+        return ["fb-user123-session", "smoke-user123-known", "smoke-user123-orphan"];
       }
     }, new MemoryRecoveryStore([
       {
@@ -483,7 +518,7 @@ describe("InMemorySessionManager", () => {
         return "";
       },
       async listSessions() {
-        return ["of-existing-live"];
+        return ["fb-existing-live"];
       },
       async configureSession(name) {
         configured.push(name);
@@ -494,13 +529,13 @@ describe("InMemorySessionManager", () => {
       userId: "user_123456",
       sessionId: "session_abcdef",
       launchPlan: launchPlan(),
-      tmuxName: "of-existing-live",
+      tmuxName: "fb-existing-live",
       attachToken: "existing-live-token"
     });
 
     assert.equal(session.attachToken, "existing-live-token");
     assert.equal(store.entries[0]?.attachToken, "existing-live-token");
-    assert.deepEqual(configured, ["of-existing-live"]);
+    assert.deepEqual(configured, ["fb-existing-live"]);
   });
 
   it("serializes per-session lifecycle operations via runExclusive", async () => {
@@ -568,7 +603,7 @@ describe("InMemorySessionManager", () => {
       id: "s-dead",
       userId: "u1",
       attachToken: "tok",
-      tmuxName: "of-u1-s-dead",
+      tmuxName: "fb-u1-s-dead",
       launchPlan: launchPlan(),
       createdAt: new Date().toISOString()
     }]);
@@ -604,7 +639,7 @@ describe("InMemorySessionManager", () => {
         async createSession() {},
         async killSession() {},
         async capturePane() { return ""; },
-        async listSessions() { return ["of-u1-s-det"]; },
+        async listSessions() { return ["fb-u1-s-det"]; },
         async hasSession() { return true; },
         async showEnvironment() { return {}; }
       },

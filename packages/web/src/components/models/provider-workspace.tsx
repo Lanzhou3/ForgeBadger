@@ -7,7 +7,6 @@ import { CliBrandChip } from "@/components/cli-brand-chip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ModelProviderReadiness, ProviderProfile } from "@/lib/api";
 
-import { ApplyTab } from "./apply-tab";
 import { CredentialTab } from "./credential-tab";
 import { ModelsTab } from "./models-tab";
 import {
@@ -22,7 +21,6 @@ import {
 
 type ModelsTabProps = Parameters<typeof ModelsTab>[0];
 type CredentialTabProps = Parameters<typeof CredentialTab>[0];
-type ApplyTabProps = Parameters<typeof ApplyTab>[0];
 
 interface ProviderWorkspaceProps {
   provider: ProviderProfile;
@@ -34,9 +32,9 @@ interface ProviderWorkspaceProps {
   onCheckReadiness: () => void;
   onSync: () => void;
   onDeleteProvider: () => void;
+  onApplyToCli: () => void;
   modelsTab: Omit<ModelsTabProps, "t">;
   credentialTab: Omit<CredentialTabProps, "t">;
-  applyTab: Omit<ApplyTabProps, "t">;
   t: Translate;
 }
 
@@ -50,9 +48,9 @@ export function ProviderWorkspace({
   onCheckReadiness,
   onSync,
   onDeleteProvider,
+  onApplyToCli,
   modelsTab,
   credentialTab,
-  applyTab,
   t,
 }: ProviderWorkspaceProps) {
   return (
@@ -72,6 +70,14 @@ export function ProviderWorkspace({
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={onApplyToCli}
+              >
+                <ShieldCheck className="size-4" />
+                {t("models.applyToCli")}
+              </Button>
               <Button
                 type="button"
                 size="sm"
@@ -126,16 +132,12 @@ export function ProviderWorkspace({
         <TabsList>
           <TabsTrigger value="models">{t("models.modelsWorkspace")}</TabsTrigger>
           <TabsTrigger value="credentials">{t("models.credentials")}</TabsTrigger>
-          <TabsTrigger value="apply">{t("models.applyWorkspace")}</TabsTrigger>
         </TabsList>
         <TabsContent value="models" className="pt-4">
           <ModelsTab {...modelsTab} t={t} />
         </TabsContent>
         <TabsContent value="credentials" className="pt-4">
           <CredentialTab {...credentialTab} t={t} />
-        </TabsContent>
-        <TabsContent value="apply" className="pt-4">
-          <ApplyTab {...applyTab} t={t} />
         </TabsContent>
       </Tabs>
     </div>

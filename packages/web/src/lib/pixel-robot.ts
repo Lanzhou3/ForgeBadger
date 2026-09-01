@@ -273,7 +273,6 @@ export function cornerOffsetPosition(
 export const ROBOT_SIZE_PX = 64;
 export const CORNER_MARGIN_PX = 20;
 export const ROBOT_CORNER_STORAGE_KEY = "forgebadger.robotCorner";
-export const LEGACY_ROBOT_CORNER_STORAGE_KEY = "openforge.robotCorner";
 export const BLINK_MIN_INTERVAL_MS = 3000;
 export const BLINK_MAX_INTERVAL_MS = 6000;
 export const BLINK_DURATION_MS = 160;

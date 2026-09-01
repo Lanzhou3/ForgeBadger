@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
 import { chmod, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -35,6 +34,17 @@ export interface LoadRuntimeConfigOptions {
   homeDir?: string;
 }
 
+export interface RuntimeConfigInspection {
+  stateDir: string;
+  initialized: boolean;
+  gateway: RuntimeConfig["gateway"];
+  web: RuntimeConfig["web"];
+  config?: RuntimeConfig;
+}
+
+const DEFAULT_GATEWAY = { host: "127.0.0.1", port: 48731 } as const;
+const DEFAULT_WEB = { host: "127.0.0.1", port: 48732 } as const;
+
 export async function loadOrCreateRuntimeConfig(
   options: LoadRuntimeConfigOptions = {}
 ): Promise<RuntimeConfig> {
@@ -56,8 +66,8 @@ export async function loadOrCreateRuntimeConfig(
     version: 1,
     stateDir,
     dbPath: resolveDefaultDbPath(stateDir),
-    gateway: { host: "127.0.0.1", port: 48731 },
-    web: { host: "127.0.0.1", port: 48732 },
+    gateway: { ...DEFAULT_GATEWAY },
+    web: { ...DEFAULT_WEB },
     secrets: {
       masterKey: randomBytes(32).toString("hex"),
       jwtSecret: randomBytes(48).toString("base64url")
@@ -70,6 +80,34 @@ export async function loadOrCreateRuntimeConfig(
   return applyRuntimeOverrides(config, options, env, homeDir);
 }
 
+/** Reads existing runtime state without creating directories, keys, or config files. */
+export async function inspectRuntimeConfig(
+  options: LoadRuntimeConfigOptions = {}
+): Promise<RuntimeConfigInspection> {
+  const env = options.env ?? process.env;
+  const homeDir = options.homeDir ?? homedir();
+  const stateDir = resolveStateDir(options.stateDir, homeDir, env);
+  const configPath = path.join(stateDir, "config.json");
+  if (!(await isExistingConfigFile(configPath))) {
+    return {
+      stateDir,
+      initialized: false,
+      gateway: { ...DEFAULT_GATEWAY },
+      web: { ...DEFAULT_WEB }
+    };
+  }
+
+  const parsed = runtimeConfigSchema.parse(await readRuntimeConfigJson(configPath));
+  const config = applyRuntimeOverrides(parsed, options, env, homeDir);
+  return {
+    stateDir,
+    initialized: true,
+    gateway: config.gateway,
+    web: config.web,
+    config
+  };
+}
+
 export function resolveStateDir(
   stateDir: string | undefined,
   homeDir = homedir(),
@@ -78,20 +116,12 @@ export function resolveStateDir(
   const configuredStateDir =
     stateDir ??
     env.FORGEBADGER_STATE_DIR ??
-    env.OPENFORGE_STATE_DIR ??
-    chooseDefaultStateDir(homeDir);
+    path.join(homeDir, ".forgebadger");
   return path.resolve(expandHomeDir(configuredStateDir, homeDir));
 }
 
-function chooseDefaultStateDir(homeDir: string): string {
-  const currentDir = path.join(homeDir, ".forgebadger");
-  const legacyDir = path.join(homeDir, ".openforge");
-  return !existsSync(currentDir) && existsSync(legacyDir) ? legacyDir : currentDir;
-}
-
 function resolveDefaultDbPath(stateDir: string): string {
-  const legacyDbPath = path.join(stateDir, "openforge.db");
-  return existsSync(legacyDbPath) ? legacyDbPath : path.join(stateDir, "forgebadger.db");
+  return path.join(stateDir, "forgebadger.db");
 }
 
 function expandHomeDir(filePath: string, homeDir: string): string {

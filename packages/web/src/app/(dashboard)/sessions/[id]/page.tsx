@@ -141,9 +141,7 @@ export default function TerminalPage() {
     notifySessionTabsChanged();
   }, [session]);
 
-  // Focus mode gives the terminal the full window width; mark <body> so the
-  // floating copilot (fixed at the bottom-right corner) hides instead of
-  // covering the terminal's bottom-right content.
+  // Focus mode gives the terminal the full window width.
   useEffect(() => {
     if (!focusMode) {
       return;

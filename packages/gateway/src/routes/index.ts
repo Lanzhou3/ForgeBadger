@@ -23,67 +23,27 @@ import { createDashboardRoutes } from "./dashboard.js";
 import { createNotificationRoutes } from "./notifications.js";
 import { createSessionHookRoutes } from "./session-hooks.js";
 import { createSnapshotRoutes } from "./snapshots.js";
-import { createCodexSubscriptionRoutes } from "./codex-subscription.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
-import { createPortfolioRoutes } from "./portfolio.js";
 import { createCopilotRoutes } from "./copilot.js";
-import { createCopilotBridgeRoutes } from "./internal-copilot-bridge.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
-import type { AgentStackDeps } from "../services/agent/agent-stack.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
-  const agentDeps: AgentStackDeps = deps.agentDeps ?? {
-    db: deps.db,
-    masterKey: deps.masterKey,
-    eventBus: deps.eventBus,
-    sessionManager: deps.sessionManager,
-    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}),
-    ...(deps.dshBff ? { dshBff: deps.dshBff } : {}),
-    ...(deps.portfolioApi ? { portfolioApi: deps.portfolioApi } : {}),
-    ...(deps.llmFetch ? { llmFetch: deps.llmFetch } : {})
-  };
   app.use("/api/v1/health", createHealthRoutes());
-  // Guarded internal API for the deepseek-harness forgebadger-bridge plugin:
-  // mounted only when its service token is configured.
-  if (deps.copilotBridgeToken && deps.portfolioApi) {
-    app.use("/api/internal/v1/copilot-bridge", createCopilotBridgeRoutes({
-      db: deps.db,
-      sessionManager: deps.sessionManager,
-      portfolioApi: deps.portfolioApi,
-      bridgeToken: deps.copilotBridgeToken,
-      ...(deps.dispatchConfirm ? { dispatchConfirm: deps.dispatchConfirm } : {}),
-      launchSessionRuntime: async (userId, sessionId) => {
-        const { startSessionRuntime } = await import("../services/session-runtime.js");
-        try {
-          await startSessionRuntime({
-            db: deps.db,
-            userId,
-            masterKey: deps.masterKey,
-            eventBus: deps.eventBus,
-            sessionManager: deps.sessionManager,
-            ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
-          }, sessionId);
-          return true;
-        } catch {
-          return false;
-        }
-      }
-    }));
-  }
   app.use("/api/v1/gate-a/dependencies", createDependencyRoutes());
   app.use("/api/v1/adapters", createAdapterRoutes());
   app.use(
     "/api/v1/auth",
     createAuthRouter(new UserRepository(deps.db), deps.jwtSecret, {
       db: deps.db,
+      ...(deps.accountRecovery ? { accountRecovery: deps.accountRecovery } : {}),
       ...(deps.registrationMode ? { registrationMode: deps.registrationMode } : {})
     })
   );
-  app.use("/api/v1/admin/users", createAdminUserRoutes(deps.db));
+  app.use("/api/v1/admin/users", createAdminUserRoutes(deps.db, deps.runtimeAuthorizationInvalidator));
   app.use(
     "/api/v1/session-hooks",
-    createSessionHookRoutes(deps.db, deps.eventBus, deps.claudePortfolioWorker)
+    createSessionHookRoutes(deps.db, deps.eventBus)
   );
   app.use("/api/v1/activities", createActivityRoutes(deps.db));
   app.use("/api/v1/audit-logs", createAuditLogRoutes(deps.db));
@@ -96,14 +56,21 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     deps.adapterCommandRunner
   ));
   app.use("/api/v1/projects", createProjectManagerRoutes(deps.db, {
+    masterKey: deps.masterKey,
     ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
   }));
-  app.use("/api/v1/projects", createProjectRoutes(deps.db, deps.sessionManager, deps.eventBus));
+  app.use("/api/v1/projects", createProjectRoutes(
+    deps.db,
+    deps.runtimeAuthorizationInvalidator,
+    deps.sessionManager,
+    deps.eventBus
+  ));
   app.use("/api/v1/projects", createProjectGraphRoutes(deps.db));
   app.use("/api/v1/sessions", createSessionRoutes(
     deps.db,
     deps.masterKey,
     deps.sessionManager,
+    deps.runtimeAuthorizationInvalidator,
     deps.eventBus,
     deps.adapterCommandRunner
   ));
@@ -111,35 +78,19 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/templates", createTemplateRoutes(deps.db, deps.eventBus));
   app.use("/api/v1/usage", createUsageRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/model-providers", createModelProviderRoutes(deps.db, deps.masterKey));
-  // The signed Feishu callback is intentionally public. Mount it before the
-  // broad /api/v1 Skill router, whose router-level auth middleware otherwise
-  // rejects unmatched anonymous requests before they reach this route.
   app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
     db: deps.db,
     masterKey: deps.masterKey,
-    ...(deps.feishuChannelRuntime ? { channelRuntime: deps.feishuChannelRuntime } : {}),
-    resolveAgentDeps: () => agentDeps,
-    ...(deps.feishuWebhookSdkFactory ? { sdkFactory: deps.feishuWebhookSdkFactory } : {})
+    ...(deps.feishuChannelRuntime ? { channelRuntime: deps.feishuChannelRuntime } : {})
   }));
   app.use("/api/v1", createSkillRoutes(deps.db));
   app.use("/api/v1/notifications", createNotificationRoutes(deps.db));
   app.use("/api/v1/api-keys", createApiKeyRoutes(deps.db, deps.masterKey));
-  app.use("/api/v1/cli-config", createCliConfigRoutes());
-  app.use("/api/v1/dashboard", createDashboardRoutes(deps.db, deps.masterKey));
-  app.use("/api/v1/codex/subscription", createCodexSubscriptionRoutes());
-  if (deps.portfolioApi) {
-    app.use("/api/v1/portfolio", createPortfolioRoutes(deps.portfolioApi));
+  app.use("/api/v1/cli-config", createCliConfigRoutes(deps.db, deps.masterKey));
+  app.use("/api/v1/dashboard", createDashboardRoutes(deps.db));
+  if (deps.copilotAgent) {
+    app.use("/api/v1/copilot", createCopilotRoutes(deps.copilotAgent));
   }
-  app.use("/api/v1/copilot", createCopilotRoutes({
-    db: deps.db,
-    masterKey: deps.masterKey,
-    eventBus: deps.eventBus,
-    ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}),
-    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}),
-    ...(deps.dshBff ? { dshBff: deps.dshBff } : {}),
-    ...(deps.portfolioApi ? { portfolioApi: deps.portfolioApi } : {}),
-    ...(deps.llmFetch ? { llmFetch: deps.llmFetch } : {})
-  }));
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
     db: deps.db,
     masterKey: deps.masterKey,

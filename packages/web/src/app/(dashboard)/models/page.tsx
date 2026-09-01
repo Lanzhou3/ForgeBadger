@@ -14,26 +14,22 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { AddProviderDialog } from "@/components/models/add-provider-dialog";
-import { CodexIdentityCard } from "@/components/models/codex-identity-card";
+import { ApplyToCliDialog } from "@/components/models/apply-to-cli-dialog";
 import { DeleteConfirmDialog } from "@/components/models/delete-confirm-dialog";
 import { ProviderList } from "@/components/models/provider-list";
 import { ProviderWorkspace } from "@/components/models/provider-workspace";
 import {
   applyTargetsForProvider,
-  buildApplyPayload,
   emptyCredential,
   emptyCustomProvider,
   emptyModel,
-  emptyModelReferences,
   type CredentialForm,
   type CustomProviderForm,
   type DeleteTarget,
   type ModelForm,
-  type ModelReferenceInfo,
 } from "@/components/models/shared";
 import { useLanguage } from "@/hooks/use-language";
 import {
-  applyProviderConfig,
   checkModelProviderReadiness,
   createModelProvider,
   createProviderCredential,
@@ -41,19 +37,15 @@ import {
   deleteProviderCredential,
   deleteProviderModel,
   deleteModelProvider,
-  getCodexSubscriptionStatus,
   listModelProviders,
   listProviderCatalog,
-  listSessions,
-  previewProviderApply,
   rotateProviderCredential,
   setDefaultProviderModel,
   syncProviderModels,
   updateProviderModel,
   type ModelProviderReadiness,
-  type ProviderApplyAdapter,
-  type ProviderApplyPreview,
   type ProviderCatalogPreset,
+  type ProviderSupportedAdapter,
 } from "@/lib/api";
 import {
   buildConfiguredProviderMap,
@@ -70,12 +62,9 @@ export default function ModelsPage() {
   const [customProvider, setCustomProvider] = useState<CustomProviderForm>(emptyCustomProvider);
   const [credentialForm, setCredentialForm] = useState<CredentialForm>(emptyCredential);
   const [modelForm, setModelForm] = useState<ModelForm>(emptyModel);
-  const [projectRoot, setProjectRoot] = useState("");
-  const [applyScope, setApplyScope] = useState<"project" | "user-global">("project");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedCredentialId, setSelectedCredentialId] = useState("");
-  const [selectedApplyAdapter, setSelectedApplyAdapter] = useState<ProviderApplyAdapter>("claude");
-  const [applyPreview, setApplyPreview] = useState<ProviderApplyPreview | null>(null);
+  const [selectedReadinessAdapter, setSelectedReadinessAdapter] = useState<ProviderSupportedAdapter>("claude");
   const [providerReadiness, setProviderReadiness] = useState<ModelProviderReadiness | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [providerQueryText, setProviderQueryText] = useState("");
@@ -88,6 +77,7 @@ export default function ModelsPage() {
   const [setupCredentialForm, setSetupCredentialForm] = useState<CredentialForm>(emptyCredential);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [addProviderOpen, setAddProviderOpen] = useState(false);
+  const [applyDialogOpen, setApplyDialogOpen] = useState(false);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [rotateDialogOpen, setRotateDialogOpen] = useState(false);
 
@@ -99,38 +89,10 @@ export default function ModelsPage() {
     queryKey: ["model-provider-catalog"],
     queryFn: listProviderCatalog,
   });
-  const codexSubscriptionQuery = useQuery({
-    queryKey: ["codex-subscription-status"],
-    queryFn: getCodexSubscriptionStatus,
-  });
-  // 引用检测：会话与代理选择模型后会产生外键引用，删除前需先切换模型。
-  const sessionsQuery = useQuery({
-    queryKey: ["model-page-sessions"],
-    queryFn: listSessions,
-    staleTime: 30_000,
-  });
   const providers = providerQuery.data?.providers ?? [];
   const models = providerQuery.data?.models ?? [];
   const credentials = providerQuery.data?.credentials ?? [];
   const catalog = catalogQuery.data?.providers ?? [];
-  // model_profiles id 与 legacy models id 相同（mirrorLegacy），会话/代理的
-  // modelId 直接按模型 profile id 匹配即可。
-  const modelReferences = useMemo(() => {
-    const map = new Map<string, ModelReferenceInfo>();
-    for (const model of models) map.set(model.id, { sessions: [] });
-    for (const session of sessionsQuery.data?.sessions ?? []) {
-      if (!session.modelId) continue;
-      const info = map.get(session.modelId);
-      if (info) {
-        info.sessions.push({
-          id: session.id,
-          name: session.name ?? session.tmuxName ?? session.id,
-          status: session.status,
-        });
-      }
-    }
-    return map;
-  }, [models, sessionsQuery.data]);
   const filteredProviders = useMemo(() => {
     const query = providerQueryText.trim().toLowerCase();
     if (!query) return providers;
@@ -189,27 +151,6 @@ export default function ModelsPage() {
     }
     return counts;
   }, [models]);
-  const deleteTargetReferences = useMemo<ModelReferenceInfo>(() => {
-    if (!deleteTarget) return emptyModelReferences;
-    if (deleteTarget.kind === "model") {
-      return modelReferences.get(deleteTarget.modelId) ?? emptyModelReferences;
-    }
-    if (deleteTarget.kind === "credential") return emptyModelReferences;
-    const targetModels = models.filter((model) => model.providerProfileId === deleteTarget.providerId);
-    const sessions: Array<{ id: string; name: string; status: string }> = [];
-    const seenSessions = new Set<string>();
-    for (const model of targetModels) {
-      const refs = modelReferences.get(model.id);
-      if (!refs) continue;
-      for (const ref of refs.sessions) {
-        if (!seenSessions.has(ref.id)) {
-          seenSessions.add(ref.id);
-          sessions.push(ref);
-        }
-      }
-    }
-    return { sessions };
-  }, [deleteTarget, models, modelReferences]);
 
   useEffect(() => {
     setSelectedModelId((current) =>
@@ -218,22 +159,21 @@ export default function ModelsPage() {
     setSelectedCredentialId((current) =>
       providerCredentials.some((credential) => credential.id === current) ? current : providerCredentials[0]?.id || ""
     );
-    setApplyPreview(null);
     setProviderReadiness(null);
   }, [providerModels, providerCredentials]);
 
   useEffect(() => {
     if (!selectedProvider) {
-      setSelectedApplyAdapter("claude");
+      setSelectedReadinessAdapter("claude");
       return;
     }
     const targets = applyTargetsForProvider(selectedProvider);
-    setSelectedApplyAdapter((current) => targets.includes(current) ? current : targets[0] ?? "claude");
+    setSelectedReadinessAdapter((current) => targets.includes(current) ? current : targets[0] ?? "claude");
   }, [selectedProvider]);
 
   useEffect(() => {
     setProviderReadiness(null);
-  }, [selectedApplyAdapter, selectedCredentialId, selectedModelId, selectedProviderId]);
+  }, [selectedCredentialId, selectedModelId, selectedProviderId, selectedReadinessAdapter]);
 
   useEffect(() => {
     if (selectedModel) {
@@ -257,15 +197,14 @@ export default function ModelsPage() {
     mutationFn: async (input: { preset: ProviderCatalogPreset; credential: CredentialForm }) => {
       const created = await createModelProvider({ catalogId: input.preset.id });
       const credential =
-        created.provider.authType === "none"
+        created.provider.authType === "none" || input.preset.id === "openai"
           ? undefined
           : (await createProviderCredential(created.provider.id, {
             label: input.credential.label.trim() || undefined,
             plaintextSecret: input.credential.plaintextSecret,
           })).credential;
-      const syncResult = await syncProviderModels(created.provider.id, {
-        ...(credential ? { credentialId: credential.id } : {}),
-      });
+      if (!credential) return { provider: created.provider, credential, models: created.models };
+      const syncResult = await syncProviderModels(created.provider.id, { credentialId: credential.id });
       return { provider: created.provider, credential, models: syncResult.models };
     },
     onSuccess: async (result) => {
@@ -307,7 +246,6 @@ export default function ModelsPage() {
       setSelectedProviderId(nextProviderId);
       setSelectedModelId("");
       setSelectedCredentialId("");
-      setApplyPreview(null);
       setNotice(t("models.providerDeleted"));
       await refreshProviders();
     },
@@ -346,12 +284,12 @@ export default function ModelsPage() {
 
   const deleteCredentialMutation = useMutation({
     mutationFn: (credentialId: string) => deleteProviderCredential(selectedProviderId, credentialId),
-    onSuccess: async (_result, credentialId) => {
+    onSuccess: async (result, credentialId) => {
       setDeleteTarget(null);
       const nextCredentialId = providerCredentials.find((credential) => credential.id !== credentialId)?.id || "";
       setSelectedCredentialId(nextCredentialId);
       setCredentialForm(emptyCredential);
-      setNotice(t("models.credentialDeleted"));
+      setNotice(result.disposition === "revoked" ? t("models.credentialRevoked") : t("models.credentialDeleted"));
       await refreshProviders();
     },
   });
@@ -449,39 +387,11 @@ export default function ModelsPage() {
     },
   });
 
-  const previewMutation = useMutation({
-    mutationFn: () => {
-      if (!selectedProviderId) throw new Error(t("models.providerRequired"));
-      return previewProviderApply(
-        selectedProviderId,
-        buildApplyPayload(selectedApplyAdapter, applyScope, projectRoot, selectedModelId, selectedCredentialId)
-      );
-    },
-    onSuccess: (result) => {
-      setApplyPreview(result.preview);
-      setNotice(t("models.previewReady"));
-    },
-  });
-
-  const applyMutation = useMutation({
-    mutationFn: () => {
-      if (!selectedProviderId) throw new Error(t("models.providerRequired"));
-      return applyProviderConfig(
-        selectedProviderId,
-        buildApplyPayload(selectedApplyAdapter, applyScope, projectRoot, selectedModelId, selectedCredentialId)
-      );
-    },
-    onSuccess: (result) => {
-      setApplyPreview(result.result);
-      setNotice(t("models.applyComplete"));
-    },
-  });
-
   const readinessMutation = useMutation({
     mutationFn: () => {
       if (!selectedProviderId) throw new Error(t("models.providerRequired"));
       return checkModelProviderReadiness(selectedProviderId, {
-        adapter: selectedApplyAdapter,
+        adapter: selectedReadinessAdapter,
         ...(selectedModelId ? { modelProfileId: selectedModelId } : {}),
         ...(selectedCredentialId ? { credentialId: selectedCredentialId } : {}),
         includeRemoteCheck: true,
@@ -498,7 +408,6 @@ export default function ModelsPage() {
   });
 
   function refreshProviders() {
-    setApplyPreview(null);
     setProviderReadiness(null);
     return queryClient.invalidateQueries({ queryKey: ["model-providers"] });
   }
@@ -574,8 +483,6 @@ export default function ModelsPage() {
     deleteModelMutation.error ??
     setDefaultModelMutation.error ??
     syncModelsMutation.error ??
-    previewMutation.error ??
-    applyMutation.error ??
     readinessMutation.error;
   return (
     <div className="mx-auto max-w-[1400px] space-y-6 p-6">
@@ -642,11 +549,6 @@ export default function ModelsPage() {
             onDeleteProvider={(providerId) => openDeleteDialog({ kind: "provider", providerId })}
             t={t}
           />
-          <CodexIdentityCard
-            status={codexSubscriptionQuery.data?.status}
-            isLoading={codexSubscriptionQuery.isLoading}
-            t={t}
-          />
         </div>
 
         <div className="min-w-0">
@@ -663,9 +565,9 @@ export default function ModelsPage() {
               onCheckReadiness={() => readinessMutation.mutate()}
               onSync={() => syncModelsMutation.mutate()}
               onDeleteProvider={() => openDeleteDialog({ kind: "provider", providerId: selectedProvider.id })}
+              onApplyToCli={() => setApplyDialogOpen(true)}
               modelsTab={{
                 models: providerModels,
-                references: modelReferences,
                 selectedModelId,
                 modelForm,
                 dialogOpen: modelDialogOpen,
@@ -695,26 +597,6 @@ export default function ModelsPage() {
                 onOpenRotate: openRotateDialog,
                 onConfirmRotate: () => rotateCredentialMutation.mutate(),
                 onDeleteCredential: (credentialId) => openDeleteDialog({ kind: "credential", credentialId }),
-              }}
-              applyTab={{
-                provider: selectedProvider,
-                models: providerModels,
-                credentials: providerCredentials,
-                projectRoot,
-                applyScope,
-                selectedModelId,
-                selectedCredentialId,
-                selectedAdapter: selectedApplyAdapter,
-                preview: applyPreview,
-                isPreviewing: previewMutation.isPending,
-                isApplying: applyMutation.isPending,
-                onProjectRootChange: setProjectRoot,
-                onScopeChange: setApplyScope,
-                onModelChange: setSelectedModelId,
-                onCredentialChange: setSelectedCredentialId,
-                onAdapterChange: setSelectedApplyAdapter,
-                onPreview: () => previewMutation.mutate(),
-                onApply: () => applyMutation.mutate(),
               }}
               t={t}
             />
@@ -783,7 +665,6 @@ export default function ModelsPage() {
       />
       <DeleteConfirmDialog
         target={deleteTarget}
-        references={deleteTargetReferences}
         isDeleting={anyDeletePending}
         onOpenChange={(open) => {
           if (!open && !anyDeletePending) {
@@ -793,6 +674,15 @@ export default function ModelsPage() {
         onConfirm={handleConfirmDelete}
         t={t}
       />
+      {selectedProvider ? (
+        <ApplyToCliDialog
+          provider={selectedProvider}
+          models={providerModels}
+          credentials={providerCredentials}
+          open={applyDialogOpen}
+          onOpenChange={setApplyDialogOpen}
+        />
+      ) : null}
     </div>
   );
 }

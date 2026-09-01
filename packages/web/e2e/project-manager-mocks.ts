@@ -1,4 +1,4 @@
-import type { Page, Route } from "@playwright/test";
+import { expect, type Page, type Route } from "@playwright/test";
 
 const PROJECT_ID = "project-123";
 
@@ -116,6 +116,11 @@ export async function mockProjectDetailApis(
       return;
     }
 
+    if (url.pathname === "/api/v1/model-providers" && method === "GET") {
+      await route.fulfill({ json: envelope({ providers: [], models: [], credentials: [] }) });
+      return;
+    }
+
     if (url.pathname === `/api/v1/projects/${PROJECT_ID}` && method === "GET") {
       await route.fulfill({
         json: envelope({
@@ -221,6 +226,26 @@ export async function mockProjectDetailApis(
           }],
         }),
       });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/gate-a/dependencies" && method === "GET") {
+      await route.fulfill({ json: envelope({ dependencies: [] }) });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/task-packets` && method === "GET") {
+      await route.fulfill({ json: envelope({ taskPackets: [] }) });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/stages` && method === "GET") {
+      await route.fulfill({ json: envelope({ stages: [] }) });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/work-item-links` && method === "GET") {
+      await route.fulfill({ json: envelope({ links: [] }) });
       return;
     }
 

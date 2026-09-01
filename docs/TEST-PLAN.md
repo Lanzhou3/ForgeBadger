@@ -6,6 +6,7 @@
 > 2026-04-26 补充：测试执行按 MVP-0/MVP-1 分层，MVP-0 必须先覆盖 Claude Code 本地控制闭环和风险 Gate。
 > 2026-04-29 补充：MVP-1 smoke 已加入 `packages/web/e2e/mvp1-smoke.spec.ts`，覆盖注册、模型/API Key、模板克隆、Agent、Skill 项目启用、配置写入和 Dashboard 健康入口。
 > 2026-04-29 补充：MVP-1 稳定化新增 `dashboard-summary.test.ts`、`model-health.test.ts`、`agent-preview.test.ts`，覆盖 Dashboard 汇总、模型本地健康检查和 Agent 权限预览。
+> 2026-08-31 补充：终端持久层按平台选择——macOS/Linux/WSL 使用 tmux，原生 Windows 使用 psmux ≥ 3.3.8；安装确认和物理 Windows 外部证据分层验收。
 
 ---
 
@@ -17,14 +18,14 @@
 
 | 类别 | 必测内容 |
 |------|----------|
-| Auth | 注册、登录、JWT 校验、过期/伪造 token 拒绝、`alg:none` 拒绝 |
+| Auth | 注册、登录、本机恢复密码、JWT 校验、过期/伪造 token 拒绝、`alg:none` 拒绝 |
 | Tenant | repository 自动 `user_id` 过滤，userA 不能访问 userB 项目/session/key |
 | SQL | API/repository 参数化查询，SQL 注入 payload 不生效 |
 | Crypto | AES-256-GCM 加解密、IV 随机、auth tag 篡改失败、密钥长度校验 |
 | Path | approved project root、denied root、`..`、编码 traversal、Unicode traversal、symlink escape |
 | Config | dry-run、变量渲染、冲突检测、identical auto-skip、modified skip/overwrite、backup、partial write rollback、rollback failure report |
-| Session | Gateway 创建 tmux session、Claude adapter launch plan、`tmux new-session -e` 注入、node-pty attach |
-| Restart | 浏览器刷新恢复、Gateway 重启恢复、`of-*` orphan tmux 清理 |
+| Session | Gateway 按平台创建 tmux/psmux session、Claude adapter launch plan、`new-session -e` 注入、node-pty attach |
+| Restart | 浏览器刷新恢复、Gateway 重启恢复、`fb-*` orphan tmux/psmux 清理 |
 | WebSocket | JWT auth、session ownership、单连接替换、malformed message、message size、heartbeat timeout、基础输入限流 |
 | Frontend | 登录、项目创建/导入、配置注入确认、session 列表、terminal 页面 smoke test |
 
@@ -37,14 +38,22 @@
 | Skill | 启用/禁用、项目注入、内容 XSS 文本渲染、内容预览已纳入 MVP-1；安装源管理延后 |
 | Template | 克隆、编辑、删除、项目应用已纳入 MVP-1；版本同步和导入/导出延后 |
 | Model | CRUD、默认模型、Key 轮换、本地配置健康检查已纳入 MVP-1；外部连通性健康检查延后 |
+| CLI Config Apply | 四 CLI 原生 writer（claude/codex/opencode/kimi）、明文密钥 `0600` 原子写、写前 AES-256-GCM 加密备份与 rollback、preview 不落盘且掩码、SSRF 防护、instance-admin 门 |
 | Dashboard | 汇总 API、健康卡、事件订阅、快捷入口已纳入 MVP-1；通知中心延后 |
 | E2E | MVP-1 smoke 覆盖单项目核心闭环；多项目、多 session 压测延后 |
+
+Model Center 与 apply-provider 的真实浏览器门为
+`pnpm --dir packages/web exec playwright test e2e/models.spec.ts --project=chromium`。
+缺少 Playwright 浏览器可执行文件时必须记录为“进入断言前阻塞”，不得用 Vitest
+替代为 E2E Pass。真实 OpenAI credential/provider、Codex native account 与 native
+Windows psmux 也必须分别保留外部证据边界。官方 Codex native login 由 CLI 管理；
+测试不得读取 `auth.json` 内容或 keyring。
 
 ### 0.3 Gate 对应测试要求
 
 | Gate | 最低测试证据 |
 |------|--------------|
-| Gate A Terminal Feasibility | 真实 tmux + node-pty + WebSocket + xterm.js + Claude Code 交互；浏览器/Gateway 重启恢复 |
+| Gate A Terminal Feasibility | macOS/Linux/WSL：真实 tmux + node-pty + WebSocket + xterm.js + Claude Code；原生 Windows：真实 ConPTY + psmux ≥ 3.3.8 + 同等 attach/input/resize/reconnect/restart/cleanup 生命周期 |
 | Gate B Config Contract | config generation 单元/集成测试覆盖 dry-run、冲突、回滚和路径安全 |
 | Gate C Security Baseline | auth、tenant、crypto、path、WebSocket ownership/limits 测试通过 |
 | Gate D MVP-0 Acceptance | MVP-0 必跑测试通过，或记录无法运行的命令和原因 |
@@ -89,9 +98,26 @@
 | Mock 对象 | 单元测试 | 集成测试 |
 |----------|---------|---------|
 | tmux | 可用抽象接口 Mock | **必须用真实 tmux** |
+| psmux | 可用平台运行时接口 Mock | **必须在物理 Windows 上用真实 psmux/ConPTY** |
 | node-pty | 可用抽象接口 Mock | **必须用真实 pty** |
 | 数据库 | 接口抽象 Mock | 内存 SQLite |
 | WebSocket | 客户端 Mock（前端） | 真实 WS 库（服务端） |
+
+### 1.5 Windows psmux 与安装确认回归（2026-08-31）
+
+| 范围 | 自动化契约 | 外部/真实证据 |
+|------|------------|---------------|
+| 平台选择 | `terminal-multiplexer-runtime.test.ts` 覆盖 win32→psmux、其他平台→tmux，普通 attach 与 psmux `PSMUX_SESSION_NAME` + `-CC` control plan | 物理 Windows 上记录实际 psmux 进程与会话 |
+| 版本/依赖 | Gateway/CLI `dependency-check.test.ts` 覆盖 `native_psmux`、`psmux_missing`、`psmux_outdated`，最低版本 3.3.8 | PowerShell 中记录 `forgebadger doctor` 与 `psmux -V` 摘要 |
+| 安装确认 | `terminal-runtime-install.test.ts`、`doctor.test.ts`、`start.test.ts`、`init-command.test.ts` 覆盖 TTY、CI、默认 No、明确 `y`/`yes`、安装失败、PATH 未刷新及安装后复检 | 不要求自动化测试真实改动开发机包管理器 |
+| CLI fail-closed | `start.test.ts` / `init-command.test.ts` 覆盖所有非 ready 状态返回非零，且不创建运行时/项目状态、不导入 init runtime、不启动子进程 | 在发布包 smoke 中复核失败信息可执行且无残留状态 |
+| Doctor 零副作用 | `doctor.test.ts` 覆盖不存在的 state dir，仅报告 `(not initialized)` 和默认 URL，不创建目录/配置/密钥/数据库 | 首次用户试用前后对比状态路径 |
+| Gateway 直接启动 gate | `gateway-start.test.ts` 覆盖 readiness 失败发生在账户恢复、DB/session recovery、路由/listen 之前 | 物理目标主机上用缺失运行时复核无监听与状态残留 |
+| 命令安全 | 固定 `winget` 参数和 Linux `apt-get/dnf/yum/pacman/zypper/apk` 白名单；installer 使用 `shell:false` | 人工确认显示命令与官方包一致 |
+| 完整终端生命周期 | 单测覆盖 create/list/capture/resize/stop、环境身份清理、programmatic control plan | 必须在物理 Windows 验证 ConPTY + psmux + 浏览器 + 至少一个真实 AI CLI 的 attach/input/output/resize/reconnect/Gateway restart/cleanup |
+
+自动化和非 Windows 主机上的回归通过不能将 `WINDOWS-WSL` 门禁改为 `Pass`。
+该门禁在真实物理 Windows 生命周期证据审阅前保持 `Caveat`。
 
 ---
 
@@ -102,7 +128,7 @@
 | # | 文件 | 测试内容 | 预期用例 |
 |---|------|---------|---------|
 | 1 | `auth.test.ts` | 密码哈希（bcrypt） | 正常哈希、盐轮数验证、弱密码拒绝 |
-| 2 | `auth.test.ts` | 用户注册 | 正常注册、重复邮箱拒绝、弱密码拒绝、空字段拒绝 |
+| 2 | `auth.test.ts` / `account-recovery.test.ts` | 用户注册 | 正常注册、恢复密钥必填与错误密钥拒绝、代理转发拒绝、注册不轮换密钥、重复邮箱拒绝、弱密码拒绝、空字段拒绝 |
 | 3 | `auth.test.ts` | 用户登录 | 正确凭据、错误密码、错误邮箱、已禁用账户 |
 | 4 | `auth.test.ts` | JWT 签发 | 正常签发、载荷验证、过期时间验证 |
 | 5 | `auth.test.ts` | JWT 验证 | 有效 token、过期 token、伪造签名拒绝、**alg:none 攻击拒绝** |
@@ -110,6 +136,7 @@
 | 7 | `authMiddleware.test.ts` | userId 注入 | req.userId 正确注入、多租户隔离验证 |
 | 8 | `authMiddleware.test.ts` | 权限校验 | 管理员/普通用户路由隔离 |
 | 9 | `tenantMiddleware.test.ts` | 多租户隔离 | userA 无法访问 userB 数据 |
+| 9a | `account-recovery.test.ts` | 本机密码恢复 | 密钥持久化与 `0600` 权限、仅 loopback、代理头拒绝、通用失败、限流、成功轮换、旧会话吊销 |
 
 **覆盖率目标：** lines 80%, functions 75%, branches 90%
 
@@ -151,12 +178,12 @@
 
 | # | 文件 | 测试内容 | 预期用例 |
 |---|------|---------|---------|
-| 30 | `session-manager.test.ts` | createSession | 正常创建、名称格式验证（of-{user}-{session}） |
+| 30 | `session-manager.test.ts` | createSession | 正常创建、名称格式验证（fb-{user}-{session}） |
 | 31 | `session-manager.test.ts` | stopSession | 正常停止、已停止会话再次停止 |
 | 32 | `session-manager.test.ts` | deleteSession | 正常删除、级联清理 |
 | 33 | `session-manager.test.ts` | getSessionStatus | 正确返回状态 |
 | 34 | `session-manager.test.ts` | listSessions | 按用户过滤、按项目过滤 |
-| 35 | `session-manager.test.ts` | **tmux 孤儿清理** | Gateway 重启后扫描 of-* 会话，对比数据库，清理孤儿 |
+| 35 | `session-manager.test.ts` | **tmux 孤儿清理** | Gateway 重启后扫描 fb-* 会话，对比数据库，清理孤儿 |
 | 36 | `session-manager.test.ts` | **tmux 命名冲突** | 命名冲突时自动追加后缀 |
 | 37 | `session-manager.test.ts` | **tmux attach 失败降级** | session 不存在时返回明确错误 |
 | 38 | `session-manager.test.ts` | **tmux history-limit 验证** | capture-pane 验证 history-limit 设置为 10000 |
@@ -233,6 +260,7 @@
 | 75 | `integration/auth.test.ts` | POST /api/v1/auth/login | 正确凭据、错误密码、错误邮箱、已禁用账户 |
 | 76 | `integration/auth.test.ts` | POST /api/v1/auth/refresh | 有效 refresh token、过期 refresh token |
 | 77 | `integration/auth.test.ts` | 速率限制 | 快速连续登录触发限流 |
+| 77a | `account-recovery.test.ts` | POST /api/v1/auth/reset-password | 生产路由挂载、新密码登录、密钥不可重放、全部旧会话失效 |
 
 ### 3.2 项目 API（10 集成测试）
 

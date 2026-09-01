@@ -51,7 +51,12 @@ export const modelProviderProfiles = sqliteTable("model_provider_profiles", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 }, (table) => ({
-  idx_model_provider_profiles_user_key_url: uniqueIndex("idx_model_provider_profiles_user_key_url").on(table.userId, table.providerKey, table.baseUrl)
+  idx_model_provider_profiles_user_key_url: uniqueIndex("idx_model_provider_profiles_user_key_url").on(
+    table.userId,
+    table.providerKey,
+    sql`ifnull(${table.baseUrl}, '')`
+  ),
+  idx_model_provider_profiles_id_user: uniqueIndex("idx_model_provider_profiles_id_user").on(table.id, table.userId)
 }));
 
 export const modelProfiles = sqliteTable("model_profiles", {
@@ -72,7 +77,8 @@ export const modelProfiles = sqliteTable("model_profiles", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 }, (table) => ({
-  idx_model_profiles_user_provider_model: uniqueIndex("idx_model_profiles_user_provider_model").on(table.userId, table.providerProfileId, table.modelId)
+  idx_model_profiles_user_provider_model: uniqueIndex("idx_model_profiles_user_provider_model").on(table.userId, table.providerProfileId, table.modelId),
+  idx_model_profiles_id_user_provider: uniqueIndex("idx_model_profiles_id_user_provider").on(table.id, table.userId, table.providerProfileId)
 }));
 
 export const providerCredentials = sqliteTable("provider_credentials", {
@@ -85,12 +91,16 @@ export const providerCredentials = sqliteTable("provider_credentials", {
     .references(() => modelProviderProfiles.id, { onDelete: "cascade" }),
   label: text("label"),
   secretEncrypted: text("secret_encrypted").notNull(),
+  generation: integer("generation").notNull().default(1),
   status: text("status").notNull().default("active"),
   lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 }, (table) => ({
-  idx_provider_credentials_user_provider: index("idx_provider_credentials_user_provider").on(table.userId, table.providerProfileId)
+  idx_provider_credentials_user_provider: index("idx_provider_credentials_user_provider").on(table.userId, table.providerProfileId),
+  idx_provider_credentials_id_user_provider: uniqueIndex("idx_provider_credentials_id_user_provider").on(table.id, table.userId, table.providerProfileId),
+  generationCheck: check("provider_credentials_generation_check", sql`${table.generation} >= 1`),
+  statusCheck: check("provider_credentials_status_check", sql`${table.status} IN ('active', 'revoked')`)
 }));
 
 export const templates = sqliteTable("templates", {
@@ -148,22 +158,24 @@ export const projectManagerGoals = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
     summary: text("summary").notNull(),
     constraintsJson: text("constraints_json").notNull().default("[]"),
     acceptanceCriteriaJson: text("acceptance_criteria_json").notNull().default("[]"),
     detailsJson: text("details_json").notNull().default("{}"),
     status: text("status").notNull().default("active"),
-    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
   },
   (table) => ({
     idx_project_manager_goals_user_project: uniqueIndex("idx_project_manager_goals_user_project").on(
       table.userId,
       table.projectId
-    )
+    ),
+    projectOwnerFk: foreignKey({
+      columns: [table.userId, table.projectId],
+      foreignColumns: [projects.userId, projects.id]
+    }).onDelete("cascade")
   })
 );
 
@@ -174,9 +186,7 @@ export const projectManagerWorkItems = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
     title: text("title").notNull(),
     description: text("description"),
     status: text("status").notNull().default("todo"),
@@ -190,20 +200,33 @@ export const projectManagerWorkItems = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
   },
   (table) => ({
-    idx_project_manager_work_items_user_project: index("idx_project_manager_work_items_user_project").on(
-      table.userId,
-      table.projectId
-    ),
-    idx_project_manager_work_items_status: index("idx_project_manager_work_items_status").on(
+    idx_project_manager_work_items_updated: index("idx_project_manager_work_items_updated").on(
       table.userId,
       table.projectId,
-      table.status
+      sql`${table.updatedAt} DESC`,
+      sql`${table.title} ASC`
+    ),
+    idx_project_manager_work_items_status_updated: index("idx_project_manager_work_items_status_updated").on(
+      table.userId,
+      table.projectId,
+      table.status,
+      sql`${table.updatedAt} DESC`,
+      sql`${table.title} ASC`
     ),
     idx_project_manager_work_items_stage: index("idx_project_manager_work_items_stage").on(
       table.userId,
       table.projectId,
       table.stageId
-    )
+    ),
+    idx_project_manager_work_items_user_project_id: uniqueIndex("idx_project_manager_work_items_user_project_id").on(
+      table.userId,
+      table.projectId,
+      table.id
+    ),
+    projectOwnerFk: foreignKey({
+      columns: [table.userId, table.projectId],
+      foreignColumns: [projects.userId, projects.id]
+    }).onDelete("cascade")
   })
 );
 
@@ -407,6 +430,69 @@ export const notifications = sqliteTable(
   })
 );
 
+export const modelProviderBindings = sqliteTable(
+  "model_provider_bindings",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    adapter: text("adapter").notNull(),
+    scope: text("scope").notNull(),
+    scopeKey: text("scope_key").notNull(),
+    projectId: text("project_id"),
+    providerProfileId: text("provider_profile_id").notNull(),
+    modelProfileId: text("model_profile_id").notNull(),
+    providerCredentialId: text("provider_credential_id"),
+    authMode: text("auth_mode").notNull(),
+    targetLocatorHash: text("target_locator_hash").notNull(),
+    targetRealpathHash: text("target_realpath_hash"),
+    desiredRevision: integer("desired_revision").notNull().default(1),
+    appliedRevision: integer("applied_revision"),
+    observedFingerprint: text("observed_fingerprint"),
+    backupRevision: integer("backup_revision"),
+    status: text("status").notNull().default("active"),
+    revokedAt: integer("revoked_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idxBindingIdUser: uniqueIndex("idx_model_provider_bindings_id_user").on(table.id, table.userId),
+    idxBindingProvider: index("idx_model_provider_bindings_user_provider").on(table.userId, table.providerProfileId),
+    idxBindingActiveScope: uniqueIndex("idx_model_provider_bindings_active_scope")
+      .on(table.userId, table.adapter, table.scope, table.scopeKey)
+      .where(sql`${table.status} = 'active'`),
+    idxBindingActiveLocator: uniqueIndex("idx_model_provider_bindings_active_locator")
+      .on(table.targetLocatorHash)
+      .where(sql`${table.status} = 'active'`),
+    idxBindingActiveRealpath: uniqueIndex("idx_model_provider_bindings_active_realpath")
+      .on(table.targetRealpathHash)
+      .where(sql`${table.status} = 'active' AND ${table.targetRealpathHash} IS NOT NULL`),
+    adapterCheck: check("model_provider_bindings_adapter_check", sql`${table.adapter} IN ('claude','opencode','codex','kimi')`),
+    authModeCheck: check("model_provider_bindings_auth_mode_check", sql`${table.authMode} IN ('managed_credential','native_cli_login','host_environment','none')`),
+    statusCheck: check("model_provider_bindings_status_check", sql`${table.status} IN ('active','revoked')`),
+    revisionCheck: check("model_provider_bindings_revision_check", sql`${table.desiredRevision} >= 1`),
+    scopeCheck: check("model_provider_bindings_scope_check", sql`
+      (${table.scope} = 'global' AND ${table.scopeKey} = 'global' AND ${table.projectId} IS NULL)
+      OR (${table.scope} = 'project' AND ${table.projectId} IS NOT NULL AND ${table.scopeKey} = ${table.projectId})
+    `),
+    projectOwnerFk: foreignKey({
+      columns: [table.projectId, table.userId],
+      foreignColumns: [projects.id, projects.userId]
+    }).onDelete("restrict"),
+    providerOwnerFk: foreignKey({
+      columns: [table.providerProfileId, table.userId],
+      foreignColumns: [modelProviderProfiles.id, modelProviderProfiles.userId]
+    }).onDelete("restrict"),
+    modelOwnerFk: foreignKey({
+      columns: [table.modelProfileId, table.userId, table.providerProfileId],
+      foreignColumns: [modelProfiles.id, modelProfiles.userId, modelProfiles.providerProfileId]
+    }).onDelete("restrict"),
+    credentialOwnerFk: foreignKey({
+      columns: [table.providerCredentialId, table.userId, table.providerProfileId],
+      foreignColumns: [providerCredentials.id, providerCredentials.userId, providerCredentials.providerProfileId]
+    }).onDelete("restrict")
+  })
+);
+
 export const sessions = sqliteTable(
   "sessions",
   {
@@ -414,9 +500,7 @@ export const sessions = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
     name: text("name").notNull(),
     aiTool: text("ai_tool").notNull(),
     modelId: text("model_id").references(() => modelProfiles.id),
@@ -426,6 +510,18 @@ export const sessions = sqliteTable(
     workingDir: text("working_dir").notNull(),
     credentialMode: text("credential_mode").notNull().default("host_environment"),
     apiKeyId: text("api_key_id").references(() => apiKeys.id),
+    bindingId: text("binding_id"),
+    providerProfileId: text("provider_profile_id"),
+    modelProfileId: text("model_profile_id"),
+    providerCredentialId: text("provider_credential_id"),
+    credentialGeneration: integer("credential_generation"),
+    launchAuthMode: text("launch_auth_mode"),
+    launchProviderId: text("launch_provider_id"),
+    launchModelId: text("launch_model_id"),
+    launchBaseUrl: text("launch_base_url"),
+    launchEnvName: text("launch_env_name"),
+    launchWireApi: text("launch_wire_api"),
+    launchDesiredFingerprint: text("launch_desired_fingerprint"),
     lastActive: integer("last_active", { mode: "timestamp" }),
     errorMessage: text("error_message"),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
@@ -434,7 +530,45 @@ export const sessions = sqliteTable(
   (table) => ({
     idx_sessions_user_project: index("idx_sessions_user_project").on(table.userId, table.projectId),
     idx_sessions_user_project_id: uniqueIndex("idx_sessions_user_project_id").on(table.userId, table.projectId, table.id),
-    idx_sessions_status: index("idx_sessions_status").on(table.status)
+    idx_sessions_user_status: index("idx_sessions_user_status").on(table.userId, table.status),
+    idxSessionsBinding: index("idx_sessions_binding").on(table.userId, table.bindingId),
+    snapshotComplete: check("sessions_launch_snapshot_complete", sql`
+      (${table.bindingId} IS NULL AND ${table.providerProfileId} IS NULL AND ${table.modelProfileId} IS NULL
+        AND ${table.providerCredentialId} IS NULL AND ${table.credentialGeneration} IS NULL
+        AND ${table.launchAuthMode} IS NULL AND ${table.launchProviderId} IS NULL
+        AND ${table.launchModelId} IS NULL AND ${table.launchBaseUrl} IS NULL AND ${table.launchEnvName} IS NULL
+        AND ${table.launchWireApi} IS NULL AND ${table.launchDesiredFingerprint} IS NULL)
+      OR (${table.bindingId} IS NOT NULL AND ${table.providerProfileId} IS NOT NULL AND ${table.modelProfileId} IS NOT NULL
+        AND ${table.launchAuthMode} IS NOT NULL AND ${table.launchProviderId} IS NOT NULL AND ${table.launchModelId} IS NOT NULL
+        AND ${table.launchDesiredFingerprint} IS NOT NULL
+        AND ((${table.launchAuthMode} = 'managed_credential' AND ${table.providerCredentialId} IS NOT NULL
+          AND ${table.credentialGeneration} IS NOT NULL AND ${table.launchEnvName} IS NOT NULL)
+          OR (${table.launchAuthMode} <> 'managed_credential' AND ${table.providerCredentialId} IS NULL
+            AND ${table.credentialGeneration} IS NULL)))
+    `),
+    credentialGenerationCheck: check("sessions_credential_generation_check", sql`
+      ${table.credentialGeneration} IS NULL OR ${table.credentialGeneration} >= 1
+    `),
+    projectOwnerFk: foreignKey({
+      columns: [table.projectId, table.userId],
+      foreignColumns: [projects.id, projects.userId]
+    }).onDelete("cascade"),
+    bindingOwnerFk: foreignKey({
+      columns: [table.bindingId, table.userId],
+      foreignColumns: [modelProviderBindings.id, modelProviderBindings.userId]
+    }).onDelete("restrict"),
+    providerOwnerFk: foreignKey({
+      columns: [table.providerProfileId, table.userId],
+      foreignColumns: [modelProviderProfiles.id, modelProviderProfiles.userId]
+    }).onDelete("restrict"),
+    modelOwnerFk: foreignKey({
+      columns: [table.modelProfileId, table.userId, table.providerProfileId],
+      foreignColumns: [modelProfiles.id, modelProfiles.userId, modelProfiles.providerProfileId]
+    }).onDelete("restrict"),
+    credentialOwnerFk: foreignKey({
+      columns: [table.providerCredentialId, table.userId, table.providerProfileId],
+      foreignColumns: [providerCredentials.id, providerCredentials.userId, providerCredentials.providerProfileId]
+    }).onDelete("restrict")
   })
 );
 
@@ -664,6 +798,9 @@ export const sessionActivities = sqliteTable(
     idx_session_activities_project: index("idx_session_activities_project").on(table.userId, table.projectId)
   })
 );
+
+// Migration 0061 enforces tenant ownership for nullable session/project
+// references with triggers so parent deletion can retain historical rows.
 
 export const sessionSnapshots = sqliteTable(
   "session_snapshots",
@@ -960,8 +1097,14 @@ export const auditLogs = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date())
   },
   (table) => ({
-    idx_audit_logs_user: index("idx_audit_logs_user").on(table.userId),
-    idx_audit_logs_resource: index("idx_audit_logs_resource").on(table.resourceType, table.resourceId)
+    idx_audit_logs_user_created: index("idx_audit_logs_user_created").on(table.userId, table.createdAt, table.id),
+    idx_audit_logs_user_resource_created: index("idx_audit_logs_user_resource_created").on(
+      table.userId,
+      table.resourceType,
+      table.resourceId,
+      table.createdAt,
+      table.id
+    )
   })
 );
 
@@ -994,9 +1137,8 @@ export const tokenUsageRecords = sqliteTable(
       table.adapter,
       table.requestId
     ),
-    idx_token_usage_user_adapter_occurred: index("idx_token_usage_user_adapter_occurred").on(
+    idx_token_usage_user_occurred: index("idx_token_usage_user_occurred").on(
       table.userId,
-      table.adapter,
       table.occurredAt
     ),
     idx_token_usage_user_project_occurred: index("idx_token_usage_user_project_occurred").on(
@@ -1162,8 +1304,9 @@ export const portfolioFacts = sqliteTable("portfolio_facts", {
 }));
 
 // ---------------------------------------------------------------------------
-// Copilot agent runtime (self-hosted harness; the platform is its tool surface)
-// Fresh schema — the legacy copilot_* tables were dropped by migration 0038.
+// Historical Copilot/DSH table declarations retained for migration continuity
+// and the separately authorized backup/restore procedure only. No live route,
+// repository, scheduler, event, or runtime may import these declarations.
 // ---------------------------------------------------------------------------
 
 export const copilotConversations = sqliteTable("copilot_conversations", {
@@ -1176,8 +1319,7 @@ export const copilotConversations = sqliteTable("copilot_conversations", {
   summary: text("summary"),
   summaryCoveredSequence: integer("summary_covered_sequence"),
   lastSummaryAt: integer("last_summary_at", { mode: "timestamp" }),
-  // dsh kernel session id bound to this conversation (M2 BFF path). Null for
-  // conversations that have only ever run on the in-process orchestrator.
+  // Historical DSH session binding; retained only to describe existing rows.
   dshSessionId: text("dsh_session_id"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
@@ -1248,9 +1390,7 @@ export const copilotOperationLog = sqliteTable("copilot_operation_log", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date())
 }, (table) => ({ idempotency: uniqueIndex("idx_copilot_operation_user_op_key").on(table.userId, table.operation, table.idempotencyKey) }));
 
-// M4: per-user dsh kernel configuration (visual config -> per-user cordis.yml).
-// pluginsJson is keyed by the availablePlugins whitelist; defaultModelId
-// overrides the system default model for dsh runs when a message names none.
+// Historical per-user DSH configuration; never read by the current runtime.
 export const copilotDshConfig = sqliteTable("copilot_dsh_config", {
   userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   defaultModelId: text("default_model_id"),
@@ -1258,10 +1398,7 @@ export const copilotDshConfig = sqliteTable("copilot_dsh_config", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 });
 
-// Per-user Copilot tool switches: a row pins one tool to enabled(1)/disabled(0).
-// Absent row = tool enabled at its registered default. Enforced by the
-// in-process orchestrator (model schemas + execution) and the internal bridge
-// routes (dsh runtime callbacks).
+// Historical per-user Copilot tool switches; never read by the current runtime.
 export const copilotToolPreferences = sqliteTable("copilot_tool_preferences", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   toolName: text("tool_name").notNull(),
@@ -1272,9 +1409,8 @@ export const copilotToolPreferences = sqliteTable("copilot_tool_preferences", {
   idx_copilot_tool_preferences_user: index("idx_copilot_tool_preferences_user").on(table.userId)
 }));
 
-// Feishu Copilot channel: one row per (user, Feishu chat) pointing at the chat's
-// CURRENT Copilot conversation. Chats without a Portfolio channel binding route
-// messages into the Copilot harness; /new swaps the pointer to a fresh context.
+// Historical Feishu-to-Copilot channel rows. Current Feishu ingress requires a
+// Portfolio binding and fails closed when none exists.
 export const feishuCopilotChannels = sqliteTable("feishu_copilot_channels", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   chatId: text("chat_id").notNull(),
@@ -1300,7 +1436,8 @@ export const authSessions = sqliteTable("auth_sessions", {
   absoluteExpiresAt: integer("absolute_expires_at", { mode: "timestamp" }).notNull(),
   userAgent: text("user_agent")
 }, (table) => ({
-  idx_auth_sessions_user: index("idx_auth_sessions_user").on(table.userId)
+  idx_auth_sessions_user_last_seen: index("idx_auth_sessions_user_last_seen").on(table.userId, table.lastSeenAt),
+  idx_auth_sessions_expires: index("idx_auth_sessions_expires").on(table.expiresAt)
 }));
 
 // One-time invite codes for the invite-only registration mode. Codes are

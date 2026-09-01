@@ -4,7 +4,6 @@ const DEFAULT_GATEWAY_URL = "http://127.0.0.1:48731";
 const EVENT_SUBSCRIPTION = "im.message.receive_v1";
 
 export function resolveFeishuBotWebSocketSmokeConfig(env = process.env, argv = process.argv.slice(2)) {
-  env = normalizeEnvironment(env);
   const args = parseArgs(argv);
   const gatewayUrl = nonEmpty(args["gateway-url"]) ?? nonEmpty(env.FORGEBADGER_GATEWAY_URL) ?? DEFAULT_GATEWAY_URL;
   const token = nonEmpty(args.token) ?? nonEmpty(env.FORGEBADGER_TOKEN);
@@ -18,18 +17,9 @@ export function resolveFeishuBotWebSocketSmokeConfig(env = process.env, argv = p
       chatId: nonEmpty(args["chat-id"]) ?? nonEmpty(env.FORGEBADGER_FEISHU_SMOKE_CHAT_ID) ?? "oc_forgebadger_smoke",
       feishuUserId: nonEmpty(args["feishu-user-id"]) ?? nonEmpty(env.FORGEBADGER_FEISHU_SMOKE_USER_ID) ?? "ou_forgebadger_smoke",
       command: nonEmpty(args.command) ?? "/forgebadger status",
-      connectionId: nonEmpty(args["connection-id"]) ?? `of-feishu-ws-smoke-${Date.now()}`
+      connectionId: nonEmpty(args["connection-id"]) ?? `fb-feishu-ws-smoke-${Date.now()}`
     }
   };
-}
-
-function normalizeEnvironment(env) {
-  const normalized = { ...env };
-  for (const [name, value] of Object.entries(env)) {
-    if (!name.startsWith("OPENFORGE_") || value === undefined) continue;
-    normalized[`FORGEBADGER_${name.slice("OPENFORGE_".length)}`] ??= value;
-  }
-  return normalized;
 }
 
 export function buildFeishuBotWebSocketFixtureEvent(input) {
@@ -70,7 +60,7 @@ export async function runFeishuBotWebSocketSmoke(input) {
     });
   }
 
-  const connectionId = input.connectionId ?? `of-feishu-ws-smoke-${Date.now()}`;
+  const connectionId = input.connectionId ?? `fb-feishu-ws-smoke-${Date.now()}`;
   const baseEvent = {
     chatId: input.chatId,
     feishuUserId: input.feishuUserId

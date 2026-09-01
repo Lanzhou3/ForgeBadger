@@ -1,5 +1,5 @@
 /**
- * Session runtime lifecycle — shared by the HTTP start route and the Copilot
+ * Session runtime lifecycle — shared by the HTTP start route and Project Manager
  * tools so there is exactly one launch path (mutex, adapter validation,
  * launch-plan construction, recovery bookkeeping, activity/snapshot records).
  *
@@ -17,8 +17,7 @@ import type { ForgeBadgerEventBus } from "./event-bus.js";
 import {
   createLaunchPlan,
   normalizeAdapter,
-  prepareAdapterLaunchExtras,
-  validateSelfManagedAdapterCredentialBoundary
+  prepareAdapterLaunchExtras
 } from "./session-launch-plan.js";
 import { getAdapterLaunchStatus } from "./adapter-discovery.js";
 import type { CommandRunner } from "../lib/dependency-check.js";
@@ -66,17 +65,6 @@ export async function startSessionRuntime(deps: SessionRuntimeDeps, sessionId: s
       (err as Error & { httpStatus?: number }).httpStatus = 400;
       throw err;
     }
-    const credentialBoundary = validateSelfManagedAdapterCredentialBoundary({
-      adapter,
-      credentialMode: dbSession.credentialMode,
-      ...(dbSession.apiKeyId ? { apiKeyId: dbSession.apiKeyId } : {}),
-      ...(dbSession.modelId ? { modelId: dbSession.modelId } : {})
-    });
-    if (!credentialBoundary.ok) {
-      const err = new Error(credentialBoundary.message);
-      (err as Error & { httpStatus?: number }).httpStatus = 400;
-      throw err;
-    }
     const launchStatus = await getAdapterLaunchStatus(adapter, deps.adapterCommandRunner);
     if (!launchStatus.launchEnabled) {
       const err = new Error(`${launchStatus.label} is not available for launch`);
@@ -92,15 +80,9 @@ export async function startSessionRuntime(deps: SessionRuntimeDeps, sessionId: s
 
     const pluginDirs = await prepareAdapterLaunchExtras(deps.db, deps.userId, adapter, dbSession.workingDir, dbSession.id);
     const launchPlan = createLaunchPlan({
-      db: deps.db,
-      userId: deps.userId,
-      masterKey: deps.masterKey,
       adapter,
       projectRoot: dbSession.workingDir,
       sessionId: dbSession.id,
-      credentialMode: dbSession.credentialMode,
-      ...(dbSession.apiKeyId ? { apiKeyId: dbSession.apiKeyId } : {}),
-      ...(dbSession.modelId ? { modelId: dbSession.modelId } : {}),
       ...(pluginDirs.length > 0 ? { pluginDirs } : {})
     });
     const attachToken = randomUUID();

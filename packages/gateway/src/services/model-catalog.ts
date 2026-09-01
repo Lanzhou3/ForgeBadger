@@ -9,7 +9,7 @@ export interface ModelPreset {
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderSupportedAdapter = "claude" | "opencode";
+export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi";
 export type ProviderModelSource = "static" | "dynamic" | "models.dev";
 export type ProviderCatalogSource = "verified" | "models.dev";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
@@ -136,6 +136,23 @@ const claudeEnv = {
 };
 
 const providerCatalog: ProviderCatalogPreset[] = [
+  providerProduct({
+    id: "openai",
+    name: "OpenAI",
+    description: "Official OpenAI provider for Codex native login or ForgeBadger-managed Responses API credentials.",
+    region: "global",
+    productType: "payg_api",
+    apiFormat: "openai",
+    openaiBaseUrl: "https://api.openai.com/v1",
+    opencodeNpm: "@ai-sdk/openai",
+    envName: "OPENAI_API_KEY",
+    supportedAdapters: ["opencode", "codex"],
+    defaultModels: [
+      model("gpt-5-codex", "GPT-5 Codex", ["chat", "code", "reasoning"], 400000)
+    ],
+    smallFastModel: "gpt-5-codex",
+    modelsUrl: "https://api.openai.com/v1/models"
+  }),
   providerProduct({
     id: "anthropic-api",
     name: "Anthropic API",
@@ -718,6 +735,7 @@ function providerProduct(input: {
   defaultModels: ProviderModelPreset[];
   smallFastModel: string;
   supportsTools?: boolean;
+  supportedAdapters?: ProviderSupportedAdapter[];
   /** OpenAI-compatible GET /models endpoint. When set, the preset becomes
    *  dynamic: "sync models" fetches the provider's live model list from this
    *  URL instead of only seeding the built-in default models. */
@@ -744,7 +762,7 @@ function providerProduct(input: {
     productType: input.productType,
     authType,
     apiFormat: input.apiFormat,
-    supportedAdapters: ["claude", "opencode"],
+    supportedAdapters: input.supportedAdapters ?? ["claude", "opencode"],
     modelSource: input.modelsUrl ? "dynamic" : "static",
     source: "verified",
     endpoints,

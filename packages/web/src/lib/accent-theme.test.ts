@@ -43,15 +43,6 @@ describe("accent theme", () => {
     expect(readStoredAccent(storage)).toBe("cyan");
   });
 
-  it("migrates the legacy accent key on first read", () => {
-    const storage = new MemoryStorage();
-    storage.setItem("openforge.accent", "violet");
-
-    expect(readStoredAccent(storage)).toBe("violet");
-    expect(storage.getItem("forgebadger.accent")).toBe("violet");
-    expect(storage.getItem("openforge.accent")).toBeNull();
-  });
-
   it("gives every theme a distinct brand color and swatch", () => {
     const brands = new Set(ACCENT_THEMES.map((theme) => theme.brand));
     const swatches = new Set(ACCENT_THEMES.map((theme) => theme.swatch));

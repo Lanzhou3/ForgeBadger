@@ -1,4 +1,4 @@
-import { and, desc, eq, notInArray, or } from "drizzle-orm";
+import { and, count, desc, eq, notInArray, or } from "drizzle-orm";
 
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { Database } from "../types.js";
@@ -73,6 +73,12 @@ const BUILTIN_OPENCODE_TEMPLATE_ID = "builtin-opencode";
 const BUILTIN_CODEX_TEMPLATE_ID = "builtin-codex";
 const BUILTIN_KIMI_TEMPLATE_ID = "builtin-kimi";
 const BUILTIN_ADAPTER_TEMPLATE_VERSION = "1.0.0";
+const BUILTIN_TEMPLATE_IDS = [
+  BUILTIN_CLAUDE_TEMPLATE_ID,
+  BUILTIN_OPENCODE_TEMPLATE_ID,
+  BUILTIN_CODEX_TEMPLATE_ID,
+  BUILTIN_KIMI_TEMPLATE_ID
+] as const;
 
 function builtInClaudeTemplate(): typeof templates.$inferInsert {
   return {
@@ -368,7 +374,7 @@ function builtInClaudeMd(): string {
     "- Keep Gateway responsibilities in `packages/gateway`; do not add Next.js API routes for Gateway behavior.",
     "- Keep Web console responsibilities in `packages/web`; call Gateway through `/api/v1` and WebSocket endpoints.",
     "- REST responses use the ForgeBadger envelope: `{ \"code\": 0, \"data\": {}, \"message\": \"\" }` or `{ \"code\": 1, \"message\": \"...\", \"details\": {} }`.",
-    "- Terminal sessions are tmux-backed. Gateway restarts and browser reconnects must not kill the underlying CLI session.",
+    "- Terminal sessions use a persistent platform multiplexer: tmux on macOS/Linux and psmux on Windows. Gateway restarts and browser reconnects must not kill the underlying CLI session.",
     "- Store project, session, model, agent, skill, and template state in SQLite. Do not store terminal scrollback in SQLite.",
     "",
     "## Coding Standards",
@@ -413,7 +419,7 @@ function builtInClaudeMd(): string {
     "",
     "- ForgeBadger writes hooks into `.claude/settings.json` or `.claude/settings.local.json` at session launch.",
     "- `PermissionRequest`, `PermissionDenied`, and `Notification(permission_prompt)` use HTTP hooks that POST Claude Code's hook JSON directly to ForgeBadger with env-backed headers.",
-    "- If notifications do not appear, check that `FORGEBADGER_SESSION_ID`, `FORGEBADGER_ATTACH_TOKEN`, and `FORGEBADGER_GATEWAY_URL` are present in the launched tmux environment.",
+    "- If notifications do not appear, check that `FORGEBADGER_SESSION_ID`, `FORGEBADGER_ATTACH_TOKEN`, and `FORGEBADGER_GATEWAY_URL` are present in the launched terminal multiplexer environment.",
     "- Use Claude Code `/hooks` inside the terminal to inspect which project, local, user, and plugin hooks are active.",
     "",
     "## When To Update This File",
@@ -561,7 +567,7 @@ function builtInAdapterAgentsMd(adapterName: "OpenCode" | "Codex" | "Kimi Code")
     "- Keep API, service, repository, WebSocket, and CLI adapter behavior in the Gateway package.",
     "- Keep React pages, components, hooks, and styling in the Web package.",
     "- Do not implement Gateway behavior in Next.js API routes.",
-    "- Terminal sessions are tmux-backed; browser disconnects must not kill the underlying CLI process.",
+    "- Terminal sessions use a persistent platform multiplexer: tmux on macOS/Linux and psmux on Windows; browser disconnects must not kill the underlying CLI process.",
     "",
     "## Safety Boundaries",
     "",
@@ -664,10 +670,7 @@ function builtInTemplateDefinitions(): Array<{
 }
 
 function isBuiltInTemplateId(id: string): boolean {
-  return id === BUILTIN_CLAUDE_TEMPLATE_ID ||
-    id === BUILTIN_OPENCODE_TEMPLATE_ID ||
-    id === BUILTIN_CODEX_TEMPLATE_ID ||
-    id === BUILTIN_KIMI_TEMPLATE_ID;
+  return BUILTIN_TEMPLATE_IDS.some((templateId) => templateId === id);
 }
 
 export class TemplateRepository {
@@ -715,6 +718,18 @@ export class TemplateRepository {
       )
       .all() as Template[];
     return this.attachUsageCounts(rows);
+  }
+
+  countReadable(): number {
+    const row = this.drizzle
+      .select({ value: count() })
+      .from(templates)
+      .where(and(
+        notInArray(templates.id, [...BUILTIN_TEMPLATE_IDS]),
+        this.readableVisibility(true)
+      ))
+      .get();
+    return BUILTIN_TEMPLATE_IDS.length + (row?.value ?? 0);
   }
 
   create(input: CreateTemplateInput): Template {

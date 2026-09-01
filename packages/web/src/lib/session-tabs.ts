@@ -1,9 +1,5 @@
 import type { Session } from "@/lib/api";
-import {
-  readMigratedStorageValue,
-  writeMigratedStorageValue,
-  type BrandStorage,
-} from "@/lib/brand-storage";
+import type { BrandStorage } from "@/lib/brand-storage";
 
 export interface SessionTab {
   id: string;
@@ -18,7 +14,6 @@ export interface SessionTab {
 }
 
 const SESSION_TABS_KEY = "forgebadger.sessionTabs.v1";
-const LEGACY_SESSION_TABS_KEY = "openforge.sessionTabs.v1";
 const MAX_SESSION_TABS = 8;
 
 export function sessionToTab(session: Session, now = Date.now()): SessionTab {
@@ -35,7 +30,7 @@ export function sessionToTab(session: Session, now = Date.now()): SessionTab {
 
 export function readSessionTabs(storage: BrandStorage = window.localStorage): SessionTab[] {
   try {
-    const raw = readMigratedStorageValue(storage, SESSION_TABS_KEY, LEGACY_SESSION_TABS_KEY);
+    const raw = storage.getItem(SESSION_TABS_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -58,12 +53,7 @@ export function writeSessionTabs(
   storage: BrandStorage = window.localStorage
 ): SessionTab[] {
   const normalized = normalizeTabs(tabs);
-  writeMigratedStorageValue(
-    storage,
-    SESSION_TABS_KEY,
-    LEGACY_SESSION_TABS_KEY,
-    JSON.stringify(normalized)
-  );
+  storage.setItem(SESSION_TABS_KEY, JSON.stringify(normalized));
   return normalized;
 }
 

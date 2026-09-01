@@ -92,11 +92,11 @@ describe("buildModelProviderReadiness", () => {
     assert.equal(JSON.stringify(readiness).includes("sk-hidden"), false);
   });
 
-  it("keeps Codex subscription-managed and skips provider remote checks", async () => {
+  it("validates Codex through the common provider readiness path", async () => {
     let fetchCalled = false;
 
     const readiness = await buildModelProviderReadiness({
-      provider,
+      provider: createProvider({ supportedAdapters: ["claude", "opencode", "codex"] }),
       model,
       credential,
       adapter: "codex",
@@ -105,15 +105,56 @@ describe("buildModelProviderReadiness", () => {
       includeRemoteCheck: true,
       fetchProviderModels: async () => {
         fetchCalled = true;
-        return [];
+        return [{ id: model.modelId, ownedBy: "provider" }];
       }
     });
 
-    assert.equal(readiness.status, "managed_elsewhere");
-    assert.equal(readiness.code, "codex_subscription_managed");
-    assert.equal(readiness.checks.adapter, "managed_elsewhere");
-    assert.match(readiness.steps.join("\n"), /subscription/i);
-    assert.equal(fetchCalled, false);
+    assert.equal(readiness.status, "ready");
+    assert.equal(readiness.code, "ready");
+    assert.equal(readiness.checks.adapter, "supported");
+    assert.equal(fetchCalled, true);
+  });
+
+  it("uses bounded Codex native login status without requiring or decrypting a provider credential", async () => {
+    for (const method of ["chatgpt", "api", "unknown"] as const) {
+      let decrypted = false;
+      let fetched = false;
+      const readiness = await buildModelProviderReadiness({
+        provider: createProvider({ providerKey: "openai", supportedAdapters: ["codex"] }),
+        model,
+        adapter: "codex",
+        authMode: "native_cli_login",
+        nativeAuth: { state: "ready", method },
+        includeRemoteCheck: true,
+        decryptCredential: () => { decrypted = true; return "must-not-decrypt"; },
+        fetchProviderModels: async () => { fetched = true; return []; }
+      });
+
+      assert.equal(readiness.status, "ready");
+      assert.equal(readiness.nativeAuth?.method, method);
+      assert.equal(readiness.checks.credential, "not_required");
+      assert.equal(decrypted, false);
+      assert.equal(fetched, false);
+    }
+  });
+
+  it("rejects a revoked exact managed credential before decrypt or fetch", async () => {
+    let decrypted = false;
+    let fetched = false;
+    const readiness = await buildModelProviderReadiness({
+      provider: createProvider({ supportedAdapters: ["codex"] }),
+      model,
+      credential: createCredential({ status: "revoked" }),
+      adapter: "codex",
+      authMode: "managed_credential",
+      includeRemoteCheck: true,
+      decryptCredential: () => { decrypted = true; return "must-not-decrypt"; },
+      fetchProviderModels: async () => { fetched = true; return []; }
+    });
+
+    assert.equal(readiness.code, "missing_active_credential");
+    assert.equal(decrypted, false);
+    assert.equal(fetched, false);
   });
 
   it("classifies remote validation failures into actionable categories", async () => {

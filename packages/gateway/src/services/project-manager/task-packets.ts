@@ -1,6 +1,6 @@
 /**
  * Task-packet domain service — shared by the project-manager HTTP routes and
- * the Copilot PM tools so packet construction, session linking, and the
+ * the Project Manager execution path so packet construction, session linking, and the
  * start flow have exactly one implementation.
  *
  * The packet is the unit of dispatch for autonomous software engineering:
@@ -151,6 +151,36 @@ export function resolveTaskPacketSession(
   return session?.projectId === projectId ? session : null;
 }
 
+export function resolveTaskPacketSessions(
+  db: Database,
+  userId: string,
+  projectId: string,
+  workItems: ProjectManagerWorkItem[]
+): Map<string, Session> {
+  const sessionIdByWorkItem = new Map<string, string>();
+  for (const workItem of workItems) {
+    const sessionId = readTaskPacketSessionId(workItem);
+    if (sessionId) sessionIdByWorkItem.set(workItem.id, sessionId);
+  }
+  const sessions = new SessionRepository(db, userId).listByIds(
+    projectId,
+    [...new Set(sessionIdByWorkItem.values())]
+  );
+  const sessionById = new Map(sessions.map((session) => [session.id, session]));
+  const result = new Map<string, Session>();
+  for (const [workItemId, sessionId] of sessionIdByWorkItem) {
+    const session = sessionById.get(sessionId);
+    if (session) result.set(workItemId, session);
+  }
+  return result;
+}
+
+function readTaskPacketSessionId(workItem: ProjectManagerWorkItem): string | null {
+  const value = readTaskPacketDetails(workItem.details).sessionId;
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  return value.trim();
+}
+
 export function withTaskPacketSessionLink(
   details: Record<string, unknown>,
   session: Session,
@@ -194,10 +224,7 @@ export function toTaskPacketSessionDto(session: Session) {
     name: session.name,
     projectId: session.projectId,
     status: session.status,
-    aiTool: session.aiTool,
-    modelId: session.modelId,
-    credentialMode: session.credentialMode,
-    apiKeyId: session.apiKeyId
+    aiTool: session.aiTool
   };
 }
 

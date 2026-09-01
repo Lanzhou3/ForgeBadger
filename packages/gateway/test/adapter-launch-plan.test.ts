@@ -33,7 +33,7 @@ describe("multi-adapter launch plans", () => {
     });
 
     assert.equal(plan.command, "codex");
-    assert.deepEqual(plan.args, ["-m", "gpt-5.1-codex"]);
+    assert.deepEqual(plan.args, ["-m", "gpt-5.1-codex", "-c", 'model_provider="openai"']);
     assert.equal(plan.cwd, "/workspace/app");
     assert.deepEqual(plan.secretEnvNames, []);
   });

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { mkdirSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
@@ -12,6 +14,7 @@ import { ProjectRepository } from "../src/db/repositories/project-repository.js"
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { SessionSnapshotRepository } from "../src/db/repositories/session-snapshot-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
+import { recordSessionSnapshot } from "../src/services/session-snapshots.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import type { TmuxCreateOptions } from "../src/services/tmux.js";
@@ -133,7 +136,35 @@ describe("session snapshot restore", () => {
     assert.equal(body.data?.session.id, sessionId);
     assert.equal(body.data?.session.status, "running");
     assert.equal(createdTmuxOptions.length, 1);
-    assert.match(createdTmuxOptions[0]!.name, /^of-/);
+    assert.match(createdTmuxOptions[0]!.name, /^fb-/);
+  });
+
+  it("recreates a deleted Codex session against the host environment", async () => {
+    const auth = await register("snapshot-codex@example.com");
+    const projectRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-codex-restore-"));
+    const project = new ProjectRepository(db, auth.userId).create({
+      name: "Codex Project",
+      path: projectRoot,
+      aiTool: "codex"
+    });
+    const sessions = new SessionRepository(db, auth.userId);
+    const session = sessions.create({
+      projectId: project.id, name: "Codex Session", aiTool: "codex", workingDir: project.path
+    });
+    const snapshot = recordSessionSnapshot({ db, userId: auth.userId, session, metadata: { reason: "test" } });
+    sessions.delete(session.id);
+    createdTmuxOptions = [];
+
+    const restoreRes = await fetch(`${baseUrl}/api/v1/snapshots/${snapshot.id}/restore`, {
+      method: "POST",
+      headers: jsonHeaders(auth.token)
+    });
+    const body = (await restoreRes.json()) as RestoreBody;
+
+    assert.equal(restoreRes.status, 200, JSON.stringify(body));
+    assert.equal(createdTmuxOptions.length, 1);
+    // Host-environment launch: no provider/model flags are injected at start.
+    assert.deepEqual(createdTmuxOptions[0]?.args, []);
   });
 
   it("does not restore another user's snapshot", async () => {
@@ -170,6 +201,7 @@ describe("session snapshot restore", () => {
     const provider = providerRepo.createProviderProfile({
       providerKey: "anthropic",
       name: "Anthropic",
+      baseUrl: "https://api.anthropic.com",
       authType: "api_key",
       apiFormat: "anthropic",
       supportedAdapters: ["claude"]

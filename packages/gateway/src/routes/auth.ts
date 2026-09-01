@@ -15,11 +15,13 @@ import type { User, UserRepository } from "../db/repositories/user-repository.js
 import type { Database } from "../db/types.js";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import { redactSensitiveErrorMessage } from "../lib/redaction.js";
+import type { LocalAccountRecovery } from "../services/local-account-recovery.js";
 
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
-  inviteCode: z.string().trim().min(6).max(64).optional()
+  inviteCode: z.string().trim().min(6).max(64).optional(),
+  recoveryKey: z.string().max(256).optional()
 });
 
 const loginSchema = z.object({
@@ -32,13 +34,24 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8)
 });
 
+const resetPasswordSchema = z.object({
+  email: z.string().email(),
+  recoveryKey: z.string().min(1).max(256),
+  newPassword: z.string().min(8)
+});
+
 const invalidCredentialsResponse = { code: 1, message: "Invalid credentials" };
+const invalidRegistrationCredentialsResponse = {
+  code: 1,
+  message: "Invalid registration credentials"
+};
 
 export type RegistrationMode = "open" | "off" | "invite";
 
 export interface AuthRouterOptions {
   db?: Database;
   registrationMode?: RegistrationMode;
+  accountRecovery?: LocalAccountRecovery;
 }
 
 export function createAuthRouter(
@@ -54,6 +67,7 @@ export function createAuthRouter(
   // and credential-stuffing protection for login/register, and unbounded
   // account-creation for register. Generous enough for test suites and CI.
   const authLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
+  const recoveryLimiter = createRateLimiter({ windowMs: 15 * 60_000, maxRequests: 5 });
 
   router.post("/register", authLimiter, async (req, res) => {
     const parseResult = registerSchema.safeParse(req.body);
@@ -62,7 +76,16 @@ export function createAuthRouter(
       return;
     }
 
-    const { email, password, inviteCode } = parseResult.data;
+    const { email, password, inviteCode, recoveryKey } = parseResult.data;
+
+    if (options.accountRecovery && !isDirectLoopbackRequest(req)) {
+      res.status(403).json({ code: 1, message: "Registration is only available locally" });
+      return;
+    }
+    if (options.accountRecovery && !options.accountRecovery.isValid(recoveryKey ?? "")) {
+      res.status(401).json(invalidRegistrationCredentialsResponse);
+      return;
+    }
 
     try {
       const isFirstUser = userRepository.count() === 0;
@@ -183,6 +206,45 @@ export function createAuthRouter(
     res.status(200).json({ code: 0, data: { revokedSessions: true }, message: "" });
   });
 
+  router.post("/reset-password", recoveryLimiter, async (req, res) => {
+    const parseResult = resetPasswordSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+    if (!isDirectLoopbackRequest(req)) {
+      res.status(403).json({ code: 1, message: "Account recovery is only available locally" });
+      return;
+    }
+    if (!db || !options.accountRecovery) {
+      res.status(503).json({ code: 1, message: "Account recovery unavailable" });
+      return;
+    }
+
+    const { email, recoveryKey, newPassword } = parseResult.data;
+    const user = userRepository.findByEmail(email);
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    if (
+      !user ||
+      user.status !== "active" ||
+      !options.accountRecovery.consume(recoveryKey)
+    ) {
+      res.status(401).json({ code: 1, message: "Invalid recovery credentials" });
+      return;
+    }
+
+    db.transaction(() => {
+      userRepository.updatePassword(user.id, passwordHash);
+      new AuthSessionRepository(db).deleteAllByUser(user.id);
+    })();
+    clearSessionCookie(res);
+    res.status(200).json({
+      code: 0,
+      data: { revokedSessions: true, recoveryKeyRotated: true },
+      message: ""
+    });
+  });
+
   router.get("/sessions", authenticate, (req, res) => {
     if (!db) {
       res.status(500).json({ code: 1, message: "Auth storage unavailable" });
@@ -295,7 +357,14 @@ async function respondWithCredentials(
 
 function clearSessionCookie(res: Response): void {
   res.clearCookie(SESSION_COOKIE_NAME, { httpOnly: true, sameSite: "strict", path: "/" });
-  res.clearCookie("openforge_session", { httpOnly: true, sameSite: "strict", path: "/" });
+}
+
+function isDirectLoopbackRequest(req: Request): boolean {
+  if (req.headers.forwarded || req.headers["x-forwarded-for"] || req.headers["x-real-ip"]) {
+    return false;
+  }
+  const address = req.socket.remoteAddress?.toLowerCase();
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 }
 
 function toPublicUser(user: User) {

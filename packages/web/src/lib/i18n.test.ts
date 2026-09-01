@@ -4,6 +4,12 @@ import { getTranslation, normalizeLanguage } from "./i18n";
 
 describe("i18n", () => {
   it("returns localized labels for each supported language", () => {
+    expect(getTranslation("zh-CN", "auth.signIn")).toBe("登录");
+    expect(getTranslation("zh-TW", "auth.forgotPassword")).toBe("忘記密碼？");
+    expect(getTranslation("en", "auth.resetPassword")).toBe("Reset password");
+    expect(getTranslation("zh-CN", "auth.createAccount")).toBe("创建账户");
+    expect(getTranslation("zh-TW", "auth.registrationInvalidCredentials")).toBe("復原密鑰無效。");
+    expect(getTranslation("en", "auth.registrationInstructions")).toContain("does not rotate");
     expect(getTranslation("zh-CN", "settings.title")).toBe("设置");
     expect(getTranslation("zh-TW", "settings.title")).toBe("設定");
     expect(getTranslation("en", "settings.title")).toBe("Settings");
@@ -65,14 +71,8 @@ describe("i18n", () => {
     expect(getTranslation("en", "models.saveAndSyncModels")).toBe("Save and sync models");
     expect(getTranslation("zh-CN", "models.deleteProviderInlineLabel")).toBe("删除服务商");
     expect(getTranslation("zh-TW", "models.deleteProviderConfirm")).toContain("供應商");
-    expect(getTranslation("en", "models.codexOfficialDocs")).toContain("OpenAI Codex docs");
-    expect(getTranslation("zh-CN", "models.deleteBlockedTitle")).toBe("暂时无法删除");
-    expect(getTranslation("zh-TW", "models.deleteBlockedTitle")).toBe("暫時無法刪除");
-    expect(getTranslation("en", "models.deleteBlockedTitle")).toBe("Cannot delete yet");
-    expect(getTranslation("zh-CN", "models.referencesSafe")).toContain("安全删除");
-    expect(getTranslation("zh-TW", "models.referencedSessions")).toBe("會話");
-    expect(getTranslation("en", "models.referencedSessions")).toBe("Sessions");
-    expect(getTranslation("en", "models.referencedModelBadge")).toContain("{count}");
+    expect(getTranslation("en", "models.applyToCli")).toContain("Apply to CLI");
+    expect(getTranslation("zh-CN", "models.applyToCli")).toBe("应用到 CLI");
     expect(getTranslation("zh-CN", "terminal.historyOutput")).toBe("历史输出");
     expect(getTranslation("zh-TW", "terminal.historyOutput")).toBe("歷史輸出");
     expect(getTranslation("en", "terminal.historyOutput")).toBe("Output history");

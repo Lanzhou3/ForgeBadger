@@ -2,6 +2,12 @@
 
 > Status: v1.5 evidence registry with Feishu long-connection gate | Date: 2026-06-13
 
+> Historical protocol note (2026-08-31): labels such as
+> `smoke:copilot-provider` and linked issue titles are immutable v1.5 evidence
+> identifiers. They do not describe a current Copilot/DSH runtime. Current
+> provider health is independent from the retired Portfolio Operations work,
+> and current Copilot acceptance is tracked by the OpenSpec corrective cutover.
+
 This registry is the source of truth for external ForgeBadger release gates.
 Repository tests, mocked browser checks, documentation, templates, and empty
 issue forms are useful support artifacts, but they do not clear an external
@@ -14,7 +20,8 @@ is linked and reviewed.
 ## Purpose And Scope
 
 ForgeBadger is a local-first AI CLI control plane. The current external gates
-focus on release trust: live provider behavior, real Windows/WSL terminal
+focus on release trust: live provider behavior, real native Windows psmux and
+Windows/WSL tmux terminal
 behavior, Feishu bot long-connection behavior, and completed first-user
 feedback.
 
@@ -43,7 +50,7 @@ do not exercise the external boundary.
 | Gate | Current State | Owner | Clearing Condition | Rerun Path | Target Destination |
 |------|---------------|-------|--------------------|------------|--------------------|
 | `LIVE-PROVIDER` | `Caveat` | Release maintainer with disposable provider credential | `pnpm smoke:copilot-provider` runs with an explicit provider, explicit model id, and disposable credential; result is redacted and maps failure classes if not passing. | Run `pnpm smoke:copilot-provider` after configuring an explicit provider/model/credential outside the repository. | `docs/reports/phase-18-live-provider-evidence-rerun-2026-05-29.md`; historical baseline in `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`; follow-up issue #3. |
-| `WINDOWS-WSL` | `Caveat` | Release maintainer with physical Windows host and WSL | A real WSL run records dependency checks, browser terminal attach/input/resize, reconnect, Gateway restart recovery, and cleanup. Native Windows management UI checks do not clear terminal evidence. | Run the Windows/WSL section in `docs/TRIAL-CHECKLIST.md` on physical hardware. | `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`; historical baseline in `docs/reports/phase-6-terminal-gate-evidence-2026-05-21.md`; follow-up issue #4. |
+| `WINDOWS-WSL` | `Caveat` | Release maintainer with physical Windows host and WSL | A physical native Windows run with ConPTY + psmux ≥ 3.3.8 records dependency/install-confirmation checks and a real browser + AI CLI attach/input/output/resize/reconnect/Gateway-restart/stop/cleanup lifecycle. A real WSL run records the equivalent tmux lifecycle. Repository unit tests, non-Windows simulation, or native Windows management UI checks do not clear terminal evidence. | Run the Windows/WSL section in `docs/TRIAL-CHECKLIST.md` on physical hardware; record the native `psmux -V` or WSL `tmux -V` summary and `forgebadger doctor` without raw transcripts. | `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`; historical baseline in `docs/reports/phase-6-terminal-gate-evidence-2026-05-21.md`; follow-up issue #4. |
 | `FEISHU-BOT-WS` | `Caveat` | ForgeBadger operator with Feishu bot long-connection access | A real Feishu bot WebSocket or persistent connection run receives an `im.message.receive_v1` event from an allowed DM or group, routes it through ForgeBadger policy, sends a bounded reply or creates a pending action, reconnects after interruption, and preserves no-free-form-approval and no-terminal-input boundaries. Candidate reports pass automated redaction/audit checks, but the reports explicitly require maintainer review before this gate can move to `Pass`. | Configure a Feishu self-built bot for persistent connection event subscription, subscribe to `im.message.receive_v1`, run `pnpm smoke:feishu-bot-websocket` against the authenticated Gateway fixture path, then run `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output <report.json>`, run `pnpm evidence:feishu-bot-live-audit -- <report.json>`, and run `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output <report.md>` before maintainer review. Public webhook URL verification is optional compatibility evidence, not the primary gate. | Candidate artifacts pending explicit maintainer acceptance: `docs/reports/phase-41-feishu-bot-live-evidence-2026-06-14.json`; `docs/reports/phase-41-feishu-bot-live-evidence-2026-06-14.md`; historical public webhook blocker baseline in `docs/reports/phase-19-feishu-public-callback-evidence-2026-05-29.md`; historical local callback baseline in `docs/reports/phase-7-feishu-callback-evidence-2026-05-21.md`. |
 | `FIRST-USER-FEEDBACK` | `Caveat` | Maintainer/operator collecting a real trial packet | At least one completed redacted first-user feedback packet is attached or linked with severity, owner, disposition, affected surface, environment, reproduction detail, and follow-up route or no-action rationale. | Use `docs/TRIAL-FEEDBACK.md` or `.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml`; run `pnpm trial:feedback-audit -- <packet.md>` for Markdown packets, `pnpm trial:feedback-issue-audit -- --issue=<number>` for a specific GitHub issue-form feedback item, or `pnpm trial:feedback-issues-audit` to scan non-tracker GitHub feedback candidates before maintainer triage. | `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`; follow-up issue #5 or a completed trial feedback issue. |
 
@@ -75,11 +82,18 @@ Forbidden:
 Allowed:
 
 - Windows version and WSL distribution/version;
-- `forgebadger doctor`, `node --version`, `tmux -V`, and AI CLI version summaries;
+- selected path: native Windows ConPTY + psmux or WSL + tmux;
+- `forgebadger doctor`, `node --version`, `psmux -V` or `tmux -V`, and AI CLI version summaries;
+- bounded observation that missing/outdated native psmux offered the exact
+  `marlocarlo.psmux` WinGet command and required explicit confirmation;
 - browser terminal attach/input/resize/reconnect result;
 - Gateway restart recovery result;
 - cleanup result;
 - redacted screenshot or written observation.
+
+Implementation/unit evidence may be linked as supporting context, but does not
+replace this physical-host artifact. Until that artifact is reviewed, the gate
+remains `Caveat`.
 
 Forbidden:
 

@@ -51,8 +51,6 @@ get_session_output, dispatch_task_to_session
    or are reported to the owner.
 
 ## Guardrails
-- Never dispatch to a session leased by a Portfolio worker (409
-  PORTFOLIO_WRITER_FENCE_REJECTED means hands off).
 - If delivery returns 502 submission_indeterminate, the task may already have
   reached the CLI: tell the owner to inspect the terminal and never auto-retry.
 - One work item at a time unless the owner asks for parallel lanes.`;
@@ -69,7 +67,6 @@ Deliver instructions to running AI CLI sessions and read their screens.
 - 1-4000 chars after trim; split larger plans into sequential messages.
 - 409 BRIDGE_SESSION_NOT_ACTIVE: session exists in DB but not live here ->
   start it first (or ask the owner if start tooling is unavailable).
-- 409 PORTFOLIO_WRITER_FENCE_REJECTED: leased to a Portfolio worker -> hands off.
 - 502 submission_indeterminate: the task may already be running -> inspect the
   terminal, report the uncertainty, and do not retry automatically.
 
@@ -101,24 +98,6 @@ Read and create projects.
 Before any development-management work, resolve which project id applies;
 never guess ids — list first.`;
 
-const PORTFOLIO_GOVERNANCE = `# Portfolio governance
-
-Portfolio-level requests, dossiers, and gated work-item advancement.
-
-## Read tools
-- \`portfolio_overview\`: enrolled projects, open work items, recent activity.
-- \`list_portfolio_requests {projectId?, limit?}\`.
-- \`get_project_dossier {projectId}\`: objective, intended outcome, evidence.
-- \`get_work_item {workItemId}\`.
-
-## Advance (gated)
-\`advance_work_item {workItemId, note?}\` moves ONE lifecycle step
-(todo->in_progress->ready_for_review->done) through the Portfolio State Gate:
-dispatch receipts, verified completion evidence, accepted decisions, and owner
-authority are enforced. Rejections come back 409 with stable codes:
-PORTFOLIO_PRECONDITION_FAILED / PORTFOLIO_INVALID_TRANSITION. Terminal states
-reject. Always attach a short transition note.`;
-
 const MEMORY_PLAYBOOK = `# Memory playbook
 
 Durable, scoped notes the Copilot can recall later.
@@ -135,9 +114,9 @@ global | project (requires projectId) | session.
 fact | preference | decision | project_note.
 
 ## Etiquette
-Write decisions and owner preferences, not transient chatter. On the dsh path
-write_memory is operate-gated; on the in-process path it executes directly —
-either way prefer precision over volume.`;
+Write decisions and owner preferences, not transient chatter. The native
+runtime persists memory through the tenant-scoped repository; prefer precision
+over volume.`;
 
 const USAGE_ANALYSIS = `# Usage analysis
 
@@ -202,12 +181,6 @@ export const BUILTIN_COPILOT_SKILLS: readonly CopilotSkill[] = [
     description:
       "List/get/create projects; includes the create_project path approval rules (home directory, denied roots).",
     body: PROJECT_INSIGHTS,
-  },
-  {
-    name: "portfolio-governance",
-    description:
-      "Portfolio requests/dossiers and the gated advance_work_item lifecycle with its 409 rejection codes.",
-    body: PORTFOLIO_GOVERNANCE,
   },
   {
     name: "memory-playbook",

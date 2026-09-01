@@ -6,7 +6,19 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 import { resolveTokenUserId } from "../auth/resolve-token.js";
 import type { Database } from "../db/types.js";
+import { SessionRepository } from "../db/repositories/session-repository.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
+import { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
+import {
+  clearInheritedMultiplexerIdentity,
+  resolveTerminalMultiplexerRuntime,
+  type TerminalMultiplexerRuntime
+} from "../services/terminal-multiplexer-runtime.js";
+import {
+  TerminalRuntimeAuthorizationRegistry,
+  validateTerminalRuntimeAuthorization,
+  type TerminalRuntimeAuthorizationLease
+} from "./terminal-runtime-authorization.js";
 import { extractWsAuthToken, extractWsAttachToken } from "./auth.js";
 import { WebSocketConnectionLimits } from "./connection-limits.js";
 
@@ -17,7 +29,7 @@ const TERMINAL_HEARTBEAT_INTERVAL_MS = 30_000;
 const TERMINAL_HEARTBEAT_TIMEOUT_MS = 90_000;
 const DEFAULT_TERMINAL_WS_MAX_CONNECTIONS = 100;
 const DEFAULT_TERMINAL_WS_MAX_CONNECTIONS_PER_USER = 5;
-const TERMINAL_WS_AUTH_PROTOCOLS = ["forgebadger-terminal", "openforge-terminal"] as const;
+const TERMINAL_WS_AUTH_PROTOCOLS = ["forgebadger-terminal"] as const;
 
 export type TerminalMessage =
   | { type: "terminal_input"; payload: { data: string } }
@@ -160,10 +172,16 @@ export interface TerminalWebSocketOptions {
   registry?: TerminalConnectionRegistry;
   maxConnections?: number;
   maxConnectionsPerUser?: number;
+  terminalRuntime?: TerminalMultiplexerRuntime;
+  runtimeAuthorizationInvalidator: RuntimeAuthorizationInvalidator;
+  runtimeAuthorizationRegistry?: TerminalRuntimeAuthorizationRegistry;
 }
 
 export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void {
+  const terminalRuntime = options.terminalRuntime ?? resolveTerminalMultiplexerRuntime();
   const registry = options.registry ?? new TerminalConnectionRegistry();
+  const runtimeAuthorizationRegistry = options.runtimeAuthorizationRegistry
+    ?? new TerminalRuntimeAuthorizationRegistry(options.runtimeAuthorizationInvalidator);
   const limits = new WebSocketConnectionLimits<WebSocket>({
     maxGlobalConnections: options.maxConnections ?? DEFAULT_TERMINAL_WS_MAX_CONNECTIONS,
     maxConnectionsPerUser:
@@ -223,6 +241,12 @@ export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void
       return;
     }
 
+    const dbSession = new SessionRepository(options.db, userId).getById(sessionId);
+    if (!dbSession) {
+      wss.handleUpgrade(request, socket, head, (ws) => ws.close(4404, "session not found"));
+      return;
+    }
+
     const attachToken = extractWsAttachToken(request.headers, TERMINAL_WS_AUTH_PROTOCOLS) ?? "";
     const terminalAccessRequest: TerminalAccessRequest = {
       authTokenUserId: userId,
@@ -250,7 +274,12 @@ export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void
         terminalAccessRequest,
         options.sessionManager,
         registry,
-        limits
+        limits,
+        terminalRuntime,
+        options.db,
+        userId,
+        dbSession.projectId,
+        runtimeAuthorizationRegistry
       );
     });
   });
@@ -262,14 +291,21 @@ async function handleTerminalSocket(
   access: TerminalAccessRequest,
   sessionManager: InMemorySessionManager,
   registry: TerminalConnectionRegistry,
-  limits: WebSocketConnectionLimits<WebSocket>
+  limits: WebSocketConnectionLimits<WebSocket>,
+  terminalRuntime: TerminalMultiplexerRuntime,
+  db: Database,
+  userId: string,
+  projectId: string,
+  runtimeAuthorizationRegistry: TerminalRuntimeAuthorizationRegistry
 ): Promise<void> {
   let pty: IPty | undefined;
   const inputBuffer = new TerminalInputBuffer();
   const resizeBuffer = new TerminalResizeBuffer();
   let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
+  let authorizationLease: TerminalRuntimeAuthorizationLease | undefined;
 
   const releaseResources = () => {
+    authorizationLease?.dispose();
     limits.release(ws);
     registry.unregister(sessionId, ws);
     clearInterval(heartbeatInterval);
@@ -277,6 +313,15 @@ async function handleTerminalSocket(
       pty.kill();
       pty = undefined;
     }
+  };
+
+  const revokeRuntime = () => {
+    inputBuffer.clear();
+    if (pty) {
+      pty.kill();
+      pty = undefined;
+    }
+    if (ws.readyState === WebSocket.OPEN) ws.close(4403, "session forbidden");
   };
 
   ws.on("close", () => {
@@ -292,6 +337,17 @@ async function handleTerminalSocket(
     ws.close(4403, "session forbidden");
     return;
   }
+  // The upgrade authorization and PTY attach are separated by an async
+  // callback. Subscribe before the final database check so a revoke/role
+  // change cannot fall between validation and the live authorization lease.
+  authorizationLease = runtimeAuthorizationRegistry.open({
+    userId,
+    sessionId,
+    projectId,
+    revalidate: () => validateTerminalRuntimeAuthorization(db, userId, sessionId),
+    onInvalidated: revokeRuntime
+  });
+  if (!authorizationLease.isAuthorized()) return;
 
   registry.register(sessionId, ws);
 
@@ -301,6 +357,7 @@ async function handleTerminalSocket(
   });
 
   ws.on("message", (raw) => {
+    if (!authorizationLease?.isAuthorized()) return;
     try {
       const message = parseTerminalMessage(raw);
       if (message.type === "terminal_input") {
@@ -313,9 +370,6 @@ async function handleTerminalSocket(
           );
           return;
         }
-        // Raw browser input may never race ahead of a Portfolio lease. The
-        // gate is checked again before flushing any pre-attach buffer below.
-        sessionManager.assertBrowserInputAllowed(sessionId);
         inputBuffer.writeOrStore(pty, message.payload.data);
         return;
       }
@@ -335,7 +389,8 @@ async function handleTerminalSocket(
 
   try {
     const { spawn } = await import("node-pty");
-    pty = spawn("tmux", ["attach-session", "-t", session.tmuxName], {
+    if (!authorizationLease.isAuthorized()) return;
+    pty = spawn(terminalRuntime.command, terminalRuntime.buildAttachArgs(session.tmuxName), {
       name: "xterm-256color",
       cwd: session.launchPlan.cwd,
       cols: 120,
@@ -344,9 +399,9 @@ async function handleTerminalSocket(
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    const probe = probeTmuxForDiagnostics(process.env);
+    const probe = probeTmuxForDiagnostics(process.env, terminalRuntime);
     console.error(
-      `[terminal-ws] attach failed for session ${sessionId} (tmux=${session.tmuxName}, cwd=${session.launchPlan.cwd}) detail=${detail} ${probe}`,
+      `[terminal-ws] attach failed for session ${sessionId} (runtime=${terminalRuntime.kind}, target=${session.tmuxName}, cwd=${session.launchPlan.cwd}) detail=${detail} ${probe}`,
       error
     );
     ws.send(
@@ -361,7 +416,6 @@ async function handleTerminalSocket(
   const activePty = pty;
   if (inputBuffer.hasPendingInput()) {
     try {
-      sessionManager.assertBrowserInputAllowed(sessionId);
       inputBuffer.flush(activePty);
     } catch (error) {
       inputBuffer.clear();
@@ -378,7 +432,7 @@ async function handleTerminalSocket(
   void sessionManager
     .captureHistory(sessionId)
     .then((history) => {
-      if (history && ws.readyState === WebSocket.OPEN) {
+      if (history && ws.readyState === WebSocket.OPEN && authorizationLease?.isAuthorized()) {
         ws.send(JSON.stringify({ type: "terminal_output", payload: { data: history } }));
       }
     })
@@ -396,6 +450,7 @@ async function handleTerminalSocket(
     });
 
   pty.onData((data) => {
+    if (!authorizationLease?.isAuthorized()) return;
     sessionManager.appendSessionOutput(sessionId, data);
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "terminal_output", payload: { data } }));
@@ -425,6 +480,7 @@ async function handleTerminalSocket(
       ws.close(4001, "heartbeat timeout");
       return;
     }
+    if (!authorizationLease?.isAuthorized()) return;
     ws.ping();
   }, TERMINAL_HEARTBEAT_INTERVAL_MS);
   heartbeatInterval.unref?.();
@@ -480,10 +536,7 @@ export function authenticateTerminalRequest(
 }
 
 export function buildTmuxAttachEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return {
-    ...env,
-    TMUX: ""
-  };
+  return clearInheritedMultiplexerIdentity(env);
 }
 
 /**
@@ -492,19 +545,22 @@ export function buildTmuxAttachEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * node:child_process (same env) to tell apart ENOENT/PATH problems, E2BIG
  * (oversized env) and resource exhaustion via the open-fd count.
  */
-export function probeTmuxForDiagnostics(env: NodeJS.ProcessEnv): string {
-  const probe = spawnSync("tmux", ["-V"], {
+export function probeTmuxForDiagnostics(
+  env: NodeJS.ProcessEnv,
+  runtime: TerminalMultiplexerRuntime = resolveTerminalMultiplexerRuntime()
+): string {
+  const probe = spawnSync(runtime.command, runtime.versionArgs, {
     env: buildTmuxAttachEnv(env),
     encoding: "utf8",
     timeout: 3000
   });
-  let tmuxProbe: string;
+  let runtimeProbe: string;
   if (probe.error || probe.status !== 0) {
-    tmuxProbe = `tmux probe failed: ${probe.error?.message ?? `exit ${probe.status ?? "unknown"}`}`;
+    runtimeProbe = `${runtime.command} probe failed: ${probe.error?.message ?? `exit ${probe.status ?? "unknown"}`}`;
   } else {
-    tmuxProbe = `tmux reachable (${probe.stdout.trim() || "unknown version"})`;
+    runtimeProbe = `${runtime.command} reachable (${probe.stdout.trim() || "unknown version"})`;
   }
-  return `${tmuxProbe}; open fds=${countOpenFds()}`;
+  return `${runtimeProbe}; open fds=${countOpenFds()}`;
 }
 
 function countOpenFds(): number {

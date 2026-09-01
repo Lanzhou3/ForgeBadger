@@ -4,32 +4,55 @@ import { describe, it } from "node:test";
 import { findLegacyBrandViolations, isBrandSurface } from "./validate-forgebadger-brand.mjs";
 
 describe("ForgeBadger brand validator", () => {
-  it("rejects unapproved legacy branding while allowing bounded compatibility", () => {
+  it("rejects retired runtime compatibility while allowing bounded security redaction", () => {
     const violations = findLegacyBrandViolations([
       { path: "packages/gateway/src/server.ts", content: "OpenForge Gateway" },
+      { path: "packages/gateway/src/services/session-manager.ts", content: "const prefix = 'of-runtime-';" },
       {
-        path: "packages/gateway/src/config/env.ts",
-        content: "const legacyName = `OPENFORGE_${suffix}`;"
+        path: "packages/gateway/src/services/redaction.ts",
+        content: "const secret = /(?:FORGEBADGER|OPENFORGE)_TOKEN/;"
       }
     ]);
 
-    assert.deepEqual(violations, ["packages/gateway/src/server.ts:1: OpenForge Gateway"]);
+    assert.deepEqual(violations, [
+      "packages/gateway/src/server.ts:1: OpenForge Gateway",
+      "packages/gateway/src/services/session-manager.ts:1: const prefix = 'of-runtime-';"
+    ]);
   });
 
-  it("keeps compatibility exceptions exact instead of allowing arbitrary legacy names", () => {
-    const legacyRepository = ["Lanzhou3", "OpenForge"].join("/");
+  it("keeps security exceptions exact instead of allowing runtime aliases", () => {
     const violations = findLegacyBrandViolations([
-      { path: "packages/gateway/src/config/env.ts", content: "const ok = input.OPENFORGE_STATE_DIR;\nconst bad = input.OPENFORGE_FUTURE;" },
-      { path: "scripts/audit-trial-feedback-issue.mjs", content: `const DEFAULT_REPOSITORY = "${legacyRepository}";\nconst title = "OpenForge feedback";` },
-      { path: "docs/TRIAL-RUNBOOK.md", content: `GitHub repo: ${legacyRepository}\nOpenForge product` }
+      { path: "packages/gateway/src/config/env.ts", content: "const bad = input.OPENFORGE_STATE_DIR;" },
+      { path: "packages/gateway/src/services/redaction.ts", content: "const ok = /(?:FORGEBADGER|OPENFORGE)_TOKEN/;\nconst bad = input.OPENFORGE_STATE_DIR;" },
+      { path: "docs/TRIAL-RUNBOOK.md", content: "OpenForge product" }
     ]);
 
     assert.deepEqual(violations, [
-      "packages/gateway/src/config/env.ts:2: const bad = input.OPENFORGE_FUTURE;",
-      `scripts/audit-trial-feedback-issue.mjs:1: const DEFAULT_REPOSITORY = "${legacyRepository}";`,
-      'scripts/audit-trial-feedback-issue.mjs:2: const title = "OpenForge feedback";',
-      `docs/TRIAL-RUNBOOK.md:1: GitHub repo: ${legacyRepository}`,
-      "docs/TRIAL-RUNBOOK.md:2: OpenForge product"
+      "packages/gateway/src/config/env.ts:1: const bad = input.OPENFORGE_STATE_DIR;",
+      "packages/gateway/src/services/redaction.ts:2: const bad = input.OPENFORGE_STATE_DIR;",
+      "docs/TRIAL-RUNBOOK.md:1: OpenForge product"
+    ]);
+  });
+
+  it("allows historical evidence only at its exact path", () => {
+    const violations = findLegacyBrandViolations([
+      {
+        path: "packages/gateway/src/services/unapproved-model-binding.ts",
+        content: "const stateDir = process.env.OPENFORGE_STATE_DIR;"
+      },
+      {
+        path: "openspec/changes/replace-copilot-with-portfolio-operations/gate-3-acceptance.md",
+        content: "Historical database: /Users/lanzhou/.openforge/openforge.db"
+      },
+      {
+        path: "openspec/changes/unapproved/gate-3-acceptance.md",
+        content: "Historical database: /Users/lanzhou/.openforge/openforge.db"
+      }
+    ]);
+
+    assert.deepEqual(violations, [
+      "packages/gateway/src/services/unapproved-model-binding.ts:1: const stateDir = process.env.OPENFORGE_STATE_DIR;",
+      "openspec/changes/unapproved/gate-3-acceptance.md:1: Historical database: /Users/lanzhou/.openforge/openforge.db"
     ]);
   });
 

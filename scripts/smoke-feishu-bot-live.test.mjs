@@ -32,17 +32,16 @@ describe("Feishu bot live long-connection smoke helper", () => {
     assert.equal(config.config.outputPath, "docs/reports/feishu-live-report.json");
   });
 
-  it("accepts legacy OpenForge smoke variables while preferring ForgeBadger values", () => {
+  it("uses only ForgeBadger smoke variables", () => {
     const config = resolveFeishuBotLiveConfig({
-      OPENFORGE_TOKEN: "legacy-token",
-      OPENFORGE_GATEWAY_URL: "http://legacy.example:48731",
+      FORGEBADGER_TOKEN: "current-token",
       FORGEBADGER_GATEWAY_URL: "http://current.example:48731",
       FEISHU_APP_ID: "cli_a_live_app",
       FEISHU_APP_SECRET: "live-app-secret"
     });
 
     assert.equal(config.ok, true);
-    assert.equal(config.config.token, "legacy-token");
+    assert.equal(config.config.token, "current-token");
     assert.equal(config.config.gatewayUrl, "http://current.example:48731");
   });
 

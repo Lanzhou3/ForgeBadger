@@ -46,7 +46,8 @@ describe("authenticate middleware", () => {
     const token = signJwt({ userId: "user_123", email: "test@example.com" }, secret);
     const middleware = requireAuth();
     const request = {
-      headers: { authorization: `Bearer ${token}` }
+      headers: { authorization: `Bearer ${token}` },
+      app: { locals: { jwtSecret: secret } }
     } as any;
     const response = fakeResponse();
     let nextCalled = false;
@@ -85,10 +86,10 @@ describe("authenticate middleware", () => {
     assert.deepEqual(response.body, { code: 1, message: "Unauthorized" });
   });
 
-  it("accepts the legacy OpenForge auth cookie during the rename window", () => {
-    const token = signJwt({ userId: "user_legacy", email: "legacy@example.com" }, secret);
+  it("rejects retired auth cookie names", () => {
+    const token = signJwt({ userId: "user_old", email: "old@example.com" }, secret);
     const middleware = requireAuth();
-    const request = { headers: { cookie: `openforge_session=${token}` } } as any;
+    const request = { headers: { cookie: `old_product_session=${token}` } } as any;
     const response = fakeResponse();
     let nextCalled = false;
 
@@ -96,8 +97,8 @@ describe("authenticate middleware", () => {
       nextCalled = true;
     });
 
-    assert.equal(nextCalled, true);
-    assert.equal(request.userId, "user_legacy");
+    assert.equal(nextCalled, false);
+    assert.equal(response.statusCode, 401);
   });
 });
 

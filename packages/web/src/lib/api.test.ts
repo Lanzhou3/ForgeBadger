@@ -75,6 +75,7 @@ import {
   previewConfigSync,
   previewSkillSource,
   rotateApiKey,
+  resetPassword,
   markAllNotificationsRead,
   markNotificationRead,
   clearServerNotifications,
@@ -139,6 +140,46 @@ describe("api client", () => {
     });
   });
 
+  it("submits local account recovery credentials without an auth token", async () => {
+    await resetPassword({
+      email: "owner@example.com",
+      recoveryKey: "fbr_recovery-key",
+      newPassword: "new-password-123"
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/auth/reset-password",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          email: "owner@example.com",
+          recoveryKey: "fbr_recovery-key",
+          newPassword: "new-password-123"
+        })
+      })
+    );
+  });
+
+  it("submits the local recovery key when registering", async () => {
+    await apiModule.register(
+      "owner@example.com",
+      "password123",
+      "fbr_recovery-key"
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/auth/register",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          email: "owner@example.com",
+          password: "password123",
+          recoveryKey: "fbr_recovery-key"
+        })
+      })
+    );
+  });
+
   it("deletes model provider profiles through REST", async () => {
     await deleteModelProvider("provider-1");
 
@@ -182,6 +223,38 @@ describe("api client", () => {
         }),
       })
     );
+  });
+
+  it("previews, applies, and rolls back CLI config provider application", async () => {
+    await apiModule.previewCliConfigApply("kimi", { providerProfileId: "provider-1", modelProfileId: "model-1", credentialId: "credential-1" });
+    await apiModule.applyCliConfigToAdapter("kimi", { providerProfileId: "provider-1", modelProfileId: "model-1" });
+    await apiModule.rollbackCliConfigApply("kimi", "backup-1");
+    await apiModule.rollbackCliConfigApply("kimi");
+
+    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:48731/api/v1/cli-config/kimi/apply-provider/preview", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ providerProfileId: "provider-1", modelProfileId: "model-1", credentialId: "credential-1" }),
+    }));
+    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:48731/api/v1/cli-config/kimi/apply-provider", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ providerProfileId: "provider-1", modelProfileId: "model-1" }),
+    }));
+    expect(fetch).toHaveBeenNthCalledWith(3, "http://127.0.0.1:48731/api/v1/cli-config/kimi/rollback", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ backupId: "backup-1" }),
+    }));
+    expect(fetch).toHaveBeenNthCalledWith(4, "http://127.0.0.1:48731/api/v1/cli-config/kimi/rollback", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({}),
+    }));
+  });
+
+  it("loads CLI field schema and values separately", async () => {
+    await apiModule.getCliConfigFields("codex");
+    await apiModule.getCliConfigFieldValues("codex");
+
+    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:48731/api/v1/cli-config/codex/fields", expect.objectContaining({}));
+    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:48731/api/v1/cli-config/codex/field-values", expect.objectContaining({}));
   });
 
   it("manages provider model profiles through REST", async () => {
@@ -496,13 +569,10 @@ describe("api client", () => {
     );
   });
 
-  it("creates sessions with explicit runtime adapter, model, and stored credential selection", async () => {
+  it("creates sessions with an explicit runtime adapter only", async () => {
     await createSession({
       projectId: "project-1",
-      credentialMode: "stored_encrypted_key",
       aiTool: "opencode",
-      modelId: "model-1",
-      apiKeyId: "key-1",
     });
 
     expect(fetch).toHaveBeenCalledWith(
@@ -511,11 +581,20 @@ describe("api client", () => {
         method: "POST",
         body: JSON.stringify({
           projectId: "project-1",
-          credentialMode: "stored_encrypted_key",
           aiTool: "opencode",
-          modelId: "model-1",
-          apiKeyId: "key-1",
         }),
+      })
+    );
+  });
+
+  it("creates a session with just a project id", async () => {
+    await createSession({ projectId: "project-1" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/sessions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ projectId: "project-1" }),
       })
     );
   });
@@ -1392,12 +1471,12 @@ describe("api client", () => {
 
   it("manages CLI global config through REST", async () => {
     await getCliConfig("kimi");
-    await getCliConfigFile("kimi", "config.toml", true);
+    await getCliConfigFile("kimi", "config.toml");
     await writeCliConfigFile("kimi", "config.toml", "default_model = \"k2\"");
     await upsertCliProvider("kimi", "moonshot", {
       baseUrl: "https://api.moonshot.cn/anthropic",
       protocol: "anthropic",
-      apiKey: "sk-test",
+      envKey: "MOONSHOT_API_KEY",
     });
     await removeCliProvider("kimi", "moonshot");
     await upsertCliModel("kimi", {
@@ -1415,7 +1494,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/file?path=config.toml&reveal=1",
+      "http://127.0.0.1:48731/api/v1/cli-config/kimi/file?path=config.toml",
       expect.objectContaining({})
     );
     expect(fetch).toHaveBeenNthCalledWith(
@@ -1434,7 +1513,7 @@ describe("api client", () => {
         body: JSON.stringify({
           baseUrl: "https://api.moonshot.cn/anthropic",
           protocol: "anthropic",
-          apiKey: "sk-test",
+          envKey: "MOONSHOT_API_KEY",
         }),
       })
     );

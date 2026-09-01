@@ -10,6 +10,7 @@ import type { Database } from "../../db/types.js";
 import { TokenUsageRepository } from "../../db/repositories/token-usage-repository.js";
 import { ClaudeCodeSource } from "./claude-code-source.js";
 import { CodexSource } from "./codex-source.js";
+import { KimiSource } from "./kimi-source.js";
 import { OpenCodeSource } from "./opencode-source.js";
 import type { UsageSource, UsageTokenAdapter } from "./usage-source.js";
 
@@ -26,7 +27,7 @@ export interface UsageSyncSummary {
 
 export function createUsageTokenSyncer(db: Database): {
   syncForUser: (userId: string, source: UsageSource) => UsageSyncResult;
-  /** Run every built-in source (Claude + OpenCode + Codex) for a user and return totals. */
+  /** Run every built-in source (Claude + OpenCode + Codex + Kimi) for a user and return totals. */
   syncAllForUser: (userId: string) => UsageSyncSummary;
 } {
   const syncForUser = (userId: string, source: UsageSource): UsageSyncResult => {
@@ -48,7 +49,8 @@ export function createUsageTokenSyncer(db: Database): {
       const results = [
         syncForUser(userId, new ClaudeCodeSource()),
         syncForUser(userId, new OpenCodeSource()),
-        syncForUser(userId, new CodexSource())
+        syncForUser(userId, new CodexSource()),
+        syncForUser(userId, new KimiSource())
       ];
       return {
         byAdapter: results,

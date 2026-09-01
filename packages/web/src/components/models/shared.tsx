@@ -1,10 +1,5 @@
-import { ExternalLink } from "lucide-react";
-
-import { Badge } from "@/components/ui/badge";
 import type {
   ModelProviderReadiness,
-  ProviderApplyAdapter,
-  ProviderApplyPreview,
   ProviderProfile,
   ProviderSupportedAdapter,
 } from "@/lib/api";
@@ -26,24 +21,12 @@ export interface ModelForm {
   capabilities: string;
 }
 
-export interface NamedReference {
-  id: string;
-  name: string;
-  status: string;
-}
-
-export interface ModelReferenceInfo {
-  sessions: NamedReference[];
-}
-
 export type DeleteTarget =
   | { kind: "provider"; providerId: string }
   | { kind: "model"; modelId: string }
   | { kind: "credential"; credentialId: string };
 
 export type Translate = (key: any) => string;
-
-export const emptyModelReferences: ModelReferenceInfo = { sessions: [] };
 
 export const emptyCustomProvider: CustomProviderForm = {
   name: "",
@@ -62,7 +45,7 @@ export const emptyModel: ModelForm = {
   capabilities: "chat,code",
 };
 
-export function adapterLabel(adapter: ProviderSupportedAdapter | ProviderApplyAdapter): string {
+export function adapterLabel(adapter: ProviderSupportedAdapter): string {
   if (adapter === "claude") return "Claude Code";
   if (adapter === "opencode") return "OpenCode";
   if (adapter === "codex") return "Codex";
@@ -96,55 +79,9 @@ export function formatCheckedAt(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-export function applyTargetsForProvider(provider: ProviderProfile | undefined): ProviderApplyAdapter[] {
+export function applyTargetsForProvider(provider: ProviderProfile | undefined): ProviderSupportedAdapter[] {
   if (!provider) return [];
   return [...provider.supportedAdapters];
-}
-
-export function buildApplyPayload(
-  adapter: ProviderApplyAdapter,
-  scope: "project" | "user-global",
-  projectRoot: string,
-  modelProfileId: string,
-  credentialId: string
-): { adapter: ProviderApplyAdapter; scope?: "project" | "user-global"; projectRoot?: string; modelProfileId?: string; credentialId?: string } {
-  const root = projectRoot.trim();
-  return {
-    adapter,
-    scope,
-    ...(scope === "project" && root ? { projectRoot: root } : {}),
-    ...(modelProfileId ? { modelProfileId } : {}),
-    ...(credentialId ? { credentialId } : {}),
-  };
-}
-
-export function getApplyBlockedReason({
-  provider,
-  supportedAdapters,
-  selectedAdapter,
-  selectedModelId,
-  projectRoot,
-  scope,
-  needsPreview,
-  preview,
-  t,
-}: {
-  provider: ProviderProfile | undefined;
-  supportedAdapters: ProviderApplyAdapter[];
-  selectedAdapter: ProviderApplyAdapter;
-  selectedModelId: string;
-  projectRoot: string;
-  scope: "project" | "user-global";
-  needsPreview: boolean;
-  preview: ProviderApplyPreview | null;
-  t: Translate;
-}): string | null {
-  if (!provider) return t("models.providerRequired");
-  if (!supportedAdapters.includes(selectedAdapter)) return t("models.applyTargetUnsupported");
-  if (!selectedModelId) return t("models.applyModelRequired");
-  if (scope === "project" && !projectRoot.trim()) return t("models.projectPathRequired");
-  if (needsPreview && !preview) return t("models.previewRequiredBeforeApply");
-  return null;
 }
 
 export function EmptyLine({ text }: { text: string }) {
@@ -160,40 +97,6 @@ export function SummaryCell({ label, value }: { label: string; value: string }) 
     <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-0.5 truncate text-sm font-medium">{value}</div>
-    </div>
-  );
-}
-
-export function ReferenceRow({
-  name,
-  status,
-  kindLabel,
-  href,
-  linkLabel,
-}: {
-  name: string;
-  status: string;
-  kindLabel: string;
-  href: string;
-  linkLabel: string;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1.5 text-sm">
-      <div className="flex min-w-0 items-center gap-2">
-        <Badge variant="secondary" className="shrink-0">{kindLabel}</Badge>
-        <span className="truncate font-medium">{name}</span>
-        <span className="shrink-0 text-xs text-muted-foreground">{status}</span>
-      </div>
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        onClick={(event) => event.stopPropagation()}
-        className="inline-flex shrink-0 items-center gap-1 text-xs text-brand hover:underline"
-      >
-        {linkLabel}
-        <ExternalLink className="size-3" />
-      </a>
     </div>
   );
 }

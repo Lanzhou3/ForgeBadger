@@ -8,7 +8,6 @@ import { PixelRobot } from "@/components/copilot/pixel-robot";
 import { useLanguage } from "@/hooks/use-language";
 import { useNotifications } from "@/hooks/use-notifications";
 import { shouldTriggerBrowserNotification } from "@/lib/browser-notifications";
-import { readMigratedStorageValue, writeMigratedStorageValue } from "@/lib/brand-storage";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
 import {
   toastDurationFor,
@@ -29,7 +28,6 @@ import {
   CLICK_DRAG_THRESHOLD_PX,
   CORNER_MARGIN_PX,
   IDLE_SIT_DELAY_MS,
-  LEGACY_ROBOT_CORNER_STORAGE_KEY,
   ROBOT_CORNER_STORAGE_KEY,
   ROBOT_NUDGE_DURATION_MS,
   ROBOT_SIZE_PX,
@@ -122,11 +120,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     reducedMotionRef.current = prefersReducedMotion;
     setReducedMotion(prefersReducedMotion);
-    const stored = readMigratedStorageValue(
-      window.localStorage,
-      ROBOT_CORNER_STORAGE_KEY,
-      LEGACY_ROBOT_CORNER_STORAGE_KEY
-    );
+    const stored = window.localStorage.getItem(ROBOT_CORNER_STORAGE_KEY);
     const initial = isRobotCorner(stored) ? stored : "bottom-right";
     setCorner(initial);
     cornerRef.current = initial;
@@ -277,12 +271,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
     const next = nearestCorner(clientX, clientY, viewport);
     setCorner(next);
     cornerRef.current = next;
-    writeMigratedStorageValue(
-      window.localStorage,
-      ROBOT_CORNER_STORAGE_KEY,
-      LEGACY_ROBOT_CORNER_STORAGE_KEY,
-      next
-    );
+    window.localStorage.setItem(ROBOT_CORNER_STORAGE_KEY, next);
     setPos(cornerOffsetPosition(next, viewport, ROBOT_SIZE_PX, CORNER_MARGIN_PX));
   }, []);
 

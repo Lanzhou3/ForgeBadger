@@ -1,5 +1,10 @@
 # ForgeBadger Trial Checklist
 
+> Historical protocol note (2026-08-31): the Copilot-specific section below is
+> retained only for compatibility with completed v1.5 evidence packets and
+> validators. Do not use it to test the current runtime. Current trials use
+> native `/copilot`; Portfolio Operations is retired and is not a trial surface.
+
 Use this checklist as the first-user trial entry point. Attach the completed
 notes to either `docs/TRIAL-FEEDBACK.md` or the GitHub issue form
 `ForgeBadger first-user trial feedback` at
@@ -40,12 +45,14 @@ evidence reports.
 - [ ] Shell and version:
 - [ ] Browser and version:
 - [ ] `node --version`:
-- [ ] `tmux -V`:
+- [ ] Terminal runtime and version (`tmux -V` on macOS/Linux/WSL or `psmux -V`
+      on native Windows):
 - [ ] `claude --version`:
 - [ ] npm/CLI only: `forgebadger doctor` output reviewed.
-- [ ] Windows only: native Windows was used for management UI checks only.
-- [ ] Windows terminal evidence, if claimed: WSL distribution/version and
-      terminal trial result recorded.
+- [ ] Native Windows only: psmux ≥ 3.3.8 and ConPTY/browser terminal lifecycle
+      result recorded.
+- [ ] WSL compatibility evidence, if claimed: distribution/version, tmux
+      version, and terminal trial result recorded.
 
 ### Account
 
@@ -125,35 +132,34 @@ Forbidden Project Manager evidence content:
 
 - [ ] Check `docs/EXTERNAL-EVIDENCE-GATES.md` gate `LIVE-PROVIDER` before
       claiming a live provider pass.
-- [ ] Open `/models` and choose the Provider, Model, Credential, and apply
-      target that will be used for the smoke.
+- [ ] Open `/models` and choose the Provider, Model, Credential, and target CLI
+      adapter whose global config will be used for the smoke.
 - [ ] Click **Check readiness** in the Provider Health card. Record only
       `readiness.status`, `readiness.code`, remote error category, matched model
       id, and next step text. Do not copy API keys, Authorization headers,
       provider request/response bodies, or provider payloads.
-- [ ] If Codex is the runtime under test, confirm the Codex subscription card
-      shows subscription-managed identity and that provider apply remains
-      disabled for Codex.
-- [ ] Maintainer live-provider harness result recorded, if available:
-      `pnpm smoke:copilot-provider`.
+- [ ] If Codex is the runtime under test, apply an OpenAI provider through the
+      same Model Center apply-provider flow used by other CLIs. Confirm the
+      Codex-owned native login state and the ForgeBadger-applied
+      `~/.codex/config.toml` / `~/.codex/auth.json` are labelled separately and
+      there is no standalone Codex account/subscription card.
+- [ ] For native login, record only the normalized status/method from
+      `codex login status`; never capture `auth.json` content, keyring data,
+      raw command output, account labels, or tokens.
+- [ ] For apply-provider, confirm the preview masks credential values and
+      writes nothing to disk, and the apply writes the CLI's native global
+      config atomically with mode `0600` after an encrypted backup.
 - [ ] If live provider smoke is skipped, record the visible reason: missing
       disposable credential, missing compatible provider, missing active model,
       or missing active credential.
 - [ ] Configure an OpenAI or Anthropic provider with an active model and a
-      disposable test credential before claiming live Copilot provider pass.
-- [ ] Open `/copilot` from the sidebar.
-- [ ] Ask Copilot to diagnose session launch readiness.
-- [ ] Verify the response uses safe ForgeBadger platform state such as adapter
-      discovery, dashboard health, recent activity, project detail, session
-      detail, or diagnostics summary.
-- [ ] If Copilot proposes an action, confirm it appears as a pending action
-      before approval.
-- [ ] Approve or reject the pending action and confirm the run state does not
-      duplicate the submission.
-- [ ] If Copilot proposes a memory write, approve or reject it and confirm the
-      visible text does not expose pasted secrets.
-- [ ] Confirm Copilot does not expose terminal input, raw shell execution,
-      automatic tmux input, or Codex app-server `/turn` input.
+      disposable test credential before claiming a live provider pass.
+- [ ] Exercise the apply-provider lifecycle against the real Gateway/Web
+      composition: preview (masked, no disk write), apply, no-op re-apply, and
+      rollback restoring the encrypted backup for each CLI under test.
+- [ ] Restart a pre-existing session after changing providers and confirm it
+      comes back as a plain host-environment session that picks up the CLI's
+      current global config.
 
 ### Feishu Bot Long-Connection Smoke
 
@@ -268,7 +274,7 @@ feedback:
 
 | Requirement | Use When The Report Shows |
 |-------------|---------------------------|
-| UX-01 | Missing tmux, missing Claude/Codex/OpenCode CLI, unsupported native Windows terminal mode, or unclear runtime dependency guidance. |
+| UX-01 | Missing tmux/psmux, outdated psmux, missing Claude/Codex/OpenCode CLI, install-confirmation failure, or unclear runtime dependency guidance. |
 | UX-02 | Provider, model, or credential readiness failures that are hard to recover from or risk exposing secrets. |
 | UX-03 | Copilot run, pending-action, cancellation, or waiting-for-approval state is confusing after retry, refresh, or multiple tabs. |
 | UX-04 | Feedback lacks enough environment, command, browser, expected/actual, or reproduction detail to become an engineering task. |
@@ -328,23 +334,25 @@ For every `pass with caveats` or `blocked` result, record:
 
 ### Windows And WSL Evidence
 
-- Native Windows can be used for management UI checks.
-- Native Windows does not count as tmux-backed browser terminal pass evidence.
-- Physical Windows/WSL terminal evidence remains a `Caveat` until a real WSL
-  host completes dependency checks, browser terminal attach/input/resize,
-  WebSocket reconnect, Gateway restart recovery, and session cleanup checks.
-- Record WSL distribution/version, `forgebadger doctor`, terminal trial result,
-  and any environment-specific blocker.
+- Native Windows uses psmux 3.3.8 or newer over ConPTY; WSL uses tmux 3.2 or
+  newer.
+- Physical Windows/WSL terminal evidence remains a `Caveat` until a native
+  ConPTY + psmux run and/or a real WSL tmux run completes dependency checks,
+  browser + real AI CLI attach/input/output/resize, WebSocket reconnect,
+  Gateway restart recovery, stop, and session cleanup checks.
+- Record Windows version, selected runtime/version, `forgebadger doctor`, trial
+  result, and any environment-specific blocker. Repository tests or management
+  UI-only checks do not clear the gate.
 
 ### Manual Evidence Boundary
 
-- CI can cover workspace tests, builds, provider regressions, mocked Copilot
-  page behavior, focused tmux integration, and simulated Feishu route
-  regressions.
+- CI can cover workspace tests, builds, provider/cli-config-apply regressions,
+  mocked Model Center behavior, focused tmux integration, and simulated Feishu
+  route regressions.
 - CI cannot replace real browser terminal behavior, real Claude Code permission
-  prompt behavior, live Copilot prompt behavior against a disposable provider
-  credential, physical Windows/WSL behavior, or real Feishu bot long-connection
-  behavior.
+  prompt behavior, live OpenAI/provider behavior against a disposable
+  credential, native Codex-account status, physical Windows/WSL behavior, or
+  real Feishu bot long-connection behavior.
 - Manual evidence must stay redacted. Never share raw provider keys, Feishu
   secrets, JWTs, browser auth token values, sensitive terminal output, raw
   provider/callback bodies, private keys, attach tokens, passwords, or

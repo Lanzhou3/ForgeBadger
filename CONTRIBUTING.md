@@ -54,8 +54,12 @@ For changes touching release behavior, also use `docs/RELEASE-PLAN.md` and
   authorization.
 - Copilot, Feishu, and model output may propose writes only through explicit
   pending-action approval.
-- Codex subscription-managed paths must stay isolated from third-party provider
-  API-key/model injection.
+- Codex uses the same Model Center apply-provider flow as the other CLIs: the
+  selection is written to `~/.codex/config.toml` and `~/.codex/auth.json` in
+  Codex's native format. Codex-owned native login stays distinct: status checks
+  may call `codex login status`, but code must never read the OS keyring, and
+  the apply-provider write must never be described as the official
+  `codex login` flow.
 
 ## Safe Feedback And Pull Requests
 

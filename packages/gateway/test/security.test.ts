@@ -15,6 +15,10 @@ import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { TerminalInputRateLimiter } from "../src/websocket/terminal.js";
 import { ApiKeyRepository } from "../src/db/repositories/api-key-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
+import {
+  RuntimeAuthorizationInvalidator,
+  type RuntimeAuthorizationInvalidation
+} from "../src/services/runtime-authorization-invalidation.js";
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
@@ -77,18 +81,22 @@ describe("security hardening", () => {
   let server: ReturnType<typeof createGatewayApp>["server"];
   let baseUrl: string;
   let db: Database;
+  const runtimeInvalidations: RuntimeAuthorizationInvalidation[] = [];
 
   before(async () => {
     db = createTestDb();
     const sessionManager = new InMemorySessionManager(mockTmuxClient as any);
     const apiKeyStore = new InMemoryApiKeyStore({ masterKey });
+    const runtimeAuthorizationInvalidator = new RuntimeAuthorizationInvalidator();
+    runtimeAuthorizationInvalidator.subscribe((invalidation) => runtimeInvalidations.push(invalidation));
     const app = createGatewayApp({
       jwtSecret,
       masterKey,
       db,
       sessionManager,
       apiKeyStore,
-      adapterCommandRunner: availableAdapterCommandRunner
+      adapterCommandRunner: availableAdapterCommandRunner,
+      runtimeAuthorizationInvalidator
     });
     await new Promise<void>((resolve) => {
       server = app.server.listen(0, "127.0.0.1", () => {
@@ -435,7 +443,7 @@ describe("security hardening", () => {
     assert.equal(deleteRes.status, 200);
   });
 
-  it("creates sessions with selected model and stored encrypted API key", async () => {
+  it("creates sessions in host_environment without credential or model fields", async () => {
     mockTmuxCreates.length = 0;
     const registerRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: "POST",
@@ -463,37 +471,6 @@ describe("security hardening", () => {
     });
     const projectData = await projectRes.json();
 
-    const providerRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        name: "Anthropic",
-        providerKey: "anthropic",
-        baseUrl: "https://api.anthropic.com",
-        authType: "api_key",
-        apiFormat: "anthropic",
-        supportedAdapters: ["claude"]
-      })
-    });
-    const providerData = await providerRes.json();
-    const providerId = providerData.data.provider.id;
-
-    const modelRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerId}/models`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        name: "Claude Sonnet",
-        modelId: "claude-sonnet-4-5"
-      })
-    });
-    const modelData = await modelRes.json();
-
     const keyRes = await fetch(`${baseUrl}/api/v1/api-keys`, {
       method: "POST",
       headers: {
@@ -506,7 +483,58 @@ describe("security hardening", () => {
         plaintextKey: "test-api-key-session-secret"
       })
     });
-    const keyData = await keyRes.json();
+    assert.equal(keyRes.status, 201);
+
+    const sessionRes = await fetch(`${baseUrl}/api/v1/sessions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        projectId: projectData.data.project.id,
+        aiTool: "claude"
+      })
+    });
+    const sessionData = await sessionRes.json();
+
+    assert.equal(sessionRes.status, 201);
+    assert.equal(sessionData.data.session.modelId, undefined);
+    assert.equal(sessionData.data.session.credentialMode, undefined);
+    assert.equal(sessionData.data.session.apiKeyId, undefined);
+    assert.equal(JSON.stringify(sessionData).includes("test-api-key-session-secret"), false);
+    // Host-environment sessions never receive stored key material through tmux env.
+    assert.equal(mockTmuxCreates.at(-1)?.env.ANTHROPIC_API_KEY, undefined);
+    assert.equal(mockTmuxCreates.at(-1)?.env.ANTHROPIC_AUTH_TOKEN, undefined);
+  });
+
+
+  it("rejects session creation carrying legacy model fields", async () => {
+    const registerRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "model-owner@test.com",
+        password: "password123"
+      })
+    });
+    const registerData = await registerRes.json();
+    const token = registerData.data.token;
+
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-cross-model-session-"));
+    const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        name: "Legacy Model Project",
+        path: rootPath,
+        aiTool: "claude"
+      })
+    });
+    const projectData = await projectRes.json();
 
     const sessionRes = await fetch(`${baseUrl}/api/v1/sessions`, {
       method: "POST",
@@ -517,109 +545,13 @@ describe("security hardening", () => {
       body: JSON.stringify({
         projectId: projectData.data.project.id,
         aiTool: "claude",
-        credentialMode: "stored_encrypted_key",
-        apiKeyId: keyData.data.apiKey.id,
-        modelId: modelData.data.model.id
+        modelId: "some-model-id"
       })
     });
     const sessionData = await sessionRes.json();
 
-    assert.equal(sessionRes.status, 201);
-    assert.equal(sessionData.data.session.modelId, modelData.data.model.id);
-    assert.equal(sessionData.data.session.credentialMode, "stored_encrypted_key");
-    assert.equal(sessionData.data.session.apiKeyId, keyData.data.apiKey.id);
-    assert.equal(JSON.stringify(sessionData).includes("test-api-key-session-secret"), false);
-    assert.equal(mockTmuxCreates.at(-1)?.env.ANTHROPIC_API_KEY, "test-api-key-session-secret");
-    assert.equal(mockTmuxCreates.at(-1)?.env.ANTHROPIC_MODEL, "claude-sonnet-4-5");
-  });
-
-
-  it("rejects session creation with a model owned by another user", async () => {
-    const ownerRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: "model-owner@test.com",
-        password: "password123"
-      })
-    });
-    const ownerData = await ownerRes.json();
-    const ownerToken = ownerData.data.token;
-
-    const ownerProviderRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${ownerToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        name: "Anthropic",
-        providerKey: "anthropic",
-        baseUrl: "https://api.anthropic.com",
-        authType: "api_key",
-        apiFormat: "anthropic",
-        supportedAdapters: ["claude"]
-      })
-    });
-    const ownerProviderData = await ownerProviderRes.json();
-    const ownerProviderId = ownerProviderData.data.provider.id;
-
-    const modelRes = await fetch(`${baseUrl}/api/v1/model-providers/${ownerProviderId}/models`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${ownerToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        name: "Owner Model",
-        modelId: "claude-owner"
-      })
-    });
-    const modelData = await modelRes.json();
-
-    const otherRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: "model-other@test.com",
-        password: "password123"
-      })
-    });
-    const otherData = await otherRes.json();
-    const otherToken = otherData.data.token;
-
-    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-cross-model-session-"));
-    const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${otherToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        name: "Other Project",
-        path: rootPath,
-        aiTool: "claude"
-      })
-    });
-    const projectData = await projectRes.json();
-
-    const sessionRes = await fetch(`${baseUrl}/api/v1/sessions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${otherToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        projectId: projectData.data.project.id,
-        aiTool: "claude",
-        credentialMode: "host_environment",
-        modelId: modelData.data.model.id
-      })
-    });
-    const sessionData = await sessionRes.json();
-
-    assert.equal(sessionRes.status, 404);
-    assert.equal(sessionData.message, "Model not found");
+    assert.equal(sessionRes.status, 400);
+    assert.equal(sessionData.message, "Invalid input");
   });
 
   it("exposes terminal attach credentials through a session connect action", async () => {
@@ -657,8 +589,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
-        aiTool: "claude",
-        credentialMode: "host_environment"
+        aiTool: "claude"
       })
     });
     const sessionData = await sessionRes.json();
@@ -687,6 +618,7 @@ describe("security hardening", () => {
 
   it("deletes only the project record and stops running project sessions", async () => {
     mockTmuxCalls.length = 0;
+    const invalidationCount = runtimeInvalidations.length;
     const registerRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -722,8 +654,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
-        aiTool: "claude",
-        credentialMode: "host_environment"
+        aiTool: "claude"
       })
     });
     const sessionData = await sessionRes.json();
@@ -749,9 +680,15 @@ describe("security hardening", () => {
     ), false);
     assert.equal((await stat(rootPath)).isDirectory(), true);
     assert.deepEqual(mockTmuxCalls, [`kill:${sessionData.data.session.tmuxName}`]);
+    assert.deepEqual(runtimeInvalidations.slice(invalidationCount), [{
+      scope: "project",
+      userId: new UserRepository(db).findByEmail("delete-project@test.com")?.id,
+      projectId: projectData.data.project.id
+    }]);
   });
 
   it("deletes a session without crashing while recording activity", async () => {
+    const invalidationCount = runtimeInvalidations.length;
     const registerRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -786,8 +723,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
-        aiTool: "claude",
-        credentialMode: "host_environment"
+        aiTool: "claude"
       })
     });
     const sessionData = await sessionRes.json();
@@ -809,6 +745,11 @@ describe("security hardening", () => {
     assert.equal(sessionsData.data.sessions.some(
       (session: { id: string }) => session.id === sessionData.data.session.id
     ), false);
+    assert.deepEqual(runtimeInvalidations.slice(invalidationCount), [{
+      scope: "session",
+      userId: new UserRepository(db).findByEmail("delete-session@test.com")?.id,
+      sessionId: sessionData.data.session.id
+    }]);
   });
 
   it("does not expose terminal attach credentials after a session is stopped", async () => {
@@ -846,8 +787,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
-        aiTool: "claude",
-        credentialMode: "host_environment"
+        aiTool: "claude"
       })
     });
     const sessionData = await sessionRes.json();
@@ -904,8 +844,7 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         projectId: projectData.data.project.id,
-        aiTool: "claude",
-        credentialMode: "host_environment"
+        aiTool: "claude"
       })
     });
     const sessionData = await sessionRes.json();

@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
 
-import { authenticate } from "../auth/middleware.js";
+import { authenticate, type AuthenticatedRequest, userIsInstanceAdmin } from "../auth/middleware.js";
+import type { Database } from "../db/types.js";
 import { isAdapterId, type AdapterId } from "../services/adapter-discovery.js";
 import {
   applyCliConfigFieldPatch,
@@ -16,13 +17,20 @@ import {
   upsertCliProvider,
   writeCliConfigFile
 } from "../services/cli-config.js";
+import {
+  applyCliConfigToAdapter,
+  CliConfigApplyError,
+  previewCliConfigApply,
+  rollbackCliConfigApply
+} from "../services/cli-config-apply.js";
 import { listCliConfigFields } from "../services/cli-config-fields.js";
+import { cliConfigTargetPath, hashTargetLocator } from "../services/cli-config-target.js";
+import { acquireModelBindingTargetLock, ModelBindingTargetLockError } from "../services/model-binding-target-lock.js";
 
 const providerBodySchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   protocol: z.string().trim().min(1).max(120).optional(),
   baseUrl: z.string().trim().max(512).optional(),
-  apiKey: z.string().max(512).optional(),
   envKey: z.string().trim().max(120).optional()
 }).strict();
 
@@ -47,20 +55,76 @@ const fileBodySchema = z.object({
 }).strict();
 
 const fileQuerySchema = z.object({
-  path: z.string().trim().min(1).max(120),
-  reveal: z.enum(["0", "1"]).optional()
+  path: z.string().trim().min(1).max(120)
 }).strict();
 
 const fieldPatchBodySchema = z.object({
   updates: z.record(z.string(), z.unknown())
 }).strict();
 
-export function createCliConfigRoutes(): Router {
+const applyProviderBodySchema = z.object({
+  providerProfileId: z.string().min(1),
+  modelProfileId: z.string().min(1).optional(),
+  credentialId: z.string().min(1).optional()
+}).strict();
+
+const rollbackBodySchema = z.object({
+  backupId: z.string().min(1).max(200).optional()
+}).strict();
+
+export function createCliConfigRoutes(
+  db: Database,
+  masterKey: string,
+  options: { operationObserver?: ((operation: string) => void) | undefined } = {}
+): Router {
   const router = Router();
   router.use(authenticate);
 
   router.get("/adapters", (_req, res) => {
     res.json({ code: 0, data: { adapters: listCliConfigAdapters() }, message: "" });
+  });
+
+  router.get("/:adapter/fields", (req, res) => {
+    const adapter = parseAdapter(req.params.adapter);
+    if (!adapter) {
+      res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
+      return;
+    }
+    res.json({ code: 0, data: { fields: listCliConfigFields(adapter) }, message: "" });
+  });
+
+  router.use("/:adapter", (req, res, next) => {
+    const adapter = parseAdapter(req.params.adapter);
+    if (!adapter) {
+      res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
+      return;
+    }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    if (!userIsInstanceAdmin(db, userId)) {
+      res.status(403).json({
+        code: 1,
+        message: "Instance administrator access is required",
+        details: { code: "INSTANCE_ADMIN_REQUIRED" }
+      });
+      return;
+    }
+    const targetPath = cliConfigTargetPath({ adapter, scope: "global" });
+    const locatorHash = hashTargetLocator(masterKey, targetPath);
+    let lock: { release(): void };
+    try {
+      lock = acquireModelBindingTargetLock(locatorHash);
+    } catch (error) {
+      if (error instanceof ModelBindingTargetLockError) {
+        res.status(409).json({ code: 1, message: error.message, details: { code: error.code } });
+        return;
+      }
+      throw error;
+    }
+    let released = false;
+    const release = () => { if (!released) { released = true; lock.release(); } };
+    res.once("finish", release);
+    res.once("close", release);
+    next();
   });
 
   router.get("/:adapter", async (req, res) => {
@@ -69,6 +133,7 @@ export function createCliConfigRoutes(): Router {
       res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
       return;
     }
+    observe(options, "snapshot.read");
     await handle(res, async () => ({ snapshot: await readCliConfig(adapter) }));
   });
 
@@ -83,9 +148,8 @@ export function createCliConfigRoutes(): Router {
       res.status(400).json({ code: 1, message: "Invalid file query" });
       return;
     }
-    await handle(res, async () => ({
-      file: await readCliConfigFile(adapter, query.data.path, query.data.reveal === "1")
-    }));
+    observe(options, "file.read");
+    await handle(res, async () => ({ file: await readCliConfigFile(adapter, query.data.path) }));
   });
 
   router.put("/:adapter/file", async (req, res) => {
@@ -99,21 +163,20 @@ export function createCliConfigRoutes(): Router {
       res.status(400).json({ code: 1, message: "Invalid file payload" });
       return;
     }
+    observe(options, "file.write");
     await handle(res, async () => ({
       snapshot: await writeCliConfigFile(adapter, body.data.path, body.data.content)
     }));
   });
 
-  router.get("/:adapter/fields", async (req, res) => {
+  router.get("/:adapter/field-values", async (req, res) => {
     const adapter = parseAdapter(req.params.adapter);
     if (!adapter) {
       res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
       return;
     }
-    await handle(res, async () => ({
-      fields: listCliConfigFields(adapter),
-      values: await readCliConfigFieldValues(adapter)
-    }));
+    observe(options, "fields.read");
+    await handle(res, async () => ({ values: await readCliConfigFieldValues(adapter) }));
   });
 
   router.patch("/:adapter/fields", async (req, res) => {
@@ -127,6 +190,7 @@ export function createCliConfigRoutes(): Router {
       res.status(400).json({ code: 1, message: "Invalid field patch payload" });
       return;
     }
+    observe(options, "fields.patch");
     await handle(res, async () => ({
       snapshot: await applyCliConfigFieldPatch(adapter, body.data.updates)
     }));
@@ -143,6 +207,7 @@ export function createCliConfigRoutes(): Router {
       res.status(400).json({ code: 1, message: "Invalid provider payload" });
       return;
     }
+    observe(options, "provider.put");
     await handle(res, async () => ({
       snapshot: await upsertCliProvider(adapter, req.params.providerId, body.data)
     }));
@@ -154,6 +219,7 @@ export function createCliConfigRoutes(): Router {
       res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
       return;
     }
+    observe(options, "provider.delete");
     await handle(res, async () => ({
       snapshot: await removeCliProvider(adapter, req.params.providerId)
     }));
@@ -170,6 +236,7 @@ export function createCliConfigRoutes(): Router {
       res.status(400).json({ code: 1, message: "Invalid model payload" });
       return;
     }
+    observe(options, "model.put");
     await handle(res, async () => ({
       snapshot: await upsertCliModel(adapter, body.data.alias, {
         provider: body.data.provider,
@@ -189,6 +256,7 @@ export function createCliConfigRoutes(): Router {
       res.status(400).json({ code: 1, message: "Invalid model payload" });
       return;
     }
+    observe(options, "model.delete");
     await handle(res, async () => ({
       snapshot: await removeCliModel(adapter, body.data.alias)
     }));
@@ -205,16 +273,102 @@ export function createCliConfigRoutes(): Router {
       res.status(400).json({ code: 1, message: "Invalid default model payload" });
       return;
     }
+    observe(options, "default-model.put");
     await handle(res, async () => ({
       snapshot: await setCliDefaultModel(adapter, body.data.model, body.data.providerId)
+    }));
+  });
+
+  router.post("/:adapter/apply-provider/preview", async (req, res) => {
+    const adapter = parseAdapter(req.params.adapter);
+    if (!adapter) {
+      res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
+      return;
+    }
+    const body = applyProviderBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ code: 1, message: "Invalid apply preview payload" });
+      return;
+    }
+    observe(options, "apply.preview");
+    await handle(res, async () => ({
+      preview: await previewCliConfigApply(applyInput(db, masterKey, req, adapter, body.data))
+    }));
+  });
+
+  router.post("/:adapter/apply-provider", async (req, res) => {
+    const adapter = parseAdapter(req.params.adapter);
+    if (!adapter) {
+      res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
+      return;
+    }
+    const body = applyProviderBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ code: 1, message: "Invalid apply payload" });
+      return;
+    }
+    observe(options, "apply.apply");
+    await handle(res, async () => ({
+      result: await applyCliConfigToAdapter(applyInput(db, masterKey, req, adapter, body.data))
+    }));
+  });
+
+  router.post("/:adapter/rollback", async (req, res) => {
+    const adapter = parseAdapter(req.params.adapter);
+    if (!adapter) {
+      res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
+      return;
+    }
+    const body = rollbackBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ code: 1, message: "Invalid rollback payload" });
+      return;
+    }
+    observe(options, "apply.rollback");
+    await handle(res, async () => ({
+      result: rollbackCliConfigApply({
+        masterKey,
+        adapter,
+        ...(body.data.backupId ? { backupId: body.data.backupId } : {})
+      })
     }));
   });
 
   return router;
 }
 
+function applyInput(
+  db: Database,
+  masterKey: string,
+  req: unknown,
+  adapter: AdapterId,
+  body: z.infer<typeof applyProviderBodySchema>
+) {
+  return {
+    db,
+    userId: (req as unknown as AuthenticatedRequest).userId,
+    masterKey,
+    adapter,
+    providerProfileId: body.providerProfileId,
+    ...(body.modelProfileId ? { modelProfileId: body.modelProfileId } : {}),
+    ...(body.credentialId ? { credentialId: body.credentialId } : {})
+  };
+}
+
+function observe(options: { operationObserver?: ((operation: string) => void) | undefined }, operation: string): void {
+  options.operationObserver?.(operation);
+}
+
 function parseAdapter(value: string | undefined): AdapterId | undefined {
   return value !== undefined && isAdapterId(value) ? value : undefined;
+}
+
+function applyErrorStatus(error: CliConfigApplyError): number {
+  if (error.code.endsWith("_NOT_FOUND")) return 404;
+  if (error.code === "CLI_CONFIG_APPLY_FAILED"
+    || error.code === "CLI_CONFIG_APPLY_VERIFY_FAILED"
+    || error.code === "CLI_CONFIG_ROLLBACK_FAILED") return 500;
+  return 400;
 }
 
 async function handle(
@@ -225,6 +379,14 @@ async function handle(
     const data = await action();
     res.json({ code: 0, data, message: "" });
   } catch (error) {
+    if (error instanceof CliConfigApplyError) {
+      res.status(applyErrorStatus(error)).json({
+        code: 1,
+        message: error.message,
+        details: { code: error.code }
+      });
+      return;
+    }
     res.status(400).json({
       code: 1,
       message: error instanceof Error ? error.message : "CLI config operation failed"

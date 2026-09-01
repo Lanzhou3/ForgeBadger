@@ -50,6 +50,12 @@ describe("DbSessionRecoveryStore", () => {
     assert.equal(listed[0]?.tmuxName, "of-user-session");
     assert.equal(listed[0]?.launchPlan.command, "claude");
     assert.equal(listed[0]?.launchPlan.cwd, project.path);
+    assert.equal(listed[0]?.createdAt, session.createdAt.toISOString());
+
+    db.prepare("UPDATE sessions SET created_at = ? WHERE id = ?")
+      .run(session.createdAt.getTime(), session.id);
+    const legacyMillisecondRow = await store.listSessions();
+    assert.equal(legacyMillisecondRow[0]?.createdAt, session.createdAt.toISOString());
 
     await store.upsertSession({
       ...listed[0]!,
@@ -61,6 +67,9 @@ describe("DbSessionRecoveryStore", () => {
     assert.equal(updated?.attachToken, "attach-new");
     assert.equal(updated?.tmuxSession, "of-user-session-new");
     assert.equal(updated?.status, "running");
+    const rawUpdated = db.prepare("SELECT updated_at FROM sessions WHERE id = ?")
+      .get(session.id) as { updated_at: number };
+    assert.ok(rawUpdated.updated_at < 100_000_000_000, "session timestamps must use Unix seconds");
 
     await store.removeSession(session.id, "other-user");
 

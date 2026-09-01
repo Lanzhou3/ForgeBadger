@@ -1,5 +1,5 @@
 name: ForgeBadger first-user trial feedback
-description: Report a local ForgeBadger trial result with environment, diagnostics, and Portfolio workflow evidence.
+description: Report a local ForgeBadger trial result with environment, diagnostics, and Copilot workflow evidence.
 title: "[Trial]: "
 labels:
   - trial-feedback
@@ -33,7 +33,7 @@ body:
         - provider
         - platform
         - terminal
-        - Portfolio
+        - Copilot
         - Feishu
         - Project Manager
         - docs
@@ -56,14 +56,15 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Include commit/version, OS, shell, browser, Node, tmux, Claude Code, and optional OpenCode/Codex versions.
+      description: Include commit/version, OS, shell, browser, Node, selected terminal runtime and actual tmux/psmux version, Claude Code, and optional OpenCode/Codex versions.
       value: |
         ForgeBadger version or commit:
         OS:
         Shell:
         Browser:
         node --version:
-        tmux -V:
+        Terminal runtime selected (tmux/psmux):
+        Actual runtime version (`tmux -V` or `psmux -V`):
         claude --version:
         opencode --version, if checked:
         codex --version, if checked:
@@ -74,7 +75,7 @@ body:
     id: doctor
     attributes:
       label: forgebadger doctor summary
-      description: Summarize the redacted `forgebadger doctor` result. Native Windows users should include the runtime warning. Do not attach raw terminal transcripts.
+      description: Summarize the redacted, read-only `forgebadger doctor` result and selected runtime mode. For a new state path, note whether it remained absent. Do not attach raw terminal transcripts.
       render: text
     validations:
       required: true
@@ -112,17 +113,17 @@ body:
       required: true
 
   - type: textarea
-    id: portfolio
+    id: copilot
     attributes:
-      label: Portfolio workflow evidence
-      description: Record the observed Portfolio request and owner-decision path. Do not run or attach a retired provider smoke harness.
+      label: Copilot workflow evidence
+      description: Record the observed Copilot conversation and approval path. Do not run or attach a retired provider smoke harness.
       value: |
-        Portfolio route availability: observed / unavailable / blocked
-        Portfolio request lifecycle observed: yes / no / skipped
-        Owner decision result, if exercised: approved / rejected / not exercised
-        Feishu Portfolio ingress disposition, if configured: accepted / rejected / not configured
-        Visible Portfolio blocker, if any:
-        Confirmed no terminal/shell/Codex turn input in Portfolio: yes / no
+        Copilot route availability: observed / unavailable / blocked
+        Copilot conversation lifecycle observed: yes / no / skipped
+        Approval decision result, if exercised: approved / rejected / not exercised
+        Feishu account/configuration result, if configured: accepted / rejected / not configured
+        Visible Copilot blocker, if any:
+        Confirmed no raw terminal input without approval: yes / no
     validations:
       required: true
 
@@ -134,7 +135,7 @@ body:
       options:
         - UX-01 dependency/runtime guidance
         - UX-02 provider/model/credential recovery
-        - UX-03 Portfolio request and owner-decision state coherence
+        - UX-03 Copilot conversation and approval state coherence
         - UX-04 reproducible feedback quality
         - UX-05 active-run monotonic ordering
         - UX-06 partial API/query failure recovery
@@ -153,7 +154,7 @@ body:
         - provider
         - CLI
         - platform
-        - Portfolio
+        - Copilot
         - docs
         - E2E
         - other
@@ -190,12 +191,13 @@ body:
     id: windows_wsl
     attributes:
       label: Windows or WSL evidence
-      description: Native Windows should be recorded as management-UI evidence only; WSL is required for terminal evidence.
+      description: Record native Windows ConPTY + psmux or WSL + tmux evidence. Repository tests and Ubuntu CI do not clear the physical-host caveat.
       value: |
-        Native Windows management UI checked: yes / no / not applicable
-        Native Windows doctor warning:
+        Native Windows version:
+        Native psmux version and ConPTY terminal result:
         WSL distribution/version:
-        WSL terminal trial result:
+        WSL tmux terminal trial result:
+        Browser + real AI CLI lifecycle completed: yes / no / blocked
     validations:
       required: false
 

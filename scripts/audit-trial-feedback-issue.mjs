@@ -22,7 +22,7 @@ export async function auditTrialFeedbackIssue(options = {}) {
   let issue;
   try {
     issue = await fetchIssue({
-      repository: options.repository ?? process.env.FORGEBADGER_TRIAL_FEEDBACK_ISSUE_REPO ?? process.env.OPENFORGE_TRIAL_FEEDBACK_ISSUE_REPO ?? DEFAULT_REPOSITORY,
+      repository: options.repository ?? process.env.FORGEBADGER_TRIAL_FEEDBACK_ISSUE_REPO ?? DEFAULT_REPOSITORY,
       issueNumber
     });
   } catch (error) {

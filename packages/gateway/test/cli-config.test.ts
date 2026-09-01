@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -53,8 +53,7 @@ describe("cli-config service", () => {
 
       let snapshot = await upsertCliProvider("kimi", "moonshot", {
         protocol: "kimi",
-        baseUrl: "https://api.moonshot.cn/v1",
-        apiKey: "sk-secret-value"
+        baseUrl: "https://api.moonshot.cn/v1"
       });
       assert.equal(snapshot.configFile, "config.toml");
       assert.equal(snapshot.providers.length, 1);
@@ -63,7 +62,7 @@ describe("cli-config service", () => {
         name: "moonshot",
         protocol: "kimi",
         baseUrl: "https://api.moonshot.cn/v1",
-        hasApiKey: true,
+        hasApiKey: false,
         isActive: false
       });
 
@@ -81,22 +80,23 @@ describe("cli-config service", () => {
 
       const raw = await readFile(path.join(root, "config.toml"), "utf8");
       assert.match(raw, /\[providers\.moonshot\]/);
-      assert.match(raw, /api_key = "sk-secret-value"/);
+      assert.doesNotMatch(raw, /api_key/u);
       assert.match(raw, /default_model = "moonshot\/kimi-k2\.5"/);
 
       const configFile = snapshot.files.find((file) => file.relativePath === "config.toml");
       assert.ok(configFile);
-      assert.equal(configFile.redacted, true);
-      assert.doesNotMatch(configFile.content, /sk-secret-value/);
+      assert.equal("content" in configFile, false);
+      assert.equal("redacted" in configFile, false);
 
-      const revealed = await readCliConfigFile("kimi", "config.toml", true);
-      assert.equal(revealed.redacted, false);
-      assert.match(revealed.content, /sk-secret-value/);
+      const directRead = await readCliConfigFile("kimi", "config.toml");
+      assert.equal("content" in directRead, false);
+      assert.equal("redacted" in directRead, false);
     });
 
     it("keeps the existing api key when updating a provider without one", async () => {
       await useConfigRoot("KIMI_CODE_HOME", "forgebadger-cli-config-kimi-keep-");
-      await upsertCliProvider("kimi", "moonshot", { apiKey: "sk-secret-value" });
+      await mkdir(process.env.KIMI_CODE_HOME!, { recursive: true });
+      await writeFile(path.join(process.env.KIMI_CODE_HOME!, "config.toml"), '[providers.moonshot]\napi_key = "sk-secret-value"\n');
 
       const snapshot = await upsertCliProvider("kimi", "moonshot", { baseUrl: "https://api.moonshot.ai/v1" });
 
@@ -173,19 +173,18 @@ describe("cli-config service", () => {
       let snapshot = await upsertCliProvider("opencode", "deepseek", {
         name: "DeepSeek",
         protocol: "@ai-sdk/openai-compatible",
-        baseUrl: "https://api.deepseek.com",
-        apiKey: "sk-secret-value"
+        baseUrl: "https://api.deepseek.com"
       });
       assert.equal(snapshot.providers[0]?.protocol, "@ai-sdk/openai-compatible");
-      assert.equal(snapshot.providers[0]?.hasApiKey, true);
+      assert.equal(snapshot.providers[0]?.hasApiKey, false);
 
       snapshot = await setCliDefaultModel("opencode", "deepseek/deepseek-chat");
       assert.equal(snapshot.defaultModel, "deepseek/deepseek-chat");
       assert.equal(snapshot.providers[0]?.isActive, true);
 
       const raw = await readFile(path.join(root, "opencode.json"), "utf8");
-      const doc = JSON.parse(raw) as { provider: Record<string, { options: { apiKey: string } }> };
-      assert.equal(doc.provider.deepseek?.options.apiKey, "sk-secret-value");
+      const doc = JSON.parse(raw) as { provider: Record<string, { options: Record<string, unknown> }> };
+      assert.equal(doc.provider.deepseek?.options.apiKey, undefined);
 
       snapshot = await removeCliProvider("opencode", "deepseek");
       assert.equal(snapshot.providers.length, 0);
@@ -198,11 +197,10 @@ describe("cli-config service", () => {
       const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-cli-config-claude-");
 
       let snapshot = await upsertCliProvider("claude", "anthropic", {
-        baseUrl: "https://api.anthropic.com",
-        apiKey: "sk-ant-secret"
+        baseUrl: "https://api.anthropic.com"
       });
       assert.equal(snapshot.providers.length, 1);
-      assert.equal(snapshot.providers[0]?.hasApiKey, true);
+      assert.equal(snapshot.providers[0]?.hasApiKey, false);
 
       snapshot = await setCliDefaultModel("claude", "claude-sonnet-4-5");
       assert.equal(snapshot.defaultModel, "claude-sonnet-4-5");
@@ -210,7 +208,7 @@ describe("cli-config service", () => {
       const raw = await readFile(path.join(root, "settings.json"), "utf8");
       const doc = JSON.parse(raw) as { env: Record<string, string> };
       assert.equal(doc.env.ANTHROPIC_BASE_URL, "https://api.anthropic.com");
-      assert.equal(doc.env.ANTHROPIC_AUTH_TOKEN, "sk-ant-secret");
+      assert.equal(doc.env.ANTHROPIC_AUTH_TOKEN, undefined);
       assert.equal(doc.env.ANTHROPIC_MODEL, "claude-sonnet-4-5");
 
       snapshot = await removeCliProvider("claude", "anthropic");
@@ -228,13 +226,10 @@ describe("cli-config service", () => {
   });
 
   describe("raw file editing", () => {
-    it("writes whitelisted config files and rejects unsupported paths", async () => {
+    it("allows whitelisted non-main files and rejects unsupported raw config paths", async () => {
       const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-cli-config-raw-");
 
-      const snapshot = await writeCliConfigFile("kimi", "AGENTS.md", "# Global Kimi\n");
-      const agentsFile = snapshot.files.find((file) => file.relativePath === "AGENTS.md");
-      assert.equal(agentsFile?.exists, true);
-      assert.equal(agentsFile?.content, "# Global Kimi\n");
+      await writeCliConfigFile("kimi", "AGENTS.md", "# Global Kimi\n");
       assert.equal(await readFile(path.join(root, "AGENTS.md"), "utf8"), "# Global Kimi\n");
 
       await assert.rejects(
@@ -298,8 +293,8 @@ describe("cli-config service", () => {
     });
 
     it("reports claude secret fields as a presence flag only", async () => {
-      await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-fields-claude-secret-");
-      await writeCliConfigFile("claude", "settings.json", JSON.stringify({
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-fields-claude-secret-");
+      await writeFile(path.join(root, "settings.json"), JSON.stringify({
         env: {
           ANTHROPIC_AUTH_TOKEN: "sk-ant-secret",
           ANTHROPIC_BASE_URL: "https://api.anthropic.com"
@@ -355,10 +350,14 @@ describe("cli-config service", () => {
       assert.match(await readFile(path.join(root, "config.toml"), "utf8"), /default_model = /);
     });
 
-    it("writes secret field values but never reads them back", async () => {
-      await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-fields-claude-write-secret-");
+    it("writes secret field values while reads report presence only", async () => {
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-fields-claude-write-secret-");
       await applyCliConfigFieldPatch("claude", { anthropicAuthToken: "sk-new-secret" });
 
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, unknown>;
+      };
+      assert.equal(doc.env.ANTHROPIC_AUTH_TOKEN, "sk-new-secret");
       const values = await readCliConfigFieldValues("claude");
       assert.equal(values.anthropicAuthToken, true);
     });
@@ -424,13 +423,14 @@ describe("cli-config service", () => {
 
     it("surfaces invalid TOML instead of silently dropping it", async () => {
       const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-cli-config-bad-toml-");
+      const broken = "[providers\nbroken";
+      // Raw writes are byte-exact; the error surfaces from the post-write snapshot read.
       await assert.rejects(
-        writeCliConfigFile("kimi", "config.toml", "[providers\nbroken"),
+        writeCliConfigFile("kimi", "config.toml", broken),
         /not valid TOML/
       );
 
-      assert.match(await readFile(path.join(root, "config.toml"), "utf8"), /broken/);
-      await assert.rejects(readCliConfig("kimi"), /not valid TOML/);
+      assert.equal(await readFile(path.join(root, "config.toml"), "utf8"), broken);
     });
   });
 });

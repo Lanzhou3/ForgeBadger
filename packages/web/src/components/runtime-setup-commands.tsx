@@ -9,8 +9,9 @@ interface RuntimeSetupCommandsProps {
 
 export function RuntimeSetupCommands({ guidance }: RuntimeSetupCommandsProps) {
   const { t } = useLanguage();
+  const links = guidance.links ?? [];
 
-  if (guidance.commands.length === 0) {
+  if (guidance.commands.length === 0 && links.length === 0) {
     return null;
   }
 
@@ -28,6 +29,17 @@ export function RuntimeSetupCommands({ guidance }: RuntimeSetupCommandsProps) {
             {item.command}
           </code>
         </div>
+      ))}
+      {links.map((item) => (
+        <a
+          key={`${item.labelKey}:${item.href}`}
+          className="min-w-0 rounded-md border border-border bg-background/70 p-2 text-xs font-medium text-foreground underline-offset-4 hover:underline"
+          href={item.href}
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          {t(item.labelKey)}
+        </a>
       ))}
     </div>
   );

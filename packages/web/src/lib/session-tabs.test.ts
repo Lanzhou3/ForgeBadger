@@ -57,16 +57,6 @@ describe("session tabs", () => {
     expect(readSessionTabs(storage)).toEqual([]);
   });
 
-  it("migrates legacy session tabs on first read", () => {
-    const storage = new MemoryStorage();
-    const tabs = [{ id: "legacy", label: "Legacy", updatedAt: 1 }];
-    storage.setItem("openforge.sessionTabs.v1", JSON.stringify(tabs));
-
-    expect(readSessionTabs(storage)).toEqual(tabs);
-    expect(storage.getItem("forgebadger.sessionTabs.v1")).toBe(JSON.stringify(tabs));
-    expect(storage.getItem("openforge.sessionTabs.v1")).toBeNull();
-  });
-
   it("prunes deleted sessions", () => {
     const storage = new MemoryStorage();
     upsertSessionTab({ id: "a", label: "A", updatedAt: 1 }, storage);

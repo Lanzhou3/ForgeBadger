@@ -11,6 +11,10 @@ import http from "node:http";
 import { signJwt } from "../src/auth/jwt.js";
 import { createAdminUserRoutes } from "../src/routes/admin-users.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
+import {
+  RuntimeAuthorizationInvalidator,
+  type RuntimeAuthorizationInvalidation
+} from "../src/services/runtime-authorization-invalidation.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 
@@ -33,13 +37,20 @@ describe("admin user routes", () => {
   let db: Database;
   let userRepo: UserRepository;
   let app: express.Express;
+  let runtimeAuthorizationInvalidator: RuntimeAuthorizationInvalidator;
+  let invalidations: RuntimeAuthorizationInvalidation[];
 
   beforeEach(() => {
     db = createTestDb();
     userRepo = new UserRepository(db);
+    runtimeAuthorizationInvalidator = new RuntimeAuthorizationInvalidator();
+    invalidations = [];
+    runtimeAuthorizationInvalidator.subscribe((invalidation) => invalidations.push(invalidation));
     app = express();
+    app.locals.jwtSecret = secret;
+    app.locals.db = db;
     app.use(express.json());
-    app.use("/api/v1/admin/users", createAdminUserRoutes(db));
+    app.use("/api/v1/admin/users", createAdminUserRoutes(db, runtimeAuthorizationInvalidator));
   });
 
   it("requires admin role to list users", async () => {
@@ -78,6 +89,7 @@ describe("admin user routes", () => {
     assert.equal(updateRes.status, 200);
     assert.equal(updateRes.body.data.user.role, "admin");
     assert.equal(updateRes.body.data.user.status, "disabled");
+    assert.deepEqual(invalidations, [{ scope: "user", userId: regular.id }]);
   });
 
   it("prevents an admin from demoting or disabling themselves", async () => {

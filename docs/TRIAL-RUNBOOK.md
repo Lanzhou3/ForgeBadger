@@ -2,6 +2,12 @@
 
 > Status: first-user local beta trial | Date: 2026-05-10
 
+> Historical protocol note (2026-08-31): this v1.5 packet preserves legacy
+> Copilot field names because its validators and existing GitHub issue routes
+> form an immutable evidence chain. Those fields are not current product
+> capability claims. Current trials use native `/copilot`, Project Manager,
+> provider readiness, sessions, terminal recovery, and Feishu account checks.
+
 This is the single entry point for a local ForgeBadger first-user trial. It is not
 a public release guide. Use it to start ForgeBadger, run the core Claude Code
 browser terminal path, collect diagnostics, and submit feedback. Prefer the
@@ -93,29 +99,37 @@ Check local tools before starting:
 
 ```bash
 node --version
-tmux -V
 claude --version
+```
+
+Then check the selected terminal runtime:
+
+```text
+macOS/Linux/WSL: tmux -V
+native Windows:  psmux -V
 ```
 
 Required:
 
 - Node.js 20.12 through 24.
-- `tmux` 3.2 or newer.
+- `tmux` 3.2 or newer on macOS/Linux/WSL, or psmux 3.3.8 or newer on
+  native Windows.
 - Claude Code CLI on `PATH` for the main terminal smoke path.
 - A local shell where ForgeBadger can bind loopback ports.
 
-Windows users should run the terminal trial inside WSL. Native Windows can open
-the management UI, but the built-in persistent browser terminal depends on
-tmux and is not treated as supported without WSL.
+Native Windows uses psmux over ConPTY; WSL uses tmux. Either path must be
+recorded explicitly, and repository unit tests do not substitute for a physical
+Windows terminal run.
 
 For a Windows evidence pass, record both sides explicitly:
 
-1. Run `forgebadger doctor` from native Windows and record the terminal runtime
-   warning.
-2. Run the terminal trial from WSL with Node.js, tmux, and Claude Code installed
-   inside WSL.
-3. Treat only the WSL run as evidence for browser terminal attach, input,
-   resize, refresh/reconnect, and stop behavior.
+1. On native Windows, run `forgebadger doctor` and `psmux -V`, then exercise
+   ConPTY + psmux + browser + a real AI CLI through attach, input/output,
+   resize, refresh/reconnect, Gateway restart recovery, stop, and cleanup.
+2. If testing WSL compatibility, record the WSL distribution/version and run
+   the equivalent lifecycle with tmux.
+3. Keep `WINDOWS-WSL` as `Caveat` until the physical-host artifact is reviewed;
+   management UI checks or simulated platform tests do not clear it.
 
 Required only for source fallback:
 
@@ -152,10 +166,23 @@ Run the doctor first:
 forgebadger doctor
 ```
 
-On native Windows, or when `tmux` is missing, `forgebadger doctor` reports that
-the terminal runtime is unsupported and points to WSL or tmux installation.
-`forgebadger start` may still start the management services, but terminal session
-launch should be treated as blocked until the runtime warning is fixed.
+`forgebadger doctor` is read-only: it reports `native_tmux`, `native_psmux`,
+`tmux_missing`, `psmux_missing`, or `psmux_outdated`. `forgebadger start` and
+`forgebadger init` may offer a fixed install/upgrade command only in an
+interactive TTY outside CI; the prompt defaults to No and requires explicit
+`y`/`yes`, then rechecks the runtime. npm postinstall never installs system
+software. Native Windows uses
+`winget install --id marlocarlo.psmux --exact --source winget`, or
+`winget upgrade --id marlocarlo.psmux --exact --source winget` when below
+3.3.8. Linux detection is limited to the fixed apt-get/dnf/yum/pacman/zypper/apk
+allowlist. If the runtime is still not ready—for example after decline,
+non-interactive/CI execution, install failure, or a PATH refresh requirement—
+`start`/`init` return non-zero and stop before runtime config/project files,
+database recovery, Gateway/Web startup, or listener creation.
+
+Against a new `FORGEBADGER_STATE_DIR`, `doctor` reports `(not initialized)` and
+diagnostic default URLs without creating the directory, config, secrets,
+database, or account-recovery key.
 
 Start Gateway and Web on the trial ports:
 
@@ -202,7 +229,7 @@ NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
 FORGEBADGER_DB_PATH=/tmp/forgebadger-trial/forgebadger.db
 FORGEBADGER_MASTER_KEY=<64-character-hex-key-from-openssl-rand-hex-32>
 FORGEBADGER_JWT_SECRET=<32-or-more-random-characters>
-FORGEBADGER_TMUX_PREFIX=of-trial-
+FORGEBADGER_TMUX_PREFIX=fb-trial-
 ```
 
 Generate local secrets when needed:
@@ -276,7 +303,7 @@ Follow this path in order and record the exact point of any failure.
     usable.
 11. Refresh the browser and confirm reconnect attaches to the same session.
 12. Stop the session from the Web console.
-13. Restart Gateway and Web, then confirm existing tmux-backed sessions recover
+13. Restart Gateway and Web, then confirm existing multiplexer-backed sessions recover
     or show the expected stopped state.
 14. Export diagnostics if anything fails or behaves unexpectedly.
 15. Submit feedback with environment, commands, diagnostics, screenshots or logs,
@@ -384,22 +411,43 @@ For source fallback, stop both foreground dev processes with `Ctrl-C`:
 - `pnpm --dir packages/gateway dev`
 - `pnpm --dir packages/web dev`
 
-ForgeBadger sessions are tmux-backed. Stopping Gateway or Web should not kill a
-running CLI session by itself.
+ForgeBadger sessions are multiplexer-backed. Stopping Gateway or Web should not
+kill a running CLI session by itself.
 
 ## 8. Cleanup
 
-List ForgeBadger tmux sessions:
+List ForgeBadger sessions using the branch for the current platform.
+
+macOS/Linux/WSL (tmux):
 
 ```bash
-tmux list-sessions | grep '^of-'
+tmux list-sessions | grep '^fb-'
 ```
 
-Kill a trial tmux session only after confirming it is no longer needed:
+Native Windows PowerShell (psmux ≥ 3.3.8):
+
+```powershell
+psmux list-sessions | Select-String '^fb-'
+```
+
+Kill a trial multiplexer session only after confirming it is no longer needed:
+
+macOS/Linux/WSL:
 
 ```bash
 tmux kill-session -t <session-name>
 ```
+
+Native Windows PowerShell:
+
+```powershell
+psmux kill-session -t <session-name>
+```
+
+The same safety boundary applies to both branches: verify the exact `fb-*`
+session belongs to this disposable trial before killing it. Do not use broad
+patterns or kill sessions that may belong to another user, project, or active
+AI CLI task.
 
 ## 9. What CI Cannot Prove
 

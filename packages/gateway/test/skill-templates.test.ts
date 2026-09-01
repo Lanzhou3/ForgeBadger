@@ -38,6 +38,8 @@ describe("skill templates", () => {
     const user = new UserRepository(db).create("skill-template@example.com", "hash");
     token = signJwt({ userId: user.id, email: user.email }, secret);
     app = express();
+    app.locals.db = db;
+    app.locals.jwtSecret = secret;
     app.use(express.json());
     app.use("/api/v1", createSkillRoutes(db));
   });

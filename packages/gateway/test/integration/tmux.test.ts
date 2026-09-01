@@ -18,7 +18,7 @@ const execFileAsync = promisify(execFile);
 describe("tmux integration", { skip: !runTmuxTests }, () => {
   it("creates, captures, and kills a real tmux session", async () => {
     const tmux = createTmuxClient();
-    const sessionName = `of-test-${process.pid}`;
+    const sessionName = `fb-test-${process.pid}`;
 
     await tmux.createSession({
       name: sessionName,
@@ -35,9 +35,73 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
     assert.match(output, /forgebadger-gate-a/);
   });
 
+  it("removes stale unknown server secrets before creating a session", async () => {
+    const tmux = createTmuxClient();
+    const sessionName = `fb-test-env-scrub-${process.pid}`;
+    const bootstrapName = `fb-test-env-bootstrap-${process.pid}`;
+    const staleKey = "STALE_MULTIPLEXER_SECRET";
+    const sessionSecretKey = "EXPLICIT_SESSION_MODEL_SECRET";
+    const selectorKey = "CODEX_HOME";
+    const staleSecret = `stale-global-${process.pid}`;
+    const sessionSecret = `session-only-${process.pid}`;
+    const selectorValue = `/tmp/codex-home-${process.pid}`;
+    const originalStale = process.env[staleKey];
+    const originalSessionSecret = process.env[sessionSecretKey];
+    const originalSelector = process.env[selectorKey];
+    delete process.env[staleKey];
+    delete process.env[sessionSecretKey];
+    process.env[selectorKey] = selectorValue;
+
+    await execFileAsync("tmux", [
+      "new-session", "-d", "-s", bootstrapName, "--", "sleep", "5"
+    ]);
+    await execFileAsync("tmux", ["set-environment", "-g", staleKey, staleSecret]);
+    const probe = [
+      `console.log("STALE:" + (process.env.${staleKey} ?? "missing"));`,
+      `console.log("EXPLICIT:" + (process.env.${sessionSecretKey} ?? "missing"));`,
+      `console.log("SELECTOR:" + (process.env.${selectorKey} ?? "missing"));`,
+      "setTimeout(() => {}, 5000);"
+    ].join("");
+
+    try {
+      await tmux.createSession({
+        name: sessionName,
+        cwd: tmpdir(),
+        command: process.execPath,
+        args: ["-e", probe],
+        env: { [sessionSecretKey]: sessionSecret }
+      });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      const output = await tmux.capturePane(sessionName);
+      assert.match(output, /STALE:missing/);
+      assert.match(output, new RegExp(`EXPLICIT:${sessionSecret}`));
+      assert.match(output, new RegExp(`SELECTOR:${selectorValue}`));
+      await assert.rejects(execFileAsync("tmux", ["show-environment", "-g", staleKey]));
+      await assert.rejects(execFileAsync("tmux", ["show-environment", "-g", sessionSecretKey]));
+      const { stdout: selectorGlobal } = await execFileAsync("tmux", [
+        "show-environment", "-g", selectorKey
+      ]);
+      assert.equal(selectorGlobal.trim(), `${selectorKey}=${selectorValue}`);
+    } finally {
+      await tmux.killSession(sessionName);
+      await execFileAsync("tmux", ["set-environment", "-gu", staleKey]).catch(() => undefined);
+      await execFileAsync("tmux", ["set-environment", "-gu", sessionSecretKey]).catch(() => undefined);
+      if (originalSelector === undefined) {
+        await execFileAsync("tmux", ["set-environment", "-gu", selectorKey]).catch(() => undefined);
+      } else {
+        await execFileAsync("tmux", ["set-environment", "-g", selectorKey, originalSelector]).catch(() => undefined);
+      }
+      await tmux.killSession(bootstrapName);
+      restoreEnv(staleKey, originalStale);
+      restoreEnv(sessionSecretKey, originalSessionSecret);
+      restoreEnv(selectorKey, originalSelector);
+    }
+  });
+
   it("enables tmux mouse scrolling and keeps a larger history", async () => {
     const tmux = createTmuxClient();
-    const sessionName = `of-test-options-${process.pid}`;
+    const sessionName = `fb-test-options-${process.pid}`;
 
     try {
       await tmux.createSession({
@@ -76,7 +140,7 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
 
   it("keeps the window size when a wider client attaches", async () => {
     const tmux = createTmuxClient();
-    const sessionName = `of-test-winsize-${process.pid}`;
+    const sessionName = `fb-test-winsize-${process.pid}`;
     let widerClient: ChildProcess | undefined;
 
     try {
@@ -111,7 +175,7 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
 
   it("sends literal input to a real tmux session", async () => {
     const tmux = createTmuxClient();
-    const sessionName = `of-test-input-${process.pid}`;
+    const sessionName = `fb-test-input-${process.pid}`;
 
     try {
       await tmux.createSession({
@@ -135,7 +199,7 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
 
   it("stages one multiline bracketed paste through control stdin and submits once", async () => {
     const tmux = createTmuxClient();
-    const sessionName = `of-test-programmatic-${process.pid}`;
+    const sessionName = `fb-test-programmatic-${process.pid}`;
     const canary = `PROGRAMMATIC_CANARY_${process.pid}_中文\nsecond line`;
     const rawConsumer = [
       "process.stdin.setRawMode(true);",
@@ -184,7 +248,7 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
   it("recovers indexed tmux sessions and kills unindexed ForgeBadger sessions", async () => {
     const tmux = createTmuxClient();
     const store = new MemoryRecoveryStore();
-    const tmuxPrefix = `of-recovery-${process.pid}-`;
+    const tmuxPrefix = `fb-recovery-${process.pid}-`;
     const knownSessionId = `sessionknown${process.pid}`;
     const orphanName = `${tmuxPrefix}user123-sessionorphan${process.pid}`;
     const manager = new InMemorySessionManager(tmux, store, undefined, { tmuxPrefix });
@@ -223,6 +287,11 @@ async function listTmuxBuffers(): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }
 
 function launchPlan(sessionId: string): LaunchPlan {

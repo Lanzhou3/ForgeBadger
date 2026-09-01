@@ -285,9 +285,6 @@ export interface Session {
   projectId?: string;
   projectName?: string;
   aiTool?: string;
-  modelId?: string | null;
-  credentialMode?: CredentialMode;
-  apiKeyId?: string | null;
 }
 
 export interface DependencyStatus {
@@ -299,8 +296,15 @@ export interface DependencyStatus {
 }
 
 export interface TerminalRuntimeStatus {
-  persistence: "tmux";
-  mode: "native_tmux" | "wsl_required" | "tmux_missing" | string;
+  persistence: "tmux" | "psmux";
+  mode:
+    | "native_tmux"
+    | "native_psmux"
+    | "wsl_required"
+    | "tmux_missing"
+    | "psmux_missing"
+    | "psmux_outdated"
+    | string;
   supported: boolean;
   message: string;
 }
@@ -515,10 +519,9 @@ export interface ProjectSkill {
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderApplyAdapter = "claude" | "opencode" | "codex" | "kimi";
-export type ProviderSupportedAdapter = "claude" | "opencode" | "kimi";
+export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
-export type ProviderReadinessAdapter = ProviderApplyAdapter;
+export type ProviderReadinessAdapter = ProviderSupportedAdapter;
 export type ProviderReadinessStatus = "ready" | "needs_attention" | "managed_elsewhere";
 export type ProviderReadinessCode =
   | "ready"
@@ -529,7 +532,7 @@ export type ProviderReadinessCode =
   | "remote_validation_unavailable"
   | "remote_model_missing"
   | "remote_validation_failed"
-  | "codex_subscription_managed";
+  | "native_auth_not_ready";
 export type ProviderReadinessCheckStatus =
   | "ready"
   | "disabled"
@@ -639,23 +642,6 @@ export interface ProviderCredentialSummary {
   secretPreview: string;
 }
 
-export interface ProviderApplyPreview {
-  adapter: ProviderApplyAdapter;
-  scope?: "project" | "user-global";
-  env: Record<string, string>;
-  secretEnvNames: string[];
-  changedFiles: Array<{ relativePath: string; operation: "create" | "update" }>;
-  backupPath?: string;
-  files?: Array<{ relativePath: string; content: string }>;
-  internalDefault?: {
-    scope: "user";
-    providerProfileId: string;
-    modelProfileId: string;
-    providerName: string;
-    modelName: string;
-  };
-}
-
 export interface ModelProviderReadiness {
   status: ProviderReadinessStatus;
   code: ProviderReadinessCode;
@@ -687,21 +673,13 @@ export interface ModelProviderReadiness {
     errorCode?: string;
     error?: string;
   };
+  nativeAuth?: CodexNativeAuthStatus;
   steps: string[];
 }
 
-export interface CodexSubscriptionStatus {
-  providerApplyEnabled: boolean;
-  identitySource: "chatgpt_subscription_sdk";
-  connectionState: "connected" | "not_connected" | "pending_sdk_connection";
-  accountLabel: string | null;
-  canUseAppServerIdentity: boolean;
-  sdk: {
-    packageName: string;
-    installed: boolean;
-    docsUrl: string;
-    appServerDocsUrl: string;
-  };
+export interface CodexNativeAuthStatus {
+  state: "ready" | "not_authenticated" | "cli_missing" | "unknown";
+  method: "chatgpt" | "api" | "unknown";
 }
 
 export interface SessionActivity {
@@ -1162,7 +1140,8 @@ const AUTH_CREDENTIAL_PATHS = [
   "/api/v1/auth/login",
   "/api/v1/auth/register",
   "/api/v1/auth/logout",
-  "/api/v1/auth/change-password"
+  "/api/v1/auth/change-password",
+  "/api/v1/auth/reset-password"
 ];
 
 function handleUnauthorized(path: string, hadToken: boolean, status: number): void {
@@ -1213,10 +1192,10 @@ export async function login(email: string, password: string) {
   });
 }
 
-export async function register(email: string, password: string) {
+export async function register(email: string, password: string, recoveryKey: string) {
   return fetchEnvelope<AuthPayload>("/api/v1/auth/register", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, recoveryKey }),
   });
 }
 
@@ -1255,6 +1234,17 @@ export async function changePassword(
     method: "POST",
     body: JSON.stringify({ currentPassword, newPassword })
   }) as Promise<{ revokedSessions: boolean }>;
+}
+
+export async function resetPassword(input: {
+  email: string;
+  recoveryKey: string;
+  newPassword: string;
+}): Promise<{ revokedSessions: boolean; recoveryKeyRotated: boolean }> {
+  return fetchJson("/api/v1/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }) as Promise<{ revokedSessions: boolean; recoveryKeyRotated: boolean }>;
 }
 
 export async function getDependencies(): Promise<DependencyReport> {
@@ -1594,9 +1584,8 @@ export interface CliConfigFileEntry {
   relativePath: string;
   fileType: string;
   exists: boolean;
-  content: string;
-  redacted: boolean;
   sizeBytes: number;
+  content?: string;
 }
 
 export interface CliProviderEntry {
@@ -1629,7 +1618,6 @@ export interface CliProviderInput {
   name?: string;
   protocol?: string;
   baseUrl?: string;
-  apiKey?: string;
   envKey?: string;
 }
 
@@ -1644,11 +1632,9 @@ export async function getCliConfig(adapter: RuntimeAdapterId): Promise<CliConfig
 
 export async function getCliConfigFile(
   adapter: RuntimeAdapterId,
-  path: string,
-  reveal: boolean
+  path: string
 ): Promise<CliConfigFileEntry> {
   const searchParams = new URLSearchParams({ path });
-  if (reveal) searchParams.set("reveal", "1");
   const { file } = await fetchJson<{ file: CliConfigFileEntry }>(
     `${cliConfigPath(adapter, "/file")}?${searchParams.toString()}`
   );
@@ -1736,13 +1722,18 @@ export interface CliConfigFieldSpec {
 
 export interface CliConfigFieldsResult {
   fields: CliConfigFieldSpec[];
-  values: Record<string, unknown>;
 }
 
 export async function getCliConfigFields(
   adapter: RuntimeAdapterId
 ): Promise<CliConfigFieldsResult> {
   return fetchJson(cliConfigPath(adapter, "/fields")) as Promise<CliConfigFieldsResult>;
+}
+
+export async function getCliConfigFieldValues(
+  adapter: RuntimeAdapterId
+): Promise<{ values: Record<string, unknown> }> {
+  return fetchJson(cliConfigPath(adapter, "/field-values")) as Promise<{ values: Record<string, unknown> }>;
 }
 
 export async function patchCliConfigFields(
@@ -1754,6 +1745,80 @@ export async function patchCliConfigFields(
     { method: "PATCH", body: JSON.stringify({ updates }) }
   );
   return snapshot;
+}
+
+// ---- CLI config apply (cc-switch style provider application) ----
+
+export interface CliConfigApplyInput {
+  providerProfileId: string;
+  modelProfileId?: string;
+  credentialId?: string;
+}
+
+export interface CliConfigApplyFilePreview {
+  targetPath: string;
+  fileType: string;
+  operation: "create" | "update" | "none" | string;
+  /** Observed content with credential values masked; null when the file does not exist. */
+  current: string | null;
+  /** Proposed content with credential values masked. */
+  proposed: string;
+  changedFields?: string[];
+}
+
+export interface CliConfigApplyPreview {
+  adapter: string;
+  providerProfileId?: string;
+  modelProfileId?: string;
+  credentialId?: string;
+  files: CliConfigApplyFilePreview[];
+  warnings?: string[];
+}
+
+export interface CliConfigApplyResult {
+  adapter?: string;
+  backupId: string;
+  changed: boolean;
+  files?: Array<{ targetPath: string; operation: string }>;
+}
+
+export interface CliConfigRollbackResult {
+  adapter?: string;
+  backupId?: string;
+  restoredFiles?: string[];
+}
+
+export async function previewCliConfigApply(
+  adapter: RuntimeAdapterId,
+  input: CliConfigApplyInput
+): Promise<CliConfigApplyPreview> {
+  const { preview } = await fetchJson<{ preview: CliConfigApplyPreview }>(cliConfigPath(adapter, "/apply-provider/preview"), {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return preview;
+}
+
+export async function applyCliConfigToAdapter(
+  adapter: RuntimeAdapterId,
+  input: CliConfigApplyInput
+): Promise<CliConfigApplyResult> {
+  const { result } = await fetchJson<{ result: CliConfigApplyResult }>(cliConfigPath(adapter, "/apply-provider"), {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return result;
+}
+
+export async function rollbackCliConfigApply(
+  adapter: RuntimeAdapterId,
+  backupId?: string
+): Promise<CliConfigRollbackResult> {
+  const { result } = await fetchJson<{ result: CliConfigRollbackResult }>(cliConfigPath(adapter, "/rollback"), {
+    method: "POST",
+    body: JSON.stringify(backupId ? { backupId } : {}),
+  });
+  return result;
 }
 
 
@@ -2335,10 +2400,7 @@ export async function listSessions(params: { projectId?: string } = {}): Promise
 
 export async function createSession(data: {
   projectId: string;
-  credentialMode: CredentialMode;
   aiTool?: RuntimeAdapterId;
-  modelId?: string;
-  apiKeyId?: string;
 }): Promise<{ session: Session }> {
   return fetchJson("/api/v1/sessions", { method: "POST", body: JSON.stringify(data) }) as Promise<{ session: Session }>;
 }
@@ -2599,7 +2661,7 @@ export async function createModelProvider(data: {
   productType?: ProviderProductType;
   authType?: ProviderAuthType;
   apiFormat?: ProviderApiFormat;
-  supportedAdapters?: Array<"claude" | "opencode">;
+  supportedAdapters?: ProviderSupportedAdapter[];
 }): Promise<{ provider: ProviderProfile; models: ModelProfile[] }> {
   return fetchJson("/api/v1/model-providers", {
     method: "POST",
@@ -2634,10 +2696,10 @@ export async function rotateProviderCredential(
   }) as Promise<{ credential: ProviderCredentialSummary }>;
 }
 
-export async function deleteProviderCredential(providerId: string, credentialId: string): Promise<unknown> {
+export async function deleteProviderCredential(providerId: string, credentialId: string): Promise<{ disposition: "deleted" | "revoked" }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/credentials/${credentialId}`, {
     method: "DELETE",
-  });
+  }) as Promise<{ disposition: "deleted" | "revoked" }>;
 }
 
 export async function createProviderModel(
@@ -2697,42 +2759,6 @@ export async function checkModelProviderReadiness(
     method: "POST",
     body: JSON.stringify(data),
   }) as Promise<{ readiness: ModelProviderReadiness }>;
-}
-
-export async function previewProviderApply(
-  providerId: string,
-  data: {
-    adapter: ProviderApplyAdapter;
-    scope?: "project" | "user-global";
-    projectRoot?: string;
-    modelProfileId?: string;
-    credentialId?: string;
-  }
-): Promise<{ preview: ProviderApplyPreview }> {
-  return fetchJson(`/api/v1/model-providers/${providerId}/preview-apply`, {
-    method: "POST",
-    body: JSON.stringify(data),
-  }) as Promise<{ preview: ProviderApplyPreview }>;
-}
-
-export async function applyProviderConfig(
-  providerId: string,
-  data: {
-    adapter: ProviderApplyAdapter;
-    scope?: "project" | "user-global";
-    projectRoot?: string;
-    modelProfileId?: string;
-    credentialId?: string;
-  }
-): Promise<{ result: ProviderApplyPreview }> {
-  return fetchJson(`/api/v1/model-providers/${providerId}/apply`, {
-    method: "POST",
-    body: JSON.stringify(data),
-  }) as Promise<{ result: ProviderApplyPreview }>;
-}
-
-export async function getCodexSubscriptionStatus(): Promise<{ status: CodexSubscriptionStatus }> {
-  return fetchJson("/api/v1/codex/subscription/status") as Promise<{ status: CodexSubscriptionStatus }>;
 }
 
 export async function listApiKeys(): Promise<{ apiKeys: ApiKeySummary[] }> {

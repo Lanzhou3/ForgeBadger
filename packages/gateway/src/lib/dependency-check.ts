@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 
+import { resolveTerminalMultiplexerRuntime } from "../services/terminal-multiplexer-runtime.js";
+
 export interface CommandResult {
   exitCode: number;
   stdout: string;
@@ -25,10 +27,15 @@ export interface DependencyStatus {
   error?: string;
 }
 
-export type TerminalRuntimeMode = "native_tmux" | "wsl_required" | "tmux_missing";
+export type TerminalRuntimeMode =
+  | "native_tmux"
+  | "native_psmux"
+  | "tmux_missing"
+  | "psmux_missing"
+  | "psmux_outdated";
 
 export interface TerminalRuntimeStatus {
-  persistence: "tmux";
+  persistence: "tmux" | "psmux";
   mode: TerminalRuntimeMode;
   supported: boolean;
   message: string;
@@ -45,8 +52,7 @@ interface DependencyCheck {
   required: boolean;
 }
 
-const FORGEBADGER_DEPENDENCY_CHECKS: DependencyCheck[] = [
-  { command: "tmux", args: ["-V"], required: true },
+const OPTIONAL_ADAPTER_DEPENDENCY_CHECKS: DependencyCheck[] = [
   { command: "claude", args: ["--version"], required: false },
   { command: "opencode", args: ["--version"], required: false },
   { command: "codex", args: ["--version"], required: false },
@@ -56,6 +62,7 @@ const FORGEBADGER_DEPENDENCY_CHECKS: DependencyCheck[] = [
 const DEFAULT_COMMAND_TIMEOUT_MS = 3000;
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_KILL_GRACE_MS = 250;
+const MINIMUM_PSMUX_VERSION = [3, 3, 8] as const;
 
 interface BoundedOutput {
   chunks: Buffer[];
@@ -102,13 +109,22 @@ export async function checkGateADependencies(
 }
 
 export async function checkForgeBadgerDependencies(
-  runner: CommandRunner = runCommand
+  runner: CommandRunner = runCommand,
+  platform: NodeJS.Platform = process.platform
 ): Promise<DependencyStatus[]> {
+  const runtime = resolveTerminalMultiplexerRuntime(platform);
+  const checks: DependencyCheck[] = [
+    { command: runtime.command, args: runtime.versionArgs, required: true },
+    ...OPTIONAL_ADAPTER_DEPENDENCY_CHECKS
+  ];
   return Promise.all(
-    FORGEBADGER_DEPENDENCY_CHECKS.map(async (check) => ({
-      ...(await checkCommand(check.command, check.args, runner)),
-      required: check.required
-    }))
+    checks.map(async (check) => {
+      const status = await checkCommand(check.command, check.args, runner);
+      return {
+        ...validateTerminalRuntimeVersion(status, platform),
+        required: check.required
+      };
+    })
   );
 }
 
@@ -116,11 +132,23 @@ export async function checkForgeBadgerRuntimeDependencies(
   runner: CommandRunner = runCommand,
   platform: NodeJS.Platform = process.platform
 ): Promise<ForgeBadgerDependencyReport> {
-  const dependencies = await checkForgeBadgerDependencies(runner);
+  const dependencies = await checkForgeBadgerDependencies(runner, platform);
   return {
     dependencies,
     terminalRuntime: describeTerminalRuntime(dependencies, platform)
   };
+}
+
+export async function checkTerminalRuntimeReadiness(
+  runner: CommandRunner = runCommand,
+  platform: NodeJS.Platform = process.platform
+): Promise<TerminalRuntimeStatus> {
+  const runtime = resolveTerminalMultiplexerRuntime(platform);
+  const dependency = validateTerminalRuntimeVersion(
+    await checkCommand(runtime.command, runtime.versionArgs, runner),
+    platform
+  );
+  return describeTerminalRuntime([dependency], platform);
 }
 
 export function runCommand(
@@ -195,31 +223,74 @@ function describeTerminalRuntime(
   dependencies: DependencyStatus[],
   platform: NodeJS.Platform
 ): TerminalRuntimeStatus {
-  if (platform === "win32") {
+  const runtime = resolveTerminalMultiplexerRuntime(platform);
+  const dependency = dependencies.find((item) => item.name === runtime.command);
+  if (dependency?.available) {
     return {
-      persistence: "tmux",
-      mode: "wsl_required",
-      supported: false,
-      message: "Native Windows terminals require WSL because ForgeBadger persists sessions with tmux."
+      persistence: runtime.kind,
+      mode: runtime.kind === "psmux" ? "native_psmux" : "native_tmux",
+      supported: true,
+      message: `${runtime.command} is available for persistent browser terminals.`
     };
   }
 
-  const tmux = dependencies.find((dependency) => dependency.name === "tmux");
-  if (tmux?.available) {
+  if (runtime.kind === "psmux" && isOutdatedPsmuxVersion(dependency?.version)) {
     return {
-      persistence: "tmux",
-      mode: "native_tmux",
-      supported: true,
-      message: "tmux is available for persistent browser terminals."
+      persistence: "psmux",
+      mode: "psmux_outdated",
+      supported: false,
+      message: "Upgrade psmux to version 3.3.8 or newer for persistent browser terminals."
     };
   }
 
   return {
-    persistence: "tmux",
-    mode: "tmux_missing",
+    persistence: runtime.kind,
+    mode: runtime.kind === "psmux" ? "psmux_missing" : "tmux_missing",
     supported: false,
-    message: "Install tmux to enable persistent browser terminals."
+    message: `Install ${runtime.command} to enable persistent browser terminals.`
   };
+}
+
+function validateTerminalRuntimeVersion(
+  status: DependencyStatus,
+  platform: NodeJS.Platform
+): DependencyStatus {
+  if (platform !== "win32" || status.name !== "psmux" || !status.available) {
+    return status;
+  }
+  const parsed = parsePsmuxVersion(status.version);
+  if (parsed && compareVersions(parsed, MINIMUM_PSMUX_VERSION) >= 0) {
+    return status;
+  }
+  return {
+    ...status,
+    available: false,
+    error: parsed
+      ? "psmux 3.3.8 or newer is required"
+      : "Unable to determine psmux version; version 3.3.8 or newer is required"
+  };
+}
+
+function isOutdatedPsmuxVersion(version: string | undefined): boolean {
+  const parsed = parsePsmuxVersion(version);
+  return parsed !== undefined && compareVersions(parsed, MINIMUM_PSMUX_VERSION) < 0;
+}
+
+function parsePsmuxVersion(version: string | undefined): readonly [number, number, number] | undefined {
+  const match = /(?:psmux|tmux)\s+(\d+)\.(\d+)\.(\d+)/i.exec(version ?? "");
+  if (!match) return undefined;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function compareVersions(
+  left: readonly [number, number, number],
+  right: readonly [number, number, number]
+): number {
+  for (let index = 0; index < left.length; index += 1) {
+    const difference = left[index]! - right[index]!;
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
 function createBoundedOutput(): BoundedOutput {

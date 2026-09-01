@@ -1,10 +1,11 @@
 import { homedir } from "node:os";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 
 import type { AdapterId } from "./adapter-discovery.js";
+import { atomicWriteConfig } from "./cli-config-fs.js";
 import {
   findCliConfigField,
   listCliConfigFields,
@@ -15,8 +16,6 @@ export interface CliConfigFileEntry {
   relativePath: string;
   fileType: string;
   exists: boolean;
-  content: string;
-  redacted: boolean;
   sizeBytes: number;
 }
 
@@ -50,7 +49,6 @@ export interface CliProviderInput {
   name?: string | undefined;
   protocol?: string | undefined;
   baseUrl?: string | undefined;
-  apiKey?: string | undefined;
   envKey?: string | undefined;
 }
 
@@ -95,11 +93,10 @@ const cliConfigMeta: Record<AdapterId, CliConfigMeta> = {
   }
 };
 
-export function listCliConfigAdapters(): Array<{ adapter: AdapterId; configFile: string; configRoot: string }> {
+export function listCliConfigAdapters(): Array<{ adapter: AdapterId; configFile: string }> {
   return (Object.keys(cliConfigMeta) as AdapterId[]).map((adapter) => ({
     adapter,
-    configFile: cliConfigMeta[adapter].mainFile,
-    configRoot: cliConfigMeta[adapter].configRoot()
+    configFile: cliConfigMeta[adapter].mainFile
   }));
 }
 
@@ -107,7 +104,7 @@ export async function readCliConfig(adapter: AdapterId): Promise<CliConfigSnapsh
   const meta = cliConfigMeta[adapter];
   const root = meta.configRoot();
   const files = await Promise.all(
-    meta.editableFiles.map((relativePath) => readConfigFile(root, relativePath, { reveal: false }))
+    meta.editableFiles.map((relativePath) => readConfigFile(root, relativePath))
   );
   const parsed = await parseMainConfig(adapter);
 
@@ -124,11 +121,10 @@ export async function readCliConfig(adapter: AdapterId): Promise<CliConfigSnapsh
 
 export async function readCliConfigFile(
   adapter: AdapterId,
-  relativePath: string,
-  reveal: boolean
+  relativePath: string
 ): Promise<CliConfigFileEntry> {
   assertEditableFile(adapter, relativePath);
-  return readConfigFile(cliConfigMeta[adapter].configRoot(), relativePath, { reveal });
+  return readConfigFile(cliConfigMeta[adapter].configRoot(), relativePath);
 }
 
 export async function writeCliConfigFile(
@@ -157,7 +153,6 @@ export async function upsertCliProvider(
         }
         const env = ensureRecord(doc, "env");
         if (input.baseUrl !== undefined) env.ANTHROPIC_BASE_URL = input.baseUrl;
-        if (input.apiKey) env.ANTHROPIC_AUTH_TOKEN = input.apiKey;
       });
     case "opencode":
       return mutateOpenCodeConfig((doc) => {
@@ -166,7 +161,6 @@ export async function upsertCliProvider(
         const existingOptions = asRecord(existing?.options);
         const options: Record<string, unknown> = { ...existingOptions };
         if (input.baseUrl !== undefined) options.baseURL = input.baseUrl;
-        if (input.apiKey) options.apiKey = input.apiKey;
         providers[providerId] = {
           ...existing,
           npm: input.protocol ?? existing?.npm ?? "@ai-sdk/openai-compatible",
@@ -195,7 +189,6 @@ export async function upsertCliProvider(
           type: input.protocol ?? existing?.type ?? "kimi"
         };
         if (input.baseUrl !== undefined) next.base_url = input.baseUrl;
-        if (input.apiKey) next.api_key = input.apiKey;
         providers[providerId] = next;
       });
   }
@@ -541,28 +534,23 @@ function parseConfigDoc(fileType: "json" | "toml", content: string): ConfigDoc {
 
 async function readConfigFile(
   root: string,
-  relativePath: string,
-  options: { reveal: boolean }
+  relativePath: string
 ): Promise<CliConfigFileEntry> {
   const base = {
     relativePath,
-    fileType: fileTypeFor(relativePath),
-    redacted: false
+    fileType: fileTypeFor(relativePath)
   };
   const absolutePath = path.join(root, relativePath);
   const fileStat = await statFile(absolutePath);
   if (!fileStat) {
-    return { ...base, exists: false, content: "", sizeBytes: 0 };
+    return { ...base, exists: false, sizeBytes: 0 };
   }
   if (fileStat.size > maxConfigFileBytes) {
-    return { ...base, exists: true, content: "", sizeBytes: fileStat.size };
+    return { ...base, exists: true, sizeBytes: fileStat.size };
   }
-  const content = await readFile(absolutePath, "utf8");
   return {
     ...base,
     exists: true,
-    content: options.reveal ? content : redactSensitiveContent(content),
-    redacted: !options.reveal,
     sizeBytes: fileStat.size
   };
 }
@@ -574,8 +562,7 @@ async function readFileIfExists(root: string, relativePath: string): Promise<str
 }
 
 async function writeConfigFile(root: string, relativePath: string, content: string): Promise<void> {
-  await mkdir(root, { recursive: true, mode: 0o700 });
-  await writeFile(path.join(root, relativePath), content, { encoding: "utf8", mode: 0o600 });
+  atomicWriteConfig(path.join(root, relativePath), content);
 }
 
 async function statFile(absolutePath: string): Promise<{ size: number } | undefined> {
@@ -639,14 +626,6 @@ function fileTypeFor(filePath: string): string {
   if (extension === ".json" || extension === ".jsonc") return "json";
   if (extension === ".toml") return "toml";
   return "text";
-}
-
-function redactSensitiveContent(content: string): string {
-  return content
-    .replace(/\b((?:FORGEBADGER|OPENFORGE)_(?:MASTER_KEY|JWT_SECRET|ATTACH_TOKEN|API_KEY|TOKEN))\s*=\s*[^\s]+/giu, "$1=[REDACTED]")
-    .replace(/("(?:api[_-]?key|token|secret|password|authorization)"\s*:\s*")[^"]*(")/giu, "$1[REDACTED]$2")
-    .replace(/^(\s*(?:api[_-]?key|token|secret|password|authorization)\s*=\s*).+$/gimu, "$1\"[REDACTED]\"")
-    .replace(/((?:sk|pk|rk)-[A-Za-z0-9_-]{8,})/gu, "[REDACTED]");
 }
 
 function errorCode(error: unknown): string | undefined {

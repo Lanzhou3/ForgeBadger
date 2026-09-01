@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { Database } from "../types.js";
@@ -40,6 +40,25 @@ export interface Session {
   projectName?: string | null;
 }
 
+const sessionColumns = {
+  id: sessions.id,
+  userId: sessions.userId,
+  projectId: sessions.projectId,
+  name: sessions.name,
+  aiTool: sessions.aiTool,
+  modelId: sessions.modelId,
+  status: sessions.status,
+  attachToken: sessions.attachToken,
+  tmuxSession: sessions.tmuxSession,
+  workingDir: sessions.workingDir,
+  credentialMode: sessions.credentialMode,
+  apiKeyId: sessions.apiKeyId,
+  lastActive: sessions.lastActive,
+  errorMessage: sessions.errorMessage,
+  createdAt: sessions.createdAt,
+  updatedAt: sessions.updatedAt
+};
+
 export class SessionRepository {
   private drizzle;
 
@@ -62,14 +81,14 @@ export class SessionRepository {
         credentialMode: input.credentialMode ?? "host_environment",
         apiKeyId: input.apiKeyId ?? null
       })
-      .returning()
+      .returning(sessionColumns)
       .get();
     return result as Session;
   }
 
   list(): Session[] {
     return this.drizzle
-      .select({ session: sessions, projectName: projects.name })
+      .select({ session: sessionColumns, projectName: projects.name })
       .from(sessions)
       .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(eq(sessions.userId, this.userId))
@@ -79,7 +98,7 @@ export class SessionRepository {
 
   listByProject(projectId: string): Session[] {
     return this.drizzle
-      .select({ session: sessions, projectName: projects.name })
+      .select({ session: sessionColumns, projectName: projects.name })
       .from(sessions)
       .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(and(eq(sessions.userId, this.userId), eq(sessions.projectId, projectId)))
@@ -87,9 +106,24 @@ export class SessionRepository {
       .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
   }
 
+  listByIds(projectId: string, ids: string[]): Session[] {
+    if (ids.length === 0) return [];
+    return this.drizzle
+      .select({ session: sessionColumns, projectName: projects.name })
+      .from(sessions)
+      .leftJoin(projects, eq(sessions.projectId, projects.id))
+      .where(and(
+        eq(sessions.userId, this.userId),
+        eq(sessions.projectId, projectId),
+        inArray(sessions.id, ids)
+      ))
+      .all()
+      .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
+  }
+
   getById(id: string): Session | undefined {
     const row = this.drizzle
-      .select({ session: sessions, projectName: projects.name })
+      .select({ session: sessionColumns, projectName: projects.name })
       .from(sessions)
       .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(and(eq(sessions.id, id), eq(sessions.userId, this.userId)))
@@ -102,7 +136,7 @@ export class SessionRepository {
       .update(sessions)
       .set({ status })
       .where(and(eq(sessions.id, id), eq(sessions.userId, this.userId)))
-      .returning()
+      .returning(sessionColumns)
       .get() as Session | undefined;
   }
 
@@ -132,7 +166,7 @@ export class SessionRepository {
       .update(sessions)
       .set(updateData)
       .where(and(eq(sessions.id, id), eq(sessions.userId, this.userId)))
-      .returning()
+      .returning(sessionColumns)
       .get() as Session | undefined;
   }
 
@@ -145,7 +179,7 @@ export class SessionRepository {
 
   upsert(record: Session): Session {
     const existing = this.drizzle
-      .select()
+      .select({ id: sessions.id })
       .from(sessions)
       .where(and(eq(sessions.id, record.id), eq(sessions.userId, this.userId)))
       .get();
@@ -169,7 +203,7 @@ export class SessionRepository {
           updatedAt: record.updatedAt
         })
         .where(and(eq(sessions.id, record.id), eq(sessions.userId, this.userId)))
-        .returning()
+        .returning(sessionColumns)
         .get() as Session;
     }
 
@@ -193,7 +227,7 @@ export class SessionRepository {
         createdAt: record.createdAt,
         updatedAt: record.updatedAt
       })
-      .returning()
+      .returning(sessionColumns)
       .get() as Session;
   }
 }

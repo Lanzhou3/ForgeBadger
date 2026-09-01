@@ -61,6 +61,7 @@ export async function verifyNpmPackage(options = {}) {
   if (!hasAllowedFilesWhitelist(cliPackageRoot)) {
     errors.push("packages/cli/package.json files whitelist does not match npm package artifacts");
   }
+  verifyReadmeBrandAssetUrls(cliPackageRoot, errors);
   verifyForbiddenRuntimeDependencies(packageJson, errors);
   verifyGatewayRuntimeDependencies(packageJson, gatewayPackageRoot, errors);
 
@@ -166,6 +167,22 @@ function hasAllowedFilesWhitelist(cliPackageRoot) {
 function readPackageJson(cliPackageRoot) {
   const packageJsonPath = path.join(cliPackageRoot, "package.json");
   return JSON.parse(existsSync(packageJsonPath) && lstatSync(packageJsonPath).isFile() ? readFileSync(packageJsonPath, "utf8") : "{}");
+}
+
+function verifyReadmeBrandAssetUrls(cliPackageRoot, errors) {
+  const readmes = ["README.md", "docs/README.zh-CN.md", "docs/README.zh-TW.md"];
+  const relativeBrandAssetPattern = /src="(?:\.\.\/)*packages\/web\/public\/brand\//;
+  for (const readme of readmes) {
+    const absolute = path.join(cliPackageRoot, readme);
+    if (!existsSync(absolute)) {
+      continue;
+    }
+    if (relativeBrandAssetPattern.test(readFileSync(absolute, "utf8"))) {
+      errors.push(
+        `packages/cli/${readme} uses a relative brand asset URL; build-npm-package must rewrite it to the raw GitHub URL`
+      );
+    }
+  }
 }
 
 function verifyForbiddenRuntimeDependencies(packageJson, errors) {

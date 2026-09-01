@@ -1,8 +1,3 @@
-import { ApiKeyRepository } from "../db/repositories/api-key-repository.js";
-import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
-import { ProjectRepository } from "../db/repositories/project-repository.js";
-import { SessionRepository } from "../db/repositories/session-repository.js";
-import { SkillRepository } from "../db/repositories/skill-repository.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
 import type { Database } from "../db/types.js";
 
@@ -37,28 +32,34 @@ export interface DashboardSummary {
   health: DashboardHealth;
 }
 
+type DashboardResourceCounts = Omit<DashboardStats, "templates">;
+
+export function getDashboardResourceCounts(db: Database, userId: string): DashboardResourceCounts {
+  const row = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM projects WHERE user_id = @userId) AS projects,
+      (SELECT COUNT(*) FROM sessions WHERE user_id = @userId) AS sessions,
+      (SELECT COUNT(*) FROM sessions WHERE user_id = @userId AND status = 'running') AS runningSessions,
+      (
+        SELECT COUNT(*) FROM skills
+        WHERE user_id = @userId OR visibility = 'shared'
+          OR (visibility = 'admin' AND EXISTS (
+            SELECT 1 FROM users WHERE id = @userId AND role = 'admin'
+          ))
+      ) AS skills,
+      (SELECT COUNT(*) FROM model_profiles WHERE user_id = @userId) AS models,
+      (SELECT COUNT(*) FROM api_keys WHERE user_id = @userId) AS apiKeys
+  `).get({ userId }) as DashboardResourceCounts;
+  return row;
+}
+
 export function getDashboardSummary(
   db: Database,
-  userId: string,
-  masterKey: string
+  userId: string
 ): DashboardSummary {
-  const projects = new ProjectRepository(db, userId).list();
-  const sessions = new SessionRepository(db, userId).list();
-  const skills = new SkillRepository(db, userId).list();
-  const models = new ModelProviderRepository(db, userId, masterKey).listModelProfiles();
-  const apiKeys = new ApiKeyRepository(db, userId, masterKey).list();
-  const templateRepo = new TemplateRepository(db, userId);
-  const templates = [...templateRepo.listBuiltIn(), ...templateRepo.list()];
-  const runningSessions = sessions.filter((session) => session.status === "running");
-
   const stats: DashboardStats = {
-    projects: projects.length,
-    sessions: sessions.length,
-    runningSessions: runningSessions.length,
-    skills: skills.length,
-    models: models.length,
-    apiKeys: apiKeys.length,
-    templates: templates.length
+    ...getDashboardResourceCounts(db, userId),
+    templates: new TemplateRepository(db, userId).countReadable()
   };
 
   return {

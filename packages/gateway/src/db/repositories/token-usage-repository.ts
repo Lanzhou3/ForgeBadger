@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { randomUUID } from "node:crypto";
 
@@ -37,7 +37,7 @@ export interface TokenUsageSummary {
 export class TokenUsageRepository {
   private drizzle;
 
-  constructor(db: Database, private readonly userId: string) {
+  constructor(private readonly db: Database, private readonly userId: string) {
     this.drizzle = drizzle(db);
   }
 
@@ -109,59 +109,43 @@ export class TokenUsageRepository {
   getSummary(from?: Date, to?: Date): TokenUsageSummary {
     const fromSeconds = from ? Math.floor(from.getTime() / 1000) : null;
     const toSeconds = to ? Math.floor(to.getTime() / 1000) : null;
-    const andClauses = [eq(tokenUsageRecords.userId, this.userId)];
-    if (fromSeconds !== null) andClauses.push(sql`${tokenUsageRecords.occurredAt} >= ${fromSeconds}`);
-    if (toSeconds !== null) andClauses.push(sql`${tokenUsageRecords.occurredAt} < ${toSeconds}`);
-    const where = and(...andClauses);
-
-    const rows = this.drizzle
-      .select({
-        adapter: tokenUsageRecords.adapter,
-        projectPath: tokenUsageRecords.projectPath,
-        modelId: tokenUsageRecords.modelId,
-        inputTokens: tokenUsageRecords.inputTokens,
-        outputTokens: tokenUsageRecords.outputTokens,
-        cacheReadTokens: tokenUsageRecords.cacheReadTokens,
-        cacheWriteTokens: tokenUsageRecords.cacheWriteTokens,
-        reasoningTokens: tokenUsageRecords.reasoningTokens
-      })
-      .from(tokenUsageRecords)
-      .where(where)
-      .all() as Array<{
-      adapter: string;
-      projectPath: string;
-      modelId: string | null;
-      inputTokens: number;
-      outputTokens: number;
-      cacheReadTokens: number;
-      cacheWriteTokens: number;
-      reasoningTokens: number;
-    }>;
+    const { whereSql, params } = buildRangeFilter(this.userId, fromSeconds, toSeconds);
+    const rows = this.db.prepare(`
+      SELECT
+        adapter,
+        project_path AS projectPath,
+        model_id AS modelId,
+        SUM(input_tokens) AS inputTokens,
+        SUM(output_tokens) AS outputTokens,
+        SUM(cache_read_tokens) AS cacheReadTokens,
+        SUM(cache_write_tokens) AS cacheWriteTokens,
+        SUM(reasoning_tokens) AS reasoningTokens,
+        COUNT(*) AS requestCount
+      FROM token_usage_records
+      ${whereSql}
+      GROUP BY adapter, project_path, model_id
+    `).all(...params) as TokenAggregateRow[];
 
     const byAdapter = new Map<string, TokenUsageBucket>();
     const byProject = new Map<string, TokenUsageBucket>();
     const byModel = new Map<string, TokenUsageBucket>();
 
     for (const row of rows) {
-      merge(byAdapter, row.adapter || "unknown", row);
-      merge(byProject, row.projectPath || "unknown", row);
-      merge(byModel, row.modelId || "unknown", row);
+      mergeAggregate(byAdapter, row.adapter || "unknown", row);
+      mergeAggregate(byProject, row.projectPath || "unknown", row);
+      mergeAggregate(byModel, row.modelId || "unknown", row);
     }
 
-    const totalInputTokens = sum(rows, (r) => r.inputTokens);
-    const totalOutputTokens = sum(rows, (r) => r.outputTokens);
-    const totalReasoningTokens = sum(rows, (r) => r.reasoningTokens);
-    const totalCacheReadTokens = sum(rows, (r) => r.cacheReadTokens);
-    const totalCacheWriteTokens = sum(rows, (r) => r.cacheWriteTokens);
+    const totals = sumAggregates(rows);
     return {
-      totalInputTokens,
-      totalOutputTokens,
-      totalCacheReadTokens,
-      totalCacheWriteTokens,
-      totalReasoningTokens,
-      totalTokens: totalInputTokens + totalOutputTokens + totalCacheReadTokens + totalCacheWriteTokens + totalReasoningTokens,
-      requestCount: rows.length,
-      cacheHitRate: hitRate(totalCacheReadTokens, totalCacheWriteTokens, totalInputTokens),
+      totalInputTokens: totals.inputTokens,
+      totalOutputTokens: totals.outputTokens,
+      totalCacheReadTokens: totals.cacheReadTokens,
+      totalCacheWriteTokens: totals.cacheWriteTokens,
+      totalReasoningTokens: totals.reasoningTokens,
+      totalTokens: totalTokens(totals),
+      requestCount: totals.requestCount,
+      cacheHitRate: hitRate(totals.cacheReadTokens, totals.cacheWriteTokens, totals.inputTokens),
       byAdapter: sortBuckets(byAdapter),
       byProject: sortBuckets(byProject),
       byModel: sortBuckets(byModel)
@@ -181,69 +165,45 @@ export class TokenUsageRepository {
     outputTokens: number;
     totalTokens: number;
   }> {
-    const andClauses = [eq(tokenUsageRecords.userId, this.userId)];
-    if (options.from) andClauses.push(sql`${tokenUsageRecords.occurredAt} >= ${Math.floor(options.from.getTime() / 1000)}`);
-    if (options.to) andClauses.push(sql`${tokenUsageRecords.occurredAt} < ${Math.floor(options.to.getTime() / 1000)}`);
-    if (options.projectPath) andClauses.push(eq(tokenUsageRecords.projectPath, options.projectPath));
+    const fromSeconds = options.from ? Math.floor(options.from.getTime() / 1000) : null;
+    const toSeconds = options.to ? Math.floor(options.to.getTime() / 1000) : null;
+    const { whereSql, params } = buildRangeFilter(this.userId, fromSeconds, toSeconds, options.projectPath);
+    const groupColumn = options.groupBy === "project" ? "project_path" : "adapter";
 
-    const groupColumn = options.groupBy === "project"
-      ? tokenUsageRecords.projectPath
-      : tokenUsageRecords.adapter;
-
-    const dayPrefix = sql<string>`strftime('%Y-%m-%d', ${tokenUsageRecords.occurredAt}, 'unixepoch')`;
-
-    const rows = this.drizzle
-      .select({
-        day: dayPrefix,
-        group: groupColumn,
-        inputTokens: tokenUsageRecords.inputTokens,
-        outputTokens: tokenUsageRecords.outputTokens,
-        totalTokens: sql<number>`(${tokenUsageRecords.inputTokens} + ${tokenUsageRecords.outputTokens} + ${tokenUsageRecords.cacheReadTokens} + ${tokenUsageRecords.cacheWriteTokens} + ${tokenUsageRecords.reasoningTokens})`
-      })
-      .from(tokenUsageRecords)
-      .where(and(...andClauses))
-      .orderBy(asc(dayPrefix))
-      .all() as Array<{
+    return this.db.prepare(`
+      SELECT
+        strftime('%Y-%m-%d', occurred_at, 'unixepoch') AS day,
+        ${groupColumn} AS "group",
+        SUM(input_tokens) AS inputTokens,
+        SUM(output_tokens) AS outputTokens,
+        SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + reasoning_tokens) AS totalTokens
+      FROM token_usage_records
+      ${whereSql}
+      GROUP BY day, ${groupColumn}
+      ORDER BY day ASC, "group" ASC
+    `).all(...params) as Array<{
       day: string;
       group: string;
       inputTokens: number;
       outputTokens: number;
       totalTokens: number;
     }>;
-
-    const byDay = new Map<string, Map<string, { inputTokens: number; outputTokens: number; totalTokens: number; count: number }>>();
-    for (const row of rows) {
-      const dayKey = typeof row.day === "string" ? row.day : "";
-      const groupKey = row.group ?? "unknown";
-      const dayMap = byDay.get(dayKey) ?? new Map();
-      const current = dayMap.get(groupKey) ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0, count: 0 };
-      current.inputTokens += row.inputTokens;
-      current.outputTokens += row.outputTokens;
-      current.totalTokens += row.totalTokens;
-      current.count += 1;
-      dayMap.set(groupKey, current);
-      byDay.set(dayKey, dayMap);
-    }
-
-    const result: Array<{ day: string; group: string; inputTokens: number; outputTokens: number; totalTokens: number }> = [];
-    for (const [day, groupMap] of [...byDay.entries()].sort()) {
-      for (const [group, value] of [...groupMap.entries()].sort()) {
-        result.push({ day, group, inputTokens: value.inputTokens, outputTokens: value.outputTokens, totalTokens: value.totalTokens });
-      }
-    }
-    return result;
   }
 }
 
-type TokenRow = {
+type TokenAggregateRow = {
+  adapter: string;
+  projectPath: string;
+  modelId: string | null;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
   reasoningTokens: number;
+  requestCount: number;
 };
 
-function merge(map: Map<string, TokenUsageBucket>, key: string, row: TokenRow): void {
+function mergeAggregate(map: Map<string, TokenUsageBucket>, key: string, row: TokenAggregateRow): void {
   const current = map.get(key) ?? {
     key,
     inputTokens: 0,
@@ -260,8 +220,8 @@ function merge(map: Map<string, TokenUsageBucket>, key: string, row: TokenRow): 
   current.cacheReadTokens += row.cacheReadTokens;
   current.cacheWriteTokens += row.cacheWriteTokens;
   current.reasoningTokens += row.reasoningTokens;
-  current.totalTokens += row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens + row.reasoningTokens;
-  current.requestCount += 1;
+  current.totalTokens += totalTokens(row);
+  current.requestCount += row.requestCount;
   current.cacheHitRate = hitRate(current.cacheReadTokens, current.cacheWriteTokens, current.inputTokens);
   map.set(key, current);
 }
@@ -284,6 +244,40 @@ function sortBuckets(map: Map<string, TokenUsageBucket>): TokenUsageBucket[] {
   return [...map.values()].sort((a, b) => b.totalTokens - a.totalTokens);
 }
 
-function sum(rows: Array<{ inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }>, pick: (r: (typeof rows)[number]) => number): number {
-  return rows.reduce((total, row) => total + pick(row), 0);
+function buildRangeFilter(
+  userId: string,
+  fromSeconds: number | null,
+  toSeconds: number | null,
+  projectPath?: string
+): { whereSql: string; params: Array<string | number> } {
+  const clauses = ["user_id = ?"];
+  const params: Array<string | number> = [userId];
+  if (fromSeconds !== null) {
+    clauses.push("occurred_at >= ?");
+    params.push(fromSeconds);
+  }
+  if (toSeconds !== null) {
+    clauses.push("occurred_at < ?");
+    params.push(toSeconds);
+  }
+  if (projectPath !== undefined) {
+    clauses.push("project_path = ?");
+    params.push(projectPath);
+  }
+  return { whereSql: `WHERE ${clauses.join(" AND ")}`, params };
+}
+
+function sumAggregates(rows: TokenAggregateRow[]): Omit<TokenAggregateRow, "adapter" | "projectPath" | "modelId"> {
+  return rows.reduce((total, row) => ({
+    inputTokens: total.inputTokens + row.inputTokens,
+    outputTokens: total.outputTokens + row.outputTokens,
+    cacheReadTokens: total.cacheReadTokens + row.cacheReadTokens,
+    cacheWriteTokens: total.cacheWriteTokens + row.cacheWriteTokens,
+    reasoningTokens: total.reasoningTokens + row.reasoningTokens,
+    requestCount: total.requestCount + row.requestCount
+  }), { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, requestCount: 0 });
+}
+
+function totalTokens(row: Pick<TokenAggregateRow, "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "reasoningTokens">): number {
+  return row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens + row.reasoningTokens;
 }

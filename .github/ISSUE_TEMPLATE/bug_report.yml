@@ -17,10 +17,10 @@ body:
       options:
         - Gateway API
         - Web console
-        - terminal/tmux
+        - terminal runtime (tmux/psmux)
         - project setup/import
         - provider/model readiness
-        - Copilot/pending actions
+        - Copilot conversations/approvals
         - Project Manager traceability
         - Feishu integration
         - Codex app-server prototype
@@ -37,11 +37,12 @@ body:
       value: |
         ForgeBadger commit/version:
         OS:
-        WSL distribution/version, if applicable:
+        Native Windows or WSL distribution/version, if applicable:
         Browser:
         node --version:
         pnpm --version:
-        tmux -V:
+        Terminal runtime selected (tmux/psmux):
+        Actual runtime version (`tmux -V` or `psmux -V`):
         claude --version, if checked:
         opencode --version, if checked:
         codex --version, if checked:

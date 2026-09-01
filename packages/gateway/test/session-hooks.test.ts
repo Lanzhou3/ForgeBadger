@@ -10,11 +10,7 @@ import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
-import {
-  handleClaudeNotificationHook,
-  handleClaudePortfolioWorkerSessionStart
-} from "../src/routes/session-hooks.js";
-import type { ClaudePortfolioWorker } from "../src/services/portfolio/claude-portfolio-worker.js";
+import { handleClaudeNotificationHook } from "../src/routes/session-hooks.js";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -92,91 +88,6 @@ describe("Claude Code session hook route", () => {
       assert.equal(event.notificationType, "permission_prompt");
       assert.equal(event.toolName, "Bash");
     }
-  });
-
-  it("isolates worker ACK from the ordinary attach-token notification hook", () => {
-    // Arrange
-    const user = new UserRepository(db).create("hook-portfolio-worker@example.com", "hash");
-    const project = new ProjectRepository(db, user.id).create({
-      name: "Portfolio worker hook project",
-      path: "/tmp/portfolio-worker-hook-project",
-      aiTool: "claude"
-    });
-    const session = new SessionRepository(db, user.id).create({
-      projectId: project.id,
-      name: "Portfolio worker hook session",
-      aiTool: "claude",
-      workingDir: project.path,
-      attachToken: "valid-attach-token-is-not-worker-capability",
-      tmuxSession: "of-portfolio-worker-hook"
-    });
-    const expectedCapability = "worker-ack-capability-only";
-    const acknowledged: Array<{ userId: string; sessionId: string; workerAckCapability: string }> = [];
-    const worker = {
-      forwardSessionStart(input: { userId: string; sessionId: string; workerAckCapability: string }) {
-        if (input.workerAckCapability !== expectedCapability) return { status: "rejected" };
-        acknowledged.push(input);
-        return { status: "acknowledged" };
-      }
-    } as unknown as ClaudePortfolioWorker;
-
-    // Act
-    const normalNotification = handleClaudeNotificationHook(
-      db,
-      eventBus,
-      { hook_event_name: "SessionStart", adapter: "claude" },
-      session.attachToken ?? undefined,
-      session.id
-    );
-    const missing = handleClaudePortfolioWorkerSessionStart(
-      db,
-      session.id,
-      { hook_event_name: "SessionStart" },
-      undefined,
-      worker
-    );
-    const wrongAttachToken = handleClaudePortfolioWorkerSessionStart(
-      db,
-      session.id,
-      { hook_event_name: "SessionStart" },
-      session.attachToken ?? undefined,
-      worker
-    );
-    const wrongEvent = handleClaudePortfolioWorkerSessionStart(
-      db,
-      session.id,
-      { hook_event_name: "Notification" },
-      expectedCapability,
-      worker
-    );
-    const extraWorkerKey = handleClaudePortfolioWorkerSessionStart(
-      db,
-      session.id,
-      { hook_event_name: "SessionStart", receiptDigest: "must-not-reach-worker" },
-      expectedCapability,
-      worker
-    );
-    assert.equal(acknowledged.length, 0, "a strict-body rejection must not create a worker ACK signal or receipt");
-    const accepted = handleClaudePortfolioWorkerSessionStart(
-      db,
-      session.id,
-      { hook_event_name: "SessionStart" },
-      expectedCapability,
-      worker
-    );
-
-    // Assert
-    assert.equal(normalNotification.status, 200);
-    assert.notEqual(missing.status, 200);
-    assert.notEqual(wrongAttachToken.status, 200);
-    assert.notEqual(wrongEvent.status, 200);
-    assert.equal(extraWorkerKey.status, 400);
-    assert.equal(accepted.status, 200);
-    assert.deepEqual(acknowledged, [{
-      userId: user.id,
-      sessionId: session.id,
-      workerAckCapability: expectedCapability
-    }]);
   });
 
   it("accepts Claude Code raw PermissionRequest hook payloads from HTTP hooks", async () => {

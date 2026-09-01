@@ -25,11 +25,12 @@ import {
   createTaskPacketContext,
   createTaskPacketSessionName,
   resolveTaskPacketSession,
+  resolveTaskPacketSessions,
   withTaskPacketSessionLink,
   isActiveSessionStatus,
   type ProjectManagerTaskPacket
 } from "../../project-manager/task-packets.js";
-import { dispatchSessionInput } from "../../copilot-bridge/bridge-service.js";
+import { dispatchSessionInput } from "../platform-access.js";
 import { startSessionRuntime } from "../../session-runtime.js";
 import { isAdapterId } from "../../adapter-discovery.js";
 
@@ -92,12 +93,12 @@ export function createProjectManagerTools(): AgentTool[] {
         const project = new ProjectRepository(db, userId).getById(projectId);
         if (!project) return { found: false, taskPackets: [] };
         const repo = new ProjectManagerRepository(db, userId);
-        const items = repo.listWorkItems(projectId);
+        const items = repo.listWorkItems(projectId, limit === undefined ? {} : { limit });
+        const sessionsByWorkItem = resolveTaskPacketSessions(db, userId, projectId, items);
         const packets: ProjectManagerTaskPacket[] = [];
         for (const workItem of items) {
-          const session = resolveTaskPacketSession(db, userId, projectId, workItem);
+          const session = sessionsByWorkItem.get(workItem.id) ?? null;
           packets.push(buildTaskPacket({ project, workItem, session }));
-          if (limit !== undefined && packets.length >= limit) break;
         }
         return { found: true, count: packets.length, taskPackets: packets };
       }

@@ -11,7 +11,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 
-export type UsageTokenAdapter = "claude" | "opencode" | "codex";
+export type UsageTokenAdapter = "claude" | "opencode" | "codex" | "kimi";
 
 export interface TokenUsageRecord {
   /** Which CLI the record came from. */
@@ -70,6 +70,12 @@ export function opencodeDbPath(): string {
 export function codexSessionsRoot(): string {
   const codexHome = process.env.CODEX_HOME?.trim();
   return path.join(codexHome || pathJoinHome(".codex"), "sessions");
+}
+
+/** Root of Kimi Code session transcripts (KIMI_CODE_HOME-aware). */
+export function kimiSessionsRoot(): string {
+  const kimiHome = process.env.KIMI_CODE_HOME?.trim();
+  return path.join(kimiHome || pathJoinHome(".kimi-code"), "sessions");
 }
 
 /** Decode a Claude encode-project-dir into an absolute path (`-Users-a-B` -> `/Users/a/B`). */

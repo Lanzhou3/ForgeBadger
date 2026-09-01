@@ -18,20 +18,11 @@ import { createAgentLlmClient } from "./llm-client.js";
 import { createAgentToolRegistry, type AgentToolRegistry } from "./tool-registry.js";
 import { createPlatformTools } from "./tools/index.js";
 import { createCopilotOrchestrator } from "./orchestrator.js";
-import type { PortfolioApiFacade } from "../portfolio/portfolio-api-service.js";
-import type { DshCopilotBff } from "../dsh-copilot/bff-service.js";
 
 export interface AgentStackDeps {
   db: Database;
   masterKey: string;
   eventBus: ForgeBadgerEventBus;
-  portfolioApi?: PortfolioApiFacade | undefined;
-  /**
-   * M3: present when FORGEBADGER_DSH_COPILOT_ENABLED=1. Proactive (reactive-loop)
-   * and Feishu-channel turns then run on the dsh kernel BFF instead of the
-   * in-process orchestrator, with the same run/pending-action contract.
-   */
-  dshBff?: DshCopilotBff | undefined;
   /** Test-only fetch override; production callers omit it. */
   llmFetch?: typeof fetch;
   /**
@@ -69,8 +60,7 @@ export function buildAgentStack(deps: AgentStackDeps, userId: string): AgentStac
     eventBus: deps.eventBus,
     isToolDisabled: (toolName) => !toolPreferences.isEnabled(toolName),
     ...(deps.sessionManager !== undefined ? { sessionManager: deps.sessionManager } : {}),
-    ...(deps.adapterCommandRunner !== undefined ? { adapterCommandRunner: deps.adapterCommandRunner } : {}),
-    ...(deps.portfolioApi !== undefined ? { portfolioApi: deps.portfolioApi } : {})
+    ...(deps.adapterCommandRunner !== undefined ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
   });
   return { log, memory, orchestrator, toolRegistry };
 }

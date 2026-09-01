@@ -362,9 +362,3 @@
     @apply bg-background text-foreground antialiased;
   }
 }
-
-/* Session-page focus mode is a full-width terminal; the floating copilot
-   (fixed bottom-right) would cover the terminal's bottom-right content. */
-body[data-session-focus-mode] [data-floating-copilot] {
-  display: none;
-}

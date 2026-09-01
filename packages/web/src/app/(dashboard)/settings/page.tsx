@@ -131,7 +131,13 @@ export default function SettingsPage() {
     terminalRuntime?.mode,
     terminalRuntime?.supported
   );
-  const tmuxDependency = dependenciesData?.dependencies.find((dependency) => dependency.name === "tmux");
+  const terminalPersistence = terminalRuntime?.persistence;
+  const terminalDependency = dependenciesData?.dependencies.find(
+    (dependency) => dependency.name === terminalPersistence
+  );
+  const terminalDependencyDetail =
+    terminalDependency?.version ?? terminalDependency?.error ?? terminalRuntime?.message;
+  const terminalPersistenceLabel = terminalPersistence ?? t("settings.notDetected");
   const discoveryRefreshing = adaptersFetching || dependenciesFetching;
 
   return (
@@ -297,9 +303,9 @@ export default function SettingsPage() {
                       <p className="mt-1 text-xs text-muted-foreground">
                         {t(terminalSetupGuidance.descriptionKey)}
                       </p>
-                      {(tmuxDependency?.version || tmuxDependency?.error) && (
+                      {terminalDependencyDetail && (
                         <p className="mt-2 break-all font-mono text-xs text-muted-foreground">
-                          {tmuxDependency.version ?? tmuxDependency.error}
+                          {terminalDependencyDetail}
                         </p>
                       )}
                     </div>
@@ -376,7 +382,10 @@ export default function SettingsPage() {
                 <SecurityItem label={t("settings.jwtAuth")} value={t("settings.enabled")} />
                 <SecurityItem label={t("settings.tenantIsolation")} value={t("settings.enabled")} />
                 <SecurityItem label={t("settings.apiKeyEncryption")} value="AES-256-GCM" />
-                <SecurityItem label={t("settings.terminalPersistence")} value="tmux" />
+                <SecurityItem
+                  label={t("settings.terminalPersistence")}
+                  value={terminalPersistenceLabel}
+                />
               </div>
               <div className="flex items-start gap-2.5 rounded-md border border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
                 <KeyRound className="mt-0.5 size-3.5 shrink-0" />

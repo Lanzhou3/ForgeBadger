@@ -57,17 +57,20 @@ export interface ActivityCreatedEvent {
   createdAt: Date;
 }
 
-/** A redacted, ordered Portfolio projection suitable for user-facing push. */
-export interface PortfolioProjectionUpdatedEvent {
-  type: "portfolio_projection_updated";
+/** A redacted Copilot run update for the authenticated user's event stream. */
+export interface CopilotRunUpdatedEvent {
+  type: "copilot_run_updated";
   userId: string;
-  kind: "request" | "intake_decision" | "dossier" | "work_item" | "task_attempt" | "authorization" | "observation" | "risk" | "wakeup" | "heartbeat";
-  recordId: string;
-  projectId?: string | undefined;
-  state?: string | undefined;
-  projectionVersion?: number | undefined;
-  correlationId?: string | undefined;
-  summary?: string | undefined;
+  runId: string;
+  conversationId: string;
+  status: string;
+  source?: "user" | "reactive" | undefined;
+  textDelta?: string | undefined;
+  thinkingDelta?: string | undefined;
+  toolName?: string | undefined;
+  pendingActionId?: string | undefined;
+  message?: string | undefined;
+  titleUpdated?: string | undefined;
   occurredAt: Date;
 }
 
@@ -80,33 +83,12 @@ export interface ErrorEvent {
   notificationCreatedAt?: Date | undefined;
 }
 
-/** A redacted Copilot agent run update (streaming deltas + completion). */
-export interface CopilotRunUpdatedEvent {
-  type: "copilot_run_updated";
-  userId: string;
-  runId: string;
-  conversationId: string;
-  status: string;
-  /** "user" = the owner typed a message; "reactive" = the proactive loop woke the agent. */
-  source?: "user" | "reactive" | undefined;
-  textDelta?: string | undefined;
-  /** Provider reasoning/thinking content (Anthropic extended thinking, OpenAI reasoning_content). */
-  thinkingDelta?: string | undefined;
-  toolName?: string | undefined;
-  pendingActionId?: string | undefined;
-  message?: string | undefined;
-  /** Set when the run triggered an auto-generated conversation title (first completed turn). */
-  titleUpdated?: string | undefined;
-  occurredAt: Date;
-}
-
 export type ForgeBadgerEvent =
   | SessionStatusChangedEvent
   | SessionCreatedEvent
   | SessionDeletedEvent
   | ClaudeNotificationEvent
   | ActivityCreatedEvent
-  | PortfolioProjectionUpdatedEvent
   | CopilotRunUpdatedEvent
   | ErrorEvent;
 

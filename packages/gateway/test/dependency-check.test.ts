@@ -142,6 +142,18 @@ describe("checkForgeBadgerDependencies", () => {
       { command: "kimi", args: ["--version"] }
     ]);
   });
+
+  it("checks psmux instead of tmux on native Windows", async () => {
+    const seen: Array<{ command: string; args: string[] }> = [];
+
+    await checkForgeBadgerDependencies(async (command, args) => {
+      seen.push({ command, args });
+      return { exitCode: 0, stdout: `${command} ok\n`, stderr: "" };
+    }, "win32");
+
+    assert.deepEqual(seen[0], { command: "psmux", args: ["-V"] });
+    assert.equal(seen.some(({ command }) => command === "tmux"), false);
+  });
 });
 
 describe("checkForgeBadgerRuntimeDependencies", () => {
@@ -163,21 +175,69 @@ describe("checkForgeBadgerRuntimeDependencies", () => {
     });
   });
 
-  it("reports WSL guidance instead of native tmux support on Windows", async () => {
+  it("reports native psmux terminal support on Windows when psmux is available", async () => {
     const result = await checkForgeBadgerRuntimeDependencies(
-      async () => ({
-        exitCode: 127,
-        stdout: "",
-        stderr: "not found"
+      async (command) => ({
+        exitCode: command === "psmux" ? 0 : 127,
+        stdout: command === "psmux" ? "psmux 3.3.8\n" : "",
+        stderr: command === "psmux" ? "" : "not found"
       }),
       "win32"
     );
 
     assert.deepEqual(result.terminalRuntime, {
-      persistence: "tmux",
-      mode: "wsl_required",
+      persistence: "psmux",
+      mode: "native_psmux",
+      supported: true,
+      message: "psmux is available for persistent browser terminals."
+    });
+  });
+
+  for (const versionOutput of ["psmux 3.3.7\n", "tmux 3.3.7\n"]) {
+    it(`rejects vulnerable psmux output ${versionOutput.trim()}`, async () => {
+      const result = await checkForgeBadgerRuntimeDependencies(
+        async (command) => ({
+          exitCode: command === "psmux" ? 0 : 127,
+          stdout: command === "psmux" ? versionOutput : "",
+          stderr: command === "psmux" ? "" : "not found"
+        }),
+        "win32"
+      );
+
+      assert.deepEqual(result.terminalRuntime, {
+        persistence: "psmux",
+        mode: "psmux_outdated",
+        supported: false,
+        message: "Upgrade psmux to version 3.3.8 or newer for persistent browser terminals."
+      });
+    });
+  }
+
+  it("accepts the fixed psmux version when its real version string uses the tmux product name", async () => {
+    const result = await checkForgeBadgerRuntimeDependencies(
+      async (command) => ({
+        exitCode: command === "psmux" ? 0 : 127,
+        stdout: command === "psmux" ? "tmux 3.3.8\n" : "",
+        stderr: command === "psmux" ? "" : "not found"
+      }),
+      "win32"
+    );
+
+    assert.equal(result.terminalRuntime.mode, "native_psmux");
+    assert.equal(result.terminalRuntime.supported, true);
+  });
+
+  it("reports psmux_missing on Windows when psmux is absent", async () => {
+    const result = await checkForgeBadgerRuntimeDependencies(
+      async () => ({ exitCode: 127, stdout: "", stderr: "not found" }),
+      "win32"
+    );
+
+    assert.deepEqual(result.terminalRuntime, {
+      persistence: "psmux",
+      mode: "psmux_missing",
       supported: false,
-      message: "Native Windows terminals require WSL because ForgeBadger persists sessions with tmux."
+      message: "Install psmux to enable persistent browser terminals."
     });
   });
 

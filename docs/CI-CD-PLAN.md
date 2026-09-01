@@ -18,7 +18,7 @@ pnpm evidence:gates-validate
 pnpm -r typecheck
 pnpm -r test
 RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
-pnpm --dir packages/gateway test test/model-provider-routes.test.ts test/model-provider-repository.test.ts test/model-config-apply.test.ts test/codex-provider-env.test.ts test/session-adapter-decoupling.test.ts
+pnpm --dir packages/gateway test test/model-provider-routes.test.ts test/model-provider-repository.test.ts test/cli-config-apply.test.ts test/codex-provider-env.test.ts test/session-adapter-decoupling.test.ts
 git diff --check
 ```
 
@@ -35,8 +35,10 @@ Acceptance:
   trial material or external gate registry changes are accepted.
 - TypeScript emits no type errors.
 - CLI, Gateway `node:test`, and Web Vitest suites pass.
-- Real tmux integration tests pass when tmux is installed.
-- Provider SSOT and Codex subscription-boundary regressions pass.
+- Real tmux integration tests pass when tmux is installed. This job runs on
+  Linux/Ubuntu and does not exercise native Windows psmux/ConPTY.
+- Provider/cli-config-apply SSOT, Codex native-auth
+  boundary, and session adapter-decoupling gates pass.
 - `git diff --check` reports no whitespace errors.
 
 Maintainer-only live preflight:
@@ -98,6 +100,9 @@ Acceptance:
   install/startup behavior. It also sets explicit npm fetch retry and timeout
   options so transient registry resets fail less often and still produce a
   bounded diagnostic when the network remains unavailable.
+- The current npm smoke runner is Linux/tmux-specific: its session cleanup
+  invokes `tmux` directly. A passing Ubuntu npm smoke proves the packaged
+  tmux path and CLI startup composition, not native Windows psmux behavior.
 - The `forgebadger` package ships the Next standalone Web runtime under `dist/`;
   do not add `next`, `react`, or `react-dom` as top-level runtime dependencies
   of the CLI package unless the standalone packaging strategy changes.
@@ -111,15 +116,20 @@ Known skip:
   this happens, record the exact npm stdout/stderr and keep `pnpm build:npm`,
   `pnpm pack:npm`, and `node scripts/verify-npm-package.mjs` as required
   evidence.
-- `forgebadger doctor` must fail when required dependencies such as `tmux` are not
-  installed. Treat that as an environment failure, not a passing smoke.
+- `forgebadger doctor` must fail when the selected required runtime (`tmux` on
+  Linux/macOS/WSL or psmux ≥ 3.3.8 on native Windows) is unavailable. Doctor
+  must remain read-only even against an absent state directory. Treat a missing
+  runtime as an environment failure, not a passing smoke.
 
-### Codex Background Task Gates
+### Model Center Apply-Provider and Codex Gates
 
-The Codex app-server control-plane prototype (routes, manager, Web console,
-Playwright smoke, and `pnpm smoke:codex-app-server`) was removed on 2026-08-14.
-Codex sessions run exclusively as tmux-backed terminal sessions; the former
-dedicated gates no longer apply.
+Codex uses the common apply-provider flow; there is no standalone account,
+subscription, app-server, or turn-input smoke. Required regression evidence is
+the model-provider route/repository set, cli-config apply (four CLI writers,
+plaintext `0600` writes, encrypted backup/rollback, masked no-write preview),
+the Codex environment boundary, and session adapter-decoupling tests. A real
+Codex-account or OpenAI-provider pass remains an external smoke and requires an
+explicitly authorized host/account/credential.
 
 ### E2E Smoke
 
@@ -137,6 +147,7 @@ export FORGEBADGER_JWT_SECRET=<32+-character-secret>
 
 pnpm --filter @forgebadger/gateway dev > /tmp/forgebadger-gateway.log 2>&1 &
 pnpm --filter @forgebadger/web exec playwright test e2e/gate-d-smoke.spec.ts e2e/mvp1-smoke.spec.ts
+pnpm --filter @forgebadger/web exec playwright test e2e/models.spec.ts --project=chromium
 ```
 
 Acceptance:
@@ -148,7 +159,8 @@ Acceptance:
 
 Known skip:
 
-- Skip E2E only when CI cannot provide loopback listeners, tmux, or Claude Code
+- Skip E2E only when CI cannot provide loopback listeners, the selected terminal
+  runtime, or Claude Code
   CLI. Record which dependency is missing.
 
 ### Phase 1 Terminal Gate Boundary
@@ -158,7 +170,7 @@ CI requires `e2e/mvp1-smoke.spec.ts` as the stable control-plane happy path.
 supplies Gateway/Web loopback listeners, tmux, and the real CLI prerequisites
 needed for terminal behavior.
 
-Focused tmux evidence is the explicit command:
+Focused Linux/macOS tmux evidence is the explicit command:
 
 ```bash
 RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
@@ -169,6 +181,10 @@ focused tmux command is skipped, record `Status: Caveat`, skip reason, owner,
 and next action. The default owner is the release maintainer for the target
 host, and the next action is to rerun the skipped command on a host with the
 missing dependency installed.
+
+Neither this command nor the Ubuntu npm smoke is native Windows coverage.
+Windows acceptance requires physical ConPTY + psmux ≥ 3.3.8 browser/AI-CLI
+lifecycle evidence and remains `Caveat` until that artifact is reviewed.
 
 ### v1.1 Phase 6 Evidence Matrix
 
@@ -189,8 +205,8 @@ Treat these as separate gates:
 - CI core smoke: `pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line`.
 - Release/manual browser terminal smoke: `pnpm --dir packages/web exec playwright test e2e/gate-d-smoke.spec.ts --project=chromium --reporter=line`.
 - Focused tmux integration: `RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts`.
-- Physical Windows/WSL terminal smoke: manual real-host checklist, not covered
-  by Ubuntu CI or current-host Linux evidence.
+- Physical Windows/WSL terminal smoke: manual native ConPTY + psmux and/or WSL
+  tmux real-host checklist, not covered by Ubuntu CI or current-host Linux evidence.
 - Feishu automated route and authority regression:
   `pnpm --dir packages/gateway test test/feishu-integration.test.ts test/copilot-routes.test.ts`.
 - Feishu manual/live bot long connection: configure a self-built Feishu bot for
@@ -205,8 +221,9 @@ Treat these as separate gates:
   cannot replace this gate. Public webhook URL verification is an optional
   compatibility path for deployments that deliberately expose Gateway.
 
-Do not mark the physical Windows/WSL row `Pass` unless the real WSL checklist
-is completed. Do not mark the live provider row `Pass` unless a disposable live
+Do not mark the physical Windows/WSL row `Pass` unless the physical native
+Windows psmux and/or real WSL tmux checklist is completed and reviewed. Do not
+mark the live provider row `Pass` unless a disposable live
 provider credential and explicit model id produce a successful redacted smoke
 result. Do not mark the Feishu bot row `Pass` unless a real persistent
 connection/WebSocket run received `im.message.receive_v1`, routed through
@@ -256,8 +273,9 @@ Gate 2 - Automated verification:
 - Web build passes or has a documented sandbox-only skip.
 - CLI build passes.
 - Script harness tests pass.
-- Provider/Codex boundary regression passes.
-  candidate keeps the explicit environment caveat.
+- Provider/cli-config-apply/Codex boundary regression passes; the candidate
+  keeps explicit real-account, live-provider, browser, and native-Windows
+  caveats.
 - NPM package checks pass or have a documented npm registry/native dependency
   skip with exact stdout/stderr.
 - E2E smoke passes or has a documented environment skip.
@@ -278,7 +296,9 @@ Gate 3 - Manual acceptance:
 | Gate | CI default | Manual release acceptance |
 | --- | --- | --- |
 | Workspace typecheck/test/build | Required | Re-run when cutting a candidate |
-| Provider/Codex boundary regression | Required | Re-run if model/provider code changed |
+| Provider/cli-config-apply/Codex boundary regression | Required | Re-run if model/provider/session code changed |
+| Model Center apply-provider Playwright lifecycle | Environment-gated | Required on release host; record missing-browser blockers exactly |
+| Native Codex/OpenAI provider smoke | Not covered by unit CI | Required before claiming real account/provider evidence |
 | NPM build/verify/smoke | Required on Ubuntu CI with tmux | Re-run before publish or tag |
 | Browser terminal end-to-end smoke | Environment-gated | Required on release host |
 | Real Claude Code permission prompt smoke | Environment-gated | Required when Claude behavior is in scope |

@@ -16,6 +16,12 @@ const cliReadme = path.join(workspaceRoot, "packages/cli/README.md");
 const cliLicense = path.join(workspaceRoot, "packages/cli/LICENSE");
 const cliDocs = path.join(workspaceRoot, "packages/cli/docs");
 const copyTreeOptions = { recursive: true, dereference: true };
+// The npm tarball does not ship the brand images, so package READMEs must
+// reference them through the canonical raw GitHub URL instead of repo-relative
+// paths (npmjs.com cannot resolve relative paths without a repository field,
+// and the monorepo `directory` field would resolve them wrongly anyway).
+const brandAssetRawBaseUrl =
+  "https://raw.githubusercontent.com/Lanzhou3/ForgeBadger/main/packages/web/public/brand/";
 
 const restoreWebNextEnv = await preserveFile(webNextEnv);
 
@@ -42,15 +48,24 @@ try {
   await rm(cliReadme, { recursive: true, force: true });
   await rm(cliLicense, { recursive: true, force: true });
   await rm(cliDocs, { recursive: true, force: true });
-  await cp(path.join(workspaceRoot, "README.md"), cliReadme);
+  await copyReadmeForNpm(path.join(workspaceRoot, "README.md"), cliReadme);
   await cp(path.join(workspaceRoot, "LICENSE"), cliLicense);
   await mkdir(cliDocs, { recursive: true });
-  await cp(path.join(workspaceRoot, "docs/README.zh-CN.md"), path.join(cliDocs, "README.zh-CN.md"));
-  await cp(path.join(workspaceRoot, "docs/README.zh-TW.md"), path.join(cliDocs, "README.zh-TW.md"));
+  await copyReadmeForNpm(path.join(workspaceRoot, "docs/README.zh-CN.md"), path.join(cliDocs, "README.zh-CN.md"));
+  await copyReadmeForNpm(path.join(workspaceRoot, "docs/README.zh-TW.md"), path.join(cliDocs, "README.zh-TW.md"));
 
   run("node", ["scripts/verify-npm-package.mjs"]);
 } finally {
   await restoreWebNextEnv();
+}
+
+async function copyReadmeForNpm(sourcePath, targetPath) {
+  const content = await readFile(sourcePath, "utf8");
+  const rewritten = content.replace(
+    /(src=")(?:\.\.\/)*packages\/web\/public\/brand\//g,
+    `$1${brandAssetRawBaseUrl}`
+  );
+  await writeFile(targetPath, rewritten);
 }
 
 function run(command, args) {

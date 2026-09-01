@@ -126,6 +126,43 @@ describe("verifyNpmPackage", () => {
     assert.equal(result.ok, false);
     assert.match(result.errors.join("\n"), /sharp\.node/);
   });
+
+  it("rejects relative brand asset URLs in the package README", async () => {
+    const root = await createPackageTree();
+    await writeFile(
+      path.join(root, "README.md"),
+      '<img src="packages/web/public/brand/forgebadger-banner.png" alt="ForgeBadger">\n'
+    );
+
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /README\.md uses a relative brand asset URL/);
+  });
+
+  it("rejects parent-relative brand asset URLs in translated package READMEs", async () => {
+    const root = await createPackageTree();
+    await writeFile(
+      path.join(root, "docs", "README.zh-CN.md"),
+      '<img src="../packages/web/public/brand/forgebadger-banner.png" alt="ForgeBadger">\n'
+    );
+
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /docs\/README\.zh-CN\.md uses a relative brand asset URL/);
+  });
+
+  it("accepts raw GitHub brand asset URLs in package READMEs", async () => {
+    const root = await createPackageTree();
+    const absoluteUrl =
+      "https://raw.githubusercontent.com/Lanzhou3/ForgeBadger/main/packages/web/public/brand/forgebadger-banner.png";
+    await writeFile(path.join(root, "README.md"), `<img src="${absoluteUrl}" alt="ForgeBadger">\n`);
+
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+
+    assert.deepEqual(result, { ok: true, errors: [] });
+  });
 });
 
 async function createPackageTree(options = {}) {

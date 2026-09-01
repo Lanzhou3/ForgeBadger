@@ -42,7 +42,7 @@ describe("Gate D auth and project API contracts", () => {
             id: input.sessionId,
             userId: input.userId,
             attachToken: "attach-token",
-            tmuxName: `of-${input.userId.slice(0, 8)}-${input.sessionId}`,
+            tmuxName: `fb-${input.userId.slice(0, 8)}-${input.sessionId}`,
             launchPlan: input.launchPlan,
             status: "running",
             createdAt: "2026-04-27T00:00:00.000Z",

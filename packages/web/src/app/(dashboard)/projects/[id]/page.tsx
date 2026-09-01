@@ -34,7 +34,6 @@ import {
   getDependencies,
   discoverAdapters,
   listSessions,
-  createSession,
   listActivities,
   deleteProject,
   listProjectSkills,
@@ -58,6 +57,7 @@ import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highligh
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/projects/markdown-renderer";
+import { SessionLaunchDialog } from "@/components/sessions/session-launch-dialog";
 
 const PROJECT_DETAIL_TABS = [
   "sessions",
@@ -85,6 +85,7 @@ export default function ProjectDetailPage() {
   const [selectedConfigPath, setSelectedConfigPath] = useState("");
   const [configDraft, setConfigDraft] = useState("");
   const [pendingConfigAction, setPendingConfigAction] = useState<"preview" | null>(null);
+  const [launchDialogOpen, setLaunchDialogOpen] = useState(false);
   const configSyncRef = useRef<ConfigSyncPanelHandle>(null);
 
   const { data: projectData, isLoading: projectLoading } = useQuery({
@@ -143,21 +144,6 @@ export default function ProjectDetailPage() {
     enabled: !!id && !!selectedRuntimeAdapter,
   });
 
-  const createSessionMutation = useMutation({
-    mutationFn: () => {
-      if (!selectedRuntimeAdapter) {
-        throw new Error(t("projects.selectRuntimeCli"));
-      }
-      return createSession({
-        projectId: id,
-        credentialMode: "host_environment",
-        aiTool: selectedRuntimeAdapter,
-      });
-    },
-    onSuccess: () => {
-      router.push("/sessions");
-    },
-  });
   const deleteMutation = useMutation({
     mutationFn: () => deleteProject(id),
     onSuccess: () => {
@@ -220,7 +206,6 @@ export default function ProjectDetailPage() {
   const globalAiConfig = globalAiConfigData;
   const selectedConfigFile = projectAiConfig?.files.find((file) => file.relativePath === selectedConfigPath);
   const cannotCreateSession =
-    createSessionMutation.isPending ||
     adapterDiscoveryLoading ||
     !selectedRuntimeAdapter ||
     !selectedRuntimeLaunchable;
@@ -350,11 +335,11 @@ export default function ProjectDetailPage() {
               <Button
                 size="sm"
                 className="bg-brand text-brand-foreground hover:bg-brand/90"
-                onClick={() => createSessionMutation.mutate()}
+                onClick={() => setLaunchDialogOpen(true)}
                 disabled={cannotCreateSession}
               >
                 <Plus className="size-4" />
-                {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
+                {t("projects.newSession")}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -444,14 +429,6 @@ export default function ProjectDetailPage() {
             </Card>
           )}
 
-          {createSessionMutation.isError && (
-            <p className="text-sm text-destructive">
-              {createSessionMutation.error instanceof Error
-                ? createSessionMutation.error.message
-                : t("projects.failedCreateSession")}
-            </p>
-          )}
-
           {deleteMutation.isError && (
             <p className="text-sm text-destructive">
               {deleteMutation.error instanceof Error
@@ -504,7 +481,7 @@ export default function ProjectDetailPage() {
                       <Button
                         size="sm"
                         className="bg-brand text-brand-foreground hover:bg-brand/90"
-                        onClick={() => createSessionMutation.mutate()}
+                        onClick={() => setLaunchDialogOpen(true)}
                         disabled={cannotCreateSession}
                       >
                         <Plus className="size-4" />
@@ -642,6 +619,16 @@ export default function ProjectDetailPage() {
           </Tabs>
         </>
       )}
+      <SessionLaunchDialog
+        projectId={id}
+        open={launchDialogOpen}
+        onOpenChange={setLaunchDialogOpen}
+        initialAdapter={selectedRuntimeAdapter || undefined}
+        onCreated={(session) => {
+          queryClient.invalidateQueries({ queryKey: ["sessions", { projectId: id }] });
+          router.push(`/sessions/${session.id}`);
+        }}
+      />
     </div>
   );
 }

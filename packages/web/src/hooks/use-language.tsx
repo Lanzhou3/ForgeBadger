@@ -15,10 +15,7 @@ import {
   type Language,
   type TranslationKey,
 } from "@/lib/i18n";
-import { readMigratedStorageValue, writeMigratedStorageValue } from "@/lib/brand-storage";
-
 const LANGUAGE_KEY = "forgebadger-language";
-const LEGACY_LANGUAGE_KEY = "openforge-language";
 
 interface LanguageContextValue {
   language: Language;
@@ -32,11 +29,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<Language>("zh-CN");
 
   useEffect(() => {
-    const stored = readMigratedStorageValue(
-      window.localStorage,
-      LANGUAGE_KEY,
-      LEGACY_LANGUAGE_KEY
-    );
+    const stored = window.localStorage.getItem(LANGUAGE_KEY);
     const nextLanguage = normalizeLanguage(stored);
     setLanguageState(nextLanguage);
     document.documentElement.lang = nextLanguage;
@@ -44,12 +37,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   const setLanguage = (nextLanguage: Language) => {
     setLanguageState(nextLanguage);
-    writeMigratedStorageValue(
-      window.localStorage,
-      LANGUAGE_KEY,
-      LEGACY_LANGUAGE_KEY,
-      nextLanguage
-    );
+    window.localStorage.setItem(LANGUAGE_KEY, nextLanguage);
     document.documentElement.lang = nextLanguage;
   };
 

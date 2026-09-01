@@ -8,10 +8,8 @@ import { useLanguage } from "@/hooks/use-language";
 
 /**
  * Header entry point for Copilot settings: navigates to the full settings
- * page at /copilot/settings, which consolidates the proactive-heartbeat
- * toggle, the dsh kernel configuration (default model + plugins), and the
- * capability tool list that used to be split between a popover and the
- * persistent right-hand kernel panel.
+ * page at /copilot/settings, which exposes the Gateway-native runtime state
+ * and the capability tool list.
  */
 export function CopilotSettings() {
   const { t } = useLanguage();

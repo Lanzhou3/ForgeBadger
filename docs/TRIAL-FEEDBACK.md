@@ -1,5 +1,11 @@
 # ForgeBadger Trial Feedback Template
 
+> Historical protocol note (2026-08-31): Copilot-labelled fields are retained
+> only so previously collected v1.5 packets and issue-form audits remain
+> reproducible. They are not current runtime requirements. New feedback should
+> describe native Copilot conversation, approval, provider, Project Manager,
+> terminal, and Feishu account behavior under the nearest bounded fields.
+
 Use this template for first-user local trial feedback. Prefer the GitHub issue
 form `ForgeBadger first-user trial feedback` when filing feedback from the
 repository; use this document as the offline copy/paste template. Review all
@@ -86,7 +92,7 @@ Result rubric:
 ## Dependency Versions
 
 - node --version:
-- tmux -V:
+- terminal runtime version (`tmux -V` or `psmux -V`):
 - claude --version:
 - forgebadger doctor summary:
 
@@ -148,7 +154,7 @@ Requirement mapping guide:
 
 | Requirement | Use When The Report Shows |
 |-------------|---------------------------|
-| UX-01 | Missing tmux, missing local CLI, unsupported native Windows terminal mode, or unclear dependency/runtime guidance. |
+| UX-01 | Missing tmux/psmux, outdated psmux, missing local CLI, install-confirmation failure, or unclear dependency/runtime guidance. |
 | UX-02 | Provider/model/credential readiness failures or recovery paths that risk exposing secrets. |
 | UX-03 | Copilot run, pending-action, cancellation, or waiting-for-approval state confusion. |
 | UX-04 | Feedback is not reproducible enough to become an engineering task. |
@@ -160,12 +166,12 @@ Requirement mapping guide:
 
 - Console errors:
 - Network failures:
-- Portfolio route availability: observed / unavailable / blocked
-- Portfolio request lifecycle observed: yes / no / skipped
-- Owner decision result, if exercised: approved / rejected / not exercised
-- Feishu Portfolio ingress disposition, if configured: accepted / rejected / not configured
-- Visible Portfolio blocker, if any:
-- Confirmed no terminal/shell/Codex turn input in Portfolio: yes / no
+- Copilot route availability: observed / unavailable / blocked
+- Copilot conversation lifecycle observed: yes / no / skipped
+- Approval decision result, if exercised: approved / rejected / not exercised
+- Feishu account/configuration result, if configured: accepted / rejected / not configured
+- Visible Copilot blocker, if any:
+- Confirmed no raw terminal input without approval: yes / no
 - `pnpm smoke:copilot-provider` result: passed / skipped / failed
 - Provider smoke skip or failure reason:
 - Copilot provider with active model configured: yes / no / skipped

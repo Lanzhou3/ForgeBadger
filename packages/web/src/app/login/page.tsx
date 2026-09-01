@@ -7,6 +7,9 @@ export default function LoginPage() {
     <AuthShell
       title="Sign in"
       description="Connect to your local ForgeBadger console."
+      titleKey="auth.loginTitle"
+      descriptionKey="auth.loginDescription"
+      showLanguageSwitcher
     >
       <Suspense>
         <LoginForm />

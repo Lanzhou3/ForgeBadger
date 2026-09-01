@@ -62,6 +62,20 @@ describe("built-in Claude template surface", () => {
     db.close();
   });
 
+  it("describes terminal persistence without assuming tmux on native Windows", () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("builtin-terminal-runtime@example.com", "hash");
+    const repo = new TemplateRepository(db, user.id);
+    repo.listBuiltIn();
+
+    for (const templateId of ["builtin-claude-code", "builtin-opencode", "builtin-codex", "builtin-kimi"]) {
+      const content = (repo.getById(templateId)?.files ?? []).map((file) => file.content).join("\n");
+      assert.doesNotMatch(content, /Terminal sessions are tmux-backed/);
+      assert.match(content, /tmux on macOS\/Linux.*psmux on Windows/i);
+    }
+    db.close();
+  });
+
   it("seeds the built-in Kimi Code template with AGENTS.md and .kimi-code agents", async () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("builtin-kimi@example.com", "hash");

@@ -61,6 +61,21 @@ describe("ProjectManagerRepository", () => {
     assert.deepEqual(otherRepo.listLedgerEvents(projectId), []);
   });
 
+  it("rejects a goal that points at another tenant's project", () => {
+    const foreignProject = new ProjectRepository(db, other.id).create({
+      name: "Foreign project",
+      path: "/tmp/forgebadger-pm-foreign",
+      aiTool: "claude"
+    });
+
+    assert.throws(
+      () => new ProjectManagerRepository(db, owner.id).upsertGoal(foreignProject.id, {
+        summary: "Must not cross tenant boundaries"
+      }),
+      /FOREIGN KEY constraint failed/u
+    );
+  });
+
   it("updates projection, appends one ledger event, and writes one audit row per mutation", () => {
     const repo = new ProjectManagerRepository(db, owner.id);
 

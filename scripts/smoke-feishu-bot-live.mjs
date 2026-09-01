@@ -8,7 +8,6 @@ const DEFAULT_MAX_EVENTS = 2;
 const EVENT_SUBSCRIPTION = "im.message.receive_v1";
 
 export function resolveFeishuBotLiveConfig(env = process.env, argv = process.argv.slice(2)) {
-  env = normalizeEnvironment(env);
   const args = parseArgs(argv);
   const token = nonEmpty(args.token) ?? nonEmpty(env.FORGEBADGER_TOKEN);
   const appId = nonEmpty(args["app-id"]) ?? nonEmpty(env.FEISHU_APP_ID) ?? nonEmpty(env.LARK_APP_ID);
@@ -39,15 +38,6 @@ export function resolveFeishuBotLiveConfig(env = process.env, argv = process.arg
       requireGateEvidence
     }
   };
-}
-
-function normalizeEnvironment(env) {
-  const normalized = { ...env };
-  for (const [name, value] of Object.entries(env)) {
-    if (!name.startsWith("OPENFORGE_") || value === undefined) continue;
-    normalized[`FORGEBADGER_${name.slice("OPENFORGE_".length)}`] ??= value;
-  }
-  return normalized;
 }
 
 export async function runFeishuBotLiveSmoke(input) {
@@ -106,7 +96,7 @@ export async function runFeishuBotLiveSmoke(input) {
       counts.connected += 1;
       enqueue(postConnectionEvent(input, fetchImpl, {
         state: "connected",
-        connectionId: `of-feishu-live-${Date.now()}`,
+        connectionId: `fb-feishu-live-${Date.now()}`,
         attempt: 0,
         eventSubscription: EVENT_SUBSCRIPTION
       }));
@@ -115,7 +105,7 @@ export async function runFeishuBotLiveSmoke(input) {
       counts.reconnecting += 1;
       enqueue(postConnectionEvent(input, fetchImpl, {
         state: "reconnecting",
-        connectionId: `of-feishu-live-${Date.now()}`,
+        connectionId: `fb-feishu-live-${Date.now()}`,
         attempt: counts.reconnecting,
         eventSubscription: EVENT_SUBSCRIPTION,
         reason: "official SDK reconnect callback"
@@ -125,7 +115,7 @@ export async function runFeishuBotLiveSmoke(input) {
       counts.reconnected += 1;
       enqueue(postConnectionEvent(input, fetchImpl, {
         state: "reconnected",
-        connectionId: `of-feishu-live-${Date.now()}`,
+        connectionId: `fb-feishu-live-${Date.now()}`,
         attempt: counts.reconnected,
         eventSubscription: EVENT_SUBSCRIPTION
       }));

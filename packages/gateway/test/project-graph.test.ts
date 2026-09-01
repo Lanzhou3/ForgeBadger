@@ -83,7 +83,7 @@ describe("project-graph service", () => {
     });
 
     it("reports unavailable (not error) when the project root does not exist", () => {
-      const missing = path.join("/nonexistent", `of-missing-${Date.now()}`);
+      const missing = path.join("/nonexistent", `fb-missing-${Date.now()}`);
       const overview = getGraphOverview(missing);
       assert.equal(overview.available, false);
     });

@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
-import { GatewayApiError } from "@/lib/api";
 import { CopilotChat } from "@/components/copilot/copilot-chat";
 
 const {
@@ -17,8 +16,6 @@ const {
   cancelRunMock,
   sendMessageMock,
   editMessageMock,
-  getDshConfigMock,
-  updateDshConfigMock,
   getCopilotCapabilitiesMock,
   listModelProvidersMock,
   getRunMock,
@@ -32,8 +29,6 @@ const {
   cancelRunMock: vi.fn(),
   sendMessageMock: vi.fn(),
   editMessageMock: vi.fn(),
-  getDshConfigMock: vi.fn(),
-  updateDshConfigMock: vi.fn(),
   getCopilotCapabilitiesMock: vi.fn(),
   listModelProvidersMock: vi.fn(),
   getRunMock: vi.fn(),
@@ -56,8 +51,6 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     cancelRun: cancelRunMock,
     sendMessage: sendMessageMock,
     editMessage: editMessageMock,
-    getDshConfig: getDshConfigMock,
-    updateDshConfig: updateDshConfigMock,
     getCopilotCapabilities: getCopilotCapabilitiesMock,
     getRun: getRunMock,
   };
@@ -103,15 +96,6 @@ const baseUserMessage = {
   createdAt: "2026-05-21T00:00:00.000Z",
 };
 
-const baseDshConfig = {
-  defaultModelId: "model-1",
-  plugins: { "forgebadger-bridge": true },
-  availablePlugins: [
-    { id: "forgebadger-bridge", label: "ForgeBadger Bridge", description: "平台工具" },
-  ],
-  runtime: { status: "running" as const },
-};
-
 const baseModels = {
   providers: [],
   credentials: [],
@@ -119,11 +103,11 @@ const baseModels = {
     {
       id: "model-1",
       providerProfileId: "provider-1",
-      providerKey: "deepseek",
-      providerName: "DeepSeek",
+      providerKey: "openai",
+      providerName: "OpenAI",
       baseUrl: null,
-      name: "deepseek-chat",
-      modelId: "deepseek-chat",
+      name: "gpt-5",
+      modelId: "gpt-5",
       capabilities: [],
       status: "active",
       isDefault: true,
@@ -184,8 +168,6 @@ describe("CopilotChat console layout", () => {
     cancelRunMock.mockResolvedValue({ cancelled: true, runId: "run-1" });
     sendMessageMock.mockResolvedValue({ runId: "run-1" });
     editMessageMock.mockResolvedValue({ runId: "run-2" });
-    getDshConfigMock.mockResolvedValue(baseDshConfig);
-    updateDshConfigMock.mockResolvedValue(baseDshConfig);
     getCopilotCapabilitiesMock.mockResolvedValue(baseCapabilities);
     listModelProvidersMock.mockResolvedValue(baseModels);
     getRunMock.mockResolvedValue({
@@ -212,7 +194,7 @@ describe("CopilotChat console layout", () => {
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
 
     // The POST is still in flight, but the pulsing indicator must already be
-    // visible — no dead air while the dsh runtime cold-starts.
+    // visible — no dead air while the Gateway starts the model turn.
     expect(screen.getAllByText("Copilot 正在思考…").length).toBeGreaterThan(0);
 
     await act(async () => {
@@ -248,8 +230,6 @@ describe("CopilotChat console layout", () => {
     expect(screen.getAllByText("测试对话").length).toBeGreaterThan(0);
     // Center: message stream with the persisted user message.
     expect(screen.getByText("你好")).toBeTruthy();
-    // Kernel config no longer lives on the console — it moved to the settings page.
-    expect(screen.queryByTestId("copilot-kernel-panel")).toBeNull();
     // The status bar keeps model/runtime visibility in the console.
     expect(screen.getByTestId("copilot-status-bar")).toBeTruthy();
   });
@@ -293,12 +273,10 @@ describe("CopilotChat console layout", () => {
   it("shows the status bar with the current model and runtime badge", async () => {
     renderChat();
 
-    // The models query only becomes enabled once dsh-config lands, so wait
-    // for the resolved label instead of asserting synchronously.
     const statusBar = await screen.findByTestId("copilot-status-bar");
-    await waitFor(() => expect(statusBar.textContent).toContain("DeepSeek / deepseek-chat"));
+    await waitFor(() => expect(statusBar.textContent).toContain("OpenAI / gpt-5"));
     expect(statusBar.textContent).toContain("当前模型");
-    expect(statusBar.textContent).toContain("运行中");
+    expect(statusBar.textContent).toContain("Gateway 原生");
   });
 
   it("collapses the conversation sidebar via the header toggle", async () => {
@@ -308,39 +286,6 @@ describe("CopilotChat console layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "切换会话列表" }));
 
     await waitFor(() => expect(screen.queryByPlaceholderText("搜索对话…")).toBeNull());
-  });
-
-  it("keeps the chat fully usable when dsh-config answers 404", async () => {
-    getDshConfigMock.mockRejectedValue(new GatewayApiError("Not Found", 404));
-
-    renderChat();
-
-    // The center chat is unaffected: messages still load and can be sent.
-    await waitForConversationLoaded();
-    // The status bar hides itself; the not-enabled hint lives on the settings page.
-    expect(screen.queryByTestId("copilot-status-bar")).toBeNull();
-    expect(screen.queryByText("dsh 内核未启用")).toBeNull();
-  });
-
-  it("shows a targeted hint when edit-and-rerun is rejected with 501 on the dsh path", async () => {
-    editMessageMock.mockRejectedValue(
-      new GatewayApiError("Editing messages is not supported yet on the dsh copilot path", 501, {
-        code: "DSH_EDIT_MESSAGE_UNSUPPORTED",
-      })
-    );
-
-    renderChat();
-
-    await waitForConversationLoaded();
-    fireEvent.click(
-      screen.getByRole("button", { name: "编辑消息（删除该消息及之后所有内容并重新运行）" })
-    );
-    fireEvent.click(screen.getByRole("button", { name: "保存并重新运行" }));
-
-    await waitFor(() =>
-      expect(screen.getByText("当前内核暂不支持编辑重发，请直接发送新消息。")).toBeTruthy()
-    );
-    expect(screen.queryByText("编辑失败，请重试。")).toBeNull();
   });
 
   it("preselects the conversation from the ?c= deep link", async () => {
@@ -365,7 +310,7 @@ describe("CopilotChat console layout", () => {
   });
 
   it("falls back to the generic edit error for other failures", async () => {
-    editMessageMock.mockRejectedValue(new GatewayApiError("boom", 500));
+    editMessageMock.mockRejectedValue(new Error("boom"));
 
     renderChat();
 

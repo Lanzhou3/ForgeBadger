@@ -28,6 +28,7 @@
     "trial:readiness-validate": "node scripts/validate-trial-readiness.mjs",
     "typecheck": "pnpm -r typecheck",
     "validate:brand": "node scripts/validate-forgebadger-brand.mjs",
+    "validate:db-migrations": "node scripts/validate-db-migrations.mjs",
     "verify:npm": "node scripts/verify-npm-package.mjs"
   },
   "engines": {

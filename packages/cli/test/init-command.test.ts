@@ -45,6 +45,7 @@ export async function runForgeBadgerCli(args) {
     );
 
     const code = await runInit(["init", "--path", "/tmp/project"], {
+      stdout: createMemoryWriter(),
       resolvePaths: () => ({
         packageRoot: tempDir,
         gatewayEntry: path.join(tempDir, "gateway.js"),
@@ -58,11 +59,50 @@ export async function runForgeBadgerCli(args) {
     assert.deepEqual(JSON.parse(await readFile(argsPath, "utf8")), ["init", "--path", "/tmp/project"]);
   });
 
+  it("fails closed without delegating project initialization when runtime installation is skipped", async () => {
+    const stderr = createMemoryWriter();
+    let delegated = false;
+
+    const code = await runInit(["init", "--path", "C:\\workspace\\app"], {
+      resolvePaths: () => ({
+        packageRoot: "/tmp/forgebadger",
+        gatewayEntry: "/tmp/forgebadger/gateway.js",
+        gatewayInitEntry: "/tmp/forgebadger/gateway-init.js",
+        webServerEntry: "/tmp/forgebadger/server.js",
+        webPublicDir: "/tmp/forgebadger/public"
+      }),
+      ensureTerminalRuntime: async () => ({
+        status: "non_tty",
+        runtime: {
+          persistence: "psmux",
+          mode: "psmux_missing",
+          supported: false,
+          message: "Install psmux to enable persistent browser terminals."
+        },
+        installCommand: "winget install --id marlocarlo.psmux --exact --source winget"
+      }),
+      importModule: async () => ({
+        async runForgeBadgerCli() {
+          delegated = true;
+          return 0;
+        }
+      }),
+      stdout: createMemoryWriter(),
+      stderr
+    });
+
+    assert.equal(code, 1);
+    assert.equal(delegated, false);
+    assert.match(stderr.text, /winget install --id marlocarlo\.psmux --exact --source winget/);
+    assert.match(stderr.text, /initialization.*aborted/i);
+  });
+
   it("rejects gateway init entries outside the installed package root", async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), "forgebadger-init-command-"));
 
     await assert.rejects(
       () => runInit(["init"], {
+        stdout: createMemoryWriter(),
         resolvePaths: () => ({
           packageRoot: path.join(tempDir, "package"),
           gatewayEntry: path.join(tempDir, "package", "gateway.js"),
@@ -75,3 +115,12 @@ export async function runForgeBadgerCli(args) {
     );
   });
 });
+
+function createMemoryWriter() {
+  return {
+    text: "",
+    write(chunk: string) {
+      this.text += chunk;
+    }
+  };
+}

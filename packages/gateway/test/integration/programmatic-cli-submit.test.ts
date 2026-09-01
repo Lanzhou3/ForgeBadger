@@ -6,10 +6,8 @@ import { createAdapterLaunchPlan } from "../../src/adapters/index.js";
 import type { AdapterId } from "../../src/services/adapter-discovery.js";
 import {
   confirmProgrammaticTaskConsumed,
-  DEFAULT_DISPATCH_CONFIRM
-} from "../../src/services/copilot-bridge/delivery-confirm.js";
-import {
   currentProgrammaticComposer,
+  DEFAULT_PROGRAMMATIC_CONSUMPTION,
   isProgrammaticComposerReady,
   stripTerminalControl
 } from "../../src/services/programmatic-terminal-submit.js";
@@ -88,7 +86,7 @@ describe("programmatic submission against installed AI CLIs", { skip: !runCliSub
           entry.adapter,
           staged.stagedPane,
           staged.needle,
-          { ...DEFAULT_DISPATCH_CONFIRM, timeoutMs: 10_000 }
+          { ...DEFAULT_PROGRAMMATIC_CONSUMPTION, timeoutMs: 10_000 }
         );
 
         const finalPane = consumed ? "" : await manager.captureHistory(sessionId);

@@ -66,7 +66,8 @@ async function notify(event) {
           "x-forgebadger-session-id": SESSION_ID,
           "x-forgebadger-session-token": ATTACH_TOKEN
         },
-        body: JSON.stringify({ ...lifecycle, adapter: "opencode" })
+        body: JSON.stringify({ ...lifecycle, adapter: "opencode" }),
+        signal: AbortSignal.timeout(4500)
       }
     );
   } catch {

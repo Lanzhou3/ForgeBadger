@@ -1,5 +1,10 @@
 # ForgeBadger Support Diagnostics
 
+> Historical protocol note (2026-08-31): Copilot commands and test filenames in
+> this v1.5 packet are retained evidence identifiers, not supported current
+> runtime entry points. Current incidents should be reproduced through
+> `/copilot`, `/api/v1/copilot/*`, Project Manager, and current Feishu account tests.
+
 Use this packet when a first-user trial reports provider, runtime/terminal, or
 Feishu failures. The goal is to collect enough redacted evidence for triage
 without exposing credentials, auth tokens, provider payloads, Feishu secrets, or
@@ -16,7 +21,8 @@ sensitive terminal output.
   `GET /api/v1/diagnostics/export`; it is authenticated, tenant scoped,
   local-only, and redacted.
 - Record ForgeBadger version or commit, startup path, OS, shell, browser, Node,
-  tmux, Claude Code, and package manager versions.
+  selected terminal runtime (`tmux -V` or `psmux -V`), Claude Code, and package
+  manager versions.
 - Share summaries, counts, statuses, sanitized error names, public metadata, and
   file paths. Do not share raw secrets or full payload bodies.
 - Keep `Caveat` statuses visible when the missing evidence depends on external
@@ -91,17 +97,15 @@ Acceptable evidence references are short pointers, not raw evidence. Examples:
 
 Canonical gate: `docs/EXTERNAL-EVIDENCE-GATES.md` gate `LIVE-PROVIDER`.
 
-Run or request:
-
-```bash
-pnpm smoke:copilot-provider
-```
+Use `/models` provider readiness and the focused provider/cli-config-apply
+regression tests. A live-provider result requires an explicitly authorized
+disposable credential and is never inferred from unit tests.
 
 Collect these redacted artifacts:
 
 - smoke status: passed / skipped / failed;
 - provider name and model id when non-sensitive;
-- visible readiness reason from Copilot/Web: no compatible provider, missing
+- visible readiness reason from Model Center/Web: no compatible provider, missing
   active credential, missing active model, disabled provider, or provider
   request failure class;
 - `/models` Provider Health fields: `readiness.status`, `readiness.code`,
@@ -128,16 +132,25 @@ Classify:
   endpoint or model-list route; verify base URL, proxy, DNS, and models support.
 - `remote_model_missing` means the selected model id was not returned by the
   provider model list; sync models or pick a returned model id.
-- `codex_subscription_managed` is expected for Codex. It is not a third-party
-  provider key failure; Codex must keep using the subscription-managed SDK
-  identity path.
+- For Codex `native_cli_login`, collect only normalized `ready`,
+  `not_authenticated`, `cli_missing`, or `unknown` plus `chatgpt`, `api`, or
+  `unknown`. Codex login is Codex-owned; never collect `auth.json`,
+  keyring content, raw status output, or account labels.
+- For apply-provider writes, confirm the target CLI config path, that the
+  preview masked credential values and wrote nothing to disk, and that the
+  apply produced a `0600` atomic write with an AES-256-GCM-encrypted backup
+  that rollback can restore. Never collect plaintext credential values.
+- If a session still uses the old provider/model after a config change, re-run
+  `POST /api/v1/cli-config/:adapter/apply-provider` (or the Web equivalent) and
+  restart the session. Historical sessions always restart as plain
+  host-environment sessions; there is no frozen launch environment to bypass
+  or restore.
 - A configured provider that returns a recoverable auth, quota, network,
   unsupported-model, timeout, or outage error is a provider readiness issue.
   Preserve the provider error class, not raw provider request or response
   bodies.
-- Copilot exposing terminal input, raw shell execution, automatic tmux input, or
-  Codex app-server `/turn` input is a product contract failure and should be
-  escalated to engineering.
+- Copilot exposing unapproved terminal input or raw shell execution is a
+  product contract failure and should be escalated to engineering.
 - Copilot pending-action state moving backward, duplicating approval, or losing
   cancellation context should be mapped to UX-03 or UX-05.
 
@@ -170,12 +183,15 @@ Run or request:
 ```bash
 forgebadger doctor
 node --version
-tmux -V
 claude --version
 pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line
 pnpm --dir packages/web exec playwright test e2e/gate-d-smoke.spec.ts --project=chromium --reporter=line
 RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
 ```
+
+Also record `tmux -V` on macOS/Linux/WSL or `psmux -V` on native Windows.
+The focused `RUN_TMUX_TESTS` command is Linux/macOS tmux evidence only; it is
+not native Windows psmux coverage.
 
 Collect these redacted artifacts:
 
@@ -184,19 +200,21 @@ Collect these redacted artifacts:
 - browser terminal attach/input/resize evidence;
 - refresh/reconnect result;
 - stop-session and restart-recovery result;
-- tmux session name only when it is not sensitive;
+- selected multiplexer session name only when it is not sensitive;
 - relevant ForgeBadger error names, status codes, and request paths;
 - `mvp1-smoke`, `gate-d-smoke`, and focused tmux command summaries.
 
 Classify:
 
-- Missing `tmux`, missing local AI CLI, unsupported native Windows terminal
-  mode, or unclear dependency guidance maps to UX-01.
-- Native Windows can prove management UI behavior only. It cannot clear the
-  physical Windows/WSL terminal `Caveat`.
-- Physical Windows/WSL terminal pass requires a real WSL host with browser
-  terminal attach/input/resize, WebSocket reconnect, Gateway restart recovery,
-  and cleanup evidence.
+- Missing tmux/psmux, psmux below 3.3.8, missing local AI CLI, install-confirmation
+  failure, or unclear dependency guidance maps to UX-01.
+- Physical Windows/WSL remains `Caveat` until a native ConPTY + psmux and/or
+  real WSL tmux run records browser + real AI CLI attach/input/output/resize,
+  WebSocket reconnect, Gateway restart recovery, stop, and cleanup evidence.
+- `forgebadger start`/`init` must exit non-zero without state/process side
+  effects when runtime readiness remains false. `doctor` must remain read-only,
+  including against an absent state directory. Direct Gateway startup must fail
+  before recovery/database/listen side effects.
 - `mvp1-smoke` is stable control-plane evidence. `gate-d-smoke` is
   release/manual browser terminal evidence unless CI supplies Gateway/Web,
   tmux, and real CLI prerequisites.
@@ -204,7 +222,7 @@ Classify:
 Escalate when:
 
 - Gateway restart or WebSocket disconnect kills the CLI process instead of
-  preserving the tmux session;
+  preserving the platform-multiplexer session;
 - terminal ownership or attach-token checks leak cross-tenant session access;
 - terminal output appears in SQLite or diagnostics exports;
 - terminal logs include secrets or raw transcripts that should be summarized.
@@ -367,7 +385,7 @@ Escalate to engineering immediately when the evidence suggests:
 - unauthenticated REST or WebSocket access to tenant data;
 - secrets in diagnostics, logs, provider output, terminal evidence, or Feishu
   callback evidence;
-- terminal persistence no longer depends on tmux;
+- terminal persistence no longer depends on the selected tmux/psmux runtime;
 - Copilot or Feishu can execute or approve without the pending-action boundary;
 - Feishu public webhook is exposed in a multi-instance topology without shared
   replay and shared rate-limit stores;

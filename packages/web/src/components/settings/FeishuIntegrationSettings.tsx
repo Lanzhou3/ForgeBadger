@@ -11,11 +11,6 @@ import {
 } from "@/components/ui/card";
 import { useLanguage } from "@/hooks/use-language";
 
-/**
- * Feishu channel bindings are provisioned through the Portfolio API; the web
- * settings page only explains where chats route (bound chats -> portfolio
- * requirement capture, unbound chats -> copilot conversation).
- */
 export function FeishuIntegrationSettings() {
   const { t } = useLanguage();
 
@@ -31,9 +26,6 @@ export function FeishuIntegrationSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        <p className="text-sm text-muted-foreground">
-          {t("settings.feishuRouting")}
-        </p>
         <p className="text-sm text-muted-foreground">
           {t("settings.feishuCommands")}
         </p>

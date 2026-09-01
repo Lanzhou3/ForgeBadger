@@ -1,6 +1,12 @@
 import { spawn } from "node:child_process";
 
 import { assertSafeProgrammaticMessage } from "./programmatic-terminal-submit.js";
+import {
+  buildSanitizedMultiplexerEnv,
+  clearInheritedMultiplexerIdentity,
+  resolveTerminalMultiplexerRuntime,
+  type TerminalMultiplexerRuntime
+} from "./terminal-multiplexer-runtime.js";
 
 export interface TmuxCreateOptions {
   name: string;
@@ -49,12 +55,71 @@ export function buildProgrammaticInputControlCommand(name: string, data: string)
   return `send-keys -t ${name} -H ${hexBytes.join(" ")}`;
 }
 
-export function createTmuxClient(): TmuxClient {
+export function buildCreateSessionArgs(
+  options: TmuxCreateOptions,
+  inheritedEnv: NodeJS.ProcessEnv = process.env
+): string[] {
+  const args = [
+    "new-session",
+    "-d",
+    "-s",
+    options.name,
+    "-c",
+    options.cwd,
+    // Do not let tmux's update-environment option copy client variables into
+    // the new session. The explicit -e values below are the complete trusted
+    // launch-plan overlay.
+    "-E"
+  ];
+
+  // These variables are supplied by the trusted launch plan for this session
+  // only. They intentionally bypass the inherited-environment sanitizer so a
+  // model credential is available to its CLI without entering the
+  // multiplexer server's global environment.
+  const sessionEnv = buildSessionEnvironmentOverrides(inheritedEnv, options.env);
+  for (const [name, value] of Object.entries(sessionEnv)) {
+    args.push("-e", `${name}=${value}`);
+  }
+
+  args.push("--", options.command, ...options.args);
+  return args;
+}
+
+function buildSessionEnvironmentOverrides(
+  inheritedEnv: NodeJS.ProcessEnv,
+  explicitEnv: Record<string, string>
+): Record<string, string> {
+  const safeBaseEnv = buildSanitizedMultiplexerEnv(inheritedEnv);
+  const overrides: Record<string, string> = {};
+
+  // A pre-fix multiplexer server may still retain the Gateway environment in
+  // its global state. Copy only allowlisted runtime variables and empty every
+  // other inherited variable on the new session before the CLI starts.
+  for (const [name, value] of Object.entries(inheritedEnv)) {
+    if (value === undefined) continue;
+    overrides[name] = safeBaseEnv[name] === value ? value : "";
+  }
+
+  // Clear stale identity even when it is only present in a long-running
+  // pre-fix server and no longer present in this Gateway process.
+  for (const [name, value] of Object.entries(safeBaseEnv)) {
+    if (value === "") overrides[name] = "";
+  }
+
+  // Trusted per-session launch variables, including model credentials, must
+  // override both the safe host defaults and the inherited-secret tombstones.
+  Object.assign(overrides, explicitEnv);
+  return overrides;
+}
+
+export function createTmuxClient(
+  runtime: TerminalMultiplexerRuntime = resolveTerminalMultiplexerRuntime()
+): TmuxClient {
   async function configureSession(name: string): Promise<void> {
     // Mouse mode lets tmux enter copy-mode for CLIs that do not implement
     // terminal mouse input; OpenCode keeps receiving its own mouse events.
-    await runTmux(["set-option", "-t", name, "mouse", "on"]);
-    await runTmux(["set-option", "-t", name, "history-limit", "10000"]);
+    await runMultiplexer(runtime, ["set-option", "-t", name, "mouse", "on"]);
+    await runMultiplexer(runtime, ["set-option", "-t", name, "history-limit", "10000"]);
     // Pin the window size to manual control. With the default `window-size
     // latest`, any other attached client (e.g. a wider `tmux attach` from a
     // real terminal) can grow the window beyond the browser xterm's columns;
@@ -62,26 +127,13 @@ export function createTmuxClient(): TmuxClient {
     // off-screen and right-side text looks occluded. With `manual`, only the
     // Gateway's resize-window — driven by the browser's fit/resize messages —
     // may change the window size.
-    await runTmux(["set-option", "-t", name, "window-size", "manual"]);
+    await runMultiplexer(runtime, ["set-option", "-t", name, "window-size", "manual"]);
   }
 
   return {
     async createSession(options) {
-      const args = [
-        "new-session",
-        "-d",
-        "-s",
-        options.name,
-        "-c",
-        options.cwd
-      ];
-
-      for (const [name, value] of Object.entries(options.env)) {
-        args.push("-e", `${name}=${value}`);
-      }
-
-      args.push("--", options.command, ...options.args);
-      await runTmux(args);
+      await sanitizeMultiplexerGlobalEnvironment(runtime);
+      await runMultiplexer(runtime, buildCreateSessionArgs(options));
       await configureSession(options.name);
     },
 
@@ -90,15 +142,19 @@ export function createTmuxClient(): TmuxClient {
     },
 
     async killSession(name) {
-      await runTmux(["kill-session", "-t", name], { ignoreFailure: true });
+      await runMultiplexer(runtime, ["kill-session", "-t", name], { ignoreFailure: true });
     },
 
     async capturePane(name) {
-      return runTmux(["capture-pane", "-e", "-S", "-500", "-t", name, "-p"]);
+      return runMultiplexer(runtime, ["capture-pane", "-e", "-S", "-500", "-t", name, "-p"]);
     },
 
     async listSessions() {
-      const output = await runTmux(["list-sessions", "-F", "#{session_name}"], {
+      // Startup recovery calls listSessions before terminal WebSockets are
+      // mounted, so stale server-global variables are removed before the
+      // first browser attach can occur.
+      await sanitizeMultiplexerGlobalEnvironment(runtime);
+      const output = await runMultiplexer(runtime, ["list-sessions", "-F", "#{session_name}"], {
         ignoreNoServer: true
       });
       return output
@@ -113,7 +169,7 @@ export function createTmuxClient(): TmuxClient {
     },
 
     async showEnvironment(name) {
-      const output = await runTmux(["show-environment", "-t", name], { ignoreFailure: true });
+      const output = await runMultiplexer(runtime, ["show-environment", "-t", name], { ignoreFailure: true });
       const env: Record<string, string> = {};
       for (const line of output.split("\n")) {
         const eq = line.indexOf("=");
@@ -125,7 +181,7 @@ export function createTmuxClient(): TmuxClient {
     },
 
     async resizeWindow(name, cols, rows) {
-      await runTmux(["resize-window", "-t", name, "-x", String(cols), "-y", String(rows)], {
+      await runMultiplexer(runtime, ["resize-window", "-t", name, "-x", String(cols), "-y", String(rows)], {
         ignoreFailure: true
       });
     },
@@ -135,29 +191,29 @@ export function createTmuxClient(): TmuxClient {
       for (let index = 0; index < lines.length; index += 1) {
         const line = lines[index];
         if (line) {
-          await runTmux(["send-keys", "-t", name, "-l", "--", line]);
+          await runMultiplexer(runtime, ["send-keys", "-t", name, "-l", "--", line]);
         }
         if (index < lines.length - 1) {
-          await runTmux(["send-keys", "-t", name, "Enter"]);
+          await runMultiplexer(runtime, ["send-keys", "-t", name, "Enter"]);
         }
       }
     },
 
     async inspectPane(name) {
       const [content, metadata] = await Promise.all([
-        runTmux(["capture-pane", "-e", "-t", name, "-p"]),
-        runTmux(["display-message", "-p", "-t", name, "#{pane_dead}|#{pane_in_mode}"])
+        runMultiplexer(runtime, ["capture-pane", "-e", "-t", name, "-p"]),
+        runMultiplexer(runtime, ["display-message", "-p", "-t", name, "#{pane_dead}|#{pane_in_mode}"])
       ]);
       const [dead, inMode] = metadata.trim().split("|");
       return { content, dead: dead === "1", inMode: inMode === "1" };
     },
 
     async stageProgrammaticInput(name, data) {
-      await runTmuxControl(name, buildProgrammaticInputControlCommand(name, data));
+      await runMultiplexerControl(runtime, name, buildProgrammaticInputControlCommand(name, data));
     },
 
     async pressEnter(name) {
-      await runTmux(["send-keys", "-t", name, "Enter"]);
+      await runMultiplexer(runtime, ["send-keys", "-t", name, "Enter"]);
     }
   };
 }
@@ -167,10 +223,15 @@ interface RunOptions {
   ignoreNoServer?: boolean;
 }
 
-function runTmux(args: string[], options: RunOptions = {}): Promise<string> {
+function runMultiplexer(
+  runtime: TerminalMultiplexerRuntime,
+  args: string[],
+  options: RunOptions = {}
+): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn("tmux", args, {
-      stdio: ["ignore", "pipe", "pipe"]
+    const child = spawn(runtime.command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: clearInheritedMultiplexerIdentity(process.env)
     });
 
     let stdout = "";
@@ -202,25 +263,36 @@ function runTmux(args: string[], options: RunOptions = {}): Promise<string> {
         return;
       }
 
-      reject(new Error(stderr.trim() || `tmux exited with ${exitCode}`));
+      reject(new Error(stderr.trim() || `${runtime.command} exited with ${exitCode}`));
     });
   });
 }
 
-function runTmuxControl(name: string, command: string): Promise<string> {
+function runMultiplexerControl(
+  runtime: TerminalMultiplexerRuntime,
+  name: string,
+  command: string
+): Promise<string> {
   if (!SAFE_TMUX_TARGET.test(name)) {
     return Promise.reject(new Error("invalid tmux target"));
   }
+  return sanitizeMultiplexerGlobalEnvironment(runtime).then(() => runMultiplexerControlRaw(
+    runtime,
+    name,
+    command
+  ));
+}
+
+function runMultiplexerControlRaw(
+  runtime: TerminalMultiplexerRuntime,
+  name: string,
+  command: string
+): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn("tmux", [
-      "-C",
-      "attach-session",
-      "-f",
-      "no-output,ignore-size",
-      "-t",
-      name
-    ], {
-      stdio: ["pipe", "pipe", "pipe"]
+    const plan = runtime.buildControlPlan(name, process.env);
+    const child = spawn(plan.command, plan.args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: plan.env
     });
     let stdout = "";
     let stderr = "";
@@ -239,17 +311,28 @@ function runTmuxControl(name: string, command: string): Promise<string> {
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", () => finish(new Error("tmux control input failed")));
+    child.on("error", () => finish(new Error(`${runtime.command} control input failed`)));
     child.on("close", (exitCode) => {
       if (exitCode === 0 && !stdout.includes("%error")) {
         finish();
         return;
       }
-      finish(new Error(stderr.trim() || "tmux control input failed"));
+      finish(new Error(stderr.trim() || `${runtime.command} control input failed`));
     });
-    child.stdin.on("error", () => finish(new Error("tmux control input failed")));
-    timeout = setTimeout(() => finish(new Error("tmux control input timed out")), 5000);
+    child.stdin.on("error", () => finish(new Error(`${runtime.command} control input failed`)));
+    timeout = setTimeout(() => finish(new Error(`${runtime.command} control input timed out`)), 5000);
     timeout.unref?.();
     child.stdin.end(`${command}\ndetach-client\n`);
   });
+}
+
+async function sanitizeMultiplexerGlobalEnvironment(
+  runtime: TerminalMultiplexerRuntime
+): Promise<void> {
+  const output = await runMultiplexer(runtime, ["show-environment", "-g"], {
+    ignoreNoServer: true
+  });
+  for (const args of runtime.buildGlobalEnvironmentCleanupArgs(output)) {
+    await runMultiplexer(runtime, args);
+  }
 }

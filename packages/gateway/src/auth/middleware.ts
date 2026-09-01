@@ -15,7 +15,6 @@ export interface AuthenticatedRequest extends Request {
 }
 
 export const SESSION_COOKIE_NAME = "forgebadger_session";
-const LEGACY_SESSION_COOKIE_NAME = "openforge_session";
 
 export function authenticate(req: Request, res: Response, next: NextFunction): void {
   const token = extractRequestToken(req);
@@ -70,16 +69,19 @@ function userIsActive(db: Database, userId: string): boolean {
   return user !== undefined && user.status === "active";
 }
 
+/** Re-read the authoritative user row for host-wide privileged operations. */
+export function userIsInstanceAdmin(db: Database, userId: string): boolean {
+  const user = new UserRepository(db).findById(userId);
+  return user?.status === "active" && user.role === "admin";
+}
+
 export function extractRequestToken(req: Request): string | undefined {
   const authHeader = req.headers.authorization;
   if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
     const bearer = authHeader.slice(7).trim();
     if (bearer) return bearer;
   }
-  return (
-    extractCookieValue(req.headers.cookie, SESSION_COOKIE_NAME) ??
-    extractCookieValue(req.headers.cookie, LEGACY_SESSION_COOKIE_NAME)
-  );
+  return extractCookieValue(req.headers.cookie, SESSION_COOKIE_NAME);
 }
 
 export function extractCookieValue(

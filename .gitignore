@@ -60,7 +60,7 @@ docs/*
 !docs/assets/
 !docs/adr/
 docs/adr/*
-!docs/adr/0001-replace-legacy-copilot-with-portfolio-operations.md
+!docs/adr/0001-decouple-model-config-from-projects-and-sessions.md
 !docs/superpowers/
 !docs/superpowers/specs/
 docs/superpowers/specs/*

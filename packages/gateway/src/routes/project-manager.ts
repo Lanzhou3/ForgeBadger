@@ -32,6 +32,7 @@ import {
   readStringValue,
   readTaskPacketDetails,
   resolveTaskPacketSession,
+  resolveTaskPacketSessions,
   toTaskPacketSessionDto,
   withTaskPacketSessionLink
 } from "../services/project-manager/task-packets.js";
@@ -185,7 +186,7 @@ type ProjectManagerTaskPacketQueueStatus =
 
 export function createProjectManagerRoutes(
   db: Database,
-  options: { adapterCommandRunner?: CommandRunner } = {}
+  options: { adapterCommandRunner?: CommandRunner; masterKey?: string } = {}
 ): Router {
   const router = Router({ mergeParams: true });
   router.use(authenticate);
@@ -251,10 +252,11 @@ export function createProjectManagerRoutes(
     const workItems = new ProjectManagerRepository(db, userId).listWorkItems(project.id, {
       ...(parse.data.limit !== undefined ? { limit: parse.data.limit } : {})
     });
+    const sessionsByWorkItem = resolveTaskPacketSessions(db, userId, project.id, workItems);
     const taskPackets = workItems.map((workItem) => buildTaskPacket({
       project,
       workItem,
-      session: resolveTaskPacketSession(db, userId, project.id, workItem)
+      session: sessionsByWorkItem.get(workItem.id) ?? null
     }));
     res.json({ code: 0, data: { taskPackets }, message: "" });
   });

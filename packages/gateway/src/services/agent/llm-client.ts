@@ -326,7 +326,6 @@ function buildSystemPrompt(): string {
     "You can observe and operate the whole platform through the provided tools:",
     "- projects: list and inspect projects",
     "- sessions: list and inspect AI CLI sessions",
-    "- portfolio: read portfolio progress (requests, work items, dossiers)",
     "- memory: read/write scoped memory (global, project, session)",
     "",
     "Be concise. When you need to take an operate action, request it and it will be",

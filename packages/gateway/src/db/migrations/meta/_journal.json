@@ -365,6 +365,97 @@
       "when": 1788048000000,
       "tag": "0052_rename_forgebadger_contracts",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1788134400000,
+      "tag": "0053_model_provider_bindings",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1788220800000,
+      "tag": "0054_credential_generation",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1788307200000,
+      "tag": "0055_sessions_tenant_project_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1788393600000,
+      "tag": "0056_global_binding_target_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1788393600001,
+      "tag": "0057_query_index_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1788393600002,
+      "tag": "0058_provider_identity_normalization",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1788393600003,
+      "tag": "0059_project_manager_tenant_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1788393600004,
+      "tag": "0060_query_index_forward_repair",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1788393600005,
+      "tag": "0061_history_tenant_guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1788393600006,
+      "tag": "0062_sessions_tenant_status_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1788393600007,
+      "tag": "0063_history_tenant_update_guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1788393600008,
+      "tag": "0064_normalize_mixed_timestamp_units",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1788393600009,
+      "tag": "0065_project_manager_goals_tenant_fk",
+      "breakpoints": true
     }
   ]
 }

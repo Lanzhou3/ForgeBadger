@@ -2,7 +2,7 @@
  * Reactive loop for the Copilot harness — the proactive wake-up seam.
  *
  * The platform event bus is the wake signal: on relevant project/session/
- * portfolio events the loop debounces per user, then starts a proactive
+ * platform events the loop debounces per user, then starts a proactive
  * Copilot turn (source: "reactive") in a rolling "Copilot 主动更新"
  * conversation — the most recent one updated within the rolling window is
  * reused, and a fresh conversation is only created when none qualifies. The
@@ -38,8 +38,7 @@ const REACTIVE_TRIGGERS = new Set<string>([
   "session_status_changed",
   "session_created",
   "session_deleted",
-  "activity_created",
-  "portfolio_projection_updated"
+  "activity_created"
 ]);
 
 const MAX_EVENT_DESC_CHARS = 200;
@@ -104,23 +103,10 @@ export function attachCopilotReactiveLoop(options: CopilotReactiveLoopOptions): 
     try {
       const prompt = buildProactivePrompt(event);
       // Rolling conversation: reuse the most recent proactive thread inside
-      // the window (same db rows for both paths, so dsh and in-process runs
-      // share identical rolling semantics).
+      // the window.
       const log = new CopilotConversationLog(options.deps.db, userId);
       const reusable = findReusableProactiveConversation(log);
       const conversationId = reusable ?? log.createConversation(PROACTIVE_CONVERSATION_TITLE).id;
-      if (options.deps.dshBff) {
-        // dsh path (M3): the proactive turn runs on the per-user kernel via the
-        // BFF with the same run contract; debounce/cooldown semantics above are
-        // unchanged. A parked approval (awaiting_approval) still ends fire().
-        await options.deps.dshBff.sendMessage({
-          userId,
-          conversationId,
-          content: prompt,
-          source: "reactive"
-        });
-        return;
-      }
       const stack = options.buildAgentStack(options.deps, userId);
       await stack.orchestrator.runTurn({
         userId,
@@ -170,7 +156,7 @@ function buildProactivePrompt(event: ForgeBadgerEvent): string {
   return [
     "平台刚刚发生了一个事件，请你主动查看并汇报。",
     `事件：${describeEvent(event)}`,
-    "请用只读工具（projects / sessions / portfolio / memory）查看相关项目与会话的最新进度，",
+    "请用只读工具（projects / sessions / project manager / memory）查看相关项目与会话的最新进度，",
     "给出一段简短的中文主动更新（2-4 句）：发生了什么、当前状态、以及是否需要我关注或采取行动。",
     "不要执行任何写操作；如果需要，先申请我的批准。"
   ].join("\n");
@@ -190,9 +176,6 @@ function describeEvent(event: ForgeBadgerEvent): string {
       break;
     case "activity_created":
       description = `新增活动 ${event.activityType}（${event.status}）：${event.message}`;
-      break;
-    case "portfolio_projection_updated":
-      description = `组合投影更新 ${event.kind}（${event.recordId}${event.state ? ` → ${event.state}` : ""}）`;
       break;
     default:
       description = event.type;

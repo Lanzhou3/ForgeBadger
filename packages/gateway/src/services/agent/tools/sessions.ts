@@ -3,15 +3,15 @@
  * expose AI CLI session state; the operate tool (launch a session) is
  * approval-gated and only fires after the owner approves it.
  *
- * The read queries live in services/copilot-bridge/bridge-service.ts so the
- * internal copilot-bridge HTTP API and these tools share one implementation.
+ * Tenant-scoped reads and programmatic delivery live in the native Copilot
+ * platform-access service.
  */
 import { z } from "zod";
 import {
   getSessionDetail,
   listSessionSummaries,
   dispatchSessionInput
-} from "../../copilot-bridge/bridge-service.js";
+} from "../platform-access.js";
 import { SessionRepository } from "../../../db/repositories/session-repository.js";
 import type { Database } from "../../../db/types.js";
 import type { AgentTool, AgentToolContext } from "../tool-registry.js";

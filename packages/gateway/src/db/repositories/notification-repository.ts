@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 
 import { notifications } from "../schema.js";
+import { sqliteTimestampSeconds } from "../sqlite-time.js";
 import type { Database } from "../types.js";
 
 export interface Notification {
@@ -87,7 +88,7 @@ export class NotificationRepository {
   markAllRead(): number {
     const result = this.db
       .prepare("UPDATE notifications SET is_read = 1, updated_at = ? WHERE user_id = ? AND is_read = 0")
-      .run(Date.now(), this.userId);
+      .run(sqliteTimestampSeconds(), this.userId);
     return result.changes;
   }
 

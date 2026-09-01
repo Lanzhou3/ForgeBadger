@@ -148,6 +148,8 @@ export function AddProviderDialog({
                   ["all", t("common.all")],
                   ["claude", "Claude Code"],
                   ["opencode", "OpenCode"],
+                  ["codex", "Codex"],
+                  ["kimi", "Kimi Code"],
                 ]}
               />
               <CatalogSelect
@@ -330,12 +332,13 @@ function SetupStep({
   onBack: () => void;
   t: Translate;
 }) {
-  const requiresCredential = preset.authType !== "none";
+  const isOpenAiAccountProvider = preset.id === "openai";
+  const requiresCredential = preset.authType !== "none" && !isOpenAiAccountProvider;
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
       <DialogHeader>
         <DialogTitle>{t("models.configureProviderTitle")} {preset.name}</DialogTitle>
-        <DialogDescription>{t("models.configureProviderDescription")}</DialogDescription>
+        <DialogDescription>{isOpenAiAccountProvider ? t("models.configureOpenAiDescription") : t("models.configureProviderDescription")}</DialogDescription>
       </DialogHeader>
 
       <div className="grid gap-2 rounded-md border border-border/70 bg-muted/20 p-3 text-sm">
@@ -377,7 +380,7 @@ function SetupStep({
         </div>
       ) : (
         <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
-          {t("models.noCredentialRequired")}
+          {isOpenAiAccountProvider ? t("models.openAiChooseAuthLater") : t("models.noCredentialRequired")}
         </div>
       )}
 

@@ -191,49 +191,4 @@ describe("copilot reactive loop", () => {
     loop.stop();
   });
 
-  it("runs the proactive turn through the dsh BFF when wired (M3)", async () => {
-    // Arrange
-    const db = createTestDb();
-    const user = new UserRepository(db).create("loop-dsh@example.com", "hash");
-    const bus = new ForgeBadgerEventBus();
-    const log = new CopilotConversationLog(db, user.id);
-    const bffCalls: Array<{ userId: string; conversationId: string; content: string; source?: string }> = [];
-    const runCalls: unknown[] = [];
-    const stack = {
-      log,
-      orchestrator: { runTurn: async (input: unknown) => { runCalls.push(input); return "run-orch"; } }
-    } as unknown as AgentStack;
-    const loop = attachCopilotReactiveLoop({
-      deps: {
-        db,
-        masterKey: "mk",
-        eventBus: bus,
-        dshBff: {
-          sendMessage: async (input: { userId: string; conversationId: string; content: string; source?: "user" | "reactive" }) => {
-            bffCalls.push(input);
-            return "run-dsh";
-          },
-          cancelRun: async () => ({ cancelled: false, runId: "" }),
-          decidePendingAction: async () => ({ resumed: false, runId: "" })
-        }
-      },
-      buildAgentStack: () => stack,
-      debounceMs: 5,
-      cooldownMs: 60
-    });
-
-    // Act
-    bus.emitEvent({ type: "session_status_changed", userId: user.id, sessionId: "s1", oldStatus: "running", newStatus: "completed", occurredAt: new Date() });
-    await sleep(30);
-
-    // Assert: the BFF drove the turn; the in-process orchestrator was bypassed.
-    assert.equal(bffCalls.length, 1);
-    assert.equal(bffCalls[0]?.source, "reactive");
-    assert.match(bffCalls[0]?.content ?? "", /主动/);
-    assert.equal(runCalls.length, 0);
-    const conversations = log.listConversations();
-    assert.equal(conversations.length, 1);
-    assert.equal(conversations[0]?.title, PROACTIVE_CONVERSATION_TITLE);
-    loop.stop();
-  });
 });

@@ -53,22 +53,6 @@ describe("useAuth session validation", () => {
     expect(localStorage.getItem("forgebadger.user")).toBe(JSON.stringify(cachedUser));
   });
 
-  it("migrates a legacy cached session before validation", async () => {
-    localStorage.clear();
-    localStorage.setItem("openforge.token", "legacy-token");
-    localStorage.setItem("openforge.user", JSON.stringify(cachedUser));
-    getMeMock.mockRejectedValue(new Error("Gateway temporarily unavailable"));
-
-    const { result } = renderHook(() => useAuth(), { wrapper });
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.user).toEqual(cachedUser);
-    expect(localStorage.getItem("forgebadger.token")).toBe("legacy-token");
-    expect(localStorage.getItem("forgebadger.user")).toBe(JSON.stringify(cachedUser));
-    expect(localStorage.getItem("openforge.token")).toBeNull();
-    expect(localStorage.getItem("openforge.user")).toBeNull();
-  });
-
   it("clears the cached session when Gateway explicitly rejects authentication", async () => {
     getMeMock.mockRejectedValue(new GatewayApiError("Unauthorized", 401));
 

@@ -13,6 +13,7 @@ import { createGatewayApp } from "../src/server.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import type { CommandResult } from "../src/lib/dependency-check.js";
+import { RuntimeAuthorizationInvalidator } from "../src/services/runtime-authorization-invalidation.js";
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
@@ -41,18 +42,6 @@ interface ProjectResponseBody {
   };
 }
 
-interface ProviderResponseBody {
-  data: {
-    provider: {
-      id: string;
-    };
-    models: Array<{
-      id: string;
-      modelId: string;
-    }>;
-  };
-}
-
 function createTestDb(): Database {
   const db = new Database(":memory:");
   db.pragma("journal_mode = WAL");
@@ -68,11 +57,12 @@ function createTestDb(): Database {
 describe("session adapter decoupling", () => {
   const tmuxCreates: MockTmuxCreateInput[] = [];
   let gateway: ReturnType<typeof createGatewayApp>;
+  let db: Database;
   let server: Server;
   let baseUrl: string;
 
   before(async () => {
-    const db = createTestDb();
+    db = createTestDb();
     const sessionManager = new InMemorySessionManager({
       async createSession(input) {
         tmuxCreates.push(input);
@@ -85,17 +75,17 @@ describe("session adapter decoupling", () => {
         return [];
       }
     });
+    const runtimeAuthorizationInvalidator = new RuntimeAuthorizationInvalidator();
     gateway = createGatewayApp({
       jwtSecret,
       masterKey,
       db,
       sessionManager,
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
-      adapterCommandRunner: async (command): Promise<CommandResult> => ({
-        exitCode: 0,
-        stdout: `${command} test-version`,
-        stderr: ""
-      })
+      runtimeAuthorizationInvalidator,
+      adapterCommandRunner: async (command): Promise<CommandResult> => {
+        return { exitCode: 0, stdout: `${command} test-version`, stderr: "" };
+      }
     });
     server = gateway.server;
     baseUrl = await listenOnLoopback(server);
@@ -178,8 +168,7 @@ describe("session adapter decoupling", () => {
       method: "POST",
       headers: jsonAuthHeaders(token),
       body: JSON.stringify({
-        projectId: projectData.data.project.id,
-        credentialMode: "host_environment"
+        projectId: projectData.data.project.id
       })
     });
 
@@ -239,7 +228,6 @@ describe("session adapter decoupling", () => {
       headers: jsonAuthHeaders(token),
       body: JSON.stringify({
         projectId: projectData.data.project.id,
-        credentialMode: "host_environment",
         aiTool: "codex"
       })
     });
@@ -251,16 +239,16 @@ describe("session adapter decoupling", () => {
     assert.equal(tmuxCreates.at(-1)?.cwd, await realpath(rootPath));
   });
 
-  it("rejects provider credentials and model overrides for Codex terminal sessions", async () => {
+  it("creates Codex sessions in host_environment without provider or model fields", async () => {
     const beforeCreateCount = tmuxCreates.length;
-    const token = await register("adapter-codex-provider-boundary@example.com");
-    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-codex-provider-boundary-"));
+    const token = await register("adapter-codex-host-env@example.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-codex-host-env-"));
 
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
       headers: jsonAuthHeaders(token),
       body: JSON.stringify({
-        name: "Codex Provider Boundary",
+        name: "Codex Host Environment",
         path: rootPath,
         aiTool: "codex"
       })
@@ -268,74 +256,26 @@ describe("session adapter decoupling", () => {
     const projectData = await projectRes.json() as ProjectResponseBody;
     assert.equal(projectRes.status, 201);
 
-    const providerRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
-      method: "POST",
-      headers: jsonAuthHeaders(token),
-      body: JSON.stringify({
-        name: "OpenAI",
-        providerKey: "openai",
-        baseUrl: "https://api.openai.com/v1",
-        authType: "api_key",
-        apiFormat: "openai",
-        supportedAdapters: ["opencode"]
-      })
-    });
-    const providerData = await providerRes.json() as { data: { provider: { id: string } } };
-    assert.equal(providerRes.status, 201);
-
-    const modelRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerData.data.provider.id}/models`, {
-      method: "POST",
-      headers: jsonAuthHeaders(token),
-      body: JSON.stringify({
-        name: "GPT Codex",
-        modelId: "gpt-5.1-codex"
-      })
-    });
-    const modelData = await modelRes.json() as { data: { model: { id: string } } };
-    assert.equal(modelRes.status, 201);
-
-    const keyRes = await fetch(`${baseUrl}/api/v1/api-keys`, {
-      method: "POST",
-      headers: jsonAuthHeaders(token),
-      body: JSON.stringify({
-        provider: "openai",
-        name: "OpenAI",
-        plaintextKey: "secret"
-      })
-    });
-    const keyData = await keyRes.json() as { data: { apiKey: { id: string } } };
-    assert.equal(keyRes.status, 201);
-
-    const storedCredentialRes = await fetch(`${baseUrl}/api/v1/sessions`, {
+    const sessionRes = await fetch(`${baseUrl}/api/v1/sessions`, {
       method: "POST",
       headers: jsonAuthHeaders(token),
       body: JSON.stringify({
         projectId: projectData.data.project.id,
-        credentialMode: "stored_encrypted_key",
-        aiTool: "codex",
-        apiKeyId: keyData.data.apiKey.id,
-        modelId: modelData.data.model.id
+        aiTool: "codex"
       })
     });
-    const modelOverrideRes = await fetch(`${baseUrl}/api/v1/sessions`, {
-      method: "POST",
-      headers: jsonAuthHeaders(token),
-      body: JSON.stringify({
-        projectId: projectData.data.project.id,
-        credentialMode: "host_environment",
-        aiTool: "codex",
-        modelId: modelData.data.model.id
-      })
-    });
+    const sessionData = await sessionRes.json();
 
-    assert.equal(storedCredentialRes.status, 400);
-    assert.match((await storedCredentialRes.json()).message, /subscription-managed/i);
-    assert.equal(modelOverrideRes.status, 400);
-    assert.match((await modelOverrideRes.json()).message, /subscription-managed/i);
-    assert.equal(tmuxCreates.length, beforeCreateCount);
+    assert.equal(sessionRes.status, 201);
+    assert.equal(sessionData.data.session.aiTool, "codex");
+    assert.equal(sessionData.data.session.credentialMode, undefined);
+    assert.equal(sessionData.data.session.launchModelId, undefined);
+    assert.equal(tmuxCreates.length, beforeCreateCount + 1);
+    assert.equal(tmuxCreates.at(-1)?.command, "codex");
+    assert.equal(tmuxCreates.at(-1)?.env.OPENAI_API_KEY, undefined);
   });
 
-  it("rejects provider credentials and model overrides for Kimi Code terminal sessions", async () => {
+  it("rejects legacy credential and model fields for Kimi Code terminal sessions", async () => {
     const beforeCreateCount = tmuxCreates.length;
     const token = await register("adapter-kimi-provider-boundary@example.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-kimi-provider-boundary-"));
@@ -352,44 +292,6 @@ describe("session adapter decoupling", () => {
     const projectData = await projectRes.json() as ProjectResponseBody;
     assert.equal(projectRes.status, 201);
 
-    const providerRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
-      method: "POST",
-      headers: jsonAuthHeaders(token),
-      body: JSON.stringify({
-        name: "Kimi",
-        providerKey: "kimi",
-        baseUrl: "https://api.moonshot.cn/anthropic",
-        authType: "api_key",
-        apiFormat: "anthropic",
-        supportedAdapters: ["kimi"]
-      })
-    });
-    const providerData = await providerRes.json() as { data: { provider: { id: string } } };
-    assert.equal(providerRes.status, 201);
-
-    const modelRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerData.data.provider.id}/models`, {
-      method: "POST",
-      headers: jsonAuthHeaders(token),
-      body: JSON.stringify({
-        name: "Kimi K2.5",
-        modelId: "kimi-k2.5"
-      })
-    });
-    const modelData = await modelRes.json() as { data: { model: { id: string } } };
-    assert.equal(modelRes.status, 201);
-
-    const keyRes = await fetch(`${baseUrl}/api/v1/api-keys`, {
-      method: "POST",
-      headers: jsonAuthHeaders(token),
-      body: JSON.stringify({
-        provider: "kimi",
-        name: "Kimi",
-        plaintextKey: "secret"
-      })
-    });
-    const keyData = await keyRes.json() as { data: { apiKey: { id: string } } };
-    assert.equal(keyRes.status, 201);
-
     const storedCredentialRes = await fetch(`${baseUrl}/api/v1/sessions`, {
       method: "POST",
       headers: jsonAuthHeaders(token),
@@ -397,8 +299,8 @@ describe("session adapter decoupling", () => {
         projectId: projectData.data.project.id,
         credentialMode: "stored_encrypted_key",
         aiTool: "kimi",
-        apiKeyId: keyData.data.apiKey.id,
-        modelId: modelData.data.model.id
+        apiKeyId: "key-id",
+        modelId: "model-id"
       })
     });
     const modelOverrideRes = await fetch(`${baseUrl}/api/v1/sessions`, {
@@ -406,39 +308,29 @@ describe("session adapter decoupling", () => {
       headers: jsonAuthHeaders(token),
       body: JSON.stringify({
         projectId: projectData.data.project.id,
-        credentialMode: "host_environment",
         aiTool: "kimi",
-        modelId: modelData.data.model.id
+        modelId: "model-id"
+      })
+    });
+    const plainRes = await fetch(`${baseUrl}/api/v1/sessions`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({
+        projectId: projectData.data.project.id,
+        aiTool: "kimi"
       })
     });
 
     assert.equal(storedCredentialRes.status, 400);
-    assert.match((await storedCredentialRes.json()).message, /subscription-managed/i);
     assert.equal(modelOverrideRes.status, 400);
-    assert.match((await modelOverrideRes.json()).message, /subscription-managed/i);
-    assert.equal(tmuxCreates.length, beforeCreateCount);
+    assert.equal(plainRes.status, 201);
+    assert.equal(tmuxCreates.length, beforeCreateCount + 1);
+    assert.equal(tmuxCreates.at(-1)?.command, "kimi");
   });
 
-  it("launches provider-backed OpenCode sessions without a legacy api key id", async () => {
+  it("rejects legacy stored-credential fields for OpenCode sessions", async () => {
     const token = await register("adapter-provider-credential@example.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-provider-session-"));
-
-    const providerRes = await fetch(`${baseUrl}/api/v1/model-providers`, {
-      method: "POST",
-      headers: jsonAuthHeaders(token),
-      // Catalog IDs are stable API keys; display names remain separately user-facing.
-      body: JSON.stringify({ catalogId: "deepseek-api" })
-    });
-    const providerData = await providerRes.json() as ProviderResponseBody;
-    assert.equal(providerRes.status, 201);
-    assert.equal(providerData.data.models[0].modelId, "deepseek-chat");
-
-    const credentialRes = await fetch(`${baseUrl}/api/v1/model-providers/${providerData.data.provider.id}/credentials`, {
-      method: "POST",
-      headers: jsonAuthHeaders(token),
-      body: JSON.stringify({ plaintextSecret: "provider-secret" })
-    });
-    assert.equal(credentialRes.status, 201);
 
     const projectRes = await fetch(`${baseUrl}/api/v1/projects`, {
       method: "POST",
@@ -459,16 +351,14 @@ describe("session adapter decoupling", () => {
         projectId: projectData.data.project.id,
         credentialMode: "stored_encrypted_key",
         aiTool: "opencode",
-        modelId: providerData.data.models[0].id
+        modelId: "model-id"
       })
     });
-    const sessionData = await sessionRes.json() as { data: { session: { aiTool: string } } };
+    const sessionData = await sessionRes.json() as { message: string };
 
-    assert.equal(sessionRes.status, 201);
-    assert.equal(sessionData.data.session.aiTool, "opencode");
-    assert.equal(tmuxCreates.at(-1)?.command, "opencode");
-    assert.deepEqual(tmuxCreates.at(-1)?.args, ["--model", "deepseek-api/deepseek-chat"]);
-    assert.equal(tmuxCreates.at(-1)?.env.DEEPSEEK_API_API_KEY, "provider-secret");
+    assert.equal(sessionRes.status, 400);
+    assert.equal(sessionData.message, "Invalid input");
+    assert.equal(tmuxCreates.some((entry) => entry.cwd === rootPath), false);
   });
 });
 

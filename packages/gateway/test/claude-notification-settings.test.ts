@@ -5,7 +5,6 @@ import path from "node:path";
 import { describe, it } from "node:test";
 
 import {
-  buildClaudePortfolioWorkerHookSettings,
   buildForgeBadgerClaudeHookSettings,
   ensureClaudeNotificationSettings
 } from "../src/services/claude-notification-settings.js";
@@ -37,28 +36,6 @@ describe("Claude notification settings", () => {
     assert.doesNotMatch(String(notificationHook?.url), /session-token-value|attach-token-value/);
     assert.equal(settings.hooks.SessionStart, undefined);
     assert.equal(settings.httpHookAllowedEnvVars.includes("FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"), false);
-  });
-
-  it("builds an isolated SessionStart worker hook with no attach-token authority", () => {
-    // Arrange / Act
-    const settings = buildClaudePortfolioWorkerHookSettings("http://127.0.0.1:48731", "portfolio-session-id");
-    const sessionStartGroups = settings.hooks.SessionStart as Array<{
-      hooks: Array<{ type?: string; url?: string; headers?: Record<string, string>; allowedEnvVars?: string[] }>;
-    }> | undefined;
-    const workerHook = sessionStartGroups?.[0]?.hooks[0];
-
-    // Assert
-    assert.equal(workerHook?.type, "http");
-    assert.equal(workerHook?.url, "http://127.0.0.1:48731/api/v1/session-hooks/claude-portfolio-worker/portfolio-session-id");
-    assert.deepEqual(workerHook?.headers, {
-      "x-forgebadger-session-id": "$FORGEBADGER_SESSION_ID",
-      "x-forgebadger-portfolio-worker-capability": "$FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"
-    });
-    assert.deepEqual(workerHook?.allowedEnvVars, ["FORGEBADGER_SESSION_ID", "FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"]);
-    assert.equal(JSON.stringify(settings).includes("FORGEBADGER_ATTACH_TOKEN"), false);
-    assert.deepEqual(settings.allowedHttpHookUrls, [
-      "http://127.0.0.1:48731/api/v1/session-hooks/claude-portfolio-worker*"
-    ]);
   });
 
   it("merges ForgeBadger hooks into project-local Claude settings without clobbering existing hooks", async () => {

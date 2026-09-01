@@ -1,6 +1,11 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
+export type OutboundHostResolver = (
+  hostname: string,
+  options: { all: true }
+) => Promise<Array<{ address: string; family: number }>>;
+
 /**
  * Single source of truth for SSRF defenses used by every outbound HTTP path
  * (model endpoint health, catalog manifest fetches, skill/template
@@ -18,10 +23,7 @@ import { isIP } from "node:net";
 
 export async function validateOutboundHost(
   hostname: string,
-  resolveHost: (
-    hostname: string,
-    options: { all: true }
-  ) => Promise<Array<{ address: string; family: number }>>
+  resolveHost: OutboundHostResolver
 ): Promise<string | undefined> {
   const normalized = hostname.toLowerCase().replace(/\.$/, "");
   const blockedByName = isBlockedMetadataHost(normalized);
@@ -52,6 +54,33 @@ export async function validateOutboundHost(
     return "Unable to resolve endpoint host";
   }
   return undefined;
+}
+
+/** Synchronous fail-closed guard used before persisting or decrypting managed credentials. */
+export function assertPublicHttpsEndpoint(endpoint: string | null | undefined): void {
+  if (!endpoint) throw new Error("Managed credentials require a public HTTPS endpoint");
+  let url: URL;
+  try { url = new URL(endpoint); } catch { throw new Error("Managed credentials require a valid public HTTPS endpoint"); }
+  if (url.protocol !== "https:" || url.username || url.password) {
+    throw new Error("Managed credentials require a public HTTPS endpoint");
+  }
+  const hostname = url.hostname.toLowerCase().replace(/\.$/u, "");
+  const blocked = isBlockedMetadataHost(hostname) ?? isBlockedIpAddress(hostname);
+  if (blocked || hostname.endsWith(".local") || hostname.endsWith(".internal")
+    || (!hostname.includes(".") && isIP(hostname) === 0)) {
+    throw new Error(blocked ?? "Managed credentials require a public DNS endpoint");
+  }
+}
+
+/** Full DNS-aware guard for the last boundary before managed-secret use or config I/O. */
+export async function assertResolvedPublicHttpsEndpoint(
+  endpoint: string | null | undefined,
+  resolveHost: OutboundHostResolver = lookup
+): Promise<void> {
+  assertPublicHttpsEndpoint(endpoint);
+  const url = new URL(endpoint as string);
+  const rejection = await validateOutboundHost(url.hostname, resolveHost);
+  if (rejection) throw new Error(`Managed credential endpoint rejected: ${rejection}`);
 }
 
 export function isBlockedIpAddress(hostname: string): string | undefined {

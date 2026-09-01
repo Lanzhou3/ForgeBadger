@@ -6,19 +6,19 @@ This runbook captures operational checks and failure handling for the MVP-0 Clau
 
 First-user local trial startup now begins in [TRIAL-RUNBOOK.md](TRIAL-RUNBOOK.md).
 Use this runbook for deeper operational notes, dependency checks, failure
-handling, and manual tmux inspection after the trial path needs more detail.
+handling, and manual terminal-multiplexer inspection after the trial path needs
+more detail.
 
 ## 1. Required Local Dependencies
 
 NPM runtime:
 
 - Node.js 20+
-- tmux 3.2+
+- tmux 3.2+ on macOS/Linux/WSL, or psmux 3.3.8+ on native Windows
 - SQLite-compatible filesystem
 
-The built-in browser terminal is supported on Unix-like hosts with tmux. On
-Windows, run ForgeBadger inside WSL for terminal sessions; native Windows is only
-expected to support non-terminal management UI workflows.
+The built-in browser terminal uses tmux on macOS/Linux/WSL and psmux over
+ConPTY on native Windows.
 
 Optional runtime dependencies:
 
@@ -43,7 +43,7 @@ Optional:
 - `FORGEBADGER_PORT` - default `3000`
 - `FORGEBADGER_DB_PATH` - default `~/.forgebadger/forgebadger.db`
 - `FORGEBADGER_LOG_LEVEL` - default `info`
-- `FORGEBADGER_TMUX_PREFIX` - default `of-`
+- `FORGEBADGER_TMUX_PREFIX` - default `fb-`
 
 For npm CLI startup, do not hand-create `FORGEBADGER_MASTER_KEY` or
 `FORGEBADGER_JWT_SECRET`. The CLI generates them on first startup and stores
@@ -54,9 +54,10 @@ a different state directory for config, database, logs, and runtime files.
 
 Before Gate A:
 
-```bash
+```text
 node --version
-tmux -V
+macOS/Linux/WSL: tmux -V
+native Windows:  psmux -V
 ```
 
 For source development:
@@ -76,10 +77,10 @@ codex --version
 Expected:
 
 - Node.js is 20 or newer.
-- tmux is installed.
-- `forgebadger doctor` reports `terminal native_tmux` for supported terminal use.
-  `terminal wsl_required` means rerun inside WSL; `terminal tmux_missing` means
-  install tmux before launching browser terminal sessions.
+- The platform terminal runtime is installed.
+- `forgebadger doctor` reports `terminal native_tmux` on macOS/Linux/WSL or
+  `terminal native_psmux` on native Windows. Missing runtimes report
+  `tmux_missing`/`psmux_missing`; psmux below 3.3.8 reports `psmux_outdated`.
 - pnpm is installed for source development workflows.
 - Claude Code, OpenCode, or Codex is available on `PATH` only when that adapter
   is being used for real sessions.
@@ -93,22 +94,28 @@ forgebadger doctor
 forgebadger start --gateway-port 48731 --web-port 48732
 ```
 
-`forgebadger start` starts the Gateway/Web child processes and prints the Web
-console URL. It also prints a non-blocking terminal warning when the current
-host cannot support tmux-backed browser terminals. If the browser cannot connect
+`forgebadger start` checks the platform terminal runtime before loading or
+creating runtime configuration. Only a ready runtime proceeds to Gateway/Web
+child-process startup and prints the Web console URL. If the browser cannot connect
 immediately, wait for initialization or inspect logs and `forgebadger doctor`
 output. Runtime state defaults to `~/.forgebadger`; use `FORGEBADGER_STATE_DIR`
 when testing against disposable state or running multiple isolated installs.
 
-Windows native hosts can still start the management UI, but browser terminal
-sessions require WSL because ForgeBadger persists terminal sessions with tmux.
-Recommended recovery path:
+Native Windows installs missing psmux with
+`winget install --id marlocarlo.psmux --exact --source winget`, or upgrades a
+version below 3.3.8 with
+`winget upgrade --id marlocarlo.psmux --exact --source winget`. WSL remains an
+optional tmux-based compatibility path, not a prerequisite for native Windows.
 
-1. Install WSL, for example `wsl --install -d Ubuntu`.
-2. Open the WSL distribution and install Node.js 20+ plus tmux.
-3. On Ubuntu/Debian WSL, install tmux with `sudo apt update && sudo apt install -y tmux`.
-4. Re-run `forgebadger doctor` inside WSL and confirm `terminal native_tmux`.
-5. Re-run `forgebadger start` inside WSL for terminal-enabled browser sessions.
+The npm postinstall and `forgebadger doctor` never install system software.
+`doctor` is fully read-only: inspecting an empty state path does not create the
+directory, runtime config, secrets, SQLite database, or recovery key.
+`forgebadger start`/`init` may offer the fixed command only in an interactive
+TTY outside CI; default No and any answer other than explicit `y`/`yes` leaves
+the host unchanged. The CLI executes accepted commands without a shell and
+rechecks afterward. If the runtime remains unready, both commands return
+non-zero and stop before config/project-state creation or process startup.
+Linux detection is limited to apt-get, dnf, yum, pacman, zypper, and apk.
 
 For Unix-like hosts where `forgebadger doctor` reports `terminal tmux_missing`,
 install tmux with the platform package manager, then re-run `forgebadger doctor`
@@ -122,17 +129,17 @@ On startup, Gateway must:
 1. Open SQLite database.
 2. Run or verify migrations.
 3. Validate required env vars.
-4. Scan `of-*` tmux sessions.
+4. Scan `fb-*` platform-multiplexer sessions.
 5. Recover matching DB sessions.
-6. Kill orphan `of-*` tmux sessions.
+6. Kill orphan `fb-*` platform-multiplexer sessions.
 7. Start HTTP and WebSocket server.
 
 ## 6. Common Failure Handling
 
 | Failure | Expected behavior |
 |---------|-------------------|
-| Native Windows terminal runtime | Keep management UI startup possible, but warn that browser terminal sessions require WSL |
-| Missing `tmux` | Block session launch with dependency error and install guidance |
+| Missing/outdated native Windows psmux | Abort CLI/Gateway startup before state initialization/listen and show the exact WinGet install/upgrade guidance |
+| Missing `tmux` | Abort CLI/Gateway startup before state initialization/listen with allowlisted package-manager guidance |
 | Missing Claude Code | Block session launch with adapter dependency error |
 | API key decrypt fails | Block launch; do not create tmux session |
 | Project under denied root | Reject before render/write/launch |
@@ -143,7 +150,10 @@ On startup, Gateway must:
 | `capture-pane` fails | Attach anyway; show history restoration warning |
 | config rollback fails | Return affected files for manual recovery |
 
-## 7. Manual tmux Inspection
+## 7. Manual Multiplexer Inspection
+
+Use `tmux` below on macOS/Linux/WSL and `psmux` on native Windows. PowerShell
+users can omit the `grep` filter and inspect the bounded session list directly.
 
 List ForgeBadger sessions:
 
@@ -177,7 +187,7 @@ If Gate A fails:
 
 1. Freeze embedded terminal UI deep work.
 2. Continue project/config management only.
-3. Show user the generated `tmux attach` command.
+3. Show the user the generated platform multiplexer attach command.
 4. Record failure reason and required fix.
 5. Revisit embedded terminal after the POC blocker is resolved.
 

@@ -14,8 +14,6 @@ const session: Session = {
   projectName: "ForgeBadger",
   status: "stopped",
   aiTool: "claude",
-  modelId: "claude-sonnet",
-  credentialMode: "host_environment",
 };
 
 const taskPacket: ProjectManagerTaskPacket = {

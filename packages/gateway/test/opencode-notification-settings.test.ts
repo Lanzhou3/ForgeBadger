@@ -49,6 +49,7 @@ describe("OpenCode notification settings", () => {
     assert.match(content, /export const ForgeBadgerPermissionNotify/);
     assert.match(content, /adapter: "opencode"/);
     assert.match(content, /"x-forgebadger-session-token"/);
+    assert.match(content, /signal: AbortSignal\.timeout\(4500\)/);
   });
 
   it("is idempotent when the plugin content is unchanged", async () => {

@@ -1,6 +1,7 @@
 import type { LaunchPlan } from "../adapters/claude.js";
 import type { CredentialMode } from "../config-generation/types.js";
 import { decryptSecret, encryptSecret } from "../crypto/secret-box.js";
+import { dateFromSqliteTimestamp, sqliteTimestampSeconds } from "../db/sqlite-time.js";
 import type { Database } from "../db/types.js";
 import type { SessionRecoveryStore, StoredSession } from "./session-manager.js";
 
@@ -69,7 +70,7 @@ class DbSessionRecoveryStore implements SessionRecoveryStore {
         storedToken,
         session.tmuxName,
         "running",
-        Date.now(),
+        sqliteTimestampSeconds(),
         session.id,
         session.userId
       );
@@ -90,7 +91,7 @@ class DbSessionRecoveryStore implements SessionRecoveryStore {
          SET tmux_session = NULL, status = ?, updated_at = ?
          WHERE id = ? AND user_id = ?`
       )
-      .run("exited", Date.now(), id, userId);
+      .run("exited", sqliteTimestampSeconds(), id, userId);
   }
 
   private encryptAttachToken(token: string): string {
@@ -145,12 +146,5 @@ function parseCredentialMode(value: string): CredentialMode {
 }
 
 function toIsoString(value: number | string | null): string {
-  if (typeof value === "number") {
-    return new Date(value).toISOString();
-  }
-  if (typeof value === "string" && value.length > 0) {
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
-  }
-  return new Date().toISOString();
+  return (dateFromSqliteTimestamp(value) ?? new Date()).toISOString();
 }

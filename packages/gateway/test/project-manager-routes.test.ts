@@ -13,10 +13,12 @@ import { AuditLogRepository } from "../src/db/repositories/audit-log-repository.
 import { ProjectManagerRepository } from "../src/db/repositories/project-manager-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
+import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { UserRepository, type User } from "../src/db/repositories/user-repository.js";
 import { createProjectManagerRoutes } from "../src/routes/project-manager.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
+const masterKey = "abcdef0123456789abcdef0123456789";
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
@@ -53,6 +55,7 @@ describe("project-manager routes", () => {
     app.locals.jwtSecret = secret;
     app.use(express.json());
     app.use("/api/v1/projects", createProjectManagerRoutes(db, {
+      masterKey,
       adapterCommandRunner: async () => ({ exitCode: 0, stdout: "claude 1.0.0 (Claude Code)", stderr: "" })
     }));
   });
@@ -290,6 +293,24 @@ describe("project-manager routes", () => {
     assert.equal(started.body.data.taskPacket.runtime.adapter, "opencode");
     assert.match(started.body.data.taskPacket.prompt, /Runtime CLI: opencode/u);
     assert.equal(sessions[0]?.aiTool, "opencode");
+  });
+
+  it("creates the task-packet session in host_environment without launch fields", async () => {
+    const workItems = new ProjectManagerRepository(db, owner.id);
+    const item = workItems.createWorkItem(projectId, { title: "Launch plainly" });
+
+    const started = await request(
+      "POST",
+      `/api/v1/projects/${projectId}/project-manager/work-items/${item.id}/task-packet/start`,
+      { aiTool: "opencode" }
+    );
+    const stored = new SessionRepository(db, owner.id).getById(started.body.data.session.id);
+
+    assert.equal(started.status, 201);
+    assert.equal(started.body.data.session.credentialMode, undefined);
+    assert.equal(started.body.data.session.launchModelId, undefined);
+    assert.equal(started.body.data.session.launchProviderId, undefined);
+    assert.equal(stored?.aiTool, "opencode");
   });
 
   it("rejects task packet start when the selected CLI is unavailable", async () => {

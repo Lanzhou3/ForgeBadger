@@ -4,15 +4,14 @@
  * and project notes. Writes are scoped and read-tool only (no approval needed
  * to record a memory).
  *
- * The queries/writes live in services/copilot-bridge/bridge-service.ts so the
- * internal copilot-bridge HTTP API and these tools share one implementation.
+ * Queries and writes use the native Copilot platform-access service.
  */
 import { z } from "zod";
 import {
   listMemoryEntries,
   searchMemoryEntries,
   writeMemoryEntry
-} from "../../copilot-bridge/bridge-service.js";
+} from "../platform-access.js";
 import type { Database } from "../../../db/types.js";
 import type { AgentTool, AgentToolContext } from "../tool-registry.js";
 

@@ -11,7 +11,7 @@ const EVENTS_HEARTBEAT_INTERVAL_MS = 30_000;
 const EVENTS_HEARTBEAT_TIMEOUT_MS = 90_000;
 const DEFAULT_EVENTS_WS_MAX_CONNECTIONS = 300;
 const DEFAULT_EVENTS_WS_MAX_CONNECTIONS_PER_USER = 10;
-const EVENTS_WS_AUTH_PROTOCOLS = ["forgebadger-events", "openforge-events"] as const;
+const EVENTS_WS_AUTH_PROTOCOLS = ["forgebadger-events"] as const;
 
 export interface EventsWebSocketOptions {
   server: Server;
@@ -174,19 +174,6 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         message: event.message,
         created_at: event.createdAt.toISOString()
       };
-    case "portfolio_projection_updated":
-      // Portfolio publishes only this projection allowlist; raw requests,
-      // terminal content, credentials, and worker material never reach ws.
-      return {
-        kind: event.kind,
-        record_id: event.recordId,
-        ...(event.projectId ? { project_id: event.projectId } : {}),
-        ...(event.state ? { state: event.state } : {}),
-        ...(event.projectionVersion !== undefined ? { projection_version: event.projectionVersion } : {}),
-        ...(event.correlationId ? { correlation_id: event.correlationId } : {}),
-        ...(event.summary ? { summary: event.summary } : {}),
-        occurred_at: event.occurredAt.toISOString()
-      };
     case "copilot_run_updated":
       return {
         run_id: event.runId,
@@ -211,7 +198,11 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
 }
 
 function buildNotificationMeta(event: ForgeBadgerEvent): Record<string, unknown> {
-  if (event.type === "activity_created" || event.type === "portfolio_projection_updated" || event.type === "copilot_run_updated" || !event.notificationId) {
+  if (
+    event.type === "activity_created"
+    || event.type === "copilot_run_updated"
+    || !event.notificationId
+  ) {
     return {};
   }
   return {

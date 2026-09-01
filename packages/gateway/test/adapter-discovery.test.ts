@@ -42,21 +42,32 @@ describe("adapter discovery", () => {
     assert.equal(codex?.launchEnabled, true);
   });
 
-  it("disables terminal launch on native Windows even when adapter commands exist", async () => {
+  it("enables terminal launch on native Windows when psmux and adapter commands exist", async () => {
     const runner: CommandRunner = async (command) => ({
       exitCode: 0,
-      stdout: `${command} 1.0.0\n`,
+      stdout: command === "psmux" ? "tmux 3.3.8\n" : `${command} 1.0.0\n`,
       stderr: ""
     });
 
     const adapters = await discoverAdapters(runner, "win32");
 
     assert.equal(adapters.every((adapter) => adapter.available), true);
+    assert.equal(adapters.every((adapter) => adapter.launchEnabled), true);
+    assert.equal(adapters.every((adapter) => adapter.error === undefined), true);
+  });
+
+  it("disables terminal launch on native Windows when psmux is missing", async () => {
+    const runner: CommandRunner = async (command) => ({
+      exitCode: command === "psmux" ? 127 : 0,
+      stdout: command === "psmux" ? "" : `${command} 1.0.0\n`,
+      stderr: command === "psmux" ? "psmux not found" : ""
+    });
+
+    const adapters = await discoverAdapters(runner, "win32");
+
+    assert.equal(adapters.every((adapter) => adapter.available), true);
     assert.equal(adapters.every((adapter) => adapter.launchEnabled === false), true);
-    assert.match(
-      adapters.find((adapter) => adapter.id === "claude")?.error ?? "",
-      /Native Windows terminals require WSL/
-    );
+    assert.match(adapters[0]?.error ?? "", /Install psmux/);
   });
 
   it("disables terminal launch when tmux is missing on Unix-like hosts", async () => {

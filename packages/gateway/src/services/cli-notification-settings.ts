@@ -19,10 +19,15 @@ interface CodexHookGroup {
 
 // Kimi Code's hook system is Beta and global-only: `[[hooks]]` rules are read
 // from ~/.kimi-code/config.toml (or $KIMI_CODE_HOME), never from a project
-// config. Events follow the documented lifecycle set — "PermissionRequest" and
-// "Interrupt" are NOT Kimi events (permission prompts arrive as Notification
-// with sink/notification_type context), so do not add them back.
-const kimiHookEvents = ["Stop", "StopFailure", "SessionEnd", "Notification"] as const;
+// config. Keep this lifecycle set aligned with Kimi's documented event names.
+const kimiHookEvents = [
+  "PermissionRequest",
+  "Stop",
+  "Interrupt",
+  "StopFailure",
+  "SessionEnd",
+  "Notification"
+] as const;
 const codexEvents = ["PermissionRequest", "Stop", "SessionEnd"] as const;
 
 /**
@@ -72,7 +77,6 @@ export async function ensureKimiNotificationSettings(
   const kimiHome = process.env.KIMI_CODE_HOME?.trim() || path.join(os.homedir(), ".kimi-code");
   const stateDir =
     process.env.FORGEBADGER_STATE_DIR?.trim() ||
-    process.env.OPENFORGE_STATE_DIR?.trim() ||
     path.join(os.homedir(), ".forgebadger");
   const configPath = path.join(kimiHome, "config.toml");
   const scriptPath = path.join(stateDir, "hooks", "kimi-notify.mjs");
@@ -101,7 +105,7 @@ async function stripProjectKimiHookBlock(projectRoot: string): Promise<boolean> 
     const existingText = await readText(configPath);
     if (!existingText) return false;
     const stripped = existingText
-      .replace(/\n?# (?:ForgeBadger|OpenForge) managed notification hooks: start\n[\s\S]*?# (?:ForgeBadger|OpenForge) managed notification hooks: end\n?/u, "")
+      .replace(/\n?# ForgeBadger managed notification hooks: start\n[\s\S]*?# ForgeBadger managed notification hooks: end\n?/u, "")
       .replace(/\n+$/u, "");
     if (stripped === existingText) return false;
     await writeFile(configPath, stripped.length > 0 ? `${stripped}\n` : stripped, "utf8");
@@ -114,13 +118,13 @@ async function stripProjectKimiHookBlock(projectRoot: string): Promise<boolean> 
 function mergeCodexHooks(existing: Record<string, unknown>, scriptPath: string): Record<string, unknown> {
   const next = cloneRecord(existing);
   const hooks = isRecord(next.hooks) ? { ...next.hooks } : {};
-  const command: CodexHookCommand = {
-    type: "command",
-    command: `node ${shellQuote(scriptPath)}`,
-    timeout: 5
-  };
 
   for (const event of codexEvents) {
+    const command: CodexHookCommand = {
+      type: "command",
+      command: `node ${shellQuote(scriptPath)}`,
+      timeout: event === "SessionEnd" ? 3 : 5
+    };
     hooks[event] = mergeCodexHookGroups(hooks[event], command);
   }
   next.hooks = hooks;
@@ -146,7 +150,7 @@ function mergeCodexHookGroups(value: unknown, command: CodexHookCommand): CodexH
 
 function mergeKimiHookText(existing: string, scriptPath: string): string {
   const preserved = existing
-    .replace(/\n?# (?:ForgeBadger|OpenForge) managed notification hooks: start\n[\s\S]*?# (?:ForgeBadger|OpenForge) managed notification hooks: end\n?/u, "")
+    .replace(/\n?# ForgeBadger managed notification hooks: start\n[\s\S]*?# ForgeBadger managed notification hooks: end\n?/u, "")
     .replace(/\n+$/u, "");
   const command = `node ${shellQuote(scriptPath)}`;
   const managed = kimiHookEvents.flatMap((event) => [
@@ -176,6 +180,9 @@ process.stdin.on("end", async () => {
 
   let payload = {};
   try { payload = JSON.parse(chunks.join("")); } catch { return; }
+  const requestTimeoutMs = ${
+    adapter === "codex" ? 'payload.hook_event_name === "SessionEnd" ? 2500 : 4500' : "4500"
+  };
   try {
     await fetch(
       gatewayUrl.replace(/\\/+$/u, "") + "/api/v1/session-hooks/claude-notification/" + encodeURIComponent(sessionId),
@@ -187,7 +194,7 @@ process.stdin.on("end", async () => {
           "x-forgebadger-session-token": attachToken
         },
         body: JSON.stringify({ ...payload, adapter: "${adapter}" }),
-        signal: AbortSignal.timeout(4500)
+        signal: AbortSignal.timeout(requestTimeoutMs)
       }
     );
   } catch {
@@ -230,7 +237,7 @@ function shellQuote(value: string): string {
 function isForgeBadgerCommand(value: unknown): boolean {
   return (
     typeof value === "string" &&
-    (value.includes("forgebadger-notify.mjs") || value.includes("openforge-notify.mjs"))
+    value.includes("forgebadger-notify.mjs")
   );
 }
 

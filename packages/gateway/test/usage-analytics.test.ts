@@ -41,6 +41,7 @@ describe("usage analytics", () => {
     const provider = providerRepo.createProviderProfile({
       providerKey: "anthropic",
       name: "Anthropic",
+      baseUrl: "https://api.example.com/v1",
       authType: "api_key",
       apiFormat: "anthropic",
       supportedAdapters: ["claude"]

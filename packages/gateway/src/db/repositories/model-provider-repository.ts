@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import type { Database } from "../types.js";
 import { decryptSecret, encryptSecret, type EncryptedSecret } from "../../crypto/secret-box.js";
+import { assertPublicHttpsEndpoint } from "../../services/network-policy.js";
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderAdapter = "claude" | "opencode" | "kimi";
+export type ProviderAdapter = "claude" | "opencode" | "codex" | "kimi";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
 export interface ProviderProfile {
@@ -54,6 +55,7 @@ export interface ProviderCredentialSummary {
   providerProfileId: string;
   label: string | null;
   status: string;
+  generation: number;
   secretPreview: string;
   lastUsedAt: number | null;
   createdAt: number | null;
@@ -145,6 +147,7 @@ interface CredentialRow {
   label: string | null;
   secret_encrypted: string;
   status: string;
+  generation: number;
   last_used_at: number | null;
   created_at: number | null;
   updated_at: number | null;
@@ -158,6 +161,7 @@ export class ModelProviderRepository {
   ) {}
 
   createProviderProfile(input: CreateProviderProfileInput): ProviderProfile {
+    assertProviderEndpointsSafe(input);
     const id = randomUUID();
     const now = Date.now();
     this.db.prepare(`
@@ -235,6 +239,7 @@ export class ModelProviderRepository {
       defaultHeaders: input.defaultHeaders ?? existing.defaultHeaders,
       opencodeNpm: input.opencodeNpm === undefined ? existing.opencodeNpm : input.opencodeNpm
     };
+    assertProviderEndpointsSafe(next);
     this.db.prepare(`
       UPDATE model_provider_profiles
       SET provider_key = ?, name = ?, base_url = ?, anthropic_base_url = ?, openai_base_url = ?,
@@ -262,6 +267,7 @@ export class ModelProviderRepository {
   }
 
   deleteProviderProfile(id: string): boolean {
+    if (!this.getProviderProfile(id)) return false;
     const result = this.db.prepare(`
       DELETE FROM model_provider_profiles WHERE id = ? AND user_id = ?
     `).run(id, this.userId);
@@ -393,6 +399,16 @@ export class ModelProviderRepository {
     return rows.map(toCredentialSummary);
   }
 
+  getOldestActiveCredential(providerProfileId: string): ProviderCredentialSummary | undefined {
+    const row = this.db.prepare(`
+      SELECT * FROM provider_credentials
+      WHERE user_id = ? AND provider_profile_id = ? AND status = 'active'
+      ORDER BY created_at ASC, rowid ASC
+      LIMIT 1
+    `).get(this.userId, providerProfileId) as CredentialRow | undefined;
+    return row ? toCredentialSummary(row) : undefined;
+  }
+
   getCredential(id: string): ProviderCredentialSummary | undefined {
     const row = this.db.prepare(`
       SELECT * FROM provider_credentials WHERE id = ? AND user_id = ?
@@ -409,7 +425,7 @@ export class ModelProviderRepository {
     const encrypted = encryptSecret(input.plaintextSecret, { key: this.masterKey });
     this.db.prepare(`
       UPDATE provider_credentials
-      SET label = ?, secret_encrypted = ?, updated_at = ?
+      SET label = ?, secret_encrypted = ?, status = 'active', generation = generation + 1, updated_at = ?
       WHERE id = ? AND user_id = ?
     `).run(
       input.label === undefined ? existing.label : input.label,
@@ -421,11 +437,12 @@ export class ModelProviderRepository {
     return this.getCredential(id);
   }
 
-  deleteCredential(id: string): boolean {
+  deleteCredential(id: string): "deleted" | "revoked" | "not_found" {
+    if (!this.getCredential(id)) return "not_found";
     const result = this.db.prepare(`
       DELETE FROM provider_credentials WHERE id = ? AND user_id = ?
     `).run(id, this.userId);
-    return result.changes > 0;
+    return result.changes > 0 ? "deleted" : "not_found";
   }
 
   decryptCredential(id: string): string {
@@ -433,6 +450,7 @@ export class ModelProviderRepository {
       SELECT * FROM provider_credentials WHERE id = ? AND user_id = ?
     `).get(id, this.userId) as CredentialRow | undefined;
     if (!row) throw new Error("Provider credential not found");
+    if (row.status !== "active") throw new Error("Provider credential must be active");
     return decryptSecret(JSON.parse(row.secret_encrypted) as EncryptedSecret, { key: this.masterKey });
   }
 
@@ -441,6 +459,13 @@ export class ModelProviderRepository {
       UPDATE model_profiles SET is_default = 0, updated_at = ? WHERE user_id = ?
     `).run(Date.now(), this.userId);
   }
+}
+
+function assertProviderEndpointsSafe(input: Pick<CreateProviderProfileInput, "authType" | "baseUrl" | "anthropicBaseUrl" | "openaiBaseUrl">): void {
+  if (input.authType === "none") return;
+  const endpoints = [input.baseUrl, input.anthropicBaseUrl, input.openaiBaseUrl].filter((value): value is string => Boolean(value));
+  if (endpoints.length === 0) throw new Error("Credential-bearing providers require an endpoint");
+  for (const endpoint of endpoints) assertPublicHttpsEndpoint(endpoint);
 }
 
 function toProviderProfile(row: ProviderProfileRow): ProviderProfile {
@@ -494,6 +519,7 @@ function toCredentialSummary(row: CredentialRow): ProviderCredentialSummary {
     providerProfileId: row.provider_profile_id,
     label: row.label,
     status: row.status,
+    generation: row.generation,
     secretPreview: "********",
     lastUsedAt: row.last_used_at,
     createdAt: row.created_at,
@@ -532,7 +558,7 @@ function parseJsonObject(value: string): Record<string, string> {
 }
 
 function isProviderAdapter(value: string): value is ProviderAdapter {
-  return value === "claude" || value === "opencode" || value === "kimi";
+  return value === "claude" || value === "opencode" || value === "codex" || value === "kimi";
 }
 
 function normalizeSupportedAdapters(adapters: ProviderAdapter[]): ProviderAdapter[] {

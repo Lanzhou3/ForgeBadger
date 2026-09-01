@@ -94,15 +94,21 @@ describe("decodeJwt", () => {
 
 describe("authenticate middleware", () => {
   it("injects userId on valid token", () => {
-    const token = signJwt({ userId: "u1", email: "a@b.com" }, secret);
-    const req = { headers: { authorization: `Bearer ${token}` } } as any;
+    const db = createTestDb();
+    const user = new UserRepository(db).create("middleware@example.com", "hash");
+    const token = signJwt({ userId: user.id, email: user.email }, secret);
+    const req = {
+      headers: { authorization: `Bearer ${token}` },
+      app: { locals: { db, jwtSecret: secret } }
+    } as any;
     const res = fakeResponse();
     let nextCalled = false;
     authenticate(req, res, () => {
       nextCalled = true;
     });
     assert.equal(nextCalled, true);
-    assert.equal(req.userId, "u1");
+    assert.equal(req.userId, user.id);
+    db.close();
   });
 
   it("rejects missing token", () => {
@@ -279,8 +285,8 @@ describe("auth routes", () => {
     });
   });
 
-  describe("legacy cookie cleanup", () => {
-    it("clears both ForgeBadger and legacy OpenForge cookies on logout", async () => {
+  describe("session cookie cleanup", () => {
+    it("clears the ForgeBadger cookie on logout", async () => {
       const registered = await makeRequest(app, "POST", "/api/v1/auth/register", {
         email: "logout-cookies@example.com",
         password: "password123"
@@ -292,15 +298,15 @@ describe("auth routes", () => {
         "POST",
         "/api/v1/auth/logout",
         undefined,
-        { cookie: `forgebadger_session=${token}; openforge_session=${token}` }
+        { cookie: `forgebadger_session=${token}` }
       );
 
       assert.equal(response.status, 200);
       assert.equal(response.setCookie.some((value) => value.startsWith("forgebadger_session=")), true);
-      assert.equal(response.setCookie.some((value) => value.startsWith("openforge_session=")), true);
+      assert.equal(response.setCookie.length, 1);
     });
 
-    it("clears both ForgeBadger and legacy OpenForge cookies after changing password", async () => {
+    it("clears the ForgeBadger cookie after changing password", async () => {
       const registered = await makeRequest(app, "POST", "/api/v1/auth/register", {
         email: "password-cookies@example.com",
         password: "password123"
@@ -312,12 +318,12 @@ describe("auth routes", () => {
         "POST",
         "/api/v1/auth/change-password",
         { currentPassword: "password123", newPassword: "new-password-123" },
-        { cookie: `forgebadger_session=${token}; openforge_session=${token}` }
+        { cookie: `forgebadger_session=${token}` }
       );
 
       assert.equal(response.status, 200);
       assert.equal(response.setCookie.some((value) => value.startsWith("forgebadger_session=")), true);
-      assert.equal(response.setCookie.some((value) => value.startsWith("openforge_session=")), true);
+      assert.equal(response.setCookie.length, 1);
     });
   });
 });

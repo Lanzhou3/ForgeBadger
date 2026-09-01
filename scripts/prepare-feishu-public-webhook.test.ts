@@ -78,24 +78,22 @@ describe("prepare Feishu public webhook", () => {
     assert.match(config.reason, /FORGEBADGER_DB_PATH/);
   });
 
-  it("accepts legacy OpenForge variables while preferring ForgeBadger values", () => {
+  it("uses only ForgeBadger variables", () => {
     const config = resolvePrepareFeishuPublicWebhookConfig({
-      OPENFORGE_DB_PATH: "/tmp/openforge.db",
-      OPENFORGE_MASTER_KEY: "legacy-master",
-      OPENFORGE_FEISHU_FORGEBADGER_USER_EMAIL: "legacy@example.com",
-      OPENFORGE_FEISHU_PUBLIC_WEBHOOK_ID: "legacy-webhook",
-      OPENFORGE_FEISHU_WEBHOOK_VERIFICATION_TOKEN: "legacy-verify",
-      OPENFORGE_FEISHU_WEBHOOK_EVENT_ENCRYPT_KEY: "legacy-encrypt",
       FORGEBADGER_DB_PATH: "/tmp/forgebadger.db",
-      FORGEBADGER_MASTER_KEY: "current-master"
+      FORGEBADGER_MASTER_KEY: "current-master",
+      FORGEBADGER_FEISHU_FORGEBADGER_USER_EMAIL: "current@example.com",
+      FORGEBADGER_FEISHU_PUBLIC_WEBHOOK_ID: "current-webhook",
+      FORGEBADGER_FEISHU_WEBHOOK_VERIFICATION_TOKEN: "current-verify",
+      FORGEBADGER_FEISHU_WEBHOOK_EVENT_ENCRYPT_KEY: "current-encrypt"
     });
 
     assert.equal(config.ok, true);
     if (!config.ok) return;
     assert.equal(config.dbPath, "/tmp/forgebadger.db");
     assert.equal(config.masterKey, "current-master");
-    assert.equal(config.forgebadgerUserEmail, "legacy@example.com");
-    assert.equal(config.publicWebhookId, "legacy-webhook");
+    assert.equal(config.forgebadgerUserEmail, "current@example.com");
+    assert.equal(config.publicWebhookId, "current-webhook");
   });
 });
 

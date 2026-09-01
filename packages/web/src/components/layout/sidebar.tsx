@@ -163,14 +163,19 @@ function NavLinks({ collapsed = false, onNavigate }: { collapsed?: boolean; onNa
 }
 
 function BrandMark({ className }: { className?: string }) {
+  // The logo artwork is a self-contained squircle app icon with a faint light
+  // edge ring and transparent margin baked in, and its tile sits slightly
+  // above the canvas center; scale up (with a small downward nudge) inside a
+  // clipped frame so the tile renders full-bleed without the fringe.
   return (
-    <div
-      className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04]",
-        className
-      )}
-    >
-      <img src={brandAssets.logoSvg} alt="" className="size-5" aria-hidden="true" />
+    <div className={cn("size-8 shrink-0 overflow-hidden rounded-lg", className)}>
+      <img
+        src={brandAssets.logoSvg}
+        alt=""
+        className="size-full translate-y-[1.2%] scale-[1.28] select-none object-cover"
+        aria-hidden="true"
+        draggable={false}
+      />
     </div>
   );
 }

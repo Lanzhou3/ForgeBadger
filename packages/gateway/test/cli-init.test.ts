@@ -55,14 +55,14 @@ describe("forgebadger init CLI prototype", () => {
     );
   });
 
-  it("accepts the legacy Gateway URL only when the ForgeBadger value is absent", async () => {
+  it("uses only the ForgeBadger Gateway URL override", async () => {
     const projectPath = await mkdtemp(path.join(tmpdir(), "forgebadger-cli-init-env-"));
-    const legacyPlan = await createInitRenderPlan({
+    const defaultPlan = await createInitRenderPlan({
       projectPath,
       templateId: "builtin-claude-code",
       credentialMode: "host_environment",
       dryRun: true,
-      env: { OPENFORGE_GATEWAY_URL: "http://legacy.example:48731" }
+      env: { OLD_PRODUCT_GATEWAY_URL: "http://old.example:48731" }
     });
     const currentPlan = await createInitRenderPlan({
       projectPath,
@@ -70,12 +70,11 @@ describe("forgebadger init CLI prototype", () => {
       credentialMode: "host_environment",
       dryRun: true,
       env: {
-        FORGEBADGER_GATEWAY_URL: "http://current.example:48731",
-        OPENFORGE_GATEWAY_URL: "http://legacy.example:48731"
+        FORGEBADGER_GATEWAY_URL: "http://current.example:48731"
       }
     });
 
-    assert.match(JSON.stringify(legacyPlan.files), /http:\/\/legacy\.example:48731/);
+    assert.match(JSON.stringify(defaultPlan.files), /http:\/\/127\.0\.0\.1:48731/);
     assert.match(JSON.stringify(currentPlan.files), /http:\/\/current\.example:48731/);
   });
 });

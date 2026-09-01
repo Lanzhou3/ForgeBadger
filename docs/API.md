@@ -45,7 +45,9 @@ HTTP status codes still carry transport semantics:
 - `403` unauthorized
 - `404` not found
 - `409` conflict
+- `429` rate limited
 - `500` server error
+- `503` temporarily unavailable
 
 ## 3. REST Surface
 
@@ -53,12 +55,31 @@ HTTP status codes still carry transport semantics:
 
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
+- `POST /api/v1/auth/reset-password`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
 
 Auth user payloads include `id`, `email`, `role`, and `status`. The first
 registered local user is bootstrapped as `admin`; later registrations default
 to `user`. Disabled users cannot log in or refresh `/auth/me`.
+
+`POST /api/v1/auth/register` accepts
+`{ email, password, recoveryKey, inviteCode? }`. When the production Gateway
+provides local account recovery, registration requires a direct loopback socket
+without proxy-forwarding headers and a valid key from
+`<FORGEBADGER_STATE_DIR>/account-recovery.key`. Validation does not consume or
+rotate the key. Existing `off` and `invite` registration policies still apply;
+invite mode requires both the local recovery key and a valid invite for users
+after the initial administrator.
+
+`POST /api/v1/auth/reset-password` is an unauthenticated, local-owner recovery
+route. It accepts `{ email, recoveryKey, newPassword }`, but only over a direct
+loopback socket without `Forwarded`/`X-Forwarded-*` proxy evidence. The key is
+read from `<FORGEBADGER_STATE_DIR>/account-recovery.key`; a successful reset
+rotates that key, revokes every session for the account, and requires a normal
+login with the new password. Unknown users, disabled users, and invalid keys
+share the same generic `401` response. Recovery attempts are limited to five
+per 15 minutes.
 
 ### Admin Users
 
@@ -403,689 +424,55 @@ transcripts, raw CLI stderr, raw Feishu messages, webhook signatures, event
 encrypt keys, Feishu tokens, provider credentials, API keys, JWTs, attach
 tokens, private keys, or cross-tenant mapping details.
 
-Feishu free-form text is never an approval or execution channel for the Project
-Manager Ledger. Feishu free-form text cannot approve pending actions, cannot
-send terminal input, cannot mutate ledger records directly, and cannot bypass
-the existing pending-action approval routes. Feishu outbound updates remain
-approval gated through the existing Copilot prepare-tool and pending-action
-policy checks, including chat allowlists, identity mode, user mapping, and
-tenant configuration. Ledger events may link a bounded Feishu reference, but
-they do not execute Feishu writes.
+Feishu free-form text is never an approval or execution channel for governed
+work. It cannot approve decisions, send terminal input, mutate ledger records,
+or bypass canonical decisions. The former Feishu outbound delivery runtime
+(Portfolio bindings, canonical signed actions, and the durable Outbox) is
+retired and not mounted; no live code path delivers Feishu channel messages,
+and no channel text is routed into an assistant or terminal path.
 
 ### Integrations
 
+Feishu account administration remains under `/api/v1/integrations/feishu/**`. Account secrets are write-only and encrypted; status and configuration responses contain only safe capability state.
+
 - `GET /api/v1/integrations/feishu/status`
-- `GET /api/v1/integrations/feishu/account`
-- `PUT /api/v1/integrations/feishu/account`
-- `GET /api/v1/integrations/feishu/health`
-- `GET /api/v1/integrations/feishu/config`
-- `PATCH /api/v1/integrations/feishu/config`
-- `GET /api/v1/integrations/feishu/user-mappings`
-- `PUT /api/v1/integrations/feishu/user-mappings`
-- `GET /api/v1/integrations/feishu/bindings`
-- `POST /api/v1/integrations/feishu/bindings`
-- `PATCH /api/v1/integrations/feishu/bindings/:bindingId`
-- `DELETE /api/v1/integrations/feishu/bindings/:bindingId`
-- `GET /api/v1/integrations/feishu/queue-summary`
+- `GET|PUT /api/v1/integrations/feishu/account`
+- `GET|PUT /api/v1/integrations/feishu/config`
+- `GET|PUT /api/v1/integrations/feishu/user-mappings`
 - `POST /api/v1/integrations/feishu/emergency-stop`
-- `POST /api/v1/integrations/feishu/bot-websocket/events`
-- `POST /api/v1/integrations/feishu/bot-websocket/connection-events`
-- `POST /api/v1/integrations/feishu/inbound`
-- `POST /api/v1/integrations/feishu/webhook/:publicId`
 
-Feishu integration endpoints are authenticated, tenant scoped, and
-Gateway-owned. Status discovers the local `lark-cli` binary, reports version
-and structured auth status when available, and overlays the tenant's persisted
-enabled/emergency-disabled state. The account endpoints read safe App ID/status
-metadata and write App ID/App Secret credentials. App Secret is encrypted with
-the Gateway master key, is never returned by the API, and may be omitted on a
-later update to preserve the existing encrypted value. Policy configuration and
-user mappings remain separate tenant-scoped resources.
+Portfolio-based message ingress, signed actions, and delivery workers are retired. Feishu configuration never becomes terminal input or an approval decision.
 
-Conversation bindings map a Feishu Chat ID and thread key to a stable Copilot
-conversation. `POST /bindings` supports manual creation with either workspace
-scope or a tenant-owned internal project ID; the Settings UI resolves that ID
-from a project-name selector. `PATCH /bindings/:bindingId` changes only the
-scope, while delete removes the binding without deleting project data.
+### Copilot and retired runtime APIs
 
-Feishu messages that arrive without a portfolio conversation binding are routed
-to a per-chat Copilot channel instead of being dropped. Each Feishu chat maps to
-exactly one `copilot_conversations` row (tracked in `feishu_copilot_channels`),
-so the chat keeps its own context and also appears in the web `/copilot`
-conversation list. The channel belongs to the first Feishu sender who opened it
-(the row records the sender's open_id, mirroring the Portfolio binding's
-external-identity key); messages, commands, and approval decisions from any
-other sender in the chat receive a bounded refusal. Bot commands inside such
-chats: `/new` resets the chat to a fresh conversation, `/approve` / `/reject`
-resolve the latest Copilot
-pending action for that conversation, and `/help` lists the commands. Chats with
-an active portfolio binding keep the portfolio requirement-capture/card behavior
-unchanged. Ingress de-duplication for both flows uses the same durable
-`portfolio_feishu_ingress_events` ledger (`handler_kind` = `portfolio` |
-`copilot`); ledger admission runs synchronously on the acknowledgement path,
-so a ledger failure rejects the delivery and the provider retries instead of the
-message being silently dropped.
+The native Copilot API is mounted at `/api/v1/copilot/**` and uses the Gateway-owned provider, conversation, memory, approval, tool, and event services. The DeepSeek Harness bridge under `/api/internal/v1/copilot-bridge/**` and the former Portfolio API under `/api/v1/portfolio/**` are not mounted.
 
-After an inbound message passes tenant, user, chat, and mention policy, the
-Inbox worker adds a transient Feishu `Typing` reaction to the original message.
-The reaction is removed after the assistant result is persisted and its final
-reply is queued in the durable Outbox. Reaction add/remove failures are
-best-effort, redacted diagnostics and never change the Copilot or Outbox result;
-rejected and logically duplicated messages receive no new reaction.
+Applied Portfolio migrations and historical schema declarations remain for migration continuity only. No live repository, route, scheduler, event publisher, or Web client reads or writes those records.
 
-For an accepted Copilot turn, the channel creates one mutable Schema 2.0
-interactive card in `running` state. Throttled stream refreshes and the final
-state use Feishu `message.patch` against the same provider-returned
-`message_id`, rather than posting the completed answer as another message. A
-normal lifecycle is `running -> done` (or `failed`). A run that requests an
-operation moves the run card to `awaiting_approval` and sends a separate
-approval card; an approved decision patches that approval card through
-approved-running and then `completed`, `failed`, `cancelled`, or
-still-running, while rejection patches it to the rejected state.
+### Terminal Runtime Dependencies
 
-Reasoning-wrapper removal and secret redaction apply only to Feishu outbound
-card/text projections, including approval input and tool-result content; the
-persisted Copilot assistant and tool messages remain unchanged. If the final
-card PATCH fails, the channel sends at most one bounded, sanitized plain-text
-fallback after filtering and before truncation. It does not create a replacement
-card or split that final fallback into multiple messages.
+- `GET /api/v1/gate-a/dependencies`
 
-These endpoints do not execute Feishu writes, accept model-generated command
-strings, send terminal input, approve actions from Feishu text, or start
-unattended development loops. Outbound Feishu writes are only available through
-Copilot prepare tools plus explicit ForgeBadger pending-action approval.
-
-`POST /api/v1/integrations/feishu/bot-websocket/events` is the authenticated
-Gateway-side receive path for a local Feishu bot long-connection worker. It
-accepts the SDK-style `im.message.receive_v1` event object, normalizes only text
-messages, applies the tenant Feishu policy, and returns a bounded `replyPlan`
-for commands such as `/forgebadger status`, `/forgebadger sessions`, and
-`/forgebadger task <id>`. The reply plan uses `receiveIdType=chat_id` and
-contains only safe status/session/task summaries; it does not include attach
-tokens, tmux names, raw work-item details, raw event bodies, or terminal
-scrollback. Free-form terminal control such as `/forgebadger terminal`,
-`/forgebadger input`, shell commands, or approval text is rejected and audited.
-
-`POST /api/v1/integrations/feishu/bot-websocket/connection-events` records
-sanitized local long-connection lifecycle evidence such as
-`connected`, `reconnecting`, and `reconnected`. It is intended for the
-Gateway-side worker or smoke harness to attach reconnect evidence to the
-`FEISHU-BOT-WS` gate. It records `publicCallbackRequired=false` and does not
-mark the external gate as passing by itself.
-
-`pnpm smoke:feishu-bot-websocket` exercises these two authenticated Gateway
-fixture paths and emits `gateClearingEvidence=false`. It is useful before a real
-Feishu bot persistent-connection run, but it does not replace real Feishu
-receive/reply/reconnect evidence.
-
-`pnpm smoke:feishu-bot-live -- --require-gate-evidence --output
-<report.json>` starts the official `@larksuiteoapi/node-sdk` long-connection
-client with `FEISHU_APP_ID`/`FEISHU_APP_SECRET`, forwards real
-`im.message.receive_v1` events through the authenticated Gateway receive path,
-sends only bounded `replyPlan` text replies through the SDK, and writes a
-redacted 0600 JSON report while still printing JSON to stdout. The report is
-gate-clearing only when it includes real receive, bounded reply, reconnect, and
-terminal-input rejection evidence.
-
-`pnpm evidence:feishu-bot-live-audit -- <report.json>` validates a saved live
-smoke report for mode, event subscription, real receive, bounded reply,
-reconnect, terminal-input rejection, all-ok checks, and obvious secret-like or
-raw Feishu identifier content. It returns `readyForHumanReview=true` only for a
-complete redacted report and always emits `gateClearingEvidence=false` because
-the audit is not itself an external event.
-
-`pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
-<report.md>` formats an audit-passing saved report into a Markdown maintainer
-review artifact. The generated report preserves `FEISHU-BOT-WS=Caveat` until a
-maintainer links the real external evidence and updates the registry.
-
-The inbound endpoint is an authenticated ForgeBadger test adapter, not a public
-Feishu webhook. The public callback contract below uses a separate route and
-auth boundary. Event listener consumption, approval links, direct terminal
-input, batch authorization, and unattended loops remain separate non-goals for
-this slice.
-
-`POST /api/v1/integrations/feishu/webhook/:publicId` is the public Feishu
-event callback route. It is separate from the authenticated `/inbound` test
-adapter and does not use the ForgeBadger REST envelope because Feishu expects
-protocol-compatible webhook responses. The `publicId` resolves the tenant
-integration before verification, but it is not a secret or an auth factor.
-Public webhook handling is disabled by default and remains inert until a tenant
-explicitly enables it and stores the required encrypted verification token and
-encrypted event encrypt key for that integration.
-
-For current release evidence, the primary Feishu gate is the bot
-long-connection/WebSocket path recorded in `docs/EXTERNAL-EVIDENCE-GATES.md`.
-This public webhook route is a compatibility path for deployments that
-deliberately expose Gateway over HTTPS. Local signed-route tests and `lark-cli`
-preflight are regression evidence only; public developer-console URL
-verification does not replace primary bot receive/reply/reconnect evidence.
-
-Ordinary public webhook events must include
-`X-Lark-Request-Timestamp`, `X-Lark-Request-Nonce`, and `X-Lark-Signature`.
-Gateway verifies the signature against the raw request body, checks timestamp
-freshness with a narrow five-minute default window, and rejects missing,
-malformed, stale, far-future, or mismatched requests before event
-normalization and before Copilot execution. URL verification is setup-only:
-`url_verification` returns only `{"challenge":"..."}` and does not create a
-Copilot run, mutate policy, dispatch Feishu commands, or write terminal input.
-Encrypted event payloads with a top-level `encrypt` field are explicitly
-unsupported in this slice and fail closed with
-`feishu_webhook_encrypted_payload_unsupported`. Tenants that require encrypted
-Feishu app mode must leave public webhook enablement off until decrypt support
-is added and tested. Unencrypted public events still validate the configured
-Feishu verification token after signature and timestamp checks.
-
-Replay protection and public webhook rate limits use dedicated persistent
-repository state, not audit-log search and not in-memory maps. Replay keys
-include tenant/integration identity plus Feishu event id or message id; the
-same nonce/signature replay is also rejected within the timestamp window. Rate
-limits apply per tenant/integration, per chat, and, once resolved, per mapped
-ForgeBadger user. SQLite-backed replay and rate storage are supported only for
-the local single-Gateway deployment. Multi-instance public webhook deployment
-requires a shared replay and shared rate-limit store before webhook enablement;
-without that shared store the public webhook route must fail closed or remain
-disabled for that deployment mode.
-
-After signature, timestamp, replay, and rate checks pass, public events
-normalize into the same bounded inbound command policy used by `/inbound`:
-the integration must be enabled, not emergency-disabled, configured with
-identity mode `user` or `bot`, constrained by explicit `allowedChatIds`, mapped
-to the current tenant through a mapped Feishu user, and, when a `projectId` is
-present, scoped to a project visible to that user. A current
-`queued`, `running`, or `waiting_for_approval` Copilot run blocks a new public
-webhook run. Only the minimum supported Feishu message events for the command
-bridge are actionable; unknown authentic event types are acknowledged without
-side effects.
-
-Plain webhook text such as `approve`, `批准`, or `/approve <id>` is not an
-approval channel for portfolio-bound flows and must not approve their pending
-actions. The only Feishu approval path is the per-chat Copilot channel's
-explicit `/approve` / `/reject` command, which resolves the latest pending
-action for that chat's own Copilot conversation after the same signature,
-timestamp, replay, and rate checks. Public webhook events
-also cannot send direct terminal input, run shell commands, create unattended
-development loops, or execute model-generated Feishu command strings. Accepted
-events may create a Copilot conversation/run with `source: "feishu"` only after
-all boundary checks pass.
-
-Failure responses are minimal. Signature, timestamp, decrypt, token, disabled
-route, and unknown-tenant failures return non-2xx responses and create no
-Copilot run. Once an authentic tenant event has been resolved, non-actionable
-or policy-rejected events may return a minimal 2xx acknowledgement when retrying
-would amplify load or leak policy state. Logs, audit rows, model context, and
-API-visible metadata must not include raw request bodies, signatures, Feishu
-tokens, event encrypt keys, credentials, raw Feishu message text, `Bearer ...`
-values, or `sk-*` style secrets.
-
-Implemented public webhook response examples:
-
-```json
-{ "challenge": "challenge-value" }
-```
-
-```json
-{ "msg": "ok" }
-```
-
-```json
-{ "msg": "ignored" }
-```
-
-```json
-{ "msg": "feishu_webhook_signature_invalid" }
-```
-
-Public webhook audit rows use bounded metadata only. Accepted rows include the
-public id or integration id, Feishu event id or message id, chat id, mapped
-ForgeBadger user id, optional project id, run id, conversation id, pending action
-count, and redacted text summary. Policy rejection rows include a reason code
-and redacted metadata sufficient for diagnostics without exposing request
-secrets or private message content.
-
-Successful status response:
+Returns the current host dependency report. `data.dependencies` includes the
+selected required runtime (`tmux` on macOS/Linux/WSL or `psmux` on native
+Windows) plus optional AI CLI commands. `data.terminalRuntime` contains:
 
 ```json
 {
-  "code": 0,
-  "data": {
-    "status": {
-      "available": true,
-      "version": "lark-cli 1.2.3",
-      "authState": "authenticated",
-      "identityMode": "user",
-      "enabled": false
-    }
-  },
-  "message": ""
+  "persistence": "psmux",
+  "mode": "native_psmux",
+  "supported": true,
+  "message": "bounded readiness detail"
 }
 ```
 
-Successful config response:
-
-```json
-{
-  "code": 0,
-  "data": {
-    "config": {
-      "enabled": false,
-      "emergencyDisabled": false,
-      "identityMode": "unknown",
-      "allowedChatIds": [],
-      "commandPrefix": "/forgebadger",
-      "publicWebhookId": null,
-      "publicWebhookEnabled": false,
-      "webhookConfiguredAt": null
-    }
-  },
-  "message": ""
-}
-```
-
-`PATCH /config` accepts any subset of:
-
-```json
-{
-  "enabled": true,
-  "emergencyDisabled": false,
-  "identityMode": "bot",
-  "allowedChatIds": ["oc_abc"],
-  "commandPrefix": "/forgebadger"
-}
-```
-
-`allowedChatIds` is trimmed, deduplicated, limited to 50 entries, and each id is
-limited to 128 characters. Config updates write a tenant-scoped audit log with
-safe metadata only.
-
-Successful user mapping response:
-
-```json
-{
-  "code": 0,
-  "data": {
-    "mappings": [
-      {
-        "id": "mapping-id",
-        "feishuUserId": "ou_abc",
-        "forgebadgerUserId": "user-id",
-        "displayName": "Alice",
-        "createdAt": "2026-05-17T00:00:00.000Z",
-        "updatedAt": "2026-05-17T00:00:00.000Z"
-      }
-    ]
-  },
-  "message": ""
-}
-```
-
-`PUT /user-mappings` replaces the authenticated tenant's mapping set:
-
-```json
-{
-  "mappings": [
-    {
-      "feishuUserId": "ou_abc",
-      "forgebadgerUserId": "user-id",
-      "displayName": "Alice"
-    }
-  ]
-}
-```
-
-Mappings are limited to 100 entries and are automatically scoped by
-`user_id`; replacement writes a tenant-scoped audit log with mapping count
-only.
-
-`POST /inbound` accepts a ForgeBadger JWT, then validates a strict inbound
-command payload:
-
-```json
-{
-  "chatId": "oc_abc",
-  "feishuUserId": "ou_abc",
-  "text": "status",
-  "messageId": "om_optional",
-  "projectId": "optional-forgebadger-project-id"
-}
-```
-
-The route fails closed before Copilot execution when the Feishu integration is
-disabled, emergency-disabled, `identityMode` is still `unknown`, no explicit
-`allowedChatIds` allowlist exists, the chat is outside that allowlist, the
-Feishu user is not mapped to the authenticated ForgeBadger user, the optional
-`projectId` is not visible to that user, an accepted `messageId` is replayed,
-or the per-chat inbound rate limit is exceeded. Accepted commands create a
-Copilot conversation and run with `source: "feishu"`; optional project context
-is used only after tenant-scoped ownership validation. Inbound text is redacted
-before run persistence, conversation message persistence, provider request
-context, audit details, and API response metadata. Free-form approval text such
-as `approve`, `批准`, or `/approve <id>` never approves pending actions; pending
-actions remain controlled by the ForgeBadger approval routes.
-
-### Copilot Agent API
-
-- `GET /api/v1/copilot/capabilities`
-- `PUT /api/v1/copilot/capabilities/:toolName/enabled`
-- `GET /api/v1/copilot/conversations`
-- `POST /api/v1/copilot/conversations`
-- `PATCH /api/v1/copilot/conversations/:id`
-- `DELETE /api/v1/copilot/conversations/:id`
-- `GET /api/v1/copilot/conversations/:id/messages`
-- `POST /api/v1/copilot/conversations/:id/messages`
-- `GET /api/v1/copilot/runs/:id`
-- `POST /api/v1/copilot/runs/:id/cancel`
-- `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/decide`
-- `GET /api/v1/copilot/memory/entries`
-- `POST /api/v1/copilot/memory/entries`
-- `GET /api/v1/copilot/memory/search`
-- `DELETE /api/v1/copilot/memory/entries/:id`
-
-These are the live endpoints of the self-built agent harness
-(`services/agent/*`), distinct from the retired historical contract below. All
-access is user scoped (repositories are constructed with the authenticated
-`userId`). `PATCH /conversations/:id` renames a conversation (title, 1–200
-chars); `DELETE /conversations/:id` removes it together with its messages,
-runs, and pending actions (foreign or already-deleted conversations 404).
-Posting a message runs a turn and returns the run id; streaming deltas and
-proactive reports arrive over `/ws/events` as `copilot_run_updated`. Operate
-tools pause the run as `awaiting_approval`; the pending-action decide route
-(body `{ "approved": true|false }`) resumes or rejects it.
-
-#### Copilot dsh runtime config (guarded)
-
-Mounted only when `FORGEBADGER_DSH_COPILOT_ENABLED=1`; otherwise both endpoints
-return 404 (treat 404 as "feature off"). JWT authenticated and user scoped.
-
-- `GET /api/v1/copilot/dsh-config` — returns the acting user's dsh runtime
-  config:
-
-  ```json
-  {"code":0,"data":{
-    "defaultModelId": "profile-uuid or null",
-    "plugins": {"compaction": true, "subagents": true},
-    "availablePlugins": [{"id":"compaction","label":"...","description":"..."},{"id":"subagents","label":"...","description":"..."}],
-    "runtime": {"status": "running|idle"}
-  }}
-  ```
-
-  Defaults: `defaultModelId=null` (system default model) and both plugins `true`.
-
-- `PUT /api/v1/copilot/dsh-config` — body
-  `{ "defaultModelId": "profile-uuid|null", "plugins": { "compaction": bool, "subagents": bool } }`,
-  all fields optional; omitted fields stay unchanged, `defaultModelId:null`
-  resets to the system default, plugins merge per key.
-  `defaultModelId` must reference one of the user's active model profiles,
-  otherwise 400 `COPILOT_DSH_CONFIG_INVALID_MODEL`; unknown plugin keys reject
-  with 400 `COPILOT_DSH_CONFIG_UNKNOWN_PLUGIN`. Success returns the GET shape
-  plus `updatedAt` and `runtimeRestarted: boolean`. Changes take effect on the
-  next runtime spawn: when no run is active (including approval-parked runs) the
-  idle runtime is restarted immediately (`runtimeRestarted:true`); while a run
-  is active the runtime is never hot-killed (`runtimeRestarted:false`) and the
-  config applies on the next spawn. The rendered per-user `cordis.yml` is
-  written to `stateDir/dsh-config/<userId>/cordis.yml` and injected via
-  `DSH_BRIDGE_CONFIG`; plugin toggles add/remove the corresponding
-  `dsh-compaction-basic` / `dsh-subagent` blocks.
-
-### Retired Platform AI Copilot API (historical)
-
-> The legacy `/api/v1/copilot/**` contract is no longer mounted. The endpoint
-> inventory and behavior below are retained only as historical reference for
-> separately authorized backup/export and disposable restore work; they MUST
-> NOT be restored as a compatibility API, fallback reader, or dual-write path.
-> `/portfolio` is the primary Web workspace. `/copilot` remains only as a
-> Portfolio-only page alias, and the pet/companion drawer are Portfolio
-> presentation; none has a Copilot API/runtime/data dependency. Portfolio
-> browser and integrated acceptance verification are deferred.
-
-- `GET /api/v1/copilot/capabilities`
-- `GET /api/v1/copilot/conversations`
-- `POST /api/v1/copilot/conversations`
-- `PATCH /api/v1/copilot/conversations/:id`
-- `DELETE /api/v1/copilot/conversations/:id`
-- `GET /api/v1/copilot/conversations/:id/messages`
-- `POST /api/v1/copilot/conversations/:id/messages`
-- `DELETE /api/v1/copilot/messages/:id`
-- `GET /api/v1/copilot/runs`
-- `POST /api/v1/copilot/runs`
-- `GET /api/v1/copilot/runs/:id`
-- `POST /api/v1/copilot/runs/:id/cancel`
-- `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/approve`
-- `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/reject`
-- `GET /api/v1/copilot/memory/entries`
-- `GET /api/v1/copilot/memory/notes`
-- `GET /api/v1/copilot/memory/search`
-- `GET /api/v1/copilot/memory/:type/:id`
-- `DELETE /api/v1/copilot/memory/:type/:id`
-
-Copilot endpoints are authenticated, tenant scoped, and provider backed. The
-first release supports OpenAI Responses-style, OpenAI-compatible opt-in, and
-Anthropic Messages-style providers through the existing Provider SSOT and
-encrypted provider credentials.
-Conversation endpoints persist the platform chat history separately from run
-execution records. Sending a conversation message stores the user message,
-creates a Copilot run with the same bounded source context rules, and stores
-assistant response events back into the conversation. Conversation and message
-deletes are soft deletes scoped to the authenticated user.
-Prompt text is redacted before run persistence, active recall, and provider
-model requests so secret-looking values such as API keys, bearer tokens, and
-ForgeBadger attach tokens, and PEM private-key blocks are not stored or sent
-onward in plaintext.
-If active memory recall fails, Copilot records a non-blocking
-`memory_recall_skipped` timeline event and continues the model request without
-injecting memory context.
-For `source: "project"` and `source: "session"` runs, `sourceRefId` is resolved
-through tenant-scoped Gateway repositories and a bounded source context is
-included in the provider model request. Project context includes only summary
-fields such as id, name, status, AI tool, tech stack, and description. Session
-context includes only summary fields such as id, name, status, AI tool, project
-id, and model id. Paths, attach tokens, tmux session names, API key ids, and
-other sensitive runtime fields are not included. Missing or cross-tenant
-references produce a non-leaking "source context unavailable" block rather than
-falling back to another user's data.
-`sourceRefId` is optional, non-empty when provided, and limited to 256
-characters.
-
-`GET /capabilities` returns the provider formats Copilot can use, whether a
-compatible provider is configured, and the current tool surface split into
-`readTools` and `prepareTools`. Read tools execute directly after Gateway-side
-validation. Prepare tools only create pending actions; all mutation or terminal
-input still requires explicit approval through the pending-action routes.
-
-`POST /runs` accepts:
-
-```json
-{
-  "prompt": "Diagnose session launch readiness",
-  "providerProfileId": "optional-provider-profile-id",
-  "modelProfileId": "optional-model-profile-id",
-  "source": "copilot",
-  "sourceRefId": "optional-related-resource-id"
-}
-```
-
-Successful runs return the created run, persisted timeline events, and any
-pending actions:
-
-```json
-{
-  "code": 0,
-  "data": {
-    "run": { "id": "run-id", "status": "completed" },
-    "events": [],
-    "pendingActions": []
-  },
-  "message": ""
-}
-```
-
-Copilot allows only one executing or approval-waiting run per user while a run
-is `queued`, `running`, or `waiting_for_approval`; the Gateway enforces this
-with a database uniqueness gate in addition to the in-process guard. A run in
-`waiting_for_approval` keeps its pending actions available for approval or
-rejection, and it blocks new runs until those pending actions are approved,
-rejected, or the run is cancelled.
-
-`POST /runs/:id/cancel` marks live runs as `cancelled`, rejects outstanding
-pending actions, and aborts the in-process model request when the run is still
-active in the current Gateway process. Late model responses are ignored after a
-run has been cancelled. The `run_cancelled` event and `copilot.run.cancel` audit
-details include `abortSignalDelivered` so callers can distinguish status
-cancellation from an in-process abort signal being delivered. Model requests are
-timeout bounded; timeout failures return `504` with
-`details.code = "copilot_model_request_timeout"` and record a redacted
-`run_failed` event. Stale `queued`/`running` runs left behind by Gateway
-interruption are failed before new run admission after the recovery window, but
-`waiting_for_approval` runs are preserved for explicit user approval/rejection.
-Network failures return `copilot_provider_network_failed`; malformed streaming
-provider responses return `copilot_provider_stream_parse_failed`. The Web
-console's Copilot run creation request uses a 65 second client timeout so the
-Gateway's 60 second model timeout remains the user-visible failure boundary.
-`GET /runs?limit=N` returns the requested bounded recent history and also
-includes any live `queued`, `running`, or `waiting_for_approval` run found in
-the 200-run recovery window. This keeps stale live runs visible and cancellable
-in the Web console even when they are older than the normal history page size.
-
-Read tools are allowlisted and validated server-side. Current read tools are:
-
-- `forgebadger.get_dashboard_summary`
-- `forgebadger.list_projects`
-- `forgebadger.get_project_detail`
-- `forgebadger.list_agents`
-- `forgebadger.list_skills`
-- `forgebadger.get_skill_detail`
-- `forgebadger.list_templates`
-- `forgebadger.get_notifications_summary`
-- `forgebadger.get_usage_summary`
-- `forgebadger.list_sessions`
-- `forgebadger.get_session_detail`
-- `forgebadger.get_session_terminal_snapshot`
-- `forgebadger.get_adapter_discovery`
-- `forgebadger.get_model_provider_summary`
-- `forgebadger.get_model_provider_catalog`
-- `forgebadger.get_recent_activity`
-- `forgebadger.get_diagnostics_summary`
-- `forgebadger.memory_search`
-- `forgebadger.memory_get`
-
-`forgebadger.get_diagnostics_summary` returns the bounded diagnostics subset
-needed for in-chat recovery: generated time, runtime metadata, tenant resource
-counts, dashboard health, adapter discovery, Provider SSOT readiness summaries,
-and Copilot capability/provider-readiness metadata. Copilot provider readiness
-uses Provider SSOT counts and supported provider formats, so legacy API key
-rows alone do not mark Copilot as provider-configured. It does not include the
-full diagnostics environment block, plaintext provider secrets, encrypted
-credential material, credential previews, provider default headers, or
-foreign-tenant providers.
-
-Read-tool outputs are redacted before persistence or model follow-up, then
-checked against size and residual-sensitive-output safety limits. Blocked tool
-outputs fail closed with `details.code = "copilot_redaction_blocked_output"`,
-record a redacted `run_failed` event, and are not persisted as `tool_result`
-timeline entries.
-
-Prepare tools create pending actions and do not directly mutate runtime state:
-
-- `forgebadger.propose_session_create`
-- `forgebadger.propose_project_create`
-- `forgebadger.propose_project_import`
-- `forgebadger.propose_project_delete`
-- `forgebadger.propose_project_config_sync`
-- `forgebadger.propose_project_manager_create_work_item`
-- `forgebadger.propose_project_manager_update_work_item_status`
-- `forgebadger.propose_project_manager_attach_evidence`
-- `forgebadger.propose_session_input`
-- `forgebadger.propose_session_start`
-- `forgebadger.propose_session_stop`
-- `forgebadger.propose_session_delete`
-- `forgebadger.propose_agent_create`
-- `forgebadger.propose_agent_update`
-- `forgebadger.propose_agent_delete`
-- `forgebadger.propose_template_create`
-- `forgebadger.propose_template_update`
-- `forgebadger.propose_template_delete`
-- `forgebadger.propose_skill_toggle`
-- `forgebadger.propose_project_skill_toggle`
-- `forgebadger.propose_copilot_model_selection`
-- `forgebadger.propose_model_provider_sync`
-- `forgebadger.propose_model_provider_apply`
-- `forgebadger.propose_diagnostics_export`
-- `forgebadger.propose_adapter_refresh`
-- `forgebadger.propose_troubleshooting_steps`
-- `forgebadger.propose_feishu_message_send`
-- `forgebadger.propose_feishu_doc_create`
-- `forgebadger.propose_feishu_doc_update`
-- `forgebadger.propose_feishu_task_create`
-- `forgebadger.propose_feishu_task_update`
-- `forgebadger.propose_memory_write`
-- `forgebadger.propose_memory_delete`
-
-The three Project Manager prepare tools map one-to-one to the Phase 12
-`create_work_item`, `update_work_item_status`, and `attach_evidence` semantics.
-They create pending actions only; they do not mutate Project Manager state until
-the user approves the stored action through the existing approval route. No
-other Project Manager prepare-tool semantics are part of this contract.
-
-Approval uses the canonical stored pending-action payload. The client cannot
-replace the action payload at approval time. Diagnostics approval returns a
-redacted diagnostics payload. Session-create approval creates and starts a
-terminal-backed CLI session for `claude`, `opencode`, or `codex` after
-revalidating the stored draft. Session-input approval sends the stored bounded
-input to the running terminal session, captures a bounded post-action terminal
-snapshot, and continues the Copilot run with that evidence when the run has a
-provider/model selection. If the run belongs to a conversation, the resulting
-assistant message is also stored in that conversation. Adapter-refresh approval
-reruns local adapter discovery and returns fresh availability/launch-readiness
-metadata without starting CLI sessions or changing project/session state.
-Approve and reject routes only operate on actions whose stored status is still
-`pending`; already approved, rejected, or in-flight `processing` actions are not
-rewritten. Approval claims the pending action before executing approval side
-effects, so duplicate concurrent approvals return `409` with
-`details.code = "copilot_pending_action_not_pending"` instead of executing the
-same action twice.
-Session-create drafts must target a project visible to the current user and one
-of the supported terminal adapters: `claude`, `opencode`, or `codex`; approval
-revalidates the canonical stored draft so stale or invalid drafts stay pending
-instead of starting a session. Session-input drafts must target a running
-session visible to the current user; approval revalidates the session state
-before writing to the terminal. Troubleshooting-step approval also revalidates
-its stored bounded payload. Unknown stored pending-action types are rejected
-instead of being treated as generic troubleshooting output.
-Memory-write approval creates a tenant-scoped durable memory entry from the
-stored redacted payload. Memory-delete approval removes the stored tenant-scoped
-memory entry or working note referenced by the canonical pending action.
-Feishu action approval requires the tenant Feishu integration to be enabled,
-not emergency-disabled, and configured with an explicit `identityMode` of
-`user` or `bot`. When `allowedChatIds` is configured, approval also requires the
-action target (`chatId`, `folderId`, `documentId`, `tasklistId`, or `taskId`) to
-be in that allowlist. When Feishu user mappings are configured, task assignment
-approvals require `assigneeFeishuUserId` to be mapped for the current tenant.
-Approval executes only the Gateway-owned allowlisted operation registry for
-message send, doc create/update, and task create/update;
-model-generated raw command strings are rejected and never passed to `lark-cli`.
-The allowlist maps to the current Feishu CLI command families
-`im +messages-send`, `docs +create`, `docs +update`, `task +create`,
-`task +update`, and `task +complete`.
-Feishu command output, stderr, audit details, and Copilot timeline payloads are
-bounded and redacted before persistence.
-Approve and reject decisions also write tenant-scoped audit rows with redacted
-action input and bounded result summaries.
-
-Copilot memory is explicit product state. Durable memory entries and working
-notes are scoped by `user_id`; project-scoped entries are additionally filtered
-by `project_id`. Search uses bounded SQLite FTS/BM25 over redacted text only.
-Copilot does not silently write long-term memory, does not index raw terminal
-transcripts, and does not create embeddings in this release.
-
-Explicit non-goals for this Copilot release:
-
-- no raw shell or host exec tool;
-- no arbitrary filesystem write tool outside validated ForgeBadger config/project workflows;
-- no Codex app-server prompt or `/turn` UI (the Codex app-server control-plane
-  prototype was removed on 2026-08-14; Codex runs as tmux-backed terminal
-  sessions only);
-- no unapproved terminal input;
-- no automatic tmux input or autonomous development loop.
+`persistence` is `tmux` or `psmux`; `mode` is `native_tmux`, `native_psmux`,
+`tmux_missing`, `psmux_missing`, or `psmux_outdated`. psmux must be 3.3.8 or
+newer. This endpoint and `forgebadger doctor` are
+read-only; they do not install a package or initialize local state. CLI
+`start`/`init` and direct Gateway startup fail closed while `supported` is
+false: CLI commands return non-zero, and Gateway rejects startup before account
+recovery, database/session recovery, or listen side effects.
 
 ### Adapter Discovery
 
@@ -1094,7 +481,7 @@ Explicit non-goals for this Copilot release:
 Returns local AI CLI command discovery for Claude Code, OpenCode, Codex, and
 Kimi Code. All four adapters are launch-supported when the corresponding local
 command is available. `launchEnabled` is false when the command check fails, and
-session creation/start returns `409` before tmux launch in that case. Every
+session creation/start returns `409` before platform-multiplexer launch in that case. Every
 adapter reports the `terminal` runtime mode; the former Codex
 `app-server-stdio`/`app-server-websocket` prototype modes were removed on
 2026-08-14.
@@ -1328,7 +715,6 @@ Project Agent orchestration:
 - `POST /api/v1/sessions/:id/connect`
 - `POST /api/v1/sessions/:id/start`
 - `POST /api/v1/sessions/:id/stop`
-- `POST /api/v1/sessions/:id/switch-model`
 - `DELETE /api/v1/sessions/:id`
 
 Create body:
@@ -1336,66 +722,91 @@ Create body:
 ```json
 {
   "projectId": "project-id",
-  "credentialMode": "host_environment",
-  "modelId": "model-id"
+  "aiTool": "codex"
 }
 ```
-
-Stored credential body:
-
-```json
-{
-  "projectId": "project-id",
-  "credentialMode": "stored_encrypted_key",
-  "apiKeyId": "api-key-id",
-  "modelId": "model-id"
-}
-```
-
-When `modelId` is supplied, Gateway validates ownership, persists it on the
-session row, and injects the provider model identifier as `ANTHROPIC_MODEL`
-in the tmux launch environment. Stored API keys are decrypted only in Gateway
-memory and injected as `ANTHROPIC_API_KEY`.
 
 Sessions launch an explicitly selected runtime CLI: the request body carries
 `aiTool` (`claude` | `opencode` | `codex` | `kimi`), and projects without a
 stored adapter hint reject creation with `400` when `aiTool` is omitted.
-OpenCode sessions receive `opencode --model <provider/model>` when a model is
-selected. Codex and Kimi Code sessions are subscription-managed and do not
-receive provider model/API-key environment injection from the model-provider
-module; supplying `modelId`/`apiKeyId` for them is rejected.
 
-### CLI Global Config
+Session launch is model-agnostic: sessions always run with host-environment
+credentials, and ForgeBadger injects no provider, model, or credential
+environment at launch. Model/provider setup is per-CLI and user-global
+(cc-switch style) through the CLI Config API below; each CLI process reads its
+own global config files when it starts. `POST /:id/start` re-launches the
+adapter the same way and never restores a ForgeBadger-managed provider
+environment.
+
+### CLI Config and Provider Apply
 
 cc-switch style management of each code CLI's global config files
 (Kimi `~/.kimi-code/config.toml`, Claude `~/.claude/settings.json`,
-Codex `~/.codex/config.toml`, OpenCode `$XDG_CONFIG_HOME/opencode/opencode.json`;
+Codex `~/.codex/config.toml` + `~/.codex/auth.json`,
+OpenCode `$XDG_CONFIG_HOME/opencode/opencode.json`;
 `KIMI_CODE_HOME` / `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `OPENCODE_CONFIG_DIR`
 overrides are honored):
 
 - `GET /api/v1/cli-config/adapters`
 - `GET /api/v1/cli-config/:adapter`
-- `GET /api/v1/cli-config/:adapter/file?path=<name>&reveal=1`
-- `PUT /api/v1/cli-config/:adapter/file` — raw file write (whitelisted file names, 128 KB cap, mode `0600`)
-- `GET /api/v1/cli-config/:adapter/fields` — curated field catalog (`fields`) plus current values (`values`); secret-typed fields only report a boolean presence flag, never the plaintext
+- `GET /api/v1/cli-config/:adapter/file?path=<name>`
+- `PUT /api/v1/cli-config/:adapter/file` — raw file write (whitelisted file names, 128 KB cap, atomic write, mode `0600`)
+- `GET /api/v1/cli-config/:adapter/fields` — static curated field schema
+- `GET /api/v1/cli-config/:adapter/field-values` — current values with secrets redacted
 - `PATCH /api/v1/cli-config/:adapter/fields` — body `{ "updates": { "<fieldKey>": value | null } }`; `null` deletes the key, unknown keys / enum / type mismatches are rejected before any write, and an empty `updates` object is a no-op that does not rewrite (and reformat) the file
 - `PUT /api/v1/cli-config/:adapter/providers/:providerId`
 - `DELETE /api/v1/cli-config/:adapter/providers/:providerId`
 - `PUT /api/v1/cli-config/:adapter/models` — body carries `alias` (Kimi only; aliases may contain `/`)
 - `DELETE /api/v1/cli-config/:adapter/models` — body carries `alias`
 - `PUT /api/v1/cli-config/:adapter/default-model`
+- `POST /api/v1/cli-config/:adapter/apply-provider/preview`
+- `POST /api/v1/cli-config/:adapter/apply-provider`
+- `POST /api/v1/cli-config/:adapter/rollback`
 
-Secrets are redacted in responses unless `reveal=1` is passed. Deleting a Kimi
-provider cascades to its model aliases and clears a dangling `default_model`.
+`/adapters` and `/:adapter/fields` expose only static non-sensitive metadata.
+Every other operation reads or writes the shared host-global CLI config root
+and therefore requires instance-admin authority. Raw file reads are always
+redacted and `reveal=1` is removed/rejected.
 
-### Codex Terminal Notes
+Provider apply maps a Model Center provider profile (plus a model profile and
+credential) onto the adapter's native config format. Preview and apply share
+the same body:
+
+```json
+{
+  "providerProfileId": "provider-profile-id",
+  "modelProfileId": "model-profile-id",
+  "credentialId": "credential-id"
+}
+```
+
+`modelProfileId` defaults to the provider's default model and `credentialId`
+to its first active credential. Preview returns `{ preview }` with per-file
+`targetPath`, redacted `current`/`proposed` content, `changedFields`, and
+`warnings`, without touching disk. Apply validates the provider base URL
+through the SSRF guard, takes an exclusive cross-process target lock, writes
+an AES-256-GCM-encrypted backup under the state directory, then atomically
+writes each target file with mode `0600` — including the plaintext credential,
+matching each CLI's native config format (Codex also writes
+`~/.codex/auth.json`). Unsafe targets (for example symlinks) are rejected
+before any write, and a multi-file failure rolls back the files already
+written. Apply returns `{ result: { adapter, backupId, changed, files } }`.
+Rollback accepts an optional `{ "backupId": "..." }` and restores the given (or
+latest) backup, returning `{ result: { adapter, backupId, restoredFiles } }`.
+
+### Codex Provider Notes
 
 For Claude Code sessions, both create and restart paths merge ForgeBadger command
-hooks into `.claude/settings.local.json` before tmux launch.
+hooks into `.claude/settings.local.json` before platform-multiplexer launch.
 
-Codex terminal sessions are also subscription-managed. Session create/start and
-the launch-plan helper reject provider credentials and model overrides for the
-Codex adapter instead of accepting values that would later be ignored.
+OpenAI is a normal verified provider. Applying a provider to Codex writes
+`model`, `model_provider`, and a `model_providers.<id>` entry with `base_url`
+and `wire_api = "responses"` into `~/.codex/config.toml`, and writes the API
+key as `OPENAI_API_KEY` into `~/.codex/auth.json` (other existing `auth.json`
+fields are preserved). Provider/model configuration is user-global because
+Codex does not permit those keys to be overridden by project configuration.
+The retired `/api/v1/codex/subscription/**` route is not mounted and returns the
+normal 404 behavior.
 
 ### Models
 
@@ -1410,55 +821,36 @@ the full provider/profile/model/credential inventory.
 ### Model Providers
 
 - `GET /api/v1/model-providers/catalog`
+- `GET /api/v1/model-providers/capabilities`
 - `GET /api/v1/model-providers`
 - `POST /api/v1/model-providers`
 - `PATCH /api/v1/model-providers/:id`
-- `DELETE /api/v1/model-providers/:id` — returns `409` when any of the
-  provider's models are still referenced by a session, agent, or default-model
-  setting; the provider and its models are left untouched in that case.
+- `DELETE /api/v1/model-providers/:id` — typed `409
+  PROVIDER_IN_USE_BY_SESSION` takes precedence over
+  `PROVIDER_IN_USE_BY_BINDING`; active and revoked references remain intact.
 - `GET /api/v1/model-providers/:id/models`
 - `POST /api/v1/model-providers/:id/models`
 - `PATCH /api/v1/model-providers/:id/models/:modelId`
-- `DELETE /api/v1/model-providers/:id/models/:modelId` — returns `409` when the
-  model profile is still referenced by a session, agent, or default-model
-  setting; the model row itself is left untouched in that case.
+- `DELETE /api/v1/model-providers/:id/models/:modelId` — typed `409
+  MODEL_IN_USE_BY_SESSION` takes precedence over `MODEL_IN_USE_BY_BINDING`.
 - `POST /api/v1/model-providers/:id/models/sync`
 - `POST /api/v1/model-providers/:id/readiness`
-- `POST /api/v1/model-providers/:id/preview-apply`
-- `POST /api/v1/model-providers/:id/apply`
 
-Provider Profiles are the source of truth for model provider configuration,
-encrypted API keys, configured model profiles, and CLI apply plans. Both
-`preview-apply` and `apply` accept an optional `scope` field:
+The retired provider-level `preview-apply`/`apply` routes are no longer
+mounted and return the normal 404 behavior.
 
-- `project` (default): writes into the project directory (`projectRoot` is
-  required).
-- `user-global`: writes into the CLI's user-global config directory, so no
-  `projectRoot` is needed. Target roots follow each CLI's conventions:
-  `CLAUDE_CONFIG_DIR`/`~/.claude` for Claude, `OPENCODE_CONFIG_DIR` or
-  `XDG_CONFIG_HOME/opencode` for OpenCode, and `KIMI_CODE_HOME`/`~/.kimi-code`
-  for Kimi.
+Provider profiles own metadata, models, and encrypted credentials. Applying a
+provider to a CLI's global config files goes through
+`/api/v1/cli-config/:adapter/apply-provider` (see above). The capabilities
+endpoint is the server source of truth for adapter compatibility across all
+four CLIs. Historical `PROVIDER_IN_USE_BY_BINDING` /
+`MODEL_IN_USE_BY_BINDING` conflicts can still be returned for rows referenced
+by pre-decoupling records; those references remain intact.
 
-Provider configuration apply currently supports:
-
-- `claude`: preview/apply writes environment entries (`ANTHROPIC_BASE_URL`,
-  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, and the cc-switch style
-  `ANTHROPIC_DEFAULT_*_MODEL` / `API_TIMEOUT_MS` defaults). Project scope
-  targets `.claude/settings.local.json`; user-global scope targets
-  `settings.json`.
-- `opencode`: preview/apply writes `opencode.json` provider and model
-  fragments in the project root or the user-global config directory.
-- `kimi`: preview/apply writes `config.toml` `[providers]`, `[models]`, and
-  `default_model` fragments. Project scope targets `.kimi-code/config.toml`;
-  user-global scope targets `config.toml` under `KIMI_CODE_HOME`/`~/.kimi-code`.
-
-Codex remains subscription-managed and must not accept Provider URL/API key
-configuration through these endpoints.
-
-`GET /model-providers/catalog` returns a cc-switch-style Claude Code provider
-preset catalog first, covering Anthropic API, Kimi, DeepSeek, Qwen, z.ai,
-OpenRouter, and Ollama with endpoint, env metadata, and default models already
-filled in. When models.dev is reachable, OpenCode-compatible provider entries
+`GET /model-providers/catalog` returns verified presets including OpenAI,
+Anthropic API, Kimi, DeepSeek, Qwen, z.ai, OpenRouter, and Ollama with endpoint,
+env metadata, compatible adapters, and default models already filled in. When
+models.dev is reachable, OpenCode-compatible provider entries
 are appended as secondary catalog entries. Catalog OpenCode npm package names
 are sanitized before exposure and revalidated before provider creation; unsafe
 package names fall back to the OpenCode OpenAI-compatible provider package.
@@ -1522,7 +914,6 @@ Response data contains `readiness.status`, `readiness.code`, `checks`,
 - `remote_validation_unavailable`
 - `remote_model_missing`
 - `remote_validation_failed`
-- `codex_subscription_managed`
 
 When `includeRemoteCheck` is true and the provider has a safe model-list
 endpoint, Gateway decrypts the selected credential only in memory and calls the
@@ -1532,10 +923,8 @@ helper. Remote failure metadata is categorized as `invalid_credential`,
 must not include plaintext credentials, authorization headers, provider request
 payloads, provider response bodies, tokens, API keys, or other secrets.
 
-For `adapter: "codex"`, readiness returns
-`codex_subscription_managed`; it does not decrypt provider credentials, does
-not call provider endpoints, and does not enable provider apply wiring. Codex
-continues to use the subscription-managed SDK identity path.
+Codex readiness uses the common provider/model/auth-source checks; managed
+readiness may use the safe remote model-list check when requested.
 
 ### API Keys And Credential Mode
 
@@ -1566,12 +955,13 @@ API key responses must never include `plaintextKey` or encrypted ciphertext.
 Plaintext is accepted only on create/rotate requests, encrypted with
 AES-256-GCM at rest, and discarded after use.
 
-Supported credential modes:
-
-- `stored_encrypted_key`
-- `host_environment`
-
-The selected mode must be recorded on session launch. Silent fallback is forbidden.
+Sessions always launch with host-environment credentials; no credential mode is
+recorded or selectable at launch. Deleting a referenced provider
+credential returns a disposition. Unreferenced credentials are physically
+`deleted`; session-referenced credentials are `revoked`, remain addressable for
+provenance, and make future start/recovery fail before decryption until the
+credential is explicitly rotated/reactivated. Rotation increments the
+credential generation; a running tmux environment is not mutated.
 
 ### Templates
 
@@ -1761,10 +1151,14 @@ manual template sync. OpenCode project plugins subscribe to `permission.asked`,
 trust approval through `/hooks`. Kimi project hooks subscribe to
 `PermissionRequest`, `Stop`, `Interrupt`, `StopFailure`, `SessionEnd`, and
 `Notification(task.completed)`.
+ForgeBadger bounds generated Codex `SessionEnd` handlers to Codex's three-second
+maximum and aborts their local Gateway forwarding request after 2.5 seconds;
+other generated Codex handlers retain a five-second timeout.
 Claude hooks use `http` handlers and send the raw Claude hook payload as JSON
 to ForgeBadger; Codex and Kimi use managed command scripts, while OpenCode uses a
-managed plugin. Headers interpolate `FORGEBADGER_SESSION_ID` and
-`FORGEBADGER_ATTACH_TOKEN` from the tmux launch environment. The endpoint also
+managed plugin whose Gateway request aborts after 4.5 seconds. Headers interpolate
+`FORGEBADGER_SESSION_ID` and
+`FORGEBADGER_ATTACH_TOKEN` from the selected multiplexer launch environment. The endpoint also
 accepts the legacy wrapper payload used by older command-hook templates.
 
 ### Activities
@@ -1782,7 +1176,7 @@ Activities are tenant-scoped structured operation rows for session launch,
 start, stop, reconnect, delete, model switch, config write, permission prompt,
 permission denial, and adapter error events.
 They intentionally do not store terminal scrollback; terminal pane history
-remains in tmux.
+remains in the selected tmux/psmux runtime.
 
 ### Session Snapshots
 
@@ -1794,16 +1188,19 @@ Query parameters:
 - `sessionId` filters snapshots to a session.
 - `projectId` filters snapshots to a project.
 
-Snapshots are tenant-scoped structured metadata records for tmux-backed session
-state: session, project, tmux session name, selected model, selected Agent, and
+Snapshots are tenant-scoped structured metadata records for
+multiplexer-backed session state: session, project, multiplexer session name,
+selected model, selected Agent, and
 optional config version. Snapshot metadata is sanitized and must not contain
-terminal scrollback; terminal pane history remains in tmux.
+terminal scrollback; terminal pane history remains in the selected runtime.
 
-Snapshot restore is explicit and tenant-scoped. When the recorded tmux session
-still exists, ForgeBadger reattaches the database session to that tmux session and
+Snapshot restore is explicit and tenant-scoped. When the recorded multiplexer
+session still exists, ForgeBadger reattaches the database session to that session and
 returns `mode: "attach_tmux"` without rotating the existing session attach
-token. When tmux no longer has the recorded session, ForgeBadger recreates a new
-tmux-backed session from the snapshot's project/model/Agent metadata plus any credential and API key
+token. `tmux_session` and `attach_tmux` remain historical API/database
+compatibility names on both runtimes. When the selected multiplexer no longer
+has the recorded session, ForgeBadger recreates a new multiplexer-backed session
+from the snapshot's project/model/Agent metadata plus any credential and API key
 metadata still available on the original session record. If the original session record is unavailable, restore falls back to the
 snapshot metadata and `host_environment` credentials. Restore returns
 `mode: "recreate_session"` and never writes terminal scrollback to SQLite.
@@ -1850,7 +1247,7 @@ Browser clients cannot set arbitrary WebSocket headers, so terminal access uses:
   Bearer <jwt>` for non-browser clients.
 - `attachToken=<session attach token>` query parameter.
 
-The Gateway must verify the JWT before attaching to tmux, then require the JWT
+The Gateway must verify the JWT before attaching to the selected multiplexer, then require the JWT
 subject to match the stored session owner and require the attach token to match
 the session attach token.
 
@@ -1913,7 +1310,7 @@ Error:
 
 MVP-0 must enforce:
 
-- JWT authentication before attaching to tmux.
+- JWT authentication before attaching to the selected tmux/psmux runtime.
 - Session ownership check before terminal access.
 - One active terminal WebSocket per session; new connection replaces old connection.
 - 30 second ping/pong heartbeat.
@@ -1926,102 +1323,6 @@ MVP-0 must enforce:
 
 Before frontend implementation begins, `.claude/rules/api.md`, `CLAUDE.md`, `docs/TECH-ARCHITECTURE.md`, and this file must agree on the response envelope.
 
-## 7. Internal API — Copilot Bridge (dsh forgebadger-bridge plugin)
+## 7. Retired Legacy Internal APIs
 
-Guarded internal surface consumed by the deepseek-harness `forgebadger-bridge`
-plugin over loopback HTTP (see `.planning/dsh-integration/PLAN.md`). The whole
-route group is mounted only when `FORGEBADGER_COPILOT_BRIDGE_TOKEN` is set
-(optional env var, min 32 chars); without it every path below returns 404.
-
-Authentication and tenancy:
-
-- `Authorization: Bearer <FORGEBADGER_COPILOT_BRIDGE_TOKEN>` — missing token
-  returns 401 (`BRIDGE_TOKEN_REQUIRED`), wrong token 403 (`BRIDGE_TOKEN_INVALID`).
-- `X-ForgeBadger-User-Id: <userId>` — required on every request (400
-  `BRIDGE_USER_ID_REQUIRED` otherwise). The header is trusted only after the
-  service token passes; all data access goes through per-user repositories and
-  the Portfolio facade, so `user_id` isolation is identical to the user API.
-- Responses use the standard envelope (`{code:0,data,message:""}` /
-  `{code:1,message,details}`).
-
-Base path: `/api/internal/v1/copilot-bridge`.
-
-- `GET /work-items?projectId=&status=&limit=` — the acting user's portfolio
-  work items. `status` is one of `todo|in_progress|blocked|ready_for_review|done|cancelled`.
-  Returns `{ workItems, count }`.
-- `GET /work-items/:id` — work item detail; 404 when missing or owned by
-  another user.
-- `POST /work-items/:id/advance` — body `{ "note": "optional progress note" }`.
-  Advances the work item one lifecycle step (`todo→in_progress`,
-  `in_progress→ready_for_review`, `blocked→in_progress`,
-  `ready_for_review→done`) through the same Portfolio State Gate the Copilot
-  `advance_work_item` tool uses, so all risk/approval preconditions (dispatch
-  receipts, verified completion evidence, accepted decisions, owner authority)
-  still apply and reject with 409 (`PORTFOLIO_PRECONDITION_FAILED`,
-  `PORTFOLIO_INVALID_TRANSITION`, …). Terminal states reject with 409. The
-  optional `note` is recorded as the transition's correlation id. Returns
-  `{ advanced: true, transition }`.
-- `GET /portfolio/overview` — portfolio overview for the acting user
-  (`{ overview }`, same payload as `GET /api/v1/portfolio/overview`).
-- `GET /sessions?projectId=&limit=` — the acting user's AI CLI sessions
-  (`{ sessions, count }`; id, name, aiTool, status, projectId, projectName,
-  modelId).
-- `GET /usage/summary?days=` — usage statistics for the acting user
-  (`{ sessionUsage, tokenUsage }`, optionally `tokenWindowDays`): session
-  duration and estimated cost by adapter/project/model (all time) plus token
-  consumption totals and top buckets. Mirrors the Copilot
-  `get_usage_summary` tool; per-tool owner switches apply (`BRIDGE_TOOL_DISABLED`).
-- `GET /sessions/:id` — session detail; 404 when missing or owned by another
-  user.
-- `POST /sessions/:id/dispatch` — body `{ "message": "..." }` (required, 1–4000
-  chars after trim). It resolves the acting user's tenant-scoped session and
-  durable adapter (404 for a missing/foreign session), verifies that adapter
-  matches the active launch command, and requires the adapter-specific CLI
-  composer to be ready. The session manager rejects programmatic task text
-  containing C0/C1 controls except LF/TAB (including CR and ESC) before any
-  terminal write. It then stages the whole task as one explicit bracketed paste:
-  UTF-8 bytes are encoded into a tmux `send-keys -H` control command carried on
-  tmux control-mode stdin, so the task body is not placed in process arguments
-  or a tmux paste buffer. After the per-adapter settle interval, it verifies the
-  task reached the current composer. Codex collapses pastes over 1000 characters
-  to `[Pasted Content N chars]`; this counts as staged only when `N` equals the
-  submitted task's Unicode scalar count. The Gateway then sends exactly one `Enter` and polls
-  `tmux capture-pane` with an adapter-aware classifier. Seeing task text anywhere
-  in scrollback is not success; the current composer must have consumed it.
-  Returns `{ dispatched: true, sessionId, delivery: "consumed" }` only after
-  that confirmation. Raw browser WebSocket terminal input remains unchanged and
-  writes directly to the attached node-pty; the separate existing
-  `SessionManager`/`TmuxClient.sendInput` path is also preserved.
-
-  Errors: 400 `PROGRAMMATIC_SUBMIT_UNSAFE_INPUT` for prohibited terminal
-  controls; 409 `BRIDGE_SESSION_NOT_ACTIVE` when the session is not live in this
-  Gateway process; 409 `PORTFOLIO_WRITER_FENCE_REJECTED` when a Portfolio worker
-  owns the input lease; and 409 `PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH`,
-  `PROGRAMMATIC_SUBMIT_NOT_READY`, or `PROGRAMMATIC_SUBMIT_STAGING_FAILED` for a
-  pre-write rejection. A failure after staging begins, or a bounded
-  post-submit poll that cannot prove composer consumption, returns 502
-  `BRIDGE_DELIVERY_UNCONFIRMED` with
-  `details.reason = "submission_indeterminate"` and
-  `details.retryable = false`. The response explicitly tells callers to inspect
-  the terminal and not retry automatically because the task may already be
-  executing.
-
-Tool-parity surface (post-M4): the remaining endpoints back the dsh plugin's
-read/write tools so the dsh path matches the in-process Copilot harness tool
-set. Schemas mirror the harness tool inputs; all data access is user scoped.
-
-- `GET /projects?limit=` / `GET /projects/:id` — the acting user's projects
-  (`{ projects, count }`; detail is 200 `{ found: false, project: null }` for
-  missing/foreign ids, mirroring the `get_project` tool). `POST /projects`
-  (operate; approval-gated on the dsh side) — body
-  `{ "name", "path", "description?" }`, returns 201 `{ created, projectId, name }`.
-- `GET /portfolio/requests?projectId=&limit=` — portfolio requests
-  (`{ requests, count }`). `GET /portfolio/projects/:id/dossier` — the project
-  dossier (`{ dossier }`).
-- `GET /memory/entries?scope=&projectId=&limit=` — scoped memory entries
-  (`{ entries }`; scope `global|project|session`, default `global`).
-  `GET /memory/search?q=&scope=&projectId=&limit=` — FTS keyword search
-  (`{ entries }`). `POST /memory/entries` (operate; approval-gated on the dsh
-  side) — body `{ "kind", "scope", "text", "projectId?", "metadata?" }`,
-  returns 201 `{ saved, id }`; repository validation failures (empty/oversized
-  text, project scope without projectId) return 400 `AGENT_MEMORY_*`.
+The former DeepSeek Harness bridge under `/api/internal/v1/copilot-bridge/**` and the former Portfolio API under `/api/v1/portfolio/**` are retired and not mounted. Programmatic terminal submission remains an internal, approval-gated Project Manager/Copilot tool path with the standard session, tenant, and runtime authorization checks.

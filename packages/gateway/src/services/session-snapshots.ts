@@ -11,12 +11,22 @@ export interface RecordSessionSnapshotInput {
 }
 
 export function recordSessionSnapshot(input: RecordSessionSnapshotInput): SessionSnapshot {
+  const metadata = normalizeMetadata(input.metadata);
   return new SessionSnapshotRepository(input.db, input.userId).create({
     sessionId: input.session.id,
     projectId: input.session.projectId,
     tmuxSession: input.session.tmuxSession,
     modelId: input.session.modelId,
     configVersion: input.configVersion,
-    metadata: input.metadata
+    metadata: {
+      ...metadata,
+      adapter: input.session.aiTool
+    }
   });
+}
+
+function normalizeMetadata(metadata: unknown): Record<string, unknown> {
+  return metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? metadata as Record<string, unknown>
+    : {};
 }

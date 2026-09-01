@@ -90,29 +90,6 @@ export async function ensureClaudeNotificationSettings(
   return { path: settingsPath, changed };
 }
 
-/**
- * Installs only the worker SessionStart hook. The capability is deliberately
- * absent from the JSON settings: Claude resolves it from the worker process
- * environment at hook time.
- */
-export async function ensureClaudePortfolioWorkerHookSettings(
-  projectRoot: string,
-  gatewayUrl: string,
-  sessionId: string
-): Promise<{ path: string; changed: boolean }> {
-  const settingsPath = safeResolve(projectRoot, ".claude/settings.local.json");
-  const existing = await readJsonObject(settingsPath);
-  const merged = mergeClaudePortfolioWorkerHookSettings(existing, gatewayUrl, sessionId);
-  const changed = JSON.stringify(existing) !== JSON.stringify(merged);
-
-  if (changed) {
-    await mkdir(dirname(settingsPath), { recursive: true });
-    await writeFile(settingsPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
-  }
-
-  return { path: settingsPath, changed };
-}
-
 function mergeForgeBadgerHookSettings(
   existing: Record<string, unknown>,
   gatewayUrl: string,
@@ -150,52 +127,6 @@ function mergeForgeBadgerHookSettings(
   );
   next.hooks = hooks;
   return next;
-}
-
-function mergeClaudePortfolioWorkerHookSettings(
-  existing: Record<string, unknown>,
-  gatewayUrl: string,
-  sessionId: string
-): Record<string, unknown> {
-  const next = cloneRecord(existing);
-  const existingHooks = isRecord(next.hooks) ? next.hooks : {};
-  const hooks: Record<string, unknown> = { ...existingHooks };
-  const workerHook = buildClaudePortfolioWorkerHttpHook(gatewayUrl, sessionId);
-
-  hooks.SessionStart = ensureHookGroup(hooks.SessionStart, undefined, workerHook);
-  next.allowedHttpHookUrls = mergeStringList(
-    next.allowedHttpHookUrls,
-    workerHookUrlAllowlist(gatewayUrl)
-  );
-  next.httpHookAllowedEnvVars = mergeStringList(
-    next.httpHookAllowedEnvVars,
-    ...workerHook.allowedEnvVars
-  );
-  next.hooks = hooks;
-  return next;
-}
-
-/**
- * Build the isolated worker-only SessionStart hook. Its header references a
- * process-local capability variable; the raw HMAC is never written to JSON.
- */
-export function buildClaudePortfolioWorkerHookSettings(
-  gatewayUrl: string,
-  sessionId?: string
-): ClaudeHookSettings {
-  const workerHook = buildClaudePortfolioWorkerHttpHook(gatewayUrl, sessionId);
-  return {
-    allowedHttpHookUrls: [workerHookUrlAllowlist(gatewayUrl)],
-    httpHookAllowedEnvVars: workerHook.allowedEnvVars,
-    hooks: {
-      SessionStart: [{ hooks: [workerHook] }],
-      PermissionRequest: [],
-      PermissionDenied: [],
-      Stop: [],
-      SessionEnd: [],
-      Notification: []
-    }
-  };
 }
 
 function ensureHookGroup(
@@ -259,20 +190,6 @@ function buildForgeBadgerHttpHook(gatewayUrl: string, sessionId?: string): Claud
   };
 }
 
-function buildClaudePortfolioWorkerHttpHook(gatewayUrl: string, sessionId?: string): ClaudeHttpHook {
-  const sessionPath = sessionId ? `/${encodeURIComponent(sessionId)}` : "";
-  return {
-    type: "http",
-    url: `${gatewayUrl.replace(/\/+$/u, "")}/api/v1/session-hooks/claude-portfolio-worker${sessionPath}`,
-    headers: {
-      "x-forgebadger-session-id": "$FORGEBADGER_SESSION_ID",
-      "x-forgebadger-portfolio-worker-capability": "$FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"
-    },
-    allowedEnvVars: ["FORGEBADGER_SESSION_ID", "FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"],
-    timeout: 5
-  };
-}
-
 function forgeBadgerHookUrlAllowlist(gatewayUrl: string): string {
   const trimmed = gatewayUrl.replace(/\/+$/u, "");
   try {
@@ -280,16 +197,6 @@ function forgeBadgerHookUrlAllowlist(gatewayUrl: string): string {
     return `${url.origin}/api/v1/session-hooks/claude-notification*`;
   } catch {
     return `${trimmed}/api/v1/session-hooks/claude-notification*`;
-  }
-}
-
-function workerHookUrlAllowlist(gatewayUrl: string): string {
-  const trimmed = gatewayUrl.replace(/\/+$/u, "");
-  try {
-    const url = new URL(trimmed);
-    return `${url.origin}/api/v1/session-hooks/claude-portfolio-worker*`;
-  } catch {
-    return `${trimmed}/api/v1/session-hooks/claude-portfolio-worker*`;
   }
 }
 
@@ -342,23 +249,7 @@ function isForgeBadgerNotificationHook(value: ClaudeForgeBadgerHook | Record<str
 }
 
 function isForgeBadgerManagedHook(value: ClaudeForgeBadgerHook | Record<string, unknown>): boolean {
-  return isForgeBadgerNotificationHook(value) || isForgeBadgerPortfolioWorkerHook(value);
-}
-
-function isForgeBadgerPortfolioWorkerHook(value: ClaudeForgeBadgerHook | Record<string, unknown>): boolean {
-  if (value.type === "command") {
-    return (
-      typeof value.command === "string"
-      && value.command.includes("/api/v1/session-hooks/claude-portfolio-worker")
-    );
-  }
-  if (value.type === "http") {
-    return (
-      typeof value.url === "string"
-      && value.url.includes("/api/v1/session-hooks/claude-portfolio-worker")
-    );
-  }
-  return false;
+  return isForgeBadgerNotificationHook(value);
 }
 
 async function readJsonObject(pathname: string): Promise<Record<string, unknown>> {

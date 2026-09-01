@@ -1,6 +1,5 @@
 import type { FeishuConnectionHealth } from "./feishu-connection-supervisor.js";
 import { redactFeishuError } from "./feishu-error-redaction.js";
-import type { AgentStackDeps } from "../agent/agent-stack.js";
 
 interface FeishuRuntimeSupervisor {
   start(): Promise<void>;
@@ -27,25 +26,11 @@ export class FeishuChannelRuntime {
   private intervalHandle: unknown;
   private started = false;
   private stopped = false;
-  private agentDeps: AgentStackDeps | undefined;
 
   constructor(private readonly dependencies: FeishuChannelRuntimeDependencies) {
     this.workers = dependencies.workers ?? [];
     this.setInterval = dependencies.setInterval ?? ((callback, intervalMs) => setInterval(callback, intervalMs));
     this.clearInterval = dependencies.clearInterval ?? ((handle) => clearInterval(handle as NodeJS.Timeout));
-  }
-
-  /**
-   * Late-bound Copilot harness deps. The runtime is constructed in startup
-   * before the gateway app creates the Portfolio facade, so the gateway app
-   * attaches the full agent deps once eventBus + portfolioApi are in scope.
-   */
-  attachAgentDeps(deps: AgentStackDeps): void {
-    this.agentDeps = deps;
-  }
-
-  getAgentDeps(): AgentStackDeps | undefined {
-    return this.agentDeps;
   }
 
   async start(): Promise<void> {

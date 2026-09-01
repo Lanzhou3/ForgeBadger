@@ -4,9 +4,7 @@
  * "what breaks if we touch X", and "which symbols do these changed files
  * affect" from real dependency data instead of guessing.
  *
- * All queries go through services/copilot-bridge/bridge-service.ts so the
- * internal HTTP surface and these tools share one tenant-scoped
- * implementation.
+ * All queries go through the native tenant-scoped platform-access service.
  */
 import { z } from "zod";
 import {
@@ -14,7 +12,7 @@ import {
   getProjectGraphSymbol,
   getProjectGraphSymbolImpact,
   searchProjectGraphSymbols
-} from "../../copilot-bridge/bridge-service.js";
+} from "../platform-access.js";
 import type { AgentTool, AgentToolContext } from "../tool-registry.js";
 
 const searchInput = z.object({

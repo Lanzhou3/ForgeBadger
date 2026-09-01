@@ -27,7 +27,7 @@ Operational runtime state:
 
 - SQLite data file at `FORGEBADGER_DB_PATH`.
 - Project-generated config files under user-approved project directories.
-- Runtime tmux sessions named with `FORGEBADGER_TMUX_PREFIX`, default `of-`.
+- Runtime tmux sessions named with `FORGEBADGER_TMUX_PREFIX`, default `fb-`.
 - User agent configuration directories such as `.claude`, `.codex`, and
   `.opencode`.
 - Local API keys, credentials, and user configuration files.
@@ -36,7 +36,7 @@ Operational runtime state is never part of the npm package or release artifact.
 
 When multiple ForgeBadger instances share one operating-system account, assign
 each instance a unique `FORGEBADGER_TMUX_PREFIX`. Separate state or database
-paths do not isolate tmux's global server, and reusing the default `of-` prefix
+paths do not isolate tmux's global server, and reusing the default `fb-` prefix
 can make one instance treat another instance's sessions as orphans.
 
 The Gateway owns all API and WebSocket behavior. The Web console is a pure
@@ -214,7 +214,7 @@ Rollback sequence:
 5. Restore the backed-up SQLite database if the new release wrote incompatible
    state.
 6. Start Gateway, then Web.
-7. Inspect `tmux list-sessions` and only terminate new failed `of-*` sessions
+7. Inspect `tmux list-sessions` and only terminate new failed `fb-*` sessions
    after confirming they are not active user sessions.
 
 Terminal scrollback is not stored in SQLite. Recovery depends on tmux sessions

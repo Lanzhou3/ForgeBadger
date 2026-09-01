@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { CopilotStatusBar } from "@/components/copilot/copilot-kernel-panel";
+import { CopilotStatusBar } from "@/components/copilot/copilot-runtime-panel";
 import {
   MessageRow,
   PendingActionRow,
@@ -21,7 +21,6 @@ import { CopilotSettings } from "@/components/copilot/copilot-settings";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
-import { GatewayApiError } from "@/lib/api";
 import {
   cancelRun,
   createConversation,
@@ -40,10 +39,10 @@ const AUTO_TITLE_MAX_CHARS = 24;
  * ChatGPT/Claude-style two-column workbench: conversation history management
  * on the left (new / search / rename / delete, collapsible on desktop and a
  * Sheet on mobile), and a centered, width-capped message stream in the middle
- * with a kernel status bar, markdown rendering, collapsible tool steps,
+ * with a runtime status bar, markdown rendering, collapsible tool steps,
  * approval cards, streaming tolerance, and a floating composer card. All
- * Copilot preferences (heartbeat, dsh kernel, capabilities) live behind the
- * top-right gear button on the dedicated /copilot/settings page.
+ * Copilot tool preferences live behind the top-right gear button on the
+ * dedicated /copilot/settings page.
  */
 export function CopilotChat() {
   const { t } = useLanguage();
@@ -181,7 +180,7 @@ export function CopilotChat() {
     setSendError(false);
     clearActive();
     // Show the "thinking" pulse immediately; the first run event can lag the
-    // POST noticeably while the dsh runtime cold-starts.
+    // POST while the Gateway starts the model turn.
     markPending(id);
     try {
       await startRun(id, text);
@@ -255,19 +254,8 @@ export function CopilotChat() {
       setEditDraft("");
       const id2 = conversationIdRef.current;
       if (id2) await reloadActiveConversation(id2);
-    } catch (error) {
-      // The dsh copilot path answers edit-message with 501 +
-      // DSH_EDIT_MESSAGE_UNSUPPORTED; surface a targeted hint instead of the
-      // generic failure message.
-      if (
-        error instanceof GatewayApiError &&
-        error.status === 501 &&
-        error.details?.code === "DSH_EDIT_MESSAGE_UNSUPPORTED"
-      ) {
-        setEditError(t("copilot.editUnsupported"));
-      } else {
-        setEditError(t("copilot.editFailed"));
-      }
+    } catch {
+      setEditError(t("copilot.editFailed"));
     } finally {
       setEditSubmitting(false);
     }
