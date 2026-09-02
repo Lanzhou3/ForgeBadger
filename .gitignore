@@ -10,6 +10,7 @@ packages/gateway/src/db/migrations/meta/*_snapshot.json
 !packages/gateway/src/db/migrations/meta/0002_snapshot.json
 dist/
 .next/
+.github/
 coverage/
 *.tsbuildinfo
 package-lock.json

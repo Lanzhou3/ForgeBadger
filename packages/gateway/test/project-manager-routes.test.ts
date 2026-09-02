@@ -56,7 +56,7 @@ describe("project-manager routes", () => {
     app.use(express.json());
     app.use("/api/v1/projects", createProjectManagerRoutes(db, {
       masterKey,
-      adapterCommandRunner: async () => ({ exitCode: 0, stdout: "claude 1.0.0 (Claude Code)", stderr: "" })
+      adapterCommandRunner: async (command: string) => ({ exitCode: 0, stdout: `${command} 3.3.8`, stderr: "" })
     }));
   });
 

@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
 
-import { resolveTerminalMultiplexerRuntime } from "../services/terminal-multiplexer-runtime.js";
+import {
+  isWindowsShimCommand,
+  resolveTerminalMultiplexerRuntime,
+  resolveWindowsShimCommand
+} from "../services/terminal-multiplexer-runtime.js";
 
 export interface CommandResult {
   exitCode: number;
@@ -157,9 +161,22 @@ export function runCommand(
   options: CommandRunnerOptions = {}
 ): Promise<CommandResult> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      stdio: ["ignore", "pipe", "pipe"]
-    });
+    // Windows npm/cargo shims are .cmd files (e.g. opencode.cmd) that bare
+    // spawn refuses to execute (EINVAL since Node 20.12/CVE-2024-27980).
+    // Resolve those shims to the real executable (or node + script) and spawn
+    // it directly; this avoids cmd.exe re-tokenizing args and is fast enough to
+    // stay inside the timeout even when several adapters are probed in
+    // parallel. When resolution fails, fall back to running through cmd.exe.
+    const resolved = resolveWindowsShimCommand(command, process.env);
+    const needsShell = resolved === undefined && isWindowsShimCommand(command);
+    const child = spawn(
+      resolved?.command ?? command,
+      [...(resolved?.args ?? []), ...args],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        ...(needsShell ? { shell: true } : {})
+      }
+    );
 
     const timeoutMs = options.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;

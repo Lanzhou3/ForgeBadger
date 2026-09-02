@@ -18,6 +18,7 @@ export interface FetchProviderModelsInput {
   timeoutMs?: number | undefined;
   fetchImpl?: typeof fetch | undefined;
   resolveHost?: CheckModelEndpointInput["resolveHost"] | undefined;
+  allowPlaintextHttp?: boolean | undefined;
 }
 
 interface ModelsResponse {
@@ -89,7 +90,9 @@ export async function fetchProviderModels(input: FetchProviderModelsInput): Prom
   let lastError = "No model endpoint candidates";
 
   for (const endpoint of candidates) {
-    const validationError = await validatePublicHttpsEndpointUrl(endpoint, resolveHost);
+    const validationError = await validatePublicHttpsEndpointUrl(endpoint, resolveHost, {
+      allowPlaintextHttp: input.allowPlaintextHttp
+    });
     if (validationError) throw new Error(validationError);
 
     try {

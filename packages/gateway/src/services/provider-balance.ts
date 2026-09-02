@@ -27,6 +27,7 @@ export interface FetchProviderBalanceInput {
   timeoutMs?: number | undefined;
   fetchImpl?: typeof fetch | undefined;
   resolveHost?: CheckModelEndpointInput["resolveHost"] | undefined;
+  allowPlaintextHttp?: boolean | undefined;
 }
 
 interface KnownBalanceProvider {
@@ -222,7 +223,9 @@ export async function fetchProviderBalance(input: FetchProviderBalanceInput): Pr
   const timeoutMs = input.timeoutMs ?? defaultTimeoutMs;
   const endpoint = `${detected.origin}${detected.provider.path}`;
 
-  const validationError = await validatePublicHttpsEndpointUrl(endpoint, resolveHost);
+  const validationError = await validatePublicHttpsEndpointUrl(endpoint, resolveHost, {
+    allowPlaintextHttp: input.allowPlaintextHttp
+  });
   if (validationError) throw new Error(validationError);
 
   const headers = new Headers({ Accept: "application/json" });

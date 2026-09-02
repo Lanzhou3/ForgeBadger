@@ -23,6 +23,7 @@ import {
 import {
   adapterLabel,
   customProviderHasEndpoint,
+  customProviderHasPlaintextHttp,
   slugifyProviderKey,
   type CredentialForm,
   type CustomProviderForm,
@@ -78,6 +79,7 @@ export function AddProviderDialog({
 
   const requiresCredential = customProvider.authType !== "none";
   const hasEndpoint = customProviderHasEndpoint(customProvider);
+  const hasPlaintextHttp = hasEndpoint && customProviderHasPlaintextHttp(customProvider);
   const canSubmit =
     !isCreating &&
     customProvider.name.trim().length > 0 &&
@@ -232,6 +234,23 @@ export function AddProviderDialog({
 
           {!hasEndpoint && (
             <p className="text-xs text-destructive">{t("models.baseUrlRequired")}</p>
+          )}
+
+          {hasPlaintextHttp && (
+            <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 accent-brand"
+                  checked={customProvider.allowPlaintextHttp}
+                  onChange={(event) =>
+                    onCustomProviderChange({ ...customProvider, allowPlaintextHttp: event.target.checked })
+                  }
+                />
+                <span>{t("models.allowPlaintextHttp")}</span>
+              </label>
+              <p className="pl-6 text-xs text-muted-foreground">{t("models.allowPlaintextHttpHint")}</p>
+            </div>
           )}
 
           <div className="space-y-2">

@@ -172,6 +172,7 @@ export default function ModelsPage() {
         ...(anthropicBaseUrl ? { anthropicBaseUrl } : {}),
         ...(openaiBaseUrl ? { openaiBaseUrl } : {}),
         supportedAdapters: customProvider.supportedAdapters,
+        ...(customProvider.allowPlaintextHttp ? { allowPlaintextHttp: true } : {}),
       });
       const secret = setupCredentialForm.plaintextSecret.trim();
       const credential =

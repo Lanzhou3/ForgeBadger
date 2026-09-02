@@ -94,6 +94,97 @@ describe("checkModelEndpoint", () => {
     assert.equal(fetchCalled, false);
   });
 
+  it("allows an http endpoint when allowPlaintextHttp is set and the host is public", async () => {
+    let fetchCalled = false;
+    const result = await checkModelEndpoint({
+      endpoint: "http://api.example.com",
+      timeoutMs: 100,
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response("ok", { status: 200 });
+      },
+      resolveHost: publicHostResolver,
+      allowPlaintextHttp: true
+    });
+
+    assert.equal(result.healthy, true);
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.error, undefined);
+    assert.equal(fetchCalled, true);
+  });
+
+  it("still blocks private IPv4 endpoints even when allowPlaintextHttp is set", async () => {
+    let fetchCalled = false;
+    const result = await checkModelEndpoint({
+      endpoint: "http://192.168.1.10",
+      timeoutMs: 100,
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response("ok", { status: 200 });
+      },
+      resolveHost: publicHostResolver,
+      allowPlaintextHttp: true
+    });
+
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Private or loopback network addresses are not allowed");
+    assert.equal(fetchCalled, false);
+  });
+
+  it("still blocks metadata hosts even when allowPlaintextHttp is set", async () => {
+    let fetchCalled = false;
+    const result = await checkModelEndpoint({
+      endpoint: "http://metadata.google.internal",
+      timeoutMs: 100,
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response("ok", { status: 200 });
+      },
+      resolveHost: publicHostResolver,
+      allowPlaintextHttp: true
+    });
+
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Metadata hostnames are not allowed");
+    assert.equal(fetchCalled, false);
+  });
+
+  it("still blocks DNS-resolved private targets even when allowPlaintextHttp is set", async () => {
+    let fetchCalled = false;
+    const result = await checkModelEndpoint({
+      endpoint: "http://example.internal",
+      timeoutMs: 100,
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response("ok", { status: 200 });
+      },
+      resolveHost: async () => [{ address: "10.0.0.12", family: 4 }],
+      allowPlaintextHttp: true
+    });
+
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Private or loopback network addresses are not allowed");
+    assert.equal(fetchCalled, false);
+  });
+
+  it("still blocks non-http(s) protocols even when allowPlaintextHttp is set", async () => {
+    let fetchCalled = false;
+    const result = await checkModelEndpoint({
+      endpoint: "ftp://example.com",
+      timeoutMs: 100,
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response("ok", { status: 200 });
+      },
+      resolveHost: publicHostResolver,
+      allowPlaintextHttp: true
+    });
+
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Only https protocol is allowed");
+    assert.equal(fetchCalled, false);
+  });
+
   it("blocks private IPv4 network endpoints", async () => {
     const result = await checkModelEndpoint({
       endpoint: "https://192.168.1.10",

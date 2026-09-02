@@ -59,6 +59,7 @@ describe("providerPresetToForm", () => {
       anthropicBaseUrl: "https://api.kimi.com/coding/",
       openaiBaseUrl: "https://api.kimi.com/coding/v1",
       supportedAdapters: ["claude", "opencode"],
+      allowPlaintextHttp: false,
     });
   });
 

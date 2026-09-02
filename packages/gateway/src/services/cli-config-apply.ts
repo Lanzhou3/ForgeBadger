@@ -314,7 +314,7 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
   }
   const baseUrl = endpointForAdapter(provider, input.adapter);
   try {
-    await assertResolvedPublicHttpsEndpoint(baseUrl, input.resolveHost);
+    await assertResolvedPublicHttpsEndpoint(baseUrl, input.resolveHost, { allowPlaintextHttp: provider.allowPlaintextHttp });
   } catch (error) {
     throw new CliConfigApplyError(
       "CLI_CONFIG_APPLY_ENDPOINT_UNSAFE",

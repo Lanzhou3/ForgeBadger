@@ -1,7 +1,8 @@
 import type { IPty } from "node-pty";
 import type { Server } from "node:http";
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 import { resolveTokenUserId } from "../auth/resolve-token.js";
@@ -390,7 +391,7 @@ async function handleTerminalSocket(
   try {
     const { spawn } = await import("node-pty");
     if (!authorizationLease.isAuthorized()) return;
-    pty = spawn(terminalRuntime.command, terminalRuntime.buildAttachArgs(session.tmuxName), {
+    pty = spawn(resolveMultiplexerExecutable(terminalRuntime.command), terminalRuntime.buildAttachArgs(session.tmuxName), {
       name: "xterm-256color",
       cwd: session.launchPlan.cwd,
       cols: 120,
@@ -537,6 +538,35 @@ export function authenticateTerminalRequest(
 
 export function buildTmuxAttachEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return clearInheritedMultiplexerIdentity(env);
+}
+
+/**
+ * Resolve a bare multiplexer command (e.g. "psmux") to an absolute executable
+ * path on Windows. node-pty's conpty backend resolves PATH entries by exact
+ * name and never appends PATHEXT extensions, so "psmux" fails its existence
+ * check even though "psmux.exe" is on PATH. macOS/Linux node-pty spawns via
+ * execvp which performs the PATH search itself, so the command is passed
+ * through unchanged there.
+ */
+export function resolveMultiplexerExecutable(
+  command: string,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  if (process.platform !== "win32") return command;
+  if (isAbsolute(command) || command.includes("/") || command.includes("\\")) return command;
+
+  const pathValue = env.Path ?? env.PATH ?? "";
+  const pathExt = env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD";
+  const extensions = pathExt.split(";").filter(Boolean);
+  for (const dir of pathValue.split(";").filter(Boolean)) {
+    for (const extension of extensions) {
+      const candidate = join(dir, `${command}${extension.toLowerCase()}`);
+      if (existsSync(candidate)) return candidate;
+    }
+    const bare = join(dir, command);
+    if (existsSync(bare)) return bare;
+  }
+  return command;
 }
 
 /**

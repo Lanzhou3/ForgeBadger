@@ -229,7 +229,7 @@ describe("OpenCodeSource", () => {
       assert.equal(record.adapter, "opencode");
       assert.equal(record.requestId, "msg-1");
       assert.equal(record.sessionId, "ses-1");
-      assert.equal(record.projectPath, "/tmp/proj-a");
+      assert.equal(record.projectPath, path.resolve("/tmp/proj-a"));
       assert.equal(record.inputTokens, 800);
       assert.equal(record.outputTokens, 200);
       assert.equal(record.cacheReadTokens, 700);

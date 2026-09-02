@@ -96,7 +96,7 @@ describe("writeConfigPlan", () => {
 
     assert.deepEqual(result.writtenFiles, [".claude/CLAUDE.md"]);
     assert.equal(await readFile(join(root, ".claude", "CLAUDE.md"), "utf8"), "# Incoming");
-    assert.match(result.backupPath, /\.forgebadger\/backups\/config-writes\//);
+    assert.match(result.backupPath, /\.forgebadger[/\\]backups[/\\]config-writes[/\\]/);
     assert.equal(
       await readFile(join(result.backupPath, ".claude", "CLAUDE.md"), "utf8"),
       "# Existing"

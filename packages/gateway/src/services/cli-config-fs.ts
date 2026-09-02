@@ -84,7 +84,9 @@ export function safeUnlink(file: string): void {
 }
 
 export function fsyncFile(file: string): void {
-  const fd = openSync(file, "r");
+  // On Windows, FlushFileBuffers (underlying fsync) requires write access (GENERIC_WRITE).
+  // Opening O_RDONLY ("r") causes EPERM on Windows. Use "r+" (O_RDWR) instead.
+  const fd = openSync(file, "r+");
   try {
     fsyncSync(fd);
   } finally {

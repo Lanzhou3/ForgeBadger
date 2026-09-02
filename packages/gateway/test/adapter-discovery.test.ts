@@ -24,7 +24,8 @@ describe("adapter discovery", () => {
   it("enables launch only when the supported adapter command is available", async () => {
     const runner: CommandRunner = async (command) => ({
       exitCode: command === "opencode" ? 127 : 0,
-      stdout: command === "codex" ? "codex 1.0.0\n" : `${command} 1.0.0\n`,
+      // psmux (and tmux) carry a minimum-version gate; use a supported version.
+      stdout: command === "psmux" || command === "tmux" ? `${command} 3.3.8\n` : `${command} 1.0.0\n`,
       stderr: command === "opencode" ? "not found" : ""
     });
 

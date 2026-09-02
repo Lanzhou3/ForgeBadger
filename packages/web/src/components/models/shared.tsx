@@ -15,6 +15,7 @@ export interface CustomProviderForm {
   anthropicBaseUrl: string;
   openaiBaseUrl: string;
   supportedAdapters: ProviderSupportedAdapter[];
+  allowPlaintextHttp: boolean;
 }
 
 export interface CredentialForm {
@@ -43,6 +44,7 @@ export const emptyCustomProvider: CustomProviderForm = {
   anthropicBaseUrl: "",
   openaiBaseUrl: "",
   supportedAdapters: ["claude"],
+  allowPlaintextHttp: false,
 };
 
 export function slugifyProviderKey(name: string): string {
@@ -55,6 +57,11 @@ export function slugifyProviderKey(name: string): string {
 
 export function customProviderHasEndpoint(form: CustomProviderForm): boolean {
   return Boolean(form.anthropicBaseUrl.trim() || form.openaiBaseUrl.trim());
+}
+
+export function customProviderHasPlaintextHttp(form: CustomProviderForm): boolean {
+  const urls = [form.anthropicBaseUrl.trim(), form.openaiBaseUrl.trim()].filter(Boolean);
+  return urls.some((url) => url.toLowerCase().startsWith("http://"));
 }
 
 export const emptyCredential: CredentialForm = {
