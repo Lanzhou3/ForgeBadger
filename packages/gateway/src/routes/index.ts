@@ -26,6 +26,7 @@ import { createSnapshotRoutes } from "./snapshots.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { createCopilotRoutes } from "./copilot.js";
+import { createSystemRoutes } from "./system.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
@@ -96,4 +97,5 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     masterKey: deps.masterKey,
     appVersion: deps.appVersion
   }));
+  app.use("/api/v1/system", createSystemRoutes());
 }

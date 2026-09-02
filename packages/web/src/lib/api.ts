@@ -2536,6 +2536,29 @@ export async function importProject(input: ImportProjectInput): Promise<{ projec
   }) as Promise<{ project: Project }>;
 }
 
+// Native directory picking (host-side dialog driven by the Gateway)
+export interface DesktopCapabilities {
+  platform: string;
+  directoryPickerSupported: boolean;
+}
+
+export async function getDesktopCapabilities(): Promise<DesktopCapabilities> {
+  return fetchJson("/api/v1/system/desktop") as Promise<DesktopCapabilities>;
+}
+
+export interface DirectoryPickerResult {
+  supported: boolean;
+  path?: string;
+  cancelled?: boolean;
+  reason?: string;
+}
+
+export async function selectNativeDirectory(): Promise<DirectoryPickerResult> {
+  return fetchJson("/api/v1/system/select-directory", {
+    method: "POST",
+  }) as Promise<DirectoryPickerResult>;
+}
+
 // Templates
 export async function listTemplates(): Promise<{ templates: Template[] }> {
   return fetchJson("/api/v1/templates") as Promise<{ templates: Template[] }>;

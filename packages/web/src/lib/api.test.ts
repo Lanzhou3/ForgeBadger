@@ -49,6 +49,8 @@ import {
   importProject,
   installCatalogTemplate,
   installCatalogSkill,
+  getDesktopCapabilities,
+  selectNativeDirectory,
   getUsageSummary,
   listActivities,
   listAuditLogs,
@@ -1352,6 +1354,55 @@ describe("api client", () => {
           name: "Existing",
         }),
       })
+    );
+  });
+
+  it("loads desktop capabilities from the Gateway", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          code: 0,
+          data: {
+            platform: "win32",
+            directoryPickerSupported: true,
+          },
+          message: "",
+        }),
+    } as Response);
+
+    const capabilities = await getDesktopCapabilities();
+    expect(capabilities.platform).toBe("win32");
+    expect(capabilities.directoryPickerSupported).toBe(true);
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/system/desktop",
+      expect.any(Object)
+    );
+  });
+
+  it("selects a directory through the host-side native picker", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          code: 0,
+          data: {
+            supported: true,
+            path: "C:\\Users\\dev\\projects\\demo",
+            cancelled: false,
+          },
+          message: "",
+        }),
+    } as Response);
+
+    const result = await selectNativeDirectory();
+    expect(result.supported).toBe(true);
+    expect(result.path).toBe("C:\\Users\\dev\\projects\\demo");
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/system/select-directory",
+      expect.objectContaining({ method: "POST" })
     );
   });
 

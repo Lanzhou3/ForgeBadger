@@ -5,8 +5,8 @@ import { useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, FolderOpen } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,8 +20,10 @@ import {
 } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  getDesktopCapabilities,
   importProject,
   scanProject,
+  selectNativeDirectory,
   type ScanResult,
 } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
@@ -49,6 +51,22 @@ export default function ImportProjectPage() {
   const [step, setStep] = useState<Step>("path");
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [scannedPath, setScannedPath] = useState("");
+  const [directoryPickerSupported, setDirectoryPickerSupported] = useState(false);
+  const [pickingDirectory, setPickingDirectory] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getDesktopCapabilities()
+      .then((capabilities) => {
+        if (active) setDirectoryPickerSupported(capabilities.directoryPickerSupported);
+      })
+      .catch(() => {
+        if (active) setDirectoryPickerSupported(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const pathForm = useForm<PathValues>({
     resolver: zodResolver(pathSchema),
@@ -89,6 +107,21 @@ export default function ImportProjectPage() {
 
   function onPathSubmit(values: PathValues) {
     scanMutation.mutate(values.path);
+  }
+
+  async function onPickDirectory() {
+    if (pickingDirectory) return;
+    setPickingDirectory(true);
+    try {
+      const result = await selectNativeDirectory();
+      if (result.path) {
+        pathForm.setValue("path", result.path, { shouldValidate: true });
+      }
+    } catch {
+      // Native picker unavailable or failed; the manual input remains usable.
+    } finally {
+      setPickingDirectory(false);
+    }
   }
 
   function onConfirmSubmit(values: ConfirmValues) {
@@ -152,7 +185,23 @@ export default function ImportProjectPage() {
                     <FormItem>
                       <FormLabel>{t("projects.directoryPath")}</FormLabel>
                       <FormControl>
-                        <Input placeholder="/path/to/existing/project" {...field} />
+                        <div className="flex gap-2">
+                          <Input placeholder="/path/to/existing/project" {...field} className="flex-1" />
+                          {directoryPickerSupported && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="shrink-0"
+                              title={t("projects.browseDirectory")}
+                              aria-label={t("projects.browseDirectory")}
+                              disabled={pickingDirectory}
+                              onClick={onPickDirectory}
+                            >
+                              <FolderOpen className="size-4" />
+                            </Button>
+                          )}
+                        </div>
                       </FormControl>
                       <FormMessage />
                     </FormItem>
