@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -67,7 +67,10 @@ describe("OpenCode notification settings", () => {
   });
 
   it("rejects denied project roots via safeResolve", async () => {
-    await assert.rejects(() => ensureForgeBadgerOpenCodePlugin("/etc"), /denied root/);
+    // /etc is denied on POSIX; on Windows use the drive root, which the
+    // gateway rejects as a denied filesystem root.
+    const deniedRoot = process.platform === "win32" ? path.parse(process.cwd()).root : "/etc";
+    await assert.rejects(() => ensureForgeBadgerOpenCodePlugin(deniedRoot), /denied root/);
   });
 
   it("rejects plugin paths that escape the project root via symlink", async () => {
@@ -85,18 +88,16 @@ describe("OpenCode notification settings", () => {
   it("degrades gracefully without throwing when the plugin cannot be written", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "forgebadger-opencode-readonly-"));
     const pluginsDir = path.join(root, ".opencode", "plugins");
-    await mkdir(pluginsDir, { recursive: true });
-    await chmod(pluginsDir, 0o555);
+    // Force the write to fail deterministically on every platform: make the
+    // plugins path a file so the plugin read/mkdir raises ENOTDIR/EEXIST.
+    await mkdir(path.dirname(pluginsDir), { recursive: true });
+    await writeFile(pluginsDir, "blocked");
 
-    try {
-      const result = await ensureForgeBadgerOpenCodePlugin(root);
+    const result = await ensureForgeBadgerOpenCodePlugin(root);
 
-      assert.equal(result.path, expectedPluginPath(root));
-      assert.equal(result.changed, false);
-      assert.equal(warnings.length, 1);
-    } finally {
-      await chmod(pluginsDir, 0o755);
-    }
+    assert.equal(result.path, expectedPluginPath(root));
+    assert.equal(result.changed, false);
+    assert.equal(warnings.length, 1);
   });
 
   it("does not touch other plugins in .opencode/plugins", async () => {

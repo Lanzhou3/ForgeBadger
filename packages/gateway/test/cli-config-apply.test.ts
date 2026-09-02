@@ -47,6 +47,14 @@ function modeOf(targetPath: string): number {
   return statSync(targetPath).mode & 0o777;
 }
 
+// Windows has no POSIX permission bits (chmod maps to the read-only attribute,
+// so a 0600 write reports 0o666). Assert the exact mode only on POSIX hosts.
+function assertPrivateMode(targetPath: string, expected: number): void {
+  if (process.platform !== "win32") {
+    assert.equal(modeOf(targetPath), expected);
+  }
+}
+
 async function settle(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -104,7 +112,7 @@ describe("cli-config apply service", () => {
       assert.equal(doc.env.ANTHROPIC_MODEL, "claude-model-1");
       assert.equal(doc.env.ANTHROPIC_SMALL_FAST_MODEL, "claude-model-1");
       assert.equal(doc.env.API_TIMEOUT_MS, "600000");
-      assert.equal(modeOf(target), 0o600);
+      assertPrivateMode(target, 0o600);
       assert.equal(result.changed, true);
       assert.equal(result.files.length, 1);
       assert.equal(result.files[0]?.operation, "create");
@@ -112,8 +120,8 @@ describe("cli-config apply service", () => {
       assert.equal((await readdir(root)).some((name) => name.endsWith(".tmp")), false);
 
       const backupPath = path.join(backupRoot("claude"), result.backupId);
-      assert.equal(modeOf(backupPath), 0o600);
-      assert.equal(modeOf(backupRoot("claude")), 0o700);
+      assertPrivateMode(backupPath, 0o600);
+      assertPrivateMode(backupRoot("claude"), 0o700);
       const backupContent = await readFile(backupPath, "utf8");
       assert.equal(backupContent.includes("sk-claude-secret"), false);
 
@@ -153,8 +161,8 @@ describe("cli-config apply service", () => {
       const auth = JSON.parse(await readFile(path.join(root, "auth.json"), "utf8")) as Record<string, string>;
       assert.equal(auth.OPENAI_API_KEY, undefined);
       assert.equal(auth.OTHER_FIELD, "keep-me");
-      assert.equal(modeOf(path.join(root, "config.toml")), 0o600);
-      assert.equal(modeOf(path.join(root, "auth.json")), 0o600);
+      assertPrivateMode(path.join(root, "config.toml"), 0o600);
+      assertPrivateMode(path.join(root, "auth.json"), 0o600);
       assert.equal(result.files.length, 2);
       assert.equal(result.files[1]?.operation, "update");
     });
@@ -411,6 +419,75 @@ describe("cli-config apply service", () => {
         db, userId: user.id, masterKey, adapter: "claude",
         providerProfileId: fixture.providerId,
         resolveHost: async () => [{ address: "10.0.0.8", family: 4 }]
+      }).catch((caught: unknown) => caught);
+
+      assert.ok(error instanceof CliConfigApplyError);
+      assert.equal(error.code, "CLI_CONFIG_APPLY_ENDPOINT_UNSAFE");
+      assert.equal(existsSync(path.join(root, "settings.json")), false);
+    });
+
+    it("applies a provider over http when allowPlaintextHttp is trusted", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-http@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-http-");
+      const repo = new ModelProviderRepository(db, user.id, masterKey);
+      const provider = repo.createProviderProfile({
+        name: "Local Lingsoul",
+        providerKey: "lingsoul-dlife",
+        anthropicBaseUrl: "http://lingsoul-dlife.cn",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"],
+        allowPlaintextHttp: true
+      });
+      repo.createModelProfile({ providerProfileId: provider.id, name: "Default", modelId: "claude-model-1", isDefault: true });
+      repo.createCredential({ providerProfileId: provider.id, plaintextSecret: "sk-claude-secret" });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: provider.id, resolveHost: publicResolver
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(doc.env.ANTHROPIC_BASE_URL, "http://lingsoul-dlife.cn");
+    });
+
+    it("rejects private endpoints at apply time even when allowPlaintextHttp is trusted", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-http-ssrf@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-http-ssrf-");
+      const providerId = "p-http-ssrf";
+      // Seed the row directly so the row exists with the trust flag on and a
+      // private http:// base URL — the create guard would refuse this, but the
+      // apply boundary must still reject the resolved private target.
+      db.prepare(`
+        INSERT INTO model_provider_profiles (
+          id, user_id, provider_key, name, base_url, anthropic_base_url, openai_base_url,
+          auth_type, api_format, supported_adapters, default_headers, status, allow_plaintext_http,
+          created_at, updated_at
+        ) VALUES (?, ?, 'private-http', 'Local Private', 'http://private.internal', NULL, NULL,
+          'api_key', 'anthropic', '["claude"]', '{}', 'active', 1, 0, 0)
+      `).run(providerId, user.id);
+      db.prepare(`
+        INSERT INTO model_profiles (
+          id, user_id, provider_profile_id, name, model_id, capabilities, status, is_default, sort_order, created_at, updated_at
+        ) VALUES (?, ?, ?, 'Default', 'claude-model-1', '["chat"]', 'active', 1, 0, 0, 0)
+      `).run("m-http-ssrf", user.id, providerId);
+      const credentialId = "c-http-ssrf";
+      // Secret content is irrelevant here: the endpoint guard rejects the
+      // private target before any decryption happens.
+      db.prepare(`
+        INSERT INTO provider_credentials (
+          id, user_id, provider_profile_id, label, secret_encrypted, generation, status, created_at, updated_at
+        ) VALUES (?, ?, ?, 'Primary', '{}', 1, 'active', 0, 0)
+      `).run(credentialId, user.id, providerId);
+
+      const error = await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: providerId,
+        resolveHost: async () => [{ address: "192.168.1.10", family: 4 }]
       }).catch((caught: unknown) => caught);
 
       assert.ok(error instanceof CliConfigApplyError);

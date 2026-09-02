@@ -162,6 +162,7 @@ export async function buildModelProviderReadiness(input: ModelProviderReadinessI
     const fetchedModels = await input.fetchProviderModels({
       baseUrl: remoteModelListBaseUrl(input.provider) as string,
       apiKey,
+      allowPlaintextHttp: input.provider.allowPlaintextHttp,
       ...(input.modelsUrl ? { modelsUrl: input.modelsUrl } : {}),
       ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {})
     });

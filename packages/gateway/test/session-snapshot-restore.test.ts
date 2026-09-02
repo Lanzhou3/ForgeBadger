@@ -74,7 +74,7 @@ describe("session snapshot restore", () => {
         }
       }),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
-      adapterCommandRunner: async () => ({ exitCode: 0, stdout: "test", stderr: "" })
+      adapterCommandRunner: async (command: string) => ({ exitCode: 0, stdout: `${command} 3.3.8`, stderr: "" })
     });
     await new Promise<void>((resolve) => {
       server = app.server.listen(0, "127.0.0.1", () => {

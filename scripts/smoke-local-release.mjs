@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 
 const secretKeys = new Set([
   "FORGEBADGER_MASTER_KEY",
@@ -66,6 +67,6 @@ export function buildSmokeCommandPlan(env = buildSmokeEnvironment()) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   process.stdout.write(`${JSON.stringify(buildSmokeCommandPlan(), null, 2)}\n`);
 }

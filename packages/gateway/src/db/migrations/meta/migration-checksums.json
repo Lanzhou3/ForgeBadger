@@ -63,5 +63,6 @@
   "0062_sessions_tenant_status_index.sql": "0c38ba0c6aa5f5ba22dd17b0a237031ac052a8f82e164ad2987ce317bfb4311f",
   "0063_history_tenant_update_guards.sql": "89feca1624c8784d60ed1fd9116558629e4a2d31c7f347d4e056bea0c719fc9c",
   "0064_normalize_mixed_timestamp_units.sql": "08f3f3a63a5cd2aa83c51885f1bfd23c9a0d4dc00c111942d29cb9c4e585d101",
-  "0065_project_manager_goals_tenant_fk.sql": "ab500e877dc6cfac114a335ca9ad83603762955c592b88c673dbd6ff3ac99c17"
+  "0065_project_manager_goals_tenant_fk.sql": "ab500e877dc6cfac114a335ca9ad83603762955c592b88c673dbd6ff3ac99c17",
+  "0066_provider_plaintext_http.sql": "f0c9e663870bf95561341bf6a5799d119d62028c10592a84d1d3009800a84f1b"
 }

@@ -151,8 +151,14 @@ describe("project-graph routes", () => {
       graphProjectId: await createProject(baseUrl, userA.token, "graph-project", graphRoot.root),
       emptyProjectId: await createProject(baseUrl, userA.token, "empty-project", emptyRoot.root),
       // Simulates a legacy/misconfigured record whose path is a denied system
-      // root (the create route would reject it today).
-      deniedProjectId: insertRawProject(testDb, userA.userId, "denied-project", "/etc")
+      // root (the create route would reject it today). /etc is denied on POSIX;
+      // on Windows use the drive root, which the gateway rejects too.
+      deniedProjectId: insertRawProject(
+        testDb,
+        userA.userId,
+        "denied-project",
+        process.platform === "win32" ? path.parse(process.cwd()).root : "/etc"
+      )
     };
   });
 

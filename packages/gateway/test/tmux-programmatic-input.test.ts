@@ -82,6 +82,29 @@ describe("tmux programmatic input encoding", () => {
     assert.equal(args.some((value) => value.includes("must-not-leak")), false);
   });
 
+  it("skips inherited variables whose names the multiplexer cannot accept", () => {
+    // Arrange / Act
+    const args = buildCreateSessionArgs(
+      {
+        name: "of-safe-session",
+        cwd: "/workspace/project",
+        command: "codex",
+        args: [],
+        env: {}
+      },
+      {
+        PATH: "/host/bin",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "CommonProgramFiles(x86)": "C:\\Program Files\\Common Files"
+      }
+    );
+
+    // Assert
+    assert.ok(args.includes("PATH=/host/bin"));
+    assert.equal(args.some((value) => value.includes("ProgramFiles(x86)")), false);
+    assert.equal(args.some((value) => value.includes("CommonProgramFiles(x86)")), false);
+  });
+
   it("encodes UTF-8 and multiline input as bracketed-paste hex without plaintext", () => {
     const canary = "secret-中文\nsecond line";
     const command = buildProgrammaticInputControlCommand("of-safe-target", canary);

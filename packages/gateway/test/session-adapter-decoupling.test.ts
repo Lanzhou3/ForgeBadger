@@ -84,7 +84,7 @@ describe("session adapter decoupling", () => {
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
       runtimeAuthorizationInvalidator,
       adapterCommandRunner: async (command): Promise<CommandResult> => {
-        return { exitCode: 0, stdout: `${command} test-version`, stderr: "" };
+        return { exitCode: 0, stdout: `${command} 3.3.8`, stderr: "" };
       }
     });
     server = gateway.server;

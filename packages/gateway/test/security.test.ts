@@ -72,7 +72,7 @@ const mockTmuxClient = {
 async function availableAdapterCommandRunner(command: string) {
   return {
     exitCode: 0,
-    stdout: `${command} test\n`,
+    stdout: `${command} 3.3.8\n`,
     stderr: ""
   };
 }
@@ -181,7 +181,9 @@ describe("security hardening", () => {
       },
       body: JSON.stringify({
         name: "test",
-        path: "/etc/passwd",
+        // /etc/passwd is a denied POSIX system file; on Windows use the drive
+        // root, which the gateway rejects as a denied filesystem root.
+        path: process.platform === "win32" ? path.parse(process.cwd()).root : "/etc/passwd",
         aiTool: "claude"
       })
     });

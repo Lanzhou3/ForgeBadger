@@ -44,7 +44,8 @@ const createProviderSchema = z.object({
   productType: productTypeSchema.optional(),
   authType: z.enum(["api_key", "bearer_token", "oauth", "none"]).optional(),
   apiFormat: z.enum(["anthropic", "openai", "openai-compatible", "google", "bedrock", "local"]).optional(),
-  supportedAdapters: z.array(providerAdapterSchema).optional()
+  supportedAdapters: z.array(providerAdapterSchema).optional(),
+  allowPlaintextHttp: z.boolean().optional()
 });
 const updateProviderSchema = createProviderSchema.partial();
 const createModelProfileSchema = z.object({
@@ -151,6 +152,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     if (parseResult.data.authType !== undefined) updateInput.authType = parseResult.data.authType;
     if (parseResult.data.apiFormat !== undefined) updateInput.apiFormat = parseResult.data.apiFormat;
     if (parseResult.data.supportedAdapters !== undefined) updateInput.supportedAdapters = parseResult.data.supportedAdapters;
+    if (parseResult.data.allowPlaintextHttp !== undefined) updateInput.allowPlaintextHttp = parseResult.data.allowPlaintextHttp;
     const provider = repoFor(db, masterKey, req).updateProviderProfile(req.params.id, updateInput);
     if (!provider) {
       res.status(404).json({ code: 1, message: "Provider not found" });
@@ -249,6 +251,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
         apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
         apiFormat: provider.apiFormat,
         defaultHeaders: provider.defaultHeaders,
+        allowPlaintextHttp: provider.allowPlaintextHttp,
         ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
       });
       const created = syncFetchedModels(repo, provider, fetchedModels);
@@ -309,6 +312,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       const result = await fetchProviderBalance({
         baseUrls,
         apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
+        allowPlaintextHttp: provider.allowPlaintextHttp,
         ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
       });
       res.json({
@@ -488,6 +492,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     }
     const health = await checkModelEndpoint({
       endpoint: provider.baseUrl,
+      allowPlaintextHttp: provider.allowPlaintextHttp,
       ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
     });
     res.json({ code: 0, data: { health }, message: "" });
@@ -539,7 +544,8 @@ function createCustom(repo: ModelProviderRepository, input: z.infer<typeof creat
     ...(input.productType ? { productType: input.productType } : {}),
     authType: input.authType,
     apiFormat: input.apiFormat,
-    supportedAdapters: input.supportedAdapters ?? ["claude"]
+    supportedAdapters: input.supportedAdapters ?? ["claude"],
+    ...(input.allowPlaintextHttp !== undefined ? { allowPlaintextHttp: input.allowPlaintextHttp } : {})
   });
 }
 

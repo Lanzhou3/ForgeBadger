@@ -561,6 +561,7 @@ export interface ProviderProfile {
   apiFormat: ProviderApiFormat;
   supportedAdapters: ProviderSupportedAdapter[];
   opencodeNpm?: string | null;
+  allowPlaintextHttp?: boolean;
   status: string;
 }
 
@@ -2624,6 +2625,7 @@ export async function createModelProvider(data: {
   region?: string;
   productType?: ProviderProductType;
   supportedAdapters?: ProviderSupportedAdapter[];
+  allowPlaintextHttp?: boolean;
 }): Promise<{ provider: ProviderProfile }> {
   return fetchJson("/api/v1/model-providers", {
     method: "POST",

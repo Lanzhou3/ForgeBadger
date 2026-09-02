@@ -63,15 +63,10 @@ describe("runCommand", () => {
   it("bounds stdout and stderr to the configured maximum output bytes", async () => {
     const stdoutText = "o".repeat(128);
     const stderrText = "e".repeat(128);
+    const script = `process.stdout.write(${JSON.stringify(stdoutText)}); process.stderr.write(${JSON.stringify(stderrText)})`;
     const result = await runCommand(
-      "awk",
-      [
-        "-v",
-        `stdoutText=${stdoutText}`,
-        "-v",
-        `stderrText=${stderrText}`,
-        "BEGIN { printf \"%s\", stdoutText; printf \"%s\", stderrText > \"/dev/stderr\" }",
-      ],
+      process.execPath,
+      ["-e", script],
       { maxOutputBytes: 16 }
     );
 
@@ -99,20 +94,21 @@ describe("checkGateADependencies", () => {
 });
 
 describe("checkForgeBadgerDependencies", () => {
-  it("marks tmux required and AI CLIs optional", async () => {
+  it("marks the terminal runtime required and AI CLIs optional", async () => {
+    const runtimeCommand = process.platform === "win32" ? "psmux" : "tmux";
     const result = await checkForgeBadgerDependencies(async (command) => ({
-      exitCode: command === "tmux" ? 0 : 127,
-      stdout: command === "tmux" ? "tmux 3.4\n" : "",
-      stderr: command === "tmux" ? "" : "not found"
+      exitCode: command === runtimeCommand ? 0 : 127,
+      stdout: command === runtimeCommand ? `${runtimeCommand} 3.3.8\n` : "",
+      stderr: command === runtimeCommand ? "" : "not found"
     }));
 
-    const tmux = result.find((item) => item.name === "tmux");
+    const runtime = result.find((item) => item.name === runtimeCommand);
     const claude = result.find((item) => item.name === "claude");
     const opencode = result.find((item) => item.name === "opencode");
     const codex = result.find((item) => item.name === "codex");
 
-    assert.equal(tmux?.required, true);
-    assert.equal(tmux?.available, true);
+    assert.equal(runtime?.required, true);
+    assert.equal(runtime?.available, true);
     assert.equal(claude?.required, false);
     assert.equal(claude?.available, false);
     assert.equal(opencode?.required, false);
@@ -123,6 +119,7 @@ describe("checkForgeBadgerDependencies", () => {
   });
 
   it("checks the ForgeBadger runtime command list in order", async () => {
+    const runtimeCommand = process.platform === "win32" ? "psmux" : "tmux";
     const seen: Array<{ command: string; args: string[] }> = [];
 
     await checkForgeBadgerDependencies(async (command, args) => {
@@ -135,7 +132,7 @@ describe("checkForgeBadgerDependencies", () => {
     });
 
     assert.deepEqual(seen, [
-      { command: "tmux", args: ["-V"] },
+      { command: runtimeCommand, args: ["-V"] },
       { command: "claude", args: ["--version"] },
       { command: "opencode", args: ["--version"] },
       { command: "codex", args: ["--version"] },

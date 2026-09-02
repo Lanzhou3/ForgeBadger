@@ -287,5 +287,6 @@ export function providerPresetToForm(preset: ProviderPreset): CustomProviderForm
     anthropicBaseUrl: preset.anthropicBaseUrl ?? "",
     openaiBaseUrl: preset.openaiBaseUrl ?? "",
     supportedAdapters: [...preset.supportedAdapters],
+    allowPlaintextHttp: false,
   };
 }

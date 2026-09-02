@@ -5,6 +5,7 @@ import {
   buildSanitizedMultiplexerEnv,
   clearInheritedMultiplexerIdentity,
   resolveTerminalMultiplexerRuntime,
+  resolveWindowsShimCommand,
   type TerminalMultiplexerRuntime
 } from "./terminal-multiplexer-runtime.js";
 
@@ -40,6 +41,9 @@ export interface TmuxClient {
 const BRACKETED_PASTE_START = Buffer.from("\x1b[200~", "utf8");
 const BRACKETED_PASTE_END = Buffer.from("\x1b[201~", "utf8");
 const SAFE_TMUX_TARGET = /^[a-zA-Z0-9_-]+$/;
+// psmux rejects -e assignments whose names are not portable environment
+// variable names (Windows hosts inherit e.g. "ProgramFiles(x86)").
+const SAFE_MULTIPLEXER_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function buildProgrammaticInputControlCommand(name: string, data: string): string {
   if (!SAFE_TMUX_TARGET.test(name)) {
@@ -97,6 +101,7 @@ function buildSessionEnvironmentOverrides(
   // other inherited variable on the new session before the CLI starts.
   for (const [name, value] of Object.entries(inheritedEnv)) {
     if (value === undefined) continue;
+    if (!SAFE_MULTIPLEXER_ENV_NAME.test(name)) continue;
     overrides[name] = safeBaseEnv[name] === value ? value : "";
   }
 
@@ -133,7 +138,14 @@ export function createTmuxClient(
   return {
     async createSession(options) {
       await sanitizeMultiplexerGlobalEnvironment(runtime);
-      await runMultiplexer(runtime, buildCreateSessionArgs(options));
+      // On Windows, npm/cargo CLI shims (e.g. opencode.cmd) cannot be launched
+      // by psmux's CreateProcessW (error 193: not a valid Win32 application).
+      // Resolve the command to its real executable (or node + script) before
+      // building the session args. POSIX passes through unchanged.
+      const resolved = resolveWindowsShimCommand(options.command);
+      const command = resolved?.command ?? options.command;
+      const args = resolved ? [...resolved.args, ...options.args] : options.args;
+      await runMultiplexer(runtime, buildCreateSessionArgs({ ...options, command, args }));
       await configureSession(options.name);
     },
 

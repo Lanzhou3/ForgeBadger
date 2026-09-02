@@ -47,6 +47,7 @@ export const modelProviderProfiles = sqliteTable("model_provider_profiles", {
   supportedAdapters: text("supported_adapters").notNull().default("[]"),
   defaultHeaders: text("default_headers").notNull().default("{}"),
   opencodeNpm: text("opencode_npm"),
+  allowPlaintextHttp: integer("allow_plaintext_http", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
