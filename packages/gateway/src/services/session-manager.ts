@@ -511,7 +511,7 @@ export class InMemorySessionManager {
         userId: indexedSession.userId || input.userId,
         attachToken,
         tmuxName,
-        launchPlan: indexedSession.launchPlan || fallbackLaunchPlan(input.cwd, indexedSession.id),
+        launchPlan: indexedSession.launchPlan || createFallbackLaunchPlan(input.cwd, indexedSession.id),
         status: "detached",
         createdAt: indexedSession.createdAt || now,
         updatedAt: now
@@ -588,9 +588,21 @@ function normalizeTmuxPrefix(value = "fb-"): string {
   return sanitized || "fb-";
 }
 
-function fallbackLaunchPlan(cwd: string, sessionId: string): LaunchPlan {
+export function createFallbackLaunchPlan(
+  cwd: string,
+  sessionId: string,
+  options: {
+    platform?: NodeJS.Platform;
+    env?: NodeJS.ProcessEnv;
+  } = {}
+): LaunchPlan {
+  const platform = options.platform ?? process.platform;
+  const env = options.env ?? process.env;
+  const command = platform === "win32"
+    ? env.ComSpec?.trim() || env.COMSPEC?.trim() || "cmd.exe"
+    : env.SHELL?.trim() || "sh";
   return {
-    command: "bash",
+    command,
     args: [],
     cwd,
     env: { FORGEBADGER_SESSION_ID: sessionId },
@@ -606,7 +618,7 @@ function fallbackStoppedSession(id: string, tmuxName: string, userId = ""): Gate
     userId,
     attachToken: "",
     tmuxName,
-    launchPlan: fallbackLaunchPlan(process.cwd(), id),
+    launchPlan: createFallbackLaunchPlan(process.cwd(), id),
     status: "exited",
     createdAt: now,
     updatedAt: now

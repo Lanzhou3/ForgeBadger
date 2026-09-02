@@ -11,10 +11,12 @@ import { ProjectRepository } from "../db/repositories/project-repository.js";
 import { SessionRepository, type Session } from "../db/repositories/session-repository.js";
 import type { Database } from "../db/types.js";
 import type { InMemorySessionManager } from "../services/session-manager.js";
-import { SessionConflictError } from "../services/session-manager.js";
+import {
+  createFallbackLaunchPlan,
+  SessionConflictError
+} from "../services/session-manager.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import type { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
-import type { CredentialMode } from "../config-generation/types.js";
 import { recordActivity } from "../services/activity-events.js";
 import { recordSessionSnapshot } from "../services/session-snapshots.js";
 import {
@@ -594,14 +596,7 @@ export function createGateASessionRoutes(sessionManager: InMemorySessionManager)
             credentialMode: "host_environment",
             env: { FORGEBADGER_SESSION_ID: sessionId }
           })
-        : {
-            command: "bash",
-            args: [],
-            cwd: resolvedCwd,
-            env: { FORGEBADGER_SESSION_ID: sessionId },
-            secretEnvNames: [],
-            credentialMode: "host_environment" as CredentialMode
-          };
+        : createFallbackLaunchPlan(resolvedCwd, sessionId);
 
     try {
       const session = await sessionManager.createSession({

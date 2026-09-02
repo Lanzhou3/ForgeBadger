@@ -13,6 +13,7 @@ import {
   type ProviderProfile
 } from "../db/repositories/model-provider-repository.js";
 import type { AdapterId } from "./adapter-discovery.js";
+import { expandUserPath } from "../lib/user-path.js";
 import {
   atomicWriteConfig,
   fsyncFile,
@@ -587,7 +588,9 @@ function latestBackupId(dir: string): string | undefined {
 
 function stateDir(): string {
   if (process.env.NODE_TEST_CONTEXT) return path.join(tmpdir(), `forgebadger-test-${process.pid}`);
-  return path.resolve(process.env.FORGEBADGER_STATE_DIR ?? path.join(homedir(), ".forgebadger"));
+  return path.resolve(expandUserPath(
+    process.env.FORGEBADGER_STATE_DIR ?? path.join(homedir(), ".forgebadger")
+  ));
 }
 
 async function withInProcessLock<T>(key: string, action: () => Promise<T>): Promise<T> {

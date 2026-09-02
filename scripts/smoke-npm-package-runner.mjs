@@ -38,13 +38,18 @@ export function buildNpmInstallArgs(options) {
   ];
 }
 
+export function buildRegistrationPayload(email, password, recoveryKey) {
+  return { email, password, recoveryKey };
+}
+
 export function runCommand(command, args, options = {}) {
   const timeoutMs = options.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
-  const result = spawnSync(command, args, {
+  const spawnSyncImpl = options.spawnSyncImpl ?? spawnSync;
+  const result = spawnSyncImpl(command, args, {
     cwd: options.cwd,
     env: options.env,
     encoding: "utf8",
-    shell: false,
+    shell: (options.platform ?? process.platform) === "win32",
     timeout: timeoutMs,
     maxBuffer: options.maxBuffer ?? DEFAULT_MAX_BUFFER
   });
@@ -69,6 +74,12 @@ export function runCommand(command, args, options = {}) {
   }
 
   return result;
+}
+
+export function resolveTerminalMultiplexerCommand(
+  platform = process.platform
+) {
+  return platform === "win32" ? "psmux" : "tmux";
 }
 
 export function formatCommandFailure(command, args, result, options = {}) {

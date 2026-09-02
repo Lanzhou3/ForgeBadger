@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { runDoctor } from "../src/commands/doctor.js";
 import { isMainModule, runCli } from "../src/index.js";
 import {
+  commandSpawnOptions,
   checkCliDependencies,
   checkCliTerminalRuntime,
   describeCliTerminalRuntime,
@@ -167,6 +168,11 @@ describe("checkCliTerminalRuntime", () => {
 });
 
 describe("runCommand", () => {
+  it("uses the Windows command shell for npm-installed CLI shims", () => {
+    assert.equal(commandSpawnOptions("win32").shell, true);
+    assert.equal(commandSpawnOptions("darwin").shell, undefined);
+  });
+
   it("returns a timeout error when the child process exceeds the configured timeout", async () => {
     const result = await runCommand(
       process.execPath,

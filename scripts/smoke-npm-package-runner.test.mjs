@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildNpmInstallArgs, runCommand } from "./smoke-npm-package-runner.mjs";
+import {
+  buildRegistrationPayload,
+  buildNpmInstallArgs,
+  resolveTerminalMultiplexerCommand,
+  runCommand
+} from "./smoke-npm-package-runner.mjs";
 
 describe("npm package smoke command runner", () => {
+  it("includes the local recovery key in first-account registration", () => {
+    assert.deepEqual(
+      buildRegistrationPayload("smoke@example.com", "secret", "fbr_recovery"),
+      { email: "smoke@example.com", password: "secret", recoveryKey: "fbr_recovery" }
+    );
+  });
+
   it("omits peer dependency resolution during tarball install", () => {
     const args = buildNpmInstallArgs({
       npmPrefix: "/tmp/forgebadger-prefix",
@@ -49,5 +61,21 @@ describe("npm package smoke command runner", () => {
         return true;
       }
     );
+  });
+
+  it("runs command shims through the Windows command shell", () => {
+    let observedOptions;
+    runCommand("pnpm", ["--version"], {
+      platform: "win32",
+      printOutput: false,
+      spawnSyncImpl: (_command, _args, options) => {
+        observedOptions = options;
+        return { status: 0, signal: null, error: undefined, stdout: "10.33.2\n", stderr: "" };
+      }
+    });
+
+    assert.equal(observedOptions.shell, true);
+    assert.equal(resolveTerminalMultiplexerCommand("win32"), "psmux");
+    assert.equal(resolveTerminalMultiplexerCommand("darwin"), "tmux");
   });
 });

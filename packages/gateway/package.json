@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/src/db && cp -R src/db/migrations dist/src/db/",
+    "build": "tsc -p tsconfig.json && node ../../scripts/build-gateway-assets.mjs",
     "dev": "node ../../scripts/run-with-root-env.mjs tsx watch src/index.ts",
     "forgebadger": "tsx src/cli/init.ts",
     "start": "node ../../scripts/run-with-root-env.mjs node dist/src/index.js",

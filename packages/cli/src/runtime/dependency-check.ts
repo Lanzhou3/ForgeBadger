@@ -209,7 +209,8 @@ export function runCommand(
 ): Promise<CliCommandResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
+      ...commandSpawnOptions()
     });
 
     const timeoutMs = options.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
@@ -268,6 +269,12 @@ export function runCommand(
       resolve(result);
     }
   });
+}
+
+export function commandSpawnOptions(
+  platform: NodeJS.Platform = process.platform
+): { shell?: true } {
+  return platform === "win32" ? { shell: true } : {};
 }
 
 function createBoundedOutput(): BoundedOutput {

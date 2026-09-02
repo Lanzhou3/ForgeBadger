@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { LaunchPlan } from "../src/adapters/claude.js";
-import { InMemorySessionManager } from "../src/services/session-manager.js";
+import {
+  createFallbackLaunchPlan,
+  InMemorySessionManager
+} from "../src/services/session-manager.js";
 import type { TmuxClient } from "../src/services/tmux.js";
 
 function launchPlan(): LaunchPlan {
@@ -15,6 +18,22 @@ function launchPlan(): LaunchPlan {
     credentialMode: "host_environment"
   };
 }
+
+describe("fallback terminal launch plan", () => {
+  it("uses the host platform shell instead of requiring bash", () => {
+    const windows = createFallbackLaunchPlan("C:\\workspace", "s-win", {
+      platform: "win32",
+      env: { ComSpec: "C:\\Windows\\System32\\cmd.exe" }
+    });
+    const linux = createFallbackLaunchPlan("/workspace", "s-linux", {
+      platform: "linux",
+      env: { SHELL: "/bin/zsh" }
+    });
+
+    assert.equal(windows.command, "C:\\Windows\\System32\\cmd.exe");
+    assert.equal(linux.command, "/bin/zsh");
+  });
+});
 
 describe("InMemorySessionManager", () => {
   it("creates a Gateway-owned tmux session and marks it running", async () => {

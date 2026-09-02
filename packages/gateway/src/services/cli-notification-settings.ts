@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { safeResolve } from "../lib/safe-resolve.js";
+import { expandUserPath } from "../lib/user-path.js";
 
 type NotificationAdapter = "codex" | "kimi";
 
@@ -74,10 +75,12 @@ export async function ensureCodexNotificationSettings(
 export async function ensureKimiNotificationSettings(
   projectRoot: string
 ): Promise<{ path: string; changed: boolean }> {
-  const kimiHome = process.env.KIMI_CODE_HOME?.trim() || path.join(os.homedir(), ".kimi-code");
-  const stateDir =
-    process.env.FORGEBADGER_STATE_DIR?.trim() ||
-    path.join(os.homedir(), ".forgebadger");
+  const kimiHome = path.resolve(expandUserPath(
+    process.env.KIMI_CODE_HOME?.trim() || path.join(os.homedir(), ".kimi-code")
+  ));
+  const stateDir = path.resolve(expandUserPath(
+    process.env.FORGEBADGER_STATE_DIR?.trim() || path.join(os.homedir(), ".forgebadger")
+  ));
   const configPath = path.join(kimiHome, "config.toml");
   const scriptPath = path.join(stateDir, "hooks", "kimi-notify.mjs");
   try {

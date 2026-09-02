@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -76,6 +76,18 @@ describe("loadEnv security configuration", () => {
     });
 
     assert.equal(env.FORGEBADGER_DB_PATH, path.join(stateDir, "forgebadger.db"));
+  });
+
+  it("expands home-relative state and database paths on every platform", () => {
+    const env = loadEnv({
+      FORGEBADGER_JWT_SECRET: jwtSecret,
+      FORGEBADGER_MASTER_KEY: masterKey,
+      FORGEBADGER_STATE_DIR: "~\\forgebadger-state",
+      FORGEBADGER_DB_PATH: "~/forgebadger-db/main.db"
+    });
+
+    assert.equal(env.FORGEBADGER_STATE_DIR, path.join(homedir(), "forgebadger-state"));
+    assert.equal(env.FORGEBADGER_DB_PATH, path.join(homedir(), "forgebadger-db", "main.db"));
   });
 
   it("only enables Project Manager automatic dispatch with an explicit boolean value", () => {

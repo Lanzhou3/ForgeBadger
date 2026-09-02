@@ -1,4 +1,3 @@
-import { homedir } from "node:os";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -6,6 +5,7 @@ import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 
 import type { AdapterId } from "./adapter-discovery.js";
 import { atomicWriteConfig } from "./cli-config-fs.js";
+import { globalConfigRoot } from "./cli-config-target.js";
 import {
   findCliConfigField,
   listCliConfigFields,
@@ -69,27 +69,25 @@ const cliConfigMeta: Record<AdapterId, CliConfigMeta> = {
     mainFile: "settings.json",
     editableFiles: ["settings.json"],
     fileType: "json",
-    configRoot: () => process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(homedir(), ".claude")
+    configRoot: () => globalConfigRoot("claude")
   },
   opencode: {
     mainFile: "opencode.json",
     editableFiles: ["opencode.json", "opencode.jsonc", "AGENTS.md"],
     fileType: "json",
-    configRoot: () =>
-      process.env.OPENCODE_CONFIG_DIR?.trim() ||
-      path.join(process.env.XDG_CONFIG_HOME?.trim() || path.join(homedir(), ".config"), "opencode")
+    configRoot: () => globalConfigRoot("opencode")
   },
   codex: {
     mainFile: "config.toml",
     editableFiles: ["config.toml", "AGENTS.md"],
     fileType: "toml",
-    configRoot: () => process.env.CODEX_HOME?.trim() || path.join(homedir(), ".codex")
+    configRoot: () => globalConfigRoot("codex")
   },
   kimi: {
     mainFile: "config.toml",
     editableFiles: ["config.toml", "mcp.json", "AGENTS.md"],
     fileType: "toml",
-    configRoot: () => process.env.KIMI_CODE_HOME?.trim() || path.join(homedir(), ".kimi-code")
+    configRoot: () => globalConfigRoot("kimi")
   }
 };
 

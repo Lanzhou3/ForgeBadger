@@ -216,6 +216,14 @@ describe("resolveStateDir", () => {
     // Assert
     assert.equal(stateDir, path.join(fakeHome, "forgebadger-test"));
   });
+
+  it("expands Windows-style leading tilde state directories", () => {
+    const fakeHome = path.join(tmpdir(), "forgebadger-fake-home");
+
+    const stateDir = resolveStateDir("~\\forgebadger-test", fakeHome);
+
+    assert.equal(stateDir, path.join(fakeHome, "forgebadger-test"));
+  });
 });
 
 function createStoredConfig(stateDir: string) {

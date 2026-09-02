@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,7 +10,9 @@ import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   DEFAULT_NPM_INSTALL_TIMEOUT_MS,
   buildNpmInstallArgs,
+  buildRegistrationPayload,
   readPositiveIntegerEnv,
+  resolveTerminalMultiplexerCommand,
   runCommand
 } from "./smoke-npm-package-runner.mjs";
 
@@ -154,7 +156,8 @@ async function runStartSmoke(forgebadgerBin) {
       FORGEBADGER_STATE_DIR: stateDir,
       FORGEBADGER_TMUX_PREFIX: tmuxPrefix
     },
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    ...(process.platform === "win32" ? { shell: true } : {})
   });
 
   let output = "";
@@ -174,10 +177,11 @@ async function runStartSmoke(forgebadgerBin) {
 
     const email = `smoke-${Date.now()}@example.com`;
     const password = randomBytes(18).toString("base64url");
-    const registered = await postJson(`http://127.0.0.1:${gatewayPort}/api/v1/auth/register`, {
-      email,
-      password
-    });
+    const recoveryKey = (await readFile(path.join(stateDir, "account-recovery.key"), "utf8")).trim();
+    const registered = await postJson(
+      `http://127.0.0.1:${gatewayPort}/api/v1/auth/register`,
+      buildRegistrationPayload(email, password, recoveryKey)
+    );
     const token = registered.data.token;
     await postJson(`http://127.0.0.1:${gatewayPort}/api/v1/auth/login`, { email, password });
     await postJson(
@@ -195,13 +199,14 @@ async function runStartSmoke(forgebadgerBin) {
 }
 
 function cleanupTmuxSessions() {
-  spawnSync("tmux", ["list-sessions", "-F", "#{session_name}"], {
+  const runtimeCommand = resolveTerminalMultiplexerCommand();
+  spawnSync(runtimeCommand, ["list-sessions", "-F", "#{session_name}"], {
     encoding: "utf8",
     shell: false
   }).stdout?.split("\n")
     .filter((name) => name.startsWith(tmuxPrefix))
     .forEach((name) => {
-      spawnSync("tmux", ["kill-session", "-t", name], { stdio: "ignore", shell: false });
+      spawnSync(runtimeCommand, ["kill-session", "-t", name], { stdio: "ignore", shell: false });
     });
 }
 

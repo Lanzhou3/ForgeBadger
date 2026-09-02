@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { z } from "zod";
 
+import { expandUserPath } from "../lib/user-path.js";
+
 const strictEnvBoolean = z
   .union([z.boolean(), z.enum(["true", "false"])])
   .default(false)
@@ -30,9 +32,13 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): GatewayEnv {
 
 function normalizeEnvironment(input: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const normalized: NodeJS.ProcessEnv = { ...input };
-  const stateDir = input.FORGEBADGER_STATE_DIR ?? path.join(homedir(), ".forgebadger");
-  normalized.FORGEBADGER_STATE_DIR ??= stateDir;
-  normalized.FORGEBADGER_DB_PATH ??= path.join(stateDir, "forgebadger.db");
+  const stateDir = path.resolve(
+    expandUserPath(input.FORGEBADGER_STATE_DIR ?? path.join(homedir(), ".forgebadger"))
+  );
+  normalized.FORGEBADGER_STATE_DIR = stateDir;
+  normalized.FORGEBADGER_DB_PATH = path.resolve(
+    expandUserPath(input.FORGEBADGER_DB_PATH ?? path.join(stateDir, "forgebadger.db"))
+  );
   return normalized;
 }
 
