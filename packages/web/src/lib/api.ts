@@ -1717,10 +1717,17 @@ export async function patchCliConfigFields(
 
 // ---- CLI config apply (cc-switch style provider application) ----
 
+export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
+export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
+
 export interface CliConfigApplyInput {
   providerProfileId: string;
   modelProfileId?: string;
   credentialId?: string;
+  /** Claude only: per-role model mapping; values are model profile ids. */
+  modelMapping?: Partial<Record<ClaudeModelSlot, string>>;
+  /** Codex only: model_reasoning_effort. */
+  reasoningEffort?: CodexReasoningEffort;
 }
 
 export interface CliConfigApplyFilePreview {

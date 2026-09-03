@@ -110,7 +110,13 @@ describe("cli-config apply service", () => {
       assert.equal(doc.env.ANTHROPIC_BASE_URL, "https://api.deepseek.com/anthropic");
       assert.equal(doc.env.ANTHROPIC_AUTH_TOKEN, "sk-claude-secret");
       assert.equal(doc.env.ANTHROPIC_MODEL, "claude-model-1");
-      assert.equal(doc.env.ANTHROPIC_SMALL_FAST_MODEL, "claude-model-1");
+      // ANTHROPIC_SMALL_FAST_MODEL is deprecated upstream; never written.
+      assert.equal(doc.env.ANTHROPIC_SMALL_FAST_MODEL, undefined);
+      // Unset role slots fall back to the primary model (cc-switch normalize).
+      assert.equal(doc.env.ANTHROPIC_DEFAULT_OPUS_MODEL, "claude-model-1");
+      assert.equal(doc.env.ANTHROPIC_DEFAULT_SONNET_MODEL, "claude-model-1");
+      assert.equal(doc.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, "claude-model-1");
+      assert.equal(doc.env.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME, "Default Model");
       assert.equal(doc.env.API_TIMEOUT_MS, "600000");
       assertPrivateMode(target, 0o600);
       assert.equal(result.changed, true);
@@ -209,11 +215,19 @@ describe("cli-config apply service", () => {
       assert.equal(existsSync(path.join(root, "config.toml")), false);
     });
 
-    it("applies an OpenCode provider with plaintext apiKey and provider/model selection", async () => {
+    it("applies an OpenCode provider additively and never touches the top-level model", async () => {
       const db = createTestDb();
       const user = new UserRepository(db).create("apply-opencode@example.com", "hash");
       const root = await useConfigRoot("OPENCODE_CONFIG_DIR", "forgebadger-apply-opencode-");
       const fixture = createFixture(db, user.id, "opencode");
+      fixture.repo.createModelProfile({
+        providerProfileId: fixture.providerId,
+        name: "Second Model",
+        modelId: "opencode-model-2",
+        contextWindow: 131072
+      });
+      // The top-level model selection is user-owned (cc-switch semantics).
+      await writeFile(path.join(root, "opencode.json"), JSON.stringify({ model: "keep-me" }), "utf8");
 
       await applyCliConfigToAdapter({
         db, userId: user.id, masterKey, adapter: "opencode",
@@ -225,7 +239,7 @@ describe("cli-config apply service", () => {
           npm: string;
           name: string;
           options: Record<string, string>;
-          models: Record<string, { name: string }>;
+          models: Record<string, { name: string; limit?: { context: number } }>;
         }>;
         model: string;
       };
@@ -233,8 +247,10 @@ describe("cli-config apply service", () => {
       assert.equal(doc.provider["opencode-provider"]?.name, "opencode provider");
       assert.equal(doc.provider["opencode-provider"]?.options.baseURL, "https://api.deepseek.com/v1");
       assert.equal(doc.provider["opencode-provider"]?.options.apiKey, "sk-opencode-secret");
+      // Every active model of the provider is added, with context limits.
       assert.equal(doc.provider["opencode-provider"]?.models["opencode-model-1"]?.name, "Default Model");
-      assert.equal(doc.model, "opencode-provider/opencode-model-1");
+      assert.equal(doc.provider["opencode-provider"]?.models["opencode-model-2"]?.limit?.context, 131072);
+      assert.equal(doc.model, "keep-me");
     });
 
     it("applies a Kimi provider into providers/models/default_model", async () => {
@@ -359,6 +375,121 @@ describe("cli-config apply service", () => {
       };
       assert.equal(switched.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "100000");
       assert.equal(switched.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
+    });
+
+    it("maps Claude alias slots to distinct models and manages optional slots", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-claude-slots@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-claude-slots-");
+      const fixture = createFixture(db, user.id, "claude");
+      const haikuModel = fixture.repo.createModelProfile({
+        providerProfileId: fixture.providerId,
+        name: "Fast Model",
+        modelId: "claude-fast-1"
+      });
+      const fableModel = fixture.repo.createModelProfile({
+        providerProfileId: fixture.providerId,
+        name: "Fable Model",
+        modelId: "claude-fable-1"
+      });
+      // Pre-existing stale values from an older apply must be cleaned up.
+      await writeFile(path.join(root, "settings.json"), JSON.stringify({
+        env: {
+          ANTHROPIC_SMALL_FAST_MODEL: "stale-small-fast",
+          CLAUDE_CODE_SUBAGENT_MODEL: "stale-subagent"
+        }
+      }), "utf8");
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: fixture.providerId,
+        modelMapping: { haiku: haikuModel.id, fable: fableModel.id },
+        resolveHost: publicResolver
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(doc.env.ANTHROPIC_MODEL, "claude-model-1");
+      assert.equal(doc.env.ANTHROPIC_DEFAULT_OPUS_MODEL, "claude-model-1");
+      assert.equal(doc.env.ANTHROPIC_DEFAULT_SONNET_MODEL, "claude-model-1");
+      assert.equal(doc.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, "claude-fast-1");
+      assert.equal(doc.env.ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME, "Fast Model");
+      assert.equal(doc.env.ANTHROPIC_DEFAULT_FABLE_MODEL, "claude-fable-1");
+      assert.equal(doc.env.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME, "Fable Model");
+      // Deprecated and stale managed keys are removed.
+      assert.equal(doc.env.ANTHROPIC_SMALL_FAST_MODEL, undefined);
+      assert.equal(doc.env.CLAUDE_CODE_SUBAGENT_MODEL, undefined);
+
+      // Unselecting the optional slot on a later apply removes it.
+      await settle(15);
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+      const reapplied = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(reapplied.env.ANTHROPIC_DEFAULT_FABLE_MODEL, undefined);
+      assert.equal(reapplied.env.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME, undefined);
+    });
+
+    it("rejects modelMapping for non-Claude adapters and models owned by another provider", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-mapping-errors@example.com", "hash");
+      const claudeFixture = createFixture(db, user.id, "claude");
+      const codexFixture = createFixture(db, user.id, "codex");
+
+      const wrongAdapter = await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "codex",
+        providerProfileId: codexFixture.providerId,
+        modelMapping: { opus: codexFixture.modelId },
+        resolveHost: publicResolver
+      }).catch((caught: unknown) => caught);
+      assert.ok(wrongAdapter instanceof CliConfigApplyError);
+      assert.equal(wrongAdapter.code, "CLI_CONFIG_APPLY_FIELD_UNSUPPORTED");
+
+      const wrongEffort = await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: claudeFixture.providerId,
+        reasoningEffort: "high",
+        resolveHost: publicResolver
+      }).catch((caught: unknown) => caught);
+      assert.ok(wrongEffort instanceof CliConfigApplyError);
+      assert.equal(wrongEffort.code, "CLI_CONFIG_APPLY_FIELD_UNSUPPORTED");
+
+      const foreignModel = await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: claudeFixture.providerId,
+        modelMapping: { opus: codexFixture.modelId },
+        resolveHost: publicResolver
+      }).catch((caught: unknown) => caught);
+      assert.ok(foreignModel instanceof CliConfigApplyError);
+      assert.equal(foreignModel.code, "CLI_CONFIG_APPLY_MODEL_NOT_FOUND");
+    });
+
+    it("writes and clears Codex model_reasoning_effort as a managed key", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-codex-effort@example.com", "hash");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-apply-codex-effort-");
+      const fixture = createFixture(db, user.id, "codex");
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "codex",
+        providerProfileId: fixture.providerId,
+        reasoningEffort: "high",
+        resolveHost: publicResolver
+      });
+      let configToml = await readFile(path.join(root, "config.toml"), "utf8");
+      assert.match(configToml, /model_reasoning_effort = "high"/u);
+
+      await settle(15);
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "codex",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+      configToml = await readFile(path.join(root, "config.toml"), "utf8");
+      assert.equal(configToml.includes("model_reasoning_effort"), false);
     });
 
     it("falls back to the default model and oldest active credential when ids are omitted", async () => {

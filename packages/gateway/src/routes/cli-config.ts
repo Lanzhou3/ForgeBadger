@@ -21,7 +21,8 @@ import {
   applyCliConfigToAdapter,
   CliConfigApplyError,
   previewCliConfigApply,
-  rollbackCliConfigApply
+  rollbackCliConfigApply,
+  type ClaudeModelSlot
 } from "../services/cli-config-apply.js";
 import { listCliConfigFields } from "../services/cli-config-fields.js";
 import { cliConfigTargetPath, hashTargetLocator } from "../services/cli-config-target.js";
@@ -65,7 +66,18 @@ const fieldPatchBodySchema = z.object({
 const applyProviderBodySchema = z.object({
   providerProfileId: z.string().min(1),
   modelProfileId: z.string().min(1).optional(),
-  credentialId: z.string().min(1).optional()
+  credentialId: z.string().min(1).optional(),
+  // Claude only: per-role alias mapping (opus/sonnet/haiku/fable/subagent),
+  // values are model profile ids owned by the provider.
+  modelMapping: z.object({
+    opus: z.string().min(1).optional(),
+    sonnet: z.string().min(1).optional(),
+    haiku: z.string().min(1).optional(),
+    fable: z.string().min(1).optional(),
+    subagent: z.string().min(1).optional()
+  }).strict().optional(),
+  // Codex only: model_reasoning_effort.
+  reasoningEffort: z.enum(["minimal", "low", "medium", "high"]).optional()
 }).strict();
 
 const rollbackBodySchema = z.object({
@@ -75,7 +87,11 @@ const rollbackBodySchema = z.object({
 export function createCliConfigRoutes(
   db: Database,
   masterKey: string,
-  options: { operationObserver?: ((operation: string) => void) | undefined } = {}
+  options: {
+    operationObserver?: ((operation: string) => void) | undefined;
+    /** Test seam: DNS resolver for the apply SSRF endpoint check. */
+    resolveHost?: import("../services/network-policy.js").OutboundHostResolver | undefined;
+  } = {}
 ): Router {
   const router = Router();
   router.use(authenticate);
@@ -110,6 +126,13 @@ export function createCliConfigRoutes(
     }
     const targetPath = cliConfigTargetPath({ adapter, scope: "global" });
     const locatorHash = hashTargetLocator(masterKey, targetPath);
+    // Reads and dry-run previews never touch disk; only mutating calls
+    // serialize on the per-target lock. Locking previews too makes the web
+    // dialog's back-to-back preview refreshes race each other into 409s.
+    if (req.method === "GET" || req.path.endsWith("/apply-provider/preview")) {
+      next();
+      return;
+    }
     let lock: { release(): void };
     try {
       lock = acquireModelBindingTargetLock(locatorHash);
@@ -292,7 +315,7 @@ export function createCliConfigRoutes(
     }
     observe(options, "apply.preview");
     await handle(res, async () => ({
-      preview: await previewCliConfigApply(applyInput(db, masterKey, req, adapter, body.data))
+      preview: await previewCliConfigApply(applyInput(db, masterKey, req, adapter, body.data, options))
     }));
   });
 
@@ -309,7 +332,7 @@ export function createCliConfigRoutes(
     }
     observe(options, "apply.apply");
     await handle(res, async () => ({
-      result: await applyCliConfigToAdapter(applyInput(db, masterKey, req, adapter, body.data))
+      result: await applyCliConfigToAdapter(applyInput(db, masterKey, req, adapter, body.data, options))
     }));
   });
 
@@ -342,7 +365,8 @@ function applyInput(
   masterKey: string,
   req: unknown,
   adapter: AdapterId,
-  body: z.infer<typeof applyProviderBodySchema>
+  body: z.infer<typeof applyProviderBodySchema>,
+  options: { resolveHost?: import("../services/network-policy.js").OutboundHostResolver | undefined } = {}
 ) {
   return {
     db,
@@ -351,8 +375,22 @@ function applyInput(
     adapter,
     providerProfileId: body.providerProfileId,
     ...(body.modelProfileId ? { modelProfileId: body.modelProfileId } : {}),
-    ...(body.credentialId ? { credentialId: body.credentialId } : {})
+    ...(body.credentialId ? { credentialId: body.credentialId } : {}),
+    ...(body.modelMapping ? { modelMapping: compactModelMapping(body.modelMapping) } : {}),
+    ...(body.reasoningEffort ? { reasoningEffort: body.reasoningEffort } : {}),
+    ...(options.resolveHost ? { resolveHost: options.resolveHost } : {})
   };
+}
+
+/** Drops undefined slot values so the input satisfies exactOptionalPropertyTypes. */
+function compactModelMapping(
+  mapping: Partial<Record<ClaudeModelSlot, string | undefined>>
+): Partial<Record<ClaudeModelSlot, string>> {
+  const compact: Partial<Record<ClaudeModelSlot, string>> = {};
+  for (const [slot, value] of Object.entries(mapping) as Array<[ClaudeModelSlot, string | undefined]>) {
+    if (value) compact[slot] = value;
+  }
+  return compact;
 }
 
 function observe(options: { operationObserver?: ((operation: string) => void) | undefined }, operation: string): void {

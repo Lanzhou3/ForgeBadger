@@ -20,11 +20,26 @@ import { useLanguage } from "@/hooks/use-language";
 import {
   applyCliConfigToAdapter,
   previewCliConfigApply,
+  type ClaudeModelSlot,
+  type CodexReasoningEffort,
   type ModelProfile,
   type ProviderCredentialSummary,
   type ProviderProfile,
   type ProviderSupportedAdapter,
 } from "@/lib/api";
+
+const CLAUDE_PRIMARY_SLOTS: Array<{ slot: ClaudeModelSlot; label: string }> = [
+  { slot: "opus", label: "Opus" },
+  { slot: "sonnet", label: "Sonnet" },
+  { slot: "haiku", label: "Haiku" },
+];
+
+const CLAUDE_ADVANCED_SLOTS: Array<{ slot: ClaudeModelSlot; label: string }> = [
+  { slot: "fable", label: "Fable" },
+  { slot: "subagent", label: "Subagent" },
+];
+
+const CODEX_REASONING_EFFORTS: CodexReasoningEffort[] = ["minimal", "low", "medium", "high"];
 
 interface ApplyToCliDialogProps {
   provider: ProviderProfile;
@@ -45,26 +60,45 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
   const [adapter, setAdapter] = useState<ProviderSupportedAdapter>(targets[0] ?? "claude");
   const [modelProfileId, setModelProfileId] = useState("");
   const [credentialId, setCredentialId] = useState("");
+  const [modelMapping, setModelMapping] = useState<Partial<Record<ClaudeModelSlot, string>>>({});
+  const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort | "">("");
+  // Gate the preview query until the open-effect has applied the defaults;
+  // otherwise the query fires twice on open (empty ids, then defaults).
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setReady(false);
+      return;
+    }
     setAdapter((current) => targets.includes(current) ? current : targets[0] ?? "claude");
     setModelProfileId(defaultModel?.id ?? "");
     setCredentialId(activeCredentials[0]?.id ?? "");
+    setModelMapping({});
+    setReasoningEffort("");
+    setReady(true);
   }, [open, targets, defaultModel?.id, activeCredentials]);
 
   const previewInput = useMemo(
-    () => ({
-      providerProfileId: provider.id,
-      ...(modelProfileId ? { modelProfileId } : {}),
-      ...(credentialId ? { credentialId } : {}),
-    }),
-    [credentialId, modelProfileId, provider.id]
+    () => {
+      const mapping = Object.fromEntries(
+        Object.entries(modelMapping).filter(([, value]) => Boolean(value))
+      ) as Partial<Record<ClaudeModelSlot, string>>;
+      return {
+        providerProfileId: provider.id,
+        // OpenCode apply is additive and carries no single model selection.
+        ...(adapter !== "opencode" && modelProfileId ? { modelProfileId } : {}),
+        ...(credentialId ? { credentialId } : {}),
+        ...(adapter === "claude" && Object.keys(mapping).length > 0 ? { modelMapping: mapping } : {}),
+        ...(adapter === "codex" && reasoningEffort ? { reasoningEffort } : {}),
+      };
+    },
+    [adapter, credentialId, modelMapping, modelProfileId, provider.id, reasoningEffort]
   );
   const previewQuery = useQuery({
     queryKey: ["cli-config-apply-preview", adapter, previewInput],
     queryFn: () => previewCliConfigApply(adapter, previewInput),
-    enabled: open && targets.length > 0,
+    enabled: open && ready && targets.length > 0,
     retry: false,
     staleTime: 0,
   });
@@ -109,19 +143,21 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
               {targets.map((target) => <option key={target} value={target}>{target}</option>)}
             </select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="apply-cli-model">{t("projects.model")}</Label>
-            <select
-              id="apply-cli-model"
-              aria-label={t("projects.model")}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-              value={modelProfileId}
-              onChange={(event) => setModelProfileId(event.target.value)}
-            >
-              {activeModels.length === 0 ? <option value="">{t("models.noModelsAvailable")}</option> : null}
-              {activeModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
-            </select>
-          </div>
+          {adapter !== "opencode" && (
+            <div className="space-y-2">
+              <Label htmlFor="apply-cli-model">{t("projects.model")}</Label>
+              <select
+                id="apply-cli-model"
+                aria-label={t("projects.model")}
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                value={modelProfileId}
+                onChange={(event) => setModelProfileId(event.target.value)}
+              >
+                {activeModels.length === 0 ? <option value="">{t("models.noModelsAvailable")}</option> : null}
+                {activeModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+              </select>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="apply-cli-credential">{t("models.credentials")}</Label>
             <select
@@ -138,6 +174,60 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
             </select>
           </div>
         </div>
+
+        {adapter === "claude" && (
+          <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
+            <div className="space-y-0.5">
+              <span className="text-sm font-medium">{t("models.roleMapping")}</span>
+              <p className="text-xs text-muted-foreground">{t("models.roleMappingDescription")}</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {[...CLAUDE_PRIMARY_SLOTS, ...CLAUDE_ADVANCED_SLOTS].map(({ slot, label }) => (
+                <div key={slot} className="space-y-1">
+                  <Label htmlFor={`apply-cli-slot-${slot}`} className="text-xs">{label}</Label>
+                  <select
+                    id={`apply-cli-slot-${slot}`}
+                    aria-label={label}
+                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    value={modelMapping[slot] ?? ""}
+                    onChange={(event) =>
+                      setModelMapping((current) => ({ ...current, [slot]: event.target.value }))
+                    }
+                  >
+                    <option value="">{t("models.followPrimaryModel")}</option>
+                    {activeModels.map((model) => (
+                      <option key={model.id} value={model.id}>{model.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {adapter === "codex" && (
+          <div className="space-y-2">
+            <Label htmlFor="apply-cli-effort">{t("models.reasoningEffort")}</Label>
+            <select
+              id="apply-cli-effort"
+              aria-label={t("models.reasoningEffort")}
+              className="h-9 w-full rounded-md border bg-background px-3 text-sm md:max-w-xs"
+              value={reasoningEffort}
+              onChange={(event) => setReasoningEffort(event.target.value as CodexReasoningEffort | "")}
+            >
+              <option value="">{t("models.reasoningEffortDefault")}</option>
+              {CODEX_REASONING_EFFORTS.map((effort) => (
+                <option key={effort} value={effort}>{effort}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {adapter === "opencode" && (
+          <p className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            {t("models.opencodeApplyHint")}
+          </p>
+        )}
 
         <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3 text-xs">
           {previewQuery.isLoading ? (

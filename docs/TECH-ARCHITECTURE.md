@@ -850,6 +850,13 @@ opencode `opencode.json`、kimi `~/.kimi-code/config.toml`）。
 
 凭据按 cc-switch 方式明文写入 CLI 配置文件：写前对现有配置做 AES-256-GCM 加密
 备份，使用原子 `0600` 写入，失败可 rollback；preview 掩码密钥且不落盘。
+模型选择按 CLI 分别适配（cc-switch 对齐）：claude 支持角色映射
+（`modelMapping: {opus, sonnet, haiku, fable?, subagent?}`，未设置的角色回退主模型；
+写入官方别名固定 `ANTHROPIC_DEFAULT_<ROLE>_MODEL` + 显示名 `*_MODEL_NAME`，
+并删除官方已废弃的 `ANTHROPIC_SMALL_FAST_MODEL`）；codex 支持
+`reasoningEffort`（写入 `model_reasoning_effort`，未传则清理）；opencode 为
+additive 语义，apply 把供应商全部 active 模型写入 models map 且不触碰用户自有的
+顶层 `model`；kimi 仍为单一 `default_model`。
 具体到各 CLI 的写入语义：claude 写入 `ANTHROPIC_AUTH_TOKEN` 时同步删除残留的
 `ANTHROPIC_API_KEY`，并对 Kimi For Coding 端点注入 256k 上下文窗口覆盖
 （`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`，不覆盖

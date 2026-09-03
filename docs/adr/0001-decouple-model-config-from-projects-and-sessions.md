@@ -39,6 +39,15 @@ launch path.
   overrides (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`)
   without overwriting explicit user values, and a stale `ANTHROPIC_API_KEY`
   is removed whenever a new `ANTHROPIC_AUTH_TOKEN` is written.
+- Model selection is adapter-specific (cc-switch parity, 2026-09-02): Claude
+  accepts `modelMapping` (`opus`/`sonnet`/`haiku` plus optional
+  `fable`/`subagent`; unset roles fall back to the primary model) and writes
+  the official alias pins `ANTHROPIC_DEFAULT_<ROLE>_MODEL` with their
+  `*_MODEL_NAME` display names — the deprecated `ANTHROPIC_SMALL_FAST_MODEL`
+  is removed, never written. Codex accepts `reasoningEffort`
+  (`model_reasoning_effort`). OpenCode apply is additive: every active model
+  of the provider joins the provider entry's `models` map, and the user-owned
+  top-level `model` key is never touched.
 - Credentials are written plaintext into the CLI config file (cc-switch
   parity), via atomic mode-`0600` writes after an AES-256-GCM-encrypted backup
   under the state directory. Plaintext keys still never touch the database,

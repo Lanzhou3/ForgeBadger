@@ -6,6 +6,10 @@ import { expandUserPath } from "../lib/user-path.js";
 
 export class ModelBindingTargetLockError extends Error {
   readonly code = "BINDING_TARGET_LOCKED";
+
+  constructor() {
+    super("Another CLI config operation is in progress; retry in a moment");
+  }
 }
 
 export function acquireModelBindingTargetLock(hash: string): { release(): void } {

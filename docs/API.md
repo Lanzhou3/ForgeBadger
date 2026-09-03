@@ -776,9 +776,27 @@ the same body:
 {
   "providerProfileId": "provider-profile-id",
   "modelProfileId": "model-profile-id",
-  "credentialId": "credential-id"
+  "credentialId": "credential-id",
+  "modelMapping": { "opus": "model-profile-id", "sonnet": "...", "haiku": "...", "fable": "...", "subagent": "..." },
+  "reasoningEffort": "high"
 }
 ```
+
+Model selection is adapter-specific (cc-switch parity):
+
+- **Claude**: `modelProfileId` is the primary model (`ANTHROPIC_MODEL`).
+  `modelMapping` pins the alias roles `opus` / `sonnet` / `haiku` (unset roles
+  fall back to the primary model) plus the optional `fable` / `subagent` slots;
+  every value must be a model profile owned by the provider. The deprecated
+  `ANTHROPIC_SMALL_FAST_MODEL` is removed, never written, and the official
+  `ANTHROPIC_DEFAULT_<ROLE>_MODEL_NAME` display names are maintained alongside.
+- **Codex**: `modelProfileId` selects `model`; `reasoningEffort`
+  (`minimal|low|medium|high`) is written as `model_reasoning_effort` and
+  removed when omitted. `modelMapping` is rejected.
+- **OpenCode**: apply is additive — the provider entry is upserted with all
+  active models of the provider, and the user-owned top-level `model` key is
+  never touched. `modelProfileId` is ignored.
+- **Kimi**: `modelProfileId` selects `default_model`.
 
 `modelProfileId` defaults to the provider's default model and `credentialId`
 to its first active credential. Preview returns `{ preview }` with per-file

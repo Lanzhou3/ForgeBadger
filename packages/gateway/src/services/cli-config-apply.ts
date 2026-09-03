@@ -39,6 +39,11 @@ export class CliConfigApplyError extends Error {
   }
 }
 
+/** Claude alias slots that can be mapped to distinct models (cc-switch role table). */
+export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
+
+export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
+
 export interface CliConfigApplyInput {
   db: Database;
   userId: string;
@@ -47,6 +52,10 @@ export interface CliConfigApplyInput {
   providerProfileId: string;
   modelProfileId?: string | undefined;
   credentialId?: string | undefined;
+  /** Claude only: per-role model mapping; values are model profile ids. */
+  modelMapping?: Partial<Record<ClaudeModelSlot, string>> | undefined;
+  /** Codex only: model_reasoning_effort written into config.toml. */
+  reasoningEffort?: CodexReasoningEffort | undefined;
   resolveHost?: OutboundHostResolver | undefined;
 }
 
@@ -87,6 +96,11 @@ interface ApplyContext {
   adapter: AdapterId;
   provider: ProviderProfile;
   model: ModelProfile;
+  /** All active model profiles of the provider (OpenCode writes them all). */
+  activeModels: ModelProfile[];
+  /** Claude role slots resolved to model profiles (cc-switch normalize semantics). */
+  slotModels: Partial<Record<ClaudeModelSlot, ModelProfile>>;
+  reasoningEffort: CodexReasoningEffort | undefined;
   credential: ProviderCredentialSummary;
   providerKey: string;
   baseUrl: string | null;
@@ -306,6 +320,24 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
   if (!model) {
     throw new CliConfigApplyError("CLI_CONFIG_APPLY_MODEL_NOT_FOUND", "Model profile not found for the provider");
   }
+  if (input.modelMapping && Object.keys(input.modelMapping).length > 0 && input.adapter !== "claude") {
+    throw new CliConfigApplyError("CLI_CONFIG_APPLY_FIELD_UNSUPPORTED", "modelMapping is only supported for the Claude adapter");
+  }
+  if (input.reasoningEffort && input.adapter !== "codex") {
+    throw new CliConfigApplyError("CLI_CONFIG_APPLY_FIELD_UNSUPPORTED", "reasoningEffort is only supported for the Codex adapter");
+  }
+  const slotModels: Partial<Record<ClaudeModelSlot, ModelProfile>> = {};
+  if (input.modelMapping) {
+    for (const slot of ["opus", "sonnet", "haiku", "fable", "subagent"] as const) {
+      const profileId = input.modelMapping[slot];
+      if (!profileId) continue;
+      const slotModel = models.find((entry) => entry.id === profileId);
+      if (!slotModel) {
+        throw new CliConfigApplyError("CLI_CONFIG_APPLY_MODEL_NOT_FOUND", `Model profile not found for the ${slot} slot`);
+      }
+      slotModels[slot] = slotModel;
+    }
+  }
   const credential = input.credentialId
     ? repository.listCredentials(provider.id)
       .find((entry) => entry.status === "active" && entry.id === input.credentialId)
@@ -326,6 +358,9 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
     adapter: input.adapter,
     provider,
     model,
+    activeModels: models,
+    slotModels,
+    reasoningEffort: input.reasoningEffort,
     credential,
     providerKey: normalizeProviderKey(provider.providerKey),
     baseUrl
@@ -387,11 +422,27 @@ function buildApplyDocument(
     // A stale ANTHROPIC_API_KEY left by a previous apply (or by hand) must not
     // shadow the freshly written token.
     delete env.ANTHROPIC_API_KEY;
-    env.ANTHROPIC_MODEL = context.model.modelId;
-    env.ANTHROPIC_SMALL_FAST_MODEL = context.model.modelId;
-    env.ANTHROPIC_DEFAULT_SONNET_MODEL = context.model.modelId;
-    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = context.model.modelId;
-    env.ANTHROPIC_DEFAULT_OPUS_MODEL = context.model.modelId;
+    // Role mapping (official alias pinning): unset slots fall back to the
+    // primary model — fill only, matching cc-switch normalize semantics.
+    const primary = context.model;
+    const opus = context.slotModels.opus ?? primary;
+    const sonnet = context.slotModels.sonnet ?? primary;
+    const haiku = context.slotModels.haiku ?? primary;
+    env.ANTHROPIC_MODEL = primary.modelId;
+    env.ANTHROPIC_DEFAULT_OPUS_MODEL = opus.modelId;
+    env.ANTHROPIC_DEFAULT_SONNET_MODEL = sonnet.modelId;
+    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = haiku.modelId;
+    // ANTHROPIC_SMALL_FAST_MODEL is deprecated upstream in favor of
+    // ANTHROPIC_DEFAULT_HAIKU_MODEL; remove it instead of writing it.
+    delete env.ANTHROPIC_SMALL_FAST_MODEL;
+    // Display names shown in the /model picker (official *_MODEL_NAME keys).
+    env.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME = opus.name;
+    env.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME = sonnet.name;
+    env.ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME = haiku.name;
+    // Optional slots are managed keys: written when selected, removed otherwise.
+    writeOptionalClaudeSlot(env, "FABLE", context.slotModels.fable);
+    if (context.slotModels.subagent) env.CLAUDE_CODE_SUBAGENT_MODEL = context.slotModels.subagent.modelId;
+    else delete env.CLAUDE_CODE_SUBAGENT_MODEL;
     const timeout = claudeTimeout(context.provider.providerKey);
     if (timeout) env.API_TIMEOUT_MS = timeout;
     else delete env.API_TIMEOUT_MS;
@@ -413,6 +464,8 @@ function buildApplyDocument(
     }
     doc.model = context.model.modelId;
     doc.model_provider = context.providerKey;
+    if (context.reasoningEffort) doc.model_reasoning_effort = context.reasoningEffort;
+    else delete doc.model_reasoning_effort;
     const providers = record(doc.model_providers);
     providers[context.providerKey] = {
       name: context.provider.name,
@@ -428,14 +481,17 @@ function buildApplyDocument(
     const options: Record<string, unknown> = { apiKey: secret };
     if (context.baseUrl) options.baseURL = context.baseUrl;
     const existing = record(providers[context.providerKey]);
-    // Merge into the provider's model map so repeated applies accumulate
-    // models instead of dropping the previously applied ones (cc-switch
-    // additive semantics for shared config files).
+    // Additive semantics (cc-switch): upsert the provider entry with every
+    // active model of the provider, merging into models already present from
+    // earlier applies. The top-level "model" key is user-owned and is never
+    // touched — model selection happens inside OpenCode.
     const models = record(existing.models);
-    models[context.model.modelId] = {
-      name: context.model.name,
-      ...(context.model.contextWindow ? { limit: { context: context.model.contextWindow } } : {})
-    };
+    for (const activeModel of context.activeModels) {
+      models[activeModel.modelId] = {
+        name: activeModel.name,
+        ...(activeModel.contextWindow ? { limit: { context: activeModel.contextWindow } } : {})
+      };
+    }
     providers[context.providerKey] = {
       npm: context.provider.opencodeNpm ?? openCodePackage(context.provider.apiFormat),
       name: context.provider.name,
@@ -443,7 +499,6 @@ function buildApplyDocument(
       models
     };
     doc.provider = providers;
-    doc.model = `${context.providerKey}/${context.model.modelId}`;
     return;
   }
   const providers = record(doc.providers);
@@ -459,6 +514,27 @@ function buildApplyDocument(
   doc.providers = providers;
   doc.models = models;
   doc.default_model = alias;
+}
+
+/**
+ * Writes or removes an optional Claude alias slot (model id + display name).
+ * These are managed keys: an unset slot must not leave stale values behind
+ * from a previous apply.
+ */
+function writeOptionalClaudeSlot(
+  env: Record<string, unknown>,
+  role: "FABLE",
+  model: ModelProfile | undefined
+): void {
+  const modelKey = `ANTHROPIC_DEFAULT_${role}_MODEL`;
+  const nameKey = `ANTHROPIC_DEFAULT_${role}_MODEL_NAME`;
+  if (model) {
+    env[modelKey] = model.modelId;
+    env[nameKey] = model.name;
+    return;
+  }
+  delete env[modelKey];
+  delete env[nameKey];
 }
 
 /**
