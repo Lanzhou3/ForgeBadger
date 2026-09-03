@@ -62,7 +62,7 @@ const goalBodySchema = z.object({
 const workItemCreateSchema = z.object({
   title: z.string().min(1).max(256),
   description: z.string().min(1).max(4_000).nullable().optional(),
-  status: statusSchema.optional(),
+  status: z.literal("todo").optional(),
   priority: z.number().int().min(0).max(100).optional(),
   acceptanceCriteria: z.array(z.string().min(1).max(1_000)).max(50).optional(),
   evidenceRefs: z.array(evidenceRefSchema).max(20).optional(),
@@ -236,7 +236,8 @@ export function createProjectManagerRoutes(
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
     try {
-      const workItem = new ProjectManagerRepository(db, userId).createWorkItem(project.id, parse.data);
+      const { status: _status, ...input } = parse.data;
+      const workItem = new ProjectManagerRepository(db, userId).createWorkItem(project.id, input);
       res.status(201).json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Work item creation failed");
@@ -709,7 +710,6 @@ function createStarterPackWorkItemInput(pack: StarterTaskPack) {
   return {
     title: pack.name,
     description: pack.promptFrame,
-    status: "todo" as const,
     acceptanceCriteria: pack.acceptanceChecklist,
     details: {
       taskPacket: {

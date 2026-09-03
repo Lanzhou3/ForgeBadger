@@ -134,7 +134,6 @@ export interface ProjectManagerStarterPack {
 export interface ProjectManagerWorkItemInput {
   title: string;
   description?: string | null;
-  status?: ProjectManagerWorkItemStatus;
   priority?: number;
   acceptanceCriteria?: string[];
   evidenceRefs?: ProjectManagerEvidenceRef[];

@@ -770,7 +770,6 @@ describe("api client", () => {
     await projectManagerApi.createProjectManagerWorkItem("project/1", {
       title: "Expose tab",
       description: "Add a project detail surface",
-      status: "todo",
       priority: 10,
       acceptanceCriteria: ["Tab is visible"],
       evidenceRefs: [{ kind: "test", label: "API test", ref: "api.test.ts", path: "packages/web/src/lib/api.test.ts" }],
@@ -841,7 +840,6 @@ describe("api client", () => {
         body: JSON.stringify({
           title: "Expose tab",
           description: "Add a project detail surface",
-          status: "todo",
           priority: 10,
           acceptanceCriteria: ["Tab is visible"],
           evidenceRefs: [{ kind: "test", label: "API test", ref: "api.test.ts", path: "packages/web/src/lib/api.test.ts" }],

@@ -18,6 +18,7 @@ const {
   listSessionsMock,
   seedProjectManagerStageTemplateMock,
   startProjectManagerTaskPacketMock,
+  createProjectManagerWorkItemMock,
   updateProjectManagerWorkItemMock,
   addProjectManagerWorkItemDependencyMock,
   removeProjectManagerWorkItemDependencyMock,
@@ -33,6 +34,7 @@ const {
   listSessionsMock: vi.fn(),
   seedProjectManagerStageTemplateMock: vi.fn(),
   startProjectManagerTaskPacketMock: vi.fn(),
+  createProjectManagerWorkItemMock: vi.fn(),
   updateProjectManagerWorkItemMock: vi.fn(),
   addProjectManagerWorkItemDependencyMock: vi.fn(),
   removeProjectManagerWorkItemDependencyMock: vi.fn(),
@@ -53,6 +55,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     listSessions: listSessionsMock,
     seedProjectManagerStageTemplate: seedProjectManagerStageTemplateMock,
     startProjectManagerTaskPacket: startProjectManagerTaskPacketMock,
+    createProjectManagerWorkItem: createProjectManagerWorkItemMock,
     updateProjectManagerWorkItem: updateProjectManagerWorkItemMock,
     addProjectManagerWorkItemDependency: addProjectManagerWorkItemDependencyMock,
     removeProjectManagerWorkItemDependency: removeProjectManagerWorkItemDependencyMock,
@@ -215,6 +218,13 @@ describe("ProjectManagerPanel stages and dependencies", () => {
     getProjectManagerTaskPacketMock.mockResolvedValue({ taskPacket: taskPackets[0] });
     listSessionsMock.mockResolvedValue({ sessions: [] });
     updateProjectManagerWorkItemMock.mockResolvedValue({ workItem: workItems[0] });
+    createProjectManagerWorkItemMock.mockResolvedValue({
+      workItem: {
+        ...workItems[1],
+        id: "item-3",
+        title: "补充创建流程",
+      },
+    });
     removeProjectManagerWorkItemDependencyMock.mockResolvedValue({});
     addProjectManagerWorkItemDependencyMock.mockResolvedValue({ link: links[0] });
     seedProjectManagerStageTemplateMock.mockResolvedValue({ stages });
@@ -293,6 +303,35 @@ describe("ProjectManagerPanel stages and dependencies", () => {
 
     await waitFor(() => {
       expect(seedProjectManagerStageTemplateMock).toHaveBeenCalledWith("project-1");
+    });
+  });
+
+  it("creates a todo work item without accepting status or source references", async () => {
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "创建工作项" }));
+    const dialog = await screen.findByRole("dialog");
+
+    expect(within(dialog).getByText("新任务将从待办开始；证据可在任务详情或验收时补充。")).not.toBeNull();
+    expect(within(dialog).queryByLabelText("状态")).toBeNull();
+    expect(within(dialog).queryByText("初始证据引用")).toBeNull();
+    expect(within(dialog).queryByText("初始飞书引用")).toBeNull();
+
+    fireEvent.change(within(dialog).getByLabelText("标题"), { target: { value: "补充创建流程" } });
+    fireEvent.change(within(dialog).getByLabelText("描述"), { target: { value: "简化任务创建表单" } });
+    fireEvent.change(within(dialog).getByLabelText("优先级"), { target: { value: "7" } });
+    fireEvent.change(within(dialog).getByLabelText("验收标准"), {
+      target: { value: "新任务从待办开始\n证据在详情中补充" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建工作项" }));
+
+    await waitFor(() => {
+      expect(createProjectManagerWorkItemMock).toHaveBeenCalledWith("project-1", {
+        title: "补充创建流程",
+        description: "简化任务创建表单",
+        priority: 7,
+        acceptanceCriteria: ["新任务从待办开始", "证据在详情中补充"],
+      });
     });
   });
 

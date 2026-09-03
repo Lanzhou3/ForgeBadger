@@ -227,6 +227,21 @@ Inputs are zod validated at the Gateway boundary. Invalid `projectId`,
 the error envelope. Missing or cross-tenant projects and work items return
 `404` without leaking whether another tenant owns the resource.
 
+`POST /work-items` accepts either an omitted `status` or an explicit `todo`;
+any other initial status returns `400`. The repository always persists a new
+work item as `todo`. Moving it to another state requires a separate
+`PATCH /work-items/:workItemId/status` mutation so the normal transition,
+evidence, ledger, and audit guards cannot be bypassed during creation.
+
+The Web create-work-item dialog does not collect or send initial evidence or
+Feishu references. Evidence is attached later from the work-item detail and
+acceptance flow through `POST /work-items/:workItemId/evidence`. The lower-level
+Gateway create contract still accepts bounded `evidenceRefs` and `feishuRefs`
+as compatibility metadata for historical records and approved integrations;
+their database and DTO fields remain intact. These references are pointers,
+not verified evidence bodies, and Feishu metadata never becomes an authority
+for Project Manager state.
+
 Task packet endpoints derive a bounded operator handoff from a work item:
 project id/name, CLI adapter, template id, prompt, acceptance criteria,
 expected verification, evidence requirements, a single linked session marker,

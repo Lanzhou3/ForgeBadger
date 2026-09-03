@@ -168,7 +168,9 @@ ForgeBadger 保留两个清晰边界：Copilot 负责对话、记忆、只读查
 架构约束：
 
 - `/copilot` 与 `/api/v1/copilot/*` 是唯一助手入口，使用 Gateway 自有 provider、conversation、memory、approval、tool 与 event 服务。
-- Project Manager 的工作项与 Task Packet 继续使用现有 `/api/v1/projects/:projectId/manager/*` 路径和 tenant-scoped repository。
+- Project Manager 的工作项与 Task Packet 继续使用现有 `/api/v1/projects/:projectId/project-manager/*` 路径和 tenant-scoped repository。
+- 新工作项始终以 `todo` 落库；创建 API 只接受省略 `status` 或显式 `todo`，其他状态必须在创建后通过独立 status mutation 按状态机、证据、Ledger 与审计约束变更。
+- Web 创建弹窗不采集或发送初始 evidence/Feishu refs；证据从工作项详情与验收流程追加。Gateway 底层创建契约仍保留 bounded `evidenceRefs` / `feishuRefs` 作为历史数据和受控集成的兼容元数据，不删除对应 DB/DTO 字段，也不使飞书成为 Project Manager 状态权威。
 - Session Manager 和平台复用器继续作为 CLI 生命周期与终端输入的唯一执行边界；浏览器与程序化输入都必须经过会话所有权和 runtime authorization 校验。
 - Portfolio Operations 的页面、API、仓储、worker、scheduler、event、Feishu handler 和 session fence 已退役，不得重新作为兼容层引入。
 - 已应用的 Portfolio migrations 与 schema declarations 仅为迁移连续性和数据安全保留；live runtime 不读取或写入这些表。
