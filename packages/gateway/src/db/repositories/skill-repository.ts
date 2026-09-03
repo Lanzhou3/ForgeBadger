@@ -108,6 +108,11 @@ export class SkillRepository {
       .get() as Skill | undefined;
   }
 
+  /** Look up a skill by name within the user's readable scope (own + shared + admin-visible). */
+  findReadableByName(name: string): Skill | undefined {
+    return this.list().find((skill) => skill.name === name);
+  }
+
   update(id: string, input: UpdateSkillInput): Skill | undefined {
     const updateData: Record<string, unknown> = {};
     if (input.name !== undefined) updateData.name = input.name;

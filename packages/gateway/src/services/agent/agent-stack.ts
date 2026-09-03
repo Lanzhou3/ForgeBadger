@@ -40,7 +40,11 @@ export interface AgentStack {
   toolRegistry: AgentToolRegistry;
 }
 
-export function buildAgentStack(deps: AgentStackDeps, userId: string): AgentStack {
+export function buildAgentStack(
+  deps: AgentStackDeps,
+  userId: string,
+  options?: { toolRegistry?: AgentToolRegistry }
+): AgentStack {
   const log = new CopilotConversationLog(deps.db, userId);
   const memory = new AgentMemoryRepository(deps.db, userId);
   const modelRepo = new ModelProviderRepository(deps.db, userId, deps.masterKey);
@@ -48,7 +52,7 @@ export function buildAgentStack(deps: AgentStackDeps, userId: string): AgentStac
     modelProviderRepository: modelRepo,
     ...(deps.llmFetch !== undefined ? { fetchImpl: deps.llmFetch } : {})
   });
-  const toolRegistry = createAgentToolRegistry(createPlatformTools());
+  const toolRegistry = options?.toolRegistry ?? createAgentToolRegistry(createPlatformTools());
   // Owner tool switches: disabled tools vanish from the model schema and are
   // refused at execution time (see orchestrator).
   const toolPreferences = new CopilotToolPreferenceRepository(deps.db, userId);

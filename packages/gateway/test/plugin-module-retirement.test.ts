@@ -11,7 +11,9 @@ import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import { CatalogRepository } from "../src/db/repositories/catalog-repository.js";
 import { UserRepository } from "../src/db/repositories/index.js";
-import { builtinSkillSeeds } from "../src/services/builtin-skills.js";
+import { builtinSkillSeeds, copilotBuiltinSkillSeeds } from "../src/services/builtin-skills.js";
+
+const allBuiltinSeeds = [...builtinSkillSeeds, ...copilotBuiltinSkillSeeds];
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
@@ -132,10 +134,10 @@ describe("plugin module retirement", () => {
     assert.equal(firstRes.status, 200);
     assert.ok(firstBody.data);
     const builtins = firstBody.data.skills.filter((s) => s.source === "builtin");
-    assert.equal(builtins.length, builtinSkillSeeds.length);
+    assert.equal(builtins.length, allBuiltinSeeds.length);
     assert.deepEqual(
       builtins.map((s) => s.name).sort(),
-      builtinSkillSeeds.map((s) => s.name).sort()
+      allBuiltinSeeds.map((s) => s.name).sort()
     );
     assert.equal(builtins.every((s) => s.isEnabled === true), true);
 
@@ -143,7 +145,7 @@ describe("plugin module retirement", () => {
     const secondRes = await fetch(`${baseUrl}/api/v1/skills`, { headers });
     const secondBody = (await secondRes.json()) as SkillBody;
     assert.ok(secondBody.data);
-    assert.equal(secondBody.data.skills.filter((s) => s.source === "builtin").length, builtinSkillSeeds.length);
+    assert.equal(secondBody.data.skills.filter((s) => s.source === "builtin").length, allBuiltinSeeds.length);
 
     // Editing a builtin skill is preserved across a later seed.
     const edited = builtins[0];

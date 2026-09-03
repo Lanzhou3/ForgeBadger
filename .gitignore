@@ -104,3 +104,4 @@ packages/gateway/mig-test.mts
 packages/gateway/pf-repro.mts
 packages/gateway/verify-copilot-mig.mts
 packages/gateway/tables.mts
+packages/gateway/pty-attach-e2e.mts

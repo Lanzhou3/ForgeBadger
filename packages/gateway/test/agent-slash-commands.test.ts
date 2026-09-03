@@ -11,7 +11,7 @@ import { CopilotConversationLog } from "../src/services/agent/conversation-log.j
 import { createCopilotOrchestrator } from "../src/services/agent/orchestrator.js";
 import type { AgentLlmClient, AgentLlmStreamEvent } from "../src/services/agent/orchestrator-types.js";
 import { resolveLocalCommandReply } from "../src/services/agent/slash-commands.js";
-import { listCopilotSkillSummaries } from "../src/services/agent/skills/copilot-skills.js";
+import { listEnabledCopilotSkillSummaries } from "../src/services/agent/skills/skill-queries.js";
 import { createAgentToolRegistry } from "../src/services/agent/tool-registry.js";
 import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
 
@@ -56,11 +56,13 @@ function createStubLlm(reply = "stubbed answer", options: { forbidStream?: boole
 
 describe("resolveLocalCommandReply", () => {
   it("formats every enabled skill as name plus one-line description", () => {
+    // Arrange
+    const summaries = [{ name: "session-dispatch", description: "dispatch summary" }, { name: "usage-analysis", description: "usage summary" }];
+
     // Act
-    const reply = resolveLocalCommandReply("/skills");
+    const reply = resolveLocalCommandReply("/skills", () => summaries);
 
     // Assert
-    const summaries = listCopilotSkillSummaries();
     assert.ok(reply);
     const lines = reply.split("\n");
     assert.equal(lines[0], `Enabled skills (${summaries.length}):`);
@@ -70,9 +72,16 @@ describe("resolveLocalCommandReply", () => {
     }
   });
 
+  it("does not resolve non-command input to the lazy skill list", () => {
+    let invoked = false;
+    const reply = resolveLocalCommandReply("hello", () => { invoked = true; return []; });
+    assert.equal(reply, null);
+    assert.equal(invoked, false);
+  });
+
   it("returns null for anything that is not exactly /skills after trimming", () => {
     for (const input of ["hello", "/skills list", "/skillz", "look /skills", "/", "//skills"]) {
-      assert.equal(resolveLocalCommandReply(input), null, `expected null for ${JSON.stringify(input)}`);
+      assert.equal(resolveLocalCommandReply(input, () => []), null, `expected null for ${JSON.stringify(input)}`);
     }
   });
 });
@@ -110,7 +119,7 @@ describe("copilot /skills command routing", () => {
       const messages = log.listMessages(conversationId);
       assert.deepEqual(messages.map((message) => message.role), ["user", "assistant"]);
       assert.equal(messages[0]?.content, "/skills");
-      const summaries = listCopilotSkillSummaries();
+      const summaries = listEnabledCopilotSkillSummaries(db, userId);
       const expected = [
         `Enabled skills (${summaries.length}):`,
         ...summaries.map((skill) => `- ${skill.name}: ${skill.description}`)

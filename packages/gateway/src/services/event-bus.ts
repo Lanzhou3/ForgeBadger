@@ -64,7 +64,7 @@ export interface CopilotRunUpdatedEvent {
   runId: string;
   conversationId: string;
   status: string;
-  source?: "user" | "reactive" | undefined;
+  source?: "user" | "reactive" | "scheduled" | undefined;
   textDelta?: string | undefined;
   thinkingDelta?: string | undefined;
   toolName?: string | undefined;

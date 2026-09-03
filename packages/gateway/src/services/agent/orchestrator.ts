@@ -24,6 +24,7 @@ import type { AgentLlmClient, AgentToolCall } from "./orchestrator-types.js";
 import { CopilotConversationLog } from "./conversation-log.js";
 import { buildCompressedContext } from "./context.js";
 import { resolveLocalCommandReply } from "./slash-commands.js";
+import { listEnabledCopilotSkillSummaries } from "./skills/skill-queries.js";
 import { redactAgentValue } from "./redaction.js";
 import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js";
 
@@ -62,7 +63,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     conversationId: string;
     userText: string;
     modelId?: string;
-    source?: "user" | "reactive";
+    source?: "user" | "reactive" | "scheduled";
     /**
      * Skip the initial user-message append. Used by the edit-message flow,
      * which has already rewritten the target message in place — appending a
@@ -91,7 +92,10 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         // Local slash-command short-circuit (e.g. /skills): reply straight
         // from platform state — no context projection, no model call, no
         // auto-title. The reply is persisted as a normal assistant turn.
-        const commandReply = resolveLocalCommandReply(input.userText);
+        const commandReply = resolveLocalCommandReply(
+          input.userText,
+          () => listEnabledCopilotSkillSummaries(deps.db, userId)
+        );
         if (commandReply !== null) {
           log.appendMessage(input.conversationId, { role: "assistant", kind: "text", content: commandReply });
           log.updateRun(run.id, { status: "completed", completedAt: new Date(), steps: 0 });
@@ -397,7 +401,7 @@ async function maybeAutoTitle(input: {
   conversationId: string;
   userText: string;
   assistantText: string;
-  source: "user" | "reactive";
+  source: "user" | "reactive" | "scheduled";
   runId: string;
   eventBus: ForgeBadgerEventBus;
   llm: AgentLlmClient;

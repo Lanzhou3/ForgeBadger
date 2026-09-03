@@ -26,6 +26,7 @@ import { createSnapshotRoutes } from "./snapshots.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { createCopilotRoutes } from "./copilot.js";
+import { createAutomationRoutes } from "./automations.js";
 import { createSystemRoutes } from "./system.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
@@ -91,6 +92,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/dashboard", createDashboardRoutes(deps.db));
   if (deps.copilotAgent) {
     app.use("/api/v1/copilot", createCopilotRoutes(deps.copilotAgent));
+    app.use("/api/v1/copilot", createAutomationRoutes(deps.copilotAgent));
   }
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
     db: deps.db,

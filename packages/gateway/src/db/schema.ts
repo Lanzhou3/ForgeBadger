@@ -1391,6 +1391,85 @@ export const copilotOperationLog = sqliteTable("copilot_operation_log", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date())
 }, (table) => ({ idempotency: uniqueIndex("idx_copilot_operation_user_op_key").on(table.userId, table.operation, table.idempotencyKey) }));
 
+// Scheduled Copilot automations: natural-language prompts that run on a
+// schedule (cron / interval / once) and deliver their result to the owner's
+// conversation + notifications. Runs are claimed via a lease (claim_token /
+// claim_expires_at) so overlapping ticks never double-execute a slot.
+export const copilotAutomations = sqliteTable("copilot_automations", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  status: text("status").notNull().default("draft"), // draft | enabled | paused
+  scopeType: text("scope_type").notNull(),           // global | project
+  scopePolicy: text("scope_policy").notNull(),       // JSON: { projectIds?: string[] }
+  prompt: text("prompt").notNull(),
+  scheduleKind: text("schedule_kind").notNull(),     // cron | interval | once
+  scheduleExpression: text("schedule_expression").notNull(), // cron expr / minutes / ISO ts
+  timezone: text("timezone").notNull().default("UTC"),
+  deliveryPlan: text("delivery_plan").notNull(),     // JSON: { notify: boolean, conversation: boolean }
+  authoritySnapshot: text("authority_snapshot").notNull(), // JSON: { readOnly: true, tools: string[] }
+  revision: integer("revision").notNull().default(1),
+  nextRunAt: integer("next_run_at", { mode: "timestamp" }),
+  lastRunAt: integer("last_run_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+}, (table) => ({
+  userStatus: index("idx_copilot_automations_user_status").on(table.userId, table.status, table.nextRunAt)
+}));
+
+export const copilotAutomationRuns = sqliteTable("copilot_automation_runs", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  automationId: text("automation_id").notNull().references(() => copilotAutomations.id, { onDelete: "cascade" }),
+  executionId: text("execution_id"),
+  scheduledSlot: text("scheduled_slot").notNull(),
+  triggerKind: text("trigger_kind").notNull(), // schedule | manual
+  status: text("status").notNull().default("pending"), // pending | claimed | running | completed | failed | cancelled
+  notBefore: integer("not_before", { mode: "timestamp" }).notNull(),
+  claimToken: text("claim_token"),
+  claimExpiresAt: integer("claim_expires_at", { mode: "timestamp" }),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  scopeSnapshot: text("scope_snapshot"),
+  generatedContentEncrypted: text("generated_content_encrypted"),
+  lastErrorCode: text("last_error_code"),
+  lastErrorMessage: text("last_error_message"),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+  completedAt: integer("completed_at", { mode: "timestamp" })
+}, (table) => ({
+  slotUnique: uniqueIndex("idx_copilot_automation_run_slot").on(table.userId, table.automationId, table.scheduledSlot),
+  executionUnique: uniqueIndex("idx_copilot_automation_execution").on(table.userId, table.executionId),
+  due: index("idx_copilot_automation_run_due").on(table.userId, table.status, table.notBefore)
+}));
+
+export const copilotAutomationRunProjects = sqliteTable(
+  "copilot_automation_run_projects",
+  {
+    runId: text("run_id").notNull().references(() => copilotAutomationRuns.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    projectName: text("project_name").notNull(),
+    ordinal: integer("ordinal").notNull()
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.runId, table.projectId] }),
+    snapshotUser: index("idx_copilot_automation_snapshot_user").on(table.userId, table.runId, table.ordinal)
+  })
+);
+
+export const copilotAutomationSuggestions = sqliteTable("copilot_automation_suggestions", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  source: text("source").notNull(), // catalog
+  dedupKey: text("dedup_key").notNull(),
+  status: text("status").notNull().default("pending"), // pending | accepted | dismissed
+  jobSpec: text("job_spec").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+}, (table) => ({
+  dedup: uniqueIndex("idx_copilot_automation_suggestion_dedup").on(table.userId, table.dedupKey)
+}));
+
 // Historical per-user DSH configuration; never read by the current runtime.
 export const copilotDshConfig = sqliteTable("copilot_dsh_config", {
   userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),

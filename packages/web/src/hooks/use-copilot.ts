@@ -28,7 +28,7 @@ interface CopilotRunUpdatedPayload {
   run_id?: string;
   conversation_id?: string;
   status?: string;
-  source?: "user" | "reactive";
+  source?: "user" | "reactive" | "scheduled";
   text_delta?: string;
   thinking_delta?: string;
   tool_name?: string;
@@ -123,8 +123,9 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       const detail = (event as CustomEvent<{ type?: string; payload?: Record<string, unknown> }>).detail;
       if (!detail || detail.type !== "copilot_run_updated") return;
       const payload = (detail.payload ?? {}) as CopilotRunUpdatedPayload;
-      if (payload.source === "reactive") {
-        // A proactive report landed in a fresh conversation — let the UI refresh.
+      if (payload.source === "reactive" || payload.source === "scheduled") {
+        // A proactive/scheduled report landed in a separate conversation — let
+        // the UI refresh instead of folding it into the active user run.
         onReactiveUpdateRef.current?.();
         return;
       }

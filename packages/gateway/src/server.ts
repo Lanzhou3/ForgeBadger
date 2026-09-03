@@ -14,6 +14,7 @@ import type { RegistrationMode } from "./routes/auth.js";
 import type { LocalAccountRecovery } from "./services/local-account-recovery.js";
 import type { TerminalMultiplexerRuntime } from "./services/terminal-multiplexer-runtime.js";
 import type { AgentStackDeps } from "./services/agent/agent-stack.js";
+import { startAutomationScheduler, type AutomationScheduler } from "./services/automation/scheduler.js";
 import { RuntimeAuthorizationInvalidator } from "./services/runtime-authorization-invalidation.js";
 
 import { mountRoutes } from "./routes/index.js";
@@ -127,6 +128,11 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const server = createHttpServer(app);
   let closed = false;
   attachNotificationPersistence({ db: options.db, eventBus });
+  // The automation scheduler runs only when the native Copilot harness is
+  // mounted (same gate as the /api/v1/copilot routes).
+  const automationScheduler: AutomationScheduler | undefined = copilotAgent
+    ? startAutomationScheduler(copilotAgent)
+    : undefined;
   attachTerminalWebSocket({
     server,
     sessionManager,
@@ -160,6 +166,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
         (error: unknown) => ({ ok: false as const, error })
       );
       await runShutdownStage(failures, () => options.feishuChannelRuntime?.stop());
+      automationScheduler?.stop();
       const httpResult = await httpCloseResult;
       if (!httpResult.ok) {
         failures.push(httpResult.error);
