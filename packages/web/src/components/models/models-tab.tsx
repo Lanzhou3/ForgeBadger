@@ -163,6 +163,19 @@ export function ModelsTab({
                 onChange={(event) => onModelFormChange({ ...modelForm, capabilities: event.target.value })}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="model-form-context-window">{t("models.contextWindow")}</Label>
+              <Input
+                id="model-form-context-window"
+                type="number"
+                min={1}
+                step={1}
+                placeholder={t("models.contextWindowPlaceholder")}
+                value={modelForm.contextWindow}
+                onChange={(event) => onModelFormChange({ ...modelForm, contextWindow: event.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">{t("models.contextWindowHint")}</p>
+            </div>
             <DialogFooter>
               <Button type="button" variant="outline" disabled={isSaving} onClick={() => onDialogOpenChange(false)}>
                 {t("common.cancel")}

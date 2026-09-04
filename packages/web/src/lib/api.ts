@@ -575,6 +575,7 @@ export interface ModelProfile {
   name: string;
   modelId: string;
   capabilities: string[];
+  contextWindow: number | null;
   status: string;
   isDefault: boolean;
 }
@@ -2697,7 +2698,7 @@ export async function deleteProviderCredential(providerId: string, credentialId:
 
 export async function createProviderModel(
   providerId: string,
-  data: { name: string; modelId: string; capabilities?: string[]; isDefault?: boolean }
+  data: { name: string; modelId: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean }
 ): Promise<{ model: ModelProfile }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/models`, {
     method: "POST",

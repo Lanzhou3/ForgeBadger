@@ -270,6 +270,38 @@ describe("cli-config apply service", () => {
       assert.match(configToml, /type = "anthropic"/u);
       assert.match(configToml, /api_key = "sk-kimi-secret"/u);
       assert.match(configToml, /base_url = "https:\/\/api\.deepseek\.com\/v1"/u);
+      // Kimi CLI requires a positive max_context_size; unknown context falls
+      // back to 256k.
+      assert.match(configToml, /\[models\."kimi-provider\/kimi-model-1"\]/u);
+      assert.match(configToml, /max_context_size = 262144/u);
+    });
+
+    it("writes a Kimi model's known context window as max_context_size", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-kimi-ctx@example.com", "hash");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-apply-kimi-ctx-");
+      const fixture = createFixture(db, user.id, "kimi");
+      const sized = fixture.repo.createModelProfile({
+        providerProfileId: fixture.providerId,
+        name: "Sized Model",
+        modelId: "kimi-model-2",
+        contextWindow: 131072
+      });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "kimi",
+        providerProfileId: fixture.providerId,
+        modelProfileId: sized.id,
+        resolveHost: publicResolver
+      });
+
+      const configToml = await readFile(path.join(root, "config.toml"), "utf8");
+      assert.match(configToml, /\[models\."kimi-provider\/kimi-model-2"\]/u);
+      assert.match(configToml, /max_context_size = 131072/u);
+      // All active models of the provider are registered additively so the
+      // /model picker can switch between them; default pins the selected one.
+      assert.match(configToml, /\[models\."kimi-provider\/kimi-model-1"\]/u);
+      assert.match(configToml, /default_model = "kimi-provider\/kimi-model-2"/u);
     });
 
     it("removes a stale ANTHROPIC_API_KEY when applying a token-based provider", async () => {

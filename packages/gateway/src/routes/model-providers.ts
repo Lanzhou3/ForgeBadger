@@ -52,7 +52,7 @@ const createModelProfileSchema = z.object({
   name: z.string().min(1),
   modelId: z.string().min(1),
   capabilities: z.array(z.string().min(1)).optional(),
-  contextWindow: z.number().int().positive().optional(),
+  contextWindow: z.number().int().positive().nullable().optional(),
   isDefault: z.boolean().optional()
 });
 const updateModelProfileSchema = createModelProfileSchema.partial();

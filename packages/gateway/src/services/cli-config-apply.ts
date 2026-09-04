@@ -33,6 +33,15 @@ const inProcessLocks = new Map<string, Promise<void>>();
 /** cc-switch parity: Kimi For Coding exposes a 256k context window. */
 const kimiCodingContextTokens = "262144";
 
+/**
+ * Kimi CLI hard-errors ("must define a positive max_context_size") on custom
+ * models without one. Synced /models payloads carry no context info, so fall
+ * back to 256k — correct for Kimi models and a workable default for
+ * Claude-compatible relays; users can override via the model profile's
+ * context window.
+ */
+const kimiDefaultMaxContextSize = 262144;
+
 export class CliConfigApplyError extends Error {
   constructor(readonly code: string, message = code) {
     super(message);
@@ -508,12 +517,22 @@ function buildApplyDocument(
   };
   if (context.baseUrl) definition.base_url = context.baseUrl;
   providers[context.providerKey] = definition;
-  const alias = `${context.providerKey}/${context.model.modelId}`;
+  // Additive semantics (cc-switch parity with the opencode branch): upsert
+  // every active model of the provider as an alias so the /model picker in
+  // Kimi Code can switch between them; default_model pins the selected one.
   const models = record(doc.models);
-  models[alias] = { provider: context.providerKey, model: context.model.modelId };
+  for (const activeModel of context.activeModels) {
+    models[`${context.providerKey}/${activeModel.modelId}`] = {
+      provider: context.providerKey,
+      model: activeModel.modelId,
+      max_context_size: activeModel.contextWindow && activeModel.contextWindow > 0
+        ? activeModel.contextWindow
+        : kimiDefaultMaxContextSize
+    };
+  }
   doc.providers = providers;
   doc.models = models;
-  doc.default_model = alias;
+  doc.default_model = `${context.providerKey}/${context.model.modelId}`;
 }
 
 /**
@@ -581,7 +600,7 @@ function serializeDocument(fileType: "json" | "toml", doc: Record<string, unknow
 }
 
 /** Masks credential values so previews never surface plaintext secrets. */
-function maskSecrets(fileType: "json" | "toml", content: string): string {
+export function maskSecrets(fileType: "json" | "toml", content: string): string {
   const doc = parseDocument(fileType, content, "");
   maskSecretsDeep(doc);
   return serializeDocument(fileType, doc);

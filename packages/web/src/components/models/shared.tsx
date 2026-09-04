@@ -27,6 +27,7 @@ export interface ModelForm {
   name: string;
   modelId: string;
   capabilities: string;
+  contextWindow: string;
 }
 
 export type DeleteTarget =
@@ -73,6 +74,7 @@ export const emptyModel: ModelForm = {
   name: "",
   modelId: "",
   capabilities: "chat,code",
+  contextWindow: "",
 };
 
 export function adapterLabel(adapter: ProviderSupportedAdapter): string {

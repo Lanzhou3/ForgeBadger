@@ -3,18 +3,17 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowUpRight,
   CheckCircle2,
   Cloud,
   Plus,
   TriangleAlert,
   X,
 } from "lucide-react";
-import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { AddProviderDialog } from "@/components/models/add-provider-dialog";
 import { ApplyToCliDialog } from "@/components/models/apply-to-cli-dialog";
+import { CliConfigPanel } from "@/components/models/cli-config-panel";
 import { DeleteConfirmDialog } from "@/components/models/delete-confirm-dialog";
 import { ProviderList } from "@/components/models/provider-list";
 import { ProviderWorkspace } from "@/components/models/provider-workspace";
@@ -147,6 +146,7 @@ export default function ModelsPage() {
         name: selectedModel.name,
         modelId: selectedModel.modelId,
         capabilities: selectedModel.capabilities.join(","),
+        contextWindow: selectedModel.contextWindow ? String(selectedModel.contextWindow) : "",
       });
     } else {
       setModelForm(emptyModel);
@@ -278,6 +278,9 @@ export default function ModelsPage() {
           .split(",")
           .map((capability) => capability.trim())
           .filter(Boolean),
+        ...(modelForm.contextWindow.trim()
+          ? { contextWindow: Number(modelForm.contextWindow.trim()) }
+          : {}),
       }),
     onSuccess: async (result) => {
       setModelForm(emptyModel);
@@ -298,6 +301,9 @@ export default function ModelsPage() {
           .split(",")
           .map((capability) => capability.trim())
           .filter(Boolean),
+        contextWindow: modelForm.contextWindow.trim()
+          ? Number(modelForm.contextWindow.trim())
+          : null,
       });
     },
     onSuccess: async (result) => {
@@ -474,12 +480,6 @@ export default function ModelsPage() {
           <p className="mt-1 text-sm text-muted-foreground">{t("models.providerCenterSubtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button asChild size="sm" variant="outline">
-            <Link href="/cli-config">
-              {t("models.viewGlobalCliConfig")}
-              <ArrowUpRight className="size-4" />
-            </Link>
-          </Button>
           <Button
             type="button"
             size="sm"
@@ -614,6 +614,8 @@ export default function ModelsPage() {
           )}
         </div>
       </div>
+
+      <CliConfigPanel />
 
       <AddProviderDialog
         open={addProviderOpen}

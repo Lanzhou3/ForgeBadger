@@ -6,6 +6,7 @@ import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import type { AdapterId } from "./adapter-discovery.js";
 import { atomicWriteConfig } from "./cli-config-fs.js";
 import { globalConfigRoot } from "./cli-config-target.js";
+import { maskSecrets } from "./cli-config-apply.js";
 import {
   findCliConfigField,
   listCliConfigFields,
@@ -258,7 +259,15 @@ export async function upsertCliModel(
   return mutateKimiConfig((doc) => {
     const models = ensureRecord(doc, "models");
     const existing = asRecord(models[alias]);
-    models[alias] = { ...existing, provider: input.provider, model: input.modelId };
+    models[alias] = {
+      // Kimi CLI hard-errors on custom models without a positive
+      // max_context_size; keep any value already present and fall back to
+      // 256k, matching the apply-provider default.
+      max_context_size: 262144,
+      ...existing,
+      provider: input.provider,
+      model: input.modelId
+    };
   });
 }
 
