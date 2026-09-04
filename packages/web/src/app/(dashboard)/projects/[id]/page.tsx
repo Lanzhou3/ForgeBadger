@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { UIEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, Eye, FileCode2, FileText, Globe2, History, Link2, MoreHorizontal, Pencil, Plus, Save, TerminalSquare, Trash2, Wrench } from "lucide-react";
 
@@ -19,12 +20,10 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { CliBrandIcon } from "@/components/cli-brand-icon";
-import { ProjectManagerPanel } from "@/components/projects/ProjectManagerPanel";
 import { ConfigSyncPanel, type ConfigSyncPanelHandle } from "@/components/projects/ConfigSyncPanel";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
 import { WorkspaceExplorer } from "@/components/projects/workspace";
-import { ProjectGraphPanel } from "@/components/projects/graph/ProjectGraphPanel";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -58,6 +57,18 @@ import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/projects/markdown-renderer";
 import { SessionLaunchDialog } from "@/components/sessions/session-launch-dialog";
+
+// Heavy tab panels are code-split so their dependencies (@xyflow/react for the
+// graph, @dnd-kit for the project manager) load on first use of their tab,
+// keeping the project-detail page itself fast to open on low-end machines.
+const ProjectGraphPanel = dynamic(
+  () => import("@/components/projects/graph/ProjectGraphPanel").then((mod) => mod.ProjectGraphPanel),
+  { ssr: false }
+);
+const ProjectManagerPanel = dynamic(
+  () => import("@/components/projects/ProjectManagerPanel").then((mod) => mod.ProjectManagerPanel),
+  { ssr: false }
+);
 
 const PROJECT_DETAIL_TABS = [
   "sessions",

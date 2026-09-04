@@ -4,6 +4,11 @@ export type TerminalWebSocketMessage =
       payload: { data: string };
     }
   | {
+      /** Scrollback replay, sent once per attach BEFORE any live output. */
+      type: "terminal_history";
+      payload: { data: string };
+    }
+  | {
       type: "terminal_error";
       payload: { message: string };
     };
@@ -27,6 +32,13 @@ export function parseTerminalWebSocketMessage(raw: unknown): TerminalWebSocketMe
   if (value.type === "terminal_output" && typeof value.payload.data === "string") {
     return {
       type: "terminal_output",
+      payload: { data: value.payload.data }
+    };
+  }
+
+  if (value.type === "terminal_history" && typeof value.payload.data === "string") {
+    return {
+      type: "terminal_history",
       payload: { data: value.payload.data }
     };
   }

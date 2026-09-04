@@ -12,6 +12,8 @@ import type { InMemorySessionManager } from "../services/session-manager.js";
 import { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
 import {
   clearInheritedMultiplexerIdentity,
+  DEFAULT_TERMINAL_COLS,
+  DEFAULT_TERMINAL_ROWS,
   resolveTerminalMultiplexerRuntime,
   type TerminalMultiplexerRuntime
 } from "../services/terminal-multiplexer-runtime.js";
@@ -377,7 +379,15 @@ async function handleTerminalSocket(
       resizeBuffer.applyOrStore(pty, message.payload.cols, message.payload.rows);
       void sessionManager
         .resizeSession(sessionId, message.payload.cols, message.payload.rows)
-        .catch(() => {});
+        .catch((error) => {
+          // A failed resize-window leaves the pane size out of sync with the
+          // browser xterm (misaligned TUI output, cursor off by a row). Never
+          // swallow it silently.
+          console.error(
+            `[terminal-ws] resize-window failed for session ${sessionId} (${message.payload.cols}x${message.payload.rows})`,
+            error
+          );
+        });
     } catch (error) {
       ws.send(
         JSON.stringify({
@@ -388,14 +398,45 @@ async function handleTerminalSocket(
     }
   });
 
+  // Restore scrollback history BEFORE spawning the attach pty. psmux/tmux
+  // push a full screen repaint (switch to the alternate buffer, clear, redraw)
+  // the moment the client attaches; if the capture-pane text arrives after
+  // that repaint, xterm has already entered the alternate screen and the
+  // replayed lines pile into it — the freshly painted TUI frame is scrolled
+  // away and the cursor ends up off by several rows ("misaligned after
+  // switching back to the tab"). Capturing first guarantees the browser
+  // receives history text first and the live repaint second, so scrollback
+  // lands in the normal buffer and the live UI paints on top of a clean
+  // screen. Windows capture spawns a fresh psmux process (~hundreds of ms),
+  // which is exactly when the old async ordering lost the race.
+  try {
+    const history = await sessionManager.captureHistory(sessionId);
+    if (!authorizationLease.isAuthorized()) return;
+    if (ws.readyState !== WebSocket.OPEN) return;
+    if (history) {
+      ws.send(JSON.stringify({ type: "terminal_history", payload: { data: history } }));
+    }
+  } catch {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: "terminal_error",
+          payload: {
+            message: "Terminal history restore failed"
+          }
+        })
+      );
+    }
+  }
+
   try {
     const { spawn } = await import("node-pty");
     if (!authorizationLease.isAuthorized()) return;
     pty = spawn(resolveMultiplexerExecutable(terminalRuntime.command), terminalRuntime.buildAttachArgs(session.tmuxName), {
       name: "xterm-256color",
       cwd: session.launchPlan.cwd,
-      cols: 120,
-      rows: 40,
+      cols: DEFAULT_TERMINAL_COLS,
+      rows: DEFAULT_TERMINAL_ROWS,
       env: buildTmuxAttachEnv(process.env)
     });
   } catch (error) {
@@ -429,26 +470,6 @@ async function handleTerminalSocket(
     }
   }
   resizeBuffer.flush(activePty);
-
-  void sessionManager
-    .captureHistory(sessionId)
-    .then((history) => {
-      if (history && ws.readyState === WebSocket.OPEN && authorizationLease?.isAuthorized()) {
-        ws.send(JSON.stringify({ type: "terminal_output", payload: { data: history } }));
-      }
-    })
-    .catch((error) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(
-          JSON.stringify({
-            type: "terminal_error",
-            payload: {
-              message: "Terminal history restore failed"
-            }
-          })
-        );
-      }
-    });
 
   pty.onData((data) => {
     if (!authorizationLease?.isAuthorized()) return;

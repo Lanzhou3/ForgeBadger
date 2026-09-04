@@ -1,4 +1,4 @@
-import { createHighlighter, type BundledLanguage, type Highlighter, type ThemedToken } from "shiki";
+import type { BundledLanguage, Highlighter, ThemedToken } from "shiki";
 
 /**
  * Lazy singleton Shiki highlighter for the workspace file viewer.
@@ -15,7 +15,11 @@ const loadedLanguages = new Set<string>();
 
 function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
-    highlighterPromise = createHighlighter({ themes: [THEME], langs: [] });
+    // Dynamic import keeps shiki's engine (grammars + theme) out of the static
+    // module graph; it is fetched on first actual highlight request.
+    highlighterPromise = import("shiki").then(({ createHighlighter }) =>
+      createHighlighter({ themes: [THEME], langs: [] })
+    );
   }
   return highlighterPromise;
 }

@@ -17,9 +17,24 @@ describe("parseTerminalWebSocketMessage", () => {
     });
   });
 
+  it("returns terminal history messages", () => {
+    expect(
+      parseTerminalWebSocketMessage(
+        JSON.stringify({
+          type: "terminal_history",
+          payload: { data: "scrolled-off lines" }
+        })
+      )
+    ).toEqual({
+      type: "terminal_history",
+      payload: { data: "scrolled-off lines" }
+    });
+  });
+
   it("returns null for malformed frames instead of throwing", () => {
     expect(parseTerminalWebSocketMessage("not json")).toBeNull();
     expect(parseTerminalWebSocketMessage(JSON.stringify({ type: "terminal_output" }))).toBeNull();
+    expect(parseTerminalWebSocketMessage(JSON.stringify({ type: "terminal_history" }))).toBeNull();
     expect(parseTerminalWebSocketMessage(JSON.stringify({ type: "unknown", payload: {} }))).toBeNull();
   });
 });

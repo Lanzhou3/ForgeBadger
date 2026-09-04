@@ -139,6 +139,17 @@ export function TerminalView({
       const message = parseTerminalWebSocketMessage(String(event.data));
       if (!message) return;
 
+      if (message.type === "terminal_history") {
+        // Scrollback replay, always sent before the live attach stream. Reset
+        // first: on a socket reconnect the same xterm instance is reused, and
+        // replaying on top of the old buffer would duplicate every line (and,
+        // if a full-screen TUI had switched xterm to the alternate buffer,
+        // corrupt the live frame). The reset leaves a clean normal buffer for
+        // the history; the live repaint that follows paints the current UI.
+        terminal.reset();
+        terminal.write(message.payload.data);
+      }
+
       if (message.type === "terminal_output") {
         terminal.write(message.payload.data);
       }

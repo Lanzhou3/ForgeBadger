@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, ArrowLeft, Brain, Cpu, Sparkles, Wrench } from "lucide-react";
+import { Activity, ArrowLeft, Brain, CalendarClock, Cpu, Sparkles, Wrench } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -129,6 +130,23 @@ export function CopilotSettingsPage() {
           </Card>
 
           <CopilotSkillsCard />
+
+          <Card>
+            <CardHeader className="flex flex-row items-center gap-3 space-y-0">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+                <CalendarClock className="size-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <CardTitle className="text-sm font-semibold">{t("copilot.automationsTitle")}</CardTitle>
+                <CardDescription className="mt-1 text-xs">
+                  {t("copilot.automationsDescription")}
+                </CardDescription>
+              </div>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/copilot/automations">{t("copilot.automationsManage")}</Link>
+              </Button>
+            </CardHeader>
+          </Card>
         </div>
       </div>
     </div>

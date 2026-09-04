@@ -23,6 +23,14 @@ export interface TerminalMultiplexerRuntime {
 
 const SAFE_SESSION_TARGET = /^[a-zA-Z0-9_-]+$/;
 
+/**
+ * Size a multiplexer session is created with and the attach pty is spawned
+ * with, before the browser's first fit/resize message lands. Keeping both on
+ * the same value avoids a SIGWINCH flicker on attach.
+ */
+export const DEFAULT_TERMINAL_COLS = 120;
+export const DEFAULT_TERMINAL_ROWS = 40;
+
 const SAFE_BASE_ENV_KEYS = new Set([
   "APPDATA",
   "COLORTERM",

@@ -125,14 +125,25 @@ describe("tmux integration", { skip: !runTmuxTests }, () => {
         "-v",
         "history-limit",
         ";",
+        // `window-size` is a window option; the session-scope lookup only
+        // works via tmux's implicit redirect and fails on psmux, so query the
+        // window option explicitly to match how configureSession sets it.
+        "show-window-options",
+        "-t",
+        sessionName,
+        "-v",
+        "window-size",
+        ";",
+        // The attach client's status line would consume one terminal row and
+        // leave the pane permanently one row taller than the client viewport.
         "show-options",
         "-t",
         sessionName,
         "-v",
-        "window-size"
+        "status"
       ]);
 
-      assert.deepEqual(stdout.trim().split("\n"), ["on", "10000", "manual"]);
+      assert.deepEqual(stdout.trim().split("\n"), ["on", "10000", "manual", "off"]);
     } finally {
       await tmux.killSession(sessionName);
     }

@@ -4,6 +4,8 @@ import { assertSafeProgrammaticMessage } from "./programmatic-terminal-submit.js
 import {
   buildSanitizedMultiplexerEnv,
   clearInheritedMultiplexerIdentity,
+  DEFAULT_TERMINAL_COLS,
+  DEFAULT_TERMINAL_ROWS,
   resolveTerminalMultiplexerRuntime,
   resolveWindowsShimCommand,
   type TerminalMultiplexerRuntime
@@ -70,6 +72,14 @@ export function buildCreateSessionArgs(
     options.name,
     "-c",
     options.cwd,
+    // Pin the initial window size to the same default the attach pty spawns
+    // with. psmux otherwise creates the window at the server's default size,
+    // so the pre-attach pane dimensions are undefined and the first client
+    // resize triggers an extra SIGWINCH redraw for full-screen TUIs.
+    "-x",
+    String(DEFAULT_TERMINAL_COLS),
+    "-y",
+    String(DEFAULT_TERMINAL_ROWS),
     // Do not let tmux's update-environment option copy client variables into
     // the new session. The explicit -e values below are the complete trusted
     // launch-plan overlay.
@@ -132,7 +142,22 @@ export function createTmuxClient(
     // off-screen and right-side text looks occluded. With `manual`, only the
     // Gateway's resize-window — driven by the browser's fit/resize messages —
     // may change the window size.
-    await runMultiplexer(runtime, ["set-option", "-t", name, "window-size", "manual"]);
+    //
+    // `window-size` is a WINDOW option. tmux's `set-option` silently
+    // auto-redirects window-only options to window scope, but psmux (Windows)
+    // accepts the same call without applying it, leaving the window in
+    // `latest` mode — the pane then tracks the attach client while
+    // resize-window also writes to it, and the two size channels disagree.
+    // Use the unambiguous `set-window-option` so both runtimes pin the size.
+    await runMultiplexer(runtime, ["set-window-option", "-t", name, "window-size", "manual"]);
+    // The attach client's status line consumes one terminal row, so a client
+    // spawned at the browser's rows renders only rows-1 of pane content. The
+    // Gateway's resize-window sets the pane to the full browser rows, leaving
+    // pane and client viewport permanently off by one row: full-screen TUIs
+    // (opencode) then repaint misaligned and the input cursor lands one row
+    // below the text. The web console has its own session chrome, so drop the
+    // multiplexer status line and make pane rows == client rows exactly.
+    await runMultiplexer(runtime, ["set-option", "-t", name, "status", "off"]);
   }
 
   return {
@@ -193,9 +218,11 @@ export function createTmuxClient(
     },
 
     async resizeWindow(name, cols, rows) {
-      await runMultiplexer(runtime, ["resize-window", "-t", name, "-x", String(cols), "-y", String(rows)], {
-        ignoreFailure: true
-      });
+      // Do NOT swallow failures here: a silently rejected resize-window leaves
+      // the pane size permanently out of sync with the browser xterm, which
+      // manifests as misaligned TUI output with no log trail. The WebSocket
+      // call site catches and logs.
+      await runMultiplexer(runtime, ["resize-window", "-t", name, "-x", String(cols), "-y", String(rows)]);
     },
 
     async sendInput(name, data) {
