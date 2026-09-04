@@ -34,12 +34,10 @@ AGENT.md
 AGENTS.md
 MEMORY.md
 CONTEXT.md
-!openspec/
-!openspec/changes/
-openspec/changes/*
-!openspec/changes/replace-copilot-with-portfolio-operations/
-!openspec/changes/replace-copilot-with-portfolio-operations/**
-openspec/config.yaml
+# OpenSpec change drafts are local planning notes, never repository inputs.
+openspec/
+# Dead template material; retained locally, never shipped.
+templates/
 docs/*
 !docs/EXTERNAL-EVIDENCE-GATES.md
 !docs/OPEN-SOURCE-READINESS.md

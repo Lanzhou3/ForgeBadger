@@ -19,9 +19,6 @@ const historicalSecurityAllowlist = new Map([
   ["packages/web/src/components/projects/project-manager/utils.ts", ["(?:FORGEBADGER|OPENFORGE)"]],
   ["packages/gateway/src/db/migrations/0052_rename_forgebadger_contracts.sql", [
     "openforge_user_id", "idx_integration_feishu_user_mappings_openforge_user", "'/openforge'"
-  ]],
-  ["openspec/changes/replace-copilot-with-portfolio-operations/gate-3-acceptance.md", [
-    ".openforge/openforge.db"
   ]]
 ]);
 
@@ -46,8 +43,8 @@ export function isBrandSurface(filePath) {
   if (filePath.startsWith("packages/gateway/src/db/migrations/") && !filePath.includes("0052_")) return false;
   return ["package.json", "pnpm-lock.yaml", "README.md", "CONTRIBUTING.md", "SECURITY.md", "LICENSE", "CLAUDE.md", "AGENTS.md"].includes(filePath) ||
     filePath === ".github/workflows/ci.yml" || filePath.startsWith(".github/ISSUE_TEMPLATE/") ||
-    filePath.startsWith("docs/") || filePath.startsWith("templates/") ||
-    filePath.startsWith("openspec/changes/") || filePath.startsWith("packages/web/src/") ||
+    filePath.startsWith("docs/") ||
+    filePath.startsWith("packages/web/src/") ||
     filePath.startsWith("packages/gateway/src/") || filePath.startsWith("packages/cli/src/") ||
     ["packages/gateway/package.json", "packages/cli/package.json"].includes(filePath) ||
     (filePath.startsWith("scripts/") && !filePath.includes(".test."));

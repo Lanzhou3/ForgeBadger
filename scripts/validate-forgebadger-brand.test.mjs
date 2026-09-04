@@ -41,10 +41,6 @@ describe("ForgeBadger brand validator", () => {
         content: "const stateDir = process.env.OPENFORGE_STATE_DIR;"
       },
       {
-        path: "openspec/changes/replace-copilot-with-portfolio-operations/gate-3-acceptance.md",
-        content: "Historical database: /Users/lanzhou/.openforge/openforge.db"
-      },
-      {
         path: "openspec/changes/unapproved/gate-3-acceptance.md",
         content: "Historical database: /Users/lanzhou/.openforge/openforge.db"
       }
@@ -56,13 +52,14 @@ describe("ForgeBadger brand validator", () => {
     ]);
   });
 
-  it("covers active web, documentation, template, issue, and OpenSpec surfaces", () => {
+  it("covers active web, documentation, and issue surfaces, but not local planning material", () => {
     assert.equal(isBrandSurface("packages/web/src/lib/auth.ts"), true);
     assert.equal(isBrandSurface("README.md"), true);
     assert.equal(isBrandSurface("docs/TRIAL-RUNBOOK.md"), true);
-    assert.equal(isBrandSurface("templates/claude-code-best-practice/README.md"), true);
     assert.equal(isBrandSurface(".github/ISSUE_TEMPLATE/bug_report.yml"), true);
-    assert.equal(isBrandSurface("openspec/changes/replace-copilot-with-portfolio-operations/design.md"), true);
     assert.equal(isBrandSurface("packages/gateway/src/db/migrations/0040_unify_models.sql"), false);
+    // OpenSpec changes and the dead templates/ pack are local-only now (untracked).
+    assert.equal(isBrandSurface("templates/claude-code-best-practice/README.md"), false);
+    assert.equal(isBrandSurface("openspec/changes/replace-copilot-with-portfolio-operations/design.md"), false);
   });
 });
