@@ -11,6 +11,7 @@ import WebSocket from "ws";
 import {
   authenticateTerminalRequest,
   formatTerminalClientError,
+  isTerminalMouseInput,
   TerminalHeartbeat,
   TerminalInputBuffer,
   TerminalInputRateLimiter,
@@ -171,6 +172,30 @@ describe("TerminalInputRateLimiter", () => {
     assert.equal(limiter.consume(1000), true);
     assert.equal(limiter.consume(1000), false);
     assert.equal(limiter.consume(2001), true);
+  });
+});
+
+describe("isTerminalMouseInput", () => {
+  it("matches single and batched SGR mouse reports", () => {
+    assert.equal(isTerminalMouseInput("\x1b[<65;23;5M"), true); // wheel down
+    assert.equal(isTerminalMouseInput("\x1b[<64;23;5M"), true); // wheel up
+    assert.equal(isTerminalMouseInput("\x1b[<35;10;12M"), true); // motion
+    assert.equal(isTerminalMouseInput("\x1b[<0;23;5M\x1b[<0;23;5m"), true); // press+release
+    assert.equal(
+      isTerminalMouseInput("\x1b[<64;23;5M\x1b[<64;23;5M\x1b[<65;23;5M"),
+      true
+    ); // batched wheel events
+  });
+
+  it("rejects keystrokes, pasted text and other escape sequences", () => {
+    assert.equal(isTerminalMouseInput("a"), false);
+    assert.equal(isTerminalMouseInput("ls -la\r"), false);
+    assert.equal(isTerminalMouseInput("\x1b[A"), false); // arrow key
+    assert.equal(isTerminalMouseInput("\x1b[<65;23;5Ma"), false); // trailing junk
+    assert.equal(isTerminalMouseInput("a\x1b[<65;23;5M"), false); // leading junk
+    assert.equal(isTerminalMouseInput("\x1b[200~pasted\x1b[201~"), false); // bracketed paste
+    assert.equal(isTerminalMouseInput("\x1b[31mred\x1b[0m"), false); // SGR color
+    assert.equal(isTerminalMouseInput(""), false);
   });
 });
 

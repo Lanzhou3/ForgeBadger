@@ -28,11 +28,27 @@ import { WebSocketConnectionLimits } from "./connection-limits.js";
 const DEFAULT_MAX_MESSAGE_BYTES = 1024 * 1024;
 const TERMINAL_INPUT_RATE_LIMIT = 50;
 const TERMINAL_RATE_WINDOW_MS = 1000;
+// Mouse-event traffic (SGR sequences) is a separate, far more permissive
+// budget: opencode enables any-motion tracking (?1003h), so holding the
+// pointer over the pane or a single wheel flick legitimately produces far
+// more events per second than a human can ever type.
+const TERMINAL_MOUSE_INPUT_RATE_LIMIT = 500;
 const TERMINAL_HEARTBEAT_INTERVAL_MS = 30_000;
 const TERMINAL_HEARTBEAT_TIMEOUT_MS = 90_000;
 const DEFAULT_TERMINAL_WS_MAX_CONNECTIONS = 100;
 const DEFAULT_TERMINAL_WS_MAX_CONNECTIONS_PER_USER = 5;
 const TERMINAL_WS_AUTH_PROTOCOLS = ["forgebadger-terminal"] as const;
+
+/**
+ * True when a terminal input chunk consists ONLY of SGR mouse reports
+ * (CSI < Cb ; Cx ; Cy M/m, possibly several per chunk). The body after
+ * "CSI <" is limited to digits and semicolons, so this can never match
+ * arbitrary escape traffic — anything else falls through to the strict
+ * keystroke rate limit.
+ */
+export function isTerminalMouseInput(data: string): boolean {
+  return data.length > 0 && /^(?:\x1b\[<[0-9;]+[Mm])+$/.test(data);
+}
 
 export type TerminalMessage =
   | { type: "terminal_input"; payload: { data: string } }
@@ -358,13 +374,22 @@ async function handleTerminalSocket(
     maxMessages: TERMINAL_INPUT_RATE_LIMIT,
     windowMs: TERMINAL_RATE_WINDOW_MS
   });
+  const mouseRateLimiter = new TerminalInputRateLimiter({
+    maxMessages: TERMINAL_MOUSE_INPUT_RATE_LIMIT,
+    windowMs: TERMINAL_RATE_WINDOW_MS
+  });
 
   ws.on("message", (raw) => {
     if (!authorizationLease?.isAuthorized()) return;
     try {
       const message = parseTerminalMessage(raw);
       if (message.type === "terminal_input") {
-        if (!inputRateLimiter.consume()) {
+        // SGR mouse reports (scroll/move) use their own permissive budget; a
+        // wheel flick otherwise burns through the keystroke limit in one
+        // gesture and the terminal floods with "rate limit exceeded".
+        const isMouse = isTerminalMouseInput(message.payload.data);
+        const allowed = isMouse ? mouseRateLimiter.consume() : inputRateLimiter.consume();
+        if (!allowed) {
           ws.send(
             JSON.stringify({
               type: "terminal_error",
