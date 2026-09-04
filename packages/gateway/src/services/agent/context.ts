@@ -7,17 +7,33 @@
  * (persisted on copilot_conversations) and only the recent tail is sent in
  * full, so long conversations stay within the model window. Summarize failures
  * degrade to the raw history rather than failing the turn.
+ *
+ * Memory recall: when a memory repository is provided, a `[相关记忆]` block
+ * built from an FTS search over the recent user text is prepended as the first
+ * user message. It is per-turn only (not part of persisted history) and never
+ * fails the turn.
  */
 import type { AgentLlmClient, AgentLlmMessage } from "./orchestrator-types.js";
 import type { CopilotConversationLog } from "./conversation-log.js";
 import type { AgentMessage } from "./types.js";
+import type { AgentMemoryRepository } from "./memory.js";
 
 export const MAX_CONTEXT_CHARS = 96_000;
+const MAX_RECALL_QUERY_CHARS = 512;
+const DEFAULT_RECALL_LIMIT = 3;
+const DEFAULT_RECALL_BUDGET_CHARS = 2_000;
 
 export interface CompressedContext {
   messages: AgentLlmMessage[];
   /** True when a summary was folded in (or an existing one reused). */
   compressed: boolean;
+}
+
+export interface CompressedContextOptions {
+  memory?: AgentMemoryRepository;
+  memoryProjectId?: string;
+  memoryRecallLimit?: number;
+  memoryRecallBudget?: number;
 }
 
 /** Map a logged message to the model-visible form (user vs assistant text only). */
@@ -34,11 +50,15 @@ export async function buildCompressedContext(
   log: CopilotConversationLog,
   conversationId: string,
   llm: AgentLlmClient,
-  modelId?: string
+  modelId?: string,
+  options: CompressedContextOptions = {}
 ): Promise<CompressedContext> {
   const rows = log.listMessages(conversationId).filter((message) => message.kind === "text");
+  const recall = buildRecallBlock(rows, options);
+
   if (estimateChars(rows) <= MAX_CONTEXT_CHARS) {
-    return { messages: rows.map(toLlmMessage), compressed: false };
+    const projected = rows.map(toLlmMessage);
+    return { messages: recall ? [recall, ...projected] : projected, compressed: false };
   }
 
   const split = splitAtBudget(rows, MAX_CONTEXT_CHARS);
@@ -63,7 +83,7 @@ export async function buildCompressedContext(
       summary = await llm.summarize({ messages: toFold, ...(modelId !== undefined ? { modelId } : {}) });
     } catch {
       // Non-fatal: degrade to the raw history; the main turn decides if it errors.
-      return { messages: rows.map(toLlmMessage), compressed: false };
+      return { messages: recall ? [recall, ...rows.map(toLlmMessage)] : rows.map(toLlmMessage), compressed: false };
     }
     const lastHead = headUncovered[headUncovered.length - 1] ?? head[head.length - 1];
     if (lastHead) {
@@ -71,7 +91,42 @@ export async function buildCompressedContext(
     }
   }
 
-  return { messages: [{ role: "user", content: `[会话摘要]\n${summary}` }, ...tail.map(toLlmMessage)], compressed: true };
+  const summaryMessage: AgentLlmMessage = { role: "user", content: `[会话摘要]\n${summary}` };
+  const tailProjected = tail.map(toLlmMessage);
+  return {
+    messages: recall ? [recall, summaryMessage, ...tailProjected] : [summaryMessage, ...tailProjected],
+    compressed: true
+  };
+}
+
+/** Build the `[相关记忆]` recall block from the most recent user text, if any. */
+function buildRecallBlock(rows: AgentMessage[], options: CompressedContextOptions): AgentLlmMessage | undefined {
+  const memory = options.memory;
+  if (!memory) return undefined;
+  const query = recentUserText(rows);
+  if (!query) return undefined;
+
+  const limit = options.memoryRecallLimit ?? DEFAULT_RECALL_LIMIT;
+  const budget = options.memoryRecallBudget ?? DEFAULT_RECALL_BUDGET_CHARS;
+  const scopes = options.memoryProjectId
+    ? [{ scope: "global" as const }, { scope: "project" as const, projectId: options.memoryProjectId }]
+    : [{ scope: "global" as const }];
+  const entries = memory.searchMulti(scopes, query, limit);
+  if (entries.length === 0) return undefined;
+
+  const lines = entries.map((entry) => `- (${entry.scope}/${entry.kind}) ${entry.text}`);
+  let content = `[相关记忆]\n${lines.join("\n")}`;
+  if (content.length > budget) content = `${content.slice(0, budget)}…`;
+  return { role: "user", content };
+}
+
+function recentUserText(rows: AgentMessage[]): string | undefined {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const message = rows[index];
+    if (message?.role !== "user") continue;
+    return message.content.slice(0, MAX_RECALL_QUERY_CHARS);
+  }
+  return undefined;
 }
 
 function estimateChars(messages: AgentMessage[]): number {

@@ -99,6 +99,37 @@ export class AgentMemoryRepository {
     return rows.map(toEntry);
   }
 
+  /**
+   * Search across multiple scopes and merge by id, preserving FTS rank order.
+   * Used by the recall path to combine global + project memory in one block.
+   *
+   * Uses OR-token semantics (any query token matches) rather than the strict
+   * AND used by the `search` tool, because the recall query is free-form user
+   * text and a single relevant keyword should surface the entry.
+   */
+  searchMulti(scopes: AgentMemoryScope[], query: string, limit = 10): AgentMemoryEntry[] {
+    const q = query.trim();
+    if (!q) return [];
+    const seen = new Set<string>();
+    const merged: AgentMemoryEntry[] = [];
+    for (const scope of scopes) {
+      const rows = this.db.prepare(`
+        SELECT m.* FROM copilot_memory m
+        INNER JOIN copilot_memory_fts fts ON fts.memory_id = m.id
+        WHERE fts.user_id = ? AND fts.copilot_memory_fts MATCH ?
+          AND (? IS NULL OR fts.project_id = ?)
+        ORDER BY rank LIMIT ?
+      `).all(this.userId, quoteFtsOr(q), scope.projectId ?? null, scope.projectId ?? null, Math.min(limit, MAX_SEARCH_LIMIT)) as MemoryRow[];
+      for (const entry of rows.map(toEntry)) {
+        if (seen.has(entry.id)) continue;
+        seen.add(entry.id);
+        merged.push(entry);
+        if (merged.length >= limit) return merged;
+      }
+    }
+    return merged;
+  }
+
   get(id: string): AgentMemoryEntry | undefined {
     const row = this.db.prepare(`SELECT * FROM copilot_memory WHERE id = ? AND user_id = ?`).get(id, this.userId) as MemoryRow | undefined;
     return row ? toEntry(row) : undefined;
@@ -136,4 +167,14 @@ function quoteFts(query: string): string {
     .filter(Boolean)
     .map((token) => `"${token}"`)
     .join(" AND ");
+}
+
+/** OR-token FTS query: any token match suffices (used by recall). */
+function quoteFtsOr(query: string): string {
+  return query
+    .replace(/"/gu, " ")
+    .split(/\s+/u)
+    .filter(Boolean)
+    .map((token) => `"${token}"`)
+    .join(" OR ");
 }

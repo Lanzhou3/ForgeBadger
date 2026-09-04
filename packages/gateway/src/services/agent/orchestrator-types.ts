@@ -41,4 +41,11 @@ export interface AgentLlmClient {
   summarize(input: { messages: AgentLlmMessage[]; modelId?: string }): Promise<string>;
   /** Generate a short conversation title from the first user/assistant exchange. */
   generateTitle(input: { userText: string; assistantText: string; modelId?: string }): Promise<string>;
+  /** Propose durable memory entries from a completed turn (memory curation). */
+  proposeMemory(input: { userText: string; assistantText: string; modelId?: string }): Promise<Array<{
+    kind: "fact" | "preference" | "decision" | "project_note";
+    scope: "global" | "project" | "session";
+    text: string;
+    projectId?: string;
+  }>>;
 }

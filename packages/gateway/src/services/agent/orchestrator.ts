@@ -23,10 +23,12 @@ import { executeAgentTool } from "./tool-registry.js";
 import type { AgentLlmClient, AgentToolCall } from "./orchestrator-types.js";
 import { CopilotConversationLog } from "./conversation-log.js";
 import { buildCompressedContext } from "./context.js";
+import { AgentMemoryRepository } from "./memory.js";
 import { resolveLocalCommandReply } from "./slash-commands.js";
 import { listEnabledCopilotSkillSummaries } from "./skills/skill-queries.js";
 import { redactAgentValue } from "./redaction.js";
 import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js";
+import { maybePersistMemory } from "./memory-curation.js";
 
 export interface CopilotOrchestratorDependencies {
   db: import("../../db/types.js").Database;
@@ -64,6 +66,8 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     userText: string;
     modelId?: string;
     source?: "user" | "reactive" | "scheduled";
+    /** Project scope for memory recall (project-scoped entries + global). */
+    projectId?: string;
     /**
      * Skip the initial user-message append. Used by the edit-message flow,
      * which has already rewritten the target message in place — appending a
@@ -113,7 +117,10 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         }
         // Project model-visible history from the log, compressing older messages
         // into a rolling summary when the conversation overflows the budget.
-      const { messages } = await buildCompressedContext(log, input.conversationId, deps.llm, input.modelId);
+      const { messages } = await buildCompressedContext(log, input.conversationId, deps.llm, input.modelId, {
+        memory: new AgentMemoryRepository(deps.db, userId),
+        ...(input.projectId !== undefined ? { memoryProjectId: input.projectId } : {})
+      });
       let steps = 0;
       let finalText = "";
 
@@ -280,6 +287,17 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         runId: run.id,
         eventBus: deps.eventBus,
         llm: deps.llm,
+        ...(input.modelId !== undefined ? { modelId: input.modelId } : {})
+      }).catch(() => undefined);
+      // Best-effort memory curation: the turn may have surfaced a durable
+      // decision or preference worth persisting. Fire-and-forget, gated by env.
+      maybePersistMemory({
+        db: deps.db,
+        userId,
+        llm: deps.llm,
+        userText: input.userText,
+        assistantText: finalText,
+        ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
         ...(input.modelId !== undefined ? { modelId: input.modelId } : {})
       }).catch(() => undefined);
       deps.eventBus.emitEvent({

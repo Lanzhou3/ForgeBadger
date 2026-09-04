@@ -71,9 +71,18 @@ export function createAgentLlmClient(input: {
   const fetchImpl = input.fetchImpl ?? fetch;
   const resolveHost = input.resolveHost ?? lookup;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  // Per-client resolution cache. The client is constructed per user per stack,
+  // so a cached resolution lives only for the current turn/stack — this avoids
+  // re-decrypting credentials across the step loop and the summarize/title/
+  // curation calls that each resolve independently.
+  const resolutionCache = new Map<string, AgentLlmProviderResolution>();
 
   /** Resolve a model profile to a concrete provider resolution. */
   function resolveProvider(modelId?: string): AgentLlmProviderResolution {
+    const cacheKey = modelId ?? "__default__";
+    const cached = resolutionCache.get(cacheKey);
+    if (cached) return cached;
+
     const repo = input.modelProviderRepository;
     const profile = modelId ? repo.getModelProfile(modelId) : repo.listModelProfiles().find((m) => m.isDefault) ?? repo.listModelProfiles()[0];
     if (!profile) throw new AgentError("AGENT_NO_MODEL", "No model provider configured");
@@ -86,7 +95,7 @@ export function createAgentLlmClient(input: {
     const apiKey = repo.decryptCredential(credential.id);
     const baseUrl = pickBaseUrl(provider.apiFormat, provider.anthropicBaseUrl ?? profile.baseUrl, provider.openaiBaseUrl ?? profile.baseUrl);
     if (!baseUrl) throw new AgentError("AGENT_NO_BASE_URL", "Provider has no base URL");
-    return {
+    const resolution: AgentLlmProviderResolution = {
       modelProfileId: profile.id,
       providerKey: provider.providerKey,
       modelId: profile.modelId,
@@ -96,6 +105,8 @@ export function createAgentLlmClient(input: {
       authType: provider.authType,
       defaultHeaders: provider.defaultHeaders
     };
+    resolutionCache.set(cacheKey, resolution);
+    return resolution;
   }
 
   /** Stream one model request; emits text/tool deltas. Resolves on completion. */
@@ -164,7 +175,34 @@ export function createAgentLlmClient(input: {
     return sanitizeTitle(text);
   }
 
-  return { resolveProvider, stream, summarize, generateTitle };
+  /**
+   * Propose durable memory entries from a completed turn. Returns an empty
+   * array on parse failure or an unusable model response — curation is always
+   * best-effort and never throws.
+   */
+  async function proposeMemory(input: { userText: string; assistantText: string; modelId?: string }): Promise<Array<{
+    kind: "fact" | "preference" | "decision" | "project_note";
+    scope: "global" | "project" | "session";
+    text: string;
+    projectId?: string;
+  }>> {
+    let text = "";
+    await stream({
+      messages: [
+        { role: "user", content: input.userText },
+        { role: "assistant", content: input.assistantText }
+      ],
+      tools: [],
+      system: MEMORY_PROPOSAL_SYSTEM_PROMPT,
+      ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+      onEvent: (event) => {
+        if (event.type === "text_delta") text += event.text ?? "";
+      }
+    });
+    return parseMemoryProposals(text);
+  }
+
+  return { resolveProvider, stream, summarize, generateTitle, proposeMemory };
 }
 
 const SUMMARY_SYSTEM_PROMPT = [
@@ -200,7 +238,7 @@ async function streamAnthropic(
   signal: AbortSignal,
   timeoutMs: number | undefined
 ): Promise<{ message: string }> {
-  const system = request.system ?? buildSystemPrompt();
+  const system = request.system ?? SYSTEM_PROMPT;
   const apiMessages = request.messages
     .filter((m) => m.role !== "tool")
     .map((m) => (m.role === "assistant"
@@ -320,19 +358,17 @@ async function streamOpenAi(
   return { message };
 }
 
-function buildSystemPrompt(): string {
-  return [
-    "You are Copilot, the platform agent for ForgeBadger.",
-    "You can observe and operate the whole platform through the provided tools:",
-    "- projects: list and inspect projects",
-    "- sessions: list and inspect AI CLI sessions",
-    "- memory: read/write scoped memory (global, project, session)",
-    "",
-    "Be concise. When you need to take an operate action, request it and it will be",
-    "approved by the owner before it executes. Never claim a write happened until",
-    "the tool result confirms it."
-  ].join("\n");
-}
+const SYSTEM_PROMPT = [
+  "You are Copilot, the platform agent for ForgeBadger.",
+  "You can observe and operate the whole platform through the provided tools:",
+  "- projects: list and inspect projects",
+  "- sessions: list and inspect AI CLI sessions",
+  "- memory: read/write scoped memory (global, project, session)",
+  "",
+  "Be concise. When you need to take an operate action, request it and it will be",
+  "approved by the owner before it executes. Never claim a write happened until",
+  "the tool result confirms it."
+].join("\n");
 
 function safeJsonParse(value: string): unknown {
   try { return JSON.parse(value); } catch { return {}; }
@@ -362,6 +398,49 @@ const TITLE_SYSTEM_PROMPT = [
   "- user asks for a haiku about autumn → 'Autumn haiku'",
   "- 用户让 Copilot 总结最近一周项目状态 → '本周项目状态回顾'"
 ].join("\n");
+
+const MEMORY_PROPOSAL_SYSTEM_PROMPT = [
+  "You extract durable memory entries from a single Copilot turn.",
+  "From the user message and the assistant reply, identify facts, preferences,",
+  "or decisions that will be useful in FUTURE turns, and return them as a JSON",
+  "array. Each entry is {\"kind\": \"fact\"|\"preference\"|\"decision\"|\"project_note\",",
+  "\"scope\": \"global\"|\"project\"|\"session\", \"text\": \"...\"}.",
+  "Rules:",
+  "- Write only concrete, non-transient information; skip trivial chatter.",
+  "- Prefer 'global' scope unless the fact is clearly project-specific.",
+  "- Return [] when nothing is worth remembering. Return ONLY the JSON array,",
+  "no prose, no markdown fences."
+].join("\n");
+
+function parseMemoryProposals(raw: string): Array<{
+  kind: "fact" | "preference" | "decision" | "project_note";
+  scope: "global" | "project" | "session";
+  text: string;
+  projectId?: string;
+}> {
+  try {
+    const parsed = JSON.parse(raw.trim()) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const valid: Array<{ kind: "fact" | "preference" | "decision" | "project_note"; scope: "global" | "project" | "session"; text: string; projectId?: string }> = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const record = item as Record<string, unknown>;
+      const kind = record.kind;
+      const scope = record.scope;
+      const text = record.text;
+      if (
+        (kind === "fact" || kind === "preference" || kind === "decision" || kind === "project_note")
+        && (scope === "global" || scope === "project" || scope === "session")
+        && typeof text === "string" && text.trim().length > 0
+      ) {
+        valid.push({ kind, scope, text: text.trim().slice(0, 8 * 1024) });
+      }
+    }
+    return valid;
+  } catch {
+    return [];
+  }
+}
 
 const TITLE_MAX_CHARS = 24;
 

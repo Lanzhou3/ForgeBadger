@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { CopilotSkillsCard, skillsQueryKey } from "@/components/copilot/copilot-skill-panel";
+import { CopilotMemoryPanel } from "@/components/copilot/copilot-memory-panel";
 import {
   CapabilitiesSection,
   copilotCapabilitiesQueryKey,
@@ -130,6 +131,8 @@ export function CopilotSettingsPage() {
           </Card>
 
           <CopilotSkillsCard />
+
+          <CopilotMemoryPanel />
 
           <Card>
             <CardHeader className="flex flex-row items-center gap-3 space-y-0">
