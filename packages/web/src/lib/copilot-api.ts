@@ -13,11 +13,14 @@ export type CopilotRunStatus =
   | "awaiting_approval"
   | "completed"
   | "cancelled"
-  | "failed";
+  | "failed"
+  | "stopped"
+  | "indeterminate";
 
 export interface CopilotConversation {
   id: string;
   title: string | null;
+  grantId?: string | null;
   status: string;
   created_at: number;
   updated_at: number;
@@ -39,6 +42,8 @@ export interface CopilotMessage {
 }
 
 export interface CopilotRun {
+  revision?: number;
+  stopReason?: string;
   id: string;
   conversationId: string;
   userId: string;
@@ -54,6 +59,8 @@ export interface CopilotRun {
 }
 
 export interface CopilotPendingAction {
+  platformIntentId?: string | null;
+  platformIntent?: import("@/lib/platform-actions-api").PlatformIntent | null;
   id: string;
   runId: string;
   userId: string;
@@ -91,10 +98,10 @@ export function listConversations() {
   return fetchJson<{ conversations: CopilotConversation[] }>("/api/v1/copilot/conversations");
 }
 
-export function createConversation(title?: string) {
+export function createConversation(title?: string, grantId?: string) {
   return fetchJson<{ conversation: CopilotConversation }>("/api/v1/copilot/conversations", {
     method: "POST",
-    body: JSON.stringify(title ? { title } : {}),
+    body: JSON.stringify({ ...(title ? { title } : {}), ...(grantId ? { grantId } : {}) }),
   });
 }
 
@@ -126,6 +133,12 @@ export function sendMessage(conversationId: string, content: string, modelId?: s
       method: "POST",
       body: JSON.stringify(modelId ? { content, modelId } : { content }),
     }
+  );
+}
+
+export function listConversationRuns(conversationId: string) {
+  return fetchJson<{ runs: CopilotRun[]; activeRun: CopilotRun | null }>(
+    `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/runs`
   );
 }
 

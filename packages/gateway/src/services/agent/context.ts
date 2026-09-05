@@ -32,6 +32,11 @@ export interface CompressedContext {
 export interface CompressedContextOptions {
   memory?: AgentMemoryRepository;
   memoryProjectId?: string;
+  memoryProjectIds?: string[];
+  excludeGlobalMemory?: boolean;
+  memoryConversationId?: string;
+  canCommit?: () => boolean;
+  signal?: AbortSignal;
   memoryRecallLimit?: number;
   memoryRecallBudget?: number;
 }
@@ -53,15 +58,20 @@ export async function buildCompressedContext(
   modelId?: string,
   options: CompressedContextOptions = {}
 ): Promise<CompressedContext> {
-  const rows = log.listMessages(conversationId).filter((message) => message.kind === "text");
+  const rows = log.listMessages(conversationId);
+  const sourceFingerprint = JSON.stringify(rows);
   const recall = buildRecallBlock(rows, options);
 
   if (estimateChars(rows) <= MAX_CONTEXT_CHARS) {
-    const projected = rows.map(toLlmMessage);
+    const projected = projectTranscript(rows);
     return { messages: recall ? [recall, ...projected] : projected, compressed: false };
   }
 
   const split = splitAtBudget(rows, MAX_CONTEXT_CHARS);
+  if (split === 0) {
+    const projected = projectTranscript(rows);
+    return { messages: recall ? [recall, ...projected] : projected, compressed: false };
+  }
   const head = rows.slice(0, split);
   const tail = rows.slice(split);
   const conversation = log.getConversation(conversationId);
@@ -78,21 +88,22 @@ export async function buildCompressedContext(
       // Anthropic requires the first message to be a user message.
       toFold.push({ role: "user", content: "Conversation start." });
     }
-    toFold.push(...headUncovered.map(toLlmMessage));
+    toFold.push(...projectTranscript(headUncovered));
     try {
-      summary = await llm.summarize({ messages: toFold, ...(modelId !== undefined ? { modelId } : {}) });
+      summary = await llm.summarize({ messages: toFold, ...(modelId !== undefined ? { modelId } : {}), ...(options.signal ? { signal: options.signal } : {}) });
     } catch {
       // Non-fatal: degrade to the raw history; the main turn decides if it errors.
-      return { messages: recall ? [recall, ...rows.map(toLlmMessage)] : rows.map(toLlmMessage), compressed: false };
+      return { messages: recall ? [recall, ...projectTranscript(rows)] : projectTranscript(rows), compressed: false };
     }
     const lastHead = headUncovered[headUncovered.length - 1] ?? head[head.length - 1];
     if (lastHead) {
-      log.updateConversationSummary(conversationId, { summary, coveredSequence: lastHead.sequence });
+      log.updateConversationSummary(conversationId, { summary, coveredSequence: lastHead.sequence,
+        expectedFingerprint: sourceFingerprint, ...(options.canCommit ? { canCommit: options.canCommit } : {}) });
     }
   }
 
   const summaryMessage: AgentLlmMessage = { role: "user", content: `[会话摘要]\n${summary}` };
-  const tailProjected = tail.map(toLlmMessage);
+  const tailProjected = projectTranscript(tail);
   return {
     messages: recall ? [recall, summaryMessage, ...tailProjected] : [summaryMessage, ...tailProjected],
     compressed: true
@@ -111,7 +122,9 @@ function buildRecallBlock(rows: AgentMessage[], options: CompressedContextOption
   const scopes = options.memoryProjectId
     ? [{ scope: "global" as const }, { scope: "project" as const, projectId: options.memoryProjectId }]
     : [{ scope: "global" as const }];
-  const entries = memory.searchMulti(scopes, query, limit);
+  const recallScopes: import("./memory.js").AgentMemoryScope[] = options.excludeGlobalMemory ? (options.memoryProjectIds ?? []).map(projectId => ({scope: "project" as const, projectId})) : scopes;
+  if (options.memoryConversationId) recallScopes.push({ scope: "session", conversationId: options.memoryConversationId });
+  const entries = memory.searchMulti(recallScopes, query, limit);
   if (entries.length === 0) return undefined;
 
   const lines = entries.map((entry) => `- (${entry.scope}/${entry.kind}) ${entry.text}`);
@@ -131,19 +144,62 @@ function recentUserText(rows: AgentMessage[]): string | undefined {
 
 function estimateChars(messages: AgentMessage[]): number {
   let total = 0;
-  for (const message of messages) total += message.content.length + 8;
+  for (const message of messages) total += message.content.length + (message.toolInputJson?.length ?? 0) + 8;
   return total;
 }
 
 /** Index of the first message to keep in the tail; everything before it is the head. */
 function splitAtBudget(messages: AgentMessage[], budget: number): number {
   let used = 0;
+  let split = messages.length;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message) continue;
-    const cost = message.content.length + 8;
-    if (used + cost > budget) return index + 1;
-    used += cost;
+    const message = messages[index]!;
+    used += message.content.length + (message.toolInputJson?.length ?? 0) + 8;
+    // Only split at complete user turns. Keep the newest turn even when it
+    // alone exceeds the budget; never sever a tool invocation from its result.
+    if (message.role === "user" && message.kind === "text") {
+      if (used > budget && split < messages.length) return split;
+      split = index;
+    }
   }
   return 0;
+}
+
+/** Historical incomplete batches are observations, never executable calls. */
+export function projectTranscript(rows: AgentMessage[]): AgentLlmMessage[] {
+  const messages: AgentLlmMessage[] = [];
+  for (let index = 0; index < rows.length;) {
+    const row = rows[index]!;
+    if (row.kind !== "tool_call") {
+      if (row.kind === "text") messages.push(toLlmMessage(row));
+      else if (row.kind === "tool_result" || row.kind === "error") messages.push(historicalObservation(row));
+      index += 1;
+      continue;
+    }
+    const calls: AgentMessage[] = [];
+    while (rows[index]?.kind === "tool_call") calls.push(rows[index++]!);
+    const results: AgentMessage[] = [];
+    while (rows[index]?.kind === "tool_result" || rows[index]?.kind === "pending_action") {
+      if (rows[index]?.kind === "tool_result") results.push(rows[index]!);
+      index += 1;
+    }
+    const ids = new Set(calls.map((call) => call.toolCallId));
+    const complete = ids.size === calls.length && calls.every((call) => call.toolCallId && call.toolName
+      && results.filter((result) => result.toolCallId === call.toolCallId).length === 1)
+      && results.length === calls.length;
+    if (!complete) {
+      messages.push(...calls.map(historicalObservation), ...results.map(historicalObservation));
+      continue;
+    }
+    messages.push({ role: "assistant", content: "", toolCalls: calls.map((call) => ({
+      id: call.toolCallId!, name: call.toolName!, arguments: call.toolInputJson ?? "{}"
+    })) });
+    messages.push(...calls.map((call): AgentLlmMessage => ({ role: "tool", toolCallId: call.toolCallId!,
+      content: results.find((result) => result.toolCallId === call.toolCallId)!.content })));
+  }
+  return messages;
+}
+
+function historicalObservation(row: AgentMessage): AgentLlmMessage {
+  return { role: "assistant", content: `[Historical ${row.kind}; observation only] ${row.toolName ?? ""} ${row.toolInputJson ?? ""} ${row.content}` };
 }

@@ -131,3 +131,79 @@ describe("copilot context compression", () => {
     assert.ok(MAX_CONTEXT_CHARS > 0);
   });
 });
+
+it("recalls complete tool batches without orphan tool roles", async () => {
+  const db = createTestDb();
+  try {
+    const user = new UserRepository(db).create("batch@example.com", "hash");
+    const log = new CopilotConversationLog(db, user.id);
+    const conversation = log.createConversation();
+    log.appendMessage(conversation.id, { role: "user", kind: "text", content: "inspect" });
+    for (const id of ["a", "b"]) log.appendMessage(conversation.id, {
+      role: "assistant", kind: "tool_call", content: "", toolName: `read_${id}`, toolCallId: id, toolInputJson: "{}"
+    });
+    for (const id of ["a", "b"]) log.appendMessage(conversation.id, {
+      role: "tool", kind: "tool_result", content: `fact ${id}`, toolCallId: id
+    });
+    const result = await buildCompressedContext(log, conversation.id, {} as AgentLlmClient);
+    assert.deepEqual(result.messages.map((m) => m.role), ["user", "assistant", "tool", "tool"]);
+    assert.equal(result.messages[1]?.toolCalls?.length, 2);
+    assert.equal(result.messages[3]?.content, "fact b");
+  } finally { db.close(); }
+});
+
+it("does not commit a summary after source history changes or ownership is lost", async () => {
+  for (const changeHistory of [true, false]) {
+    const db = createTestDb();
+    try {
+      const user = new UserRepository(db).create("fence@example.com", "hash");
+      const log = new CopilotConversationLog(db, user.id);
+      const conversation = log.createConversation();
+      appendText(log, conversation.id, 60, 2000);
+      const llm = { async summarize() {
+        if (changeHistory) log.appendMessage(conversation.id, { role: "user", kind: "text", content: "changed" });
+        return "stale";
+      } } as unknown as AgentLlmClient;
+      await buildCompressedContext(log, conversation.id, llm, undefined, { canCommit: () => changeHistory });
+      assert.equal(log.getConversation(conversation.id)?.summary, null);
+    } finally { db.close(); }
+  }
+});
+
+it("keeps a whole oversized latest turn and labels incomplete legacy calls as history", async () => {
+  const db = createTestDb();
+  try {
+    const user = new UserRepository(db).create("turn@example.com", "hash");
+    const log = new CopilotConversationLog(db, user.id);
+    const conversation = log.createConversation();
+    log.appendMessage(conversation.id, { role: "user", kind: "text", content: "x".repeat(MAX_CONTEXT_CHARS + 1) });
+    log.appendMessage(conversation.id, { role: "assistant", kind: "tool_call", toolCallId: "missing", toolName: "read", toolInputJson: "{}", content: "" });
+    const llm = { async summarize() { assert.fail("must not cut a single turn"); } } as unknown as AgentLlmClient;
+    const result = await buildCompressedContext(log, conversation.id, llm);
+    assert.equal(result.compressed, false);
+    assert.equal(result.messages[0]?.content.length, MAX_CONTEXT_CHARS + 1);
+    assert.match(result.messages[1]!.content, /Historical tool_call/);
+    assert.equal(result.messages.some((message) => message.toolCalls?.length), false);
+  } finally { db.close(); }
+});
+
+it("compresses at user-turn boundaries and includes tool facts in the summary request", async () => {
+  const db = createTestDb();
+  try {
+    const user = new UserRepository(db).create("toolsummary@example.com", "hash");
+    const log = new CopilotConversationLog(db, user.id);
+    const conversation = log.createConversation();
+    for (const id of ["old", "new"]) {
+      log.appendMessage(conversation.id, { role: "user", kind: "text", content: `inspect ${id}` });
+      log.appendMessage(conversation.id, { role: "assistant", kind: "tool_call", content: "", toolName: "read", toolCallId: id, toolInputJson: "{}" });
+      log.appendMessage(conversation.id, { role: "tool", kind: "tool_result", content: `${id} fact ${"x".repeat(60_000)}`, toolCallId: id });
+    }
+    let folded: AgentLlmMessage[] = [];
+    const llm = { async summarize(input: { messages: AgentLlmMessage[] }) { folded = input.messages; return "old fact"; } } as unknown as AgentLlmClient;
+    const result = await buildCompressedContext(log, conversation.id, llm);
+    assert.deepEqual(folded.map((message) => message.role), ["user", "assistant", "tool"]);
+    assert.equal(folded[2]?.toolCallId, "old");
+    assert.deepEqual(result.messages.slice(1).map((message) => message.role), ["user", "assistant", "tool"]);
+    assert.equal(result.messages.at(-1)?.toolCallId, "new");
+  } finally { db.close(); }
+});

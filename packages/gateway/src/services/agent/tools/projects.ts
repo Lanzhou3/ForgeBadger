@@ -1,3 +1,4 @@
+import { executeAgentAction } from "../../platform-commands/agent-actions.js";
 /**
  * Project tools for the Copilot harness — the "projects" seam of the platform
  * tool surface. Read tools expose project state; the operate tool (create
@@ -7,7 +8,6 @@
  */
 import { z } from "zod";
 import {
-  createProjectRecord,
   getProjectDetail,
   listProjectSummaries
 } from "../platform-access.js";
@@ -63,20 +63,13 @@ export function createProjectTools(): AgentTool[] {
     },
     {
       name: "create_project",
-      description: "Create a new project (approval required outside home directory).",
+      description: "Create a new project (exact approval or project creation grant required).",
       risk: "operate",
       requiresApproval: true,
       riskClass: "medium",
       inputSchema: createProjectInput,
       async execute(input, context) {
-        const parsed = createProjectInput.parse(input);
-        const { db, userId } = toolDb(context);
-        const created = createProjectRecord(db, userId, {
-          name: parsed.name,
-          path: parsed.path,
-          ...(parsed.description !== undefined ? { description: parsed.description } : {})
-        });
-        return { created: true, ...created };
+        return executeAgentAction("create_project", createProjectInput.parse(input), context);
       }
     }
   ];

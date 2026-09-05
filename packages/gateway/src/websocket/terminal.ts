@@ -65,7 +65,10 @@ export interface TerminalWritable {
 export class TerminalInputBuffer {
   private readonly pendingInput: string[] = [];
 
+  constructor(private readonly assertWritable: () => void = () => {}) {}
+
   writeOrStore(pty: TerminalWritable | undefined, data: string): void {
+    this.assertWritable();
     if (pty) {
       pty.write(data);
       return;
@@ -74,7 +77,9 @@ export class TerminalInputBuffer {
   }
 
   flush(pty: TerminalWritable): void {
-    for (const data of this.pendingInput) {
+    const pending = this.pendingInput.splice(0);
+    for (const data of pending) {
+      this.assertWritable();
       pty.write(data);
     }
     this.pendingInput.length = 0;
@@ -318,7 +323,7 @@ async function handleTerminalSocket(
   runtimeAuthorizationRegistry: TerminalRuntimeAuthorizationRegistry
 ): Promise<void> {
   let pty: IPty | undefined;
-  const inputBuffer = new TerminalInputBuffer();
+  const inputBuffer = new TerminalInputBuffer(() => sessionManager.assertManualInputAllowed(userId, sessionId));
   const resizeBuffer = new TerminalResizeBuffer();
   let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
   let authorizationLease: TerminalRuntimeAuthorizationLease | undefined;
@@ -543,6 +548,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function formatTerminalClientError(error: unknown): string {
   if (error instanceof Error) {
+    if (error.message === "SESSION_WRITER_BUSY") return "Copilot is writing to this workspace. Take over the active session before typing.";
     if (error.message === "Malformed terminal message" || error.message === "Terminal message too large") {
       return error.message;
     }

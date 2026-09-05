@@ -1,22 +1,8 @@
-/**
- * Copilot orchestrator — the turn/step loop.
- *
- * A run is one user turn plus its tool steps. The loop:
- *   1. appends the user message to the conversation log
- *   2. projects model-visible history from the log and calls the LLM
- *   3. streams text deltas; collects tool calls
- *   4. executes read tools; gates operate tools behind a pending action
- *      (sets the run to awaiting_approval and stops — the approved action is
- *      executed by a follow-up step, not autonomously)
- *   5. loops until no tool is owed or the step budget is exhausted
- *   6. persists the run and emits copilot_run_updated events
- *
- * It is deliberately provider-agnostic: provider resolution lives in
- * llm-client, tool definitions in the registry, and all platform reads/writes
- * go through the registered tool seams.
- */
+import { projectActionReceipt } from "../platform-commands/receipt-projection.js";
+import { agentActions, agentActionInput, TOOL_COMMANDS } from "../platform-commands/agent-actions.js";
+import { checkAgentScope, grantedToolVisible } from "../platform-commands/agent-scope.js";
+import { CopilotGrantRepository } from "../../db/repositories/copilot-grant-repository.js";
 import { randomUUID } from "node:crypto";
-import { createHash } from "node:crypto";
 import { ForgeBadgerEventBus } from "../event-bus.js";
 import type { AgentToolRegistry, AgentToolContext } from "./tool-registry.js";
 import { executeAgentTool } from "./tool-registry.js";
@@ -26,432 +12,325 @@ import { buildCompressedContext } from "./context.js";
 import { AgentMemoryRepository } from "./memory.js";
 import { resolveLocalCommandReply } from "./slash-commands.js";
 import { listEnabledCopilotSkillSummaries } from "./skills/skill-queries.js";
-import { redactAgentValue } from "./redaction.js";
+import { redactAgentValue, redactAgentErrorMessage } from "./redaction.js";
 import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js";
-import { maybePersistMemory } from "./memory-curation.js";
-
+import { AgentError } from "./types.js";
+import { CopilotRunLedger, inputDigest, type TurnInput, type Claim, type RunStep } from "./run-ledger.js";
+import { executionControl } from "./execution-control.js";
 export interface CopilotOrchestratorDependencies {
-  db: import("../../db/types.js").Database;
-  masterKey: string;
-  toolRegistry: AgentToolRegistry;
-  llm: AgentLlmClient;
-  eventBus: ForgeBadgerEventBus;
-  maxSteps?: number;
-  /**
-   * Owner's per-tool switches (copilot_tool_preferences). Disabled tools are
-   * hidden from the model, and a call that still arrives is refused with a
-   * recoverable tool_result instead of executing.
-   */
-  isToolDisabled?: (toolName: string) => boolean;
-  /** Live-session seam for tools that read terminal output or dispatch. */
-  sessionManager?: import("../session-manager.js").InMemorySessionManager;
-  /** Adapter CLI availability probing for launch preflight. */
-  adapterCommandRunner?: import("../../lib/dependency-check.js").CommandRunner;
+    db: import("../../db/types.js").Database;
+    masterKey: string;
+    toolRegistry: AgentToolRegistry;
+    llm: AgentLlmClient;
+    eventBus: ForgeBadgerEventBus;
+    maxSteps?: number;
+    leaseMs?: number;
+    isToolDisabled?: (toolName: string) => boolean;
+    sessionManager?: import("../session-manager.js").InMemorySessionManager;
+    adapterCommandRunner?: import("../../lib/dependency-check.js").CommandRunner;
 }
-
-const DEFAULT_MAX_STEPS = 16;
-
+/** Durable loop. HTTP uses enqueue; automation uses the waiting runTurn API. */
 export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies) {
-  const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
-  const securityPolicy = createSecurityPolicy();
-
-  function logFor(userId: string): CopilotConversationLog {
-    return new CopilotConversationLog(deps.db, userId);
-  }
-
-  /** Run one user turn (or a proactive reactive-loop turn). Returns the run id. */
-  async function runTurn(input: {
+    const control = executionControl(deps.db);
+    const leaseMs = deps.leaseMs ?? 30000;
+    const policy = createSecurityPolicy();
+    const ledgerFor = (userId: string) => new CopilotRunLedger(deps.db, userId);
+    function emit(ledger: CopilotRunLedger, runId: string, extra: {
+        textDelta?: string;
+        message?: string;
+        toolName?: string;
+        pendingActionId?: string;
+    } = {}) {
+        if (!deps.db.open || control.stopped)
+            return;
+        const r = ledger.get(runId);
+        if (!r)
+            return;
+        deps.eventBus.emitEvent({ type: "copilot_run_updated", userId: ledger.userId, runId, conversationId: r.conversation_id, status: r.status, source: r.source, revision: r.revision, ...extra, occurredAt: new Date() });
+    }
+    const effect = (name: string) => deps.toolRegistry.tools.get(name)?.risk === "operate" || name === "write_memory" ? "write" as const : "read" as const;
+    function enqueue(input: TurnInput): string {
+        if (control.stopped)
+            throw new AgentError("COPILOT_RUNTIME_STOPPED", "Copilot runtime is shutting down");
+        const runId = ledgerFor(input.userId).admit(input, deps.maxSteps ?? 16);
+        // Admission is synchronous and durable before the worker is queued.
+        queueMicrotask(() => { void executeRun(input.userId, runId); });
+        return runId;
+    }
+    async function runTurn(input: TurnInput): Promise<string> {
+        if (control.stopped)
+            throw new AgentError("COPILOT_RUNTIME_STOPPED", "Copilot runtime is shutting down");
+        const runId = ledgerFor(input.userId).admit(input, deps.maxSteps ?? 16);
+        await executeRun(input.userId, runId);
+        if (!deps.db.open || control.stopped)
+            return runId;
+        const result = ledgerFor(input.userId).log.getRun(runId);
+        if (result?.status === "failed")
+            throw new AgentError(result.stopReason ?? "COPILOT_FAILED", result.error ?? "Copilot failed");
+        return runId;
+    }
+    async function executeRun(userId: string, runId: string): Promise<void> {
+        if (control.stopped || !deps.db.open)
+            return;
+        const existing = control.active.get(runId);
+        if (existing)
+            return existing.promise;
+        const ledger = ledgerFor(userId);
+        const claim = ledger.claim(runId, randomUUID(), leaseMs);
+        if (!claim) {
+            emit(ledger, runId);
+            return;
+        }
+        const controller = new AbortController();
+        const timer = setInterval(() => { if (control.stopped || !deps.db.open) {
+            clearInterval(timer);
+            controller.abort();
+            return;
+        } if (!ledger.renew(claim, leaseMs))
+            controller.abort(); }, Math.max(10, Math.floor(leaseMs / 3)));
+        timer.unref();
+        const promise = Promise.resolve().then(() => drive(ledger, claim, controller.signal)).catch(error => {
+            if (!deps.db.open || control.stopped)
+                return;
+            const interruptedWrite = ledger.steps(runId).find(s => s.status === "running" && s.effect === "write");
+            if (interruptedWrite) {
+                ledger.receipt(claim, interruptedWrite, "Tool outcome unknown after execution error", true);
+                emit(ledger, runId);
+                return;
+            }
+            ledger.finish(claim, "failed", error instanceof AgentError ? error.code : redactAgentErrorMessage(error instanceof Error ? error.message : "Copilot failed"));
+            emit(ledger, runId);
+        }).finally(() => { clearInterval(timer); control.active.delete(runId); });
+        control.active.set(runId, { controller, promise, stopLease: () => clearInterval(timer) });
+        return promise;
+    }
+    async function drive(ledger: CopilotRunLedger, c: Claim, signal: AbortSignal): Promise<void> {
+        const input = JSON.parse(ledger.get(c.runId)!.input_json) as TurnInput;
+        ledger.validateScope(input);
+        const live = () => !control.stopped && !signal.aborted && ledger.owns(c);
+        while (live()) {
+            ledger.validateScope(input);
+            const pending = ledger.steps(c.runId).find(s => s.kind === "tool" && s.status !== "completed");
+            if (pending) {
+                await toolStep(ledger, c, pending, input, live);
+                continue;
+            }
+            const step = ledger.modelStep(c);
+            if (!step || !live())
+                break;
+            if (!ledger.startStep(c, step))
+                break;
+            const command = ledger.get(c.runId)!.steps === 1 ? resolveLocalCommandReply(input.userText, () => input.grantId ? [] : listEnabledCopilotSkillSummaries(deps.db, input.userId)) : null;
+            const calls: AgentToolCall[] = [];
+            let text = "";
+            if (command !== null)
+                text = command;
+            else {
+                const { messages } = await buildCompressedContext(ledger.log, input.conversationId, deps.llm, input.modelId, {
+                    memory: new AgentMemoryRepository(deps.db, input.userId), memoryConversationId: input.conversationId, signal,
+                    ...(input.grantId ? { excludeGlobalMemory: true, memoryProjectIds: new CopilotGrantRepository(deps.db, input.userId).get(input.grantId)?.scope.projectIds ?? [] } : {}),
+                    ...(input.projectId ? { memoryProjectId: input.projectId } : {}), canCommit: live
+                });
+                if (!live())
+                    return;
+                await deps.llm.stream({ messages, signal,
+                    tools: deps.toolRegistry.toModelSchemas().filter(t => !deps.isToolDisabled?.(t.name) && (!input.grantId || grantedToolVisible(t.name)) && (input.source !== "scheduled" || effect(t.name) === "read")),
+                    ...(input.modelId ? { modelId: input.modelId } : {}), onEvent: event => {
+                        if (!live())
+                            return;
+                        if (event.type === "text_delta") {
+                            text += event.text ?? "";
+                            emit(ledger, c.runId, { textDelta: event.text ?? "" });
+                        }
+                        if (event.type === "tool_call" && event.toolCall)
+                            calls.push({ id: event.toolCall.id, name: event.toolCall.name, input: parse(event.toolCall.arguments) });
+                    } });
+            }
+            if (!live())
+                return;
+            let completed = false;
+            ledger.commit(c, () => {
+                ledger.completeStep(step.id, text);
+                if (command !== null)
+                    deps.db.prepare("UPDATE copilot_runs SET steps=0 WHERE user_id=? AND id=?").run(ledger.userId, c.runId);
+                if (text || calls.length === 0)
+                    ledger.append(c.runId, { role: "assistant", kind: "text", content: text }, step.id);
+                for (const call of calls) {
+                    const tool = ledger.addStep(c.runId, { kind: "tool", toolCallId: call.id, toolName: call.name, inputJson: JSON.stringify(call.input), effect: effect(call.name) });
+                    ledger.append(c.runId, { role: "assistant", kind: "tool_call", content: call.name, toolName: call.name, toolInputJson: JSON.stringify(call.input), toolCallId: call.id }, tool.id);
+                }
+                if (calls.length === 0)
+                    completed = ledger.finish(c, "completed");
+            });
+            if (calls.length === 0) {
+                if (completed) {
+                    emit(ledger, c.runId, { message: text });
+                    // Await best-effort helpers so shutdown cannot close their database midway.
+                    if (command === null && !control.stopped && ledger.get(c.runId)?.status === "completed") {
+                        await maybeAutoTitle({ log: ledger.log, userId: input.userId, conversationId: input.conversationId, userText: input.userText, assistantText: text, source: input.source ?? "user", signal, canCommit: () => !control.stopped && deps.db.open && !!ledger.log.getConversation(input.conversationId) && ledger.log.listRuns(input.conversationId)[0]?.id === c.runId, runId: c.runId, eventBus: deps.eventBus, llm: deps.llm, ...(input.modelId ? { modelId: input.modelId } : {}) }).catch(() => undefined);
+                        // Durable memory writes are platform commands; background curation
+                        // cannot bypass the selected grant or exact one-shot approval.
+                    }
+                }
+                return;
+            }
+        }
+        emit(ledger, c.runId);
+    }
+    async function toolStep(ledger: CopilotRunLedger, c: Claim, step: RunStep, input: TurnInput, live: () => boolean): Promise<void> {
+        if (!live())
+            return;
+        const tool = deps.toolRegistry.tools.get(step.tool_name!);
+        const raw = parse(step.input_json!);
+        const action = ledger.log.listPendingActions(c.runId).find(a => a.stepId === step.id);
+        let rejection: string | undefined;
+        if (!tool)
+            rejection = `Unknown tool: ${step.tool_name}`;
+        else if (deps.isToolDisabled?.(tool.name))
+            rejection = `Tool disabled by owner: ${tool.name}`;
+        else if (input.source === "scheduled" && effect(tool.name) === "write")
+            rejection = "Scheduled runs are read only";
+        else if (inputDigest(step.input_json!) !== step.input_digest || (action && action.inputDigest !== step.input_digest))
+            rejection = "Tool input digest mismatch";
+        else if (!tool.inputSchema.safeParse(raw).success)
+            rejection = "Invalid tool input";
+        else if (action?.status === "rejected")
+            rejection = "Action rejected by owner";
+        const context: AgentToolContext = { userId: input.userId, db: deps.db, masterKey: deps.masterKey, conversationId: input.conversationId,
+            ...(input.grantId ? { grantId: input.grantId } : {}),
+            ...(input.projectId ? { projectId: input.projectId } : {}), ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}), ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}) };
+        if (!rejection && tool) {
+            try { checkAgentScope(context, tool.name, raw); } catch (error) { rejection = error instanceof Error ? error.message : "Grant scope rejected"; }
+            const decision = policy.evaluate({ userId: input.userId, toolName: tool.name, toolRisk: tool.risk, requiresApproval: tool.requiresApproval, input: raw });
+            logSecurityDecision({ db: deps.db, userId: input.userId, operation: tool.name, input: raw, action: decision.action, reason: decision.reason });
+            if (decision.action === "deny") rejection = `Denied by security policy: ${decision.reason}`;
+            if (!rejection && tool.risk === "operate" && TOOL_COMMANDS[tool.name]) {
+                try {
+                    const actions = agentActions(context);
+                    let intent = actions.intents.byKey(step.id);
+                    if (!intent) intent = actions.preview({ commandId: TOOL_COMMANDS[tool.name], input: agentActionInput(tool.name, raw, context), idempotencyKey: step.id,
+                        authority: input.grantId ? "delegated_grant" : "owner_action", ...(input.grantId ? { grantId: input.grantId } : {}) });
+                    if (intent.status === "pending" && action?.status === "approved") intent = actions.decide(intent.id, intent.digest, true);
+                    context.platformIntentId = intent.id;
+                    if (intent.status === "pending") {
+                        ledger.waitApproval(c, step);
+                        const pending = ledger.log.listPendingActions(c.runId).find(a => a.stepId === step.id);
+                        emit(ledger, c.runId, { toolName: tool.name, ...(pending ? { pendingActionId: pending.id } : {}) });
+                        return;
+                    }
+                    if (intent.status === "rejected") rejection = "Action rejected";
+                } catch (error) { rejection = error instanceof Error ? error.message : "Platform action rejected"; }
+            } else if (!rejection && tool.risk === "operate" && (input.grantId || action?.status !== "approved")) {
+                if (input.grantId) rejection = "Unregistered command is unavailable under grant authority";
+                else { ledger.waitApproval(c, step); return; }
+            }
+        }
+        if (!ledger.startStep(c, step)) return;
+        if (rejection) { ledger.receipt(c, step, rejection.startsWith("Denied by security policy:") ? rejection : `Denied by security policy: ${rejection}`); return; }
+        const result = await executeAgentTool(tool!, raw, context);
+        const platformActions=typeof context.platformIntentId==="string"?agentActions(context):undefined;
+        const platformReceipt=platformActions?.intents.receipt(context.platformIntentId as string);
+        const content=platformReceipt?projectActionReceipt(platformReceipt):result.ok?JSON.stringify(redactAgentValue(result.output)):`Tool error: ${result.error??"unknown"}`;
+        const intent=platformActions?.intents.get(context.platformIntentId as string);
+        const unknownEffect=platformReceipt?platformReceipt.outcome==="unknown":!result.ok&&step.effect==="write"&&(!intent||["executing","indeterminate"].includes(intent.status));
+        ledger.receipt(c,step,content,unknownEffect);
+        if (live())
+            emit(ledger, c.runId, { toolName: step.tool_name!, message: result.ok ? "ok" : "error" });
+    }
+    async function resumeAfterApproval(input: {
+        userId: string;
+        runId: string;
+        actionId: string;
+        approved: boolean;
+        async?: boolean;
+    }) {
+        const resumed = deps.db.transaction(() => {
+            const ledger = ledgerFor(input.userId);
+            const changed = ledger.decide(input.runId,input.actionId,input.approved);
+            if(!changed)return false;
+            const action=ledger.log.getPendingAction(input.actionId);
+            const actions=agentActions({db:deps.db,userId:input.userId,masterKey:deps.masterKey});
+            const intent=action?.stepId?actions.intents.byKey(action.stepId):undefined;
+            if(intent?.authority==="owner_action"&&intent.status==="pending")actions.decide(intent.id,intent.digest,input.approved);
+            return true;
+        }).immediate();
+        if (resumed) {
+            if (input.async)
+                queueMicrotask(() => { void executeRun(input.userId, input.runId); });
+            else
+                await executeRun(input.userId, input.runId);
+        }
+        return { resumed, runId: input.runId };
+    }
+    async function cancelRun(input: {
+        userId: string;
+        runId: string;
+    }) {
+        const ledger = ledgerFor(input.userId);
+        const cancelled = ledger.cancel(input.runId);
+        if (cancelled) {
+            control.active.get(input.runId)?.controller.abort();
+            emit(ledger, input.runId, { message: "Run cancelled" });
+        }
+        return { cancelled, runId: input.runId };
+    }
+    return { enqueue, runTurn, executeRun, resumeAfterApproval, cancelRun };
+}
+function parse(value: string): unknown { try {
+    return JSON.parse(value);
+}
+catch {
+    return null;
+} }
+async function maybeAutoTitle(input: {
+    log: CopilotConversationLog;
     userId: string;
     conversationId: string;
     userText: string;
+    assistantText: string;
+    source: "user" | "reactive" | "scheduled";
+    runId: string;
+    eventBus: ForgeBadgerEventBus;
+    llm: AgentLlmClient;
     modelId?: string;
-    source?: "user" | "reactive" | "scheduled";
-    /** Project scope for memory recall (project-scoped entries + global). */
-    projectId?: string;
-    /**
-     * Skip the initial user-message append. Used by the edit-message flow,
-     * which has already rewritten the target message in place — appending a
-     * duplicate would split the conversation into two of the same prompt.
-     */
-    skipUserMessage?: boolean;
-  }): Promise<string> {
-    const userId = input.userId;
-    const source = input.source ?? "user";
-    const log = logFor(userId);
-    if (!input.skipUserMessage) {
-      log.appendMessage(input.conversationId, { role: "user", kind: "text", content: input.userText });
-    }
-    const run = log.createRun(input.conversationId, {});
-    log.updateRun(run.id, { status: "running", startedAt: new Date() });
-
-      const context: AgentToolContext = {
-        userId,
-        db: deps.db,
-        masterKey: deps.masterKey,
-        ...(deps.sessionManager !== undefined ? { sessionManager: deps.sessionManager } : {}),
-        ...(deps.adapterCommandRunner !== undefined ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
-      };
-
-      try {
-        // Local slash-command short-circuit (e.g. /skills): reply straight
-        // from platform state — no context projection, no model call, no
-        // auto-title. The reply is persisted as a normal assistant turn.
-        const commandReply = resolveLocalCommandReply(
-          input.userText,
-          () => listEnabledCopilotSkillSummaries(deps.db, userId)
-        );
-        if (commandReply !== null) {
-          log.appendMessage(input.conversationId, { role: "assistant", kind: "text", content: commandReply });
-          log.updateRun(run.id, { status: "completed", completedAt: new Date(), steps: 0 });
-          deps.eventBus.emitEvent({
+    signal?: AbortSignal;
+    canCommit?: () => boolean;
+}): Promise<void> {
+    if (input.source !== "user")
+        return;
+    const conversation = input.log.getConversation(input.conversationId);
+    if (!conversation || conversation.title !== null)
+        return;
+    try {
+        const generated = await input.llm.generateTitle({
+            userText: input.userText,
+            assistantText: input.assistantText,
+            ...(input.signal ? { signal: input.signal } : {}),
+            ...(input.modelId !== undefined ? { modelId: input.modelId } : {})
+        });
+        if (!generated)
+            return;
+        // Re-check the title right before writing — a parallel rename from the
+        // owner (renameConversation endpoint) could have raced us between the
+        // check above and now. Never overwrite an owner-set title.
+        if (!(input.canCommit?.() ?? true))
+            return;
+        const fresh = input.log.getConversation(input.conversationId);
+        if (!fresh || fresh.title !== null)
+            return;
+        input.log.renameConversation(input.conversationId, generated);
+        input.eventBus.emitEvent({
             type: "copilot_run_updated",
-            userId,
-            source,
-            runId: run.id,
+            userId: input.userId,
+            runId: input.runId,
             conversationId: input.conversationId,
             status: "completed",
-            message: commandReply,
+            titleUpdated: generated,
             occurredAt: new Date()
-          });
-          return run.id;
-        }
-        // Project model-visible history from the log, compressing older messages
-        // into a rolling summary when the conversation overflows the budget.
-      const { messages } = await buildCompressedContext(log, input.conversationId, deps.llm, input.modelId, {
-        memory: new AgentMemoryRepository(deps.db, userId),
-        ...(input.projectId !== undefined ? { memoryProjectId: input.projectId } : {})
-      });
-      let steps = 0;
-      let finalText = "";
-
-      while (steps < maxSteps) {
-        steps += 1;
-        const toolCalls: AgentToolCall[] = [];
-        await deps.llm.stream({
-          messages,
-          tools: deps.toolRegistry.toModelSchemas().filter((schema) => !deps.isToolDisabled?.(schema.name)),
-          ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
-          onEvent: (event) => {
-            if (event.type === "text_delta") {
-              finalText += event.text ?? "";
-              deps.eventBus.emitEvent({
-                type: "copilot_run_updated",
-                userId,
-                source,
-                runId: run.id,
-                conversationId: input.conversationId,
-                status: "running",
-                textDelta: event.text ?? "",
-                occurredAt: new Date()
-              });
-            } else if (event.type === "tool_call" && event.toolCall) {
-              toolCalls.push({ id: event.toolCall.id, name: event.toolCall.name, input: safeParse(event.toolCall.arguments) });
-            }
-          }
         });
-
-        if (toolCalls.length === 0) {
-          // No tool owed — assistant finished.
-          break;
-        }
-
-        log.appendMessage(input.conversationId, {
-          role: "assistant",
-          kind: "text",
-          content: finalText
-        });
-        for (const tc of toolCalls) {
-          log.appendMessage(input.conversationId, {
-            role: "assistant",
-            kind: "tool_call",
-            content: tc.name,
-            toolName: tc.name,
-            toolInputJson: JSON.stringify(tc.input),
-            toolCallId: tc.id
-          });
-        }
-
-        // Handle tool calls in order; operate tools stop the loop pending approval.
-        let operated = false;
-        for (const tc of toolCalls) {
-          const tool = deps.toolRegistry.tools.get(tc.name);
-          if (!tool) {
-            log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content: `Unknown tool: ${tc.name}`, toolName: tc.name, toolCallId: tc.id });
-            messages.push({ role: "tool", toolCallId: tc.id, content: `Unknown tool: ${tc.name}` });
-            continue;
-          }
-          if (deps.isToolDisabled?.(tc.name)) {
-            // Defense in depth: the schema was already filtered, so this only
-            // triggers on a stale or hallucinated call. Recoverable result.
-            const content = `Tool disabled by owner: ${tc.name}`;
-            log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content, toolName: tc.name, toolCallId: tc.id });
-            messages.push({ role: "tool", toolCallId: tc.id, content });
-            continue;
-          }
-          const decision = securityPolicy.evaluate({
-            userId,
-            toolName: tc.name,
-            toolRisk: tool.risk,
-            requiresApproval: tool.requiresApproval,
-            input: tc.input
-          });
-          logSecurityDecision({
-            db: deps.db,
-            userId,
-            operation: tc.name,
-            input: tc.input,
-            action: decision.action,
-            reason: decision.reason
-          });
-
-          if (decision.action === "deny") {
-            const content = `Denied by security policy: ${decision.reason}`;
-            log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content, toolName: tc.name, toolCallId: tc.id });
-            messages.push({ role: "tool", toolCallId: tc.id, content });
-            deps.eventBus.emitEvent({
-              type: "copilot_run_updated",
-              userId,
-              source,
-              runId: run.id,
-              conversationId: input.conversationId,
-              status: "running",
-              toolName: tc.name,
-              message: "denied",
-              occurredAt: new Date()
-            });
-            continue;
-          }
-
-          if (decision.action === "require_approval") {
-            const digest = createHash("sha256").update(JSON.stringify(tc.input)).digest("hex");
-            const action = log.createPendingAction({
-              runId: run.id,
-              tool: tc.name,
-              inputJson: JSON.stringify(tc.input),
-              inputDigest: digest
-            });
-            log.updateRun(run.id, { status: "awaiting_approval" });
-            deps.eventBus.emitEvent({
-              type: "copilot_run_updated",
-              userId,
-              source,
-              runId: run.id,
-              conversationId: input.conversationId,
-              status: "awaiting_approval",
-              toolName: tc.name,
-              pendingActionId: action.id,
-              occurredAt: new Date()
-            });
-            operated = true;
-            break;
-          }
-
-          const result = await executeAgentTool(tool, tc.input, context);
-          const safeOutput = redactAgentValue(result.output);
-          const content = result.ok ? JSON.stringify(safeOutput) : `Tool error: ${result.error ?? "unknown"}`;
-          log.appendMessage(input.conversationId, { role: "tool", kind: "tool_result", content, toolName: tc.name, toolCallId: tc.id });
-          messages.push({ role: "tool", toolCallId: tc.id, content });
-          deps.eventBus.emitEvent({
-            type: "copilot_run_updated",
-            userId,
-            source,
-            runId: run.id,
-            conversationId: input.conversationId,
-            status: "running",
-            toolName: tc.name,
-            message: result.ok ? "ok" : "error",
-            occurredAt: new Date()
-          });
-        }
-
-        if (operated) {
-          // Run is waiting for owner approval; do not continue autonomously.
-          return run.id;
-        }
-      }
-
-      log.appendMessage(input.conversationId, { role: "assistant", kind: "text", content: finalText });
-      log.updateRun(run.id, { status: "completed", completedAt: new Date(), steps });
-      // After the first completed user turn, the conversation still has a null
-      // title — fire-and-forget an LLM-generated title so the sidebar / chat
-      // header stop showing "未命名对话". Reactive-loop turns and subsequent
-      // user turns are left alone: rename conversation only when the title is
-      // still null, so we never overwrite a user-renamed title.
-      maybeAutoTitle({
-        log,
-        userId,
-        conversationId: input.conversationId,
-        userText: input.userText,
-        assistantText: finalText,
-        source,
-        runId: run.id,
-        eventBus: deps.eventBus,
-        llm: deps.llm,
-        ...(input.modelId !== undefined ? { modelId: input.modelId } : {})
-      }).catch(() => undefined);
-      // Best-effort memory curation: the turn may have surfaced a durable
-      // decision or preference worth persisting. Fire-and-forget, gated by env.
-      maybePersistMemory({
-        db: deps.db,
-        userId,
-        llm: deps.llm,
-        userText: input.userText,
-        assistantText: finalText,
-        ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
-        ...(input.modelId !== undefined ? { modelId: input.modelId } : {})
-      }).catch(() => undefined);
-      deps.eventBus.emitEvent({
-        type: "copilot_run_updated",
-        userId,
-        source,
-        runId: run.id,
-        conversationId: input.conversationId,
-        status: "completed",
-        message: finalText,
-        occurredAt: new Date()
-      });
-      return run.id;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Copilot run failed";
-      log.updateRun(run.id, { status: "failed", error: message });
-      deps.eventBus.emitEvent({
-        type: "copilot_run_updated",
-        userId,
-        source,
-        runId: run.id,
-        conversationId: input.conversationId,
-        status: "failed",
-        message,
-        occurredAt: new Date()
-      });
-      throw error;
     }
-  }
-
-  /** Resume a run that was awaiting_approval after the owner decides. */
-  async function resumeAfterApproval(input: { userId: string; runId: string; actionId: string; approved: boolean }): Promise<{ resumed: boolean; runId: string }> {
-    const log = logFor(input.userId);
-    const run = log.getRun(input.runId);
-    if (!run || run.status !== "awaiting_approval") return { resumed: false, runId: input.runId };
-    const action = log.getPendingAction(input.actionId);
-    if (!action || action.runId !== run.id || action.status !== "pending") return { resumed: false, runId: input.runId };
-    log.decidePendingAction(action.id, input.approved ? "approved" : "rejected");
-
-    if (input.approved) {
-      const tool = deps.toolRegistry.tools.get(action.tool);
-      // The owner may have disabled the tool between the approval request and
-      // the decision — the switch wins over the earlier approval, and the run
-      // completes without executing it.
-      if (tool && !deps.isToolDisabled?.(action.tool)) {
-        const context: AgentToolContext = {
-          userId: input.userId,
-          db: deps.db,
-          masterKey: deps.masterKey,
-          ...(deps.sessionManager !== undefined ? { sessionManager: deps.sessionManager } : {}),
-          ...(deps.adapterCommandRunner !== undefined ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
-        };
-        const rawInput = safeParse(action.inputJson);
-        const result = await executeAgentTool(tool, rawInput, context);
-        const safeOutput = redactAgentValue(result.output);
-        const content = result.ok ? JSON.stringify(safeOutput) : `Tool error: ${result.error ?? "unknown"}`;
-        log.appendMessage(run.conversationId, { role: "tool", kind: "tool_result", content, toolName: action.tool });
-        log.updateRun(run.id, { status: "completed", completedAt: new Date() });
-        deps.eventBus.emitEvent({
-          type: "copilot_run_updated",
-          userId: input.userId,
-          runId: run.id,
-          conversationId: run.conversationId,
-          status: "completed",
-          toolName: action.tool,
-          message: content,
-          occurredAt: new Date()
-        });
-        return { resumed: true, runId: run.id };
-      }
+    catch {
+        // Auto-title is best-effort. A model failure must not surface as a Copilot
+        // turn failure — the run already completed.
     }
-
-    log.updateRun(run.id, { status: "completed", completedAt: new Date() });
-    deps.eventBus.emitEvent({
-      type: "copilot_run_updated",
-      userId: input.userId,
-      runId: run.id,
-      conversationId: run.conversationId,
-      status: "completed",
-      message: input.approved ? "Action rejected" : "Action approved",
-      occurredAt: new Date()
-    });
-    return { resumed: true, runId: run.id };
-  }
-
-  /** Cancel a non-terminal run; its pending actions are rejected. */
-  async function cancelRun(input: { userId: string; runId: string }): Promise<{ cancelled: boolean; runId: string }> {
-    const log = logFor(input.userId);
-    const run = log.getRun(input.runId);
-    if (!run || run.status === "completed" || run.status === "cancelled" || run.status === "failed") {
-      return { cancelled: false, runId: input.runId };
-    }
-    for (const action of log.listPendingActions(run.id)) {
-      if (action.status === "pending") log.decidePendingAction(action.id, "rejected");
-    }
-    log.updateRun(run.id, { status: "cancelled", completedAt: new Date() });
-    deps.eventBus.emitEvent({
-      type: "copilot_run_updated",
-      userId: input.userId,
-      runId: run.id,
-      conversationId: run.conversationId,
-      status: "cancelled",
-      message: "Run cancelled",
-      occurredAt: new Date()
-    });
-    return { cancelled: true, runId: run.id };
-  }
-
-  return { runTurn, resumeAfterApproval, cancelRun };
-}
-
-function safeParse(value: string): unknown {
-  try { return JSON.parse(value); } catch { return {}; }
-}
-
-async function maybeAutoTitle(input: {
-  log: CopilotConversationLog;
-  userId: string;
-  conversationId: string;
-  userText: string;
-  assistantText: string;
-  source: "user" | "reactive" | "scheduled";
-  runId: string;
-  eventBus: ForgeBadgerEventBus;
-  llm: AgentLlmClient;
-  modelId?: string;
-}): Promise<void> {
-  if (input.source !== "user") return;
-  const conversation = input.log.getConversation(input.conversationId);
-  if (!conversation || conversation.title !== null) return;
-  try {
-    const generated = await input.llm.generateTitle({
-      userText: input.userText,
-      assistantText: input.assistantText,
-      ...(input.modelId !== undefined ? { modelId: input.modelId } : {})
-    });
-    if (!generated) return;
-    // Re-check the title right before writing — a parallel rename from the
-    // owner (renameConversation endpoint) could have raced us between the
-    // check above and now. Never overwrite an owner-set title.
-    const fresh = input.log.getConversation(input.conversationId);
-    if (!fresh || fresh.title !== null) return;
-    input.log.renameConversation(input.conversationId, generated);
-    input.eventBus.emitEvent({
-      type: "copilot_run_updated",
-      userId: input.userId,
-      runId: input.runId,
-      conversationId: input.conversationId,
-      status: "completed",
-      titleUpdated: generated,
-      occurredAt: new Date()
-    });
-  } catch {
-    // Auto-title is best-effort. A model failure must not surface as a Copilot
-    // turn failure — the run already completed.
-  }
 }

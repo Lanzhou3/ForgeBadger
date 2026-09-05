@@ -15,6 +15,7 @@ import type {
   AgentRun,
   AgentRunStatus
 } from "./types.js";
+import { AgentError } from "./types.js";
 import { redactAgentText } from "./redaction.js";
 
 interface ConversationRow {
@@ -48,6 +49,8 @@ interface RunRow {
   conversation_id: string;
   user_id: string;
   status: string;
+  revision: number;
+  stop_reason: string | null;
   provider: string | null;
   model: string | null;
   steps: number;
@@ -63,6 +66,8 @@ interface PendingActionRow {
   run_id: string;
   user_id: string;
   tool: string;
+  step_id: string | null;
+  tool_call_id: string | null;
   input_json: string;
   input_digest: string;
   status: string;
@@ -89,22 +94,32 @@ export class CopilotConversationLog {
 
   listConversations(): ConversationRow[] {
     return this.db.prepare(`
-      SELECT * FROM copilot_conversations WHERE user_id = ? ORDER BY updated_at DESC
+      SELECT * FROM copilot_conversations WHERE user_id = ? AND status != 'deleted' ORDER BY updated_at DESC
     `).all(this.userId) as ConversationRow[];
   }
 
   getConversation(id: string): ConversationRow | undefined {
-    return this.db.prepare(`SELECT * FROM copilot_conversations WHERE id = ? AND user_id = ?`).get(id, this.userId) as ConversationRow | undefined;
+    return this.db.prepare(`SELECT * FROM copilot_conversations WHERE id = ? AND user_id = ? AND status != 'deleted'`).get(id, this.userId) as ConversationRow | undefined;
   }
 
   /** Persist the rolling context-compression summary up to a message sequence. */
-  updateConversationSummary(id: string, input: { summary: string; coveredSequence: number }): boolean {
-    const result = this.db.prepare(`
-      UPDATE copilot_conversations
-      SET summary = ?, summary_covered_sequence = ?, last_summary_at = ?, updated_at = ?
-      WHERE id = ? AND user_id = ?
-    `).run(input.summary, input.coveredSequence, Date.now(), Date.now(), id, this.userId);
-    return result.changes > 0;
+  updateConversationSummary(id: string, input: {
+    summary: string;
+    coveredSequence: number;
+    expectedFingerprint?: string;
+    canCommit?: () => boolean;
+  }): boolean {
+    return this.db.transaction(() => {
+      if (!(input.canCommit?.() ?? true)) return false;
+      if (input.expectedFingerprint !== undefined
+        && JSON.stringify(this.listMessages(id)) !== input.expectedFingerprint) return false;
+      const result = this.db.prepare(`
+        UPDATE copilot_conversations
+        SET summary = ?, summary_covered_sequence = ?, last_summary_at = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?
+      `).run(input.summary, input.coveredSequence, Date.now(), Date.now(), id, this.userId);
+      return result.changes > 0;
+    }).immediate();
   }
 
   renameConversation(id: string, title: string): boolean {
@@ -113,36 +128,33 @@ export class CopilotConversationLog {
     return result.changes > 0;
   }
 
-  deleteConversation(id: string): boolean {
-    const result = this.db.prepare(`DELETE FROM copilot_conversations WHERE id = ? AND user_id = ?`).run(id, this.userId);
-    return result.changes > 0;
-  }
-
-  /**
-   * Edit a message: rewrite its content in place and drop everything recorded
-   * after it (later messages, runs, pending actions). When `newContent` is
-   * omitted the edit target's row is removed along with its descendants.
-   * Returns the target's sequence, or undefined when the message does not
-   * belong to this user. The caller is responsible for starting a new run.
-   */
-  truncateAfterMessage(messageId: string, newContent?: string): { sequence: number } | undefined {
-    const row = this.db.prepare(`SELECT sequence, created_at, conversation_id FROM copilot_messages WHERE id = ? AND user_id = ?`)
-      .get(messageId, this.userId) as { sequence: number; created_at: number; conversation_id: string } | undefined;
-    if (!row) return undefined;
-    // Drop runs (and via FK their pending_actions) that were created at or
-    // after the edit target — their messages are about to disappear.
-    this.db.prepare(`DELETE FROM copilot_runs WHERE user_id = ? AND conversation_id = ? AND created_at >= ?`)
-      .run(this.userId, row.conversation_id, row.created_at);
-    if (newContent !== undefined) {
-      this.db.prepare(`UPDATE copilot_messages SET content = ? WHERE id = ? AND user_id = ?`)
-        .run(redactAgentText(newContent), messageId, this.userId);
-      this.db.prepare(`DELETE FROM copilot_messages WHERE user_id = ? AND conversation_id = ? AND sequence > ?`)
-        .run(this.userId, row.conversation_id, row.sequence);
-    } else {
-      this.db.prepare(`DELETE FROM copilot_messages WHERE user_id = ? AND conversation_id = ? AND sequence >= ?`)
-        .run(this.userId, row.conversation_id, row.sequence);
+  assertEditable(id: string): void {
+    if (this.listRuns(id).some(run => ["pending","running","awaiting_approval","indeterminate"].includes(run.status))) {
+      throw new AgentError("COPILOT_CONVERSATION_BUSY", "Cancel or reconcile the active run before editing");
     }
-    return { sequence: row.sequence };
+    const unresolved = this.db.prepare("SELECT s.id FROM copilot_run_steps s JOIN copilot_runs r ON r.id=s.run_id AND r.user_id=s.user_id WHERE s.user_id=? AND r.conversation_id=? AND s.effect='write' AND s.status IN ('running','indeterminate') LIMIT 1").get(this.userId,id);
+    if (unresolved) throw new AgentError("COPILOT_CONVERSATION_BUSY", "An unresolved write receipt must be reconciled first");
+  }
+  deleteConversation(id: string): boolean {
+    return this.db.transaction(()=>{
+      if (!this.getConversation(id))return false;
+      this.assertEditable(id);
+      // Hide the conversation, retaining immutable execution evidence.
+      return this.db.prepare("UPDATE copilot_conversations SET status='deleted',updated_at=? WHERE id=? AND user_id=?").run(Date.now(),id,this.userId).changes>0;
+    }).immediate();
+  }
+  truncateAfterMessage(messageId: string, newContent?: string, conversationId?: string): { sequence: number } | undefined {
+    return this.db.transaction(()=>{
+      const row=this.db.prepare("SELECT sequence,conversation_id,role,kind FROM copilot_messages WHERE id=? AND user_id=?").get(messageId,this.userId) as {sequence:number;conversation_id:string;role:string;kind:string} | undefined;
+      if (!row || (conversationId && row.conversation_id!==conversationId) || row.role!=="user" || row.kind!=="text")return;
+      this.assertEditable(row.conversation_id);
+      if(newContent!==undefined) {
+        this.db.prepare("UPDATE copilot_messages SET content=? WHERE user_id=? AND id=?").run(redactAgentText(newContent),this.userId,messageId);
+        this.db.prepare("DELETE FROM copilot_messages WHERE user_id=? AND conversation_id=? AND sequence>?").run(this.userId,row.conversation_id,row.sequence);
+      } else this.db.prepare("DELETE FROM copilot_messages WHERE user_id=? AND conversation_id=? AND sequence>=?").run(this.userId,row.conversation_id,row.sequence);
+      this.db.prepare("UPDATE copilot_conversations SET summary=NULL,summary_covered_sequence=NULL,last_summary_at=NULL,updated_at=? WHERE user_id=? AND id=?").run(Date.now(),this.userId,row.conversation_id);
+      return {sequence:row.sequence};
+    }).immediate();
   }
 
   appendMessage(conversationId: string, input: {
@@ -182,6 +194,10 @@ export class CopilotConversationLog {
       SELECT * FROM copilot_messages WHERE conversation_id = ? AND user_id = ? ORDER BY sequence ASC
     `).all(conversationId, this.userId) as MessageRow[];
     return rows.map(toMessage);
+  }
+
+  listRunMessages(runId: string): AgentMessage[] {
+    return (this.db.prepare("SELECT * FROM copilot_messages WHERE user_id=? AND run_id=? ORDER BY sequence ASC").all(this.userId,runId) as MessageRow[]).map(toMessage);
   }
 
   createRun(conversationId: string, input: { provider?: string; model?: string }): AgentRun {
@@ -293,6 +309,8 @@ function toRun(row: RunRow): AgentRun {
     conversationId: row.conversation_id,
     userId: row.user_id,
     status: row.status as AgentRunStatus,
+    revision: row.revision,
+    ...(row.stop_reason !== null ? {stopReason:row.stop_reason} : {}),
     ...(row.provider !== null ? { provider: row.provider } : {}),
     ...(row.model !== null ? { model: row.model } : {}),
     steps: row.steps,
@@ -310,6 +328,8 @@ function toPendingAction(row: PendingActionRow): AgentPendingAction {
     runId: row.run_id,
     userId: row.user_id,
     tool: row.tool,
+    ...(row.step_id ? {stepId:row.step_id} : {}),
+    ...(row.tool_call_id ? {toolCallId:row.tool_call_id} : {}),
     inputJson: row.input_json,
     inputDigest: row.input_digest,
     status: row.status as AgentPendingAction["status"],

@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { PlatformActions } from "../services/platform-commands/actions.js";
+import { createPlatformCommands } from "../services/platform-commands/catalog.js";
 import { Router } from "express";
 import { existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
@@ -116,16 +119,7 @@ export function createProjectRoutes(
     }
 
     try {
-      const { name, path: rawPath, description, techStack } = parseResult.data;
-      const rootPath = await prepareCreatedProjectRoot(rawPath);
-      const repo = new ProjectRepository(db, userId);
-      const project = repo.create({
-        name,
-        path: rootPath,
-        description,
-        techStack,
-        aiTool: unboundProjectAiTool
-      });
+      const project = await new PlatformActions({db,userId},createPlatformCommands()).executeOwner("project.create",parseResult.data,randomUUID());
       res.status(201).json({
         code: 0,
         data: { project },

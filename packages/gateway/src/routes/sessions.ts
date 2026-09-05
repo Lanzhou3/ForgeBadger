@@ -1,3 +1,5 @@
+import { PlatformActions } from "../services/platform-commands/actions.js";
+import { createPlatformCommands } from "../services/platform-commands/catalog.js";
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -298,185 +300,36 @@ export function createSessionRoutes(
     });
   });
 
-  router.post("/:id/start", async (req, res) => {
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const sessionRepo = new SessionRepository(db, userId);
-    const dbSession = sessionRepo.getById(req.params.id);
-    if (!dbSession) {
-      res.status(404).json({ code: 1, message: "Session not found" });
-      return;
+  router.get("/:id/writer", (req, res) => {
+    const userId=(req as unknown as AuthenticatedRequest).userId;
+    if(!new SessionRepository(db,userId).getById(req.params.id)) return res.status(404).json({code:1,message:"Session not found"});
+    let mode: "manual" | "automated" = "manual";
+    if(sessionManager.getSession(req.params.id)) {
+      try { sessionManager.assertManualInputAllowed(userId,req.params.id); }
+      catch(error) { if(error instanceof Error&&error.message==="SESSION_WRITER_BUSY")mode="automated";else return res.status(409).json({code:1,message:error instanceof Error?error.message:"Writer unavailable"}); }
     }
-
-    try {
-      const updated = await sessionManager.runExclusive(req.params.id, async () => {
-        // Re-check state inside the mutex (memory + DB), not just DB, to catch
-        // concurrent starts. Conflict → 409 with a stable code.
-        const live = sessionManager.getSession(req.params.id);
-        const fresh = sessionRepo.getById(req.params.id);
-        if (live?.status === "running" || fresh?.status === "running") {
-          throw new SessionConflictError("Session already running");
-        }
-
-        const adapter = normalizeAdapter(dbSession.aiTool);
-        if (!adapter) {
-          const err = new Error("Unsupported session adapter");
-          (err as Error & { httpStatus?: number }).httpStatus = 400;
-          throw err;
-        }
-        const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner);
-        if (!launchStatus.launchEnabled) {
-          const err = new Error(`${launchStatus.label} is not available for launch`);
-          (err as Error & { httpStatus?: number }).httpStatus = 409;
-          (err as Error & { details?: unknown }).details = {
-            adapter: launchStatus.id,
-            command: launchStatus.command,
-            status: launchStatus.status,
-            error: launchStatus.error
-          };
-          throw err;
-        }
-
-        const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, dbSession.workingDir, dbSession.id);
-        const launchPlan = createLaunchPlan({
-          adapter,
-          projectRoot: dbSession.workingDir,
-          sessionId: dbSession.id,
-          ...(pluginDirs.length > 0 ? { pluginDirs } : {})
-        });
-        const attachToken = randomUUID();
-        sessionRepo.update(dbSession.id, { attachToken });
-        const session = await sessionManager.createSession({
-          userId,
-          sessionId: dbSession.id,
-          launchPlan,
-          attachToken
-        });
-
-        const updatedSession = sessionRepo.update(dbSession.id, {
-          status: "running",
-          attachToken: session.attachToken,
-          tmuxSession: session.tmuxName,
-          lastActive: new Date()
-        });
-        recordSessionActivity(db, eventBus, userId, updatedSession ?? dbSession, "session_started", "success", `Session ${dbSession.name} started`);
-        recordSessionSnapshot({
-          db,
-          userId,
-          session: updatedSession ?? dbSession,
-          metadata: { reason: "session_started" }
-        });
-        return updatedSession ?? dbSession;
-      });
-
-      res.json({
-        code: 0,
-        data: { session: updated ? toSessionPayload(updated) : undefined },
-        message: ""
-      });
-    } catch (error) {
-      const oldStatus = dbSession.status;
-      if (error instanceof SessionConflictError) {
-        res.status(409).json({ code: 1, message: error.message });
-        return;
-      }
-      const httpStatus = (error as Error & { httpStatus?: number }).httpStatus ?? 400;
-      sessionRepo.update(dbSession.id, {
-        status: "error",
-        attachToken: "",
-        errorMessage: error instanceof Error ? error.message : String(error)
-      });
-      recordSessionActivity(
-        db,
-        eventBus,
-        userId,
-        dbSession,
-        "session_error",
-        "error",
-        error instanceof Error ? error.message : "Failed to start session"
-      );
-      eventBus?.emitEvent({
-        type: "session_status_changed",
-        userId,
-        sessionId: dbSession.id,
-        oldStatus,
-        newStatus: "error"
-      });
-      res.status(httpStatus).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "Failed to start session",
-        ...((error as Error & { details?: unknown }).details
-          ? { details: (error as Error & { details?: unknown }).details }
-          : {})
-      });
-    }
+    return res.json({code:0,data:{sessionId:req.params.id,mode,autonomy:"manual_only"},message:""});
   });
 
-  router.post("/:id/stop", async (req, res) => {
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const sessionRepo = new SessionRepository(db, userId);
-    const dbSession = sessionRepo.getById(req.params.id);
-    if (!dbSession) {
-      res.status(404).json({ code: 1, message: "Session not found" });
-      return;
-    }
-
-    try {
-      const updated = await sessionManager.runExclusive(req.params.id, async () => {
-        const live = sessionManager.getSession(req.params.id);
-        const tmuxName = live?.tmuxName ?? dbSession.tmuxSession ?? undefined;
-        if (!live && !tmuxName) {
-          throw new SessionConflictError("Session is not running");
-        }
-        const oldStatus = live?.status ?? dbSession.status;
-        await sessionManager.stopSession(req.params.id, tmuxName, userId);
-
-        const updatedSession = sessionRepo.update(dbSession.id, {
-          status: "exited",
-          attachToken: "",
-          tmuxSession: null,
-          lastActive: new Date()
-        });
-        recordSessionActivity(db, eventBus, userId, updatedSession ?? dbSession, "session_stopped", "success", `Session ${dbSession.name} stopped`);
-        return updatedSession ?? dbSession;
-      });
-
-      res.json({
-        code: 0,
-        data: { session: updated ? toSessionPayload(updated) : undefined },
-        message: ""
-      });
-    } catch (error) {
-      const oldStatus = dbSession.status;
-      if (error instanceof SessionConflictError) {
-        res.status(409).json({ code: 1, message: error.message });
+  for (const action of ["start", "stop", "takeover"] as const) {
+    router.post(`/:id/${action}`, async (req, res) => {
+      const userId = (req as unknown as AuthenticatedRequest).userId;
+      if (!new SessionRepository(db, userId).getById(req.params.id)) {
+        res.status(404).json({ code: 1, message: "Session not found" });
         return;
       }
-      sessionRepo.update(dbSession.id, {
-        status: "error",
-        errorMessage: error instanceof Error ? error.message : String(error)
-      });
-      recordSessionActivity(
-        db,
-        eventBus,
-        userId,
-        dbSession,
-        "session_error",
-        "error",
-        error instanceof Error ? error.message : "Failed to stop session"
-      );
-      eventBus?.emitEvent({
-        type: "session_status_changed",
-        userId,
-        sessionId: dbSession.id,
-        oldStatus,
-        newStatus: "error"
-      });
-      res.status(400).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "Failed to stop session"
-      });
-    }
-  });
+      try {
+        const actions = new PlatformActions({ db, userId, masterKey, sessionManager, eventBus, adapterCommandRunner }, createPlatformCommands());
+        const result = await actions.executeOwner(`session.${action}`, { sessionId: req.params.id }, randomUUID());
+        res.json({code:0,data:action === "takeover" ? result : {session:result},message:""});
+      } catch(error) {
+        const detail = error as Error & {httpStatus?:number;details?:unknown};
+        const status = error instanceof SessionConflictError ? 409 : detail.httpStatus ?? 400;
+        res.status(status).json({code:1,message:error instanceof Error ? error.message : "Session operation failed",
+          ...(detail.details ? {details:detail.details} : {})});
+      }
+    });
+  }
 
   router.delete("/:id", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;

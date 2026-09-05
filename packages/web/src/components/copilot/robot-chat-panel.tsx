@@ -57,7 +57,13 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
   const conversationIdRef = useRef<string | null>(null);
   conversationIdRef.current = conversationId;
 
-  const { active, startRun, approveAction, clearActive, markPending } = useCopilotRun();
+  const { active, startRun, approveAction, clearActive, markPending, reconcile, syncError } = useCopilotRun({
+    conversationId,
+    onSettled: async (id) => {
+      const { messages: next } = await listMessages(id);
+      if (conversationIdRef.current === id) setMessages(next);
+    },
+  });
 
   const reloadMessages = useCallback(async (id: string) => {
     const { messages: next } = await listMessages(id);
@@ -87,7 +93,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
 
   const send = useCallback(async (textOverride?: string) => {
     const text = (textOverride ?? input).trim();
-    if (!text || sending) return;
+    if (!text || sending || (active && ["pending", "running", "awaiting_approval"].includes(active.status))) return;
     lastSentRef.current = text;
     setPinnedToBottom(true);
     setMessages((current) => [
@@ -129,7 +135,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
     } finally {
       setSending(false);
     }
-  }, [input, sending, conversationId, clearActive, markPending, startRun, reloadMessages]);
+  }, [input, sending, active, conversationId, clearActive, markPending, startRun, reloadMessages]);
 
   const newChat = useCallback(() => {
     clearActive();
@@ -142,10 +148,12 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
 
   const stopRun = useCallback(async () => {
     if (!active?.runId) return;
-    await cancelRun(active.runId).catch(() => undefined);
-    clearActive();
+    try {
+      await cancelRun(active.runId);
+      await reconcile();
+    } catch { setLoadError("取消未确认，请同步状态后重试。"); }
     if (active.conversationId) await reloadMessages(active.conversationId);
-  }, [active, clearActive, reloadMessages]);
+  }, [active, reconcile, reloadMessages]);
 
   const onDecide = useCallback(
     async (approved: boolean) => {
@@ -177,6 +185,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
   }, []);
 
   const isRunning = active && (active.status === "running" || active.status === "pending");
+  const isBusy = Boolean(isRunning || active?.status === "awaiting_approval");
   const toolResultById = useMemo(() => indexToolResults(messages), [messages]);
   const showEmpty = !loadError && !restoring && messages.length === 0 && !active;
 
@@ -260,6 +269,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
               />
             );
           })}
+          {(syncError || active?.error) && <p role="status" className="text-sm text-muted-foreground">{syncError || active?.error}</p>}
           {active?.thinking ? <ThinkingSection text={active.thinking} live={isRunning === true} /> : null}
           {active?.text ? (
             <StreamingMessage text={active.text} />
@@ -336,7 +346,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
               size="icon"
               className="size-7 shrink-0 rounded-full"
               onClick={() => void send()}
-              disabled={sending || !input.trim()}
+              disabled={sending || isBusy || !input.trim()}
               aria-label={t("copilot.send")}
               title={t("copilot.send")}
             >

@@ -25,7 +25,9 @@ export type AgentRunStatus =
   | "awaiting_approval"
   | "completed"
   | "cancelled"
-  | "failed";
+  | "failed"
+  | "stopped"
+  | "indeterminate";
 
 /** A single message appended to the conversation log. */
 export interface AgentMessage {
@@ -74,6 +76,8 @@ export interface AgentRun {
   conversationId: string;
   userId: string;
   status: AgentRunStatus;
+  revision?: number;
+  stopReason?: string;
   provider?: string;
   model?: string;
   steps: number;
@@ -90,6 +94,8 @@ export interface AgentPendingAction {
   runId: string;
   userId: string;
   tool: string;
+  stepId?: string;
+  toolCallId?: string;
   inputJson: string;
   inputDigest: string;
   status: "pending" | "approved" | "rejected" | "expired";
@@ -104,6 +110,7 @@ export interface AgentMemoryEntry {
   userId: string;
   scope: "global" | "project" | "session";
   projectId?: string | null;
+  conversationId?: string | null;
   kind: "fact" | "preference" | "decision" | "project_note";
   text: string;
   metadataJson: string;

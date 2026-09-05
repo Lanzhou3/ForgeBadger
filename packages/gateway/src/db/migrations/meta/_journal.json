@@ -470,6 +470,41 @@
       "when": 1788393600200,
       "tag": "0067_copilot_automations",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1788393600201,
+      "tag": "0068_copilot_runtime_continuity",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1788393600202,
+      "tag": "0069_copilot_platform_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1788393600203,
+      "tag": "0070_copilot_platform_action_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "6",
+      "when": 1788591741565,
+      "tag": "0071_cli_config_applied_providers",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1788620517897,
+      "tag": "0072_model_provider_kimi_adapter",
+      "breakpoints": true
     }
   ]
 }

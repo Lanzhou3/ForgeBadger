@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AlertTriangle, Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Loader2, Pencil, Wrench } from "lucide-react";
 
+import { PlatformActionPreview } from "@/components/copilot/PlatformActionPreview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -221,9 +222,31 @@ export function PendingActionRow({
   onDecide,
 }: {
   action: CopilotPendingAction;
-  onDecide: (approved: boolean) => void;
+  onDecide: (approved: boolean) => void | Promise<void>;
 }) {
   const { t } = useLanguage();
+  const [previewUnavailable, setPreviewUnavailable] = useState(Boolean(action.platformIntent));
+  const [now, setNow] = useState(Date.now());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const expired = action.platformIntent
+    ? action.platformIntent.expires_at <= now
+    : action.status !== "pending";
+  async function decide(approved: boolean) {
+    setBusy(true);
+    setError("");
+    try {
+      await onDecide(approved);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "确认失败，请同步状态后重试");
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
       <div className="flex items-center gap-2">
@@ -232,14 +255,19 @@ export function PendingActionRow({
         </Badge>
         <span className="text-sm font-medium">{action.tool}</span>
       </div>
+      {action.platformIntent && (
+        <PlatformActionPreview intent={action.platformIntent} onUnavailable={setPreviewUnavailable} />
+      )}
+      {expired && <p role="status">确认已失效，请重新生成操作预览。</p>}
+      {error && <p role="alert" className="text-destructive">{error}</p>}
       {action.inputJson && (
         <pre className="max-h-40 overflow-auto rounded bg-background p-2 text-xs">{action.inputJson}</pre>
       )}
       <div className="flex gap-2">
-        <Button size="sm" onClick={() => void onDecide(true)}>
+        <Button size="sm" disabled={busy || expired || previewUnavailable} onClick={() => void decide(true)}>
           {t("copilot.approve")}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => void onDecide(false)}>
+        <Button size="sm" variant="outline" disabled={busy || expired || previewUnavailable} onClick={() => void decide(false)}>
           {t("copilot.reject")}
         </Button>
       </div>
@@ -269,8 +297,8 @@ function deriveToolStatus(resultContent: string): ToolStatus {
   // The orchestrator prefixes tool_result content so the UI can detect the
   // outcome without re-running security-policy or error parsing. Anything
   // else (real tool JSON output) is treated as a successful read.
-  if (/^Denied by security policy:/u.test(resultContent)) return "denied";
-  if (/^Tool error:/u.test(resultContent) || /^Unknown tool:/u.test(resultContent)) return "error";
+  if (/^(?:Denied by security policy:|Action rejected by owner|Tool disabled by owner:|Scheduled runs are read only)/u.test(resultContent)) return "denied";
+  if (/^(?:Tool error:|Unknown tool:|Invalid tool input|Tool input digest mismatch)/u.test(resultContent)) return "error";
   return "ok";
 }
 

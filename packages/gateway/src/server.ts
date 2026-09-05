@@ -15,6 +15,7 @@ import type { LocalAccountRecovery } from "./services/local-account-recovery.js"
 import type { TerminalMultiplexerRuntime } from "./services/terminal-multiplexer-runtime.js";
 import type { AgentStackDeps } from "./services/agent/agent-stack.js";
 import { startAutomationScheduler, type AutomationScheduler } from "./services/automation/scheduler.js";
+import { startCopilotRuntime } from "./services/agent/runtime.js";
 import { RuntimeAuthorizationInvalidator } from "./services/runtime-authorization-invalidation.js";
 
 import { mountRoutes } from "./routes/index.js";
@@ -99,7 +100,6 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const eventBus = options.eventBus ?? new ForgeBadgerEventBus();
   const runtimeAuthorizationInvalidator = options.runtimeAuthorizationInvalidator
     ?? new RuntimeAuthorizationInvalidator();
-  const recoveryReady = Promise.resolve();
   const copilotAgent: AgentStackDeps = {
     db: options.db,
     masterKey: options.masterKey,
@@ -108,6 +108,9 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     ...(options.adapterCommandRunner ? { adapterCommandRunner: options.adapterCommandRunner } : {}),
     ...(options.llmFetch ? { llmFetch: options.llmFetch } : {})
   };
+
+  const copilotRuntime = startCopilotRuntime(copilotAgent);
+  const recoveryReady = copilotRuntime.ready;
 
   const app = createServer({
     db: options.db,
@@ -167,6 +170,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
       );
       await runShutdownStage(failures, () => options.feishuChannelRuntime?.stop());
       automationScheduler?.stop();
+      await runShutdownStage(failures, () => copilotRuntime.stop());
       const httpResult = await httpCloseResult;
       if (!httpResult.ok) {
         failures.push(httpResult.error);

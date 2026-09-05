@@ -1,3 +1,8 @@
+import { createPlatformActionRoutes } from "./platform-actions.js";
+import { createProjectManagementRoutes } from "./project-management.js";
+import { PlatformActions } from "../services/platform-commands/actions.js";
+import { createPlatformCommands } from "../services/platform-commands/catalog.js";
+import { randomUUID } from "node:crypto";
 import type { Express } from "express";
 
 import type { ServerDeps } from "../server.js";
@@ -90,6 +95,8 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/api-keys", createApiKeyRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/cli-config", createCliConfigRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/dashboard", createDashboardRoutes(deps.db));
+  app.use("/api/v1", createPlatformActionRoutes({db:deps.db,masterKey:deps.masterKey,sessionManager:deps.sessionManager,adapterCommandRunner:deps.adapterCommandRunner,eventBus:deps.eventBus}));
+  app.use("/api/v1", createProjectManagementRoutes(deps.db, (userId,commandId,input) => new PlatformActions({db:deps.db,userId},createPlatformCommands()).executeOwner(commandId,input,randomUUID())));
   if (deps.copilotAgent) {
     app.use("/api/v1/copilot", createCopilotRoutes(deps.copilotAgent));
     app.use("/api/v1/copilot", createAutomationRoutes(deps.copilotAgent));

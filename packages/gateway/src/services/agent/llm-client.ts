@@ -57,7 +57,6 @@ export interface AgentLlmProviderResolution {
   defaultHeaders: Record<string, string>;
 }
 
-const DEFAULT_MAX_STEPS = 24;
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 export type AgentFetch = typeof fetch;
@@ -116,34 +115,37 @@ export function createAgentLlmClient(input: {
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const outer = request.signal;
     if (outer?.aborted) controller.abort();
-    outer?.addEventListener("abort", () => controller.abort(), { once: true });
+    const abort = () => controller.abort();
+    outer?.addEventListener("abort", abort, { once: true });
     try {
+      controller.signal.throwIfAborted();
       const host = new URL(resolution.baseUrl).hostname;
       const blocked = await validateOutboundHost(host, resolveHost);
+      controller.signal.throwIfAborted();
       if (blocked) throw new AgentError("AGENT_HOST_BLOCKED", `Outbound host blocked: ${blocked}`);
 
-      const maxSteps = request.maxSteps ?? DEFAULT_MAX_STEPS;
       if (resolution.apiFormat === "anthropic") {
-        return await streamAnthropic(resolution, request, maxSteps, fetchImpl, controller.signal, input.timeoutMs);
+        return await streamAnthropic(resolution, request, fetchImpl, controller.signal, input.timeoutMs);
       }
-      return await streamOpenAi(resolution, request, maxSteps, fetchImpl, controller.signal, input.timeoutMs);
+      return await streamOpenAi(resolution, request, fetchImpl, controller.signal, input.timeoutMs);
     } catch (error) {
       if (error instanceof AgentError) throw error;
       throw new AgentError("AGENT_LLM_FAILED", redactAgentErrorMessage(error instanceof Error ? error.message : "LLM request failed"));
     } finally {
       clearTimeout(timeout);
-      outer?.removeEventListener("abort", () => controller.abort());
+      outer?.removeEventListener("abort", abort);
     }
   }
 
   /** Fold a message list into a concise summary (non-streaming; used for context compression). */
-  async function summarize(input: { messages: AgentLlmMessage[]; modelId?: string }): Promise<string> {
+  async function summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal }): Promise<string> {
     let text = "";
     await stream({
       messages: input.messages,
       tools: [],
       system: SUMMARY_SYSTEM_PROMPT,
       ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
       onEvent: (event) => {
         if (event.type === "text_delta") text += event.text ?? "";
       }
@@ -158,7 +160,7 @@ export function createAgentLlmClient(input: {
    * the model returned nothing usable. Never throws — failures fall through to
    * the empty result and the conversation keeps its null title.
    */
-  async function generateTitle(input: { userText: string; assistantText: string; modelId?: string }): Promise<string> {
+  async function generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<string> {
     let text = "";
     await stream({
       messages: [
@@ -168,6 +170,7 @@ export function createAgentLlmClient(input: {
       tools: [],
       system: TITLE_SYSTEM_PROMPT,
       ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
       onEvent: (event) => {
         if (event.type === "text_delta") text += event.text ?? "";
       }
@@ -180,7 +183,7 @@ export function createAgentLlmClient(input: {
    * array on parse failure or an unusable model response — curation is always
    * best-effort and never throws.
    */
-  async function proposeMemory(input: { userText: string; assistantText: string; modelId?: string }): Promise<Array<{
+  async function proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<Array<{
     kind: "fact" | "preference" | "decision" | "project_note";
     scope: "global" | "project" | "session";
     text: string;
@@ -195,6 +198,7 @@ export function createAgentLlmClient(input: {
       tools: [],
       system: MEMORY_PROPOSAL_SYSTEM_PROMPT,
       ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
       onEvent: (event) => {
         if (event.type === "text_delta") text += event.text ?? "";
       }
@@ -233,17 +237,22 @@ function authHeaders(resolution: AgentLlmProviderResolution): Record<string, str
 async function streamAnthropic(
   resolution: AgentLlmProviderResolution,
   request: AgentLlmRequest,
-  maxSteps: number,
   fetchImpl: AgentFetch,
   signal: AbortSignal,
   timeoutMs: number | undefined
 ): Promise<{ message: string }> {
   const system = request.system ?? SYSTEM_PROMPT;
-  const apiMessages = request.messages
-    .filter((m) => m.role !== "tool")
-    .map((m) => (m.role === "assistant"
-      ? { role: "assistant" as const, content: m.content, ...(m.toolCalls?.length ? { tool_use: m.toolCalls.map((tc) => ({ id: tc.id, name: tc.name, input: safeJsonParse(tc.arguments) })) } : {}) }
-      : { role: "user" as const, content: m.content }));
+  const apiMessages: Array<{ role: "user" | "assistant"; content: Array<Record<string, unknown>> }> = [];
+  for (const message of request.messages) {
+    const role = message.role === "assistant" ? "assistant" : "user";
+    const content: Array<Record<string, unknown>> = message.role === "tool"
+      ? [{ type: "tool_result", tool_use_id: message.toolCallId, content: message.content }]
+      : [...(message.content ? [{ type: "text", text: message.content }] : []),
+        ...(message.toolCalls ?? []).map((call) => ({ type: "tool_use", id: call.id, name: call.name, input: safeJsonParse(call.arguments) }))];
+    const previous = apiMessages.at(-1);
+    if (previous?.role === role) previous.content.push(...content);
+    else apiMessages.push({ role, content });
+  }
 
   const body: Record<string, unknown> = {
     model: resolution.modelId,
@@ -252,7 +261,6 @@ async function streamAnthropic(
     messages: apiMessages,
     tools: request.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema }))
   };
-  if (maxSteps) body.max_steps = maxSteps;
 
   const response = await fetchImpl(`${resolution.baseUrl}/v1/messages`, {
     method: "POST",
@@ -272,6 +280,7 @@ async function streamAnthropic(
     content?: Array<{ type: string; text?: string; thinking?: string; name?: string; id?: string; input?: unknown }>;
     stop_reason?: string;
   };
+  signal.throwIfAborted();
   let message = "";
   for (const block of data.content ?? []) {
     if (block.type === "thinking" && block.thinking) {
@@ -294,7 +303,6 @@ async function streamAnthropic(
 async function streamOpenAi(
   resolution: AgentLlmProviderResolution,
   request: AgentLlmRequest,
-  maxSteps: number,
   fetchImpl: AgentFetch,
   signal: AbortSignal,
   timeoutMs: number | undefined
@@ -312,16 +320,13 @@ async function streamOpenAi(
     }
     return { role: m.role as "user" | "assistant", content: m.content };
   });
-  const apiMessages = request.system
-    ? [{ role: "system" as const, content: request.system }, ...mapped]
-    : mapped;
+  const apiMessages = [{ role: "system" as const, content: request.system ?? SYSTEM_PROMPT }, ...mapped];
 
   const body: Record<string, unknown> = {
     model: resolution.modelId,
     messages: apiMessages,
     tools: request.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }))
   };
-  if (maxSteps) body.max_steps = maxSteps;
 
   const response = await fetchImpl(`${resolution.baseUrl}/chat/completions`, {
     method: "POST",
@@ -346,6 +351,7 @@ async function streamOpenAi(
       };
     }>;
   };
+  signal.throwIfAborted();
   const choice = data.choices?.[0];
   let message = choice?.message?.content ?? "";
   const reasoning = choice?.message?.reasoning_content ?? "";

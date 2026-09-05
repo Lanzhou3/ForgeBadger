@@ -65,5 +65,10 @@
   "0064_normalize_mixed_timestamp_units.sql": "08f3f3a63a5cd2aa83c51885f1bfd23c9a0d4dc00c111942d29cb9c4e585d101",
   "0065_project_manager_goals_tenant_fk.sql": "ab500e877dc6cfac114a335ca9ad83603762955c592b88c673dbd6ff3ac99c17",
   "0066_provider_plaintext_http.sql": "f0c9e663870bf95561341bf6a5799d119d62028c10592a84d1d3009800a84f1b",
-  "0067_copilot_automations.sql": "94254a459b379ce8765b065f03869ab079fbcac2d75fa8cdd97b62f6406e921c"
+  "0067_copilot_automations.sql": "94254a459b379ce8765b065f03869ab079fbcac2d75fa8cdd97b62f6406e921c",
+  "0068_copilot_runtime_continuity.sql": "5631024a0ea3437fd0d9a314ced8406929942411049bd0050a3a050904bd16d9",
+  "0069_copilot_platform_actions.sql": "3aaad007c30e8ed3fb51f7a4a3124cf301b75fb6dca49ad7a87e657095cb8944",
+  "0070_copilot_platform_action_recovery.sql": "9f4baa71898dfb5c28d84e6501a68682a2959595d6e1e3f706c5dc01969e1e98",
+  "0071_cli_config_applied_providers.sql": "e569ea6491b5932e980ee8248e04ee2db61e2e5c4af79c016d10c7afc6f23d97",
+  "0072_model_provider_kimi_adapter.sql": "c16d815b497d9e193e420f30a7ff3630f3105b7e6fd779d9330e49a7de5ceb89"
 }

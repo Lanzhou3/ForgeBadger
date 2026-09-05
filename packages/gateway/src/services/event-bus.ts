@@ -71,6 +71,7 @@ export interface CopilotRunUpdatedEvent {
   pendingActionId?: string | undefined;
   message?: string | undefined;
   titleUpdated?: string | undefined;
+  revision?: number;
   occurredAt: Date;
 }
 

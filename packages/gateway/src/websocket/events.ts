@@ -185,7 +185,8 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         ...(event.toolName ? { tool_name: event.toolName } : {}),
         ...(event.pendingActionId ? { pending_action_id: event.pendingActionId } : {}),
         ...(event.message !== undefined ? { message: event.message } : {}),
-        ...(event.titleUpdated !== undefined ? { title_updated: event.titleUpdated } : {})
+        ...(event.titleUpdated !== undefined ? { title_updated: event.titleUpdated } : {}),
+        ...(event.revision !== undefined ? {revision:event.revision} : {})
       };
     case "error":
       return {
