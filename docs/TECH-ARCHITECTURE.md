@@ -176,6 +176,28 @@ ForgeBadger 保留两个清晰边界：Copilot 负责对话、记忆、只读查
 - 已应用的 Portfolio migrations 与 schema declarations 仅为迁移连续性和数据安全保留；live runtime 不读取或写入这些表。
 - DeepSeek Harness 与 bridge 继续保持移除状态；DeepSeek 仅可作为普通可选模型 provider。
 
+### 0.5.8 Copilot P0 持久运行（2026-09-05）
+
+Gateway 的 `startCopilotRuntime` 负责恢复扫描及关停，租户 stack 仍按执行构建。`CopilotRunLedger` 通过 SQLite IMMEDIATE 事务准入、领取 lease/fence、提交完整工具批次和回执。HTTP 使用 enqueue 立即返回；定时任务继续等待 runTurn，并按自己的 runId 获取最终结果。模型请求预算跨审批和恢复持久计数。
+
+迁移 0068 增加 run 输入/版本/lease/revision、`copilot_run_steps`、消息和审批步骤关联、会话级记忆归属。旧版活跃 run 明确失败、旧 pending action 过期，保留原数据且不重放。新版同会话仅允许一个活跃 run。终态模型响应和 completed 原子提交；恢复只重试安全读取，已经开始却无回执的写操作进入 indeterminate，执行异常也按可能存在部分副作用保守处理。
+
+取消先更新数据库终态和 fence，再 abort 本机请求；在途写步骤标记结果未知，迟到回执只能补充证据。关停停止续租，最多等待一秒 drain 后由 lease 到期触发保守恢复。运行记录和回执随会话隐藏继续保留。回滚应暂停新版执行器并保留账本，不能在新版未决运行存在时启动旧版写执行器。
+
+OpenAI 和 Anthropic 的工具往返均由持久 transcript 投影；压缩以完整用户回合为边界。摘要写入校验历史和执行权；记忆按 tenant/global/project/conversation 精确匹配。P1 项目授权和混合项目总览见下节；飞书、Telegram 和自治项目经理闭环仍属于后续阶段。
+
+### 0.5.9 Copilot P1 平台命令与范围授权（2026-09-05）
+
+`services/platform-commands/` 是首批项目、工作项、任务准备、会话生命周期、管理元数据和记忆写入的统一边界。Web route 与 Copilot tool 复用命令目录、严格输入、实际资源解析和 `PlatformActions`。显式 Web 操作使用单次 `owner_action`；Copilot 没有匹配 Grant 时等待精确审批。Grant 失效或越界不得退回 owner 权限。工作项一般元数据授权不包含验收条件、证据写入和完成状态。
+
+迁移 `0069_copilot_platform_actions.sql` 与前向补充 `0070_copilot_platform_action_recovery.sql` 增加 `copilot_grants`、`platform_action_intents`、`platform_action_receipts`、`copilot_conversation_grants`、`project_manager_management` 和 `session_writer_leases`，关联采用租户复合外键。0069 保留已实际应用的原始 SQL/hash；0070 补 conversation 租户复合约束、writer 表与外部执行 lease，并把无租约的旧 executing intent 标为 indeterminate。升级使旧活跃 run 失败、旧 pending action 过期，保留历史而不以旧审批执行新命令。仅新空会话可绑定 Grant；绑定不可切换，撤销后也不解除。模型工具、查询资源、记忆召回均按实际关联过滤，未授权全局上下文不能进入模型输入。
+
+Grant 明确项目、能力、规范化根目录、到期时间、动作次数和并发数；目前 actor 是当前 owner，没有跨用户或渠道身份委派。Intent 固化参数摘要、资源 revision、Grant revision、策略版本、actor、有效期和租户内唯一幂等键。执行前复核当前身份、工具开关、策略、资源与预算；数据库动作、回执和预算在 IMMEDIATE 事务内提交，外部动作先持久 claim 再执行，claim 使用 30 秒租约、每 10 秒续租；过期孤立 claim 保守恢复为未知，不重放。外部回执与 intent 终态同事务提交；迟到确认可补充事实。P0 run 恢复读取已持久化的平台回执，避免把已确认数据库作用错误投影为未知。外部结果未知时保留占用和证据、不重试副作用。P0 步骤仅引用这些结果，不形成第二条独立写入路径。自动 post-turn memory curation 已退出 orchestrator；持久记忆通过统一 `memory.write` 命令授权，包括旧的 memory entries HTTP 创建入口。
+
+`SessionWriterLeases` 在正式 Gateway 组合中持久化到 SQLite，以规范化 workspace 为排他范围，租户/会话校验和单调 fence 防止别名目录、过期或旧进程继续写入。程序化提交在 staging 前、等待后和 Enter 前复核；WebSocket 键盘及缓冲 flush 同样检查。显式 takeover 先失效旧 token 再交回人工，已 staging 的不确定效果不重放。四种生产 adapter 均为 `manual_only`；自动任务执行和 dispatch 在启动前拒绝，项目的 `cli` 分类不表示 CLI 沙箱权限已验证。
+
+混合项目总览复用现有目标和工作项事实，独立管理元数据记录 manual/cli、负责人、下一动作、证据时效阈值与 revision。旧项目默认 manual；证据时效仅基于声明时间，缺失或未来时间按未知处理，不代表证据内容已验收。Web 在 `/copilot` 提供 Grant、精确预览/回执、总览与管理编辑，在终端提供 writer 状态和接管。P2 飞书/Telegram、P3 调度、真实 CLI 自治权限验收尚未启用；本地 fixture LLM 浏览器验证不能代替这些外部证据。
+
 ## 零、架构总览
 
 ### 架构模式
@@ -860,9 +882,13 @@ opencode `opencode.json`、kimi `~/.kimi-code/config.toml`）。
 additive 语义，apply 把供应商全部 active 模型写入 models map 且不触碰用户自有的
 顶层 `model`；kimi 仍为单一 `default_model`。
 具体到各 CLI 的写入语义：claude 写入 `ANTHROPIC_AUTH_TOKEN` 时同步删除残留的
-`ANTHROPIC_API_KEY`，并对 Kimi For Coding 端点注入 256k 上下文窗口覆盖
-（`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`，不覆盖
-用户显式值，切走时仅剥离注入默认值）；codex 采用 0.149+ 布局，把 key 写入
+`ANTHROPIC_API_KEY`，并对目录外模型 id 注入上下文窗口覆盖
+（`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 两个键
+必须同时写，且仅对非 `claude-` 前缀模型 id 生效）：优先取模型 profile 的
+`contextWindow`，未设置时 Kimi For Coding 端点回落 256k、MiniMax
+`/anthropic` 端点回落 512k 保底；不覆盖用户显式值，切走时依据
+`cli_config_applied_providers` 指针仅剥离上一次 apply 注入的值（Kimi 的
+256k 默认值对指针建立前的历史 apply 也始终视为托管值）；codex 采用 0.149+ 布局，把 key 写入
 `model_providers.<id>.experimental_bearer_token`，并从 `~/.codex/auth.json`
 移除遗留 `OPENAI_API_KEY`（保留 ChatGPT 登录 tokens 等其它字段，若因此清空则
 直接删除该文件——Codex 对空 auth.json 报错、缺文件才显示登录页）；opencode

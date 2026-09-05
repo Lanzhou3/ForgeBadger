@@ -316,14 +316,12 @@ not return raw terminal transcripts, unbounded ledger details, Feishu webhook
 verification material, provider credentials, attach tokens, or cross-tenant
 mapping details.
 
-Phase 12 adds Project Manager traceability on top of the local-first AI CLI
-control plane. It does not broaden ForgeBadger into a generic project-management
-suite. Copilot-origin Project Manager writes are proposals only: each proposal
-must become exactly one pending action, must use the canonical stored
-pending-action payload at approval time, and must execute through the
-Gateway-owned Project Manager repository transaction. The only Project Manager
-write semantics in this contract are `create_work_item`,
-`update_work_item_status`, and `attach_evidence`.
+Project Manager remains the task and evidence source of truth. The P1 governed
+command contract below supersedes the older proposal-only write path: supported
+writes use immutable platform-action intents and receipts. A matching grant can
+authorize the action; otherwise an exact owner approval is required. Generic
+metadata grants cannot change acceptance criteria, attach completion evidence or
+mark work complete. Existing explicit owner routes retain their domain validation.
 
 Work item status is a bounded product state. Allowed statuses are:
 
@@ -463,6 +461,88 @@ Portfolio-based message ingress, signed actions, and delivery workers are retire
 The native Copilot API is mounted at `/api/v1/copilot/**` and uses the Gateway-owned provider, conversation, memory, approval, tool, and event services. The DeepSeek Harness bridge under `/api/internal/v1/copilot-bridge/**` and the former Portfolio API under `/api/v1/portfolio/**` are not mounted.
 
 Applied Portfolio migrations and historical schema declarations remain for migration continuity only. No live repository, route, scheduler, event publisher, or Web client reads or writes those records.
+
+### Native Copilot run continuity (P0, 2026-09-05)
+
+All responses use the standard `{code,data,message}` envelope and authenticated tenant ownership.
+
+| Endpoint | Contract |
+|---|---|
+| `POST /api/v1/copilot/conversations/:id/messages` | `{content,modelId?,projectId?,grantId?}`; returns 201 `{runId}` after durable admission, before model completion. A second active run returns 409 `COPILOT_CONVERSATION_BUSY`. |
+| `GET /api/v1/copilot/conversations/:id/runs` | `{runs,activeRun}`; latest 50 runs and current active run, or null. |
+| `GET /api/v1/copilot/runs/:id` | `{run,pendingActions,steps}`; run includes revision and stopReason, actions include full inputJson/inputDigest, stepId and toolCallId. Steps retain execution receipts. |
+| `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/decide` | `{approved}`; persists a single decision and returns `{resumed,runId}`. The original run continues asynchronously, including after rejection. |
+| `POST /api/v1/copilot/runs/:id/cancel` | Awaits durable cancellation; returns `{cancelled,runId}`. It does not undo effects already sent to a CLI. |
+| `POST /api/v1/copilot/conversations/:id/edit-message` | Validates that messageId is a user text in the URL conversation. Active or unresolved writes return 409. Clears summary, preserves run/step receipts and admits an edited turn atomically. |
+| `DELETE /api/v1/copilot/conversations/:id` | Hides an inactive conversation while retaining execution evidence; unresolved executions return 409. Repeated deletion returns 404. |
+
+Run terminal states are `completed`, `failed`, `cancelled`, `stopped` (for example `step_budget_exhausted`) and `indeterminate` (unconfirmed side effects). `pending`, `running` and `awaiting_approval` remain active. Cancellation may retain an indeterminate write step; a later receipt records the outcome without reviving the run. There is no automatic retry endpoint for unknown writes.
+
+`copilot_run_updated` includes `revision` and is a refresh hint; REST is authoritative. Memory endpoints accept `conversationId` for session scope. Global memory rejects project/conversation association; project/session writes require owned scope IDs. Unbound historical session memories are excluded from recall. `write_memory` is an operation, not a scheduled read.
+
+### Governed platform actions and mixed-project management (P1, 2026-09-05)
+
+All paths below are under `/api/v1`, require an active authenticated user and
+return the standard `{code,data,message}` envelope. Grant and action handlers
+return 400 for schema errors and 409 for rejected actions. Unknown fields and
+unsupported grant capabilities are rejected.
+
+| Method/path | Input and returned `data` |
+|---|---|
+| `GET /copilot/grants` | `{grants,capabilities}`; capabilities contain `id`, `capability`, `effect`. |
+| `POST /copilot/grants` | `{name,projectIds,capabilities,allowedRoots?,expiresAt,maxActions,maxConcurrency?}` → `{grant}`. Expiry is Unix milliseconds; concurrency defaults to 1. |
+| `POST /copilot/grants/:id/revoke` | `{grant}`; advances the revision and cancels active bound runs. |
+| `POST /platform-actions/preview` | `{commandId,input,idempotencyKey,grantId?}` → `{intent}`. No effect is executed. |
+| `GET /platform-actions/:id` | `{intent,receipt}`; receipt is null before an outcome exists. |
+| `POST /platform-actions/:id/decide` | `{digest,approved}` → `{intent}`. Digest must match the immutable preview. |
+| `POST /platform-actions/:id/execute` | `{receipt}`; requires a currently valid approved intent. Duplicate confirmed execution returns the stored receipt. |
+| `GET /project-manager/overview?grantId=...` | `{projects,observedAt}`; an unavailable, revoked or expired requested grant returns 403. Omitted grant lists the owner's projects. |
+| `PATCH /projects/:id/project-manager/management` | `{expectedRevision,mode?,ownerLabel?,nextAction?,freshnessHours?}` → `{management}`. Mode is `manual` or `cli`; stale revisions conflict. |
+| `GET /sessions/:id/writer` | `{sessionId,mode,autonomy}`; mode is `manual` or `automated`, autonomy is currently `manual_only`. |
+| `POST /sessions/:id/takeover` | `{sessionId,takenOver}`; invalidates the old automatic writer before manual input resumes. |
+
+Grant scope contains explicit project IDs, capabilities and canonical allowed
+roots. Empty project lists mean no existing projects; `project.create` separately
+requires a permitted root and does not add the created project to the grant.
+Budgets count actions and simultaneous executions, not tokens or money. Delegation
+is currently to the same authenticated owner, with no remote actor mapping.
+
+`POST /copilot/conversations` accepts `{title?,grantId?}`; conversation list and
+creation responses include `grantId` or null. Message admission may bind a grant
+only to an empty unbound conversation. Subsequent turns inherit the immutable
+binding, including when `grantId` is omitted; revoked bindings cannot become
+unrestricted conversations. Bound model tools, reads and memory recall are
+restricted to that scope; global reads and global memory are excluded.
+
+Intents expose snake-case storage fields including `command_id`, `input_json`,
+`resources_json`, `grant_revision`, `authority`, `expires_at`, and `digest`.
+Authority is `owner_action` or `delegated_grant`; previews expire after at most
+15 minutes and no later than grant expiry. Receipts use
+`{intentId,outcome,result,createdAt}`, with outcome `confirmed`, `no_effect` or
+`unknown`. Unknown external effects remain indeterminate and are not replayed. External
+execution claims expire after 30 seconds without their 10-second renewal; expired
+claims recover conservatively, while late confirmed receipts retain actual outcomes.
+Copilot pending approvals reference this same intent and resume the original run.
+
+The first delegatable commands are `project.create`, `project.metadata.update`,
+`pm.work_item.create`, `pm.work_item.metadata`, `pm.task.prepare`,
+`pm.management.update`, `memory.write`, `session.start`, and `session.stop`.
+Task preparation creates/links an idle session and never launches or submits a
+prompt. `pm.task.execute` and `session.dispatch` reject with
+`CLI_AUTONOMY_MANUAL_ONLY` before an effect; all four adapters remain manual-only.
+Explicit owner lifecycle actions remain available. Persistent Copilot memory
+writes use `memory.write`, including the memory-entry HTTP creation endpoint;
+automatic post-turn memory curation is disabled.
+
+Overview projects contain `id`, `name`, `management`, `counts`, `goal`,
+`evidenceFreshness`, and `autonomy`. Management defaults are manual mode, empty
+owner/next action, 72-hour freshness and revision 0 before the first update.
+Freshness uses declared evidence timestamps (`source=declared_evidence_timestamp`),
+with fresh/stale/unknown counts and nullable `lastObservedAt`; it does not verify
+evidence content or infer completion. Selecting CLI planning mode grants no CLI
+execution permission. Feishu/Telegram integration and autonomous PM scheduling
+remain later phases.
+
 
 ### Terminal Runtime Dependencies
 
@@ -874,6 +954,8 @@ the full provider/profile/model/credential inventory.
   MODEL_IN_USE_BY_SESSION` takes precedence over `MODEL_IN_USE_BY_BINDING`.
 - `POST /api/v1/model-providers/:id/models/sync`
 - `POST /api/v1/model-providers/:id/readiness`
+- `GET /api/v1/model-providers/applied/:adapter`
+- `GET /api/v1/model-providers/:id/balance`
 - `POST /api/v1/model-providers/:id/balance`
 
 Model sync fetches the provider's model list through its OpenAI-compatible
@@ -884,7 +966,11 @@ follows the provider's API format: Anthropic-format providers send
 `x-goog-api-key`, and everything else sends `Authorization: Bearer`.
 Anthropic-format responses are paginated (`has_more`/`last_id` cursors,
 bounded at 20 pages) so full model inventories are collected. Sync only adds
-missing models; existing model profiles are left untouched.
+missing models; existing model profiles are left untouched. When the
+provider's model list reports a context size (`context_length`,
+`context_window`, `max_context_length`, or `max_input_tokens`), sync fills it
+into the created model profile's `contextWindow` — Claude applies then inject
+it as `CLAUDE_CODE_MAX_CONTEXT_TOKENS`/`CLAUDE_CODE_AUTO_COMPACT_WINDOW`.
 
 `POST /api/v1/model-providers/:id/balance` checks the remaining balance or
 subscription quota for providers with a known endpoint, detected from the
@@ -898,6 +984,20 @@ memory. The response is `{ supported, detectedProvider?, balances: [{ label,
 remaining, unit, isAvailable?, limit?, resetsAt? }], checkedAt }`;
 unsupported providers return `supported: false` with an empty list, and
 upstream failures return `502` with a redacted message.
+
+`GET /api/v1/model-providers/:id/balance` is the polling-friendly read twin:
+it serves a 60-second in-memory cache per user and provider (marked
+`cached: true` on a hit), while `POST` always queries upstream and repopulates
+the cache. Both share the balance probe rate limit.
+
+`GET /api/v1/model-providers/applied/:adapter` returns the provider last
+applied to that adapter's global CLI config via
+`/api/v1/cli-config/:adapter/apply-provider`, read from the per-user
+`cli_config_applied_providers` pointer (written on apply, cleared on rollback,
+cascade-deleted with the provider). The response is `{ appliedProvider:
+{ providerProfileId, providerName, providerStatus, modelProfileId, appliedAt }
+| null }`; it requires only authentication (not instance admin) so the session
+sidebar can render the provider quota module.
 
 The retired provider-level `preview-apply`/`apply` routes are no longer
 mounted and return the normal 404 behavior.
