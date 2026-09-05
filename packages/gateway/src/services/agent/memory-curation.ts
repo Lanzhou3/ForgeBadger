@@ -18,6 +18,9 @@ export interface ProposeMemoryInput {
   userText: string;
   assistantText: string;
   projectId?: string;
+  conversationId?: string;
+  canCommit?: () => boolean;
+  signal?: AbortSignal;
   modelId?: string;
 }
 
@@ -35,6 +38,9 @@ export interface MaybePersistMemoryOptions {
   userText: string;
   assistantText: string;
   projectId?: string;
+  conversationId?: string;
+  canCommit?: () => boolean;
+  signal?: AbortSignal;
   modelId?: string;
 }
 
@@ -50,12 +56,13 @@ export async function maybePersistMemory(options: MaybePersistMemoryOptions): Pr
     proposals = await options.llm.proposeMemory({
       userText: options.userText,
       assistantText: options.assistantText,
-      ...(options.modelId !== undefined ? { modelId: options.modelId } : {})
+      ...(options.modelId !== undefined ? { modelId: options.modelId } : {}),
+      ...(options.signal ? { signal: options.signal } : {})
     });
   } catch {
     return;
   }
-  if (!Array.isArray(proposals) || proposals.length === 0) return;
+  if (!Array.isArray(proposals) || proposals.length === 0 || !(options.canCommit?.() ?? true)) return;
 
   const repo = new AgentMemoryRepository(options.db, options.userId);
   for (const item of proposals) {
@@ -64,7 +71,8 @@ export async function maybePersistMemory(options: MaybePersistMemoryOptions): Pr
         kind: item.kind,
         scope: item.scope,
         text: item.text,
-        ...(item.projectId !== undefined ? { projectId: item.projectId } : {})
+        ...(item.scope === "project" && options.projectId ? { projectId: options.projectId } : {}),
+        ...(item.scope === "session" && options.conversationId ? { conversationId: options.conversationId } : {})
       });
     } catch {
       // Per-item write failure (empty text, bad scope) is dropped, not raised.

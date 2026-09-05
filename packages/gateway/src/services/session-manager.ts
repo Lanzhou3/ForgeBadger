@@ -6,6 +6,8 @@ import { isAdapterId, type AdapterId } from "./adapter-discovery.js";
 import type { TmuxClient } from "./tmux.js";
 import type { ForgeBadgerEventBus } from "./event-bus.js";
 import { SessionOutputRing } from "./session-output-buffer.js";
+import { SessionWriterLeases } from "./session-writer-leases.js";
+import type { Database } from "../db/types.js";
 import {
   assertSafeProgrammaticMessage,
   composerContainsStagedTask,
@@ -75,6 +77,7 @@ export interface RecoveryResult {
 }
 
 export interface SessionManagerOptions {
+  db?: Database;
   tmuxPrefix?: string;
   runtimeInputAuthorizer?: (session: Readonly<GateASession>) => void;
   programmaticSubmitSettleMs?: Partial<Record<AdapterId, number>>;
@@ -118,6 +121,8 @@ class EmptyRecoveryStore implements SessionRecoveryStore {
 }
 
 export class InMemorySessionManager {
+  private readonly writerLeases: SessionWriterLeases;
+  private readonly writerGenerations = new Map<string, number>();
   private readonly sessions = new Map<string, GateASession>();
   private readonly sessionOutputs = new Map<string, SessionOutputRing>();
   private readonly tmuxPrefix: string;
@@ -133,6 +138,7 @@ export class InMemorySessionManager {
     private readonly eventBus?: ForgeBadgerEventBus,
     options: SessionManagerOptions = {}
   ) {
+    this.writerLeases = new SessionWriterLeases(options.db ? {db:options.db} : {});
     this.tmuxPrefix = normalizeTmuxPrefix(options.tmuxPrefix);
     this.runtimeInputAuthorizer = options.runtimeInputAuthorizer;
     this.programmaticSubmitSettleMs = {
@@ -310,6 +316,7 @@ export class InMemorySessionManager {
     }
 
     if (session) {
+      this.invalidateWriter(session);
       let failure: unknown;
       try {
         await this.tmux.killSession(session.tmuxName);
@@ -410,6 +417,7 @@ export class InMemorySessionManager {
 
   async sendInput(id: string, data: string): Promise<void> {
     const session = this.requireSession(id);
+    this.assertManualInputAllowed(session.userId, id);
     if (!this.tmux.sendInput) {
       throw new Error("terminal multiplexer input is not supported");
     }
@@ -422,8 +430,10 @@ export class InMemorySessionManager {
     input: ProgrammaticTaskInput
   ): Promise<ProgrammaticTaskStageReceipt> {
     assertSafeProgrammaticMessage(input.message);
+    const generation = this.writerGenerations.get(id) ?? 0;
     return this.runExclusive(id, async () => {
       const session = this.requireSession(id);
+      if ((this.writerGenerations.get(id) ?? 0) !== generation) throw new Error("SESSION_WRITER_FENCE_STALE");
       const launchAdapter = adapterFromLaunchCommand(session.launchPlan.command);
       if (launchAdapter !== input.adapter) {
         throw new Error(PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH);
@@ -435,42 +445,75 @@ export class InMemorySessionManager {
         throw new Error("terminal multiplexer programmatic input is not supported");
       }
 
-      const before = await this.tmux.inspectPane(session.tmuxName);
-      if (before.dead || before.inMode || !isProgrammaticComposerReady(input.adapter, before.content)) {
-        throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
-      }
-
-      const needle = programmaticDeliveryNeedle(input.message);
-      if (needle === "") {
-        throw new Error(PROGRAMMATIC_SUBMIT_STAGING_FAILED);
-      }
-      // Pane inspection may await long enough for the binding to be revoked or
-      // host privilege to change. This is the final synchronous gate before
-      // the first terminal write, so pre-write rejection remains retry-safe.
-      this.assertRuntimeInputAuthorized(session);
-      // Once staging starts, tmux may already have received some or all bytes.
-      // Any later failure is therefore indeterminate and must never be exposed
-      // as a safe-to-retry pre-write rejection.
+      const lease = this.writerLeases.acquire({ userId: session.userId, sessionId: id, workspace: session.launchPlan.cwd });
       try {
-        await this.tmux.stageProgrammaticInput(session.tmuxName, input.message);
-        await this.sleep(this.programmaticSubmitSettleMs[input.adapter]);
-
-        const staged = await this.tmux.inspectPane(session.tmuxName);
-        if (
-          staged.dead
-          || staged.inMode
-          || !composerContainsStagedTask(input.adapter, staged.content, input.message, needle)
-        ) {
-          throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
+        const before = await this.tmux.inspectPane(session.tmuxName);
+        if (before.dead || before.inMode || !isProgrammaticComposerReady(input.adapter, before.content)) {
+          throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
         }
 
+        const needle = programmaticDeliveryNeedle(input.message);
+        if (needle === "") {
+          throw new Error(PROGRAMMATIC_SUBMIT_STAGING_FAILED);
+        }
+        // Pane inspection may await long enough for the binding to be revoked or
+        // host privilege to change. This is the final synchronous gate before
+        // the first terminal write, so pre-write rejection remains retry-safe.
         this.assertRuntimeInputAuthorized(session);
-        await this.tmux.pressEnter(session.tmuxName);
-        return { adapter: input.adapter, needle, stagedPane: staged.content };
-      } catch {
-        throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
+        this.writerLeases.assertCurrent(lease);
+        // Once staging starts, tmux may already have received some or all bytes.
+        // Any later failure is therefore indeterminate and must never be exposed
+        // as a safe-to-retry pre-write rejection.
+        try {
+          await this.tmux.stageProgrammaticInput(session.tmuxName, input.message);
+          await this.sleep(this.programmaticSubmitSettleMs[input.adapter]);
+
+          const staged = await this.tmux.inspectPane(session.tmuxName);
+          if (
+            staged.dead
+            || staged.inMode
+            || !composerContainsStagedTask(input.adapter, staged.content, input.message, needle)
+          ) {
+            throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
+          }
+
+          this.assertRuntimeInputAuthorized(session);
+          this.writerLeases.assertCurrent(lease);
+          await this.tmux.pressEnter(session.tmuxName);
+          return { adapter: input.adapter, needle, stagedPane: staged.content };
+        } catch {
+          throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
+        }
+      } finally {
+        this.writerLeases.release(lease);
       }
     });
+  }
+
+  assertManualInputAllowed(userId: string, id: string): void {
+    const session = this.requireOwnedSession(userId, id);
+    this.writerLeases.assertManualInputAllowed({ userId, sessionId: id, workspace: session.launchPlan.cwd });
+  }
+
+  takeoverSession(userId: string, id: string): void {
+    const session = this.requireOwnedSession(userId, id);
+    this.writerLeases.takeover({ userId, sessionId: id, workspace: session.launchPlan.cwd });
+    this.invalidateWriter(session);
+  }
+
+  cancelProgrammaticInput(userId: string, id: string): void {
+    this.invalidateWriter(this.requireOwnedSession(userId, id));
+  }
+
+  private invalidateWriter(session: GateASession): void {
+    this.writerGenerations.set(session.id, (this.writerGenerations.get(session.id) ?? 0) + 1);
+    this.writerLeases.revokeSession(session.userId, session.id);
+  }
+
+  private requireOwnedSession(userId: string, id: string): GateASession {
+    const session = this.requireSession(id);
+    if (session.userId !== userId) throw new Error("SESSION_NOT_FOUND");
+    return session;
   }
 
   private assertRuntimeInputAuthorized(session: GateASession): void {

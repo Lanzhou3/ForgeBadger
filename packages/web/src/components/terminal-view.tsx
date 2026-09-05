@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit";
 import type { Terminal as TerminalInstance } from "@xterm/xterm";
 
+import { useTerminalWriter } from "@/hooks/use-terminal-writer";
 import { Button } from "@/components/ui/button";
 import { SessionOutputHistory } from "@/components/sessions/session-output-history";
 import { useLanguage } from "@/hooks/use-language";
@@ -50,6 +51,9 @@ export function TerminalView({
   onHistoryClose?: () => void;
 }) {
   const { t } = useLanguage();
+  const writer = useTerminalWriter(sessionId);
+  const writerRef = useRef(writer);
+  writerRef.current = writer;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<TerminalInstance | null>(null);
   const fitAddonRef = useRef<FitAddonInstance | null>(null);
@@ -155,6 +159,7 @@ export function TerminalView({
       }
 
       if (message.type === "terminal_error") {
+        writerRef.current.refresh();
         terminal.writeln(`\r\n[forgebadger] ${message.payload.message}`);
       }
     });
@@ -191,6 +196,7 @@ export function TerminalView({
     if (terminal) {
       replaceTerminalInputListener(inputDisposableRef, null);
       const disposable = terminal.onData((data) => {
+        if (writerRef.current.readOnly) return;
         const prompt = promptCaptureRef.current.push(data);
         if (prompt) {
           setSessionTabPrompt(sessionId, prompt);
@@ -399,11 +405,27 @@ export function TerminalView({
           the host's computed width/height (border-box under Tailwind preflight)
           without subtracting host padding, so padding here would overshoot
           cols/rows and clip the rightmost character column. */}
-      <div className="relative h-full min-h-0 overflow-hidden p-2">
+      <div className="relative flex h-full min-h-0 flex-col overflow-hidden p-2">
+        {writer.readOnly && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 p-2 text-xs text-amber-300" role="status">
+            <span>
+              {writer.loading
+                ? "正在检查终端写入权限…"
+                : writer.error
+                  ? "写入状态同步失败，终端保持只读。"
+                  : "Copilot 正在操作此工作区，终端只读。"}
+            </span>
+            <Button size="sm" variant="outline" disabled={writer.loading || writer.takingOver} onClick={writer.takeover}>
+              接管终端
+            </Button>
+            <Button size="sm" variant="ghost" onClick={writer.refresh}>刷新状态</Button>
+            {writer.error && <span role="alert">{writer.error.message}</span>}
+          </div>
+        )}
         <div
           ref={hostRef}
           data-testid="terminal-host"
-          className="h-full min-h-0 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
+          className="min-h-0 flex-1 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
         />
         {historyOpen && (
           <SessionOutputHistory

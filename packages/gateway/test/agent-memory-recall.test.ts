@@ -135,3 +135,29 @@ describe("memory searchMulti", () => {
     }
   });
 });
+
+it("isolates exact memory scopes and cannot delete another tenant's search index", () => {
+  const db = createTestDb();
+  try {
+    const users = new UserRepository(db);
+    const alice = users.create("alice@scope.test", "hash");
+    const bob = users.create("bob@scope.test", "hash");
+    const repo = new AgentMemoryRepository(db, alice.id);
+    const other = new AgentMemoryRepository(db, bob.id);
+    const project = new ProjectRepository(db, alice.id).create({ name: "scope", path: "/tmp/scope", aiTool: "claude" });
+    const conversation = new CopilotConversationLog(db, alice.id).createConversation();
+    const secondConversation = new CopilotConversationLog(db, alice.id).createConversation();
+    const global = repo.create({ scope: "global", kind: "fact", text: "unique global" });
+    repo.create({ scope: "project", projectId: project.id, kind: "fact", text: "unique project" });
+    assert.deepEqual(repo.search("unique", { scope: "global" }).map((entry) => entry.id), [global.id]);
+    const session = repo.create({ scope: "session", conversationId: conversation.id, kind: "fact", text: "unique session" });
+    assert.deepEqual(repo.search("unique", { scope: "session", conversationId: conversation.id }).map((entry) => entry.id), [session.id]);
+    assert.equal(repo.searchMulti([{ scope: "session", conversationId: secondConversation.id }], "unique").length, 0);
+    assert.throws(() => repo.create({ scope: "session", kind: "fact", text: "unbound" }), /CONVERSATION_REQUIRED/);
+    assert.throws(() => other.create({ scope: "project", projectId: project.id, kind: "fact", text: "wrong tenant" }), /PROJECT_NOT_FOUND/);
+    assert.equal(other.delete(global.id), false);
+    assert.equal(repo.list({ scope: "global" }).length, 1);
+    assert.equal(repo.search("unique", { scope: "global" }).length, 1);
+    assert.equal(repo.searchMulti([{ scope: "global" }], "unique").length, 1);
+  } finally { db.close(); }
+});

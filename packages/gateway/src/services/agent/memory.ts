@@ -15,6 +15,7 @@ import { redactAgentText } from "./redaction.js";
 export interface AgentMemoryScope {
   scope: "global" | "project" | "session";
   projectId?: string | null;
+  conversationId?: string | null;
 }
 
 export interface AgentMemoryInput extends AgentMemoryScope {
@@ -28,6 +29,7 @@ interface MemoryRow {
   user_id: string;
   scope: string;
   project_id: string | null;
+  conversation_id: string | null;
   kind: string;
   text: string;
   metadata_json: string;
@@ -45,17 +47,17 @@ export class AgentMemoryRepository {
     const text = redactAgentText(input.text.trim());
     if (!text) throw new Error("AGENT_MEMORY_EMPTY");
     if (text.length > MAX_MEMORY_TEXT) throw new Error("AGENT_MEMORY_TOO_LONG");
-    if (input.scope === "project" && !input.projectId) throw new Error("AGENT_MEMORY_PROJECT_REQUIRED");
 
     const id = randomUUID();
     const now = Date.now();
-    const projectId = input.scope === "project" ? input.projectId! : input.projectId ?? null;
+    const projectId = input.scope === "project" ? input.projectId! : null;
     const metadataJson = JSON.stringify(input.metadata ?? {});
     const entry: MemoryRow = {
       id,
       user_id: this.userId,
       scope: input.scope,
       project_id: projectId,
+      conversation_id: input.scope === "session" ? input.conversationId! : null,
       kind: input.kind,
       text,
       metadata_json: metadataJson,
@@ -64,38 +66,62 @@ export class AgentMemoryRepository {
     };
 
     this.db.transaction(() => {
+      this.validateScope(input);
       this.db.prepare(`
-        INSERT INTO copilot_memory (id, user_id, scope, project_id, kind, text, metadata_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(entry.id, entry.user_id, entry.scope, entry.project_id, entry.kind, entry.text, entry.metadata_json, entry.created_at, entry.updated_at);
+        INSERT INTO copilot_memory (id, user_id, scope, project_id, conversation_id, kind, text, metadata_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(entry.id, entry.user_id, entry.scope, entry.project_id, entry.conversation_id, entry.kind, entry.text, entry.metadata_json, entry.created_at, entry.updated_at);
       this.db.prepare(`
         INSERT INTO copilot_memory_fts (memory_id, user_id, scope, project_id, kind, text)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(entry.id, entry.user_id, entry.scope, entry.project_id ?? "", entry.kind, entry.text);
-    })();
+    }).immediate();
 
     return toEntry(entry);
   }
 
+  private validateScope(scope: AgentMemoryScope): void {
+    if (scope.scope === "global") {
+      if (scope.projectId || scope.conversationId) throw new Error("AGENT_MEMORY_GLOBAL_ASSOCIATION");
+      return;
+    }
+    if (scope.scope === "project") {
+      if (!scope.projectId) throw new Error("AGENT_MEMORY_PROJECT_REQUIRED");
+      if (scope.conversationId) throw new Error("AGENT_MEMORY_PROJECT_ASSOCIATION");
+      if (!this.db.prepare("SELECT id FROM projects WHERE id = ? AND user_id = ?").get(scope.projectId, this.userId)) {
+        throw new Error("AGENT_MEMORY_PROJECT_NOT_FOUND");
+      }
+      return;
+    }
+    if (scope.scope !== "session") throw new Error("AGENT_MEMORY_SCOPE_INVALID");
+    if (!scope.conversationId) throw new Error("AGENT_MEMORY_CONVERSATION_REQUIRED");
+    if (scope.projectId) throw new Error("AGENT_MEMORY_SESSION_ASSOCIATION");
+    if (!this.db.prepare("SELECT id FROM copilot_conversations WHERE id = ? AND user_id = ?").get(scope.conversationId, this.userId)) {
+      throw new Error("AGENT_MEMORY_CONVERSATION_NOT_FOUND");
+    }
+  }
+
   list(scope: AgentMemoryScope, limit = 50): AgentMemoryEntry[] {
+    this.validateScope(scope);
     const rows = this.db.prepare(`
       SELECT * FROM copilot_memory
-      WHERE user_id = ? AND scope = ? AND (? IS NULL OR project_id = ?)
+      WHERE user_id = ? AND scope = ? AND project_id IS ? AND conversation_id IS ?
       ORDER BY created_at DESC LIMIT ?
-    `).all(this.userId, scope.scope, scope.projectId ?? null, scope.projectId ?? null, limit) as MemoryRow[];
+    `).all(this.userId, scope.scope, scope.projectId ?? null, scope.conversationId ?? null, Math.max(1, Math.min(limit, 50))) as MemoryRow[];
     return rows.map(toEntry);
   }
 
   search(query: string, scope: AgentMemoryScope, limit = 10): AgentMemoryEntry[] {
+    this.validateScope(scope);
     const q = query.trim();
     if (!q) return [];
     const rows = this.db.prepare(`
       SELECT m.* FROM copilot_memory m
       INNER JOIN copilot_memory_fts fts ON fts.memory_id = m.id
-      WHERE fts.user_id = ? AND fts.copilot_memory_fts MATCH ?
-        AND (? IS NULL OR fts.project_id = ?)
+      WHERE m.user_id = ? AND fts.user_id = m.user_id AND fts.copilot_memory_fts MATCH ?
+        AND m.scope = ? AND m.project_id IS ? AND m.conversation_id IS ?
       ORDER BY rank LIMIT ?
-    `).all(this.userId, quoteFts(q), scope.projectId ?? null, scope.projectId ?? null, Math.min(limit, MAX_SEARCH_LIMIT)) as MemoryRow[];
+    `).all(this.userId, quoteFts(q), scope.scope, scope.projectId ?? null, scope.conversationId ?? null, Math.max(1, Math.min(limit, MAX_SEARCH_LIMIT))) as MemoryRow[];
     return rows.map(toEntry);
   }
 
@@ -113,13 +139,14 @@ export class AgentMemoryRepository {
     const seen = new Set<string>();
     const merged: AgentMemoryEntry[] = [];
     for (const scope of scopes) {
+      this.validateScope(scope);
       const rows = this.db.prepare(`
         SELECT m.* FROM copilot_memory m
         INNER JOIN copilot_memory_fts fts ON fts.memory_id = m.id
-        WHERE fts.user_id = ? AND fts.copilot_memory_fts MATCH ?
-          AND (? IS NULL OR fts.project_id = ?)
+        WHERE m.user_id = ? AND fts.user_id = m.user_id AND fts.copilot_memory_fts MATCH ?
+          AND m.scope = ? AND m.project_id IS ? AND m.conversation_id IS ?
         ORDER BY rank LIMIT ?
-      `).all(this.userId, quoteFtsOr(q), scope.projectId ?? null, scope.projectId ?? null, Math.min(limit, MAX_SEARCH_LIMIT)) as MemoryRow[];
+      `).all(this.userId, quoteFtsOr(q), scope.scope, scope.projectId ?? null, scope.conversationId ?? null, Math.max(1, Math.min(limit, MAX_SEARCH_LIMIT))) as MemoryRow[];
       for (const entry of rows.map(toEntry)) {
         if (seen.has(entry.id)) continue;
         seen.add(entry.id);
@@ -138,7 +165,7 @@ export class AgentMemoryRepository {
   delete(id: string): boolean {
     const result = this.db.transaction(() => {
       const removed = this.db.prepare(`DELETE FROM copilot_memory WHERE id = ? AND user_id = ?`).run(id, this.userId);
-      this.db.prepare(`DELETE FROM copilot_memory_fts WHERE memory_id = ?`).run(id);
+      this.db.prepare(`DELETE FROM copilot_memory_fts WHERE memory_id = ? AND user_id = ?`).run(id, this.userId);
       return removed;
     })();
     return result.changes > 0;
@@ -151,6 +178,7 @@ function toEntry(row: MemoryRow): AgentMemoryEntry {
     userId: row.user_id,
     scope: row.scope as AgentMemoryEntry["scope"],
     projectId: row.project_id,
+    conversationId: row.conversation_id,
     kind: row.kind as AgentMemoryEntry["kind"],
     text: row.text,
     metadataJson: row.metadata_json,

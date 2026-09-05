@@ -91,3 +91,34 @@ describe("maybePersistMemory", () => {
     }
   });
 });
+
+it("curation binds proposal scopes to trusted run input and respects a completion fence", async () => {
+  const previous = process.env.FORGEBADGER_COPILOT_MEMORY_CURATION;
+  process.env.FORGEBADGER_COPILOT_MEMORY_CURATION = "1";
+  const db = createTestDb();
+  try {
+    const user = new UserRepository(db).create("trusted@curation.test", "hash");
+    const { ProjectRepository } = await import("../src/db/repositories/project-repository.js");
+    const { CopilotConversationLog } = await import("../src/services/agent/conversation-log.js");
+    const projects = new ProjectRepository(db, user.id);
+    const trusted = projects.create({ name: "trusted", path: "/tmp/trusted", aiTool: "claude" });
+    const forged = projects.create({ name: "forged", path: "/tmp/forged", aiTool: "claude" });
+    const conversation = new CopilotConversationLog(db, user.id).createConversation();
+    const llm = { async proposeMemory() { return [
+      { kind: "fact", scope: "project", text: "trusted note", projectId: forged.id },
+      { kind: "fact", scope: "session", text: "session note" }
+    ]; } } as unknown as AgentLlmClient;
+    const input = { db, userId: user.id, llm, userText: "remember", assistantText: "noted", projectId: trusted.id, conversationId: conversation.id };
+    await maybePersistMemory({ ...input, canCommit: () => false });
+    const memory = new AgentMemoryRepository(db, user.id);
+    assert.equal(memory.list({ scope: "project", projectId: trusted.id }).length, 0);
+    await maybePersistMemory(input);
+    assert.equal(memory.list({ scope: "project", projectId: trusted.id }).length, 1);
+    assert.equal(memory.list({ scope: "project", projectId: forged.id }).length, 0);
+    assert.equal(memory.list({ scope: "session", conversationId: conversation.id }).length, 1);
+  } finally {
+    db.close();
+    if (previous === undefined) delete process.env.FORGEBADGER_COPILOT_MEMORY_CURATION;
+    else process.env.FORGEBADGER_COPILOT_MEMORY_CURATION = previous;
+  }
+});

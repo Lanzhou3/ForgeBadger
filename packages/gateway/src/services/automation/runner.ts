@@ -22,7 +22,7 @@ export const AUTOMATION_CONVERSATION_ROLLING_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /** A tool registry limited to read tools (operate tools are removed). */
 export function createReadOnlyRegistry() {
-  return createAgentToolRegistry(createPlatformTools().filter((tool) => tool.risk === "read"));
+  return createAgentToolRegistry(createPlatformTools().filter((tool) => tool.risk === "read" && tool.name !== "write_memory"));
 }
 
 export async function runAutomationTurn(deps: AgentStackDeps, automation: Automation, run: AutomationRun): Promise<void> {
@@ -34,14 +34,15 @@ export async function runAutomationTurn(deps: AgentStackDeps, automation: Automa
     const conversationId = resolveAutomationConversation(stack.log, automation.userId);
     const prompt = buildAutomationPrompt(automation);
 
-    await stack.orchestrator.runTurn({
+    const copilotRunId = await stack.orchestrator.runTurn({
       userId: automation.userId,
       conversationId,
       userText: prompt,
       source: "scheduled"
     });
 
-    const content = lastAssistantText(stack.log, conversationId) ?? "";
+    if (stack.log.getRun(copilotRunId)?.status !== "completed") throw new Error("COPILOT_AUTOMATION_NOT_COMPLETED");
+    const content = lastAssistantText(stack.log, copilotRunId) ?? "";
     repo.completeRun(run.id, content);
 
     const delivery = parseDeliveryPlan(automation.deliveryPlan);
@@ -76,8 +77,8 @@ function buildAutomationPrompt(automation: Automation): string {
   return lines.join("\n");
 }
 
-function lastAssistantText(log: CopilotConversationLog, conversationId: string): string | undefined {
-  const messages = log.listMessages(conversationId);
+function lastAssistantText(log: CopilotConversationLog, runId: string): string | undefined {
+  const messages = log.listRunMessages(runId);
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message?.role === "assistant" && message.kind === "text") return message.content;

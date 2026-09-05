@@ -42,6 +42,7 @@ export async function startupGateway(options: {
     eventBus,
     {
       tmuxPrefix: options.env.FORGEBADGER_TMUX_PREFIX,
+      db,
       runtimeInputAuthorizer(runtimeSession) {
         // Tenant check: the session must exist for the runtime user.
         const session = new SessionRepository(db, runtimeSession.userId).getById(runtimeSession.id);

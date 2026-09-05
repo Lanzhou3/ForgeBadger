@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { fileURLToPath } from 'node:url';
+import { UserRepository } from '../src/db/repositories/user-repository.js';
+import { ProjectRepository } from '../src/db/repositories/project-repository.js';
+import { SessionRepository } from '../src/db/repositories/session-repository.js';
+import { SessionWriterLeases } from '../src/services/session-writer-leases.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+test('durable workspace lease survives owner instance restart and expires with monotonic fencing', () => {
+ const root=mkdtempSync(join(tmpdir(),'fb-writer-durable-'));
+ const filename=join(root,'state.db');
+ const db=new Database(filename);
+ let reopened:Database.Database|undefined;
+ try {
+  migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations',import.meta.url))});
+  const user=new UserRepository(db).create('writer-durable@test.dev','hash');
+  const project=new ProjectRepository(db,user.id).create({name:'p',path:'/tmp',aiTool:'codex'});
+  const repo=new SessionRepository(db,user.id);
+  const a=repo.create({projectId:project.id,name:'a',aiTool:'codex',workingDir:'/tmp'});
+  const b=repo.create({projectId:project.id,name:'b',aiTool:'codex',workingDir:'/tmp'});
+  let now=1000;
+  const first=new SessionWriterLeases({db,now:()=>now,ttlMs:100});
+  reopened=new Database(filename);
+  const restarted=new SessionWriterLeases({db:reopened,now:()=>now,ttlMs:100});
+  const scope={userId:user.id,sessionId:a.id,workspace:'/tmp'};
+  const old=first.acquire(scope);
+  assert.throws(()=>restarted.acquire({...scope,sessionId:b.id}),/WRITER_BUSY/);
+  assert.throws(()=>restarted.assertManualInputAllowed({...scope,sessionId:b.id}),/WRITER_BUSY/);
+  const other=new UserRepository(db).create('other-writer@test.dev','hash');
+  assert.throws(()=>restarted.takeover({...scope,userId:other.id}),/WRITER_BUSY/);
+  first.assertCurrent(old);
+  now=1100;
+  assert.throws(()=>first.assertCurrent(old),/WRITER_FENCE_STALE/);
+  const next=restarted.acquire({...scope,sessionId:b.id});
+  assert.ok(next.fence>old.fence);
+  first.release(old);
+  restarted.assertCurrent(next);
+  first.takeover({...scope,sessionId:b.id});
+  assert.throws(()=>restarted.assertCurrent(next),/WRITER_FENCE_STALE/);
+  const third=first.acquire(scope);
+  assert.ok(third.fence>next.fence);
+  first.revokeSession(user.id,a.id);
+  assert.throws(()=>first.assertCurrent(third),/WRITER_FENCE_STALE/);
+ } finally {reopened?.close();db.close();rmSync(root,{recursive:true,force:true});}
+});
