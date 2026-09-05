@@ -269,7 +269,9 @@ describe("cli-config apply service", () => {
       assert.match(configToml, /\[providers\.kimi-provider\]/u);
       assert.match(configToml, /type = "anthropic"/u);
       assert.match(configToml, /api_key = "sk-kimi-secret"/u);
-      assert.match(configToml, /base_url = "https:\/\/api\.deepseek\.com\/v1"/u);
+      // Anthropic-format providers must point at the Anthropic Messages
+      // endpoint, not the OpenAI-compatible one.
+      assert.match(configToml, /base_url = "https:\/\/api\.deepseek\.com\/anthropic"/u);
       // Kimi CLI requires a positive max_context_size; unknown context falls
       // back to 256k.
       assert.match(configToml, /\[models\."kimi-provider\/kimi-model-1"\]/u);
@@ -302,6 +304,81 @@ describe("cli-config apply service", () => {
       // /model picker can switch between them; default pins the selected one.
       assert.match(configToml, /\[models\."kimi-provider\/kimi-model-1"\]/u);
       assert.match(configToml, /default_model = "kimi-provider\/kimi-model-2"/u);
+    });
+
+    it("uses the kimi provider type for Moonshot endpoints", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-kimi-moonshot@example.com", "hash");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-apply-kimi-moonshot-");
+      const repo = new ModelProviderRepository(db, user.id, masterKey);
+      const provider = repo.createProviderProfile({
+        name: "Kimi For Coding",
+        providerKey: "kimi-code",
+        baseUrl: "https://api.kimi.com/coding/v1",
+        openaiBaseUrl: "https://api.kimi.com/coding/v1",
+        authType: "api_key",
+        apiFormat: "openai-compatible",
+        supportedAdapters: ["kimi"]
+      });
+      repo.createModelProfile({
+        providerProfileId: provider.id,
+        name: "Kimi For Coding",
+        modelId: "kimi-for-coding",
+        isDefault: true
+      });
+      repo.createCredential({
+        providerProfileId: provider.id,
+        label: "Primary",
+        plaintextSecret: "sk-kimi-coding-secret"
+      });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "kimi",
+        providerProfileId: provider.id, resolveHost: publicResolver
+      });
+
+      const configToml = await readFile(path.join(root, "config.toml"), "utf8");
+      assert.match(configToml, /\[providers\.kimi-code\]/u);
+      assert.match(configToml, /type = "kimi"/u);
+      assert.match(configToml, /base_url = "https:\/\/api\.kimi\.com\/coding\/v1"/u);
+      assert.match(configToml, /default_model = "kimi-code\/kimi-for-coding"/u);
+    });
+
+    it("uses the openai provider type for generic OpenAI-compatible relays", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-kimi-openai@example.com", "hash");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-apply-kimi-openai-");
+      const repo = new ModelProviderRepository(db, user.id, masterKey);
+      const provider = repo.createProviderProfile({
+        name: "Relay",
+        providerKey: "relay",
+        baseUrl: "https://relay.example.com/v1",
+        openaiBaseUrl: "https://relay.example.com/v1",
+        authType: "api_key",
+        apiFormat: "openai-compatible",
+        supportedAdapters: ["kimi"]
+      });
+      repo.createModelProfile({
+        providerProfileId: provider.id,
+        name: "Relay Model",
+        modelId: "relay-model-1",
+        isDefault: true
+      });
+      repo.createCredential({
+        providerProfileId: provider.id,
+        label: "Primary",
+        plaintextSecret: "sk-relay-secret"
+      });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "kimi",
+        providerProfileId: provider.id, resolveHost: publicResolver
+      });
+
+      const configToml = await readFile(path.join(root, "config.toml"), "utf8");
+      assert.match(configToml, /\[providers\.relay\]/u);
+      assert.match(configToml, /type = "openai"/u);
+      assert.match(configToml, /base_url = "https:\/\/relay\.example\.com\/v1"/u);
     });
 
     it("removes a stale ANTHROPIC_API_KEY when applying a token-based provider", async () => {
@@ -407,6 +484,109 @@ describe("cli-config apply service", () => {
       };
       assert.equal(switched.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "100000");
       assert.equal(switched.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
+    });
+
+    it("injects the model profile's context window and strips it when switching away", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-minimax-ctx@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-minimax-ctx-");
+      const repo = new ModelProviderRepository(db, user.id, masterKey);
+      const provider = repo.createProviderProfile({
+        name: "MiniMax",
+        providerKey: "minimax",
+        anthropicBaseUrl: "https://api.minimaxi.com/anthropic",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"]
+      });
+      repo.createModelProfile({
+        providerProfileId: provider.id, name: "M3", modelId: "MiniMax-M3",
+        contextWindow: 1000000, isDefault: true
+      });
+      repo.createCredential({ providerProfileId: provider.id, plaintextSecret: "sk-minimax" });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: provider.id, resolveHost: publicResolver
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "1000000");
+      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, "1000000");
+
+      // Switching to a model without a context window strips exactly the
+      // value the previous apply injected.
+      const fixture = createFixture(db, user.id, "claude");
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+      const switched = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(switched.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, undefined);
+      assert.equal(switched.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
+    });
+
+    it("falls back to the 512k floor for MiniMax anthropic endpoints without a model context window", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-minimax-floor@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-minimax-floor-");
+      const repo = new ModelProviderRepository(db, user.id, masterKey);
+      const provider = repo.createProviderProfile({
+        name: "MiniMax",
+        providerKey: "minimax",
+        anthropicBaseUrl: "https://api.minimax.io/anthropic",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"]
+      });
+      repo.createModelProfile({ providerProfileId: provider.id, name: "M3", modelId: "MiniMax-M3", isDefault: true });
+      repo.createCredential({ providerProfileId: provider.id, plaintextSecret: "sk-minimax" });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: provider.id, resolveHost: publicResolver
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "524288");
+      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, "524288");
+    });
+
+    it("never injects context overrides for claude- prefixed model ids", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-claude-prefix@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-claude-prefix-");
+      const repo = new ModelProviderRepository(db, user.id, masterKey);
+      const provider = repo.createProviderProfile({
+        name: "Relay",
+        providerKey: "relay",
+        anthropicBaseUrl: "https://api.deepseek.com/anthropic",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"]
+      });
+      repo.createModelProfile({
+        providerProfileId: provider.id, name: "Relay Claude", modelId: "claude-relay-1",
+        contextWindow: 999999, isDefault: true
+      });
+      repo.createCredential({ providerProfileId: provider.id, plaintextSecret: "sk-relay" });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: provider.id, resolveHost: publicResolver
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, undefined);
+      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
     });
 
     it("maps Claude alias slots to distinct models and manages optional slots", async () => {

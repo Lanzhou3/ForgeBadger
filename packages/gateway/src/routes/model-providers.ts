@@ -13,6 +13,7 @@ import {
   type ProviderProfile,
   type UpdateModelProfileInput
 } from "../db/repositories/model-provider-repository.js";
+import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
 import type { Database } from "../db/types.js";
 import { checkModelEndpoint } from "../services/model-endpoint-health.js";
 import {
@@ -100,8 +101,88 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
   router.use("/:id/models/sync", probeLimiter);
   router.use("/:id/balance", probeLimiter);
 
+  // Sidebar polling would otherwise spray provider endpoints; cache balance
+  // reads briefly and let POST /:id/balance act as the explicit refresh.
+  const balanceCacheTtlMs = 60_000;
+  const balanceCache = new Map<string, { payload: Record<string, unknown>; expiresAt: number }>();
+
+  const runBalanceQuery = async (
+    userId: string,
+    providerId: string,
+    options: { credentialId?: string | undefined; timeoutMs?: number | undefined }
+  ): Promise<
+    | { ok: true; result: FetchProviderBalanceResult }
+    | { ok: false; status: number; message: string }
+  > => {
+    const repo = new ModelProviderRepository(db, userId, masterKey);
+    const provider = repo.getProviderProfile(providerId);
+    if (!provider) {
+      return { ok: false, status: 404, message: "Provider not found" };
+    }
+    const baseUrls = [provider.openaiBaseUrl, provider.baseUrl].filter((value): value is string => Boolean(value));
+    if (baseUrls.length === 0) {
+      return { ok: false, status: 400, message: "Provider base URL is required" };
+    }
+    const credential = selectCredential(repo, provider.id, options.credentialId);
+    if (options.credentialId && !credential) {
+      return { ok: false, status: 400, message: "Credential does not belong to the selected provider" };
+    }
+    if (credential && credential.status !== "active") {
+      return { ok: false, status: 400, message: "An active provider credential is required to query balance" };
+    }
+    if (provider.authType !== "none" && !credential) {
+      return { ok: false, status: 400, message: "Provider credential is required to query balance" };
+    }
+    try {
+      // The credential secret is decrypted in memory only and never leaves the
+      // outbound Authorization header.
+      const result = await fetchProviderBalance({
+        baseUrls,
+        apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
+        allowPlaintextHttp: provider.allowPlaintextHttp,
+        ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {})
+      });
+      return { ok: true, result };
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : "Failed to query provider balance";
+      return { ok: false, status: 502, message: redactSensitiveErrorMessage(raw) };
+    }
+  };
+
   router.get("/capabilities", (_req, res) => {
     res.json({ code: 0, data: { adapters: getProviderCapabilities() }, message: "" });
+  });
+
+  // Which provider was last applied to an adapter's global CLI config; read
+  // endpoint for the session sidebar (cli-config mutations stay admin-only).
+  router.get("/applied/:adapter", (req, res) => {
+    const parsed = adapterSchema.safeParse(req.params.adapter);
+    if (!parsed.success) {
+      res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
+      return;
+    }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const pointer = new CliConfigAppliedProviderRepository(db, userId).get(parsed.data);
+    const provider = pointer
+      ? repoFor(db, masterKey, req).getProviderProfile(pointer.providerProfileId)
+      : undefined;
+    if (!pointer || !provider) {
+      res.json({ code: 0, data: { appliedProvider: null }, message: "" });
+      return;
+    }
+    res.json({
+      code: 0,
+      data: {
+        appliedProvider: {
+          providerProfileId: provider.id,
+          providerName: provider.name,
+          providerStatus: provider.status,
+          modelProfileId: pointer.modelProfileId,
+          appliedAt: new Date(pointer.appliedAt).toISOString()
+        }
+      },
+      message: ""
+    });
   });
 
   router.get("/", (req, res) => {
@@ -254,12 +335,13 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
         allowPlaintextHttp: provider.allowPlaintextHttp,
         ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
       });
-      const created = syncFetchedModels(repo, provider, fetchedModels);
+      const { created, backfilled } = syncFetchedModels(repo, provider, fetchedModels);
       res.json({
         code: 0,
         data: {
           fetchedCount: fetchedModels.length,
           createdCount: created.length,
+          updatedCount: backfilled,
           models: created
         },
         message: ""
@@ -274,56 +356,44 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     }
   });
 
+  router.get("/:id/balance", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const cacheKey = `${userId}:${req.params.id}`;
+    const cached = balanceCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      res.json({ code: 0, data: { ...cached.payload, cached: true }, message: "" });
+      return;
+    }
+    balanceCache.delete(cacheKey);
+    const outcome = await runBalanceQuery(userId, req.params.id, {});
+    if (!outcome.ok) {
+      res.status(outcome.status).json({ code: 1, message: outcome.message });
+      return;
+    }
+    const payload: Record<string, unknown> = { ...outcome.result, checkedAt: new Date().toISOString() };
+    balanceCache.set(cacheKey, { payload, expiresAt: Date.now() + balanceCacheTtlMs });
+    res.json({ code: 0, data: { ...payload, cached: false }, message: "" });
+  });
+
   router.post("/:id/balance", async (req, res) => {
     const parseResult = balanceSchema.safeParse(req.body ?? {});
     if (!parseResult.success) {
       res.status(400).json({ code: 1, message: "Invalid provider balance payload" });
       return;
     }
-    const repo = repoFor(db, masterKey, req);
-    const provider = repo.getProviderProfile(req.params.id);
-    if (!provider) {
-      res.status(404).json({ code: 1, message: "Provider not found" });
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const outcome = await runBalanceQuery(userId, req.params.id, {
+      credentialId: parseResult.data.credentialId,
+      timeoutMs: parseResult.data.timeoutMs
+    });
+    if (!outcome.ok) {
+      res.status(outcome.status).json({ code: 1, message: outcome.message });
       return;
     }
-    const baseUrls = [provider.openaiBaseUrl, provider.baseUrl].filter((value): value is string => Boolean(value));
-    if (baseUrls.length === 0) {
-      res.status(400).json({ code: 1, message: "Provider base URL is required" });
-      return;
-    }
-
-    const credential = selectCredential(repo, provider.id, parseResult.data.credentialId);
-    if (parseResult.data.credentialId && !credential) {
-      res.status(400).json({ code: 1, message: "Credential does not belong to the selected provider" });
-      return;
-    }
-    if (credential && credential.status !== "active") {
-      res.status(400).json({ code: 1, message: "An active provider credential is required to query balance" });
-      return;
-    }
-    if (provider.authType !== "none" && !credential) {
-      res.status(400).json({ code: 1, message: "Provider credential is required to query balance" });
-      return;
-    }
-
-    try {
-      // The credential secret is decrypted in memory only and never leaves the
-      // outbound Authorization header.
-      const result = await fetchProviderBalance({
-        baseUrls,
-        apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
-        allowPlaintextHttp: provider.allowPlaintextHttp,
-        ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
-      });
-      res.json({
-        code: 0,
-        data: { ...result, checkedAt: new Date().toISOString() },
-        message: ""
-      });
-    } catch (error) {
-      const raw = error instanceof Error ? error.message : "Failed to query provider balance";
-      res.status(502).json({ code: 1, message: redactSensitiveErrorMessage(raw) });
-    }
+    const payload: Record<string, unknown> = { ...outcome.result, checkedAt: new Date().toISOString() };
+    // A manual refresh doubles as the latest read for sidebar polling.
+    balanceCache.set(`${userId}:${req.params.id}`, { payload, expiresAt: Date.now() + balanceCacheTtlMs });
+    res.json({ code: 0, data: payload, message: "" });
   });
 
   router.patch("/:id/models/:modelId", (req, res) => {
@@ -581,22 +651,33 @@ function syncFetchedModels(
   repo: ModelProviderRepository,
   provider: ProviderProfile,
   fetchedModels: FetchedProviderModel[]
-): ModelProfile[] {
-  const existing = new Set(repo.listModelProfiles(provider.id).map((model) => model.modelId));
+): { created: ModelProfile[]; backfilled: number } {
+  const existing = new Map(repo.listModelProfiles(provider.id).map((model) => [model.modelId, model]));
   const created: ModelProfile[] = [];
+  let backfilled = 0;
   for (const fetched of fetchedModels) {
-    if (existing.has(fetched.id)) continue;
+    const current = existing.get(fetched.id);
+    if (current) {
+      // Backfill only a missing context window; values already set (by the
+      // user or an earlier sync) are never overwritten.
+      if (!current.contextWindow && fetched.contextWindow) {
+        repo.updateModelProfile(current.id, { contextWindow: fetched.contextWindow });
+        backfilled += 1;
+      }
+      continue;
+    }
     const model = repo.createModelProfile({
       providerProfileId: provider.id,
       name: fetched.id,
       modelId: fetched.id,
       capabilities: ["chat"],
-      isDefault: existing.size === 0 && created.length === 0
+      isDefault: existing.size === 0 && created.length === 0,
+      ...(fetched.contextWindow ? { contextWindow: fetched.contextWindow } : {})
     });
-    existing.add(fetched.id);
+    existing.set(fetched.id, model);
     created.push(model);
   }
-  return created;
+  return { created, backfilled };
 }
 
 function repoFor(db: Database, masterKey: string, req: unknown): ModelProviderRepository {

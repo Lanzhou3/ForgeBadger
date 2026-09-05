@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { signJwt } from "../src/auth/jwt.js";
+import { CliConfigAppliedProviderRepository } from "../src/db/repositories/cli-config-applied-provider-repository.js";
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createCliConfigRoutes } from "../src/routes/cli-config.js";
@@ -115,6 +116,25 @@ describe("cli-config apply-provider route", () => {
     };
     assert.equal(doc.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, "deepseek-flash");
     assert.equal(doc.env.ANTHROPIC_DEFAULT_SONNET_MODEL, "deepseek-chat");
+  });
+
+  it("records the applied-provider pointer on apply and clears it on rollback", async () => {
+    const { provider, model } = createProvider();
+    const pointers = new CliConfigAppliedProviderRepository(db, userIdFromToken());
+
+    const applied = await post("/api/v1/cli-config/claude/apply-provider", {
+      providerProfileId: provider.id,
+      modelProfileId: model.id
+    });
+
+    assert.equal(applied.status, 200, JSON.stringify(applied.json));
+    assert.equal(pointers.get("claude")?.providerProfileId, provider.id);
+    assert.equal(pointers.get("claude")?.modelProfileId, model.id);
+
+    const rolledBack = await post("/api/v1/cli-config/claude/rollback", {});
+
+    assert.equal(rolledBack.status, 200, JSON.stringify(rolledBack.json));
+    assert.equal(pointers.get("claude"), undefined);
   });
 
   it("serves concurrent previews without lock contention (dry-run is lock-free)", async () => {

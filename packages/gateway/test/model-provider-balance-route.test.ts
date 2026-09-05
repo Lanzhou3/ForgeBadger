@@ -141,6 +141,73 @@ describe("model provider balance route", () => {
     assert.equal(JSON.stringify(res.body).includes("sk-deepseek"), false);
   });
 
+  it("GET serves a fresh fetch first and then the cached payload", async () => {
+    let fetchCalls = 0;
+    const app = buildApp(async () => {
+      fetchCalls += 1;
+      return {
+        supported: true,
+        detectedProvider: "deepseek",
+        balances: [{ label: "CNY", remaining: 42.5, unit: "CNY" }]
+      };
+    });
+    const providerId = await createDeepSeekProvider(app);
+    await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
+      plaintextSecret: "sk-deepseek"
+    }, authHeaders());
+
+    const fresh = await makeRequest(app, "GET", `/api/v1/model-providers/${providerId}/balance`, undefined, authHeaders());
+    const cached = await makeRequest(app, "GET", `/api/v1/model-providers/${providerId}/balance`, undefined, authHeaders());
+
+    assert.equal(fresh.status, 200);
+    assert.equal(fresh.body.data.cached, false);
+    assert.equal(fresh.body.data.balances[0].remaining, 42.5);
+    assert.equal(cached.status, 200);
+    assert.equal(cached.body.data.cached, true);
+    assert.equal(cached.body.data.checkedAt, fresh.body.data.checkedAt);
+    assert.equal(fetchCalls, 1);
+  });
+
+  it("POST force-refreshes and repopulates the GET cache", async () => {
+    let fetchCalls = 0;
+    let remaining = 10;
+    const app = buildApp(async () => {
+      fetchCalls += 1;
+      remaining += 1;
+      return {
+        supported: true,
+        detectedProvider: "deepseek",
+        balances: [{ label: "CNY", remaining, unit: "CNY" }]
+      };
+    });
+    const providerId = await createDeepSeekProvider(app);
+    await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
+      plaintextSecret: "sk-deepseek"
+    }, authHeaders());
+
+    const first = await makeRequest(app, "GET", `/api/v1/model-providers/${providerId}/balance`, undefined, authHeaders());
+    const refreshed = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/balance`, {}, authHeaders());
+    const after = await makeRequest(app, "GET", `/api/v1/model-providers/${providerId}/balance`, undefined, authHeaders());
+
+    assert.equal(first.body.data.balances[0].remaining, 11);
+    assert.equal(refreshed.body.data.balances[0].remaining, 12);
+    assert.equal(after.body.data.cached, true);
+    assert.equal(after.body.data.balances[0].remaining, 12);
+    assert.equal(fetchCalls, 2);
+  });
+
+  it("GET returns 404 when the provider does not exist and 400 without a credential", async () => {
+    const app = buildApp(async () => ({ supported: false, balances: [] }));
+
+    const missing = await makeRequest(app, "GET", "/api/v1/model-providers/missing/balance", undefined, authHeaders());
+    assert.equal(missing.status, 404);
+
+    const providerId = await createDeepSeekProvider(app);
+    const noCredential = await makeRequest(app, "GET", `/api/v1/model-providers/${providerId}/balance`, undefined, authHeaders());
+    assert.equal(noCredential.status, 400);
+    assert.match(noCredential.body.message, /credential/i);
+  });
+
   function authHeaders(): Record<string, string> {
     return {
       Authorization: `Bearer ${token}`,

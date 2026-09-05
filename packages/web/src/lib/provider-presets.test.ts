@@ -58,7 +58,7 @@ describe("providerPresetToForm", () => {
       authType: "api_key",
       anthropicBaseUrl: "https://api.kimi.com/coding/",
       openaiBaseUrl: "https://api.kimi.com/coding/v1",
-      supportedAdapters: ["claude", "opencode"],
+      supportedAdapters: ["claude", "opencode", "kimi"],
       allowPlaintextHttp: false,
     });
   });

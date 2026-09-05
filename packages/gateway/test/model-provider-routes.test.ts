@@ -292,7 +292,7 @@ describe("model provider routes", () => {
         fetchedInputs.push(input);
         return [
           { id: "deepseek-v4-flash", ownedBy: "deepseek" },
-          { id: "deepseek-v4-pro", ownedBy: "deepseek" },
+          { id: "deepseek-v4-pro", ownedBy: "deepseek", contextWindow: 131072 },
         ];
       },
     }));
@@ -316,6 +316,55 @@ describe("model provider routes", () => {
       synced.body.data.models.map((model: { modelId: string }) => model.modelId),
       ["deepseek-v4-flash", "deepseek-v4-pro"]
     );
+    assert.deepEqual(
+      synced.body.data.models.map((model: { contextWindow: number | null }) => model.contextWindow),
+      [null, 131072]
+    );
+  });
+
+  it("backfills context windows on existing models without overwriting set values", async () => {
+    const syncApp = express();
+    syncApp.locals.jwtSecret = secret;
+    syncApp.use(express.json());
+    syncApp.use("/api/v1/model-providers", createModelProviderRoutes(db, masterKey, {
+      fetchProviderModels: async () => [
+        { id: "kimi-k3", ownedBy: "moonshot", contextWindow: 262144 },
+        { id: "kimi-k2", ownedBy: "moonshot", contextWindow: 131072 },
+      ],
+    }));
+    const created = await makeRequest(syncApp, "POST", "/api/v1/model-providers", {
+      name: "Kimi",
+      providerKey: "kimi",
+      baseUrl: "https://api.kimi.com",
+      anthropicBaseUrl: "https://api.kimi.com/coding/",
+      openaiBaseUrl: "https://api.kimi.com/v1",
+      authType: "api_key",
+      apiFormat: "anthropic",
+      supportedAdapters: ["claude", "kimi"]
+    }, authHeaders());
+    const providerId = created.body.data.provider.id;
+    await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
+      plaintextSecret: "sk-kimi"
+    }, authHeaders());
+    // One model pre-exists without a context window, one with an explicit value.
+    await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "K3", modelId: "kimi-k3"
+    }, authHeaders());
+    await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "K2", modelId: "kimi-k2", contextWindow: 65536
+    }, authHeaders());
+
+    const synced = await makeRequest(syncApp, "POST", `/api/v1/model-providers/${providerId}/models/sync`, {}, authHeaders());
+
+    assert.equal(synced.status, 200, JSON.stringify(synced.body));
+    assert.equal(synced.body.data.createdCount, 0);
+    assert.equal(synced.body.data.updatedCount, 1);
+    const listed = await makeRequest(syncApp, "GET", `/api/v1/model-providers/${providerId}/models`, undefined, authHeaders());
+    const windows = new Map(listed.body.data.models.map(
+      (model: { modelId: string; contextWindow: number | null }) => [model.modelId, model.contextWindow]
+    ));
+    assert.equal(windows.get("kimi-k3"), 262144);
+    assert.equal(windows.get("kimi-k2"), 65536);
   });
 
   it("syncs an Anthropic provider from its Anthropic endpoint", async () => {

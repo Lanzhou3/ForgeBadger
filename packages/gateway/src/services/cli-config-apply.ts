@@ -6,6 +6,7 @@ import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 
 import { decryptSecret, encryptSecret, type EncryptedSecret } from "../crypto/secret-box.js";
 import type { Database } from "../db/types.js";
+import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
 import {
   ModelProviderRepository,
   type ModelProfile,
@@ -32,6 +33,12 @@ const inProcessLocks = new Map<string, Promise<void>>();
 
 /** cc-switch parity: Kimi For Coding exposes a 256k context window. */
 const kimiCodingContextTokens = "262144";
+
+/**
+ * MiniMax's Anthropic-compatible endpoints guarantee at least a 512k context
+ * window (M3 advertises 1M; 512k = 524288 tokens is the safe floor across plans).
+ */
+const minimaxAnthropicContextTokens = 524288;
 
 /**
  * Kimi CLI hard-errors ("must define a positive max_context_size") on custom
@@ -113,6 +120,8 @@ interface ApplyContext {
   credential: ProviderCredentialSummary;
   providerKey: string;
   baseUrl: string | null;
+  /** What the previous apply to this adapter injected as the context window, if known. */
+  previousContextWindow: number | null;
 }
 
 interface ApplyTarget {
@@ -216,6 +225,11 @@ export async function applyCliConfigToAdapter(input: CliConfigApplyInput): Promi
         error instanceof Error ? error.message : "CLI config apply failed"
       );
     }
+    // The CLI config files are the source of truth for the CLI itself; this
+    // pointer only records the apply so read-only surfaces (session sidebar
+    // quota) can resolve the current provider without parsing CLI configs.
+    new CliConfigAppliedProviderRepository(input.db, input.userId)
+      .upsert(context.adapter, context.provider.id, context.model.id);
     return {
       adapter: context.adapter,
       backupId,
@@ -363,6 +377,18 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
       error instanceof Error ? error.message : "Provider endpoint is not a public HTTPS endpoint"
     );
   }
+  // The previous apply's injected context window, so switching providers can
+  // strip exactly the managed value (and nothing the user set by hand).
+  const previousPointer = new CliConfigAppliedProviderRepository(input.db, input.userId).get(input.adapter);
+  const previousProvider = previousPointer
+    ? repository.getProviderProfile(previousPointer.providerProfileId)
+    : undefined;
+  const previousModel = previousPointer?.modelProfileId
+    ? repository.getModelProfile(previousPointer.modelProfileId)
+    : undefined;
+  const previousContextWindow = previousProvider
+    ? claudeContextWindowTarget(endpointForAdapter(previousProvider, input.adapter), previousModel ?? null)
+    : null;
   return {
     adapter: input.adapter,
     provider,
@@ -372,7 +398,8 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
     reasoningEffort: input.reasoningEffort,
     credential,
     providerKey: normalizeProviderKey(provider.providerKey),
-    baseUrl
+    baseUrl,
+    previousContextWindow
   };
 }
 
@@ -455,7 +482,7 @@ function buildApplyDocument(
     const timeout = claudeTimeout(context.provider.providerKey);
     if (timeout) env.API_TIMEOUT_MS = timeout;
     else delete env.API_TIMEOUT_MS;
-    applyKimiCodingContextWindow(env, context.baseUrl);
+    applyClaudeContextWindow(env, context.baseUrl, primary, context.previousContextWindow);
     doc.env = env;
     return;
   }
@@ -512,7 +539,7 @@ function buildApplyDocument(
   }
   const providers = record(doc.providers);
   const definition: Record<string, unknown> = {
-    type: context.provider.apiFormat === "anthropic" ? "anthropic" : "openai",
+    type: kimiProviderType(context.provider.apiFormat, context.baseUrl),
     api_key: secret
   };
   if (context.baseUrl) definition.base_url = context.baseUrl;
@@ -557,19 +584,45 @@ function writeOptionalClaudeSlot(
 }
 
 /**
- * cc-switch parity: the Kimi For Coding endpoint exposes a 256k context
- * window, so fill in the Claude Code context-window overrides when applying
- * it. Explicit user values are never overwritten; when switching away, only
- * values equal to the injected default are stripped.
+ * Claude Code assumes a 200k window for model IDs outside its built-in model
+ * catalog and clamps auto-compact accordingly ("isn't described by this
+ * version's model catalog"). Fill in the override pair for known coding
+ * endpoints and for model profiles with an explicit context window — both
+ * keys are required (either alone is clamped back to 200k), and Claude Code
+ * only honors them for non-`claude-` prefixed model ids. Explicit user values
+ * are never overwritten; when switching away, only values equal to what a
+ * previous apply injected are stripped.
  */
-function applyKimiCodingContextWindow(env: Record<string, unknown>, baseUrl: string | null): void {
-  if (isKimiCodingEndpoint(baseUrl)) {
-    env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ??= kimiCodingContextTokens;
-    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??= kimiCodingContextTokens;
+function applyClaudeContextWindow(
+  env: Record<string, unknown>,
+  baseUrl: string | null,
+  model: ModelProfile,
+  previousContextWindow: number | null
+): void {
+  const target = claudeContextWindowTarget(baseUrl, model);
+  if (target !== null) {
+    const value = String(target);
+    env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ??= value;
+    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??= value;
     return;
   }
-  if (env.CLAUDE_CODE_MAX_CONTEXT_TOKENS === kimiCodingContextTokens) delete env.CLAUDE_CODE_MAX_CONTEXT_TOKENS;
-  if (env.CLAUDE_CODE_AUTO_COMPACT_WINDOW === kimiCodingContextTokens) delete env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+  // Kimi predates the applied-provider pointer, so its injected default is
+  // always treated as managed even when no pointer records it.
+  const managed = new Set<string>([kimiCodingContextTokens]);
+  if (previousContextWindow !== null) managed.add(String(previousContextWindow));
+  for (const key of ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"] as const) {
+    const value = env[key];
+    if (typeof value === "string" && managed.has(value)) delete env[key];
+  }
+}
+
+function claudeContextWindowTarget(baseUrl: string | null, model: ModelProfile | null): number | null {
+  // Claude Code ignores the overrides for catalog-prefixed ids.
+  if (model && model.modelId.toLowerCase().startsWith("claude-")) return null;
+  if (model?.contextWindow && model.contextWindow > 0) return model.contextWindow;
+  if (isKimiCodingEndpoint(baseUrl)) return Number(kimiCodingContextTokens);
+  if (isMinimaxAnthropicEndpoint(baseUrl)) return minimaxAnthropicContextTokens;
+  return null;
 }
 
 function isKimiCodingEndpoint(baseUrl: string | null): boolean {
@@ -577,6 +630,18 @@ function isKimiCodingEndpoint(baseUrl: string | null): boolean {
   try {
     const url = new URL(baseUrl);
     return url.hostname.toLowerCase() === "api.kimi.com" && url.pathname.startsWith("/coding");
+  } catch {
+    return false;
+  }
+}
+
+function isMinimaxAnthropicEndpoint(baseUrl: string | null): boolean {
+  if (!baseUrl) return false;
+  try {
+    const url = new URL(baseUrl);
+    const host = url.hostname.toLowerCase();
+    return (host === "api.minimaxi.com" || host === "api.minimax.io")
+      && url.pathname.startsWith("/anthropic");
   } catch {
     return false;
   }
@@ -713,10 +778,32 @@ function normalizeProviderKey(value: string): string {
 
 function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId): string | null {
   if (adapter === "claude") return provider.anthropicBaseUrl ?? provider.baseUrl;
-  if (adapter === "opencode" && provider.apiFormat === "anthropic") {
+  if ((adapter === "opencode" || adapter === "kimi") && provider.apiFormat === "anthropic") {
     return provider.anthropicBaseUrl ?? provider.baseUrl;
   }
   return provider.openaiBaseUrl ?? provider.baseUrl;
+}
+
+/**
+ * Kimi Code provider types (official configuration docs): "kimi" is
+ * Moonshot's OpenAI-compatible protocol (managed service + Kimi Platform
+ * keys), "anthropic" speaks the Anthropic Messages protocol, and "openai"
+ * covers generic Chat Completions relays.
+ */
+function kimiProviderType(apiFormat: ProviderProfile["apiFormat"], baseUrl: string | null): string {
+  if (apiFormat === "anthropic") return "anthropic";
+  if (isMoonshotEndpoint(baseUrl)) return "kimi";
+  return "openai";
+}
+
+function isMoonshotEndpoint(baseUrl: string | null): boolean {
+  if (!baseUrl) return false;
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === "api.moonshot.ai" || host === "api.moonshot.cn" || host === "api.kimi.com";
+  } catch {
+    return false;
+  }
 }
 
 function openCodePackage(apiFormat: ProviderProfile["apiFormat"]): string {

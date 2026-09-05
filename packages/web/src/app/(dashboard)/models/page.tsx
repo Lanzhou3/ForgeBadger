@@ -363,7 +363,8 @@ export default function ModelsPage() {
       });
     },
     onSuccess: async (result) => {
-      setNotice(result.createdCount > 0 ? t("models.modelSyncComplete") : t("models.modelSyncNoChanges"));
+      const changed = result.createdCount + (result.updatedCount ?? 0);
+      setNotice(changed > 0 ? t("models.modelSyncComplete") : t("models.modelSyncNoChanges"));
       await refreshProviders();
     },
   });

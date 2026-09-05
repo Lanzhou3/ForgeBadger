@@ -7,6 +7,8 @@ import { validatePublicHttpsEndpointUrl, type CheckModelEndpointInput } from "./
 export interface FetchedProviderModel {
   id: string;
   ownedBy: string | null;
+  /** Context window when the provider's model list reports one. */
+  contextWindow?: number | null;
 }
 
 export interface FetchProviderModelsInput {
@@ -26,10 +28,22 @@ interface ModelsResponse {
     id?: unknown;
     owned_by?: unknown;
     ownedBy?: unknown;
+    context_length?: unknown;
+    context_window?: unknown;
+    max_context_length?: unknown;
+    max_input_tokens?: unknown;
   }>;
   has_more?: unknown;
   last_id?: unknown;
 }
+
+/** Field names providers use for context size in OpenAI-style /models entries (e.g. OpenRouter's context_length). */
+const contextWindowFields = [
+  "context_length",
+  "context_window",
+  "max_context_length",
+  "max_input_tokens",
+] as const;
 
 const knownCompatSuffixes = [
   "/api/claudecode",
@@ -135,6 +149,7 @@ async function fetchModelsFromEndpoint(
           : typeof model.ownedBy === "string"
             ? model.ownedBy
             : null,
+        contextWindow: parseContextWindow(model),
       });
     }
     if (!isAnthropic) break;
@@ -238,6 +253,19 @@ function stripCompatSuffix(baseUrl: string): string | undefined {
     }
   }
   return undefined;
+}
+
+function parseContextWindow(
+  model: NonNullable<ModelsResponse["data"]>[number]
+): number | null {
+  for (const field of contextWindowFields) {
+    const value = model[field];
+    const parsed = typeof value === "number" ? value
+      : typeof value === "string" ? Number.parseFloat(value)
+      : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+  }
+  return null;
 }
 
 function truncate(value: string): string {

@@ -65,8 +65,33 @@ describe("provider model fetch", () => {
       { url: "https://api.example.com/v1/models", authorization: "Bearer sk-test" },
     ]);
     assert.deepEqual(models, [
-      { id: "a-model", ownedBy: null },
-      { id: "z-model", ownedBy: "vendor" },
+      { id: "a-model", ownedBy: null, contextWindow: null },
+      { id: "z-model", ownedBy: "vendor", contextWindow: null },
+    ]);
+  });
+
+  it("captures context window fields reported by the provider", async () => {
+    const models = await fetchProviderModels({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-test",
+      fetchImpl: async () => new Response(JSON.stringify({
+        data: [
+          { id: "openrouter-style", context_length: 1048576 },
+          { id: "string-number", context_window: "262144" },
+          { id: "alt-field", max_context_length: 131072 },
+          { id: "no-context" },
+          { id: "bogus", context_length: "lots" },
+        ],
+      }), { status: 200 }),
+      resolveHost: publicHostResolver,
+    });
+
+    assert.deepEqual(models, [
+      { id: "alt-field", ownedBy: null, contextWindow: 131072 },
+      { id: "bogus", ownedBy: null, contextWindow: null },
+      { id: "no-context", ownedBy: null, contextWindow: null },
+      { id: "openrouter-style", ownedBy: null, contextWindow: 1048576 },
+      { id: "string-number", ownedBy: null, contextWindow: 262144 },
     ]);
   });
 
@@ -123,9 +148,9 @@ describe("provider model fetch", () => {
       assert.equal(request.headers["anthropic-version"], "2023-06-01");
     }
     assert.deepEqual(models, [
-      { id: "a-model", ownedBy: null },
-      { id: "b-model", ownedBy: null },
-      { id: "c-model", ownedBy: null },
+      { id: "a-model", ownedBy: null, contextWindow: null },
+      { id: "b-model", ownedBy: null, contextWindow: null },
+      { id: "c-model", ownedBy: null, contextWindow: null },
     ]);
   });
 
@@ -147,7 +172,7 @@ describe("provider model fetch", () => {
     });
 
     assert.deepEqual(requested, [{ authorization: null, googKey: "goog-key" }]);
-    assert.deepEqual(models, [{ id: "gemini-test", ownedBy: null }]);
+    assert.deepEqual(models, [{ id: "gemini-test", ownedBy: null, contextWindow: null }]);
   });
 
   it("merges default headers but drops sensitive ones and keeps credential auth last", async () => {

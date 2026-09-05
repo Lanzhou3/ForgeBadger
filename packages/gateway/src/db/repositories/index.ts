@@ -3,6 +3,10 @@ export { AuditLogRepository } from "./audit-log-repository.js";
 export { FeishuChannelRepository } from "./feishu-channel-repository.js";
 export { ApiKeyRepository } from "./api-key-repository.js";
 export { CatalogRepository } from "./catalog-repository.js";
+export {
+  CliConfigAppliedProviderRepository,
+  type CliConfigAppliedProvider
+} from "./cli-config-applied-provider-repository.js";
 export { NotificationRepository } from "./notification-repository.js";
 export { ProjectManagerRepository } from "./project-manager-repository.js";
 export { ProjectManagerExecutionRepository } from "./project-manager-execution-repository.js";

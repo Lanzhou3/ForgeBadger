@@ -583,6 +583,7 @@ export interface ModelProfile {
 export interface ProviderModelSyncResult {
   fetchedCount: number;
   createdCount: number;
+  updatedCount?: number;
   models: ModelProfile[];
 }
 
@@ -600,6 +601,15 @@ export interface ProviderBalanceResult {
   detectedProvider?: string;
   balances: ProviderBalanceEntry[];
   checkedAt: string;
+  cached?: boolean;
+}
+
+export interface AppliedProviderInfo {
+  providerProfileId: string;
+  providerName: string;
+  providerStatus: string;
+  modelProfileId: string | null;
+  appliedAt: string;
 }
 
 export interface ProviderCredentialSummary {
@@ -2747,6 +2757,20 @@ export async function checkProviderBalance(
     method: "POST",
     body: JSON.stringify(data),
   }) as Promise<ProviderBalanceResult>;
+}
+
+export async function getAppliedProviderForAdapter(
+  adapter: string
+): Promise<{ appliedProvider: AppliedProviderInfo | null }> {
+  return fetchJson(
+    `/api/v1/model-providers/applied/${encodeURIComponent(adapter)}`
+  ) as Promise<{ appliedProvider: AppliedProviderInfo | null }>;
+}
+
+export async function getProviderBalance(providerId: string): Promise<ProviderBalanceResult> {
+  return fetchJson(
+    `/api/v1/model-providers/${providerId}/balance`
+  ) as Promise<ProviderBalanceResult>;
 }
 
 export async function checkModelProviderReadiness(

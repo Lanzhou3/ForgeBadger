@@ -43,7 +43,7 @@ function preset(input: PresetInput): ProviderPreset {
     productType: "payg_api",
     apiFormat: "openai-compatible",
     authType: "api_key",
-    supportedAdapters: ["claude", "opencode"],
+    supportedAdapters: ["claude", "opencode", "kimi"],
     ...input,
   };
 }
@@ -55,7 +55,7 @@ export const providerPresets: ProviderPreset[] = [
     description: "Official OpenAI API endpoint.",
     apiFormat: "openai",
     openaiBaseUrl: "https://api.openai.com/v1",
-    supportedAdapters: ["opencode", "codex"],
+    supportedAdapters: ["opencode", "codex", "kimi"],
   }),
   preset({
     id: "anthropic-api",

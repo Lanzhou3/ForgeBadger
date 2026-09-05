@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest, userIsInstanceAdmin } from "../auth/middleware.js";
 import type { Database } from "../db/types.js";
+import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
 import { isAdapterId, type AdapterId } from "../services/adapter-discovery.js";
 import {
   applyCliConfigFieldPatch,
@@ -348,13 +349,17 @@ export function createCliConfigRoutes(
       return;
     }
     observe(options, "apply.rollback");
-    await handle(res, async () => ({
-      result: rollbackCliConfigApply({
+    await handle(res, async () => {
+      const result = rollbackCliConfigApply({
         masterKey,
         adapter,
         ...(body.data.backupId ? { backupId: body.data.backupId } : {})
-      })
-    }));
+      });
+      // The restored config's provider is unknown, so the applied-provider
+      // pointer is no longer trustworthy.
+      new CliConfigAppliedProviderRepository(db, (req as unknown as AuthenticatedRequest).userId).clear(adapter);
+      return { result };
+    });
   });
 
   return router;
