@@ -323,6 +323,7 @@ async function handleTerminalSocket(
   runtimeAuthorizationRegistry: TerminalRuntimeAuthorizationRegistry
 ): Promise<void> {
   let pty: IPty | undefined;
+  let ptyExited = false;
   const inputBuffer = new TerminalInputBuffer(() => sessionManager.assertManualInputAllowed(userId, sessionId));
   const resizeBuffer = new TerminalResizeBuffer();
   let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
@@ -386,6 +387,10 @@ async function handleTerminalSocket(
 
   ws.on("message", (raw) => {
     if (!authorizationLease?.isAuthorized()) return;
+    // A dead pty must never receive input or resize: the client already got
+    // terminal_exit, and writing/resizing an exited ConPTY pty can re-enter
+    // node-pty's deferred queue against a dead agent.
+    if (ptyExited) return;
     try {
       const message = parseTerminalMessage(raw);
       if (message.type === "terminal_input") {
@@ -510,12 +515,16 @@ async function handleTerminalSocket(
   });
 
   pty.onExit(({ exitCode }) => {
+    ptyExited = true;
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "terminal_exit", payload: { code: exitCode } }));
     }
     // The attach pty exited: correct the session state based on whether the
     // underlying tmux session is still alive (detached) or gone (exited).
-    void sessionManager.reconcileSessionStatus(sessionId);
+    // Swallow rejections: a failure here must log, not take down the Gateway.
+    void sessionManager.reconcileSessionStatus(sessionId).catch((error) => {
+      console.error(`[terminal-ws] reconcile failed for session ${sessionId}`, error);
+    });
   });
 
   const heartbeat = new TerminalHeartbeat({

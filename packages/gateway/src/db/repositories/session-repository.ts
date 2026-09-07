@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { Database } from "../types.js";
@@ -92,6 +92,7 @@ export class SessionRepository {
       .from(sessions)
       .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(eq(sessions.userId, this.userId))
+      .orderBy(asc(sessions.createdAt), asc(sessions.id))
       .all()
       .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
   }
@@ -102,6 +103,7 @@ export class SessionRepository {
       .from(sessions)
       .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(and(eq(sessions.userId, this.userId), eq(sessions.projectId, projectId)))
+      .orderBy(asc(sessions.createdAt), asc(sessions.id))
       .all()
       .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
   }
@@ -117,6 +119,7 @@ export class SessionRepository {
         eq(sessions.projectId, projectId),
         inArray(sessions.id, ids)
       ))
+      .orderBy(asc(sessions.createdAt), asc(sessions.id))
       .all()
       .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
   }
