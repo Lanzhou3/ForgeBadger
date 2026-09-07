@@ -934,6 +934,52 @@ describe("cli-config apply: claude route branches", () => {
     );
   });
 
+  for (const openaiBaseUrl of [null, "https://api.deepseek.com/v1"]) {
+    for (const routeThroughGateway of [false, true]) {
+      it(`directly applies an explicit Anthropic endpoint with OpenAI metadata (${openaiBaseUrl !== null}, ${routeThroughGateway})`, async () => {
+        await withClaudeConfigRoot("forgebadger-claude-explicit-anthropic-", async (root) => {
+          const fixture = await createOpenAiClaudeFixture();
+          fixture.repo.updateProviderProfile(fixture.providerId, {
+            baseUrl: null,
+            openaiBaseUrl,
+            anthropicBaseUrl: "https://api.deepseek.com/anthropic"
+          });
+          const input = {
+            db: fixture.db, userId: fixture.user.id, masterKey,
+            adapter: "claude" as const, providerProfileId: fixture.providerId,
+            routeThroughGateway, resolveHost: publicResolverFn
+          };
+          const preview = await previewCliConfigApply(input);
+          assert.ok(!preview.warnings.includes("OPENAI_PROTOCOL_REQUIRES_ROUTE"));
+          assert.ok(preview.files[0]?.proposed.includes("https://api.deepseek.com/anthropic"));
+          await applyCliConfigToAdapter(input);
+          const written = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8"));
+          assert.equal(written.env.ANTHROPIC_BASE_URL, "https://api.deepseek.com/anthropic");
+          assert.equal(written.env.ANTHROPIC_AUTH_TOKEN, "sk-route-secret");
+          assert.equal(new ClaudeRouteRepository(fixture.db, fixture.user.id, masterKey).getSettings().enabled, false);
+        });
+      });
+    }
+  }
+
+  it("requires routing when only an explicit OpenAI endpoint is configured", async () => {
+    await withClaudeConfigRoot("forgebadger-claude-openai-only-", async () => {
+      const fixture = await createOpenAiClaudeFixture();
+      fixture.repo.updateProviderProfile(fixture.providerId, {
+        baseUrl: null, openaiBaseUrl: "https://api.deepseek.com/v1"
+      });
+      const input = {
+        db: fixture.db, userId: fixture.user.id, masterKey,
+        adapter: "claude" as const, providerProfileId: fixture.providerId,
+        resolveHost: publicResolverFn
+      };
+      assert.ok((await previewCliConfigApply(input)).warnings.includes("OPENAI_PROTOCOL_REQUIRES_ROUTE"));
+      await assert.rejects(applyCliConfigToAdapter(input), { code: "CLI_CONFIG_APPLY_ROUTE_REQUIRED" });
+      new ClaudeRouteRepository(fixture.db, fixture.user.id, masterKey).setEnabled(true);
+      await applyCliConfigToAdapter({ ...input, routeThroughGateway: true });
+    });
+  });
+
   it("applies the gateway endpoint + route token and records the assignment", async () => {
     await withClaudeConfigRoot("forgebadger-claude-route-apply-", async (root) => {
       const fixture = await createOpenAiClaudeFixture();
@@ -969,7 +1015,7 @@ describe("cli-config apply: claude route branches", () => {
   });
 
   it("clears the route assignment when a direct Anthropic provider is applied", async () => {
-    await withClaudeConfigRoot("forgebadger-claude-route-direct-", async () => {
+    await withClaudeConfigRoot("forgebadger-claude-route-direct-", async (root) => {
       const db = createTestDb();
       const user = new UserRepository(db).create("apply-direct@example.com", "hash");
       const repo = new ModelProviderRepository(db, user.id, masterKey);
@@ -1002,7 +1048,7 @@ describe("cli-config apply: claude route branches", () => {
         baseUrl: "https://api.deepseek.com/anthropic",
         anthropicBaseUrl: "https://api.deepseek.com/anthropic",
         authType: "api_key",
-        apiFormat: "anthropic",
+        apiFormat: "openai-compatible",
         supportedAdapters: ["claude"]
       });
       const directModel = repo.createModelProfile({ providerProfileId: directProvider.id, name: "M2", modelId: "m-2", isDefault: true });
@@ -1016,6 +1062,10 @@ describe("cli-config apply: claude route branches", () => {
         resolveHost: publicResolverFn
       });
       assert.equal(routeRepo.getAssignment(), undefined);
+      const written = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8"));
+      assert.equal(written.env.ANTHROPIC_BASE_URL, "https://api.deepseek.com/anthropic");
+      assert.equal(written.env.ANTHROPIC_AUTH_TOKEN, "sk-d");
+      assert.equal(routeRepo.getSettings().enabled, true);
     });
   });
 

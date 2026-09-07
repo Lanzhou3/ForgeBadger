@@ -880,6 +880,14 @@ Every other operation reads or writes the shared host-global CLI config root
 and therefore requires instance-admin authority. Raw file reads are always
 redacted and `reveal=1` is removed/rejected.
 
+For Claude Code, a configured `anthropicBaseUrl` takes precedence and is
+applied directly, without requiring Gateway routing to be enabled, even when
+an older client sends `routeThroughGateway: true`. Legacy providers with
+`apiFormat: "anthropic"` and `baseUrl` also connect directly. Providers with
+only an OpenAI / OpenAI-compatible endpoint require Gateway routing. A
+successful direct apply clears the previous Claude routing assignment while
+preserving the user's routing-enabled preference.
+
 Provider apply maps a Model Center provider profile (plus a model profile and
 credential) onto the adapter's native config format. Preview and apply share
 the same body:

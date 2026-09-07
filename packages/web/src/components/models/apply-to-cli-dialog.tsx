@@ -67,9 +67,9 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
   const defaultModel = activeModels.find((model) => model.isDefault) ?? activeModels[0];
 
   const [adapter, setAdapter] = useState<ProviderSupportedAdapter>(targets[0] ?? "claude");
-  // Claude Code only speaks the Anthropic protocol directly; OpenAI-protocol
-  // providers must be applied through the Gateway route endpoint.
-  const needsRoute = adapter === "claude" && provider.apiFormat !== "anthropic";
+  // Prefer a native Anthropic endpoint, including legacy Anthropic baseUrl.
+  // Only providers without one need protocol translation through the Gateway.
+  const needsRoute = adapter === "claude" && !provider.anthropicBaseUrl && provider.apiFormat !== "anthropic";
   const routeSupported = needsRoute && (provider.apiFormat === "openai" || provider.apiFormat === "openai-compatible");
   const routeUnsupported = needsRoute && !routeSupported;
   const routeQuery = useQuery({
@@ -187,7 +187,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
       await queryClient.invalidateQueries({ queryKey: ["cli-config"] });
       await queryClient.invalidateQueries({ queryKey: ["applied-providers"] });
       await queryClient.invalidateQueries({ queryKey: ["applied-provider"] });
-      if (needsRoute) {
+      if (adapter === "claude") {
         await queryClient.invalidateQueries({ queryKey: ["claude-route"] });
       }
     },

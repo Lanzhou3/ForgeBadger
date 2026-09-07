@@ -442,11 +442,12 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
       error instanceof Error ? error.message : "Provider endpoint is not a public HTTPS endpoint"
     );
   }
-  // Claude Code speaks the Anthropic protocol only; an OpenAI-protocol
-  // provider must be applied through the Gateway's loopback route endpoint.
+  // An explicit Anthropic endpoint takes precedence over the provider's
+  // default protocol, including a stale routeThroughGateway request flag.
+  // Preserve legacy Anthropic providers whose endpoint lives in baseUrl.
   let routeMode: ApplyContext["routeMode"] = "direct";
   let routeToken: string | null = null;
-  if (input.adapter === "claude" && provider.apiFormat !== "anthropic") {
+  if (input.adapter === "claude" && !provider.anthropicBaseUrl && provider.apiFormat !== "anthropic") {
     routeMode = "route_required";
     if (input.routeThroughGateway === true) {
       const settings = new ClaudeRouteRepository(input.db, input.userId, input.masterKey).getSettings();
@@ -908,7 +909,10 @@ function normalizeProviderKey(value: string): string {
 }
 
 export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId): string | null {
-  if (adapter === "claude") return provider.anthropicBaseUrl ?? provider.baseUrl;
+  if (adapter === "claude") {
+    return provider.anthropicBaseUrl
+      ?? (provider.apiFormat === "anthropic" ? provider.baseUrl : provider.openaiBaseUrl ?? provider.baseUrl);
+  }
   if ((adapter === "opencode" || adapter === "kimi") && provider.apiFormat === "anthropic") {
     return provider.anthropicBaseUrl ?? provider.baseUrl;
   }
