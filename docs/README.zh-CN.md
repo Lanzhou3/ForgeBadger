@@ -50,6 +50,7 @@ ForgeBadger 品牌。以 `OF-` 开头的历史阶段 ID 继续作为稳定的证
 ## 功能
 
 - 项目创建和导入流程，支持 AI 工具配置生成与合规检查。
+- 将项目的 AI CLI 配置沉淀为可复用模板，创建或导入项目时选择模板，并从公开 Git 仓库导入模板。
 - 基于复用器的终端会话，浏览器断开或 Gateway 重启后仍可恢复：
   macOS/Linux/WSL 使用 tmux，原生 Windows 使用 psmux。
 - 支持 Claude Code、OpenCode、Codex 的适配器发现和受控会话启动。

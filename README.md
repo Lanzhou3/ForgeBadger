@@ -67,6 +67,9 @@ identifiers.
 
 - Project create/import flows with AI tool config generation and compliance
   checks.
+- Extract a project's AI CLI config into a reusable template, pick a template
+  when creating or importing a project, and import template repos from public
+  Git repositories.
 - Multiplexer-backed terminal sessions that survive browser disconnects and
   Gateway restarts: tmux on macOS/Linux/WSL and psmux on native Windows.
 - Adapter discovery and gated session launch for Claude Code, OpenCode, Codex,

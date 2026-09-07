@@ -590,6 +590,7 @@ adapter reports the `terminal` runtime mode; the former Codex
 - `PATCH /api/v1/projects/:id`
 - `POST /api/v1/projects/scan`
 - `POST /api/v1/projects/import`
+- `POST /api/v1/projects/:id/templates`
 - `POST /api/v1/projects/:id/config/preview`
 - `POST /api/v1/projects/:id/config/write`
 - `POST /api/v1/projects/:id/config/sync/preview`
@@ -619,13 +620,29 @@ Import behavior:
 
 - `POST /api/v1/projects/import` registers an existing server directory as a
   project record. It does not delete, move, or rewrite the directory.
-- Project create/import never binds a runtime CLI or a template. Legacy
-  `aiTool`/`templateId` fields in the request body are ignored, `templateId`
-  starts as `null`, and the stored `aiTool` hint is empty until an explicit
-  designation exists. Use `PATCH /api/v1/projects/:id` to bind a template.
+- Project create/import is CLI-agnostic: the stored `aiTool` hint stays empty
+  until an explicit designation exists. An optional `templateId` in the
+  request body binds a tenant template at create/import time; it must exist
+  in the tenant or the request fails with `404` `Template not found`. When
+  omitted, `templateId` starts as `null`. `PATCH /api/v1/projects/:id` can
+  still bind or unbind a template later.
 - Config sync preview/apply, like compliance, returns `404` with
   `TEMPLATE_NOT_TRACKED` when the project tracks no template and the request
   supplies no explicit `templateId`.
+
+Template extraction:
+
+- `POST /api/v1/projects/:id/templates` reads the project's AI CLI config
+  files — according to the stored `aiTool` hint, or an explicit `adapter` in
+  the body (`claude` | `opencode` | `codex` | `kimi`) — and creates a new
+  tenant-owned custom template from them. CLI-agnostic projects must pass an
+  explicit `adapter`; the request fails with `400` otherwise. Body:
+  `{ name, description?, adapter?, bind? }`. On success (201) the response
+  carries the created `template`, the `extracted` files (`filePath` +
+  `sizeBytes`), and the `skipped` files that were ignored. `bind` defaults to
+  `true`, so the project starts tracking the new template; pass
+  `bind: false` to create the template without binding it. The request fails
+  with `400` when no extractable AI config files exist in the project.
 
 Project graph (read-only CodeGraph index):
 
@@ -1127,6 +1144,7 @@ credential generation; a running tmux environment is not mutated.
 - `PUT /api/v1/templates/:id/files/*`
 - `GET /api/v1/templates/:id/export`
 - `POST /api/v1/templates/import`
+- `POST /api/v1/templates/import/git`
 - `GET /api/v1/templates/:id/versions`
 - `POST /api/v1/templates/:id/versions/:versionId/restore`
 - `GET /api/v1/templates/:id/usage`
@@ -1158,6 +1176,17 @@ selected projects, applying per-project `decisions` (`skip`/`overwrite`) for
 conflicting paths; each project is applied independently and failures are
 reported per project. Results are recorded in the audit log and a
 `template.config_sync` activity.
+`POST /api/v1/templates/import/git` imports a template from a public Git
+repository. The Gateway shallow-clones the `url` (optional `branch`, default
+branch when omitted) into a temporary directory, reads every text file from
+it, infers the `adapter` from well-known config filenames, and creates a
+tenant-owned custom template. The template is named after the repository
+unless a `name` is supplied; `description` is optional. Body:
+`{ url, branch?, name?, description? }`. Files that are binary, larger than
+512 KiB, beyond a 5 MiB total, or past the 500-file cap are skipped rather
+than failed. On success (201) the response carries `{ templateId, name,
+adapter, fileCount, skippedFiles }`. Clone or URL errors return `400`; a
+repository that contains no importable files returns `404`.
 
 ### Agents
 
