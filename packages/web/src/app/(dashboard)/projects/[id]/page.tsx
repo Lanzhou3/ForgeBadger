@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, Eye, FileCode2, FileText, Globe2, History, Link2, MoreHorizontal, Pencil, Plus, Save, TerminalSquare, Trash2, Wrench } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, Eye, FileCode2, FileText, Globe2, History, Link2, MoreHorizontal, Package, Pencil, Plus, Save, TerminalSquare, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,10 +17,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AdapterSelect, ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { CliBrandChip } from "@/components/cli-brand-chip";
-import { CliBrandIcon } from "@/components/cli-brand-icon";
 import { ConfigSyncPanel, type ConfigSyncPanelHandle } from "@/components/projects/ConfigSyncPanel";
+import { ExtractTemplateDialog } from "@/components/projects/ExtractTemplateDialog";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
 import { WorkspaceExplorer } from "@/components/projects/workspace";
@@ -48,7 +48,6 @@ import {
   type ProjectManagerTaskPacket,
   type SessionActivity,
 } from "@/lib/api";
-import { runtimeAdapterLabel } from "@/lib/cli-brand";
 import { findSessionTaskPacket, sessionTaskPacketProjectManagerHref } from "@/components/sessions/session-task-packet";
 import { useLanguage } from "@/hooks/use-language";
 import { normalizeSessionStatus } from "@/lib/session-status";
@@ -97,6 +96,7 @@ export default function ProjectDetailPage() {
   const [configDraft, setConfigDraft] = useState("");
   const [pendingConfigAction, setPendingConfigAction] = useState<"preview" | null>(null);
   const [launchDialogOpen, setLaunchDialogOpen] = useState(false);
+  const [extractDialogOpen, setExtractDialogOpen] = useState(false);
   const configSyncRef = useRef<ConfigSyncPanelHandle>(null);
 
   const { data: projectData, isLoading: projectLoading } = useQuery({
@@ -134,7 +134,7 @@ export default function ProjectDetailPage() {
   });
 
   const { data: adapterDiscoveryData, isLoading: adapterDiscoveryLoading } = useQuery({
-    queryKey: ["adapters", "discovery"],
+    queryKey: ADAPTER_DISCOVERY_QUERY_KEY,
     queryFn: discoverAdapters,
   });
 
@@ -309,40 +309,20 @@ export default function ProjectDetailPage() {
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Select
-                value={selectedRuntimeAdapter || undefined}
-                onValueChange={(value) => setSelectedRuntimeAdapter(value as RuntimeAdapterId)}
+              <AdapterSelect
+                id="runtime-adapter"
+                ariaLabel={t("projects.selectRuntimeCli")}
+                value={selectedRuntimeAdapter || ""}
+                onValueChange={setSelectedRuntimeAdapter}
                 disabled={adapterDiscoveryLoading || runtimeAdapters.length === 0}
-              >
-                <SelectTrigger
-                  id="runtime-adapter"
-                  aria-label={t("projects.selectRuntimeCli")}
-                  size="sm"
-                  className="h-8 w-52"
-                >
-                  {/* Reflects the selected item's icon + label (see SelectItem below). */}
-                  <SelectValue
-                    placeholder={
-                      adapterDiscoveryLoading
-                        ? t("projects.loadingRuntimeCli")
-                        : t("projects.selectRuntimeCli")
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {runtimeAdapters.map((adapter) => (
-                    <SelectItem
-                      key={adapter.id}
-                      value={adapter.id}
-                      disabled={!isAdapterLaunchable(adapter)}
-                      className="pr-8"
-                    >
-                      <CliBrandIcon aiTool={adapter.id} />
-                      {runtimeAdapterLabel(adapter, t)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                size="sm"
+                className="h-8 w-52"
+                placeholder={
+                  adapterDiscoveryLoading
+                    ? t("projects.loadingRuntimeCli")
+                    : t("projects.selectRuntimeCli")
+                }
+              />
               <Button
                 size="sm"
                 className="bg-brand text-brand-foreground hover:bg-brand/90"
@@ -601,6 +581,12 @@ export default function ProjectDetailPage() {
             </TabsContent>
 
             <TabsContent value="config" className="mt-4 space-y-4">
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={() => setExtractDialogOpen(true)}>
+                  <Package className="mr-2 size-4" />
+                  {t("templates.extract")}
+                </Button>
+              </div>
               <ConfigSyncPanel
                 ref={configSyncRef}
                 projectId={id}
@@ -638,6 +624,15 @@ export default function ProjectDetailPage() {
         onCreated={(session) => {
           queryClient.invalidateQueries({ queryKey: ["sessions", { projectId: id }] });
           router.push(`/sessions/${session.id}`);
+        }}
+      />
+      <ExtractTemplateDialog
+        projectId={id}
+        open={extractDialogOpen}
+        onOpenChange={setExtractDialogOpen}
+        onExtracted={() => {
+          queryClient.invalidateQueries({ queryKey: ["project", id] });
+          queryClient.invalidateQueries({ queryKey: ["templates"] });
         }}
       />
     </div>

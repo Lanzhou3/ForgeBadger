@@ -333,4 +333,99 @@ describe("project <-> template binding lifecycle", () => {
       "unbound project must be excluded from bulk sync preview"
     );
   });
+
+  it("binds a valid templateId at create time", async () => {
+    const token = await register("create-bind@test.com");
+    const templateId = await createCustomTemplate(token, "Create Bind");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-create-"));
+
+    const res = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ name: "Create Bound", path: rootPath, aiTool: "claude", templateId })
+    });
+    const body = (await res.json()) as ProjectDetailBody;
+    assert.equal(res.status, 201, JSON.stringify(body));
+    assert.equal(body.data?.project?.templateId, templateId);
+
+    const fresh = await getProject(token, body.data?.project?.id ?? "");
+    assert.equal(fresh?.templateId, templateId);
+  });
+
+  it("rejects create with an unknown templateId", async () => {
+    const token = await register("create-missing-template@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-create-missing-"));
+
+    const res = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ name: "Create Missing Template", path: rootPath, aiTool: "claude", templateId: "does-not-exist" })
+    });
+    const body = (await res.json()) as { code?: number; message?: string };
+    assert.equal(res.status, 404);
+    assert.equal(body.message, "Template not found");
+  });
+
+  it("rejects create with another tenant's templateId", async () => {
+    const ownerToken = await register("create-tenant-owner@test.com");
+    const otherToken = await register("create-tenant-other@test.com");
+    const ownerTemplateId = await createCustomTemplate(ownerToken, "Create Tenant Only");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-create-tenant-"));
+
+    const res = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${otherToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ name: "Create Tenant Blocked", path: rootPath, aiTool: "claude", templateId: ownerTemplateId })
+    });
+    const body = (await res.json()) as { code?: number; message?: string };
+    assert.equal(res.status, 404);
+    assert.equal(body.message, "Template not found");
+  });
+
+  it("binds a valid templateId at import time", async () => {
+    const token = await register("import-bind@test.com");
+    const templateId = await createCustomTemplate(token, "Import Bind");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-import-"));
+
+    const res = await fetch(`${baseUrl}/api/v1/projects/import`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ name: "Import Bound", path: rootPath, templateId })
+    });
+    const body = (await res.json()) as ProjectDetailBody;
+    assert.equal(res.status, 201, JSON.stringify(body));
+    assert.equal(body.data?.project?.templateId, templateId);
+
+    const fresh = await getProject(token, body.data?.project?.id ?? "");
+    assert.equal(fresh?.templateId, templateId);
+  });
+
+  it("rejects import with an unknown templateId", async () => {
+    const token = await register("import-missing-template@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-binding-import-missing-"));
+
+    const res = await fetch(`${baseUrl}/api/v1/projects/import`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ name: "Import Missing Template", path: rootPath, templateId: "does-not-exist" })
+    });
+    const body = (await res.json()) as { code?: number; message?: string };
+    assert.equal(res.status, 404);
+    assert.equal(body.message, "Template not found");
+  });
 });

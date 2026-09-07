@@ -19,6 +19,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TemplateSelect } from "@/components/projects/template-select";
 import {
   getDesktopCapabilities,
   importProject,
@@ -53,6 +54,7 @@ export default function ImportProjectPage() {
   const [scannedPath, setScannedPath] = useState("");
   const [directoryPickerSupported, setDirectoryPickerSupported] = useState(false);
   const [pickingDirectory, setPickingDirectory] = useState(false);
+  const [templateId, setTemplateId] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -98,6 +100,7 @@ export default function ImportProjectPage() {
       return importProject({
         path: scannedPath,
         name: values.name,
+        ...(templateId ? { templateId } : {}),
       });
     },
     onSuccess: (result) => {
@@ -302,6 +305,18 @@ export default function ImportProjectPage() {
                     </FormItem>
                   )}
                 />
+
+                <FormItem>
+                  <FormLabel>{t("templates.selectTemplate")}</FormLabel>
+                  <FormControl>
+                    <TemplateSelect
+                      value={templateId}
+                      onValueChange={setTemplateId}
+                      id="template"
+                      ariaLabel={t("templates.selectTemplate")}
+                    />
+                  </FormControl>
+                </FormItem>
 
                 {importMutation.isError && (
                   <p className="text-sm text-destructive">

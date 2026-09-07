@@ -30,6 +30,7 @@ import { listWorkspaceTree, readWorkspaceFile } from "../services/workspace-cont
 import { getProjectGitChanges, getProjectGitFileDiff } from "../services/project-git.js";
 import { recordActivity } from "../services/activity-events.js";
 import { buildConfigSyncSummary, buildProjectConfigRenderPlan } from "../services/project-config-render.js";
+import { extractProjectTemplate } from "../services/project-template-extract.js";
 export {
   buildConfigSyncSummary,
   buildProjectConfigRenderPlan
@@ -41,11 +42,19 @@ const createProjectSchema = z.object({
   name: z.string().min(1),
   path: z.string().min(1),
   description: z.string().optional(),
-  techStack: z.string().optional()
+  techStack: z.string().optional(),
+  templateId: z.string().min(1).optional()
 });
 
 const updateProjectTemplateSchema = z.object({
   templateId: z.string().min(1).nullable().optional()
+});
+
+const extractTemplateSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  adapter: aiToolSchema.optional(),
+  bind: z.boolean().optional()
 });
 
 const configPreviewSchema = z.object({
@@ -116,6 +125,15 @@ export function createProjectRoutes(
     if (!parseResult.success) {
       res.status(400).json({ code: 1, message: "Invalid input" });
       return;
+    }
+
+    if (parseResult.data.templateId) {
+      try {
+        resolveProjectTemplateId(db, userId, parseResult.data.templateId);
+      } catch {
+        res.status(404).json({ code: 1, message: "Template not found" });
+        return;
+      }
     }
 
     try {
@@ -199,8 +217,17 @@ export function createProjectRoutes(
       return;
     }
 
+    if (parseResult.data.templateId) {
+      try {
+        resolveProjectTemplateId(db, userId, parseResult.data.templateId);
+      } catch {
+        res.status(404).json({ code: 1, message: "Template not found" });
+        return;
+      }
+    }
+
     try {
-      const { name, path: rawPath, description, techStack } = parseResult.data;
+      const { name, path: rawPath, description, techStack, templateId } = parseResult.data;
       const rootPath = await prepareImportedProjectRoot(rawPath);
       const repo = new ProjectRepository(db, userId);
       const project = repo.import({
@@ -208,6 +235,7 @@ export function createProjectRoutes(
         path: rootPath,
         description,
         techStack,
+        templateId,
         aiTool: unboundProjectAiTool
       });
       res.status(201).json({
@@ -306,6 +334,80 @@ export function createProjectRoutes(
       details: { name: project.name, templateId }
     });
     res.json({ code: 0, data: { project: updated ?? project }, message: "" });
+  });
+
+  router.post("/:id/templates", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = extractTemplateSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const repo = new ProjectRepository(db, userId);
+    const project = repo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    const adapter = parseResult.data.adapter ?? parseAiToolHint(project.aiTool);
+    if (!adapter) {
+      res.status(400).json({ code: 1, message: "An explicit adapter in the request body is required for CLI-agnostic projects" });
+      return;
+    }
+
+    try {
+      const extracted = await extractProjectTemplate(project.path, adapter);
+      if (extracted.files.length === 0) {
+        res.status(400).json({ code: 1, message: "No extractable AI config files found in project" });
+        return;
+      }
+
+      const { name, description, bind } = parseResult.data;
+      const template = new TemplateRepository(db, userId).create({
+        name,
+        adapter,
+        ...(description === undefined ? {} : { description }),
+        files: extracted.files.map((f) => ({
+          filePath: f.filePath,
+          content: f.content,
+          fileType: f.fileType
+        }))
+      });
+
+      if (bind ?? true) {
+        repo.updateTemplateId(project.id, template.id);
+      }
+
+      new AuditLogRepository(db, userId).create({
+        action: "template.extract",
+        resourceType: "template",
+        resourceId: template.id,
+        details: {
+          name,
+          projectId: project.id,
+          bind,
+          extractedFiles: extracted.files.map((f) => f.filePath),
+          skippedFiles: extracted.skipped
+        }
+      });
+
+      res.status(201).json({
+        code: 0,
+        data: {
+          template,
+          extracted: extracted.files.map((f) => ({
+            filePath: f.filePath,
+            sizeBytes: Buffer.byteLength(f.content, "utf8")
+          })),
+          skipped: extracted.skipped
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({ code: 1, message: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   router.post("/:id/config/preview", async (req, res) => {

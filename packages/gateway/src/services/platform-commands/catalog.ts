@@ -6,6 +6,7 @@ import { mkdirSync, statSync } from 'node:fs';
 import { ProjectRepository } from '../../db/repositories/project-repository.js';
 import { SessionRepository } from '../../db/repositories/session-repository.js';
 import { ProjectManagerRepository } from '../../db/repositories/project-manager-repository.js';
+import { TemplateRepository } from '../../db/repositories/template-repository.js';
 import { AgentMemoryRepository } from '../agent/memory.js';
 import { buildTaskPacket, createTaskPacketContext, createTaskPacketSessionName, resolveTaskPacketSession, withTaskPacketSessionLink, toTaskPacketSessionDto } from '../project-manager/task-packets.js';
 import { createSessionCommands } from './session-commands.js';
@@ -14,7 +15,7 @@ import { canonical, canonicalRoot } from './actions.js';
 import type { CommandContext, PlatformCommand } from './types.js';
 const id = z.string().min(1).max(128);
 const projectInput = z.object({ projectId: id }).strict();
-export const projectCreateInput = z.object({ name: z.string().trim().min(1).max(200), path: z.string().trim().min(1).max(1024), description: z.string().max(2000).optional(), techStack: z.string().max(2000).optional() }).strict();
+export const projectCreateInput = z.object({ name: z.string().trim().min(1).max(200), path: z.string().trim().min(1).max(1024), description: z.string().max(2000).optional(), techStack: z.string().max(2000).optional(), templateId: id.optional() }).strict();
 export const workItemCreateInput = z.object({ projectId: id, title: z.string().min(1).max(256), description: z.string().max(4000).nullable().optional(), priority: z.number().int().min(0).max(100).optional(), acceptanceCriteria: z.array(z.string().max(1000)).max(50).optional(), stageId: id.nullable().optional() }).strict();
 const evidenceRef = z.object({ kind: z.string().min(1).max(64).optional(), label: z.string().min(1).max(256).optional(), status: z.string().min(1).max(64).optional(), ref: z.string().min(1).max(512).optional(), path: z.string().min(1).max(512).optional(), sessionId: id.optional(), feishuChatId: id.optional(), feishuMessageId: id.optional(), createdAt: z.string().min(1).max(64).optional() }).strict();
 const workItemWithEvidence = workItemCreateInput.extend({ status: z.literal('todo').optional(), evidenceRefs: z.array(evidenceRef).max(20).optional(), feishuRefs: z.array(evidenceRef).max(20).optional() });
@@ -60,6 +61,11 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
             },
             execute(ctx, input) {
                 const v = projectCreateInput.parse(input);
+                if (v.templateId) {
+                    const template = new TemplateRepository(ctx.db, ctx.userId).getById(v.templateId);
+                    if (!template)
+                        throw new Error('Template not found');
+                }
                 const root = canonicalRoot(v.path);
                 mkdirSync(root, { recursive: true });
                 if (!statSync(root).isDirectory())

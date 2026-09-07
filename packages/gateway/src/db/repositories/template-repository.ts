@@ -12,6 +12,7 @@ export interface Template {
   name: string;
   description: string | null;
   version: string;
+  adapter: string | null;
   isBuiltin: boolean;
   visibility: string;
   usageCount: number;
@@ -32,6 +33,7 @@ export interface CreateTemplateInput {
   name: string;
   description?: string | undefined;
   version?: string | undefined;
+  adapter?: string | undefined;
   visibility?: "private" | "shared" | "admin" | undefined;
   files?: Array<{
     filePath: string;
@@ -44,6 +46,7 @@ export interface UpdateTemplateInput {
   name?: string | undefined;
   description?: string | undefined;
   version?: string | undefined;
+  adapter?: string | null | undefined;
   visibility?: "private" | "shared" | "admin" | undefined;
   status?: string | undefined;
 }
@@ -52,6 +55,7 @@ export interface TemplatePackage {
   name: string;
   description?: string | null;
   version: string;
+  adapter?: string | null;
   files: Array<{
     filePath: string;
     content: string;
@@ -87,6 +91,7 @@ function builtInClaudeTemplate(): typeof templates.$inferInsert {
     name: "Claude Code",
     description: "Built-in Claude Code template with project memory, hooks, and ForgeBadger session integration",
     version: BUILTIN_CLAUDE_TEMPLATE_VERSION,
+    adapter: "claude",
     isBuiltin: true,
     visibility: "shared",
     usageCount: 0,
@@ -191,6 +196,7 @@ function builtInOpenCodeTemplate(): typeof templates.$inferInsert {
     name: "OpenCode",
     description: "Built-in OpenCode template with AGENTS.md, project config, agents, and commands",
     version: BUILTIN_ADAPTER_TEMPLATE_VERSION,
+    adapter: "opencode",
     isBuiltin: true,
     visibility: "shared",
     usageCount: 0,
@@ -246,6 +252,7 @@ function builtInCodexTemplate(): typeof templates.$inferInsert {
     name: "Codex",
     description: "Built-in Codex template with AGENTS.md, project config preset, and review agents",
     version: BUILTIN_ADAPTER_TEMPLATE_VERSION,
+    adapter: "codex",
     isBuiltin: true,
     visibility: "shared",
     usageCount: 0,
@@ -289,6 +296,7 @@ function builtInKimiTemplate(): typeof templates.$inferInsert {
     name: "Kimi Code",
     description: "Built-in Kimi Code template with AGENTS.md and review agents",
     version: BUILTIN_ADAPTER_TEMPLATE_VERSION,
+    adapter: "kimi",
     isBuiltin: true,
     visibility: "shared",
     usageCount: 0,
@@ -692,6 +700,18 @@ export class TemplateRepository {
     return this.attachUsageCounts(rows);
   }
 
+  // Local-first CLI view: the CLI runs on the machine that owns this database,
+  // so multi-user web visibility rules do not apply and usage counts span all
+  // projects on the machine.
+  listAll(): Template[] {
+    this.ensureBuiltInTemplates();
+    const rows = this.drizzle
+      .select()
+      .from(templates)
+      .all() as Template[];
+    return this.attachUsageCounts(rows, null);
+  }
+
   getBuiltInClaude(): Template {
     this.ensureBuiltInTemplates();
     const result = this.drizzle
@@ -740,6 +760,7 @@ export class TemplateRepository {
         name: input.name,
         description: input.description ?? null,
         version: input.version ?? "1.0.0",
+        adapter: input.adapter ?? null,
         visibility: input.visibility ?? "private",
         isBuiltin: false,
         usageCount: 0,
@@ -765,6 +786,7 @@ export class TemplateRepository {
       name,
       description: source.description ?? undefined,
       version: source.version,
+      adapter: source.adapter ?? undefined,
       files: source.files.map((file) => ({
         filePath: file.filePath,
         content: file.content,
@@ -783,6 +805,7 @@ export class TemplateRepository {
       name: template.name,
       description: template.description,
       version: template.version,
+      adapter: template.adapter,
       files: template.files.map((file) => ({
         filePath: file.filePath,
         content: file.content,
@@ -797,6 +820,7 @@ export class TemplateRepository {
       name: input.name,
       description: input.description ?? undefined,
       version: input.version,
+      adapter: input.adapter ?? undefined,
       files: input.files.map((file) => ({
         filePath: file.filePath,
         content: file.content,
@@ -908,7 +932,12 @@ export class TemplateRepository {
     return this.getById(templateId);
   }
 
-  getById(id: string): (Template & { files?: TemplateFile[] }) | undefined {
+  // options.bypassVisibility is for the local CLI, which runs on the machine
+  // that owns this database and has no authenticated web user.
+  getById(
+    id: string,
+    options: { bypassVisibility?: boolean } = {}
+  ): (Template & { files?: TemplateFile[] }) | undefined {
     if (isBuiltInTemplateId(id)) {
       this.ensureBuiltInTemplates();
     }
@@ -917,10 +946,12 @@ export class TemplateRepository {
       .select()
       .from(templates)
       .where(
-        and(
-          eq(templates.id, id),
-          this.readableVisibility(true)
-        )
+        options.bypassVisibility
+          ? eq(templates.id, id)
+          : and(
+              eq(templates.id, id),
+              this.readableVisibility(true)
+            )
       )
       .get() as Template | undefined;
     if (!template) return undefined;
@@ -944,6 +975,7 @@ export class TemplateRepository {
     if (input.name !== undefined) updateData.name = input.name;
     if (input.description !== undefined) updateData.description = input.description;
     if (input.version !== undefined) updateData.version = input.version;
+    if (input.adapter !== undefined) updateData.adapter = input.adapter;
     if (input.visibility !== undefined) updateData.visibility = input.visibility;
     if (input.status !== undefined) updateData.status = input.status;
     if (Object.keys(updateData).length === 0) {
@@ -1028,14 +1060,18 @@ export class TemplateRepository {
     }
   }
 
-  private attachUsageCounts(rows: Template[]): Template[] {
+  private attachUsageCounts(rows: Template[], userId: string | null = this.userId): Template[] {
     if (rows.length === 0) return rows;
     const placeholders = rows.map(() => "?").join(", ");
+    const userFilter = userId === null ? "" : "user_id = ? AND ";
+    const params = userId === null
+      ? rows.map((row) => row.id)
+      : [userId, ...rows.map((row) => row.id)];
     const counts = (this.db
       .prepare(
-        `SELECT template_id AS templateId, COUNT(*) AS count FROM projects WHERE user_id = ? AND template_id IN (${placeholders}) GROUP BY template_id`
+        `SELECT template_id AS templateId, COUNT(*) AS count FROM projects WHERE ${userFilter}template_id IN (${placeholders}) GROUP BY template_id`
       )
-      .all(this.userId, ...rows.map((row) => row.id)) as Array<{ templateId: string; count: number }>)
+      .all(...params) as Array<{ templateId: string; count: number }>)
       .reduce((map, row) => {
         map.set(row.templateId, row.count);
         return map;
@@ -1066,6 +1102,7 @@ export class TemplateRepository {
           name: builtin.name ?? "Built-in Template",
           description: builtin.description ?? null,
           version: builtin.version ?? "1.0.0",
+          adapter: builtin.adapter ?? null,
           visibility: builtin.visibility ?? "shared",
           status: builtin.status ?? "active"
         })

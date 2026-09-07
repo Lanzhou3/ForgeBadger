@@ -126,6 +126,7 @@ export const templates = sqliteTable("templates", {
   name: text("name").notNull(),
   description: text("description"),
   version: text("version").notNull().default("1.0.0"),
+  adapter: text("adapter"),
   isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
   visibility: text("visibility").notNull().default("private"),
   usageCount: integer("usage_count").notNull().default(0),
@@ -420,6 +421,29 @@ export const catalogItems = sqliteTable(
   (table) => ({
     idx_catalog_items_user_source: index("idx_catalog_items_user_source").on(table.userId, table.sourceId),
     idx_catalog_items_unique: uniqueIndex("idx_catalog_items_unique").on(table.userId, table.itemType, table.sourceId, table.externalId)
+  })
+);
+
+export const templateGitSources = sqliteTable(
+  "template_git_sources",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sourceId: text("source_id").notNull(),
+    label: text("label"),
+    url: text("url").notNull(),
+    branch: text("branch"),
+    status: text("status").notNull().default("idle"),
+    error: text("error"),
+    lastPulledAt: integer("last_pulled_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_template_git_sources_user_source: uniqueIndex("idx_template_git_sources_user_source").on(table.userId, table.sourceId),
+    idx_template_git_sources_user: index("idx_template_git_sources_user").on(table.userId)
   })
 );
 

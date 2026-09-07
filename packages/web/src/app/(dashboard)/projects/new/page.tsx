@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,6 +19,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TemplateSelect } from "@/components/projects/template-select";
 import { createProject } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
 
@@ -32,6 +34,7 @@ type FormValues = z.infer<typeof formSchema>;
 export default function NewProjectPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  const [templateId, setTemplateId] = useState("");
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -43,7 +46,8 @@ export default function NewProjectPage() {
   });
 
   const mutation = useMutation({
-    mutationFn: createProject,
+    mutationFn: (values: FormValues) =>
+      createProject(templateId ? { ...values, templateId } : values),
     onSuccess: (result) => {
       router.push(`/projects/${result.project.id}`);
     },
@@ -116,6 +120,18 @@ export default function NewProjectPage() {
                   </FormItem>
                 )}
               />
+
+              <FormItem>
+                <FormLabel>{t("templates.selectTemplate")}</FormLabel>
+                <FormControl>
+                  <TemplateSelect
+                    value={templateId}
+                    onValueChange={setTemplateId}
+                    id="template"
+                    ariaLabel={t("templates.selectTemplate")}
+                  />
+                </FormControl>
+              </FormItem>
 
               {mutation.isError && (
                 <p className="text-sm text-destructive">

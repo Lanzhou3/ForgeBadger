@@ -36,8 +36,9 @@ MEMORY.md
 CONTEXT.md
 # OpenSpec change drafts are local planning notes, never repository inputs.
 openspec/
-# Dead template material; retained locally, never shipped.
-templates/
+# Dead template material at repo root; retained locally, never shipped.
+# Anchored to root so Next.js app routes under packages/web/src/app/(dashboard)/templates/ stay tracked.
+/templates/
 docs/*
 !docs/EXTERNAL-EVIDENCE-GATES.md
 !docs/OPEN-SOURCE-READINESS.md
