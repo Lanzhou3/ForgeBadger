@@ -867,8 +867,20 @@ export const userSettings = sqliteTable("user_settings", {
   theme: text("theme").notNull().default("light"),
   language: text("language").notNull().default("zh-CN"),
   modelId: text("model_id").references(() => modelProfiles.id),
+  // Claude Code protocol routing (cc-switch-style local proxy, Gateway edition).
+  claudeRouteEnabled: integer("claude_route_enabled", { mode: "boolean" }).notNull().default(false),
+  // EncryptedSecret JSON (master key) of the loopback route token; null until
+  // routing is first enabled.
+  claudeRouteToken: text("claude_route_token"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+});
+
+export const claudeRouteAssignments = sqliteTable("claude_route_assignments", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  providerProfileId: text("provider_profile_id").notNull().references(() => modelProviderProfiles.id, { onDelete: "cascade" }),
+  credentialId: text("credential_id").notNull().references(() => providerCredentials.id, { onDelete: "cascade" }),
+  updatedAt: integer("updated_at").notNull()
 });
 
 export const integrationFeishuConfigs = sqliteTable(

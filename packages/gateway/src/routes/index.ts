@@ -24,6 +24,7 @@ import { createModelProviderRoutes } from "./model-providers.js";
 import { createSkillRoutes } from "./skills.js";
 import { createApiKeyRoutes } from "./api-keys.js";
 import { createCliConfigRoutes } from "./cli-config.js";
+import { createClaudeRouteRoutes } from "./claude-route.js";
 import { createDashboardRoutes } from "./dashboard.js";
 import { createNotificationRoutes } from "./notifications.js";
 import { createSessionHookRoutes } from "./session-hooks.js";
@@ -107,4 +108,6 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     appVersion: deps.appVersion
   }));
   app.use("/api/v1/system", createSystemRoutes());
+  // Claude Code protocol routing data plane (route-token auth, not JWT).
+  app.use("/v1", createClaudeRouteRoutes(deps.db, deps.masterKey));
 }

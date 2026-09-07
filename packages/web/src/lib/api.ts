@@ -238,6 +238,7 @@ export interface TemplateFile {
 export interface TemplateInput {
   name: string;
   description?: string;
+  adapter?: string;
   version?: string;
   visibility?: "private" | "shared" | "admin";
   files?: Array<{
@@ -1500,6 +1501,7 @@ export async function createProject(data: {
   name: string;
   path: string;
   description?: string;
+  templateId?: string;
 }): Promise<{ project: Project }> {
   return fetchJson("/api/v1/projects", {
     method: "POST",
@@ -1534,6 +1536,46 @@ export function isTemplateNotTrackedError(error: unknown): boolean {
   );
 }
 
+
+/**
+ * 从项目已有 AI CLI 配置(根指令文件 + 适配器配置目录)提取为新模板,
+ * 可选同时绑定到该项目。返回模板本体与被提取/跳过的文件清单。
+ */
+export interface ExtractProjectTemplateInput {
+  name: string;
+  description?: string;
+  adapter?: string;
+  bind?: boolean;
+}
+
+export interface ExtractedTemplateFile {
+  filePath: string;
+  sizeBytes: number;
+}
+
+export interface SkippedTemplateFile {
+  path: string;
+  reason: string;
+}
+
+export interface ExtractProjectTemplateResult {
+  template: Template;
+  extracted: ExtractedTemplateFile[];
+  skipped: SkippedTemplateFile[];
+}
+
+export async function extractProjectTemplate(
+  projectId: string,
+  data: ExtractProjectTemplateInput
+): Promise<ExtractProjectTemplateResult> {
+  return fetchJson(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/templates`,
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    }
+  ) as Promise<ExtractProjectTemplateResult>;
+}
 
 function aiConfigQuery(aiTool?: string): string {
   return aiTool ? `?aiTool=${encodeURIComponent(aiTool)}` : "";
@@ -1738,6 +1780,8 @@ export interface CliConfigApplyInput {
   modelMapping?: Partial<Record<ClaudeModelSlot, string>>;
   /** Codex only: model_reasoning_effort. */
   reasoningEffort?: CodexReasoningEffort;
+  /** Claude only: apply through the Gateway route (OpenAI-protocol providers). */
+  routeThroughGateway?: boolean;
 }
 
 export interface CliConfigApplyFilePreview {
@@ -1804,6 +1848,36 @@ export async function rollbackCliConfigApply(
     body: JSON.stringify(backupId ? { backupId } : {}),
   });
   return result;
+}
+
+// ---- Claude Code protocol routing (Gateway local-proxy switch) ----
+
+export interface ClaudeRouteAssignment {
+  providerProfileId: string;
+  providerName: string;
+  credentialId: string;
+  updatedAt: number;
+}
+
+export interface ClaudeRouteState {
+  enabled: boolean;
+  hasToken: boolean;
+  /** Loopback URL Claude Code is pointed at when a provider is applied through the route. */
+  gatewayUrl: string;
+  assignment: ClaudeRouteAssignment | null;
+}
+
+export async function getClaudeRoute(): Promise<ClaudeRouteState> {
+  const { routing } = await fetchJson<{ routing: ClaudeRouteState }>("/api/v1/cli-config/routing/claude");
+  return routing;
+}
+
+export async function setClaudeRoute(enabled: boolean): Promise<ClaudeRouteState> {
+  const { routing } = await fetchJson<{ routing: ClaudeRouteState }>("/api/v1/cli-config/routing/claude", {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+  return routing;
 }
 
 
@@ -2541,6 +2615,7 @@ export async function scanProject(path: string): Promise<ScanResult> {
 export interface ImportProjectInput {
   path: string;
   name: string;
+  templateId?: string;
 }
 
 export async function importProject(input: ImportProjectInput): Promise<{ project: Project }> {
@@ -2549,6 +2624,7 @@ export async function importProject(input: ImportProjectInput): Promise<{ projec
     body: JSON.stringify({
       path: input.path,
       name: input.name,
+      templateId: input.templateId,
     }),
   }) as Promise<{ project: Project }>;
 }
@@ -2610,6 +2686,28 @@ export async function importTemplate(templatePackage: TemplatePackage): Promise<
   }) as Promise<{ template: Template }>;
 }
 
+export interface GitTemplateImportInput {
+  url: string;
+  branch?: string;
+  name?: string;
+  description?: string;
+}
+
+export interface GitTemplateImportResult {
+  templateId: string;
+  name: string;
+  adapter: "claude" | "opencode" | "codex" | "kimi" | null;
+  fileCount: number;
+  skippedFiles: string[];
+}
+
+export async function importTemplateFromGit(input: GitTemplateImportInput): Promise<GitTemplateImportResult> {
+  return fetchJson("/api/v1/templates/import/git", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<GitTemplateImportResult>;
+}
+
 export async function listTemplateVersions(id: string): Promise<{ versions: TemplateVersion[] }> {
   return fetchJson(`/api/v1/templates/${id}/versions`) as Promise<{ versions: TemplateVersion[] }>;
 }
@@ -2669,6 +2767,24 @@ export async function createModelProvider(data: {
 }): Promise<{ provider: ProviderProfile }> {
   return fetchJson("/api/v1/model-providers", {
     method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ provider: ProviderProfile }>;
+}
+
+export async function updateModelProvider(providerId: string, data: {
+  name?: string;
+  baseUrl?: string;
+  anthropicBaseUrl?: string;
+  openaiBaseUrl?: string;
+  region?: string;
+  productType?: ProviderProductType;
+  authType?: ProviderAuthType;
+  apiFormat?: ProviderApiFormat;
+  supportedAdapters?: ProviderSupportedAdapter[];
+  allowPlaintextHttp?: boolean;
+}): Promise<{ provider: ProviderProfile }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}`, {
+    method: "PATCH",
     body: JSON.stringify(data),
   }) as Promise<{ provider: ProviderProfile }>;
 }

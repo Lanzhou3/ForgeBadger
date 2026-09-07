@@ -505,6 +505,20 @@
       "when": 1788620517897,
       "tag": "0072_model_provider_kimi_adapter",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1789000000000,
+      "tag": "0073_claude_route",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1789100000000,
+      "tag": "0074_template_adapter_and_git_sources",
+      "breakpoints": true
     }
   ]
 }
