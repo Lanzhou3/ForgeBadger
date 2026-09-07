@@ -1,4 +1,4 @@
-import { Cloud, Pencil, Search, Trash2 } from "lucide-react";
+import { Cloud, Pencil, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,11 +15,9 @@ interface ProviderListProps {
   queryText: string;
   selectedProviderId: string;
   isLoading: boolean;
-  isDeleting: boolean;
   onQueryTextChange: (value: string) => void;
   onSelectProvider: (providerId: string) => void;
   onEditProvider: (providerId: string) => void;
-  onDeleteProvider: (providerId: string) => void;
   t: Translate;
 }
 
@@ -30,11 +28,9 @@ export function ProviderList({
   queryText,
   selectedProviderId,
   isLoading,
-  isDeleting,
   onQueryTextChange,
   onSelectProvider,
   onEditProvider,
-  onDeleteProvider,
   t,
 }: ProviderListProps) {
   return (
@@ -113,18 +109,6 @@ export function ProviderList({
                       onClick={() => onEditProvider(provider.id)}
                     >
                       <Pencil className="size-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
-                      disabled={isDeleting}
-                      title={t("models.deleteProviderInlineLabel")}
-                      aria-label={t("models.deleteProviderInlineLabel")}
-                      onClick={() => onDeleteProvider(provider.id)}
-                    >
-                      <Trash2 className="size-4" />
                     </Button>
                   </div>
                 );

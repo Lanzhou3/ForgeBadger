@@ -1,5 +1,5 @@
 import type {
-  ModelProviderReadiness,
+  AdapterAppliedStatus,
   ProviderApiFormat,
   ProviderAuthType,
   ProviderBalanceEntry,
@@ -26,7 +26,10 @@ export interface CredentialForm {
 export interface ModelForm {
   name: string;
   modelId: string;
-  capabilities: string;
+  /** Checked common capability tags. */
+  capabilities: string[];
+  /** Free-form supplement for capabilities outside the common set. */
+  customCapabilities: string;
   contextWindow: string;
 }
 
@@ -73,7 +76,8 @@ export const emptyCredential: CredentialForm = {
 export const emptyModel: ModelForm = {
   name: "",
   modelId: "",
-  capabilities: "chat,code",
+  capabilities: ["chat", "code"],
+  customCapabilities: "",
   contextWindow: "",
 };
 
@@ -91,20 +95,6 @@ export function productTypeLabel(productType: string | null | undefined, t: Tran
   if (productType === "subscription") return t("models.productTypeSubscription");
   if (productType === "local") return t("models.productTypeLocal");
   return t("models.productTypePaygApi");
-}
-
-export function readinessCheckEntries(readiness: ModelProviderReadiness, t: Translate): Array<[string, string]> {
-  return [
-    [t("models.providerHealthCheckProvider"), readiness.checks.provider],
-    [t("models.providerHealthCheckTarget"), readiness.checks.adapter],
-    [t("models.providerHealthCheckModel"), readiness.checks.model],
-    [t("models.providerHealthCheckCredential"), readiness.checks.credential],
-    [t("models.providerHealthCheckRemoteModelList"), readiness.checks.remoteModelList],
-  ];
-}
-
-export function isReadyCheckValue(value: string): boolean {
-  return value === "ready" || value === "supported" || value === "selected" || value === "passed" || value === "not_required";
 }
 
 export function formatCheckedAt(value: string): string {
@@ -135,6 +125,105 @@ function clampPercent(value: number): number {
 export function applyTargetsForProvider(provider: ProviderProfile | undefined): ProviderSupportedAdapter[] {
   if (!provider) return [];
   return [...provider.supportedAdapters];
+}
+
+/** Human-readable API protocol label; never expose the raw enum to users. */
+export function apiFormatLabel(format: ProviderApiFormat, t: Translate): string {
+  switch (format) {
+    case "anthropic": return t("models.apiFormatAnthropic");
+    case "openai": return t("models.apiFormatOpenai");
+    case "openai-compatible": return t("models.apiFormatOpenaiCompatible");
+    case "google": return t("models.apiFormatGoogle");
+    case "bedrock": return t("models.apiFormatBedrock");
+    case "local": return t("models.apiFormatLocal");
+    default: return format;
+  }
+}
+
+/** Short hint shown next to the API format option in the provider form. */
+export function apiFormatHint(format: ProviderApiFormat, t: Translate): string {
+  switch (format) {
+    case "anthropic": return t("models.apiFormatHintAnthropic");
+    case "openai": return t("models.apiFormatHintOpenai");
+    case "openai-compatible": return t("models.apiFormatHintOpenaiCompatible");
+    case "google": return t("models.apiFormatHintGoogle");
+    case "bedrock": return t("models.apiFormatHintBedrock");
+    case "local": return t("models.apiFormatHintLocal");
+    default: return "";
+  }
+}
+
+/** Human-readable credential auth label; never expose the raw enum to users. */
+export function authTypeLabel(authType: ProviderAuthType, t: Translate): string {
+  switch (authType) {
+    case "api_key": return t("models.authTypeApiKey");
+    case "bearer_token": return t("models.authTypeBearerToken");
+    case "oauth": return t("models.authTypeOauth");
+    case "none": return t("models.authTypeNone");
+    default: return authType;
+  }
+}
+
+/** Short hint shown next to the auth type option in the provider form. */
+export function authTypeHint(authType: ProviderAuthType, t: Translate): string {
+  switch (authType) {
+    case "api_key": return t("models.authTypeHintApiKey");
+    case "bearer_token": return t("models.authTypeHintBearerToken");
+    case "oauth": return t("models.authTypeHintOauth");
+    case "none": return t("models.authTypeHintNone");
+    default: return "";
+  }
+}
+
+/** Common capability tags offered as one-tap checkboxes in the model form. */
+export const COMMON_MODEL_CAPABILITIES = ["chat", "code", "vision", "tools", "reasoning", "embedding"] as const;
+
+export function parseCapabilities(input: string): string[] {
+  const seen = new Set<string>();
+  for (const item of input.split(",")) {
+    const capability = item.trim();
+    if (capability) seen.add(capability);
+  }
+  return [...seen];
+}
+
+/**
+ * Merge the checked common capabilities with a free-form supplement input into
+ * a de-duplicated, order-stable list (common tags first, extras appended).
+ */
+export function mergeCapabilities(checked: readonly string[], customInput: string): string[] {
+  const merged: string[] = [];
+  for (const capability of [...checked, ...parseCapabilities(customInput)]) {
+    if (capability && !merged.includes(capability)) merged.push(capability);
+  }
+  return merged;
+}
+
+/** Split stored capabilities into common checkbox values + custom remainder. */
+export function splitCapabilities(capabilities: readonly string[]): { checked: string[]; custom: string } {
+  const common = new Set<string>(COMMON_MODEL_CAPABILITIES);
+  const checked: string[] = [];
+  const custom: string[] = [];
+  for (const capability of capabilities) {
+    if (common.has(capability)) checked.push(capability);
+    else custom.push(capability);
+  }
+  return { checked, custom: custom.join(",") };
+}
+
+export function appliedStatusForAdapter(
+  statuses: readonly AdapterAppliedStatus[] | undefined,
+  adapter: ProviderSupportedAdapter
+): AdapterAppliedStatus | null {
+  return statuses?.find((status) => status.adapter === adapter) ?? null;
+}
+
+/** True when the given provider is the one currently applied to this CLI. */
+export function isProviderActiveOnAdapter(
+  status: AdapterAppliedStatus | null | undefined,
+  providerId: string
+): boolean {
+  return Boolean(status?.applied && status.applied.providerProfileId === providerId);
 }
 
 export function EmptyLine({ text }: { text: string }) {

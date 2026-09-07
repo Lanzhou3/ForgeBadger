@@ -36,9 +36,10 @@ test("Models provider can be created manually with an optional credential and mo
 
   await submitButton.click();
 
-  // Wait for the full create -> credential -> sync chain to settle.
+  // Wait for the full create -> credential -> sync chain to settle; feedback
+  // now arrives as a sonner toast instead of a persistent banner.
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByText("Provider created")).toBeVisible();
+  await expect(page.locator("[data-sonner-toast]").getByText("Provider created")).toBeVisible();
 
   expect(requests.providerCreate).toEqual({
     name: "My Provider",
@@ -99,6 +100,9 @@ test("Models provider can be applied to a CLI config after a redacted preview", 
 
   const dialog = page.getByRole("dialog", { name: "Apply to CLI" });
   await expect(dialog).toBeVisible();
+  // The change summary is lazy: no preview request fires until it is expanded.
+  expect(requests.applyPreview).toBeUndefined();
+  await dialog.getByRole("button", { name: "View change summary" }).click();
   await expect(dialog.getByText("/home/e2e/.claude/settings.json")).toBeVisible();
   // The preview payload intentionally carries a plaintext-looking key; the UI must mask it.
   await expect(dialog.getByText(/sk-live-secret/)).toHaveCount(0);
@@ -117,7 +121,7 @@ test("Models provider can be applied to a CLI config after a redacted preview", 
   await expect(dialog).toHaveCount(0);
 });
 
-test("Models provider readiness shows healthy remote model evidence without a separate Codex account card", async ({ page }) => {
+test("Models diagnostics tab runs the provider endpoint speed test", async ({ page }) => {
   const requests = await mockModelsApis(page, {
     configuredProviders: [providerProfile()],
     configuredModels: [modelProfile()],
@@ -126,154 +130,34 @@ test("Models provider readiness shows healthy remote model evidence without a se
 
   await page.goto("/models");
 
-  await expect(page.getByText("Codex subscription account")).toHaveCount(0);
-  await page.getByRole("button", { name: "Check readiness" }).click();
+  await page.getByRole("tab", { name: "Diagnostics" }).click();
+  await page.getByRole("button", { name: "Check endpoint" }).click();
 
-  expect(requests.readiness).toEqual({
-    adapter: "claude",
-    modelProfileId: "model-1",
-    credentialId: "credential-1",
-    includeRemoteCheck: true,
-    timeoutMs: 5000,
-  });
-  const healthCard = page.getByTestId("provider-health-card");
-  await expect(healthCard.getByText("Provider health")).toBeVisible();
-  await expect(healthCard.getByText("ready", { exact: true }).first()).toBeVisible();
-  await expect(healthCard.getByText("Remote model list", { exact: true })).toBeVisible();
-  await expect(healthCard.getByText("passed", { exact: true })).toBeVisible();
-  await expect(healthCard.getByText("provider-01-model")).toBeVisible();
+  expect(requests.endpointTest).toEqual({ timeoutMs: 5000 });
+  const healthRow = page.getByTestId("endpoint-health-row");
+  await expect(healthRow.getByText("Endpoint reachable")).toBeVisible();
+  await expect(healthRow.getByText(/42 ms/)).toBeVisible();
+  await expect(healthRow.getByText(/HTTP 200/)).toBeVisible();
   await expect(page.getByText(/test-minimax-token|sk-/)).toHaveCount(0);
 });
 
-test("Models provider readiness shows actionable remote failures", async ({ page }) => {
+test("Models CLI status grid shows per-CLI applied state", async ({ page }) => {
   await mockModelsApis(page, {
     configuredProviders: [providerProfile()],
     configuredModels: [modelProfile()],
     configuredCredentials: [credentialSummary()],
-    readiness: {
-      status: "needs_attention",
-      code: "remote_validation_failed",
-      checkedAt: "2026-05-29T02:00:00.000Z",
-      provider: {
-        id: "provider-profile-1",
-        name: "Provider 01",
-        providerKey: "provider-01",
-        apiFormat: "openai-compatible",
-        authType: "api_key",
-      },
-      selection: {
-        adapter: "claude",
-        modelProfileId: "model-1",
-        modelId: "provider-01-model",
-        credentialId: "credential-1",
-      },
-      checks: {
-        provider: "ready",
-        adapter: "supported",
-        model: "selected",
-        credential: "ready",
-        remoteModelList: "failed",
-      },
-      remote: {
-        checked: true,
-        errorCode: "invalid_credential",
-        error: "HTTP 401: unauthorized",
-      },
-      steps: ["Check that the selected credential is active and belongs to this provider."],
-    },
   });
 
   await page.goto("/models");
-  await page.getByRole("button", { name: "Check readiness" }).click();
 
-  const healthCard = page.getByTestId("provider-health-card");
-  await expect(healthCard.getByText("needs_attention", { exact: true })).toBeVisible();
-  await expect(healthCard.getByText("remote_validation_failed", { exact: true })).toBeVisible();
-  await expect(healthCard.getByText("invalid_credential")).toBeVisible();
-  await expect(healthCard.getByText("Check that the selected credential is active and belongs to this provider.")).toBeVisible();
-  await expect(page.getByText(/sk-|test-minimax-token/)).toHaveCount(0);
-});
-
-test("Models provider readiness distinguishes remote recovery categories", async ({ page }) => {
-  const readinessQueue = [
-    readinessFixture({
-      code: "remote_validation_failed",
-      remoteModelList: "failed",
-      remote: {
-        checked: true,
-        errorCode: "timeout",
-        error: "Request timed out",
-      },
-      steps: ["Retry with a longer timeout or check network connectivity to the provider endpoint."],
-    }),
-    readinessFixture({
-      code: "remote_validation_failed",
-      remoteModelList: "failed",
-      remote: {
-        checked: true,
-        errorCode: "provider_outage",
-        error: "HTTP 503: unavailable",
-      },
-      steps: ["Retry later or check the provider status page."],
-    }),
-    readinessFixture({
-      code: "remote_validation_failed",
-      remoteModelList: "failed",
-      remote: {
-        checked: true,
-        errorCode: "endpoint_or_network_failure",
-        error: "fetch failed",
-      },
-      steps: ["Check the provider endpoint, network access, and model-list support."],
-    }),
-    readinessFixture({
-      code: "remote_model_missing",
-      remoteModelList: "missing_model",
-      remote: {
-        checked: true,
-        modelCount: 2,
-      },
-      steps: ["The provider model list did not include provider-01-model. Sync models or choose a model ID returned by the provider."],
-    }),
-  ];
-  await mockModelsApis(page, {
-    configuredProviders: [providerProfile()],
-    configuredModels: [modelProfile()],
-    configuredCredentials: [credentialSummary()],
-    readiness: readinessQueue,
-  });
-
-  await page.goto("/models");
-  const healthCard = page.getByTestId("provider-health-card");
-
-  for (const expectation of [
-    {
-      code: "remote_validation_failed",
-      marker: "Error category: timeout",
-      step: "Retry with a longer timeout or check network connectivity to the provider endpoint.",
-    },
-    {
-      code: "remote_validation_failed",
-      marker: "Error category: provider_outage",
-      step: "Retry later or check the provider status page.",
-    },
-    {
-      code: "remote_validation_failed",
-      marker: "Error category: endpoint_or_network_failure",
-      step: "Check the provider endpoint, network access, and model-list support.",
-    },
-    {
-      code: "remote_model_missing",
-      marker: "missing_model",
-      step: "The provider model list did not include provider-01-model. Sync models or choose a model ID returned by the provider.",
-    },
-  ]) {
-    await page.getByRole("button", { name: "Check readiness" }).click();
-    await expect(healthCard.getByText(expectation.code, { exact: true })).toBeVisible();
-    await expect(healthCard.getByText(expectation.marker)).toBeVisible();
-    await expect(healthCard.getByText(expectation.step)).toBeVisible();
-    await expect(page.getByText(/sk-|test-minimax-token|Bearer/)).toHaveCount(0);
+  const grid = page.getByTestId("cli-status-section");
+  await expect(grid).toBeVisible();
+  for (const adapter of ["claude", "opencode", "codex", "kimi"]) {
+    await expect(page.getByTestId(`cli-status-${adapter}`)).toBeVisible();
   }
+  // The mocked applied pointer puts this provider in effect on Claude Code.
+  await expect(page.getByTestId("cli-status-claude").getByText("Provider 01 · Active")).toBeVisible();
+  await expect(page.getByTestId("cli-status-codex").getByText("Not configured")).toBeVisible();
 });
 
 async function mockModelsApis(
@@ -282,14 +166,13 @@ async function mockModelsApis(
     configuredProviders?: Array<Record<string, unknown>>;
     configuredModels?: Array<Record<string, unknown>>;
     configuredCredentials?: Array<Record<string, unknown>>;
-    readiness?: Record<string, unknown> | Array<Record<string, unknown>>;
   } = {}
 ) {
   const requests: {
     providerCreate?: unknown;
     credentialCreate?: unknown;
     syncModels?: unknown;
-    readiness?: unknown;
+    endpointTest?: unknown;
     applyPreview?: unknown;
     applyProvider?: unknown;
   } = {};
@@ -309,6 +192,73 @@ async function mockModelsApis(
           role: "admin",
           status: "active",
         }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/model-providers/applied" && method === "GET") {
+      await route.fulfill({
+        json: envelope({
+          adapters: [
+            {
+              adapter: "claude",
+              applied: {
+                providerProfileId: "provider-profile-1",
+                providerName: "Provider 01",
+                providerStatus: "active",
+                modelProfileId: "model-1",
+                modelId: "provider-01-model",
+                modelName: "Provider 01 Model",
+                appliedAt: "2026-05-29T02:00:00.000Z",
+              },
+              configDefaultModel: "provider-01-model",
+              stale: false,
+            },
+            { adapter: "opencode", applied: null, configDefaultModel: null, stale: false },
+            { adapter: "codex", applied: null, configDefaultModel: null, stale: false },
+            { adapter: "kimi", applied: null, configDefaultModel: null, stale: false },
+          ],
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/adapters/discovery") {
+      await route.fulfill({
+        json: envelope({
+          adapters: ["claude", "opencode", "codex", "kimi"].map((id) => ({
+            id,
+            label: id,
+            command: id,
+            supportLevel: "supported",
+            launchEnabled: true,
+            configDir: `/home/e2e/.${id}`,
+            runtimeModes: ["terminal"],
+            available: true,
+            status: "available",
+          })),
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/cli-config/routing/claude") {
+      await route.fulfill({
+        json: envelope({
+          routing: {
+            enabled: false,
+            hasToken: false,
+            gatewayUrl: "http://127.0.0.1:48731",
+            assignment: null,
+          },
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/model-providers/provider-profile-1/balance" && method === "POST") {
+      await route.fulfill({
+        json: envelope({ supported: false, balances: [], checkedAt: "2026-05-29T02:00:00.000Z" }),
       });
       return;
     }
@@ -396,43 +346,17 @@ async function mockModelsApis(
       return;
     }
 
-    if (url.pathname === "/api/v1/model-providers/provider-profile-1/readiness" && method === "POST") {
-      requests.readiness = route.request().postDataJSON();
-      const readiness = Array.isArray(overrides.readiness)
-        ? overrides.readiness.shift()
-        : overrides.readiness;
+    if (url.pathname === "/api/v1/model-providers/provider-profile-1/test" && method === "POST") {
+      requests.endpointTest = route.request().postDataJSON();
       await route.fulfill({
         json: envelope({
-          readiness: readiness ?? {
-            status: "ready",
-            code: "ready",
+          health: {
+            healthy: true,
+            endpoint: "https://provider-01.example.com/anthropic",
+            latencyMs: 42,
+            timeoutMs: 5000,
+            statusCode: 200,
             checkedAt: "2026-05-29T02:00:00.000Z",
-            provider: {
-              id: "provider-profile-1",
-              name: "Provider 01",
-              providerKey: "provider-01",
-              apiFormat: "openai-compatible",
-              authType: "api_key",
-            },
-            selection: {
-              adapter: "claude",
-              modelProfileId: "model-1",
-              modelId: "provider-01-model",
-              credentialId: "credential-1",
-            },
-            checks: {
-              provider: "ready",
-              adapter: "supported",
-              model: "selected",
-              credential: "ready",
-              remoteModelList: "passed",
-            },
-            remote: {
-              checked: true,
-              modelCount: 2,
-              matchedModelId: "provider-01-model",
-            },
-            steps: [],
           },
         }),
       });
@@ -461,7 +385,8 @@ function providerProfile() {
     name: "Provider 01",
     baseUrl: "https://provider-01.example.com/anthropic",
     authType: "api_key",
-    apiFormat: "openai-compatible",
+    // Anthropic protocol keeps the Claude apply flow direct (no Gateway route).
+    apiFormat: "anthropic",
     supportedAdapters: ["claude", "opencode"],
     opencodeNpm: "@ai-sdk/openai-compatible",
     anthropicBaseUrl: "https://provider-01.example.com/anthropic",
@@ -469,41 +394,6 @@ function providerProfile() {
     region: "global",
     productType: "payg_api",
     status: "active",
-  };
-}
-
-function readinessFixture(overrides: {
-  code: string;
-  remoteModelList: string;
-  remote: Record<string, unknown>;
-  steps: string[];
-}) {
-  return {
-    status: "needs_attention",
-    code: overrides.code,
-    checkedAt: "2026-05-29T02:00:00.000Z",
-    provider: {
-      id: "provider-profile-1",
-      name: "Provider 01",
-      providerKey: "provider-01",
-      apiFormat: "openai-compatible",
-      authType: "api_key",
-    },
-    selection: {
-      adapter: "claude",
-      modelProfileId: "model-1",
-      modelId: "provider-01-model",
-      credentialId: "credential-1",
-    },
-    checks: {
-      provider: "ready",
-      adapter: "supported",
-      model: "selected",
-      credential: "ready",
-      remoteModelList: overrides.remoteModelList,
-    },
-    remote: overrides.remote,
-    steps: overrides.steps,
   };
 }
 

@@ -23,6 +23,10 @@ import {
 
 import {
   adapterLabel,
+  apiFormatHint,
+  apiFormatLabel,
+  authTypeHint,
+  authTypeLabel,
   customProviderHasEndpoint,
   customProviderHasPlaintextHttp,
   slugifyProviderKey,
@@ -114,19 +118,17 @@ export function AddProviderDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-        <form className="space-y-4" onSubmit={onSubmit}>
-          <DialogHeader>
-            <DialogTitle>{editing ? t("models.editProvider") : t("models.addProvider")}</DialogTitle>
-            <DialogDescription>
-              {editing ? t("models.editProviderDescription") : t("models.addProviderDescription")}
-            </DialogDescription>
-          </DialogHeader>
-
+      <DialogContent className={editing ? "max-h-[90vh] overflow-y-auto sm:max-w-2xl" : "max-h-[90vh] overflow-hidden sm:max-w-4xl"}>
+        <form
+          className={editing ? "space-y-4" : "grid max-h-[80vh] gap-5 md:grid-cols-[240px_minmax(0,1fr)]"}
+          onSubmit={onSubmit}
+        >
           {!editing && (
-          <div className="space-y-2">
-            <span className="text-sm font-medium">{t("models.presets")}</span>
-            <p className="text-xs text-muted-foreground">{t("models.presetsDescription")}</p>
+          <div className="flex min-h-0 flex-col gap-2">
+            <div className="space-y-1">
+              <span className="text-sm font-medium">{t("models.presets")}</span>
+              <p className="text-xs text-muted-foreground">{t("models.presetsDescription")}</p>
+            </div>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -136,7 +138,7 @@ export function AddProviderDialog({
                 className="h-9 pl-9"
               />
             </div>
-            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border/70 p-1">
+            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto rounded-md border border-border/70 p-1">
               {filteredPresets.length === 0 ? (
                 <p className="px-3 py-4 text-center text-xs text-muted-foreground">
                   {t("models.noPresetMatches")}
@@ -153,7 +155,7 @@ export function AddProviderDialog({
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium">{preset.name}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground">{preset.apiFormat}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{apiFormatLabel(preset.apiFormat, t)}</span>
                     </div>
                     <div className="mt-0.5 truncate text-xs text-muted-foreground">
                       {preset.openaiBaseUrl ?? preset.anthropicBaseUrl}
@@ -163,6 +165,20 @@ export function AddProviderDialog({
               )}
             </div>
           </div>
+          )}
+
+          <div className={editing ? "contents" : "min-h-0 space-y-4 overflow-y-auto pr-1"}>
+          {!editing && (
+          <DialogHeader>
+            <DialogTitle>{t("models.addProvider")}</DialogTitle>
+            <DialogDescription>{t("models.addProviderDescription")}</DialogDescription>
+          </DialogHeader>
+          )}
+          {editing && (
+          <DialogHeader>
+            <DialogTitle>{t("models.editProvider")}</DialogTitle>
+            <DialogDescription>{t("models.editProviderDescription")}</DialogDescription>
+          </DialogHeader>
           )}
 
           <div className="grid gap-3 md:grid-cols-2">
@@ -202,9 +218,10 @@ export function AddProviderDialog({
                 }
               >
                 {API_FORMATS.map((format) => (
-                  <option key={format} value={format}>{format}</option>
+                  <option key={format} value={format}>{apiFormatLabel(format, t)}</option>
                 ))}
               </select>
+              <p className="text-xs text-muted-foreground">{apiFormatHint(customProvider.apiFormat, t)}</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="provider-auth-type">{t("models.authType")}</Label>
@@ -217,9 +234,10 @@ export function AddProviderDialog({
                 }
               >
                 {AUTH_TYPES.map((authType) => (
-                  <option key={authType} value={authType}>{authType}</option>
+                  <option key={authType} value={authType}>{authTypeLabel(authType, t)}</option>
                 ))}
               </select>
+              <p className="text-xs text-muted-foreground">{authTypeHint(customProvider.authType, t)}</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="provider-openai-base-url">{t("models.openaiBaseUrl")}</Label>
@@ -329,6 +347,7 @@ export function AddProviderDialog({
               {editing ? t("common.save") : t("models.saveAndSyncModels")}
             </Button>
           </DialogFooter>
+          </div>
         </form>
       </DialogContent>
     </Dialog>

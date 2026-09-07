@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as apiModule from "./api";
 import {
   createApiKey,
-  checkModelProviderReadiness,
   checkProviderBalance,
   cloneTemplate,
   createModelProvider,
@@ -33,10 +32,6 @@ import {
   getCliConfig,
   getCliConfigFile,
   writeCliConfigFile,
-  upsertCliProvider,
-  removeCliProvider,
-  upsertCliModel,
-  removeCliModel,
   setCliDefaultModel,
   getGlobalAiConfig,
   getProjectAiConfig,
@@ -308,30 +303,6 @@ describe("api client", () => {
       message: "Balance upstream request failed",
       status: 502,
     });
-  });
-
-  it("checks model provider readiness through REST", async () => {
-    await checkModelProviderReadiness("provider-1", {
-      adapter: "claude",
-      modelProfileId: "model-1",
-      credentialId: "credential-1",
-      includeRemoteCheck: true,
-      timeoutMs: 5000,
-    });
-
-    expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/readiness",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          adapter: "claude",
-          modelProfileId: "model-1",
-          credentialId: "credential-1",
-          includeRemoteCheck: true,
-          timeoutMs: 5000,
-        }),
-      })
-    );
   });
 
   it("previews, applies, and rolls back CLI config provider application", async () => {
@@ -1629,18 +1600,6 @@ describe("api client", () => {
     await getCliConfig("kimi");
     await getCliConfigFile("kimi", "config.toml");
     await writeCliConfigFile("kimi", "config.toml", "default_model = \"k2\"");
-    await upsertCliProvider("kimi", "moonshot", {
-      baseUrl: "https://api.moonshot.cn/anthropic",
-      protocol: "anthropic",
-      envKey: "MOONSHOT_API_KEY",
-    });
-    await removeCliProvider("kimi", "moonshot");
-    await upsertCliModel("kimi", {
-      alias: "moonshot/kimi-k2.5",
-      provider: "moonshot",
-      modelId: "kimi-k2.5",
-    });
-    await removeCliModel("kimi", "moonshot/kimi-k2.5");
     await setCliDefaultModel("kimi", "moonshot/kimi-k2.5");
 
     expect(fetch).toHaveBeenNthCalledWith(
@@ -1663,43 +1622,6 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/providers/moonshot",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({
-          baseUrl: "https://api.moonshot.cn/anthropic",
-          protocol: "anthropic",
-          envKey: "MOONSHOT_API_KEY",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      5,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/providers/moonshot",
-      expect.objectContaining({ method: "DELETE" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      6,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/models",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({
-          alias: "moonshot/kimi-k2.5",
-          provider: "moonshot",
-          modelId: "kimi-k2.5",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      7,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/models",
-      expect.objectContaining({
-        method: "DELETE",
-        body: JSON.stringify({ alias: "moonshot/kimi-k2.5" }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      8,
       "http://127.0.0.1:48731/api/v1/cli-config/kimi/default-model",
       expect.objectContaining({
         method: "PUT",

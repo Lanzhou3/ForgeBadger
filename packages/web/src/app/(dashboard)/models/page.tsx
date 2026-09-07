@@ -1,36 +1,31 @@
 "use client";
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  CheckCircle2,
-  Cloud,
-  Plus,
-  TriangleAlert,
-  X,
-} from "lucide-react";
+import { Cloud, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { AddProviderDialog } from "@/components/models/add-provider-dialog";
 import { ApplyToCliDialog } from "@/components/models/apply-to-cli-dialog";
-import { CliConfigPanel } from "@/components/models/cli-config-panel";
+import { CliConfigSheet } from "@/components/models/cli-config-sheet";
 import { DeleteConfirmDialog } from "@/components/models/delete-confirm-dialog";
 import { ProviderList } from "@/components/models/provider-list";
 import { ProviderWorkspace } from "@/components/models/provider-workspace";
 import {
-  applyTargetsForProvider,
   emptyCredential,
   emptyCustomProvider,
   emptyModel,
+  mergeCapabilities,
+  splitCapabilities,
   type CredentialForm,
   type CustomProviderForm,
   type DeleteTarget,
   type ModelForm,
 } from "@/components/models/shared";
 import { useLanguage } from "@/hooks/use-language";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import {
-  checkModelProviderReadiness,
   checkProviderBalance,
   createModelProvider,
   createProviderCredential,
@@ -44,31 +39,49 @@ import {
   syncProviderModels,
   updateModelProvider,
   updateProviderModel,
-  type ModelProviderReadiness,
   type ProviderProfile,
-  type ProviderSupportedAdapter,
+  type RuntimeAdapterId,
 } from "@/lib/api";
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export default function ModelsPage() {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const [selectedProviderId, setSelectedProviderId] = useState("");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [selectedProviderId, setSelectedProviderIdState] = useState(() => searchParams.get("provider") ?? "");
   const [customProvider, setCustomProvider] = useState<CustomProviderForm>(emptyCustomProvider);
   const [credentialForm, setCredentialForm] = useState<CredentialForm>(emptyCredential);
   const [modelForm, setModelForm] = useState<ModelForm>(emptyModel);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedCredentialId, setSelectedCredentialId] = useState("");
-  const [selectedReadinessAdapter, setSelectedReadinessAdapter] = useState<ProviderSupportedAdapter>("claude");
-  const [providerReadiness, setProviderReadiness] = useState<ModelProviderReadiness | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [providerQueryText, setProviderQueryText] = useState("");
   const [setupCredentialForm, setSetupCredentialForm] = useState<CredentialForm>(emptyCredential);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<ProviderProfile | null>(null);
-  const [applyDialogOpen, setApplyDialogOpen] = useState(false);
+  const [applyDialog, setApplyDialog] = useState<{ open: boolean; adapter?: RuntimeAdapterId }>({ open: false });
+  const [configSheet, setConfigSheet] = useState<{ open: boolean; adapter: RuntimeAdapterId }>({
+    open: false,
+    adapter: "claude",
+  });
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [rotateDialogOpen, setRotateDialogOpen] = useState(false);
+
+  // The selected provider is mirrored into ?provider=<id> so refresh/back
+  // keep the workspace context.
+  function setSelectedProviderId(providerId: string) {
+    setSelectedProviderIdState(providerId);
+    const params = new URLSearchParams(searchParams.toString());
+    if (providerId) params.set("provider", providerId);
+    else params.delete("provider");
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
 
   const providerQuery = useQuery({
     queryKey: ["model-providers"],
@@ -90,9 +103,12 @@ export default function ModelsPage() {
   }, [providerQueryText, providers]);
 
   useEffect(() => {
-    if (!selectedProviderId && providers[0]) {
-      setSelectedProviderId(providers[0].id);
+    const first = providers[0];
+    if (!first) return;
+    if (!selectedProviderId || !providers.some((provider) => provider.id === selectedProviderId)) {
+      setSelectedProviderId(first.id);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providers, selectedProviderId]);
 
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
@@ -127,28 +143,16 @@ export default function ModelsPage() {
     setSelectedCredentialId((current) =>
       providerCredentials.some((credential) => credential.id === current) ? current : providerCredentials[0]?.id || ""
     );
-    setProviderReadiness(null);
   }, [providerModels, providerCredentials]);
 
   useEffect(() => {
-    if (!selectedProvider) {
-      setSelectedReadinessAdapter("claude");
-      return;
-    }
-    const targets = applyTargetsForProvider(selectedProvider);
-    setSelectedReadinessAdapter((current) => targets.includes(current) ? current : targets[0] ?? "claude");
-  }, [selectedProvider]);
-
-  useEffect(() => {
-    setProviderReadiness(null);
-  }, [selectedCredentialId, selectedModelId, selectedProviderId, selectedReadinessAdapter]);
-
-  useEffect(() => {
     if (selectedModel) {
+      const { checked, custom } = splitCapabilities(selectedModel.capabilities);
       setModelForm({
         name: selectedModel.name,
         modelId: selectedModel.modelId,
-        capabilities: selectedModel.capabilities.join(","),
+        capabilities: checked,
+        customCapabilities: custom,
         contextWindow: selectedModel.contextWindow ? String(selectedModel.contextWindow) : "",
       });
     } else {
@@ -207,7 +211,7 @@ export default function ModelsPage() {
       setSetupCredentialForm(emptyCredential);
       setProviderDialogOpen(false);
       setEditingProvider(null);
-      setNotice(t("models.providerCreated"));
+      toast.success(t("models.providerCreated"));
       if (result.syncError) {
         toast.error(
           result.syncError instanceof Error ? result.syncError.message : t("models.modelSyncFailed")
@@ -215,6 +219,7 @@ export default function ModelsPage() {
       }
       await refreshProviders();
     },
+    onError: (error) => toast.error(errorMessage(error, t("models.failedLoad"))),
   });
 
   const updateProviderMutation = useMutation({
@@ -237,9 +242,10 @@ export default function ModelsPage() {
       setProviderDialogOpen(false);
       setEditingProvider(null);
       setCustomProvider(emptyCustomProvider);
-      setNotice(t("models.updated"));
+      toast.success(t("models.updated"));
       await refreshProviders();
     },
+    onError: (error) => toast.error(errorMessage(error, t("models.failedLoad"))),
   });
 
   const deleteProviderMutation = useMutation({
@@ -250,9 +256,10 @@ export default function ModelsPage() {
       setSelectedProviderId(nextProviderId);
       setSelectedModelId("");
       setSelectedCredentialId("");
-      setNotice(t("models.providerDeleted"));
+      toast.success(t("models.providerDeleted"));
       await refreshProviders();
     },
+    onError: (error) => toast.error(errorMessage(error, t("models.failedLoad"))),
   });
 
   const credentialMutation = useMutation({
@@ -264,9 +271,10 @@ export default function ModelsPage() {
     onSuccess: async (result) => {
       setCredentialForm(emptyCredential);
       setSelectedCredentialId(result.credential.id);
-      setNotice(t("models.credentialSaved"));
+      toast.success(t("models.credentialSaved"));
       await refreshProviders();
     },
+    onError: (error) => toast.error(errorMessage(error, t("models.failedLoad"))),
   });
 
   const rotateCredentialMutation = useMutation({
@@ -281,9 +289,10 @@ export default function ModelsPage() {
       setCredentialForm(emptyCredential);
       setSelectedCredentialId(result.credential.id);
       setRotateDialogOpen(false);
-      setNotice(t("models.credentialRotated"));
+      toast.success(t("models.credentialRotated"));
       await refreshProviders();
     },
+    onError: (error) => toast.error(errorMessage(error, t("models.failedLoad"))),
   });
 
   const deleteCredentialMutation = useMutation({
@@ -293,20 +302,22 @@ export default function ModelsPage() {
       const nextCredentialId = providerCredentials.find((credential) => credential.id !== credentialId)?.id || "";
       setSelectedCredentialId(nextCredentialId);
       setCredentialForm(emptyCredential);
-      setNotice(result.disposition === "revoked" ? t("models.credentialRevoked") : t("models.credentialDeleted"));
+      toast.success(result.disposition === "revoked" ? t("models.credentialRevoked") : t("models.credentialDeleted"));
       await refreshProviders();
     },
+    onError: (error) => toast.error(errorMessage(error, t("models.failedLoad"))),
+  });
+
+  const modelPayload = () => ({
+    name: modelForm.name.trim(),
+    modelId: modelForm.modelId.trim(),
+    capabilities: mergeCapabilities(modelForm.capabilities, modelForm.customCapabilities),
   });
 
   const modelMutation = useMutation({
     mutationFn: () =>
       createProviderModel(selectedProviderId, {
-        name: modelForm.name.trim(),
-        modelId: modelForm.modelId.trim(),
-        capabilities: modelForm.capabilities
-          .split(",")
-          .map((capability) => capability.trim())
-          .filter(Boolean),
+        ...modelPayload(),
         ...(modelForm.contextWindow.trim()
           ? { contextWindow: Number(modelForm.contextWindow.trim()) }
           : {}),
@@ -315,21 +326,17 @@ export default function ModelsPage() {
       setModelForm(emptyModel);
       setSelectedModelId(result.model.id);
       setModelDialogOpen(false);
-      setNotice(t("models.modelProfileSaved"));
+      toast.success(t("models.modelProfileSaved"));
       await refreshProviders();
     },
+    onError: (error) => toast.error(errorMessage(error, t("models.failedLoad"))),
   });
 
   const updateModelMutation = useMutation({
     mutationFn: () => {
       if (!selectedModelId) throw new Error(t("models.modelRequired"));
       return updateProviderModel(selectedProviderId, selectedModelId, {
-        name: modelForm.name.trim(),
-        modelId: modelForm.modelId.trim(),
-        capabilities: modelForm.capabilities
-          .split(",")
-          .map((capability) => capability.trim())
-          .filter(Boolean),
+        ...modelPayload(),
         contextWindow: modelForm.contextWindow.trim()
           ? Number(modelForm.contextWindow.trim())
           : null,
@@ -338,9 +345,10 @@ export default function ModelsPage() {
     onSuccess: async (result) => {
       setSelectedModelId(result.model.id);
       setModelDialogOpen(false);
-      setNotice(t("models.updated"));
+      toast.success(t("models.updated"));
       await refreshProviders();
     },
+    onError: (error) => toast.error(errorMessage(error, t("models.failedLoad"))),
   });
 
   const deleteModelMutation = useMutation({
@@ -350,18 +358,20 @@ export default function ModelsPage() {
       const nextModelId = providerModels.find((model) => model.id !== modelId)?.id || "";
       setSelectedModelId(nextModelId);
       setModelForm(nextModelId ? modelForm : emptyModel);
-      setNotice(t("models.deleted"));
+      toast.success(t("models.deleted"));
       await refreshProviders();
     },
+    onError: (error) => toast.error(errorMessage(error, t("models.failedLoad"))),
   });
 
   const setDefaultModelMutation = useMutation({
     mutationFn: (modelId: string) => setDefaultProviderModel(selectedProviderId, modelId),
     onSuccess: async (result) => {
       setSelectedModelId(result.model.id);
-      setNotice(t("models.defaultUpdated"));
+      toast.success(t("models.defaultUpdated"));
       await refreshProviders();
     },
+    onError: (error) => toast.error(errorMessage(error, t("models.failedLoad"))),
   });
 
   function openDeleteDialog(target: DeleteTarget) {
@@ -384,40 +394,6 @@ export default function ModelsPage() {
     deleteModelMutation.isPending ||
     deleteCredentialMutation.isPending;
 
-  const syncModelsMutation = useMutation({
-    mutationFn: () => {
-      if (!selectedProvider) throw new Error(t("models.providerRequired"));
-      return syncProviderModels(selectedProvider.id, {
-        credentialId: selectedProvider.authType === "none" ? undefined : selectedCredentialId || undefined,
-      });
-    },
-    onSuccess: async (result) => {
-      const changed = result.createdCount + (result.updatedCount ?? 0);
-      setNotice(changed > 0 ? t("models.modelSyncComplete") : t("models.modelSyncNoChanges"));
-      await refreshProviders();
-    },
-  });
-
-  const readinessMutation = useMutation({
-    mutationFn: () => {
-      if (!selectedProviderId) throw new Error(t("models.providerRequired"));
-      return checkModelProviderReadiness(selectedProviderId, {
-        adapter: selectedReadinessAdapter,
-        ...(selectedModelId ? { modelProfileId: selectedModelId } : {}),
-        ...(selectedCredentialId ? { credentialId: selectedCredentialId } : {}),
-        includeRemoteCheck: true,
-        timeoutMs: 5000,
-      });
-    },
-    onSuccess: (result) => {
-      setProviderReadiness(result.readiness);
-      setNotice(result.readiness.status === "ready"
-        ? t("models.providerReadinessReadyNotice")
-        : t("models.providerReadinessNeedsAttentionNotice")
-      );
-    },
-  });
-
   const activeBalanceCredential = providerCredentials.find((credential) => credential.status === "active");
   // Balance is polled in near-real-time: fetch as soon as a provider (with a
   // usable credential) is selected, then refresh every 60s while the tab is
@@ -437,8 +413,24 @@ export default function ModelsPage() {
     retry: false,
   });
 
+  // Sync uses the provider's active credential so it no longer depends on a
+  // selection made inside the credentials tab.
+  const syncModelsMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedProvider) throw new Error(t("models.providerRequired"));
+      return syncProviderModels(selectedProvider.id, {
+        credentialId: selectedProvider.authType === "none" ? undefined : activeBalanceCredential?.id,
+      });
+    },
+    onSuccess: async (result) => {
+      const changed = result.createdCount + (result.updatedCount ?? 0);
+      toast.success(changed > 0 ? t("models.modelSyncComplete") : t("models.modelSyncNoChanges"));
+      await refreshProviders();
+    },
+    onError: (error) => toast.error(errorMessage(error, t("models.modelSyncFailed"))),
+  });
+
   function refreshProviders() {
-    setProviderReadiness(null);
     return queryClient.invalidateQueries({ queryKey: ["model-providers"] });
   }
 
@@ -510,20 +502,6 @@ export default function ModelsPage() {
     setRotateDialogOpen(true);
   }
 
-  const currentError =
-    providerQuery.error ??
-    createProviderMutation.error ??
-    updateProviderMutation.error ??
-    deleteProviderMutation.error ??
-    credentialMutation.error ??
-    rotateCredentialMutation.error ??
-    deleteCredentialMutation.error ??
-    modelMutation.error ??
-    updateModelMutation.error ??
-    deleteModelMutation.error ??
-    setDefaultModelMutation.error ??
-    syncModelsMutation.error ??
-    readinessMutation.error;
   return (
     <div className="mx-auto max-w-[1400px] space-y-6 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3 forgebadger-animate-in">
@@ -544,30 +522,6 @@ export default function ModelsPage() {
         </div>
       </div>
 
-      {notice && (
-        <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-          <CheckCircle2 className="size-4 shrink-0" />
-          <span className="min-w-0 flex-1">{notice}</span>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="size-6 shrink-0 text-current"
-            aria-label={t("common.close")}
-            onClick={() => setNotice(null)}
-          >
-            <X className="size-4" />
-          </Button>
-        </div>
-      )}
-
-      {currentError instanceof Error && (
-        <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-          <span className="min-w-0 flex-1">{currentError.message}</span>
-        </div>
-      )}
-
       <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
         <div className="min-w-0 space-y-6">
           <ProviderList
@@ -577,14 +531,12 @@ export default function ModelsPage() {
             queryText={providerQueryText}
             selectedProviderId={selectedProviderId}
             isLoading={providerQuery.isLoading}
-            isDeleting={deleteProviderMutation.isPending}
             onQueryTextChange={setProviderQueryText}
             onSelectProvider={setSelectedProviderId}
             onEditProvider={(providerId) => {
               const provider = providers.find((item) => item.id === providerId);
               if (provider) openEditProviderDialog(provider);
             }}
-            onDeleteProvider={(providerId) => openDeleteDialog({ kind: "provider", providerId })}
             t={t}
           />
         </div>
@@ -593,11 +545,9 @@ export default function ModelsPage() {
           {selectedProvider ? (
             <ProviderWorkspace
               provider={selectedProvider}
-              readiness={providerReadiness}
-              isCheckingReadiness={readinessMutation.isPending}
               isSyncing={syncModelsMutation.isPending}
               syncDisabled={
-                selectedProvider.authType !== "none" && !selectedCredentialId
+                selectedProvider.authType !== "none" && !activeBalanceCredential
               }
               isDeletingProvider={deleteProviderMutation.isPending}
               onEditProvider={() => openEditProviderDialog(selectedProvider)}
@@ -610,11 +560,11 @@ export default function ModelsPage() {
                   : null
               }
               isCheckingBalance={balanceQuery.isFetching}
-              onCheckReadiness={() => readinessMutation.mutate()}
               onSync={() => syncModelsMutation.mutate()}
               onCheckBalance={() => void balanceQuery.refetch()}
               onDeleteProvider={() => openDeleteDialog({ kind: "provider", providerId: selectedProvider.id })}
-              onApplyToCli={() => setApplyDialogOpen(true)}
+              onApplyToCli={(adapter) => setApplyDialog({ open: true, adapter })}
+              onViewCliConfig={(adapter) => setConfigSheet({ open: true, adapter })}
               modelsTab={{
                 models: providerModels,
                 selectedModelId,
@@ -672,7 +622,11 @@ export default function ModelsPage() {
         </div>
       </div>
 
-      <CliConfigPanel />
+      <CliConfigSheet
+        open={configSheet.open}
+        adapter={configSheet.adapter}
+        onOpenChange={(open) => setConfigSheet((current) => ({ ...current, open }))}
+      />
 
       <AddProviderDialog
         open={providerDialogOpen}
@@ -702,8 +656,9 @@ export default function ModelsPage() {
           provider={selectedProvider}
           models={providerModels}
           credentials={providerCredentials}
-          open={applyDialogOpen}
-          onOpenChange={setApplyDialogOpen}
+          open={applyDialog.open}
+          initialAdapter={applyDialog.adapter}
+          onOpenChange={(open) => setApplyDialog((current) => ({ ...current, open }))}
         />
       ) : null}
     </div>

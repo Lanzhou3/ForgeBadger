@@ -2,13 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, FileCode2, Pencil, ShieldAlert } from "lucide-react";
-import { toast } from "sonner";
+import { FileCode2, Pencil, ShieldAlert } from "lucide-react";
+import { toast } from "@/lib/toast";
+import type { ThemedToken } from "shiki";
 
 import { CliBrandChip } from "@/components/cli-brand-chip";
+import {
+  highlightWorkspaceCode,
+  tokenFontStyle,
+} from "@/components/projects/workspace/highlight";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
@@ -21,35 +32,47 @@ import {
   type CliConfigFieldSpec,
   type RuntimeAdapterId,
 } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 const cliAdapters: RuntimeAdapterId[] = ["claude", "opencode", "codex", "kimi"];
 
-export function CliConfigPanel() {
+interface CliConfigSheetProps {
+  open: boolean;
+  /** Adapter selected by the entry point (a CLI status cell); defaults to claude. */
+  adapter: RuntimeAdapterId;
+  onOpenChange: (open: boolean) => void;
+}
+
+/**
+ * Right-side drawer for inspecting (and, for admins, editing) a CLI's global
+ * config files: common fields, config metadata, and the raw file editor.
+ */
+export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: CliConfigSheetProps) {
   const { t } = useLanguage();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const queryClient = useQueryClient();
 
-  const [expanded, setExpanded] = useState(false);
-  const [adapter, setAdapter] = useState<RuntimeAdapterId>("codex");
+  const [adapter, setAdapter] = useState<RuntimeAdapterId>(initialAdapter);
+  useEffect(() => {
+    if (open) setAdapter(initialAdapter);
+  }, [open, initialAdapter]);
 
   const fieldsQuery = useQuery({
     queryKey: ["cli-config-fields", adapter],
     queryFn: () => getCliConfigFields(adapter),
-    enabled: expanded,
+    enabled: open,
   });
   const snapshotQuery = useQuery({
     queryKey: ["cli-config", adapter],
     queryFn: () => getCliConfig(adapter),
     retry: false,
-    enabled: expanded,
+    enabled: open,
   });
   const valuesQuery = useQuery({
     queryKey: ["cli-config-field-values", adapter],
     queryFn: () => getCliConfigFieldValues(adapter),
     retry: false,
-    enabled: expanded,
+    enabled: open,
   });
 
   const snapshot = snapshotQuery.data;
@@ -59,7 +82,7 @@ export function CliConfigPanel() {
   const mainFileQuery = useQuery({
     queryKey: ["cli-config-file", adapter, mainFile?.relativePath],
     queryFn: () => getCliConfigFile(adapter, mainFile!.relativePath),
-    enabled: expanded && Boolean(mainFile?.relativePath),
+    enabled: open && Boolean(mainFile?.relativePath),
     retry: false,
   });
 
@@ -68,7 +91,7 @@ export function CliConfigPanel() {
   useEffect(() => {
     setEditing(false);
     setDraft("");
-  }, [adapter]);
+  }, [adapter, open]);
 
   const saveMutation = useMutation({
     mutationFn: () => writeCliConfigFile(adapter, mainFile!.relativePath, draft),
@@ -79,6 +102,7 @@ export function CliConfigPanel() {
         queryClient.invalidateQueries({ queryKey: ["cli-config", adapter] }),
         queryClient.invalidateQueries({ queryKey: ["cli-config-file", adapter, mainFile?.relativePath] }),
         queryClient.invalidateQueries({ queryKey: ["cli-config-field-values", adapter] }),
+        queryClient.invalidateQueries({ queryKey: ["applied-providers"] }),
       ]);
     },
     onError: (error) => {
@@ -86,22 +110,17 @@ export function CliConfigPanel() {
     },
   });
 
-  return (
-    <Card className="forgebadger-animate-in">
-      <CardHeader className="cursor-pointer select-none" onClick={() => setExpanded((v) => !v)}>
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <CardTitle className="text-base">{t("models.cliConfigSection")}</CardTitle>
-            <p className="mt-1 text-xs text-muted-foreground">{t("models.cliConfigSectionDescription")}</p>
-          </div>
-          <ChevronDown
-            className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-200", expanded && "rotate-180")}
-          />
-        </div>
-      </CardHeader>
+  const commonFields = fieldsQuery.data?.fields ?? [];
 
-      {expanded && (
-        <CardContent className="space-y-5 border-t border-border/70 pt-5">
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full gap-0 overflow-y-auto sm:max-w-xl">
+        <SheetHeader>
+          <SheetTitle>{t("models.cliConfigSection")}</SheetTitle>
+          <SheetDescription>{t("models.cliConfigSectionDescription")}</SheetDescription>
+        </SheetHeader>
+
+        <div className="space-y-5 px-4 pb-6">
           {!isAdmin && (
             <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
               <ShieldAlert className="size-3.5 shrink-0" />
@@ -119,32 +138,32 @@ export function CliConfigPanel() {
             </TabsList>
           </Tabs>
 
-          {/* Common fields */}
-          <section className="space-y-2">
-            <h3 className="text-sm font-medium">{t("cliConfig.commonFields")}</h3>
-            {fieldsQuery.isLoading ? (
-              <StateLine text={t("common.loading")} />
-            ) : fieldsQuery.error ? (
-              <StateLine destructive text={message(fieldsQuery.error, t("cliConfig.loadFailed"))} />
-            ) : (
-              <div className="grid gap-2 md:grid-cols-2">
-                {(fieldsQuery.data?.fields ?? []).map((field) => (
-                  <FieldMetadata
-                    key={field.key}
-                    field={field}
-                    value={valuesQuery.data?.values[field.key]}
-                    valuesLoading={valuesQuery.isLoading}
-                    t={t}
-                  />
-                ))}
-              </div>
-            )}
-            {valuesQuery.error ? (
-              <StateLine destructive text={message(valuesQuery.error, t("cliConfig.loadFieldValuesFailed"))} />
-            ) : null}
-          </section>
+          {commonFields.length > 0 || fieldsQuery.isLoading || fieldsQuery.error ? (
+            <section className="space-y-2">
+              <h3 className="text-sm font-medium">{t("cliConfig.commonFields")}</h3>
+              {fieldsQuery.isLoading ? (
+                <StateLine text={t("common.loading")} />
+              ) : fieldsQuery.error ? (
+                <StateLine destructive text={message(fieldsQuery.error, t("cliConfig.loadFailed"))} />
+              ) : (
+                <div className="grid gap-2 md:grid-cols-2">
+                  {commonFields.map((field) => (
+                    <FieldMetadata
+                      key={field.key}
+                      field={field}
+                      value={valuesQuery.data?.values[field.key]}
+                      valuesLoading={valuesQuery.isLoading}
+                      t={t}
+                    />
+                  ))}
+                </div>
+              )}
+              {valuesQuery.error ? (
+                <StateLine destructive text={message(valuesQuery.error, t("cliConfig.loadFieldValuesFailed"))} />
+              ) : null}
+            </section>
+          ) : null}
 
-          {/* Config metadata */}
           <section className="space-y-2">
             <h3 className="text-sm font-medium">{t("cliConfig.configMetadata")}</h3>
             {snapshotQuery.isLoading ? (
@@ -182,7 +201,6 @@ export function CliConfigPanel() {
             )}
           </section>
 
-          {/* Raw editor */}
           <section className="space-y-2">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-sm font-medium">
@@ -241,16 +259,71 @@ export function CliConfigPanel() {
             ) : mainFileQuery.error ? (
               <StateLine destructive text={message(mainFileQuery.error, t("cliConfig.loadFailed"))} />
             ) : mainFileQuery.data?.content !== undefined ? (
-              <pre className="max-h-96 overflow-auto rounded-md border border-border/70 bg-muted/20 p-3 font-mono text-xs whitespace-pre-wrap">
-                {mainFileQuery.data.content}
-              </pre>
+              <HighlightedConfigContent
+                fileName={mainFile.relativePath}
+                content={mainFileQuery.data.content}
+              />
             ) : (
               <StateLine text={t("cliConfig.rawFileContentUnavailable")} />
             )}
           </section>
-        </CardContent>
-      )}
-    </Card>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function HighlightedConfigContent({ fileName, content }: { fileName: string; content: string }) {
+  const [tokens, setTokens] = useState<ThemedToken[][] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTokens(null);
+    if (!content) return;
+    void highlightWorkspaceCode(content, fileName).then((result) => {
+      if (!cancelled) setTokens(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fileName, content]);
+
+  // Tokens arrive asynchronously; plain text renders first so there is no
+  // layout shift when the grammar finishes loading.
+  if (!tokens) {
+    return (
+      <pre className="max-h-96 overflow-auto rounded-md border border-border/70 bg-muted/20 p-3 font-mono text-xs whitespace-pre-wrap">
+        {content}
+      </pre>
+    );
+  }
+  return (
+    <div className="max-h-96 overflow-auto rounded-md border border-border/70 bg-muted/20 p-3 font-mono text-xs leading-5">
+      {tokens.map((lineTokens, lineIndex) => (
+        <div key={lineIndex} className="whitespace-pre-wrap">
+          {lineTokens.length > 0 ? (
+            lineTokens.map((token, tokenIndex) => {
+              const style = tokenFontStyle(token.fontStyle);
+              return (
+                <span
+                  key={tokenIndex}
+                  style={{
+                    color: token.color,
+                    fontStyle: style.italic ? "italic" : undefined,
+                    fontWeight: style.bold ? 600 : undefined,
+                    textDecoration: style.underline ? "underline" : undefined,
+                  }}
+                >
+                  {token.content}
+                </span>
+              );
+            })
+          ) : (
+            " "
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 

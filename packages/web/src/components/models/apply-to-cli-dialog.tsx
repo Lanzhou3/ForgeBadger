@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ShieldCheck } from "lucide-react";
-import { toast } from "sonner";
+import { ChevronDown, ShieldCheck } from "lucide-react";
+import { toast } from "@/lib/toast";
 
 import { AdapterSelect, ADAPTER_DISCOVERY_QUERY_KEY, chooseDefaultAdapter, isAdapterSelectable } from "@/components/adapter-select";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,7 @@ import {
   type ProviderProfile,
   type ProviderSupportedAdapter,
 } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 const CLAUDE_PRIMARY_SLOTS: Array<{ slot: ClaudeModelSlot; label: string }> = [
   { slot: "opus", label: "Opus" },
@@ -52,10 +53,12 @@ interface ApplyToCliDialogProps {
   models: ModelProfile[];
   credentials: ProviderCredentialSummary[];
   open: boolean;
+  /** Preselected CLI when opened from a CLI status cell. */
+  initialAdapter?: string;
   onOpenChange: (open: boolean) => void;
 }
 
-export function ApplyToCliDialog({ provider, models, credentials, open, onOpenChange }: ApplyToCliDialogProps) {
+export function ApplyToCliDialog({ provider, models, credentials, open, initialAdapter, onOpenChange }: ApplyToCliDialogProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const targets = useMemo(() => [...provider.supportedAdapters], [provider.supportedAdapters]);
@@ -92,21 +95,25 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
     () => adaptersQuery.data?.adapters ?? EMPTY_ADAPTERS,
     [adaptersQuery.data]
   );
-  // Gate the preview query until the open-effect has applied the defaults;
-  // otherwise the query fires twice on open (empty ids, then defaults).
-  const [ready, setReady] = useState(false);
+
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Track the route requirement across renders so the open effect can default
+  // the advanced section open when the banner carries a blocking decision.
+  const needsRouteRef = useRef(needsRoute);
+  needsRouteRef.current = needsRoute;
 
   useEffect(() => {
-    if (!open) {
-      setReady(false);
-      return;
-    }
-    // Default to a locally installed, provider-supported CLI when possible;
-    // fall back to the first supported CLI so the preview still renders.
-    const fallback = chooseDefaultAdapter(detectedAdapters, targets) ?? targets[0] ?? "claude";
+    if (!open) return;
+    // An explicit entry point (CLI status cell) wins; otherwise default to a
+    // locally installed, provider-supported CLI when possible, falling back to
+    // the first supported CLI so the dialog still renders.
+    const preset = initialAdapter && targets.includes(initialAdapter as ProviderSupportedAdapter)
+      ? (initialAdapter as ProviderSupportedAdapter)
+      : undefined;
+    const fallback = preset ?? chooseDefaultAdapter(detectedAdapters, targets) ?? targets[0] ?? "claude";
     const detected = new Map(detectedAdapters.map((adapter) => [adapter.id, adapter]));
     setAdapter((current) =>
-      targets.includes(current) && (detected.get(current) ? isAdapterSelectable(detected.get(current)!, targets) : true)
+      !preset && targets.includes(current) && (detected.get(current) ? isAdapterSelectable(detected.get(current)!, targets) : true)
         ? current
         : fallback
     );
@@ -114,8 +121,9 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
     setCredentialId(activeCredentials[0]?.id ?? "");
     setModelMapping({});
     setReasoningEffort("");
-    setReady(true);
-  }, [open, targets, defaultModel?.id, activeCredentials, detectedAdapters]);
+    setAdvancedOpen(needsRouteRef.current);
+    setPreviewExpanded(false);
+  }, [open, targets, defaultModel?.id, activeCredentials, detectedAdapters, initialAdapter]);
 
   const previewInput = useMemo(
     () => {
@@ -136,10 +144,24 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
     },
     [adapter, credentialId, modelMapping, modelProfileId, needsRoute, provider.id, reasoningEffort]
   );
+
+  // The change summary is pulled lazily: only while the section is expanded,
+  // debounced so rapid selection changes do not spam preview requests.
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [debouncedPreviewInput, setDebouncedPreviewInput] = useState(previewInput);
+  useEffect(() => {
+    if (!previewExpanded) return;
+    const timer = setTimeout(() => setDebouncedPreviewInput(previewInput), 400);
+    return () => clearTimeout(timer);
+  }, [previewInput, previewExpanded]);
+
   const previewQuery = useQuery({
-    queryKey: ["cli-config-apply-preview", adapter, previewInput],
-    queryFn: () => previewCliConfigApply(adapter, previewInput),
-    enabled: open && ready && targets.length > 0,
+    queryKey: ["cli-config-apply-preview", adapter, debouncedPreviewInput],
+    queryFn: () => previewCliConfigApply(adapter, debouncedPreviewInput),
+    // Gate on the debounce having caught up: expanding the summary must not
+    // fire a request with the stale (pre-selection) input, and selection
+    // changes pause the query until the 400ms debounce settles.
+    enabled: open && previewExpanded && targets.length > 0 && debouncedPreviewInput === previewInput,
     retry: false,
     staleTime: 0,
   });
@@ -163,6 +185,8 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
       }
       onOpenChange(false);
       await queryClient.invalidateQueries({ queryKey: ["cli-config"] });
+      await queryClient.invalidateQueries({ queryKey: ["applied-providers"] });
+      await queryClient.invalidateQueries({ queryKey: ["applied-provider"] });
       if (needsRoute) {
         await queryClient.invalidateQueries({ queryKey: ["claude-route"] });
       }
@@ -229,110 +253,140 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
           </div>
         </div>
 
-        {adapter === "claude" && (
-          <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
-            <div className="space-y-0.5">
-              <span className="text-sm font-medium">{t("models.roleMapping")}</span>
-              <p className="text-xs text-muted-foreground">{t("models.roleMappingDescription")}</p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              {[...CLAUDE_PRIMARY_SLOTS, ...CLAUDE_ADVANCED_SLOTS].map(({ slot, label }) => (
-                <div key={slot} className="space-y-1">
-                  <Label htmlFor={`apply-cli-slot-${slot}`} className="text-xs">{label}</Label>
-                  <select
-                    id={`apply-cli-slot-${slot}`}
-                    aria-label={label}
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                    value={modelMapping[slot] ?? ""}
-                    onChange={(event) =>
-                      setModelMapping((current) => ({ ...current, [slot]: event.target.value }))
-                    }
-                  >
-                    <option value="">{t("models.followPrimaryModel")}</option>
-                    {activeModels.map((model) => (
-                      <option key={model.id} value={model.id}>{model.name}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {adapter === "codex" && (
-          <div className="space-y-2">
-            <Label htmlFor="apply-cli-effort">{t("models.reasoningEffort")}</Label>
-            <select
-              id="apply-cli-effort"
-              aria-label={t("models.reasoningEffort")}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm md:max-w-xs"
-              value={reasoningEffort}
-              onChange={(event) => setReasoningEffort(event.target.value as CodexReasoningEffort | "")}
-            >
-              <option value="">{t("models.reasoningEffortDefault")}</option>
-              {CODEX_REASONING_EFFORTS.map((effort) => (
-                <option key={effort} value={effort}>{effort}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
         {adapter === "opencode" && (
           <p className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
             {t("models.opencodeApplyHint")}
           </p>
         )}
 
-        {routeUnsupported && (
-          <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {t("models.claudeRouteUnsupported")}
-          </p>
-        )}
-        {routeSupported && (
-          <div
-            className={
-              routeEnabled
-                ? "space-y-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs"
-                : "space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs"
-            }
-          >
-            <p className={routeEnabled ? "font-medium text-emerald-700 dark:text-emerald-300" : "font-medium text-amber-700 dark:text-amber-300"}>
-              {routeEnabled
-                ? t("models.claudeRouteEnabledHint").replace("{gatewayUrl}", routeQuery.data?.gatewayUrl ?? "—")
-                : t("models.claudeRouteBanner")}
-            </p>
-            {!routeEnabled && (
-              <p className="text-muted-foreground">{t("models.claudeRouteBannerDescription")}</p>
+        {(adapter === "claude" || adapter === "codex" || needsRoute) && (
+          <div className="rounded-md border border-border/70">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium"
+              aria-expanded={advancedOpen}
+              onClick={() => setAdvancedOpen((value) => !value)}
+            >
+              {t("models.applyAdvancedOptions")}
+              <ChevronDown className={cn("size-4 text-muted-foreground transition-transform duration-200", advancedOpen && "rotate-180")} />
+            </button>
+            {advancedOpen && (
+              <div className="space-y-3 border-t border-border/70 px-3 py-3">
+                {adapter === "claude" && (
+                  <div className="space-y-2">
+                    <div className="space-y-0.5">
+                      <span className="text-sm font-medium">{t("models.roleMapping")}</span>
+                      <p className="text-xs text-muted-foreground">{t("models.roleMappingDescription")}</p>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      {[...CLAUDE_PRIMARY_SLOTS, ...CLAUDE_ADVANCED_SLOTS].map(({ slot, label }) => (
+                        <div key={slot} className="space-y-1">
+                          <Label htmlFor={`apply-cli-slot-${slot}`} className="text-xs">{label}</Label>
+                          <select
+                            id={`apply-cli-slot-${slot}`}
+                            aria-label={label}
+                            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                            value={modelMapping[slot] ?? ""}
+                            onChange={(event) =>
+                              setModelMapping((current) => ({ ...current, [slot]: event.target.value }))
+                            }
+                          >
+                            <option value="">{t("models.followPrimaryModel")}</option>
+                            {activeModels.map((model) => (
+                              <option key={model.id} value={model.id}>{model.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {adapter === "codex" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="apply-cli-effort">{t("models.reasoningEffort")}</Label>
+                    <select
+                      id="apply-cli-effort"
+                      aria-label={t("models.reasoningEffort")}
+                      className="h-9 w-full rounded-md border bg-background px-3 text-sm md:max-w-xs"
+                      value={reasoningEffort}
+                      onChange={(event) => setReasoningEffort(event.target.value as CodexReasoningEffort | "")}
+                    >
+                      <option value="">{t("models.reasoningEffortDefault")}</option>
+                      {CODEX_REASONING_EFFORTS.map((effort) => (
+                        <option key={effort} value={effort}>{effort}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {routeUnsupported && (
+                  <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    {t("models.claudeRouteUnsupported")}
+                  </p>
+                )}
+                {routeSupported && (
+                  <div
+                    className={
+                      routeEnabled
+                        ? "space-y-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs"
+                        : "space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs"
+                    }
+                  >
+                    <p className={routeEnabled ? "font-medium text-emerald-700 dark:text-emerald-300" : "font-medium text-amber-700 dark:text-amber-300"}>
+                      {routeEnabled
+                        ? t("models.claudeRouteEnabledHint").replace("{gatewayUrl}", routeQuery.data?.gatewayUrl ?? "—")
+                        : t("models.claudeRouteBanner")}
+                    </p>
+                    {!routeEnabled && (
+                      <p className="text-muted-foreground">{t("models.claudeRouteBannerDescription")}</p>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
 
-        <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3 text-xs">
-          {previewQuery.isLoading ? (
-            <p className="text-muted-foreground">{t("common.loading")}</p>
-          ) : previewQuery.error ? (
-            <p className="text-destructive">{previewQuery.error instanceof Error ? previewQuery.error.message : t("models.applyPreviewFailed")}</p>
-          ) : preview ? (
-            <>
-              {previewFiles.map((file) => (
-                <div key={file.targetPath} className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-muted-foreground">{t("models.applyTargetPath")}:</span>
-                    <span className="break-all font-mono">{file.targetPath || "—"}</span>
-                    <Badge variant="outline">{file.operation}</Badge>
-                  </div>
-                  {file.proposed ? (
-                    <pre className="max-h-48 overflow-auto rounded-md border border-border/70 bg-background/60 p-2 font-mono whitespace-pre-wrap">{maskSecrets(file.proposed)}</pre>
+        <div className="rounded-md border border-border/70">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium"
+            aria-expanded={previewExpanded}
+            onClick={() => setPreviewExpanded((value) => !value)}
+          >
+            {t("models.applyChangeSummary")}
+            <ChevronDown className={cn("size-4 text-muted-foreground transition-transform duration-200", previewExpanded && "rotate-180")} />
+          </button>
+          {previewExpanded && (
+            <div className="space-y-2 border-t border-border/70 px-3 py-3 text-xs">
+              {previewQuery.isPending ? (
+                <p className="text-muted-foreground">{t("common.loading")}</p>
+              ) : previewQuery.error ? (
+                <p className="text-destructive">{previewQuery.error instanceof Error ? previewQuery.error.message : t("models.applyPreviewFailed")}</p>
+              ) : preview ? (
+                <>
+                  {previewFiles.map((file) => (
+                    <div key={file.targetPath} className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-muted-foreground">{t("models.applyTargetPath")}:</span>
+                        <span className="break-all font-mono">{file.targetPath || "—"}</span>
+                        <Badge variant="outline">{file.operation}</Badge>
+                      </div>
+                      {file.proposed ? (
+                        <pre className="max-h-48 overflow-auto rounded-md border border-border/70 bg-background/60 p-2 font-mono whitespace-pre-wrap">{maskSecrets(file.proposed)}</pre>
+                      ) : null}
+                    </div>
+                  ))}
+                  {warnings.length > 0 ? (
+                    <ul className="list-disc space-y-1 pl-5 text-amber-700 dark:text-amber-300">
+                      {warnings.map((warning) => <li key={warning}>{maskSecrets(warning)}</li>)}
+                    </ul>
                   ) : null}
-                </div>
-              ))}
-              {warnings.length > 0 ? (
-                <ul className="list-disc space-y-1 pl-5 text-amber-700 dark:text-amber-300">
-                  {warnings.map((warning) => <li key={warning}>{maskSecrets(warning)}</li>)}
-                </ul>
+                </>
               ) : null}
-            </>
-          ) : null}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -342,8 +396,6 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
           <Button
             type="button"
             disabled={
-              !preview ||
-              previewQuery.isLoading ||
               applyMutation.isPending ||
               routeUnsupported ||
               (needsRoute && routeQuery.isLoading)

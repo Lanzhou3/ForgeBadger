@@ -69,8 +69,8 @@ describe("i18n", () => {
     expect(getTranslation("en", "sessions.focusMode")).toBe("Focus mode");
     expect(getTranslation("zh-CN", "models.applyTargets")).toBe("支持目标");
     expect(getTranslation("en", "models.saveAndSyncModels")).toBe("Save and sync models");
-    expect(getTranslation("zh-CN", "models.deleteProviderInlineLabel")).toBe("删除服务商");
-    expect(getTranslation("zh-TW", "models.deleteProviderConfirm")).toContain("供應商");
+    expect(getTranslation("zh-CN", "models.cliStatusStale")).toBe("配置已被外部修改");
+    expect(getTranslation("zh-TW", "models.diagnosticsTab")).toBe("診斷");
     expect(getTranslation("en", "models.applyToCli")).toContain("Apply to CLI");
     expect(getTranslation("zh-CN", "models.applyToCli")).toBe("应用到 CLI");
     expect(getTranslation("zh-CN", "terminal.historyOutput")).toBe("历史输出");

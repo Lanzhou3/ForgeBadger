@@ -521,32 +521,6 @@ export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
 export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
-export type ProviderReadinessAdapter = ProviderSupportedAdapter;
-export type ProviderReadinessStatus = "ready" | "needs_attention" | "managed_elsewhere";
-export type ProviderReadinessCode =
-  | "ready"
-  | "provider_disabled"
-  | "unsupported_target"
-  | "missing_model"
-  | "missing_active_credential"
-  | "remote_validation_unavailable"
-  | "remote_model_missing"
-  | "remote_validation_failed"
-  | "native_auth_not_ready";
-export type ProviderReadinessCheckStatus =
-  | "ready"
-  | "disabled"
-  | "supported"
-  | "unsupported"
-  | "managed_elsewhere"
-  | "selected"
-  | "missing"
-  | "not_required"
-  | "passed"
-  | "missing_model"
-  | "unavailable"
-  | "failed"
-  | "skipped";
 
 export interface ProviderProfile {
   id: string;
@@ -613,52 +587,42 @@ export interface AppliedProviderInfo {
   appliedAt: string;
 }
 
+export interface AdapterAppliedProvider {
+  providerProfileId: string;
+  providerName: string | null;
+  providerStatus: string | null;
+  modelProfileId: string | null;
+  modelId: string | null;
+  modelName: string | null;
+  appliedAt: string;
+}
+
+/** Aggregated per-CLI applied pointer returned by GET /model-providers/applied. */
+export interface AdapterAppliedStatus {
+  adapter: ProviderSupportedAdapter;
+  applied: AdapterAppliedProvider | null;
+  /** CLI config default model; always null for non-admin users. */
+  configDefaultModel: string | null;
+  /** Pointer disagrees with the CLI config (or references a deleted record). */
+  stale: boolean;
+}
+
+export interface ModelProviderEndpointHealth {
+  healthy: boolean;
+  endpoint: string;
+  latencyMs: number;
+  timeoutMs: number;
+  statusCode?: number;
+  checkedAt: string;
+  error?: string;
+}
+
 export interface ProviderCredentialSummary {
   id: string;
   providerProfileId: string;
   label: string | null;
   status: string;
   secretPreview: string;
-}
-
-export interface ModelProviderReadiness {
-  status: ProviderReadinessStatus;
-  code: ProviderReadinessCode;
-  checkedAt: string;
-  provider: {
-    id: string;
-    name: string;
-    providerKey: string;
-    apiFormat: string;
-    authType: string;
-  };
-  selection: {
-    adapter: ProviderReadinessAdapter;
-    modelProfileId?: string;
-    modelId?: string;
-    credentialId?: string;
-  };
-  checks: {
-    provider: ProviderReadinessCheckStatus;
-    adapter: ProviderReadinessCheckStatus;
-    model: ProviderReadinessCheckStatus;
-    credential: ProviderReadinessCheckStatus;
-    remoteModelList: ProviderReadinessCheckStatus;
-  };
-  remote?: {
-    checked: boolean;
-    modelCount?: number;
-    matchedModelId?: string;
-    errorCode?: string;
-    error?: string;
-  };
-  nativeAuth?: CodexNativeAuthStatus;
-  steps: string[];
-}
-
-export interface CodexNativeAuthStatus {
-  state: "ready" | "not_authenticated" | "cli_missing" | "unknown";
-  method: "chatgpt" | "api" | "unknown";
 }
 
 export interface SessionActivity {
@@ -1634,13 +1598,6 @@ export interface CliConfigSnapshot {
   defaultModel: string;
 }
 
-export interface CliProviderInput {
-  name?: string;
-  protocol?: string;
-  baseUrl?: string;
-  envKey?: string;
-}
-
 function cliConfigPath(adapter: string, suffix = ""): string {
   return `/api/v1/cli-config/${encodeURIComponent(adapter)}${suffix}`;
 }
@@ -1669,51 +1626,6 @@ export async function writeCliConfigFile(
   const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter, "/file"), {
     method: "PUT",
     body: JSON.stringify({ path, content }),
-  });
-  return snapshot;
-}
-
-export async function upsertCliProvider(
-  adapter: RuntimeAdapterId,
-  providerId: string,
-  input: CliProviderInput
-): Promise<CliConfigSnapshot> {
-  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
-    cliConfigPath(adapter, `/providers/${encodeURIComponent(providerId)}`),
-    { method: "PUT", body: JSON.stringify(input) }
-  );
-  return snapshot;
-}
-
-export async function removeCliProvider(
-  adapter: RuntimeAdapterId,
-  providerId: string
-): Promise<CliConfigSnapshot> {
-  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
-    cliConfigPath(adapter, `/providers/${encodeURIComponent(providerId)}`),
-    { method: "DELETE" }
-  );
-  return snapshot;
-}
-
-export async function upsertCliModel(
-  adapter: RuntimeAdapterId,
-  input: { alias: string; provider: string; modelId: string }
-): Promise<CliConfigSnapshot> {
-  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter, "/models"), {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
-  return snapshot;
-}
-
-export async function removeCliModel(
-  adapter: RuntimeAdapterId,
-  alias: string
-): Promise<CliConfigSnapshot> {
-  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter, "/models"), {
-    method: "DELETE",
-    body: JSON.stringify({ alias }),
   });
   return snapshot;
 }
@@ -1754,17 +1666,6 @@ export async function getCliConfigFieldValues(
   adapter: RuntimeAdapterId
 ): Promise<{ values: Record<string, unknown> }> {
   return fetchJson(cliConfigPath(adapter, "/field-values")) as Promise<{ values: Record<string, unknown> }>;
-}
-
-export async function patchCliConfigFields(
-  adapter: RuntimeAdapterId,
-  updates: Record<string, unknown>
-): Promise<CliConfigSnapshot> {
-  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
-    cliConfigPath(adapter, "/fields"),
-    { method: "PATCH", body: JSON.stringify({ updates }) }
-  );
-  return snapshot;
 }
 
 // ---- CLI config apply (cc-switch style provider application) ----
@@ -2883,26 +2784,24 @@ export async function getAppliedProviderForAdapter(
   ) as Promise<{ appliedProvider: AppliedProviderInfo | null }>;
 }
 
+export async function getAppliedProviders(): Promise<{ adapters: AdapterAppliedStatus[] }> {
+  return fetchJson("/api/v1/model-providers/applied") as Promise<{ adapters: AdapterAppliedStatus[] }>;
+}
+
+export async function testModelProviderEndpoint(
+  providerId: string,
+  data: { timeoutMs?: number } = {}
+): Promise<{ health: ModelProviderEndpointHealth }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/test`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ health: ModelProviderEndpointHealth }>;
+}
+
 export async function getProviderBalance(providerId: string): Promise<ProviderBalanceResult> {
   return fetchJson(
     `/api/v1/model-providers/${providerId}/balance`
   ) as Promise<ProviderBalanceResult>;
-}
-
-export async function checkModelProviderReadiness(
-  providerId: string,
-  data: {
-    adapter: ProviderReadinessAdapter;
-    modelProfileId?: string;
-    credentialId?: string;
-    timeoutMs?: number;
-    includeRemoteCheck?: boolean;
-  }
-): Promise<{ readiness: ModelProviderReadiness }> {
-  return fetchJson(`/api/v1/model-providers/${providerId}/readiness`, {
-    method: "POST",
-    body: JSON.stringify(data),
-  }) as Promise<{ readiness: ModelProviderReadiness }>;
 }
 
 export async function listApiKeys(): Promise<{ apiKeys: ApiKeySummary[] }> {
