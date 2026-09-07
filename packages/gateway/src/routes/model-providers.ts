@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 
-import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
+import { authenticate, type AuthenticatedRequest, userIsInstanceAdmin } from "../auth/middleware.js";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import { isForeignKeyError } from "../lib/db-errors.js";
 import { redactSensitiveErrorMessage } from "../lib/redaction.js";
@@ -17,10 +17,6 @@ import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-confi
 import type { Database } from "../db/types.js";
 import { checkModelEndpoint } from "../services/model-endpoint-health.js";
 import {
-  buildModelProviderReadiness,
-  type ProviderReadinessAdapter
-} from "../services/model-provider-readiness.js";
-import {
   fetchProviderModels as fetchProviderModelsFromEndpoint,
   type FetchedProviderModel,
   type FetchProviderModelsInput
@@ -31,6 +27,10 @@ import {
   type FetchProviderBalanceResult
 } from "../services/provider-balance.js";
 import { getProviderCapabilities } from "../services/provider-capabilities.js";
+import { buildAppliedProvidersOverview } from "../services/model-provider-applied.js";
+import type { AdapterId } from "../services/adapter-discovery.js";
+import type { CliConfigSnapshot } from "../services/cli-config.js";
+import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 
 const adapterSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
 const providerAdapterSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
@@ -65,13 +65,6 @@ const rotateCredentialSchema = createCredentialSchema;
 const endpointTestSchema = z.object({
   timeoutMs: z.number().int().min(100).max(15000).optional()
 });
-const readinessSchema = z.object({
-  adapter: adapterSchema,
-  modelProfileId: z.string().min(1).optional(),
-  credentialId: z.string().min(1).optional(),
-  timeoutMs: z.number().int().min(100).max(30000).optional(),
-  includeRemoteCheck: z.boolean().optional()
-});
 const syncModelsSchema = z.object({
   credentialId: z.string().min(1).optional(),
   timeoutMs: z.number().int().min(100).max(30000).optional()
@@ -84,6 +77,9 @@ const balanceSchema = z.object({
 export interface ModelProviderRouteOptions {
   fetchProviderModels?: (input: FetchProviderModelsInput) => Promise<FetchedProviderModel[]>;
   fetchProviderBalance?: (input: FetchProviderBalanceInput) => Promise<FetchProviderBalanceResult>;
+  /** Test seam for GET /applied: override the CLI config snapshot reader. */
+  readCliConfigSnapshot?: (adapter: AdapterId) => Promise<CliConfigSnapshot>;
+  eventBus?: ForgeBadgerEventBus | undefined;
 }
 
 export function createModelProviderRoutes(db: Database, masterKey: string, options: ModelProviderRouteOptions = {}): Router {
@@ -95,9 +91,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
   // Rate-limit network-probing endpoints (they trigger real outbound requests
   // to provider endpoints, so a stolen JWT must not be usable to spray them).
   const probeLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 30 });
-  const globalProbeLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 300, keyFn: () => "global" });
   router.use("/:id/test", probeLimiter);
-  router.use("/:id/readiness", globalProbeLimiter, probeLimiter);
   router.use("/:id/models/sync", probeLimiter);
   router.use("/:id/balance", probeLimiter);
 
@@ -151,6 +145,22 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
 
   router.get("/capabilities", (_req, res) => {
     res.json({ code: 0, data: { adapters: getProviderCapabilities() }, message: "" });
+  });
+
+  // Aggregate read of the per-adapter applied pointers plus (for instance
+  // admins) the CLI config defaultModel comparison. Registered before
+  // /applied/:adapter so the literal path wins.
+  router.get("/applied", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    try {
+      const adapters = await buildAppliedProvidersOverview(db, userId, masterKey, {
+        isAdmin: userIsInstanceAdmin(db, userId),
+        readSnapshot: options.readCliConfigSnapshot
+      });
+      res.json({ code: 0, data: { adapters }, message: "" });
+    } catch {
+      res.status(500).json({ code: 1, message: "Failed to load applied providers" });
+    }
   });
 
   // Which provider was last applied to an adapter's global CLI config; read
@@ -298,6 +308,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       return;
     }
     const repo = repoFor(db, masterKey, req);
+    const userId = (req as unknown as AuthenticatedRequest).userId;
     const provider = repo.getProviderProfile(req.params.id);
     if (!provider) {
       res.status(404).json({ code: 1, message: "Provider not found" });
@@ -336,6 +347,12 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
         ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
       });
       const { created, backfilled } = syncFetchedModels(repo, provider, fetchedModels);
+      emitModelSyncNotification(options.eventBus, {
+        userId,
+        status: "success",
+        provider,
+        detail: `Synced ${fetchedModels.length} models (${created.length} new, ${backfilled} updated)`
+      });
       res.json({
         code: 0,
         data: {
@@ -347,11 +364,18 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
         message: ""
       });
     } catch (error) {
+      const message = redactSensitiveErrorMessage(
+        error instanceof Error ? error.message : "Failed to sync provider models"
+      );
+      emitModelSyncNotification(options.eventBus, {
+        userId,
+        status: "error",
+        provider,
+        detail: message
+      });
       res.status(400).json({
         code: 1,
-        message: redactSensitiveErrorMessage(
-          error instanceof Error ? error.message : "Failed to sync provider models"
-        )
+        message
       });
     }
   });
@@ -568,35 +592,6 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     res.json({ code: 0, data: { health }, message: "" });
   });
 
-  router.post("/:id/readiness", async (req, res) => {
-    const parseResult = readinessSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({ code: 1, message: "Invalid provider readiness payload" });
-      return;
-    }
-    const repo = repoFor(db, masterKey, req);
-    const provider = repo.getProviderProfile(req.params.id);
-    if (!provider) {
-      res.status(404).json({ code: 1, message: "Provider not found" });
-      return;
-    }
-    const model = selectModel(repo, provider, parseResult.data.modelProfileId);
-    const credential = selectCredential(repo, provider.id, parseResult.data.credentialId);
-    const readiness = await buildModelProviderReadiness({
-      provider,
-      model,
-      credential,
-      adapter: parseResult.data.adapter as ProviderReadinessAdapter,
-      modelProfileId: parseResult.data.modelProfileId,
-      credentialId: parseResult.data.credentialId,
-      includeRemoteCheck: parseResult.data.includeRemoteCheck ?? false,
-      ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {}),
-      decryptCredential: credential ? () => repo.decryptCredential(credential.id) : undefined,
-      fetchProviderModels
-    });
-    res.json({ code: 0, data: { readiness }, message: "" });
-  });
-
   return router;
 }
 
@@ -617,19 +612,6 @@ function createCustom(repo: ModelProviderRepository, input: z.infer<typeof creat
     supportedAdapters: input.supportedAdapters ?? ["claude"],
     ...(input.allowPlaintextHttp !== undefined ? { allowPlaintextHttp: input.allowPlaintextHttp } : {})
   });
-}
-
-function selectModel(
-  repo: ModelProviderRepository,
-  provider: ProviderProfile | undefined,
-  requestedModelId: string | undefined
-): ModelProfile | undefined {
-  if (!provider) return undefined;
-  if (requestedModelId) {
-    const model = repo.getModelProfile(requestedModelId);
-    return model?.providerProfileId === provider.id ? model : undefined;
-  }
-  return repo.listModelProfiles(provider.id)[0];
 }
 
 function selectCredential(repo: ModelProviderRepository, providerId: string, credentialId: string | undefined) {
@@ -683,4 +665,23 @@ function syncFetchedModels(
 function repoFor(db: Database, masterKey: string, req: unknown): ModelProviderRepository {
   const userId = (req as unknown as AuthenticatedRequest).userId;
   return new ModelProviderRepository(db, userId, masterKey);
+}
+
+function emitModelSyncNotification(
+  eventBus: ForgeBadgerEventBus | undefined,
+  input: { userId: string; status: "success" | "error"; provider: ProviderProfile; detail: string }
+): void {
+  if (!eventBus) return;
+  eventBus.emitEvent({
+    type: "app_action_notification",
+    userId: input.userId,
+    action: "model_sync",
+    status: input.status,
+    titleKey: input.status === "success"
+      ? "notifications.modelSyncSucceeded"
+      : "notifications.modelSyncFailed",
+    message: `${input.detail} (${input.provider.name})`,
+    providerId: input.provider.id,
+    providerName: input.provider.name
+  });
 }

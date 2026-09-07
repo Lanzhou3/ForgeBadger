@@ -455,6 +455,7 @@ export const notifications = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     type: text("type").notNull(),
+    category: text("category").notNull().default("session_event"),
     titleKey: text("title_key").notNull(),
     message: text("message").notNull(),
     href: text("href").notNull(),

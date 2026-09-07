@@ -85,7 +85,9 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/gate-a/sessions", createGateASessionRoutes(deps.sessionManager));
   app.use("/api/v1/templates", createTemplateRoutes(deps.db, deps.eventBus));
   app.use("/api/v1/usage", createUsageRoutes(deps.db, deps.masterKey));
-  app.use("/api/v1/model-providers", createModelProviderRoutes(deps.db, deps.masterKey));
+  app.use("/api/v1/model-providers", createModelProviderRoutes(deps.db, deps.masterKey, {
+    eventBus: deps.eventBus
+  }));
   app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
     db: deps.db,
     masterKey: deps.masterKey,
@@ -94,7 +96,9 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1", createSkillRoutes(deps.db));
   app.use("/api/v1/notifications", createNotificationRoutes(deps.db));
   app.use("/api/v1/api-keys", createApiKeyRoutes(deps.db, deps.masterKey));
-  app.use("/api/v1/cli-config", createCliConfigRoutes(deps.db, deps.masterKey));
+  app.use("/api/v1/cli-config", createCliConfigRoutes(deps.db, deps.masterKey, {
+    eventBus: deps.eventBus
+  }));
   app.use("/api/v1/dashboard", createDashboardRoutes(deps.db));
   app.use("/api/v1", createPlatformActionRoutes({db:deps.db,masterKey:deps.masterKey,sessionManager:deps.sessionManager,adapterCommandRunner:deps.adapterCommandRunner,eventBus:deps.eventBus}));
   app.use("/api/v1", createProjectManagementRoutes(deps.db, (userId,commandId,input) => new PlatformActions({db:deps.db,userId},createPlatformCommands()).executeOwner(commandId,input,randomUUID())));

@@ -84,11 +84,31 @@ export interface ErrorEvent {
   notificationCreatedAt?: Date | undefined;
 }
 
+/**
+ * Persistent notification for a user-initiated app action (apply-provider,
+ * provider model sync). `message` is human-readable detail and must never
+ * contain credential material.
+ */
+export interface AppActionNotificationEvent {
+  type: "app_action_notification";
+  userId: string;
+  action: "apply_provider" | "model_sync";
+  status: "success" | "error";
+  titleKey: string;
+  message: string;
+  adapter?: string | undefined;
+  providerId?: string | undefined;
+  providerName?: string | undefined;
+  notificationId?: string | undefined;
+  notificationCreatedAt?: Date | undefined;
+}
+
 export type ForgeBadgerEvent =
   | SessionStatusChangedEvent
   | SessionCreatedEvent
   | SessionDeletedEvent
   | ClaudeNotificationEvent
+  | AppActionNotificationEvent
   | ActivityCreatedEvent
   | CopilotRunUpdatedEvent
   | ErrorEvent;

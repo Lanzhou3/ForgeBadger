@@ -72,5 +72,6 @@
   "0071_cli_config_applied_providers.sql": "e569ea6491b5932e980ee8248e04ee2db61e2e5c4af79c016d10c7afc6f23d97",
   "0072_model_provider_kimi_adapter.sql": "c16d815b497d9e193e420f30a7ff3630f3105b7e6fd779d9330e49a7de5ceb89",
   "0073_claude_route.sql": "be9c96a8faccb13c2f7b542c7deef93c1abe79420ac24cc7e6c1f459aa762637",
-  "0074_template_adapter_and_git_sources.sql": "53addfd93166944300e9e1c5511c248be75bd1451d9b3e61010d3e827961f9e9"
+  "0074_template_adapter_and_git_sources.sql": "53addfd93166944300e9e1c5511c248be75bd1451d9b3e61010d3e827961f9e9",
+  "0075_notification_category.sql": "7c474fdd88f04e1e611d8837521ffe0f12e087017e51a3a46300c2fc4990020e"
 }

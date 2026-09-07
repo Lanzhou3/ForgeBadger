@@ -31,6 +31,7 @@ import { listCliConfigFields } from "../services/cli-config-fields.js";
 import { gatewayLoopbackUrl } from "../services/claude-route/gateway-url.js";
 import { cliConfigTargetPath, hashTargetLocator } from "../services/cli-config-target.js";
 import { acquireModelBindingTargetLock, ModelBindingTargetLockError } from "../services/model-binding-target-lock.js";
+import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 
 const providerBodySchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
@@ -101,6 +102,7 @@ export function createCliConfigRoutes(
     operationObserver?: ((operation: string) => void) | undefined;
     /** Test seam: DNS resolver for the apply SSRF endpoint check. */
     resolveHost?: import("../services/network-policy.js").OutboundHostResolver | undefined;
+    eventBus?: ForgeBadgerEventBus | undefined;
   } = {}
 ): Router {
   const router = Router();
@@ -378,10 +380,34 @@ export function createCliConfigRoutes(
       res.status(400).json({ code: 1, message: "Invalid apply payload" });
       return;
     }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
     observe(options, "apply.apply");
-    await handle(res, async () => ({
-      result: await applyCliConfigToAdapter(applyInput(db, masterKey, req, adapter, body.data, options))
-    }));
+    await handle(res, async () => {
+      const providerName = new ModelProviderRepository(db, userId, masterKey)
+        .getProviderProfile(body.data.providerProfileId)?.name;
+      try {
+        const result = await applyCliConfigToAdapter(applyInput(db, masterKey, req, adapter, body.data, options));
+        emitApplyProviderNotification(options.eventBus, {
+          userId,
+          status: "success",
+          adapter,
+          providerProfileId: body.data.providerProfileId,
+          providerName,
+          detail: `Provider applied to ${adapter}`
+        });
+        return { result };
+      } catch (error) {
+        emitApplyProviderNotification(options.eventBus, {
+          userId,
+          status: "error",
+          adapter,
+          providerProfileId: body.data.providerProfileId,
+          providerName,
+          detail: error instanceof Error ? error.message : "CLI config apply failed"
+        });
+        throw error;
+      }
+    });
   });
 
   router.post("/:adapter/rollback", async (req, res) => {
@@ -448,6 +474,36 @@ function compactModelMapping(
 
 function observe(options: { operationObserver?: ((operation: string) => void) | undefined }, operation: string): void {
   options.operationObserver?.(operation);
+}
+
+interface ApplyProviderNotificationInput {
+  userId: string;
+  status: "success" | "error";
+  adapter: AdapterId;
+  providerProfileId: string;
+  providerName: string | undefined;
+  detail: string;
+}
+
+function emitApplyProviderNotification(
+  eventBus: ForgeBadgerEventBus | undefined,
+  input: ApplyProviderNotificationInput
+): void {
+  if (!eventBus) return;
+  const target = input.providerName ? `${input.providerName} -> ${input.adapter}` : input.adapter;
+  eventBus.emitEvent({
+    type: "app_action_notification",
+    userId: input.userId,
+    action: "apply_provider",
+    status: input.status,
+    titleKey: input.status === "success"
+      ? "notifications.applyProviderSucceeded"
+      : "notifications.applyProviderFailed",
+    message: `${input.detail} (${target})`,
+    adapter: input.adapter,
+    providerId: input.providerProfileId,
+    ...(input.providerName ? { providerName: input.providerName } : {})
+  });
 }
 
 function parseAdapter(value: string | undefined): AdapterId | undefined {

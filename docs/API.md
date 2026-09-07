@@ -970,7 +970,7 @@ the full provider/profile/model/credential inventory.
 - `DELETE /api/v1/model-providers/:id/models/:modelId` — typed `409
   MODEL_IN_USE_BY_SESSION` takes precedence over `MODEL_IN_USE_BY_BINDING`.
 - `POST /api/v1/model-providers/:id/models/sync`
-- `POST /api/v1/model-providers/:id/readiness`
+- `GET /api/v1/model-providers/applied`
 - `GET /api/v1/model-providers/applied/:adapter`
 - `GET /api/v1/model-providers/:id/balance`
 - `POST /api/v1/model-providers/:id/balance`
@@ -1016,6 +1016,17 @@ cascade-deleted with the provider). The response is `{ appliedProvider:
 | null }`; it requires only authentication (not instance admin) so the session
 sidebar can render the provider quota module.
 
+`GET /api/v1/model-providers/applied` is the aggregate read twin: it returns
+all four adapters (`claude`/`opencode`/`codex`/`kimi`) in one call as
+`{ adapters: [{ adapter, applied, configDefaultModel, stale }] }`, where
+`applied` extends the single-adapter payload with `modelId`/`modelName`
+(nullable when the pointer references a deleted provider or model, which also
+forces `stale: true`). For instance admins the response additionally compares
+each adapter's CLI config `defaultModel` against the pointer (Kimi's
+`<providerKey>/<modelId>` form is compared by its model segment) and sets
+`stale: true` on mismatch; non-admins always receive `configDefaultModel: null`
+and `stale: false`. Authentication only; never fails on unreadable CLI configs.
+
 The retired provider-level `preview-apply`/`apply` routes are no longer
 mounted and return the normal 404 behavior.
 
@@ -1056,45 +1067,6 @@ saved credential and fails with an error instead of falling back to built-in
 defaults when the model-list endpoint cannot be fetched.
 Plaintext credentials are decrypted only inside Gateway memory for the
 outbound provider request.
-
-`POST /api/v1/model-providers/:id/readiness` evaluates a Provider Profile,
-target adapter, selected model, selected credential, and optional remote
-model-list evidence without mutating provider state.
-
-Request body:
-
-```json
-{
-  "adapter": "claude",
-  "modelProfileId": "model-profile-id",
-  "credentialId": "credential-id",
-  "timeoutMs": 5000,
-  "includeRemoteCheck": true
-}
-```
-
-Response data contains `readiness.status`, `readiness.code`, `checks`,
-`steps`, and optional safe `remote` metadata. Readiness codes include:
-
-- `ready`
-- `provider_disabled`
-- `unsupported_target`
-- `missing_model`
-- `missing_active_credential`
-- `remote_validation_unavailable`
-- `remote_model_missing`
-- `remote_validation_failed`
-
-When `includeRemoteCheck` is true and the provider has a safe model-list
-endpoint, Gateway decrypts the selected credential only in memory and calls the
-provider's model-list endpoint through the existing HTTPS/SSRF-safe fetch
-helper. Remote failure metadata is categorized as `invalid_credential`,
-`timeout`, `provider_outage`, or `endpoint_or_network_failure`. The response
-must not include plaintext credentials, authorization headers, provider request
-payloads, provider response bodies, tokens, API keys, or other secrets.
-
-Codex readiness uses the common provider/model/auth-source checks; managed
-readiness may use the safe remote model-list check when requested.
 
 ### API Keys And Credential Mode
 
@@ -1313,14 +1285,27 @@ id, and bounded result details under `resourceType=copilot_run`.
 - `POST /api/v1/notifications/read-all`
 - `DELETE /api/v1/notifications`
 
+Query parameters:
+
+- `category` filters the list to `session_event` (session lifecycle and AI CLI
+  hook notifications) or `app_action` (user-initiated app action results such
+  as apply-provider and provider model sync). Omit it to return all
+  notifications.
+
 Notifications are tenant-scoped and persisted in SQLite. Gateway stores session
-lifecycle events and accepted AI CLI hook notifications from Claude Code,
-OpenCode, Codex, and Kimi Code before broadcasting them on
+lifecycle events, accepted AI CLI hook notifications from Claude Code,
+OpenCode, Codex, and Kimi Code (permission prompts and denials, task
+completion/interruption/failure, session end), and app action results before
+broadcasting them on
 `/ws/events`. The Web console uses these APIs to hydrate notification history
 after reload, persist read state, mark all notifications read, and clear the
 current user's notification list. AI CLI notification payloads include normalized
 `notification_type`, `adapter`, `project_id`, `project_name`, `session_id`, and
-`session_name` context.
+`session_name` context. App action notifications carry `category=app_action`,
+no session context (`sessionId` is null), and an `action`
+(`apply_provider`/`model_sync`), `status`, `title_key`, and message in their
+payload; they are also pushed live as `app_action_notification` events on
+`/ws/events`.
 
 The built-in Claude Code template writes `.claude/settings.json` hooks for
 `PermissionRequest`, `PermissionDenied`, and `Notification(permission_prompt)`.
