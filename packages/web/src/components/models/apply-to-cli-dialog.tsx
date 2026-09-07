@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
+import { AdapterSelect, ADAPTER_DISCOVERY_QUERY_KEY, chooseDefaultAdapter, isAdapterSelectable } from "@/components/adapter-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,7 +20,11 @@ import { Label } from "@/components/ui/label";
 import { useLanguage } from "@/hooks/use-language";
 import {
   applyCliConfigToAdapter,
+  discoverAdapters,
+  getClaudeRoute,
   previewCliConfigApply,
+  setClaudeRoute,
+  type AdapterDiscovery,
   type ClaudeModelSlot,
   type CodexReasoningEffort,
   type ModelProfile,
@@ -40,6 +45,7 @@ const CLAUDE_ADVANCED_SLOTS: Array<{ slot: ClaudeModelSlot; label: string }> = [
 ];
 
 const CODEX_REASONING_EFFORTS: CodexReasoningEffort[] = ["minimal", "low", "medium", "high"];
+const EMPTY_ADAPTERS: AdapterDiscovery[] = [];
 
 interface ApplyToCliDialogProps {
   provider: ProviderProfile;
@@ -58,10 +64,34 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
   const defaultModel = activeModels.find((model) => model.isDefault) ?? activeModels[0];
 
   const [adapter, setAdapter] = useState<ProviderSupportedAdapter>(targets[0] ?? "claude");
+  // Claude Code only speaks the Anthropic protocol directly; OpenAI-protocol
+  // providers must be applied through the Gateway route endpoint.
+  const needsRoute = adapter === "claude" && provider.apiFormat !== "anthropic";
+  const routeSupported = needsRoute && (provider.apiFormat === "openai" || provider.apiFormat === "openai-compatible");
+  const routeUnsupported = needsRoute && !routeSupported;
+  const routeQuery = useQuery({
+    queryKey: ["claude-route"],
+    queryFn: getClaudeRoute,
+    enabled: open && needsRoute,
+    retry: false,
+    staleTime: 30_000,
+  });
+  const routeEnabled = routeQuery.data?.enabled === true;
+
   const [modelProfileId, setModelProfileId] = useState("");
   const [credentialId, setCredentialId] = useState("");
   const [modelMapping, setModelMapping] = useState<Partial<Record<ClaudeModelSlot, string>>>({});
   const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort | "">("");
+  const adaptersQuery = useQuery({
+    queryKey: ADAPTER_DISCOVERY_QUERY_KEY,
+    queryFn: discoverAdapters,
+    enabled: open,
+    staleTime: 30_000,
+  });
+  const detectedAdapters = useMemo(
+    () => adaptersQuery.data?.adapters ?? EMPTY_ADAPTERS,
+    [adaptersQuery.data]
+  );
   // Gate the preview query until the open-effect has applied the defaults;
   // otherwise the query fires twice on open (empty ids, then defaults).
   const [ready, setReady] = useState(false);
@@ -71,13 +101,21 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
       setReady(false);
       return;
     }
-    setAdapter((current) => targets.includes(current) ? current : targets[0] ?? "claude");
+    // Default to a locally installed, provider-supported CLI when possible;
+    // fall back to the first supported CLI so the preview still renders.
+    const fallback = chooseDefaultAdapter(detectedAdapters, targets) ?? targets[0] ?? "claude";
+    const detected = new Map(detectedAdapters.map((adapter) => [adapter.id, adapter]));
+    setAdapter((current) =>
+      targets.includes(current) && (detected.get(current) ? isAdapterSelectable(detected.get(current)!, targets) : true)
+        ? current
+        : fallback
+    );
     setModelProfileId(defaultModel?.id ?? "");
     setCredentialId(activeCredentials[0]?.id ?? "");
     setModelMapping({});
     setReasoningEffort("");
     setReady(true);
-  }, [open, targets, defaultModel?.id, activeCredentials]);
+  }, [open, targets, defaultModel?.id, activeCredentials, detectedAdapters]);
 
   const previewInput = useMemo(
     () => {
@@ -91,9 +129,12 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
         ...(credentialId ? { credentialId } : {}),
         ...(adapter === "claude" && Object.keys(mapping).length > 0 ? { modelMapping: mapping } : {}),
         ...(adapter === "codex" && reasoningEffort ? { reasoningEffort } : {}),
+        // Preview the routed document (Gateway URL + masked token) so the diff
+        // matches what "enable route and apply" will write.
+        ...(needsRoute ? { routeThroughGateway: true } : {}),
       };
     },
-    [adapter, credentialId, modelMapping, modelProfileId, provider.id, reasoningEffort]
+    [adapter, credentialId, modelMapping, modelProfileId, needsRoute, provider.id, reasoningEffort]
   );
   const previewQuery = useQuery({
     queryKey: ["cli-config-apply-preview", adapter, previewInput],
@@ -104,7 +145,16 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
   });
 
   const applyMutation = useMutation({
-    mutationFn: () => applyCliConfigToAdapter(adapter, previewInput),
+    mutationFn: async () => {
+      // One-tap path: enable the route first, then apply through it.
+      if (needsRoute && !routeEnabled) {
+        await setClaudeRoute(true);
+      }
+      return applyCliConfigToAdapter(adapter, {
+        ...previewInput,
+        ...(needsRoute ? { routeThroughGateway: true } : {}),
+      });
+    },
     onSuccess: async (result) => {
       const targetPath = result.files?.[0]?.targetPath ?? "—";
       toast.success(t("models.applyToCliSuccess").replace("{targetPath}", targetPath));
@@ -113,6 +163,9 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
       }
       onOpenChange(false);
       await queryClient.invalidateQueries({ queryKey: ["cli-config"] });
+      if (needsRoute) {
+        await queryClient.invalidateQueries({ queryKey: ["claude-route"] });
+      }
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : t("models.applyToCliFailed"));
@@ -121,7 +174,8 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
 
   const preview = previewQuery.data;
   const previewFiles = preview?.files ?? [];
-  const warnings = preview?.warnings ?? [];
+  // Machine-readable route marker; the localized banner above carries the UX.
+  const warnings = (preview?.warnings ?? []).filter((warning) => warning !== "OPENAI_PROTOCOL_REQUIRES_ROUTE");
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!applyMutation.isPending) onOpenChange(next); }}>
@@ -133,15 +187,15 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
         <div className="grid gap-3 md:grid-cols-3">
           <div className="space-y-2">
             <Label htmlFor="apply-cli-adapter">{t("common.aiTool")}</Label>
-            <select
+            <AdapterSelect
               id="apply-cli-adapter"
-              aria-label={t("common.aiTool")}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              ariaLabel={t("common.aiTool")}
+              className="h-9 w-full"
               value={adapter}
-              onChange={(event) => setAdapter(event.target.value as ProviderSupportedAdapter)}
-            >
-              {targets.map((target) => <option key={target} value={target}>{target}</option>)}
-            </select>
+              onValueChange={setAdapter}
+              supported={targets}
+              placeholder={t("common.loading")}
+            />
           </div>
           {adapter !== "opencode" && (
             <div className="space-y-2">
@@ -229,6 +283,30 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
           </p>
         )}
 
+        {routeUnsupported && (
+          <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {t("models.claudeRouteUnsupported")}
+          </p>
+        )}
+        {routeSupported && (
+          <div
+            className={
+              routeEnabled
+                ? "space-y-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs"
+                : "space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs"
+            }
+          >
+            <p className={routeEnabled ? "font-medium text-emerald-700 dark:text-emerald-300" : "font-medium text-amber-700 dark:text-amber-300"}>
+              {routeEnabled
+                ? t("models.claudeRouteEnabledHint").replace("{gatewayUrl}", routeQuery.data?.gatewayUrl ?? "—")
+                : t("models.claudeRouteBanner")}
+            </p>
+            {!routeEnabled && (
+              <p className="text-muted-foreground">{t("models.claudeRouteBannerDescription")}</p>
+            )}
+          </div>
+        )}
+
         <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3 text-xs">
           {previewQuery.isLoading ? (
             <p className="text-muted-foreground">{t("common.loading")}</p>
@@ -263,11 +341,23 @@ export function ApplyToCliDialog({ provider, models, credentials, open, onOpenCh
           </Button>
           <Button
             type="button"
-            disabled={!preview || previewQuery.isLoading || applyMutation.isPending}
+            disabled={
+              !preview ||
+              previewQuery.isLoading ||
+              applyMutation.isPending ||
+              routeUnsupported ||
+              (needsRoute && routeQuery.isLoading)
+            }
             onClick={() => applyMutation.mutate()}
           >
             <ShieldCheck className="size-4" />
-            {applyMutation.isPending ? t("models.applyingToCli") : t("models.applyConfig")}
+            {applyMutation.isPending
+              ? t("models.applyingToCli")
+              : routeEnabled && needsRoute
+                ? t("models.claudeRouteApply")
+                : needsRoute
+                  ? t("models.claudeRouteEnableAndApply")
+                  : t("models.applyConfig")}
           </Button>
         </DialogFooter>
       </DialogContent>

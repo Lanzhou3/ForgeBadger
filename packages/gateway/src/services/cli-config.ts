@@ -18,6 +18,8 @@ export interface CliConfigFileEntry {
   fileType: string;
   exists: boolean;
   sizeBytes: number;
+  /** File content with credential values masked; omitted when unreadable or too large. */
+  content?: string;
 }
 
 export interface CliProviderEntry {
@@ -123,7 +125,26 @@ export async function readCliConfigFile(
   relativePath: string
 ): Promise<CliConfigFileEntry> {
   assertEditableFile(adapter, relativePath);
-  return readConfigFile(cliConfigMeta[adapter].configRoot(), relativePath);
+  const entry = await readConfigFile(cliConfigMeta[adapter].configRoot(), relativePath);
+  // Single-file reads include the content (secrets masked); snapshot listings
+  // omit it to keep list payloads small and avoid accidental secret exposure.
+  if (!entry.exists || entry.content !== undefined || entry.sizeBytes === 0) {
+    return entry;
+  }
+  const raw = await readFileIfExists(cliConfigMeta[adapter].configRoot(), relativePath);
+  if (raw === undefined) return entry;
+  let content = raw;
+  const fileType = entry.fileType;
+  if (fileType === "json" || fileType === "toml") {
+    try {
+      content = maskSecrets(fileType, raw);
+    } catch {
+      // Malformed config: withhold content rather than leak a secret in an
+      // unparseable payload.
+      return entry;
+    }
+  }
+  return { ...entry, content };
 }
 
 export async function writeCliConfigFile(

@@ -684,6 +684,36 @@ describe("InMemorySessionManager", () => {
       "expected a single session_status_changed event with newStatus=detached"
     );
   });
+
+  it("reconcileSessionStatus resolves undefined when the session is stopped while hasSession is pending", async () => {
+    let settleAlive: (alive: boolean) => void = () => undefined;
+    const manager = new InMemorySessionManager(
+      {
+        async createSession() {},
+        async killSession() {},
+        async capturePane() { return ""; },
+        async listSessions() { return []; },
+        hasSession: () => new Promise<boolean>((resolve) => { settleAlive = resolve; }),
+        async showEnvironment() { return {}; }
+      },
+      new MemoryRecoveryStore([])
+    );
+    await manager.createSession({
+      userId: "u1",
+      sessionId: "s-race",
+      launchPlan: launchPlan()
+    });
+
+    // hasSession is called synchronously before the first await, so the
+    // reconcile is parked on it as soon as this returns a promise.
+    const reconciling = manager.reconcileSessionStatus("s-race");
+    await manager.stopSession("s-race");
+    settleAlive(false);
+
+    const result = await reconciling;
+    assert.equal(result, undefined);
+    assert.equal(manager.getSession("s-race"), undefined);
+  });
 });
 
 function fakeTmux(calls: string[]): TmuxClient {

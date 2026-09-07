@@ -358,10 +358,18 @@ export class InMemorySessionManager {
     }
 
     const alive = await this.tmux.hasSession(session.tmuxName);
+    // hasSession may await long enough for a concurrent stopSession or another
+    // reconcile to remove the session. Re-check synchronously before mutating
+    // so a stale caller never throws "Unknown session" (an unhandled rejection
+    // would otherwise crash the Gateway).
+    const current = this.sessions.get(id);
+    if (!current) {
+      return undefined;
+    }
     if (!alive) {
       const exited = this.updateSession(id, { status: "exited" });
       try {
-        await this.recoveryStore.removeSession(id, session.userId);
+        await this.recoveryStore.removeSession(id, current.userId);
       } catch (error) {
         console.error(`[session-manager] reconcile DB sync failed for ${id}`, error);
       }
@@ -371,10 +379,10 @@ export class InMemorySessionManager {
       return exited;
     }
 
-    if (session.status === "running") {
+    if (current.status === "running") {
       return this.updateSession(id, { status: "detached" });
     }
-    return session;
+    return current;
   }
 
   /**

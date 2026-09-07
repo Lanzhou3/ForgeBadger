@@ -15,15 +15,21 @@ import { syncLocalSkills } from "./local-skills.js";
 const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
 
 // Config rendering derives the adapter from the bound template, never from the
-// project's ai_tool hint, so CLI-agnostic projects render correctly.
+// project's ai_tool hint, so CLI-agnostic projects render correctly. The
+// template's stored adapter wins; the built-in id mapping is the legacy
+// fallback, with "claude" as the final default.
 const templateAdapterByBuiltinId: Record<string, z.infer<typeof aiToolSchema>> = {
   "builtin-opencode": "opencode",
   "builtin-codex": "codex",
   "builtin-kimi": "kimi"
 };
 
-function adapterForTemplateId(templateId: string): z.infer<typeof aiToolSchema> {
-  return templateAdapterByBuiltinId[templateId] ?? "claude";
+export function adapterForTemplate(template: { id: string; adapter: string | null }): z.infer<typeof aiToolSchema> {
+  const stored = aiToolSchema.safeParse(template.adapter);
+  if (stored.success) {
+    return stored.data;
+  }
+  return templateAdapterByBuiltinId[template.id] ?? "claude";
 }
 
 export type ProjectConfigSkillSync = (repo: Pick<SkillRepository, "create" | "getByName" | "update">) => unknown;
@@ -82,7 +88,7 @@ export async function buildProjectConfigRenderPlan(
   // A plan must include the same locally discovered Skills as later compliance checks.
   (options.syncSkills ?? syncLocalSkills)(new SkillRepository(db, userId));
 
-  const adapter = adapterForTemplateId(template.id);
+  const adapter = adapterForTemplate(template);
   return createRenderPlan({
     projectId: project.id,
     targetRoot: project.path,

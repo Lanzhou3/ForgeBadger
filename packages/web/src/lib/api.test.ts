@@ -66,6 +66,7 @@ import {
   syncProviderModels,
   rotateProviderCredential,
   setDefaultProviderModel,
+  updateModelProvider,
   updateProviderModel,
   refreshCatalog,
   restoreTemplateVersion,
@@ -207,6 +208,24 @@ describe("api client", () => {
           baseUrl: "https://provider.example.com/v1",
           openaiBaseUrl: "https://provider.example.com/v1",
           supportedAdapters: ["claude", "opencode"],
+        }),
+      })
+    );
+  });
+
+  it("updates model provider profiles through REST", async () => {
+    await updateModelProvider("provider-1", {
+      name: "My Provider (renamed)",
+      supportedAdapters: ["claude", "opencode", "codex"],
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          name: "My Provider (renamed)",
+          supportedAdapters: ["claude", "opencode", "codex"],
         }),
       })
     );

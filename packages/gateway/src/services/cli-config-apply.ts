@@ -7,6 +7,7 @@ import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { decryptSecret, encryptSecret, type EncryptedSecret } from "../crypto/secret-box.js";
 import type { Database } from "../db/types.js";
 import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
+import { ClaudeRouteRepository } from "../db/repositories/claude-route-repository.js";
 import {
   ModelProviderRepository,
   type ModelProfile,
@@ -23,6 +24,7 @@ import {
   safeUnlink
 } from "./cli-config-fs.js";
 import { cliConfigTargetPath, globalConfigRoot } from "./cli-config-target.js";
+import { gatewayLoopbackUrl } from "./claude-route/gateway-url.js";
 import {
   assertResolvedPublicHttpsEndpoint,
   type OutboundHostResolver
@@ -72,6 +74,18 @@ export interface CliConfigApplyInput {
   modelMapping?: Partial<Record<ClaudeModelSlot, string>> | undefined;
   /** Codex only: model_reasoning_effort written into config.toml. */
   reasoningEffort?: CodexReasoningEffort | undefined;
+  /**
+   * Claude only: point Claude Code at the Gateway route endpoint instead of
+   * the provider (required for OpenAI-protocol providers).
+   */
+  routeThroughGateway?: boolean | undefined;
+  /**
+   * Codex only: wire protocol the provider uses. Defaults to "chat"
+   * (OpenAI-compatible /chat/completions), which is correct for most
+   * third-party providers. Set to "responses" only when the provider
+   * supports the OpenAI /responses API (native OpenAI, Codex.app, etc.).
+   */
+  codexWireApi?: CodexWireApi | undefined;
   resolveHost?: OutboundHostResolver | undefined;
 }
 
@@ -119,10 +133,32 @@ interface ApplyContext {
   reasoningEffort: CodexReasoningEffort | undefined;
   credential: ProviderCredentialSummary;
   providerKey: string;
+  /** The provider's own endpoint (SSRF-validated); used for context-window special cases. */
+  providerEndpoint: string | null;
+  /** Effective ANTHROPIC_BASE_URL: the provider endpoint, or the Gateway loopback URL when routed. */
   baseUrl: string | null;
+  /**
+   * Claude protocol routing state: "direct" = provider speaks Anthropic
+   * protocol; "routed" = applied through the Gateway endpoint;
+   * "route_required" = OpenAI protocol without routeThroughGateway (apply
+   * must fail; preview only).
+   */
+  routeMode: "direct" | "routed" | "route_required";
+  /** Loopback route token written as ANTHROPIC_AUTH_TOKEN when routed. */
+  routeToken: string | null;
   /** What the previous apply to this adapter injected as the context window, if known. */
   previousContextWindow: number | null;
+  /** Codex wire API for this provider: "chat" (default) or "responses". */
+  codexWireApi: CodexWireApi;
 }
+
+/**
+ * Codex wire API: "chat" = /chat/completions (OpenAI-compatible), "responses" = /responses.
+ * Third-party OpenAI-compatible APIs (Qwen, Moonshot AI, Ollama, etc.) only support
+ * chat completions. The official Codex default is "chat" when omitted; ForgeBadger
+ * previously hardcoded "responses" which broke every third-party provider.
+ */
+export type CodexWireApi = "chat" | "responses";
 
 interface ApplyTarget {
   targetPath: string;
@@ -158,6 +194,11 @@ export async function previewCliConfigApply(input: CliConfigApplyInput): Promise
   if (files.some((file) => file.fileType === "toml" && file.operation !== "none")) {
     warnings.push("Applying this change may normalize TOML comments and formatting in the config file.");
   }
+  if (context.routeMode === "route_required") {
+    // Machine-readable marker; the web dialog renders a localized banner and
+    // filters this code out of the generic warning list.
+    warnings.push("OPENAI_PROTOCOL_REQUIRES_ROUTE");
+  }
   return {
     adapter: context.adapter,
     providerProfileId: context.provider.id,
@@ -177,8 +218,16 @@ export async function previewCliConfigApply(input: CliConfigApplyInput): Promise
  */
 export async function applyCliConfigToAdapter(input: CliConfigApplyInput): Promise<CliConfigApplyResult> {
   const context = await resolveApplyContext(input);
-  const secret = new ModelProviderRepository(input.db, input.userId, input.masterKey)
-    .decryptCredential(context.credential.id);
+  if (context.routeMode === "route_required") {
+    throw new CliConfigApplyError(
+      "CLI_CONFIG_APPLY_ROUTE_REQUIRED",
+      "OpenAI-protocol providers cannot be applied to Claude Code directly; enable the Gateway Claude route and apply with routeThroughGateway"
+    );
+  }
+  // Routed applies write the loopback route token, never the provider key.
+  const secret = context.routeToken
+    ?? new ModelProviderRepository(input.db, input.userId, input.masterKey)
+      .decryptCredential(context.credential.id);
   const primaryTarget = cliConfigTargetPath({ adapter: context.adapter, scope: "global" });
   return withInProcessLock(primaryTarget, async () => {
     // Plan every file up front, then write and verify one at a time so a
@@ -230,6 +279,16 @@ export async function applyCliConfigToAdapter(input: CliConfigApplyInput): Promi
     // quota) can resolve the current provider without parsing CLI configs.
     new CliConfigAppliedProviderRepository(input.db, input.userId)
       .upsert(context.adapter, context.provider.id, context.model.id);
+    // Keep the route assignment in sync with what Claude Code now points at.
+    if (context.adapter === "claude") {
+      const routeRepository = new ClaudeRouteRepository(input.db, input.userId, input.masterKey);
+      if (context.routeMode === "routed") {
+        routeRepository.upsertAssignment(context.provider.id, context.credential.id);
+      } else {
+        // A direct (Anthropic-protocol) apply supersedes any routed target.
+        routeRepository.clearAssignment();
+      }
+    }
     return {
       adapter: context.adapter,
       backupId,
@@ -349,6 +408,9 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
   if (input.reasoningEffort && input.adapter !== "codex") {
     throw new CliConfigApplyError("CLI_CONFIG_APPLY_FIELD_UNSUPPORTED", "reasoningEffort is only supported for the Codex adapter");
   }
+  if (input.routeThroughGateway === true && input.adapter !== "claude") {
+    throw new CliConfigApplyError("CLI_CONFIG_APPLY_FIELD_UNSUPPORTED", "routeThroughGateway is only supported for the Claude adapter");
+  }
   const slotModels: Partial<Record<ClaudeModelSlot, ModelProfile>> = {};
   if (input.modelMapping) {
     for (const slot of ["opus", "sonnet", "haiku", "fable", "subagent"] as const) {
@@ -368,15 +430,37 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
   if (!credential) {
     throw new CliConfigApplyError("CLI_CONFIG_APPLY_CREDENTIAL_NOT_FOUND", "An active provider credential is required");
   }
-  const baseUrl = endpointForAdapter(provider, input.adapter);
+  // The provider endpoint is validated up front even when routed, so an
+  // unsafe target fails at apply time instead of on the first routed request
+  // (the forwarder re-checks per request regardless).
+  const providerEndpoint = endpointForAdapter(provider, input.adapter);
   try {
-    await assertResolvedPublicHttpsEndpoint(baseUrl, input.resolveHost, { allowPlaintextHttp: provider.allowPlaintextHttp });
+    await assertResolvedPublicHttpsEndpoint(providerEndpoint, input.resolveHost, { allowPlaintextHttp: provider.allowPlaintextHttp });
   } catch (error) {
     throw new CliConfigApplyError(
       "CLI_CONFIG_APPLY_ENDPOINT_UNSAFE",
       error instanceof Error ? error.message : "Provider endpoint is not a public HTTPS endpoint"
     );
   }
+  // Claude Code speaks the Anthropic protocol only; an OpenAI-protocol
+  // provider must be applied through the Gateway's loopback route endpoint.
+  let routeMode: ApplyContext["routeMode"] = "direct";
+  let routeToken: string | null = null;
+  if (input.adapter === "claude" && provider.apiFormat !== "anthropic") {
+    routeMode = "route_required";
+    if (input.routeThroughGateway === true) {
+      const settings = new ClaudeRouteRepository(input.db, input.userId, input.masterKey).getSettings();
+      if (!settings.enabled || !settings.token) {
+        throw new CliConfigApplyError(
+          "CLI_CONFIG_APPLY_ROUTE_DISABLED",
+          "The Gateway Claude route is not enabled for this user"
+        );
+      }
+      routeMode = "routed";
+      routeToken = settings.token;
+    }
+  }
+  const baseUrl = routeMode === "direct" ? providerEndpoint : gatewayLoopbackUrl();
   // The previous apply's injected context window, so switching providers can
   // strip exactly the managed value (and nothing the user set by hand).
   const previousPointer = new CliConfigAppliedProviderRepository(input.db, input.userId).get(input.adapter);
@@ -398,9 +482,33 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
     reasoningEffort: input.reasoningEffort,
     credential,
     providerKey: normalizeProviderKey(provider.providerKey),
+    providerEndpoint,
     baseUrl,
-    previousContextWindow
+    routeMode,
+    routeToken,
+    previousContextWindow,
+    codexWireApi: resolveCodexWireApi(input, provider, model)
   };
+}
+
+/** Resolves the Codex wire API: explicit input wins, else "chat" default, with "responses" for known OpenAI-native providers. */
+function resolveCodexWireApi(
+  input: CliConfigApplyInput,
+  provider: ProviderProfile,
+  model: ModelProfile
+): CodexWireApi {
+  if (input.codexWireApi) return input.codexWireApi;
+  // Only OpenAI's native providers support the /responses API. Everything else
+  // (Qwen, Moonshot AI, Moonshot, Ollama, generic OpenAI-compatible) is chat only.
+  const providerKey = provider.providerKey.toLowerCase();
+  if (providerKey === "openai" || providerKey === "codex" || providerKey === "chatgpt") {
+    return "responses";
+  }
+  const modelId = model.modelId.toLowerCase();
+  if (modelId.startsWith("gpt-") || modelId.startsWith("o3") || modelId.startsWith("o4-mini") || modelId.startsWith("codex-")) {
+    return "responses";
+  }
+  return "chat";
 }
 
 function planApplyDocuments(context: ApplyContext, plaintextSecret: string | null): ApplyDocumentPlan[] {
@@ -454,7 +562,9 @@ function buildApplyDocument(
     const env = record(doc.env);
     if (context.baseUrl) env.ANTHROPIC_BASE_URL = context.baseUrl;
     else delete env.ANTHROPIC_BASE_URL;
-    env.ANTHROPIC_AUTH_TOKEN = secret;
+    // Routed applies carry the loopback route token; the provider key stays
+    // in the Gateway vault and is injected per request by the forwarder.
+    env.ANTHROPIC_AUTH_TOKEN = context.routeToken ?? secret;
     // A stale ANTHROPIC_API_KEY left by a previous apply (or by hand) must not
     // shadow the freshly written token.
     delete env.ANTHROPIC_API_KEY;
@@ -482,7 +592,7 @@ function buildApplyDocument(
     const timeout = claudeTimeout(context.provider.providerKey);
     if (timeout) env.API_TIMEOUT_MS = timeout;
     else delete env.API_TIMEOUT_MS;
-    applyClaudeContextWindow(env, context.baseUrl, primary, context.previousContextWindow);
+    applyClaudeContextWindow(env, context.providerEndpoint, primary, context.previousContextWindow);
     doc.env = env;
     return;
   }
@@ -500,13 +610,20 @@ function buildApplyDocument(
     }
     doc.model = context.model.modelId;
     doc.model_provider = context.providerKey;
-    if (context.reasoningEffort) doc.model_reasoning_effort = context.reasoningEffort;
-    else delete doc.model_reasoning_effort;
+    // Third-party models may not recognize Codex's reasoning effort values
+    // (e.g. Qwen only accepts "xhigh"/"medium"/"low"). Only write the field
+    // for models Codex natively supports reasoning on; otherwise remove it
+    // so the provider uses its own default.
+    if (context.reasoningEffort && codexNativeReasoningModel(context.model.modelId)) {
+      doc.model_reasoning_effort = context.reasoningEffort;
+    } else {
+      delete doc.model_reasoning_effort;
+    }
     const providers = record(doc.model_providers);
     providers[context.providerKey] = {
       name: context.provider.name,
       base_url: context.baseUrl,
-      wire_api: "responses",
+      wire_api: context.codexWireApi,
       experimental_bearer_token: secret
     };
     doc.model_providers = providers;
@@ -614,6 +731,20 @@ function applyClaudeContextWindow(
     const value = env[key];
     if (typeof value === "string" && managed.has(value)) delete env[key];
   }
+}
+
+/**
+ * Codex only sends `model_reasoning_effort` to models it natively recognizes
+ * as reasoning-capable (gpt-5, o3, o4-mini, codex-*). Third-party models may
+ * have their own effort vocabularies (e.g. Qwen uses "xhigh"/"medium"/"low")
+ * and will reject unsupported values with a 400 error.
+ */
+function codexNativeReasoningModel(modelId: string): boolean {
+  const lower = modelId.toLowerCase();
+  return lower.startsWith("gpt-5")
+    || lower.startsWith("o3")
+    || lower.startsWith("o4-mini")
+    || lower.startsWith("codex-");
 }
 
 function claudeContextWindowTarget(baseUrl: string | null, model: ModelProfile | null): number | null {
@@ -776,7 +907,7 @@ function normalizeProviderKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "") || "provider";
 }
 
-function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId): string | null {
+export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId): string | null {
   if (adapter === "claude") return provider.anthropicBaseUrl ?? provider.baseUrl;
   if ((adapter === "opencode" || adapter === "kimi") && provider.apiFormat === "anthropic") {
     return provider.anthropicBaseUrl ?? provider.baseUrl;

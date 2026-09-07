@@ -4,6 +4,8 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedRequest, userIsInstanceAdmin } from "../auth/middleware.js";
 import type { Database } from "../db/types.js";
 import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
+import { ClaudeRouteRepository } from "../db/repositories/claude-route-repository.js";
+import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import { isAdapterId, type AdapterId } from "../services/adapter-discovery.js";
 import {
   applyCliConfigFieldPatch,
@@ -26,6 +28,7 @@ import {
   type ClaudeModelSlot
 } from "../services/cli-config-apply.js";
 import { listCliConfigFields } from "../services/cli-config-fields.js";
+import { gatewayLoopbackUrl } from "../services/claude-route/gateway-url.js";
 import { cliConfigTargetPath, hashTargetLocator } from "../services/cli-config-target.js";
 import { acquireModelBindingTargetLock, ModelBindingTargetLockError } from "../services/model-binding-target-lock.js";
 
@@ -78,11 +81,17 @@ const applyProviderBodySchema = z.object({
     subagent: z.string().min(1).optional()
   }).strict().optional(),
   // Codex only: model_reasoning_effort.
-  reasoningEffort: z.enum(["minimal", "low", "medium", "high"]).optional()
+  reasoningEffort: z.enum(["minimal", "low", "medium", "high"]).optional(),
+  // Claude only: apply through the Gateway route (OpenAI-protocol providers).
+  routeThroughGateway: z.boolean().optional()
 }).strict();
 
 const rollbackBodySchema = z.object({
   backupId: z.string().min(1).max(200).optional()
+}).strict();
+
+const claudeRouteBodySchema = z.object({
+  enabled: z.boolean()
 }).strict();
 
 export function createCliConfigRoutes(
@@ -108,6 +117,44 @@ export function createCliConfigRoutes(
       return;
     }
     res.json({ code: 0, data: { fields: listCliConfigFields(adapter) }, message: "" });
+  });
+
+  // Registered before the /:adapter middleware so "routing" is not parsed as
+  // an adapter id.
+  router.get("/routing/claude", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    if (!userIsInstanceAdmin(db, userId)) {
+      res.status(403).json({
+        code: 1,
+        message: "Instance administrator access is required",
+        details: { code: "INSTANCE_ADMIN_REQUIRED" }
+      });
+      return;
+    }
+    observe(options, "route.read");
+    handle(res, async () => ({ routing: readClaudeRouteState(db, masterKey, userId) }));
+  });
+
+  router.put("/routing/claude", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    if (!userIsInstanceAdmin(db, userId)) {
+      res.status(403).json({
+        code: 1,
+        message: "Instance administrator access is required",
+        details: { code: "INSTANCE_ADMIN_REQUIRED" }
+      });
+      return;
+    }
+    const body = claudeRouteBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ code: 1, message: "Invalid Claude route payload" });
+      return;
+    }
+    observe(options, "route.update");
+    handle(res, async () => {
+      new ClaudeRouteRepository(db, userId, masterKey).setEnabled(body.data.enabled);
+      return { routing: readClaudeRouteState(db, masterKey, userId) };
+    });
   });
 
   router.use("/:adapter", (req, res, next) => {
@@ -383,6 +430,7 @@ function applyInput(
     ...(body.credentialId ? { credentialId: body.credentialId } : {}),
     ...(body.modelMapping ? { modelMapping: compactModelMapping(body.modelMapping) } : {}),
     ...(body.reasoningEffort ? { reasoningEffort: body.reasoningEffort } : {}),
+    ...(body.routeThroughGateway !== undefined ? { routeThroughGateway: body.routeThroughGateway } : {}),
     ...(options.resolveHost ? { resolveHost: options.resolveHost } : {})
   };
 }
@@ -406,8 +454,33 @@ function parseAdapter(value: string | undefined): AdapterId | undefined {
   return value !== undefined && isAdapterId(value) ? value : undefined;
 }
 
+/** Route switch state for the web UI; the token itself is never returned. */
+function readClaudeRouteState(db: Database, masterKey: string, userId: string): Record<string, unknown> {
+  const routeRepository = new ClaudeRouteRepository(db, userId, masterKey);
+  const settings = routeRepository.getSettings();
+  const assignment = routeRepository.getAssignment();
+  const provider = assignment
+    ? new ModelProviderRepository(db, userId, masterKey).getProviderProfile(assignment.providerProfileId)
+    : undefined;
+  return {
+    enabled: settings.enabled,
+    hasToken: settings.token !== null,
+    gatewayUrl: gatewayLoopbackUrl(),
+    assignment: assignment && provider
+      ? {
+          providerProfileId: assignment.providerProfileId,
+          providerName: provider.name,
+          credentialId: assignment.credentialId,
+          updatedAt: assignment.updatedAt
+        }
+      : null
+  };
+}
+
 function applyErrorStatus(error: CliConfigApplyError): number {
   if (error.code.endsWith("_NOT_FOUND")) return 404;
+  if (error.code === "CLI_CONFIG_APPLY_ROUTE_REQUIRED"
+    || error.code === "CLI_CONFIG_APPLY_ROUTE_DISABLED") return 409;
   if (error.code === "CLI_CONFIG_APPLY_FAILED"
     || error.code === "CLI_CONFIG_APPLY_VERIFY_FAILED"
     || error.code === "CLI_CONFIG_ROLLBACK_FAILED") return 500;

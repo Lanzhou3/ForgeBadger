@@ -1,4 +1,4 @@
-import { Cloud, Search, Trash2 } from "lucide-react";
+import { Cloud, Pencil, Search, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ interface ProviderListProps {
   isDeleting: boolean;
   onQueryTextChange: (value: string) => void;
   onSelectProvider: (providerId: string) => void;
+  onEditProvider: (providerId: string) => void;
   onDeleteProvider: (providerId: string) => void;
   t: Translate;
 }
@@ -32,6 +33,7 @@ export function ProviderList({
   isDeleting,
   onQueryTextChange,
   onSelectProvider,
+  onEditProvider,
   onDeleteProvider,
   t,
 }: ProviderListProps) {
@@ -101,6 +103,17 @@ export function ProviderList({
                         {provider.baseUrl ?? provider.providerKey}
                       </span>
                     </button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+                      title={t("common.edit")}
+                      aria-label={t("common.edit")}
+                      onClick={() => onEditProvider(provider.id)}
+                    >
+                      <Pencil className="size-4" />
+                    </Button>
                     <Button
                       type="button"
                       size="icon"

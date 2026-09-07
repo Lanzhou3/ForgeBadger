@@ -1,7 +1,8 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { Plus, RefreshCw, Search } from "lucide-react";
+import { Plus, RefreshCw, Save, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { CliBrandIcon } from "@/components/cli-brand-icon";
 import {
   Dialog,
   DialogContent,
@@ -12,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { ProviderApiFormat, ProviderAuthType, ProviderSupportedAdapter } from "@/lib/api";
+import type { ProviderApiFormat, ProviderAuthType, ProviderProfile, ProviderSupportedAdapter } from "@/lib/api";
 import {
   filterProviderPresets,
   providerPresets,
@@ -48,6 +49,8 @@ interface AddProviderDialogProps {
   customProvider: CustomProviderForm;
   setupCredential: CredentialForm;
   isCreating: boolean;
+  /** When set, the dialog edits this existing provider instead of creating one. */
+  existing?: ProviderProfile;
   onOpenChange: (open: boolean) => void;
   onCustomProviderChange: (form: CustomProviderForm) => void;
   onSetupCredentialChange: (form: CredentialForm) => void;
@@ -60,12 +63,14 @@ export function AddProviderDialog({
   customProvider,
   setupCredential,
   isCreating,
+  existing,
   onOpenChange,
   onCustomProviderChange,
   onSetupCredentialChange,
   onSubmit,
   t,
 }: AddProviderDialogProps) {
+  const editing = existing != null;
   const providerKeyTouched = useRef(false);
   const [presetQuery, setPresetQuery] = useState("");
   useEffect(() => {
@@ -112,10 +117,13 @@ export function AddProviderDialog({
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <form className="space-y-4" onSubmit={onSubmit}>
           <DialogHeader>
-            <DialogTitle>{t("models.addProvider")}</DialogTitle>
-            <DialogDescription>{t("models.addProviderDescription")}</DialogDescription>
+            <DialogTitle>{editing ? t("models.editProvider") : t("models.addProvider")}</DialogTitle>
+            <DialogDescription>
+              {editing ? t("models.editProviderDescription") : t("models.addProviderDescription")}
+            </DialogDescription>
           </DialogHeader>
 
+          {!editing && (
           <div className="space-y-2">
             <span className="text-sm font-medium">{t("models.presets")}</span>
             <p className="text-xs text-muted-foreground">{t("models.presetsDescription")}</p>
@@ -155,6 +163,7 @@ export function AddProviderDialog({
               )}
             </div>
           </div>
+          )}
 
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
@@ -175,8 +184,12 @@ export function AddProviderDialog({
                   providerKeyTouched.current = true;
                   onCustomProviderChange({ ...customProvider, providerKey: event.target.value });
                 }}
+                disabled={editing}
                 required
               />
+              {editing && (
+                <p className="text-xs text-muted-foreground">{t("models.providerKeyLocked")}</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="provider-api-format">{t("models.apiFormat")}</Label>
@@ -264,13 +277,14 @@ export function AddProviderDialog({
                     checked={customProvider.supportedAdapters.includes(adapter)}
                     onChange={() => toggleAdapter(adapter)}
                   />
+                  <CliBrandIcon aiTool={adapter} className="size-4" />
                   {adapterLabel(adapter)}
                 </label>
               ))}
             </div>
           </div>
 
-          {requiresCredential ? (
+          {!editing && (requiresCredential ? (
             <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-3">
               <div className="space-y-2">
                 <Label htmlFor="setup-credential-label">{t("models.credentialLabel")}</Label>
@@ -301,16 +315,18 @@ export function AddProviderDialog({
             <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
               {t("models.noCredentialRequired")}
             </div>
-          )}
+          ))}
 
           <DialogFooter>
             <Button type="submit" disabled={!canSubmit}>
               {isCreating ? (
                 <RefreshCw className="size-4 animate-spin" />
+              ) : editing ? (
+                <Save className="size-4" />
               ) : (
                 <Plus className="size-4" />
               )}
-              {t("models.saveAndSyncModels")}
+              {editing ? t("common.save") : t("models.saveAndSyncModels")}
             </Button>
           </DialogFooter>
         </form>

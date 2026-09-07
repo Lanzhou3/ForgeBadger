@@ -1,4 +1,7 @@
-import { RefreshCw, ServerCog, ShieldCheck, Trash2, Wallet } from "lucide-react";
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { Pencil, RefreshCw, ServerCog, ShieldCheck, Trash2, Wallet } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +14,7 @@ import type {
   ProviderBalanceResult,
   ProviderProfile,
 } from "@/lib/api";
+import { getClaudeRoute } from "@/lib/api";
 
 import { CredentialTab } from "./credential-tab";
 import { ModelsTab } from "./models-tab";
@@ -38,6 +42,7 @@ interface ProviderWorkspaceProps {
   balanceError: string | null;
   isCheckingBalance: boolean;
   isDeletingProvider: boolean;
+  onEditProvider: () => void;
   onCheckReadiness: () => void;
   onSync: () => void;
   onCheckBalance: () => void;
@@ -58,6 +63,7 @@ export function ProviderWorkspace({
   balanceError,
   isCheckingBalance,
   isDeletingProvider,
+  onEditProvider,
   onCheckReadiness,
   onSync,
   onCheckBalance,
@@ -67,6 +73,16 @@ export function ProviderWorkspace({
   credentialTab,
   t,
 }: ProviderWorkspaceProps) {
+  const { data: routeState } = useQuery({
+    queryKey: ["claude-route"],
+    queryFn: getClaudeRoute,
+    retry: false,
+    staleTime: 60_000,
+  });
+  const routedToClaude =
+    routeState?.enabled === true &&
+    provider.supportedAdapters.includes("claude") &&
+    routeState.assignment?.providerProfileId === provider.id;
   return (
     <div className="min-w-0 space-y-6">
       <Card className="forgebadger-animate-in">
@@ -84,6 +100,15 @@ export function ProviderWorkspace({
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onEditProvider}
+              >
+                <Pencil className="size-4" />
+                {t("common.edit")}
+              </Button>
               <Button
                 type="button"
                 size="sm"
@@ -138,6 +163,7 @@ export function ProviderWorkspace({
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant="outline">{provider.apiFormat}</Badge>
+            {routedToClaude && <Badge variant="secondary">{t("models.claudeRouteBadge")}</Badge>}
             <Badge variant="outline">{provider.region ?? "-"}</Badge>
             <Badge variant="secondary">{productTypeLabel(provider.productType, t)}</Badge>
             <Badge variant="outline">{provider.authType}</Badge>

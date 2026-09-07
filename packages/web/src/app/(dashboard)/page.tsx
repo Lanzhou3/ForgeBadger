@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
+import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import {
   discoverAdapters,
   getDashboardSummary,
@@ -53,7 +54,7 @@ export default function DashboardPage() {
     queryFn: getDependencies,
   });
   const adaptersQuery = useQuery({
-    queryKey: ["adapters", "discovery"],
+    queryKey: ADAPTER_DISCOVERY_QUERY_KEY,
     queryFn: discoverAdapters,
   });
 

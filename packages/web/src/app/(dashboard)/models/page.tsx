@@ -42,8 +42,10 @@ import {
   rotateProviderCredential,
   setDefaultProviderModel,
   syncProviderModels,
+  updateModelProvider,
   updateProviderModel,
   type ModelProviderReadiness,
+  type ProviderProfile,
   type ProviderSupportedAdapter,
 } from "@/lib/api";
 
@@ -62,7 +64,8 @@ export default function ModelsPage() {
   const [providerQueryText, setProviderQueryText] = useState("");
   const [setupCredentialForm, setSetupCredentialForm] = useState<CredentialForm>(emptyCredential);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-  const [addProviderOpen, setAddProviderOpen] = useState(false);
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<ProviderProfile | null>(null);
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [rotateDialogOpen, setRotateDialogOpen] = useState(false);
@@ -202,13 +205,39 @@ export default function ModelsPage() {
       setSelectedModelId("");
       setCustomProvider(emptyCustomProvider);
       setSetupCredentialForm(emptyCredential);
-      setAddProviderOpen(false);
+      setProviderDialogOpen(false);
+      setEditingProvider(null);
       setNotice(t("models.providerCreated"));
       if (result.syncError) {
         toast.error(
           result.syncError instanceof Error ? result.syncError.message : t("models.modelSyncFailed")
         );
       }
+      await refreshProviders();
+    },
+  });
+
+  const updateProviderMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingProvider) throw new Error(t("models.providerRequired"));
+      const anthropicBaseUrl = customProvider.anthropicBaseUrl.trim();
+      const openaiBaseUrl = customProvider.openaiBaseUrl.trim();
+      return updateModelProvider(editingProvider.id, {
+        name: customProvider.name.trim(),
+        authType: customProvider.authType,
+        apiFormat: customProvider.apiFormat,
+        baseUrl: anthropicBaseUrl || openaiBaseUrl,
+        ...(anthropicBaseUrl ? { anthropicBaseUrl } : {}),
+        ...(openaiBaseUrl ? { openaiBaseUrl } : {}),
+        supportedAdapters: customProvider.supportedAdapters,
+        ...(customProvider.allowPlaintextHttp ? { allowPlaintextHttp: true } : {}),
+      });
+    },
+    onSuccess: async () => {
+      setProviderDialogOpen(false);
+      setEditingProvider(null);
+      setCustomProvider(emptyCustomProvider);
+      setNotice(t("models.updated"));
       await refreshProviders();
     },
   });
@@ -415,7 +444,11 @@ export default function ModelsPage() {
 
   function submitCustomProvider(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    createProviderMutation.mutate();
+    if (editingProvider) {
+      updateProviderMutation.mutate();
+    } else {
+      createProviderMutation.mutate();
+    }
   }
 
   function submitCredential(event: FormEvent<HTMLFormElement>) {
@@ -433,14 +466,31 @@ export default function ModelsPage() {
   }
 
   function openAddProviderDialog() {
+    setEditingProvider(null);
     setCustomProvider(emptyCustomProvider);
     setSetupCredentialForm(emptyCredential);
-    setAddProviderOpen(true);
+    setProviderDialogOpen(true);
   }
 
-  function handleAddProviderOpenChange(open: boolean) {
-    if (!open && createProviderMutation.isPending) return;
-    setAddProviderOpen(open);
+  function openEditProviderDialog(provider: ProviderProfile) {
+    setEditingProvider(provider);
+    setCustomProvider({
+      name: provider.name,
+      providerKey: provider.providerKey,
+      apiFormat: provider.apiFormat,
+      authType: provider.authType,
+      anthropicBaseUrl: provider.anthropicBaseUrl ?? "",
+      openaiBaseUrl: provider.openaiBaseUrl ?? "",
+      supportedAdapters: [...provider.supportedAdapters],
+      allowPlaintextHttp: provider.allowPlaintextHttp ?? false,
+    });
+    setSetupCredentialForm(emptyCredential);
+    setProviderDialogOpen(true);
+  }
+
+  function handleProviderDialogOpenChange(open: boolean) {
+    if (!open && (createProviderMutation.isPending || updateProviderMutation.isPending)) return;
+    setProviderDialogOpen(open);
   }
 
   function openNewModelDialog() {
@@ -463,6 +513,7 @@ export default function ModelsPage() {
   const currentError =
     providerQuery.error ??
     createProviderMutation.error ??
+    updateProviderMutation.error ??
     deleteProviderMutation.error ??
     credentialMutation.error ??
     rotateCredentialMutation.error ??
@@ -529,6 +580,10 @@ export default function ModelsPage() {
             isDeleting={deleteProviderMutation.isPending}
             onQueryTextChange={setProviderQueryText}
             onSelectProvider={setSelectedProviderId}
+            onEditProvider={(providerId) => {
+              const provider = providers.find((item) => item.id === providerId);
+              if (provider) openEditProviderDialog(provider);
+            }}
             onDeleteProvider={(providerId) => openDeleteDialog({ kind: "provider", providerId })}
             t={t}
           />
@@ -545,6 +600,7 @@ export default function ModelsPage() {
                 selectedProvider.authType !== "none" && !selectedCredentialId
               }
               isDeletingProvider={deleteProviderMutation.isPending}
+              onEditProvider={() => openEditProviderDialog(selectedProvider)}
               balance={balanceQuery.data ?? null}
               balanceError={
                 balanceQuery.isError
@@ -619,11 +675,12 @@ export default function ModelsPage() {
       <CliConfigPanel />
 
       <AddProviderDialog
-        open={addProviderOpen}
+        open={providerDialogOpen}
         customProvider={customProvider}
         setupCredential={setupCredentialForm}
-        isCreating={createProviderMutation.isPending}
-        onOpenChange={handleAddProviderOpenChange}
+        isCreating={createProviderMutation.isPending || updateProviderMutation.isPending}
+        existing={editingProvider ?? undefined}
+        onOpenChange={handleProviderDialogOpenChange}
         onCustomProviderChange={setCustomProvider}
         onSetupCredentialChange={setSetupCredentialForm}
         onSubmit={submitCustomProvider}

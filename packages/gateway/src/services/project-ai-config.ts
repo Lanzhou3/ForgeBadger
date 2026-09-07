@@ -113,7 +113,7 @@ function primaryInstructionFilesForAdapter(adapter: AdapterId): string[] {
   return ["AGENTS.md"];
 }
 
-function candidateFilesForAdapter(adapter: AdapterId): string[] {
+export function candidateFilesForAdapter(adapter: AdapterId): string[] {
   if (adapter === "claude") {
     return ["CLAUDE.md"];
   }
@@ -257,7 +257,7 @@ function roleFor(relativePath: string): ProjectAiConfigFile["role"] {
   return "other";
 }
 
-function fileTypeFor(filePath: string): string {
+export function fileTypeFor(filePath: string): string {
   const extension = path.extname(filePath).toLowerCase();
   if (extension === ".md") return "markdown";
   if (extension === ".json" || extension === ".jsonc") return "json";
