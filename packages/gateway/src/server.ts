@@ -87,7 +87,9 @@ export function createServer(deps: ServerDeps): express.Express {
 
   // The Claude route data plane carries Anthropic payloads with inlined image
   // blocks (multi-MB); keep the management API at the default body limit.
+  // Workspace file edits can carry up to 1 MB of content (plus JSON overhead).
   app.use("/v1", express.json({ limit: "64mb" }));
+  app.use("/api/v1/projects/*/workspace/file", express.json({ limit: "2mb" }));
   app.use(express.json());
 
   mountRoutes(app, deps);

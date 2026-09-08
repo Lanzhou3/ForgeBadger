@@ -641,10 +641,16 @@ function buildApplyDocument(
     // touched — model selection happens inside OpenCode.
     const models = record(existing.models);
     for (const activeModel of context.activeModels) {
-      models[activeModel.modelId] = {
-        name: activeModel.name,
-        ...(activeModel.contextWindow ? { limit: { context: activeModel.contextWindow } } : {})
-      };
+      const current = record(models[activeModel.modelId]);
+      const next: Record<string, unknown> = { ...current, name: activeModel.name };
+      // OpenCode validates limit strictly: output is required next to context,
+      // and a context-only limit makes the whole config invalid (the CLI exits
+      // on startup). We only know the context window, so never write limit —
+      // and drop the context-only shape left behind by earlier applies while
+      // keeping user-owned fields such as attachment.
+      const limit = record(next.limit);
+      if (typeof limit.context === "number" && typeof limit.output !== "number") delete next.limit;
+      models[activeModel.modelId] = next;
     }
     providers[context.providerKey] = {
       npm: context.provider.opencodeNpm ?? openCodePackage(context.provider.apiFormat),

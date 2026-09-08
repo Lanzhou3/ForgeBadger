@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, FileText, X } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, Check, FileText, Loader2, Pencil, X } from "lucide-react";
 import type { ThemedToken } from "shiki";
 
 import { Button } from "@/components/ui/button";
-import { getProjectWorkspaceFile } from "@/lib/api";
+import { getProjectWorkspaceFile, putProjectWorkspaceFile } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/hooks/use-language";
 import { highlightWorkspaceCode, tokenFontStyle } from "./highlight";
@@ -42,6 +42,43 @@ export function WorkspaceFileViewer({
     retry: false,
   });
   const file = fileQuery.data;
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  // Selecting a different file always exits edit mode with a fresh buffer.
+  useEffect(() => {
+    setEditing(false);
+    setDraft("");
+    setSavedFlash(false);
+  }, [path]);
+
+  useEffect(() => {
+    if (!savedFlash) {
+      return;
+    }
+    const timer = setTimeout(() => setSavedFlash(false), 2500);
+    return () => clearTimeout(timer);
+  }, [savedFlash]);
+
+  const canEdit = Boolean(file && !file.binary && !file.truncated);
+  const dirty = editing && draft !== (file?.content ?? "");
+  const saveMutation = useMutation({
+    mutationFn: () => putProjectWorkspaceFile(projectId, path ?? "", draft),
+    onSuccess: () => {
+      setEditing(false);
+      setSavedFlash(true);
+      void queryClient.invalidateQueries({ queryKey: ["workspace-context", projectId, "file"] });
+    },
+  });
+  const startEdit = () => {
+    if (!canEdit || !file) {
+      return;
+    }
+    setDraft(file.content);
+    setEditing(true);
+  };
 
   // Scroll the focused line into view once content is rendered.
   useEffect(() => {
@@ -99,6 +136,51 @@ export function WorkspaceFileViewer({
                 {formatBytes(file.sizeBytes)} · {formatWorkspaceTime(file.updatedAt)}
               </span>
             ) : null}
+            {savedFlash && !editing ? (
+              <span className="flex items-center gap-1 text-[11px] text-emerald-500">
+                <Check className="size-3.5" />
+                {t("projects.workspaceFileSaved")}
+              </span>
+            ) : null}
+            {editing ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setEditing(false)}
+                  disabled={saveMutation.isPending}
+                >
+                  {t("projects.workspaceCancelEdit")}
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  disabled={!dirty || saveMutation.isPending}
+                  onClick={() => saveMutation.mutate()}
+                >
+                  {saveMutation.isPending ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Check className="size-3.5" />
+                  )}
+                  {saveMutation.isPending ? t("projects.workspaceSavingFile") : t("projects.workspaceSaveFile")}
+                </Button>
+              </>
+            ) : file ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs"
+                onClick={startEdit}
+                disabled={!canEdit}
+                title={file.truncated ? t("projects.workspaceFileTooLargeToEdit") : t("projects.workspaceEditFile")}
+                aria-label={t("projects.workspaceEditFile")}
+              >
+                <Pencil className="size-3.5" />
+                {t("projects.workspaceEditFile")}
+              </Button>
+            ) : null}
             {variant === "sheet" && onClose ? (
               <Button
                 variant="ghost"
@@ -122,7 +204,38 @@ export function WorkspaceFileViewer({
         </div>
       ) : null}
 
-      {!path ? (
+      {editing ? (
+        <div className="flex min-h-[240px] min-w-0 flex-1 flex-col overflow-hidden">
+          {saveMutation.isError ? (
+            <div className="flex items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-[11px] text-destructive">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              {saveMutation.error instanceof Error
+                ? saveMutation.error.message
+                : t("projects.workspaceFileSaveFailed")}
+            </div>
+          ) : null}
+          <textarea
+            data-testid="workspace-file-editor"
+            className="min-h-0 flex-1 resize-none overflow-auto bg-transparent px-3 py-3 font-mono text-xs leading-5 text-foreground outline-none [scrollbar-width:thin]"
+            value={draft}
+            spellCheck={false}
+            wrap="off"
+            aria-label={t("projects.workspaceEditFile")}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setEditing(false);
+              } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+                event.preventDefault();
+                if (dirty && !saveMutation.isPending) {
+                  saveMutation.mutate();
+                }
+              }
+            }}
+          />
+        </div>
+      ) : !path ? (
         <div className="flex min-h-[240px] flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
           <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
             <FileText className="size-5" />

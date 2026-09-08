@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -177,6 +177,83 @@ describe("workspace context routes", () => {
     }
   });
 
+  it("saves workspace file content for the owning tenant only", async () => {
+    const token = await register("workspace-editor@test.com");
+    const otherToken = await register("workspace-editor-other@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-workspace-edit-"));
+    await writeFile(path.join(rootPath, "README.md"), "# Before\n", "utf8");
+    const projectId = await importProject(token, rootPath);
+
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/workspace/file`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ path: "README.md", content: "# After\n" })
+    });
+    const body = (await res.json()) as WorkspaceFileResponseBody;
+
+    assert.equal(res.status, 200, JSON.stringify(body));
+    assert.equal(body.code, 0);
+    assert.equal(body.data?.projectId, projectId);
+    assert.equal(body.data?.path, "README.md");
+    assert.equal(body.data?.content, "# After\n");
+    assert.equal(body.data?.sizeBytes, Buffer.byteLength("# After\n"));
+    assert.equal(body.data?.truncated, false);
+    assert.equal(body.data?.binary, false);
+    assert.equal(await readFile(path.join(rootPath, "README.md"), "utf8"), "# After\n");
+
+    const crossTenant = await fetch(`${baseUrl}/api/v1/projects/${projectId}/workspace/file`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${otherToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ path: "README.md", content: "# Hacked\n" })
+    });
+    const crossBody = (await crossTenant.json()) as { code: number; message: string };
+    assert.equal(crossTenant.status, 404);
+    assert.deepEqual(crossBody, { code: 1, message: "Project not found" });
+    assert.equal(await readFile(path.join(rootPath, "README.md"), "utf8"), "# After\n");
+  });
+
+  it("rejects oversized, binary, missing, and escaping workspace file writes", async () => {
+    const token = await register("workspace-edit-boundary@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-workspace-edit-boundary-"));
+    const outsidePath = await mkdtemp(path.join(tmpdir(), "forgebadger-workspace-edit-outside-"));
+    await writeFile(path.join(rootPath, "README.md"), "# Safe\n", "utf8");
+    await writeFile(path.join(rootPath, "big.bin"), Buffer.alloc(64 * 1024 + 1, 1));
+    await writeFile(path.join(outsidePath, "secret.txt"), "secret\n", "utf8");
+    await symlink(path.join(outsidePath, "secret.txt"), path.join(rootPath, "write-link.txt"));
+    const projectId = await importProject(token, rootPath);
+
+    const oversized = await requestWorkspaceWrite(
+      token,
+      projectId,
+      { path: "README.md", content: "x".repeat(1024 * 1024 + 1) },
+    );
+    const tooLargeToLoad = await requestWorkspaceWrite(token, projectId, { path: "big.bin", content: "shrink\n" });
+    const binary = await requestWorkspaceWrite(token, projectId, { path: "README.md", content: "a\u0000b" });
+    const missing = await requestWorkspaceWrite(token, projectId, { path: "does-not-exist.md", content: "new\n" });
+    const absolute = await requestWorkspaceWrite(
+      token,
+      projectId,
+      { path: path.join(rootPath, "README.md"), content: "x\n" },
+    );
+    const symlinkEscape = await requestWorkspaceWrite(token, projectId, { path: "write-link.txt", content: "x\n" });
+    const invalid = await requestWorkspaceWrite(token, projectId, { path: "README.md" });
+
+    for (const response of [oversized, tooLargeToLoad, binary, missing, absolute, symlinkEscape, invalid]) {
+      assert.equal(response.status, 400, JSON.stringify(response.body));
+      assert.equal(response.body.code, 1);
+      assert.equal(typeof response.body.message, "string");
+      assert.ok(!("data" in response.body));
+    }
+    assert.equal(await readFile(path.join(rootPath, "README.md"), "utf8"), "# Safe\n");
+    assert.equal(await readFile(path.join(outsidePath, "secret.txt"), "utf8"), "secret\n");
+  });
+
   it("returns 404 for cross-tenant workspace context requests", async () => {
     const ownerToken = await register("workspace-cross-owner@test.com");
     const otherToken = await register("workspace-cross-other@test.com");
@@ -196,6 +273,19 @@ describe("workspace context routes", () => {
   async function requestWorkspace(token: string, projectId: string, suffix: string) {
     const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}${suffix}`, {
       headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = (await res.json()) as { code: number; message: string };
+    return { status: res.status, body };
+  }
+
+  async function requestWorkspaceWrite(token: string, projectId: string, payload: unknown) {
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/workspace/file`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
     });
     const body = (await res.json()) as { code: number; message: string };
     return { status: res.status, body };

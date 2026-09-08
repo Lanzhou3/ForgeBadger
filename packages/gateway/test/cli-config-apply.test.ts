@@ -239,7 +239,7 @@ describe("cli-config apply service", () => {
           npm: string;
           name: string;
           options: Record<string, string>;
-          models: Record<string, { name: string; limit?: { context: number } }>;
+          models: Record<string, Record<string, unknown>>;
         }>;
         model: string;
       };
@@ -247,10 +247,47 @@ describe("cli-config apply service", () => {
       assert.equal(doc.provider["opencode-provider"]?.name, "opencode provider");
       assert.equal(doc.provider["opencode-provider"]?.options.baseURL, "https://api.deepseek.com/v1");
       assert.equal(doc.provider["opencode-provider"]?.options.apiKey, "sk-opencode-secret");
-      // Every active model of the provider is added, with context limits.
+      // Every active model of the provider is added. limit is never written:
+      // OpenCode requires limit.output next to limit.context (unknown here),
+      // and a context-only limit makes the whole config invalid (CLI exits
+      // on startup).
       assert.equal(doc.provider["opencode-provider"]?.models["opencode-model-1"]?.name, "Default Model");
-      assert.equal(doc.provider["opencode-provider"]?.models["opencode-model-2"]?.limit?.context, 131072);
+      assert.equal(doc.provider["opencode-provider"]?.models["opencode-model-2"]?.limit, undefined);
       assert.equal(doc.model, "keep-me");
+    });
+
+    it("heals context-only limits from earlier applies and preserves user-owned model fields", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-opencode-heal@example.com", "hash");
+      const root = await useConfigRoot("OPENCODE_CONFIG_DIR", "forgebadger-apply-opencode-heal-");
+      const fixture = createFixture(db, user.id, "opencode");
+      // A previous apply left an invalid context-only limit behind, and the
+      // user added an attachment flag the re-apply must not wipe.
+      await writeFile(path.join(root, "opencode.json"), JSON.stringify({
+        provider: {
+          "opencode-provider": {
+            npm: "@ai-sdk/openai-compatible",
+            name: "opencode provider",
+            options: { apiKey: "sk-old", baseURL: "https://api.deepseek.com/v1" },
+            models: {
+              "opencode-model-1": { name: "Default Model", limit: { context: 999999 }, attachment: true }
+            }
+          }
+        }
+      }), "utf8");
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "opencode",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "opencode.json"), "utf8")) as {
+        provider: Record<string, { models: Record<string, Record<string, unknown>> }>;
+      };
+      const model = doc.provider["opencode-provider"]?.models["opencode-model-1"] ?? {};
+      assert.equal(model.limit, undefined);
+      assert.equal(model.attachment, true);
+      assert.equal(model.name, "Default Model");
     });
 
     it("applies a Kimi provider into providers/models/default_model", async () => {

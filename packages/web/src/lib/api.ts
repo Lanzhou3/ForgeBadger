@@ -1802,6 +1802,17 @@ export async function getProjectWorkspaceFile(
   return fetchJson(projectWorkspacePath(id, `/file?${searchParams.toString()}`)) as Promise<WorkspaceFileSnapshot>;
 }
 
+export async function putProjectWorkspaceFile(
+  id: string,
+  filePath: string,
+  content: string
+): Promise<WorkspaceFileSnapshot> {
+  return fetchJson(projectWorkspacePath(id, "/file"), {
+    method: "PUT",
+    body: JSON.stringify({ path: filePath, content })
+  }) as Promise<WorkspaceFileSnapshot>;
+}
+
 // ---- Project graph (read-only CodeGraph index) ----
 
 export interface GraphDistributionEntry {

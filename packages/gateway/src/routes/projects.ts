@@ -26,7 +26,7 @@ import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import type { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
 import type { CredentialMode, WriteResult } from "../config-generation/types.js";
 import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } from "../services/project-ai-config.js";
-import { listWorkspaceTree, readWorkspaceFile } from "../services/workspace-context.js";
+import { listWorkspaceTree, maxFileWriteBytes, readWorkspaceFile, writeWorkspaceFile } from "../services/workspace-context.js";
 import { getProjectGitChanges, getProjectGitFileDiff } from "../services/project-git.js";
 import { recordActivity } from "../services/activity-events.js";
 import { buildConfigSyncSummary, buildProjectConfigRenderPlan } from "../services/project-config-render.js";
@@ -92,6 +92,11 @@ const workspaceTreeQuerySchema = z.object({
 
 const workspaceFileQuerySchema = z.object({
   path: z.string().min(1).max(512)
+}).strict();
+
+const workspaceFileWriteSchema = z.object({
+  path: z.string().min(1).max(512),
+  content: z.string().max(maxFileWriteBytes)
 }).strict();
 
 const gitDiffQuerySchema = z.object({
@@ -913,6 +918,43 @@ export function createProjectRoutes(
       res.status(400).json({
         code: 1,
         message: error instanceof Error ? error.message : "Workspace file read failed"
+      });
+    }
+  });
+
+  router.put("/:id/workspace/file", async (req, res) => {
+    const parseResult = workspaceFileWriteSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const projectRepo = new ProjectRepository(db, userId);
+    const project = projectRepo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const file = await writeWorkspaceFile(
+        project.path,
+        parseResult.data.path,
+        parseResult.data.content
+      );
+      res.json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          ...file
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Workspace file write failed"
       });
     }
   });
