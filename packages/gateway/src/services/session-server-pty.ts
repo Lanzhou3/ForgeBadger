@@ -14,8 +14,6 @@ import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 
-import type { IPty } from "node-pty";
-
 import { performClientHello } from "./session-server/hello-handshake.js";
 import {
   readSessionServerTokenFile,
@@ -30,6 +28,11 @@ export interface SessionServerPtyOptions {
   connectTimeoutMs?: number;
 }
 
+/** Result of a successful attach: the full rendered snapshot to replay. */
+export interface SessionServerAttachResult {
+  snapshot: string | undefined;
+}
+
 interface PtyEventMap {
   data: (data: string) => void;
   exit: (event: { exitCode: number; signal?: number }) => void;
@@ -39,6 +42,8 @@ interface PtyEventMap {
    * reconnect/unreachable path and must never report exit code 0.
    */
   transportClose: () => void;
+  /** A client_resize the server rejected or never answered. */
+  resizeError: (error: Error) => void;
 }
 
 export class SessionServerPty {
@@ -52,6 +57,19 @@ export class SessionServerPty {
   private readonly connectTimeoutMs: number;
   private exited = false;
   private detached = false;
+  private attachWaiter: {
+    resolve: (result: SessionServerAttachResult) => void;
+    reject: (reason: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | undefined;
+  /**
+   * Output received before the attach ack is consumed is buffered and emitted
+   * right after connect() resolves, so replay order stays
+   * snapshot -> attach-window output -> live stream.
+   */
+  private preLiveData: string[] = [];
+  private liveData = false;
+  private readonly pendingResize = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(options: SessionServerPtyOptions) {
     this.ipcPath = options.ipcPath;
@@ -62,11 +80,13 @@ export class SessionServerPty {
 
   /**
    * Connect to the Session Server and attach to the session.
-   * Returns after the IPC connection is established, the hello handshake has
-   * completed, and the attach message has been sent.
+   * Resolves after the IPC connection is established, the hello handshake has
+   * completed, and the server acknowledged the attach with a rendered
+   * snapshot; rejects with the server's explicit error when the attach fails
+   * (e.g. unknown session) instead of leaving the terminal black.
    */
-  async connect(): Promise<void> {
-    if (this.socket) return;
+  async connect(): Promise<SessionServerAttachResult> {
+    if (this.socket) return { snapshot: undefined };
 
     const socket = new Socket();
     await this.waitConnected(socket);
@@ -83,12 +103,50 @@ export class SessionServerPty {
     this.socket = socket;
     this.setupSocket(socket);
 
-    // Send attach message
-    this.sendIpc({
-      type: "attach_client",
-      sessionId: this.sessionId,
-      clientId: this.clientId
+    const result = await this.waitAttachAck(socket);
+    // Flush after the caller's continuation has registered onData listeners
+    // (promise microtasks run before this setImmediate macrotask).
+    setImmediate(() => this.flushPreLiveData());
+    return result;
+  }
+
+  private waitAttachAck(socket: Socket): Promise<SessionServerAttachResult> {
+    return new Promise<SessionServerAttachResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.attachWaiter = undefined;
+        socket.destroy();
+        reject(new Error(`Session Server attach timed out after ${this.connectTimeoutMs}ms`));
+      }, this.connectTimeoutMs);
+
+      this.attachWaiter = {
+        resolve: (result) => {
+          clearTimeout(timer);
+          this.attachWaiter = undefined;
+          resolve(result);
+        },
+        reject: (reason) => {
+          clearTimeout(timer);
+          this.attachWaiter = undefined;
+          socket.destroy();
+          reject(reason);
+        },
+        timer
+      };
+
+      this.sendIpc({
+        type: "attach_client",
+        sessionId: this.sessionId,
+        clientId: this.clientId
+      });
     });
+  }
+
+  private flushPreLiveData(): void {
+    const pending = this.preLiveData.splice(0);
+    this.liveData = true;
+    for (const data of pending) {
+      this.emitter.emit("data", data);
+    }
   }
 
   private waitConnected(socket: Socket): Promise<void> {
@@ -124,12 +182,22 @@ export class SessionServerPty {
   }
 
   /**
-   * Resize the session's pty window.
+   * Resize the session's pty window. The server answers the request (the
+   * message carries an id); failures surface via onResizeError instead of
+   * being silently dropped.
    */
   resize(cols: number, rows: number): void {
-    if (this.exited) return;
+    if (this.exited || !this.socket) return;
+    const id = randomUUID();
+    const timer = setTimeout(() => {
+      this.pendingResize.delete(id);
+      this.emitter.emit("resizeError", new Error(`resize ${cols}x${rows} timed out`));
+    }, this.connectTimeoutMs);
+    timer.unref?.();
+    this.pendingResize.set(id, timer);
     this.sendIpc({
       type: "client_resize",
+      id,
       sessionId: this.sessionId,
       clientId: this.clientId,
       cols,
@@ -170,6 +238,14 @@ export class SessionServerPty {
     return { dispose: () => this.emitter.off("transportClose", listener) };
   }
 
+  /**
+   * Subscribe to rejected/unanswered resize requests.
+   */
+  onResizeError(listener: PtyEventMap["resizeError"]): { dispose: () => void } {
+    this.emitter.on("resizeError", listener);
+    return { dispose: () => this.emitter.off("resizeError", listener) };
+  }
+
   // ------------------------------------------------------------------
   // Internal
   // ------------------------------------------------------------------
@@ -191,6 +267,9 @@ export class SessionServerPty {
 
     socket.on("close", () => {
       this.socket = undefined;
+      this.clearPendingResize();
+      // A pending attach must reject, not hang until its own timeout.
+      this.attachWaiter?.reject(new Error("Session Server connection closed during attach"));
       // A session_exit message marks a real CLI exit. A transport close
       // without one means the daemon (or the connection) died — surface it
       // as transport loss, never as exit code 0.
@@ -203,16 +282,48 @@ export class SessionServerPty {
     });
   }
 
+  private clearPendingResize(): void {
+    for (const [, timer] of this.pendingResize) {
+      clearTimeout(timer);
+    }
+    this.pendingResize.clear();
+  }
+
   private handleMessage(line: string): void {
-    let msg: { type: string; sessionId?: string; clientId?: string; data?: string; exitCode?: number };
+    let msg: {
+      type: string;
+      id?: string;
+      sessionId?: string;
+      clientId?: string;
+      data?: string;
+      exitCode?: number;
+      ok?: boolean;
+      snapshot?: string;
+      error?: string;
+      message?: string;
+    };
     try {
       msg = JSON.parse(line);
     } catch {
       return;
     }
 
+    if (msg.type === "attach_ack" && msg.clientId === this.clientId) {
+      if (msg.ok) {
+        this.attachWaiter?.resolve({ snapshot: msg.snapshot });
+      } else {
+        this.attachWaiter?.reject(new Error(msg.error ?? "attach rejected"));
+      }
+      return;
+    }
+
     if (msg.type === "client_output" && msg.sessionId === this.sessionId && msg.clientId === this.clientId) {
-      this.emitter.emit("data", msg.data ?? "");
+      const data = msg.data ?? "";
+      if (this.liveData) {
+        this.emitter.emit("data", data);
+      } else {
+        this.preLiveData.push(data);
+      }
       return;
     }
 
@@ -222,13 +333,23 @@ export class SessionServerPty {
       return;
     }
 
-    // I/O-stream messages (attach_client / client_input / client_resize)
-    // carry no `id`, so the ipc-server replies with id:"" on failure. Surface
-    // those instead of silently dropping them — a failed attach or input
-    // write is otherwise invisible (the terminal just goes black/unresponsive).
+    // Resize receipts (client_resize carries an id).
+    if ((msg.type === "ok" || msg.type === "error") && msg.id && this.pendingResize.has(msg.id)) {
+      const timer = this.pendingResize.get(msg.id);
+      if (timer) clearTimeout(timer);
+      this.pendingResize.delete(msg.id);
+      if (msg.type === "error") {
+        this.emitter.emit("resizeError", new Error(msg.message ?? "resize rejected"));
+      }
+      return;
+    }
+
+    // Remaining I/O-stream failures (input/write errors carry no id). Surface
+    // them instead of silently dropping — a failed input write is otherwise
+    // invisible (the terminal just goes unresponsive).
     if (msg.type === "error") {
       console.error(
-        `[session-server-pty] error for session ${this.sessionId}: ${(msg as { message?: string }).message ?? "unknown"}`
+        `[session-server-pty] error for session ${this.sessionId}: ${msg.message ?? "unknown"}`
       );
     }
   }

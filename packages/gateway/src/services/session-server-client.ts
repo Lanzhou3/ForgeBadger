@@ -336,17 +336,6 @@ export class SessionServerClient implements TmuxClient {
     });
   }
 
-  async configureSession(name: string): Promise<void> {
-    // No-op in the new architecture — tmux session configuration is not needed.
-    // The IPC call exists for interface compatibility.
-    const sessionId = this.nameToSessionId.get(name) ?? name;
-    await this.sendRequest({
-      id: randomUUID(),
-      type: "configure_session",
-      sessionId
-    });
-  }
-
   async killSession(name: string): Promise<void> {
     const sessionId = this.nameToSessionId.get(name) ?? name;
     this.nameToSessionId.delete(name);
@@ -426,7 +415,9 @@ export class SessionServerClient implements TmuxClient {
     return {
       content: result.content,
       dead: result.dead,
-      inMode: result.inMode
+      // The session-server backend has no copy-mode concept; the legacy
+      // TmuxPaneSnapshot interface still requires the field until P4.
+      inMode: false
     };
   }
 

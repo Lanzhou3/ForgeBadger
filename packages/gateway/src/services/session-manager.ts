@@ -297,8 +297,6 @@ export class InMemorySessionManager {
       }
     }
 
-    await this.tmux.configureSession?.(input.tmuxName);
-
     const now = new Date().toISOString();
     const session: GateASession = {
       id: input.sessionId,
@@ -497,7 +495,7 @@ export class InMemorySessionManager {
       const lease = this.writerLeases.acquire({ userId: session.userId, sessionId: id, workspace: session.launchPlan.cwd });
       try {
         const before = await this.tmux.inspectPane(session.tmuxName);
-        if (before.dead || before.inMode || !isProgrammaticComposerReady(input.adapter, before.content)) {
+        if (before.dead || !isProgrammaticComposerReady(input.adapter, before.content)) {
           throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
         }
 
@@ -520,7 +518,6 @@ export class InMemorySessionManager {
           const staged = await this.tmux.inspectPane(session.tmuxName);
           if (
             staged.dead
-            || staged.inMode
             || !composerContainsStagedTask(input.adapter, staged.content, input.message, needle)
           ) {
             throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
@@ -591,10 +588,6 @@ export class InMemorySessionManager {
       if (this.sessions.has(indexedSession.id)) {
         continue;
       }
-
-      // tmux outlives Gateway restarts, so bring recovered sessions up to the
-      // current scrolling and history defaults before exposing them again.
-      await this.tmux.configureSession?.(tmuxName);
 
       const now = new Date().toISOString();
       const attachToken = indexedSession.attachToken ?? randomUUID();

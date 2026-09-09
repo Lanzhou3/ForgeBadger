@@ -121,12 +121,6 @@ export interface PressEnterRequest {
   sessionId: string;
 }
 
-export interface ConfigureSessionRequest {
-  id: string;
-  type: "configure_session";
-  sessionId: string;
-}
-
 /**
  * Ask the daemon to destroy every session and exit. This is an explicit
  * maintenance path (tests, future CLI commands) — the Gateway's normal
@@ -149,7 +143,6 @@ export type ManagementRequest =
   | InspectPaneRequest
   | StageProgrammaticInputRequest
   | PressEnterRequest
-  | ConfigureSessionRequest
   | ShutdownServerRequest;
 
 // ---------------------------------------------------------------------------
@@ -196,9 +189,12 @@ export interface ClientInputMessage {
   data: string;
 }
 
-/** Gateway → Session Server: terminal resize from a client */
+/** Gateway → Session Server: terminal resize from a client. When `id` is
+ *  present the server answers with an ok/error receipt (resize failures must
+ *  surface, never silently drop). */
 export interface ClientResizeMessage {
   type: "client_resize";
+  id?: string;
   sessionId: string;
   clientId: string;
   cols: number;
@@ -219,6 +215,21 @@ export interface ClientOutputMessage {
   data: string;
 }
 
+/**
+ * Session Server → Gateway: attach receipt. Carries the full rendered
+ * snapshot (scrollback + screen + modes/cursor) on success so the client can
+ * replay history without a separate capture round-trip; on failure carries
+ * an explicit error instead of leaving the terminal black.
+ */
+export interface AttachAckMessage {
+  type: "attach_ack";
+  sessionId: string;
+  clientId: string;
+  ok: boolean;
+  snapshot?: string;
+  error?: string;
+}
+
 /** Session Server → Gateway: the session's CLI process exited */
 export interface SessionExitMessage {
   type: "session_exit";
@@ -226,7 +237,7 @@ export interface SessionExitMessage {
   exitCode: number;
 }
 
-export type IoStreamResponse = ClientOutputMessage | SessionExitMessage;
+export type IoStreamResponse = ClientOutputMessage | AttachAckMessage | SessionExitMessage;
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -244,7 +255,6 @@ export interface LaunchPlanPayload {
 export interface PaneSnapshot {
   content: string;
   dead: boolean;
-  inMode: boolean;
 }
 
 export interface SessionInfo {

@@ -320,7 +320,7 @@ describe("session env sanitization", () => {
       const start = Date.now();
       while (!content.includes("PATH") && Date.now() - start < 10_000) {
         await new Promise((r) => setTimeout(r, 100));
-        content = server.capturePane("env-check");
+        content = await server.capturePane("env-check");
       }
       assert.ok(content.includes("PATH"), `expected sanitized PATH in pty env, got: ${content.slice(0, 500)}`);
       assert.ok(!content.includes("FORGEBADGER_MASTER_KEY"), "pty env leaked FORGEBADGER_MASTER_KEY");

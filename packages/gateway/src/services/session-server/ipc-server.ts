@@ -20,6 +20,7 @@ import { timingSafeEqual } from "node:crypto";
 import { dirname } from "node:path";
 
 import { SessionServer } from "./session-server.js";
+import { clientPauseSource } from "./session-handle.js";
 import { startSocketSelfCheck } from "./socket-self-check.js";
 import {
   PROTOCOL_VERSION,
@@ -36,6 +37,12 @@ import { createPlatformAdapter } from "./platform-adapter.js";
 const MAX_LINE_BYTES = 4 * 1024 * 1024;
 /** Per-connection buffered-bytes limit while waiting for a newline. */
 const MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+/**
+ * Per-client outbound buffer hard cap (socket.writableLength). A slow
+ * consumer past this point is disconnected so it cannot OOM the daemon; the
+ * pty-level pause below it already gives honest clients flow control.
+ */
+const MAX_CLIENT_BUFFER_BYTES = 4 * 1024 * 1024;
 const DEFAULT_HELLO_TIMEOUT_MS = 2000;
 
 export interface IpcServerOptions {
@@ -53,6 +60,8 @@ export interface IpcServerOptions {
   onShutdownRequested?: () => void;
   /** Daemon start time reported in hello_ok (test hook for restart detection). */
   startedAt?: string;
+  /** Per-client outbound buffer hard cap in bytes (test hook; default 4MiB). */
+  maxClientBufferBytes?: number;
 }
 
 interface ConnectionState {
@@ -69,7 +78,12 @@ export class IpcServer {
   private readonly helloTimeoutMs: number;
   private readonly startedAt: string;
   private readonly onShutdownRequested: (() => void) | undefined;
+  private readonly maxClientBufferBytes: number;
   private readonly clients = new Map<string, Socket>();
+  /** clientId -> sessionId, for targeted session_exit and socket cleanup. */
+  private readonly clientSessions = new Map<string, string>();
+  /** clientIds whose socket is currently applying backpressure. */
+  private readonly slowClients = new Set<string>();
   /** Every live connection (management + I/O), so stop() can close them all. */
   private readonly connections = new Set<Socket>();
 
@@ -80,6 +94,7 @@ export class IpcServer {
     this.helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
     this.startedAt = options.startedAt ?? new Date().toISOString();
     this.onShutdownRequested = options.onShutdownRequested;
+    this.maxClientBufferBytes = options.maxClientBufferBytes ?? MAX_CLIENT_BUFFER_BYTES;
   }
 
   async start(): Promise<void> {
@@ -100,19 +115,22 @@ export class IpcServer {
         clientId,
         data
       };
-      this.sendToClient(clientId, msg);
+      this.sendToClient(sessionId, clientId, msg);
     };
 
-    // Set up session exit relay
+    // Set up session exit relay — targeted: only clients attached to the
+    // exiting session are notified (broadcasting would leak session names
+    // across sessions sharing the daemon).
     this.sessionServer.onSessionExit = (sessionId, exitCode) => {
       const msg: IoStreamResponse = {
         type: "session_exit",
         sessionId,
         exitCode
       };
-      // Broadcast to all clients of this session
-      for (const [clientId, socket] of this.clients) {
-        if (socket.writable) {
+      const targets = this.sessionServer.getSession(sessionId)?.getClients() ?? [];
+      for (const clientId of targets) {
+        const socket = this.clients.get(clientId);
+        if (socket?.writable) {
           this.writeSocket(socket, msg);
         }
       }
@@ -149,6 +167,8 @@ export class IpcServer {
     }
     this.connections.clear();
     this.clients.clear();
+    this.clientSessions.clear();
+    this.slowClients.clear();
 
     await new Promise<void>((resolve) => {
       this.server!.close(() => resolve());
@@ -195,6 +215,9 @@ export class IpcServer {
 
   private handleConnection(socket: Socket): void {
     this.connections.add(socket);
+    // Decode multibyte UTF-8 at the stream layer; raw chunk.toString() would
+    // splice a replacement character when a character straddles two chunks.
+    socket.setEncoding("utf8");
     const state: ConnectionState = { authenticated: false, buffer: "", bufferedBytes: 0 };
     const helloTimer = setTimeout(() => {
       if (!state.authenticated) {
@@ -202,19 +225,37 @@ export class IpcServer {
       }
     }, this.helloTimeoutMs);
 
-    socket.on("data", (chunk: Buffer) => {
+    socket.on("data", (chunk: string) => {
       if (!this.appendChunk(socket, state, chunk)) return;
       this.drainLines(socket, state, helloTimer);
+    });
+
+    socket.on("drain", () => {
+      // A slow I/O client caught up: release its pty pause.
+      for (const [clientId, s] of this.clients) {
+        if (s !== socket || !this.slowClients.has(clientId)) continue;
+        this.slowClients.delete(clientId);
+        const sessionId = this.clientSessions.get(clientId);
+        if (sessionId) {
+          this.sessionServer.resumeSessionOutput(sessionId, clientPauseSource(clientId));
+        }
+      }
     });
 
     const cleanup = () => {
       clearTimeout(helloTimer);
       this.connections.delete(socket);
       // Remove every clientId entry that still points at this socket —
-      // attach_client maps clientId → socket, and both must be reaped.
+      // attach_client maps clientId → socket, and both must be reaped. The
+      // detach also releases any backpressure pause the client was holding.
       for (const [clientId, s] of this.clients) {
-        if (s === socket) {
-          this.clients.delete(clientId);
+        if (s !== socket) continue;
+        this.clients.delete(clientId);
+        this.slowClients.delete(clientId);
+        const sessionId = this.clientSessions.get(clientId);
+        this.clientSessions.delete(clientId);
+        if (sessionId) {
+          this.sessionServer.detachClient(sessionId, clientId);
         }
       }
     };
@@ -225,9 +266,9 @@ export class IpcServer {
 
   /** Append a chunk to the connection buffer; returns false when the socket
    *  was destroyed for exceeding an inbound limit. */
-  private appendChunk(socket: Socket, state: ConnectionState, chunk: Buffer): boolean {
-    state.buffer += chunk.toString("utf8");
-    state.bufferedBytes += chunk.length;
+  private appendChunk(socket: Socket, state: ConnectionState, chunk: string): boolean {
+    state.buffer += chunk;
+    state.bufferedBytes += Buffer.byteLength(chunk, "utf8");
     if (state.bufferedBytes > MAX_BUFFER_BYTES && !state.buffer.includes("\n")) {
       console.error("[ipc-server] closing connection: buffered bytes exceeded limit");
       socket.destroy();
@@ -364,8 +405,6 @@ export class IpcServer {
         return this.handleStageProgrammaticInput(msg);
       case "press_enter":
         return this.handlePressEnter(msg);
-      case "configure_session":
-        return this.handleConfigureSession(msg);
       case "shutdown_server":
         return this.handleShutdownServer(msg, socket);
       case "attach_client":
@@ -415,7 +454,7 @@ export class IpcServer {
   }
 
   private async handleCapturePane(msg: import("./ipc-protocol.js").CapturePaneRequest): Promise<ManagementResponse> {
-    const content = this.sessionServer.capturePane(msg.sessionId);
+    const content = await this.sessionServer.capturePane(msg.sessionId);
     return { id: msg.id, type: "ok", data: { content } };
   }
 
@@ -435,7 +474,7 @@ export class IpcServer {
   }
 
   private async handleInspectPane(msg: import("./ipc-protocol.js").InspectPaneRequest): Promise<ManagementResponse> {
-    const snapshot = this.sessionServer.inspectPane(msg.sessionId);
+    const snapshot = await this.sessionServer.inspectPane(msg.sessionId);
     return { id: msg.id, type: "ok", data: snapshot };
   }
 
@@ -446,11 +485,6 @@ export class IpcServer {
 
   private async handlePressEnter(msg: import("./ipc-protocol.js").PressEnterRequest): Promise<ManagementResponse> {
     this.sessionServer.pressEnter(msg.sessionId);
-    return { id: msg.id, type: "ok" };
-  }
-
-  private async handleConfigureSession(msg: import("./ipc-protocol.js").ConfigureSessionRequest): Promise<ManagementResponse> {
-    this.sessionServer.configureSession(msg.sessionId);
     return { id: msg.id, type: "ok" };
   }
 
@@ -473,16 +507,56 @@ export class IpcServer {
   // I/O stream handlers
   // ------------------------------------------------------------------
 
+  /**
+   * Attach is request/response: the ack carries the full rendered snapshot
+   * (so the client can replay history with no separate capture round-trip),
+   * then the server flushes output buffered during the attach window, then
+   * streams live. A failed attach gets an explicit error — never a black
+   * screen.
+   */
   private async handleAttachClient(msg: import("./ipc-protocol.js").AttachClientMessage, socket: Socket): Promise<null> {
+    let snapshot: string;
+    try {
+      ({ snapshot } = await this.sessionServer.attachClient(msg.sessionId, msg.clientId));
+    } catch (error) {
+      this.writeSocket(socket, {
+        type: "attach_ack",
+        sessionId: msg.sessionId,
+        clientId: msg.clientId,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return null;
+    }
+
     this.clients.set(msg.clientId, socket);
-    this.sessionServer.attachClient(msg.sessionId, msg.clientId);
-    return null; // No response — output comes via streaming
+    this.clientSessions.set(msg.clientId, msg.sessionId);
+    this.writeSocket(socket, {
+      type: "attach_ack",
+      sessionId: msg.sessionId,
+      clientId: msg.clientId,
+      ok: true,
+      snapshot
+    });
+    // Flush the attach-window buffer, then the handle streams live.
+    const buffered = this.sessionServer.endClientBuffering(msg.sessionId, msg.clientId);
+    for (const data of buffered) {
+      this.sendToClient(msg.sessionId, msg.clientId, {
+        type: "client_output",
+        sessionId: msg.sessionId,
+        clientId: msg.clientId,
+        data
+      });
+    }
+    return null;
   }
 
   private async handleDetachClient(msg: import("./ipc-protocol.js").DetachClientMessage): Promise<null> {
     // Only drop the registry entry if it still points at this connection —
     // a re-attached client (new socket, same id) must not be clobbered.
     this.clients.delete(msg.clientId);
+    this.clientSessions.delete(msg.clientId);
+    this.slowClients.delete(msg.clientId);
     this.sessionServer.detachClient(msg.sessionId, msg.clientId);
     return null;
   }
@@ -492,24 +566,39 @@ export class IpcServer {
     return null;
   }
 
-  private async handleClientResize(msg: import("./ipc-protocol.js").ClientResizeMessage): Promise<null> {
+  private async handleClientResize(msg: import("./ipc-protocol.js").ClientResizeMessage): Promise<ManagementResponse | null> {
     this.sessionServer.resizeWindow(msg.sessionId, msg.cols, msg.rows);
-    return null;
+    // Ack when the client asked for one — resize failures must surface.
+    return msg.id ? { id: msg.id, type: "ok" } : null;
   }
 
   // ------------------------------------------------------------------
   // Socket utilities
   // ------------------------------------------------------------------
 
-  private sendToClient(clientId: string, msg: IoStreamResponse): void {
+  /**
+   * Data-plane backpressure: when a client's socket buffer fills, pause the
+   * session's pty reads (multiple clients share one pty — the slowest wins);
+   * when the per-client buffer exceeds the hard cap, disconnect that client
+   * so a stuck consumer cannot exhaust daemon memory.
+   */
+  private sendToClient(sessionId: string, clientId: string, msg: IoStreamResponse): void {
     const socket = this.clients.get(clientId);
-    if (socket?.writable) {
-      this.writeSocket(socket, msg);
+    if (!socket?.writable) return;
+    const accepted = this.writeSocket(socket, msg);
+    if (socket.writableLength > this.maxClientBufferBytes) {
+      console.error(`[ipc-server] closing client ${clientId}: outbound buffer exceeded ${this.maxClientBufferBytes} bytes`);
+      socket.destroy();
+      return;
+    }
+    if (!accepted && !this.slowClients.has(clientId)) {
+      this.slowClients.add(clientId);
+      this.sessionServer.pauseSessionOutput(sessionId, clientPauseSource(clientId));
     }
   }
 
-  private writeSocket<T>(socket: Socket, msg: T): void {
-    socket.write(`${JSON.stringify(msg)}\n`);
+  private writeSocket<T>(socket: Socket, msg: T): boolean {
+    return socket.write(`${JSON.stringify(msg)}\n`);
   }
 }
 

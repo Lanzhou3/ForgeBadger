@@ -354,27 +354,10 @@ async function handleTerminalSocket(
         return;
       }
       resizeBuffer.applyOrStore(pty, message.payload.cols, message.payload.rows);
-      void sessionManager.resizeSession(sessionId, message.payload.cols, message.payload.rows).catch((error) => {
-        console.error(`[terminal-ws] resize-window failed for session ${sessionId}`, error);
-      });
     } catch (error) {
       ws.send(JSON.stringify({ type: "terminal_error", payload: { message: formatTerminalClientError(error) } }));
     }
   });
-
-  // Restore scrollback history before connecting to the Session Server.
-  try {
-    const history = await sessionManager.captureHistory(sessionId);
-    if (!authorizationLease.isAuthorized()) return;
-    if (ws.readyState !== WebSocket.OPEN) return;
-    if (history) {
-      ws.send(JSON.stringify({ type: "terminal_history", payload: { data: history } }));
-    }
-  } catch {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "terminal_error", payload: { message: "Terminal history restore failed" } }));
-    }
-  }
 
   // Connect to the Session Server via IPC
   if (!sessionServerIpcPath) {
@@ -383,20 +366,26 @@ async function handleTerminalSocket(
     return;
   }
 
+  let snapshot: string | undefined;
   try {
     if (!authorizationLease.isAuthorized()) return;
     // The session-server registry is keyed by the tmux-style name
     // (session-manager's buildTmuxName), not the raw database UUID —
     // SessionServerClient.createSession registers sessions under that name.
     // Using the raw UUID here would cause attach/input/resize to target a
-    // session that doesn't exist, silently (the session-server responds with
-    // an error message that SessionServerPty.handleMessage ignores).
+    // session that doesn't exist.
     const serverPty = new SessionServerPty({
       ipcPath: sessionServerIpcPath,
       sessionId: session.tmuxName,
       ...(sessionServerToken !== undefined ? { token: sessionServerToken } : {})
     });
-    await serverPty.connect();
+    // connect() resolves on the attach ack; the server replays history via
+    // the ack's rendered snapshot (scrollback + screen + cursor state), so
+    // no separate captureHistory round-trip is needed — that would double
+    // the replay. A rejected attach (unknown session) surfaces here instead
+    // of leaving a black terminal.
+    const attachResult = await serverPty.connect();
+    snapshot = attachResult.snapshot;
     pty = serverPty;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -404,6 +393,13 @@ async function handleTerminalSocket(
     ws.send(JSON.stringify({ type: "terminal_error", payload: { message: `Terminal attach failed: ${detail}` } }));
     ws.close(1011, "session server attach failed");
     return;
+  }
+
+  // Replay the rendered snapshot before going live. Output produced during
+  // the attach window is buffered inside SessionServerPty and emitted right
+  // after the onData listener registers below.
+  if (snapshot && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "terminal_history", payload: { data: snapshot } }));
   }
 
   const activePty = pty;
@@ -435,6 +431,15 @@ async function handleTerminalSocket(
     void sessionManager.reconcileSessionStatus(sessionId).catch((error) => {
       console.error(`[terminal-ws] reconcile failed for session ${sessionId}`, error);
     });
+  });
+
+  // Resize failures must surface (aligned with the old "resize throws"
+  // contract) instead of leaving pty and renderer at different geometries.
+  pty.onResizeError((error) => {
+    console.error(`[terminal-ws] resize failed for session ${sessionId}`, error);
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "terminal_error", payload: { message: `Terminal resize failed: ${error.message}` } }));
+    }
   });
 
   // Transport loss (daemon crash / IPC failure) is not a process exit:

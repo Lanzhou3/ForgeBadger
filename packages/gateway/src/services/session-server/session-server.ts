@@ -3,25 +3,34 @@
  *
  * Replaces tmux/psmux with direct node-pty management:
  *   - Spawns CLI processes via node-pty
- *   - Maintains in-memory scrollback (ring buffer)
- *   - Handles multi-client attach/detach
+ *   - Renders every session through a headless terminal screen
+ *     (capture/inspect/replay read the rendered screen)
+ *   - Handles multi-client attach/detach with attach-window buffering
  *   - Provides session lifecycle (create/kill/list/inspect)
  *
  * The Session Server runs as a standalone Node.js process and communicates
  * with the Gateway via IPC (Unix Domain Socket / Named Pipe).
  */
-import type { IPty } from "node-pty";
+import { setImmediate as setImmediateCb } from "node:timers";
 
 import { createPlatformAdapter, disposePty, type PlatformPtyAdapter } from "./platform-adapter.js";
 import { SessionHandle } from "./session-handle.js";
-import { OutputRingBuffer } from "./output-ring-buffer.js";
 import { buildSanitizedEnv } from "./env-policy.js";
 import type { LaunchPlanPayload, PaneSnapshot, SessionInfo } from "./ipc-protocol.js";
 
 export interface SessionServerOptions {
   platformAdapter?: PlatformPtyAdapter;
+  /** Headless screen scrollback per session (test hook; default 10000). */
+  scrollback?: number;
+  /** Write-queue watermark tuning per session (test hook; 2MiB/512KiB default). */
+  screenFlowControl?: { highWaterBytes: number; lowWaterBytes: number };
   onSessionExit?: ((sessionId: string, exitCode: number) => void) | undefined;
   onSessionOutput?: ((sessionId: string, clientId: string, data: string) => void) | undefined;
+}
+
+export interface AttachResult {
+  /** Full rendered snapshot (scrollback + screen + modes) for replay. */
+  snapshot: string;
 }
 
 export class SessionServer {
@@ -29,6 +38,8 @@ export class SessionServer {
   /** Session IDs with a createSession call in flight (guards the await gap). */
   private readonly pendingCreates = new Set<string>();
   private readonly platformAdapter: PlatformPtyAdapter;
+  private readonly scrollback: number | undefined;
+  private readonly screenFlowControl: { highWaterBytes: number; lowWaterBytes: number } | undefined;
   /** Callback for session exit events — settable via setter for IpcServer wiring. */
   private _onSessionExit?: ((sessionId: string, exitCode: number) => void) | undefined;
   /** Callback for session output events — settable via setter for IpcServer wiring. */
@@ -36,6 +47,8 @@ export class SessionServer {
 
   constructor(options: SessionServerOptions = {}) {
     this.platformAdapter = options.platformAdapter ?? createPlatformAdapter();
+    this.scrollback = options.scrollback;
+    this.screenFlowControl = options.screenFlowControl;
     this._onSessionExit = options.onSessionExit;
     this._onSessionOutput = options.onSessionOutput;
   }
@@ -119,20 +132,22 @@ export class SessionServer {
       env
     });
 
-    const ringBuffer = new OutputRingBuffer();
     const handle = new SessionHandle({
       sessionId,
       userId,
       attachToken,
       ownerSessionId: launchPlan.env.FORGEBADGER_SESSION_ID,
       pty,
-      ringBuffer
+      scrollback: this.scrollback,
+      screenFlowControl: this.screenFlowControl
     });
 
-    // Forward pty output to ring buffer and attached clients
+    // Feed the headless screen and relay to attached clients in one pass.
     pty.onData((data) => {
-      ringBuffer.append(data);
-      this.relayOutputToClients(sessionId, data);
+      handle.screen.write(data);
+      handle.fanOut(data, (clientId, chunk) => {
+        this.onSessionOutput?.(sessionId, clientId, chunk);
+      });
     });
 
     // Handle CLI process exit. disposePty tears down node-pty's leftover
@@ -152,6 +167,7 @@ export class SessionServer {
   async killSession(sessionId: string): Promise<void> {
     const handle = this.requireSession(sessionId);
     handle.kill();
+    handle.disposeResources();
     this.sessions.delete(sessionId);
   }
 
@@ -160,6 +176,7 @@ export class SessionServer {
    * expected to be dead already — this is the natural-exit cleanup path).
    */
   removeSession(sessionId: string): void {
+    this.sessions.get(sessionId)?.disposeResources();
     this.sessions.delete(sessionId);
   }
 
@@ -183,9 +200,10 @@ export class SessionServer {
   // Terminal I/O
   // ------------------------------------------------------------------
 
-  capturePane(sessionId: string): string {
+  /** tmux `capture-pane -e -S -500` equivalent (rendered, ANSI preserved). */
+  capturePane(sessionId: string): Promise<string> {
     const handle = this.requireSession(sessionId);
-    return handle.getScrollback(500);
+    return handle.captureSerialized(500);
   }
 
   showEnvironment(sessionId: string): Record<string, string> {
@@ -213,16 +231,16 @@ export class SessionServer {
     handle.write(data);
   }
 
-  inspectPane(sessionId: string): PaneSnapshot {
+  /** Rendered current-viewport text (for programmatic composer detection). */
+  inspectPane(sessionId: string): Promise<PaneSnapshot> {
     const handle = this.requireSession(sessionId);
-    return handle.getPaneSnapshot();
+    return handle.inspectRendered();
   }
 
+  /** Bracketed-paste staging; the handle validates the payload itself. */
   stageProgrammaticInput(sessionId: string, data: string): void {
-    // In the new architecture, programmatic input is a direct pty write.
-    // No bracketed paste staging needed — we write the data directly.
     const handle = this.requireSession(sessionId);
-    handle.write(data);
+    handle.stageProgrammaticInput(data);
   }
 
   pressEnter(sessionId: string): void {
@@ -230,18 +248,46 @@ export class SessionServer {
     handle.write("\r");
   }
 
-  configureSession(_sessionId: string): void {
-    // No-op in the new architecture. tmux session configuration
-    // (mouse, history-limit, window-size, status) is not needed.
-  }
-
   // ------------------------------------------------------------------
   // Client attach/detach
   // ------------------------------------------------------------------
 
-  attachClient(sessionId: string, clientId: string): void {
+  /**
+   * Attach a client with ordered replay: pause the pty, let in-flight reads
+   * land and the write queue drain, register the client in buffering mode,
+   * take the snapshot, then release. Output produced after registration is
+   * buffered per client; endClientBuffering flushes it after the ack, so the
+   * wire order is snapshot -> buffered output -> live stream with no gap and
+   * no duplication.
+   */
+  async attachClient(sessionId: string, clientId: string): Promise<AttachResult> {
     const handle = this.requireSession(sessionId);
-    handle.addClient(clientId);
+    handle.pauseSource("attach");
+    try {
+      // pty.pause() stops future reads, but data already read by node-pty may
+      // still be delivered; yield a macrotask so it lands in the screen, then
+      // wait for the write queue to drain. Afterwards the client registration
+      // and the snapshot must stay in one synchronous block: a pty data event
+      // cannot interleave, so anything parsed so far is in the snapshot and
+      // anything arriving later is buffered for the post-ack flush — no gap,
+      // no duplication.
+      await new Promise<void>((resolve) => setImmediateCb(resolve));
+      await handle.screen.whenIdle();
+      handle.addClientBuffering(clientId);
+      return { snapshot: handle.screen.serializeSnapshot() };
+    } finally {
+      handle.resumeSource("attach");
+    }
+  }
+
+  /**
+   * Switch an attaching client to live streaming; returns the output buffered
+   * since registration (to be flushed to the client right after the ack).
+   */
+  endClientBuffering(sessionId: string, clientId: string): string[] {
+    const handle = this.sessions.get(sessionId);
+    if (!handle) return [];
+    return handle.endClientBuffering(clientId);
   }
 
   detachClient(sessionId: string, clientId: string): void {
@@ -249,6 +295,20 @@ export class SessionServer {
     if (handle) {
       handle.removeClient(clientId);
     }
+  }
+
+  // ------------------------------------------------------------------
+  // Backpressure (data plane)
+  // ------------------------------------------------------------------
+
+  /** Pause a session's pty reads (slow-client backpressure etc.). */
+  pauseSessionOutput(sessionId: string, source: string): void {
+    this.sessions.get(sessionId)?.pauseSource(source);
+  }
+
+  /** Release a pause source; the pty resumes when every source has cleared. */
+  resumeSessionOutput(sessionId: string, source: string): void {
+    this.sessions.get(sessionId)?.resumeSource(source);
   }
 
   // ------------------------------------------------------------------
@@ -263,19 +323,12 @@ export class SessionServer {
     return handle;
   }
 
-  private relayOutputToClients(sessionId: string, data: string): void {
-    const handle = this.sessions.get(sessionId);
-    if (!handle) return;
-    for (const clientId of handle.getClients()) {
-      this.onSessionOutput?.(sessionId, clientId, data);
-    }
-  }
-
   /** Kill all sessions (called on shutdown). */
   async destroy(): Promise<void> {
     const promises = [...this.sessions.values()].map((handle) => {
       try {
         handle.kill();
+        handle.disposeResources();
       } catch {
         // Ignore errors during shutdown
       }

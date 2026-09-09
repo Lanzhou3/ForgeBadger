@@ -413,7 +413,6 @@ describe("InMemorySessionManager", () => {
   });
 
   it("recovers existing ForgeBadger tmux sessions after Gateway restart", async () => {
-    const configured: string[] = [];
     const store = new MemoryRecoveryStore([
       {
         id: "session_recovered",
@@ -431,9 +430,6 @@ describe("InMemorySessionManager", () => {
       },
       async listSessions() {
         return ["fb-gate-a-u-session_recovered"];
-      },
-      async configureSession(name) {
-        configured.push(name);
       }
     }, store);
 
@@ -445,7 +441,6 @@ describe("InMemorySessionManager", () => {
     assert.equal(recovered.recovered.length, 1);
     assert.equal(recovered.recovered[0]?.id, "session_recovered");
     assert.equal(manager.getSession("session_recovered")?.status, "detached");
-    assert.deepEqual(configured, ["fb-gate-a-u-session_recovered"]);
   });
 
   it("kills ForgeBadger tmux sessions missing from the recovery index", async () => {
@@ -529,7 +524,6 @@ describe("InMemorySessionManager", () => {
 
   it("preserves an existing attach token when reattaching a live tmux session", async () => {
     const store = new MemoryRecoveryStore([]);
-    const configured: string[] = [];
     const manager = new InMemorySessionManager({
       async createSession() {},
       async killSession() {},
@@ -538,9 +532,6 @@ describe("InMemorySessionManager", () => {
       },
       async listSessions() {
         return ["fb-existing-live"];
-      },
-      async configureSession(name) {
-        configured.push(name);
       }
     }, store);
 
@@ -554,7 +545,6 @@ describe("InMemorySessionManager", () => {
 
     assert.equal(session.attachToken, "existing-live-token");
     assert.equal(store.entries[0]?.attachToken, "existing-live-token");
-    assert.deepEqual(configured, ["fb-existing-live"]);
   });
 
   it("serializes per-session lifecycle operations via runExclusive", async () => {

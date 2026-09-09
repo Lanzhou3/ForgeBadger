@@ -1,6 +1,5 @@
 /**
  * Unit tests for the Session Server components:
- *   - OutputRingBuffer
  *   - SessionHandle
  *   - PlatformAdapter
  *   - IPC protocol encoding/decoding
@@ -11,56 +10,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { OutputRingBuffer } from "../src/services/session-server/output-ring-buffer.js";
 import { createPlatformAdapter } from "../src/services/session-server/platform-adapter.js";
 import {
   type CreateSessionRequest,
   type ManagementResponse
 } from "../src/services/session-server/ipc-protocol.js";
-
-describe("OutputRingBuffer", () => {
-  it("buffers data and returns tail", () => {
-    const ring = new OutputRingBuffer();
-    ring.append("line 1\n");
-    ring.append("line 2\n");
-    ring.append("line 3\n");
-
-    const tail = ring.getTail(2);
-    assert.strictEqual(tail.lineCount, 3);
-    assert.strictEqual(tail.output, "line 2\nline 3\n");
-    assert.strictEqual(tail.truncated, false);
-  });
-
-  it("handles empty buffer", () => {
-    const ring = new OutputRingBuffer();
-    const tail = ring.getTail();
-    assert.strictEqual(tail.lineCount, 0);
-    assert.strictEqual(tail.output, "");
-    assert.strictEqual(tail.truncated, false);
-  });
-
-  it("handles output without trailing newline", () => {
-    const ring = new OutputRingBuffer();
-    ring.append("hello");
-    const tail = ring.getTail();
-    assert.strictEqual(tail.output, "hello");
-    assert.strictEqual(tail.lineCount, 1);
-  });
-
-  it("truncates oldest data when exceeding limit", () => {
-    const ring = new OutputRingBuffer();
-    // Append more than MAX_CHARS_PER_SESSION
-    const chunkSize = 100_000;
-    const chunk = "x".repeat(chunkSize);
-    for (let i = 0; i < 15; i++) {
-      ring.append(chunk);
-    }
-
-    assert.strictEqual(ring.length, 1_000_000);
-    const tail = ring.getTail();
-    assert.strictEqual(tail.truncated, true);
-  });
-});
 
 describe("PlatformAdapter", () => {
   it("creates a platform adapter for the current platform", () => {

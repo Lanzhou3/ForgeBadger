@@ -52,7 +52,7 @@ describe("SessionServer core", () => {
     // Give the process time to produce output
     await new Promise((r) => setTimeout(r, 200));
 
-    const scrollback = server.capturePane("sc");
+    const scrollback = await server.capturePane("sc");
     assert.strictEqual(typeof scrollback, "string");
     // scrollback may or may not contain output depending on timing
   });
@@ -79,8 +79,12 @@ describe("SessionServer core", () => {
     const plan = shortPlan(cwd, "echo mc");
 
     await server.createSession({ sessionId: "mc", userId: "u", attachToken: "t", launchPlan: plan });
-    server.attachClient("mc", "c1");
-    server.attachClient("mc", "c2");
+    const attach1 = await server.attachClient("mc", "c1");
+    const attach2 = await server.attachClient("mc", "c2");
+    assert.strictEqual(typeof attach1.snapshot, "string");
+    assert.strictEqual(typeof attach2.snapshot, "string");
+    server.endClientBuffering("mc", "c1");
+    server.endClientBuffering("mc", "c2");
 
     const handle = server.getSession("mc");
     assert.ok(handle);
