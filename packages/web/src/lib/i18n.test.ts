@@ -40,6 +40,16 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "notifications.opencodePermissionRequest")).toBe("OpenCode 权限申请");
     expect(getTranslation("zh-TW", "notifications.opencodePermissionRequest")).toBe("OpenCode 權限申請");
     expect(getTranslation("en", "notifications.opencodePermissionRequest")).toBe("OpenCode permission request");
+    expect(getTranslation("zh-CN", "notifications.claudePermissionDenied")).toBe("Claude Code 权限被拒绝");
+    expect(getTranslation("zh-TW", "notifications.codexPermissionDenied")).toBe("Codex 權限被拒絕");
+    expect(getTranslation("en", "notifications.kimiPermissionDenied")).toBe("Kimi Code permission denied");
+    expect(getTranslation("zh-CN", "notifications.applyProviderSucceeded")).toBe("服务商应用成功");
+    expect(getTranslation("zh-TW", "notifications.applyProviderFailed")).toBe("服務商套用失敗");
+    expect(getTranslation("en", "notifications.modelSyncSucceeded")).toBe("Models synced successfully");
+    expect(getTranslation("zh-CN", "notifications.modelSyncFailed")).toBe("模型同步失败");
+    expect(getTranslation("zh-CN", "notifications.tabAppActions")).toBe("应用操作");
+    expect(getTranslation("zh-TW", "notifications.tabSessionEvents")).toBe("會話事件");
+    expect(getTranslation("en", "notifications.noUnread")).toBe("No unread notifications");
     expect(getTranslation("zh-CN", "nav.members")).toBe("成员");
     expect(getTranslation("zh-TW", "members.accessDeniedTitle")).toBe("需要管理員權限");
     expect(getTranslation("en", "members.admin")).toBe("Admin");

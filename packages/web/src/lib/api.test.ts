@@ -479,6 +479,73 @@ describe("api client", () => {
     );
   });
 
+  it("lists notifications with a category filter and maps app action payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        mockEnvelope({
+          notifications: [
+            {
+              id: "notification-app-1",
+              type: "app_action_notification",
+              category: "app_action",
+              titleKey: "notifications.applyProviderSucceeded",
+              message: "Provider applied",
+              href: "/models",
+              sessionId: null,
+              read: false,
+              createdAt: "2026-05-01T08:00:00.000Z",
+              payload: { action: "apply_provider", status: "success", adapter: "claude" },
+            },
+          ],
+          unreadCount: 1,
+        })
+      )
+    );
+
+    const result = await listNotifications({ category: "app_action" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/notifications?category=app_action",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+    expect(result.unreadCount).toBe(1);
+    expect(result.notifications[0]).toMatchObject({
+      category: "app_action",
+      action: "apply_provider",
+      status: "success",
+      href: "/models",
+    });
+  });
+
+  it("defaults missing notification categories to session_event", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        mockEnvelope({
+          notifications: [
+            {
+              id: "notification-legacy-1",
+              type: "claude_notification",
+              titleKey: "notifications.taskCompleted",
+              message: "done",
+              href: "/sessions/session-1",
+              read: true,
+              createdAt: "2026-05-01T08:00:00.000Z",
+              payload: null,
+            },
+          ],
+          unreadCount: 0,
+        })
+      )
+    );
+
+    const result = await listNotifications();
+
+    expect(result.notifications[0]).toMatchObject({ category: "session_event" });
+    expect(result.notifications[0]?.status).toBeUndefined();
+  });
+
   it("manages admin users through REST", async () => {
     await listAdminUsers();
     await updateAdminUser("user-1", { role: "admin", status: "disabled" });

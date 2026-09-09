@@ -1,5 +1,5 @@
 import { clearToken, clearUser, getToken } from "@/lib/auth";
-import type { StoredNotification } from "@/lib/notifications";
+import type { NotificationCategory, StoredNotification } from "@/lib/notifications";
 import { getGatewayBaseUrl } from "@/lib/runtime-config";
 
 export interface GateASession {
@@ -1304,8 +1304,40 @@ export async function updateAdminUser(
   }) as Promise<{ user: AdminUser }>;
 }
 
-export async function listNotifications(): Promise<NotificationList> {
-  return fetchJson("/api/v1/notifications") as Promise<NotificationList>;
+export interface ListNotificationsOptions {
+  category?: NotificationCategory;
+}
+
+/** REST rows carry the raw event payload; app_action details live inside it. */
+type ServerNotification = Omit<StoredNotification, "category" | "status" | "action"> & {
+  category?: NotificationCategory;
+  payload?: { action?: unknown; status?: unknown } | null;
+};
+
+export async function listNotifications(
+  options: ListNotificationsOptions = {}
+): Promise<NotificationList> {
+  const searchParams = new URLSearchParams();
+  if (options.category) searchParams.set("category", options.category);
+  const query = searchParams.toString();
+  const data = (await fetchJson(
+    `/api/v1/notifications${query ? `?${query}` : ""}`
+  )) as Partial<{ notifications: ServerNotification[]; unreadCount: number }>;
+  return {
+    notifications: (data.notifications ?? []).map(mapServerNotification),
+    unreadCount: data.unreadCount ?? 0,
+  };
+}
+
+function mapServerNotification(notification: ServerNotification): StoredNotification {
+  const status = notification.payload?.status;
+  const action = notification.payload?.action;
+  return {
+    ...notification,
+    category: notification.category ?? "session_event",
+    status: status === "success" || status === "error" ? status : undefined,
+    action: typeof action === "string" && action.length > 0 ? action : undefined,
+  };
 }
 
 export async function listAuditLogs(

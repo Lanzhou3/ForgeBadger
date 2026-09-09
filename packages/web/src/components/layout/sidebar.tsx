@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   LayoutDashboard,
   Bot,
@@ -24,12 +24,14 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
 import { brandAssets } from "@/lib/brand-assets";
 import { useNotifications } from "@/hooks/use-notifications";
+import { formatRelativeTime, latestUnread } from "@/lib/notifications";
 import type { TranslationKey } from "@/lib/i18n";
 
 type NavGroupId = "workspace" | "resources" | "system";
@@ -69,23 +71,97 @@ function groupNavItems(items: NavItem[]) {
     .filter((group) => group.items.length > 0);
 }
 
+function UnreadPreviewPopover({ children }: { children: ReactNode }) {
+  const { t, language } = useLanguage();
+  const { notifications } = useNotifications();
+  const [open, setOpen] = useState(false);
+  const unread = latestUnread(notifications, 5);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <span
+          className="block"
+          onMouseEnter={() => setOpen(true)}
+          onMouseLeave={() => setOpen(false)}
+        >
+          {children}
+        </span>
+      </PopoverTrigger>
+      <PopoverContent
+        side="right"
+        align="start"
+        sideOffset={12}
+        className="w-72 p-0"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
+        <div className="border-b border-border/70 px-3 py-2 text-xs font-semibold text-muted-foreground">
+          {t("notifications.title")}
+        </div>
+        {unread.length === 0 ? (
+          <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+            {t("notifications.noUnread")}
+          </div>
+        ) : (
+          <div className="flex flex-col py-1">
+            {unread.map((notification) => (
+              <Link
+                key={notification.id}
+                href={notification.href}
+                onClick={() => setOpen(false)}
+                className="flex items-start gap-2 rounded px-3 py-2 transition-colors hover:bg-muted/40"
+              >
+                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-brand" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium">
+                    {t(notification.titleKey)}
+                  </span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {notification.message}
+                  </span>
+                  <span className="block text-[11px] text-muted-foreground/70">
+                    {formatRelativeTime(notification.createdAt, language)}
+                  </span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        )}
+        <div className="border-t border-border/70 p-1">
+          <Link
+            href="/notifications"
+            onClick={() => setOpen(false)}
+            className="flex h-8 items-center justify-center rounded text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          >
+            {t("notifications.viewAll")}
+          </Link>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function NavLinkItem({
   item,
   active,
   collapsed,
   unreadCount,
+  unreadPreview = false,
   onNavigate,
 }: {
   item: NavItem;
   active: boolean;
   collapsed: boolean;
   unreadCount: number;
+  unreadPreview?: boolean;
   onNavigate?: () => void;
 }) {
   const { t } = useLanguage();
   const showBadge = item.href === "/notifications" && unreadCount > 0;
 
-  return (
+  const link = (
     <Link
       href={item.href}
       onClick={onNavigate}
@@ -121,9 +197,22 @@ function NavLinkItem({
       )}
     </Link>
   );
+
+  if (item.href !== "/notifications" || collapsed || !unreadPreview) {
+    return link;
+  }
+  return <UnreadPreviewPopover>{link}</UnreadPreviewPopover>;
 }
 
-function NavLinks({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
+function NavLinks({
+  collapsed = false,
+  unreadPreview = false,
+  onNavigate,
+}: {
+  collapsed?: boolean;
+  unreadPreview?: boolean;
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
   const { t } = useLanguage();
   const { unreadCount } = useNotifications();
@@ -150,6 +239,7 @@ function NavLinks({ collapsed = false, onNavigate }: { collapsed?: boolean; onNa
                 active={pathname === item.href || pathname.startsWith(`${item.href}/`)}
                 collapsed={collapsed}
                 unreadCount={unreadCount}
+                unreadPreview={unreadPreview}
                 onNavigate={onNavigate}
               />
             ))}
@@ -287,7 +377,7 @@ export function Sidebar({
         ) : (
           <>
             {BrandHeader}
-            <NavLinks />
+            <NavLinks unreadPreview />
             {UserSection}
           </>
         )}

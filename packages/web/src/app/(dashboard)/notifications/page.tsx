@@ -1,20 +1,34 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { Bell, CheckCheck, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { useLanguage } from "@/hooks/use-language";
 import { useNotifications } from "@/hooks/use-notifications";
-import { notificationContextParts, type StoredNotification } from "@/lib/notifications";
+import {
+  notificationContextParts,
+  type NotificationCategory,
+  type StoredNotification,
+} from "@/lib/notifications";
 import { cn } from "@/lib/utils";
+
+type CategoryFilter = "all" | NotificationCategory;
 
 export default function NotificationsPage() {
   const { t } = useLanguage();
   const { notifications, unreadCount, markRead, markAllRead, clearNotifications } = useNotifications();
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
+
+  const filteredNotifications =
+    categoryFilter === "all"
+      ? notifications
+      : notifications.filter((notification) => notification.category === categoryFilter);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6">
@@ -53,7 +67,18 @@ export default function NotificationsPage() {
         </div>
       </div>
 
-      {notifications.length === 0 ? (
+      <Tabs
+        value={categoryFilter}
+        onValueChange={(value) => setCategoryFilter(value as CategoryFilter)}
+      >
+        <TabsList>
+          <TabsTrigger value="all">{t("notifications.tabAll")}</TabsTrigger>
+          <TabsTrigger value="session_event">{t("notifications.tabSessionEvents")}</TabsTrigger>
+          <TabsTrigger value="app_action">{t("notifications.tabAppActions")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {filteredNotifications.length === 0 ? (
         <Card className="forgebadger-animate-in">
           <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
             <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
@@ -69,13 +94,17 @@ export default function NotificationsPage() {
         </Card>
       ) : (
         <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
-          {notifications.map((notification, index) => (
+          {filteredNotifications.map((notification, index) => (
             <NotificationRow
               key={notification.id}
               notification={notification}
               index={index}
               title={t(notification.titleKey)}
-              openLabel={t("notifications.openSession")}
+              openLabel={
+                notification.category === "app_action"
+                  ? t("notifications.viewDetails")
+                  : t("notifications.openSession")
+              }
               contextLabels={{
                 project: t("notifications.projectContext"),
                 session: t("notifications.sessionContext"),
@@ -122,6 +151,16 @@ function NotificationRow({
       />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
+          {notification.category === "app_action" && notification.status && (
+            <span
+              className={cn(
+                "size-2 shrink-0 rounded-full",
+                notification.status === "success" ? "bg-emerald-400" : "bg-red-400"
+              )}
+              aria-label={notification.status}
+              title={notification.status}
+            />
+          )}
           <span className="text-sm font-medium">{title}</span>
           {notification.adapter && <CliBrandChip aiTool={notification.adapter} />}
           <span className="text-xs text-muted-foreground">
