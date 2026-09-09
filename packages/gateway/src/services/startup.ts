@@ -12,6 +12,7 @@ import {
 } from "./terminal-multiplexer-runtime.js";
 import { ForgeBadgerEventBus } from "./event-bus.js";
 import { cleanupExpiredCliConfigBackups } from "./cli-config-apply.js";
+import type { SessionServerClient } from "./session-server-client.js";
 
 export interface StartupResult {
   db: Database;
@@ -19,12 +20,16 @@ export interface StartupResult {
   apiKeyStore: InMemoryApiKeyStore;
   eventBus: ForgeBadgerEventBus;
   terminalRuntime: TerminalMultiplexerRuntime;
+  /** Present when using the custom Session Server (non-tmux) architecture. */
+  sessionServerClient?: SessionServerClient | undefined;
 }
 
 export async function startupGateway(options: {
   env: GatewayEnv;
   tmuxClient?: TmuxClient;
   terminalRuntime?: TerminalMultiplexerRuntime;
+  /** Session Server client for the custom (non-tmux) architecture. */
+  sessionServerClient?: SessionServerClient;
 }): Promise<StartupResult> {
   const db = initializeDatabase(options.env.FORGEBADGER_DB_PATH);
   cleanupExpiredCliConfigBackups();
@@ -36,8 +41,17 @@ export async function startupGateway(options: {
   });
   const eventBus = new ForgeBadgerEventBus();
   const terminalRuntime = options.terminalRuntime ?? resolveTerminalMultiplexerRuntime();
+
+  // Determine which terminal backend to use:
+  //   1. Explicit tmuxClient (test override) → use it
+  //   2. sessionServerClient (custom architecture) → use it
+  //   3. Default → create tmux client
+  const terminalBackend: TmuxClient = options.tmuxClient
+    ?? options.sessionServerClient
+    ?? createTmuxClient(terminalRuntime);
+
   const sessionManager = new InMemorySessionManager(
-    options.tmuxClient ?? createTmuxClient(terminalRuntime),
+    terminalBackend,
     createDbSessionRecoveryStore(db, options.env.FORGEBADGER_MASTER_KEY),
     eventBus,
     {
@@ -62,5 +76,12 @@ export async function startupGateway(options: {
     }));
   });
 
-  return { db, sessionManager, apiKeyStore, eventBus, terminalRuntime };
+  return {
+    db,
+    sessionManager,
+    apiKeyStore,
+    eventBus,
+    terminalRuntime,
+    sessionServerClient: options.sessionServerClient
+  };
 }

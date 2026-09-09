@@ -17,11 +17,13 @@ const envSchema = z.object({
   FORGEBADGER_DB_PATH: z.string(),
   FORGEBADGER_JWT_SECRET: z.string().min(32),
   FORGEBADGER_TMUX_PREFIX: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("fb-"),
+  FORGEBADGER_TERMINAL_BACKEND: z.enum(["session-server", "tmux"]).default("session-server"),
   FORGEBADGER_REGISTRATION: z.enum(["open", "off", "invite"]).default("open"),
   FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: strictEnvBoolean,
   FORGEBADGER_MASTER_KEY: z.string().refine((value) => isValidMasterKey(value), {
     message: "FORGEBADGER_MASTER_KEY must be 32 bytes or 64 hex characters"
-  })
+  }),
+  FORGEBADGER_SESSION_SERVER_IPC_PATH: z.string().optional()
 });
 
 export type GatewayEnv = z.infer<typeof envSchema>;

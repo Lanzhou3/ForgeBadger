@@ -17,6 +17,8 @@
 Gateway 必须创建真实会话，不允许只验证手工创建的平台终端复用器 attach 路径。
 macOS/Linux/WSL 使用 tmux；原生 Windows 使用 psmux ≥ 3.3.8。
 
+注：默认终端后端已改为自研 Session Server（独立子进程 + node-pty + JSON-line IPC，Windows 命名管道 / POSIX socket，见 AGENTS.md「Architecture boundaries」）；本节描述的 tmux/psmux 链路为旧后端，仍可通过 `FORGEBADGER_TERMINAL_BACKEND=tmux` 启用。
+
 启动链路：
 
 1. Web 发起创建 session 请求。

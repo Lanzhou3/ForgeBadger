@@ -12,6 +12,10 @@ import {
   checkTerminalRuntimeReadiness,
   type TerminalRuntimeStatus
 } from "../lib/dependency-check.js";
+import {
+  startAndConnectSessionServer,
+  type SessionServerIntegration
+} from "../services/session-server-integration.js";
 
 export interface StartedGateway extends GatewayApp {
   host: string;
@@ -23,6 +27,10 @@ export interface GatewayRuntimeOverrides {
   tmuxClient?: TmuxClient;
   terminalRuntime?: TerminalMultiplexerRuntime;
   terminalRuntimeCheck?: () => Promise<TerminalRuntimeStatus>;
+  /** Explicit Session Server IPC endpoint override (also forces the session-server backend). */
+  sessionServerIpcPath?: string;
+  /** Pre-connected Session Server client (test override). */
+  sessionServerClient?: import("../services/session-server-client.js").SessionServerClient;
 }
 
 export async function createGatewayRuntime(
@@ -31,14 +39,65 @@ export async function createGatewayRuntime(
 ): Promise<GatewayApp> {
   const env = resolveGatewayEnv(input);
   const terminalRuntime = overrides.terminalRuntime ?? resolveTerminalMultiplexerRuntime();
-  const terminalRuntimeStatus = await resolveTerminalRuntimeStatus(overrides, terminalRuntime);
-  if (!terminalRuntimeStatus.supported) {
-    throw new Error(`Terminal runtime is not ready: ${terminalRuntimeStatus.message}`);
+
+  // Determine terminal backend mode:
+  //   1. overrides.sessionServerClient → Session Server (pre-connected, test injection)
+  //   2. overrides.tmuxClient          → legacy tmux/psmux (test injection / explicit opt-in)
+  //   3. otherwise                     → FORGEBADGER_TERMINAL_BACKEND (default: session-server)
+  const useSessionServer =
+    overrides.sessionServerClient !== undefined
+      ? true
+      : overrides.tmuxClient !== undefined
+        ? false
+        : env.FORGEBADGER_TERMINAL_BACKEND === "session-server";
+
+  let sessionServerIntegration: SessionServerIntegration | undefined;
+  let sessionServerIpcPath: string | undefined;
+  let terminalRuntimeStatus: TerminalRuntimeStatus;
+
+  const ipcPathOverride =
+    overrides.sessionServerIpcPath ?? env.FORGEBADGER_SESSION_SERVER_IPC_PATH;
+
+  if (useSessionServer) {
+    // Custom Session Server architecture — no tmux/psmux dependency check needed
+    if (overrides.sessionServerClient) {
+      // Pre-connected client (test override)
+      sessionServerIpcPath = ipcPathOverride;
+      terminalRuntimeStatus = {
+        persistence: "tmux", // Historical field name
+        mode: "native_tmux",
+        supported: true,
+        message: "Session Server client provided by test override."
+      };
+    } else {
+      // Start and connect to the Session Server; the IPC endpoint falls back to
+      // the platform default (Windows named pipe / POSIX state-dir socket).
+      sessionServerIntegration = await startAndConnectSessionServer({
+        stateDir: env.FORGEBADGER_STATE_DIR,
+        ...(ipcPathOverride ? { ipcPath: ipcPathOverride } : {})
+      });
+      sessionServerIpcPath = sessionServerIntegration.ipcPath;
+      terminalRuntimeStatus = {
+        persistence: "tmux",
+        mode: "native_tmux",
+        supported: true,
+        message: "Session Server is ready."
+      };
+    }
+  } else {
+    // Legacy tmux/psmux architecture
+    terminalRuntimeStatus = await resolveTerminalRuntimeStatus(overrides, terminalRuntime);
+    if (!terminalRuntimeStatus.supported) {
+      throw new Error(`Terminal runtime is not ready: ${terminalRuntimeStatus.message}`);
+    }
   }
+
   const startupOptions = {
     env,
     ...(overrides.tmuxClient === undefined ? {} : { tmuxClient: overrides.tmuxClient }),
-    terminalRuntime
+    terminalRuntime,
+    ...(sessionServerIntegration ? { sessionServerClient: sessionServerIntegration.client } : {}),
+    ...(overrides.sessionServerClient ? { sessionServerClient: overrides.sessionServerClient } : {})
   };
   const accountRecovery = createLocalAccountRecovery(env.FORGEBADGER_STATE_DIR);
   console.info("[gateway] local account recovery key ready", {
@@ -60,8 +119,16 @@ export async function createGatewayRuntime(
     eventBus,
     accountRecovery,
     terminalRuntime,
-    registrationMode: env.FORGEBADGER_REGISTRATION
+    registrationMode: env.FORGEBADGER_REGISTRATION,
+    sessionServerIpcPath
   });
+
+  // Attach shutdown hook for the Session Server
+  const originalClose = runtime.close.bind(runtime);
+  (runtime as { close: () => Promise<void> }).close = async () => {
+    await originalClose();
+    await sessionServerIntegration?.stop();
+  };
 
   await runtime.recoveryReady;
   return runtime;

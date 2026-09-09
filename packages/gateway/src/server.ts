@@ -6,6 +6,7 @@ import { InMemorySessionManager } from "./services/session-manager.js";
 import { ForgeBadgerEventBus } from "./services/event-bus.js";
 import { attachNotificationPersistence } from "./services/notification-events.js";
 import { attachTerminalWebSocket } from "./websocket/terminal.js";
+import { attachTerminalWebSocket as attachSessionServerTerminalWebSocket } from "./websocket/terminal-session-server.js";
 import { attachEventsWebSocket } from "./websocket/events.js";
 import type { Database } from "./db/types.js";
 import type { CommandRunner } from "./lib/dependency-check.js";
@@ -61,6 +62,8 @@ export interface GatewayAppOptions {
   accountRecovery?: LocalAccountRecovery | undefined;
   terminalRuntime?: TerminalMultiplexerRuntime | undefined;
   runtimeAuthorizationInvalidator?: RuntimeAuthorizationInvalidator | undefined;
+  /** When set, use the Session Server for WebSocket terminal I/O. */
+  sessionServerIpcPath?: string | undefined;
   /** Test-only model transport seam for the native Copilot runtime. */
   llmFetch?: typeof fetch | undefined;
 }
@@ -141,14 +144,30 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const automationScheduler: AutomationScheduler | undefined = copilotAgent
     ? startAutomationScheduler(copilotAgent)
     : undefined;
-  attachTerminalWebSocket({
-    server,
-    sessionManager,
-    jwtSecret,
-    db: options.db,
-    runtimeAuthorizationInvalidator,
-    ...(options.terminalRuntime ? { terminalRuntime: options.terminalRuntime } : {})
-  });
+
+  // Mount the terminal WebSocket handler:
+  //   - If sessionServerIpcPath is set, use the Session Server WebSocket handler
+  //   - Otherwise, use the legacy tmux/psmux WebSocket handler
+  if (options.sessionServerIpcPath) {
+    attachSessionServerTerminalWebSocket({
+      server,
+      sessionManager,
+      jwtSecret,
+      db: options.db,
+      runtimeAuthorizationInvalidator,
+      sessionServerIpcPath: options.sessionServerIpcPath
+    });
+  } else {
+    attachTerminalWebSocket({
+      server,
+      sessionManager,
+      jwtSecret,
+      db: options.db,
+      runtimeAuthorizationInvalidator,
+      ...(options.terminalRuntime ? { terminalRuntime: options.terminalRuntime } : {})
+    });
+  }
+
   attachEventsWebSocket({ server, eventBus, jwtSecret, db: options.db });
   // Opening the provider connection is intentionally last.
   void options.feishuChannelRuntime?.start().catch(() => {
