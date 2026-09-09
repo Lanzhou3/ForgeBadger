@@ -112,10 +112,12 @@ describe("PlatformAdapter", () => {
 
   it("provides correct IPC path format", () => {
     const posixAdapter = createPlatformAdapter("linux");
-    assert.ok(posixAdapter.getIpcPath("/tmp/fb").includes("session-server.sock"));
+    assert.ok(posixAdapter.getIpcPath("/tmp/fb").includes("session-server-v1.sock"));
 
     const winAdapter = createPlatformAdapter("win32");
-    assert.ok(winAdapter.getIpcPath("C:\\fb").startsWith("\\\\.\\pipe\\"));
+    const winPipe = winAdapter.getIpcPath("C:\\fb");
+    // Protocol-major version + per-user + random anti-squatting suffix
+    assert.ok(/^\\\\\.\\pipe\\forgebadger-session-server-v1-[a-zA-Z0-9_-]+-[0-9a-f]{8}$/.test(winPipe), winPipe);
   });
 });
 

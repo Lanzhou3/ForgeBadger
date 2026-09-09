@@ -4,7 +4,9 @@
  * Abstracts the differences between Windows (ConPTY) and POSIX (forkpty)
  * so the rest of the Session Server is platform-agnostic.
  */
+import { randomBytes, createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { userInfo } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import type { IPty } from "node-pty";
 
@@ -34,7 +36,7 @@ class PosixPtyAdapter implements PlatformPtyAdapter {
   }
 
   getIpcPath(stateDir: string): string {
-    return join(stateDir, "session-server.sock");
+    return join(stateDir, "session-server-v1.sock");
   }
 
   readonly usesCrlf = false;
@@ -75,12 +77,38 @@ class WindowsPtyAdapter implements PlatformPtyAdapter {
     return env.COMSPEC?.trim() || env.ComSpec?.trim() || "cmd.exe";
   }
 
-  getIpcPath(stateDir: string): string {
-    // Named pipe on Windows
-    return `\\\\.\\pipe\\forgebadger-session-server`;
+  getIpcPath(_stateDir: string): string {
+    // Named pipe on Windows. The name carries the protocol major version, a
+    // per-user component, and a per-process random suffix (memoized so the
+    // Gateway reuses one name for its lifetime) to defeat same-user named
+    // pipe squatting; node cannot set a pipe SDDL, so the hello token is
+    // the real authentication layer.
+    return windowsPipeName();
   }
 
   readonly usesCrlf = true;
+}
+
+let memoizedWindowsPipeName: string | undefined;
+
+function windowsPipeName(): string {
+  if (!memoizedWindowsPipeName) {
+    memoizedWindowsPipeName =
+      `\\\\.\\pipe\\forgebadger-session-server-v1-${windowsUserComponent()}-${randomBytes(4).toString("hex")}`;
+  }
+  return memoizedWindowsPipeName;
+}
+
+function windowsUserComponent(): string {
+  let username = "";
+  try {
+    username = userInfo().username;
+  } catch {
+    // Fall through to the hash of an empty name
+  }
+  const sanitized = username.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (sanitized) return sanitized;
+  return createHash("sha256").update(username || "unknown").digest("hex").slice(0, 8);
 }
 
 export function createPlatformAdapter(

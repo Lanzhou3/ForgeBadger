@@ -15,6 +15,7 @@ import type { IPty } from "node-pty";
 import { createPlatformAdapter, disposePty, type PlatformPtyAdapter } from "./platform-adapter.js";
 import { SessionHandle } from "./session-handle.js";
 import { OutputRingBuffer } from "./output-ring-buffer.js";
+import { buildSanitizedEnv } from "./env-policy.js";
 import type { LaunchPlanPayload, PaneSnapshot, SessionInfo } from "./ipc-protocol.js";
 
 export interface SessionServerOptions {
@@ -25,6 +26,8 @@ export interface SessionServerOptions {
 
 export class SessionServer {
   private readonly sessions = new Map<string, SessionHandle>();
+  /** Session IDs with a createSession call in flight (guards the await gap). */
+  private readonly pendingCreates = new Set<string>();
   private readonly platformAdapter: PlatformPtyAdapter;
   /** Callback for session exit events — settable via setter for IpcServer wiring. */
   private _onSessionExit?: ((sessionId: string, exitCode: number) => void) | undefined;
@@ -65,23 +68,42 @@ export class SessionServer {
   }): Promise<SessionHandle> {
     const { sessionId, userId, attachToken, launchPlan } = input;
 
-    if (this.sessions.has(sessionId)) {
+    // Claim the ID synchronously — the dynamic import below yields the event
+    // loop, and without this placeholder two concurrent creates with the same
+    // ID would both pass the existence check and double-spawn.
+    if (this.sessions.has(sessionId) || this.pendingCreates.has(sessionId)) {
       throw new Error(`Session already exists: ${sessionId}`);
     }
+    this.pendingCreates.add(sessionId);
 
+    try {
+      return await this.spawnSession(sessionId, userId, attachToken, launchPlan);
+    } finally {
+      this.pendingCreates.delete(sessionId);
+    }
+  }
+
+  private async spawnSession(
+    sessionId: string,
+    userId: string,
+    attachToken: string,
+    launchPlan: LaunchPlanPayload
+  ): Promise<SessionHandle> {
     // Resolve command (Windows shim handling)
     const resolved = this.platformAdapter.resolveCommand(
       launchPlan.command,
       process.env
     );
 
-    // Build pty environment.
+    // Build pty environment from a sanitized base: the server process env is
+    // allowlist-filtered so Gateway secrets can never leak into a terminal.
     // The pty is configured as xterm-256color (see `name` below), so TERM
     // must match — otherwise CLIs like Kimi Code see the parent process's
     // TERM (often "dumb" on Windows or unset in service contexts) and
-    // disable color output. launchPlan.env can still override.
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
+    // disable color output. launchPlan.env is the only trusted override
+    // source (it carries session-manager's FORGEBADGER_ATTACH_TOKEN etc.).
+    const env: Record<string, string> = {
+      ...buildSanitizedEnv(process.env),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       ...launchPlan.env
@@ -94,7 +116,7 @@ export class SessionServer {
       cwd: launchPlan.cwd,
       cols: 120,
       rows: 40,
-      env: env as Record<string, string>
+      env
     });
 
     const ringBuffer = new OutputRingBuffer();

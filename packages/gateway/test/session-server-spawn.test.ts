@@ -8,7 +8,7 @@
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -16,6 +16,7 @@ import {
   startAndConnectSessionServer,
   type SessionServerIntegration
 } from "../src/services/session-server-integration.js";
+import { SESSION_SERVER_TOKEN_FILE_NAME } from "../src/services/session-server/auth-token.js";
 
 const stateDir = mkdtempSync(join(tmpdir(), "fb-ss-e2e-"));
 const ipcPath = process.platform === "win32"
@@ -56,6 +57,15 @@ describe("Session Server spawn (e2e)", () => {
     // Let the child process fully exit so stateDir is not locked (Windows)
     await new Promise((r) => setTimeout(r, 300));
     try { rmSync(stateDir, { recursive: true, force: true }); } catch { /* Windows EBUSY ignore */ }
+  });
+
+  it("writes the handshake token file with owner-only permissions", () => {
+    const tokenPath = join(stateDir, SESSION_SERVER_TOKEN_FILE_NAME);
+    const stat = statSync(tokenPath);
+    assert.ok(stat.isFile());
+    if (process.platform !== "win32") {
+      assert.strictEqual(stat.mode & 0o777, 0o600);
+    }
   });
 
   it("creates, lists, captures, and exits a short-lived session", async () => {

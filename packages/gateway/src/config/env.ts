@@ -24,6 +24,20 @@ const envSchema = z.object({
     message: "FORGEBADGER_MASTER_KEY must be 32 bytes or 64 hex characters"
   }),
   FORGEBADGER_SESSION_SERVER_IPC_PATH: z.string().optional()
+}).superRefine((env, ctx) => {
+  // A custom IPC endpoint must stay inside the state directory (which the
+  // Session Server locks down to 0700) so the socket inherits the same
+  // access control. POSIX-only: Windows uses named pipes without a path.
+  const ipcPath = env.FORGEBADGER_SESSION_SERVER_IPC_PATH;
+  if (!ipcPath || process.platform === "win32") return;
+  const relative = path.relative(env.FORGEBADGER_STATE_DIR, ipcPath);
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["FORGEBADGER_SESSION_SERVER_IPC_PATH"],
+      message: "FORGEBADGER_SESSION_SERVER_IPC_PATH must resolve to a file inside FORGEBADGER_STATE_DIR"
+    });
+  }
 });
 
 export type GatewayEnv = z.infer<typeof envSchema>;
@@ -41,6 +55,11 @@ function normalizeEnvironment(input: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   normalized.FORGEBADGER_DB_PATH = path.resolve(
     expandUserPath(input.FORGEBADGER_DB_PATH ?? path.join(stateDir, "forgebadger.db"))
   );
+  if (input.FORGEBADGER_SESSION_SERVER_IPC_PATH) {
+    normalized.FORGEBADGER_SESSION_SERVER_IPC_PATH = path.resolve(
+      expandUserPath(input.FORGEBADGER_SESSION_SERVER_IPC_PATH)
+    );
+  }
   return normalized;
 }
 

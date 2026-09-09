@@ -16,9 +16,17 @@ import { EventEmitter } from "node:events";
 
 import type { IPty } from "node-pty";
 
+import { performClientHello } from "./session-server/hello-handshake.js";
+import {
+  readSessionServerTokenFile,
+  resolveSessionServerTokenPath
+} from "./session-server/auth-token.js";
+
 export interface SessionServerPtyOptions {
   ipcPath: string;
   sessionId: string;
+  /** Handshake token; when omitted, read from the state-dir token file. */
+  token?: string;
   connectTimeoutMs?: number;
 }
 
@@ -34,25 +42,51 @@ export class SessionServerPty {
   private readonly emitter = new EventEmitter();
   private readonly ipcPath: string;
   private readonly sessionId: string;
+  private readonly token: string | undefined;
   private readonly connectTimeoutMs: number;
   private exited = false;
 
   constructor(options: SessionServerPtyOptions) {
     this.ipcPath = options.ipcPath;
     this.sessionId = options.sessionId;
+    this.token = options.token;
     this.connectTimeoutMs = options.connectTimeoutMs ?? 5000;
   }
 
   /**
    * Connect to the Session Server and attach to the session.
-   * Returns after the IPC connection is established and the attach message
-   * has been sent.
+   * Returns after the IPC connection is established, the hello handshake has
+   * completed, and the attach message has been sent.
    */
   async connect(): Promise<void> {
     if (this.socket) return;
 
+    const socket = new Socket();
+    await this.waitConnected(socket);
+
+    let leftover = "";
+    try {
+      const token = this.token ?? readSessionServerTokenFile(resolveSessionServerTokenPath());
+      leftover = await performClientHello(socket, token, this.connectTimeoutMs);
+    } catch (error) {
+      socket.destroy();
+      throw error;
+    }
+
+    this.socket = socket;
+    this.buffer = leftover;
+    this.setupSocket(socket);
+
+    // Send attach message
+    this.sendIpc({
+      type: "attach_client",
+      sessionId: this.sessionId,
+      clientId: this.clientId
+    });
+  }
+
+  private waitConnected(socket: Socket): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const socket = new Socket();
       const timer = setTimeout(() => {
         socket.destroy();
         reject(new Error(`Session Server I/O connection timed out after ${this.connectTimeoutMs}ms`));
@@ -60,15 +94,6 @@ export class SessionServerPty {
 
       socket.connect(this.ipcPath, () => {
         clearTimeout(timer);
-        this.socket = socket;
-        this.setupSocket(socket);
-
-        // Send attach message
-        this.sendIpc({
-          type: "attach_client",
-          sessionId: this.sessionId,
-          clientId: this.clientId
-        });
         resolve();
       });
 

@@ -11,7 +11,35 @@
  * All messages share a common envelope: { id?, type, ...payload }
  *   - `id` is present on request/response pairs (correlation)
  *   - `type` identifies the message kind
+ *
+ * Every connection must complete a hello handshake before any other message:
+ * the first line the client sends must be a HelloMessage carrying the shared
+ * token and protocol version; the server replies hello_ok / hello_error.
  */
+
+/**
+ * Protocol major version. Bumped on incompatible changes; the default socket
+ * path / pipe name carries the same major version so incompatible daemons
+ * coexist instead of fighting over one endpoint.
+ */
+export const PROTOCOL_VERSION = 1;
+
+export interface HelloMessage {
+  type: "hello";
+  protocolVersion: number;
+  token: string;
+}
+
+export interface HelloOkResponse {
+  type: "hello_ok";
+  protocolVersion: number;
+}
+
+export interface HelloErrorResponse {
+  type: "hello_error";
+  message: string;
+  protocolVersion: number;
+}
 
 // ---------------------------------------------------------------------------
 // Management messages (Gateway → Session Server)

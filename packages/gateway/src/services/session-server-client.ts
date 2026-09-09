@@ -18,9 +18,16 @@ import type {
   LaunchPlanPayload,
   PaneSnapshot
 } from "./session-server/index.js";
+import { performClientHello } from "./session-server/hello-handshake.js";
+import {
+  readSessionServerTokenFile,
+  resolveSessionServerTokenPath
+} from "./session-server/auth-token.js";
 
 export interface SessionServerClientOptions {
   ipcPath: string;
+  /** Handshake token; when omitted, read from the state-dir token file. */
+  token?: string;
   connectTimeoutMs?: number;
   requestTimeoutMs?: number;
 }
@@ -34,6 +41,7 @@ export class SessionServerClient implements TmuxClient {
     timer: ReturnType<typeof setTimeout>;
   }>();
   private readonly ipcPath: string;
+  private readonly token: string | undefined;
   private readonly connectTimeoutMs: number;
   private readonly requestTimeoutMs: number;
 
@@ -42,6 +50,7 @@ export class SessionServerClient implements TmuxClient {
 
   constructor(options: SessionServerClientOptions) {
     this.ipcPath = options.ipcPath;
+    this.token = options.token;
     this.connectTimeoutMs = options.connectTimeoutMs ?? 5000;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
   }
@@ -53,8 +62,24 @@ export class SessionServerClient implements TmuxClient {
   async connect(): Promise<void> {
     if (this.socket) return;
 
+    const socket = new Socket();
+    await this.waitConnected(socket);
+
+    let leftover = "";
+    try {
+      leftover = await performClientHello(socket, this.resolveToken(), this.connectTimeoutMs);
+    } catch (error) {
+      socket.destroy();
+      throw error;
+    }
+
+    this.socket = socket;
+    this.buffer = leftover;
+    this.setupSocket(socket);
+  }
+
+  private waitConnected(socket: Socket): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const socket = new Socket();
       const timer = setTimeout(() => {
         socket.destroy();
         reject(new Error(`Session Server connection timed out after ${this.connectTimeoutMs}ms`));
@@ -62,8 +87,6 @@ export class SessionServerClient implements TmuxClient {
 
       socket.connect(this.ipcPath, () => {
         clearTimeout(timer);
-        this.socket = socket;
-        this.setupSocket(socket);
         resolve();
       });
 
@@ -72,6 +95,10 @@ export class SessionServerClient implements TmuxClient {
         reject(error);
       });
     });
+  }
+
+  private resolveToken(): string {
+    return this.token ?? readSessionServerTokenFile(resolveSessionServerTokenPath());
   }
 
   async disconnect(): Promise<void> {

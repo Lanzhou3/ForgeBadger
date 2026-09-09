@@ -10,34 +10,46 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 import { startSessionServer } from "./session-server/ipc-server.js";
+import { readSessionServerTokenFile } from "./session-server/auth-token.js";
 import { createPlatformAdapter } from "./session-server/platform-adapter.js";
 
 function defaultStateDir(): string {
   return process.env.FORGEBADGER_STATE_DIR ?? join(homedir(), ".forgebadger");
 }
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+function parseArgs(args: string[]): { ipcPath?: string | undefined; tokenFile?: string | undefined } {
   let ipcPath: string | undefined;
-
-  // Parse --ipc <path>
+  let tokenFile: string | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--ipc" && args[i + 1]) {
       ipcPath = args[i + 1];
-      break;
+      i++;
+    } else if (args[i] === "--token-file" && args[i + 1]) {
+      tokenFile = args[i + 1];
+      i++;
     }
   }
+  return { ipcPath, tokenFile };
+}
 
-  if (!ipcPath) {
-    const platformAdapter = createPlatformAdapter();
-    ipcPath = platformAdapter.getIpcPath(defaultStateDir());
+async function main(): Promise<void> {
+  const { ipcPath: ipcArg, tokenFile } = parseArgs(process.argv.slice(2));
+
+  // The handshake token arrives via a 0600 file — never via argv value or
+  // environment variable, so it cannot leak through `ps` or /proc.
+  if (!tokenFile) {
+    throw new Error("missing required --token-file <path> argument");
   }
+  const token = readSessionServerTokenFile(tokenFile);
+
+  const ipcPath = ipcArg ?? createPlatformAdapter().getIpcPath(defaultStateDir());
 
   console.info(`starting, ipc=${ipcPath}`);
 
   const { stop } = await startSessionServer({
     ipcPath,
-    stateDir: defaultStateDir()
+    stateDir: defaultStateDir(),
+    token
   });
 
   console.info("ready");

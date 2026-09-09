@@ -37,11 +37,12 @@ function shellPlan(cwd: string, cmd: string): LaunchPlanPayload {
 /** Start IPC server + client, wait briefly for Windows pipe readiness. */
 async function startPair(ipcPath: string, cwd: string) {
   const sessionServer = new SessionServer();
-  const ipcServer = new IpcServer({ ipcPath, sessionServer });
+  const token = "test-token";
+  const ipcServer = new IpcServer({ ipcPath, sessionServer, token });
   await ipcServer.start();
   // Give the pipe time to be fully ready on Windows
   await new Promise((r) => setTimeout(r, 150));
-  const client = new SessionServerClient({ ipcPath });
+  const client = new SessionServerClient({ ipcPath, token });
   await client.connect();
   return { sessionServer, ipcServer, client };
 }

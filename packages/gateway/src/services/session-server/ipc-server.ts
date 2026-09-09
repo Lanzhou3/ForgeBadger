@@ -7,45 +7,72 @@
  *   - I/O stream: one per attached client, for terminal input/output
  *
  * Protocol: NDJSON (newline-delimited JSON) over a stream socket.
+ *
+ * Access control is layered:
+ *   - Filesystem ACLs: socket directory 0700, socket file 0600 (POSIX)
+ *   - Hello handshake: every connection must send a valid HelloMessage
+ *     (token + protocol major version) as its first line within a short
+ *     timeout; anything else destroys the socket.
  */
 import { createServer, type Server as NetServer, type Socket } from "node:net";
-import { unlinkSync } from "node:fs";
-import { once } from "node:events";
+import { chmodSync, lstatSync, mkdirSync, unlinkSync } from "node:fs";
+import { timingSafeEqual } from "node:crypto";
+import { dirname } from "node:path";
 
 import { SessionServer } from "./session-server.js";
-import type {
-  ManagementRequest,
-  ManagementResponse,
-  IoStreamRequest,
-  IoStreamResponse,
-  LaunchPlanPayload
+import {
+  PROTOCOL_VERSION,
+  type HelloErrorResponse,
+  type ManagementRequest,
+  type ManagementResponse,
+  type IoStreamRequest,
+  type IoStreamResponse,
+  type LaunchPlanPayload
 } from "./ipc-protocol.js";
 import { createPlatformAdapter } from "./platform-adapter.js";
+
+/** Single NDJSON line limit (defends against unterminated-line memory abuse). */
+const MAX_LINE_BYTES = 4 * 1024 * 1024;
+/** Per-connection buffered-bytes limit while waiting for a newline. */
+const MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+const DEFAULT_HELLO_TIMEOUT_MS = 2000;
 
 export interface IpcServerOptions {
   ipcPath: string;
   sessionServer: SessionServer;
+  /** Shared handshake token every connection must present. */
+  token: string;
+  /** Test hook: how long a connection may take to complete hello. */
+  helloTimeoutMs?: number;
+}
+
+interface ConnectionState {
+  authenticated: boolean;
+  buffer: string;
+  bufferedBytes: number;
 }
 
 export class IpcServer {
   private server: NetServer | undefined;
   private readonly ipcPath: string;
   private readonly sessionServer: SessionServer;
+  private readonly token: string;
+  private readonly helloTimeoutMs: number;
   private readonly clients = new Map<string, Socket>();
 
   constructor(options: IpcServerOptions) {
     this.ipcPath = options.ipcPath;
     this.sessionServer = options.sessionServer;
+    this.token = options.token;
+    this.helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
   }
 
   async start(): Promise<void> {
-    // Clean up stale socket file on POSIX
     if (process.platform !== "win32") {
-      try {
-        unlinkSync(this.ipcPath);
-      } catch {
-        // Socket file doesn't exist, that's fine
-      }
+      const dir = dirname(this.ipcPath);
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      chmodSync(dir, 0o700);
+      this.removeStaleSocket();
     }
 
     this.server = createServer((socket) => this.handleConnection(socket));
@@ -88,6 +115,12 @@ export class IpcServer {
         resolve();
       });
     });
+
+    // Restrict the socket to the owner (POSIX). Windows named pipes cannot
+    // be ACL'd through libuv — the hello token carries authentication there.
+    if (process.platform !== "win32") {
+      chmodSync(this.ipcPath, 0o600);
+    }
   }
 
   async stop(): Promise<void> {
@@ -104,10 +137,12 @@ export class IpcServer {
     });
     this.server = undefined;
 
-    // Clean up socket file on POSIX
+    // Clean up socket file on POSIX (only if it is still our socket)
     if (process.platform !== "win32") {
       try {
-        unlinkSync(this.ipcPath);
+        if (lstatSync(this.ipcPath).isSocket()) {
+          unlinkSync(this.ipcPath);
+        }
       } catch {
         // Already cleaned up
       }
@@ -118,27 +153,43 @@ export class IpcServer {
     return this.ipcPath;
   }
 
+  /**
+   * Remove a stale socket file before listening. Refuse to start rather than
+   * delete a path that is not a socket — the IPC path must never point at a
+   * regular file the user owns.
+   */
+  private removeStaleSocket(): void {
+    let stat;
+    try {
+      stat = lstatSync(this.ipcPath);
+    } catch {
+      return; // No stale file
+    }
+    if (!stat.isSocket()) {
+      throw new Error(`Refusing to remove non-socket file at IPC path: ${this.ipcPath}`);
+    }
+    unlinkSync(this.ipcPath);
+  }
+
   // ------------------------------------------------------------------
   // Connection handling
   // ------------------------------------------------------------------
 
   private handleConnection(socket: Socket): void {
-    let buffer = "";
-    socket.on("data", (chunk) => {
-      buffer += chunk.toString("utf8");
-      let newlineIndex: number;
-      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-        const line = buffer.slice(0, newlineIndex);
-        buffer = buffer.slice(newlineIndex + 1);
-        if (line.trim()) {
-          this.handleMessage(socket, line).catch((error) => {
-            console.error(`[ipc-server] error handling message:`, error);
-          });
-        }
+    const state: ConnectionState = { authenticated: false, buffer: "", bufferedBytes: 0 };
+    const helloTimer = setTimeout(() => {
+      if (!state.authenticated) {
+        this.failHandshake(socket, "hello timeout");
       }
+    }, this.helloTimeoutMs);
+
+    socket.on("data", (chunk: Buffer) => {
+      if (!this.appendChunk(socket, state, chunk)) return;
+      this.drainLines(socket, state, helloTimer);
     });
 
     const cleanup = () => {
+      clearTimeout(helloTimer);
       // Remove every clientId entry that still points at this socket —
       // attach_client maps clientId → socket, and both must be reaped.
       for (const [clientId, s] of this.clients) {
@@ -150,6 +201,85 @@ export class IpcServer {
 
     socket.on("close", cleanup);
     socket.on("error", cleanup);
+  }
+
+  /** Append a chunk to the connection buffer; returns false when the socket
+   *  was destroyed for exceeding an inbound limit. */
+  private appendChunk(socket: Socket, state: ConnectionState, chunk: Buffer): boolean {
+    state.buffer += chunk.toString("utf8");
+    state.bufferedBytes += chunk.length;
+    if (state.bufferedBytes > MAX_BUFFER_BYTES && !state.buffer.includes("\n")) {
+      console.error("[ipc-server] closing connection: buffered bytes exceeded limit");
+      socket.destroy();
+      return false;
+    }
+    return true;
+  }
+
+  private drainLines(socket: Socket, state: ConnectionState, helloTimer: ReturnType<typeof setTimeout>): void {
+    let newlineIndex: number;
+    while ((newlineIndex = state.buffer.indexOf("\n")) !== -1) {
+      const line = state.buffer.slice(0, newlineIndex);
+      const lineBytes = Buffer.byteLength(line, "utf8");
+      state.buffer = state.buffer.slice(newlineIndex + 1);
+      state.bufferedBytes -= lineBytes + 1;
+      if (lineBytes > MAX_LINE_BYTES) {
+        console.error("[ipc-server] closing connection: line length exceeded limit");
+        socket.destroy();
+        return;
+      }
+      if (!line.trim()) continue;
+      if (!state.authenticated) {
+        if (!this.handleHello(socket, state, line, helloTimer)) return;
+        continue;
+      }
+      this.handleMessage(socket, line).catch((error) => {
+        console.error(`[ipc-server] error handling message:`, error);
+      });
+    }
+  }
+
+  /** Validate the hello handshake. Returns false when the socket was destroyed. */
+  private handleHello(
+    socket: Socket,
+    state: ConnectionState,
+    line: string,
+    helloTimer: ReturnType<typeof setTimeout>
+  ): boolean {
+    let msg: { type?: string; protocolVersion?: number; token?: string };
+    try {
+      msg = JSON.parse(line) as typeof msg;
+    } catch {
+      this.failHandshake(socket, "invalid hello message");
+      return false;
+    }
+    if (msg.type !== "hello") {
+      this.failHandshake(socket, "first message must be hello");
+      return false;
+    }
+    if (typeof msg.protocolVersion !== "number" || Math.trunc(msg.protocolVersion) !== PROTOCOL_VERSION) {
+      this.failHandshake(socket, `unsupported protocol version: ${String(msg.protocolVersion)}`);
+      return false;
+    }
+    if (typeof msg.token !== "string" || !this.tokenMatches(msg.token)) {
+      this.failHandshake(socket, "invalid token");
+      return false;
+    }
+    state.authenticated = true;
+    clearTimeout(helloTimer);
+    this.writeSocket(socket, { type: "hello_ok", protocolVersion: PROTOCOL_VERSION });
+    return true;
+  }
+
+  private tokenMatches(candidate: string): boolean {
+    const expected = Buffer.from(this.token, "utf8");
+    const actual = Buffer.from(candidate, "utf8");
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
+  }
+
+  private failHandshake(socket: Socket, message: string): void {
+    const reply: HelloErrorResponse = { type: "hello_error", message, protocolVersion: PROTOCOL_VERSION };
+    socket.write(`${JSON.stringify(reply)}\n`, () => socket.destroy());
   }
 
   // ------------------------------------------------------------------
@@ -348,6 +478,7 @@ export class IpcServer {
 export async function startSessionServer(options: {
   ipcPath: string;
   stateDir: string;
+  token: string;
 }): Promise<{ ipcServer: IpcServer; sessionServer: SessionServer; stop: () => Promise<void> }> {
   const platformAdapter = createPlatformAdapter();
   const sessionServer = new SessionServer({
@@ -361,7 +492,7 @@ export async function startSessionServer(options: {
   });
 
   const ipcPath = options.ipcPath ?? platformAdapter.getIpcPath(options.stateDir);
-  const ipcServer = new IpcServer({ ipcPath, sessionServer });
+  const ipcServer = new IpcServer({ ipcPath, sessionServer, token: options.token });
 
   await ipcServer.start();
 

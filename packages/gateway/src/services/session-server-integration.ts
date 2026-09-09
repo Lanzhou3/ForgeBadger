@@ -14,6 +14,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { SessionServerClient } from "./session-server-client.js";
+import { buildSanitizedEnv } from "./session-server/env-policy.js";
+import {
+  generateSessionServerToken,
+  resolveSessionServerTokenPath,
+  writeSessionServerTokenFile
+} from "./session-server/auth-token.js";
 import { createPlatformAdapter } from "./session-server/platform-adapter.js";
 
 export interface SessionServerIntegration {
@@ -34,19 +40,32 @@ export async function startAndConnectSessionServer(options: {
   const platformAdapter = createPlatformAdapter();
   const ipcPath = options.ipcPath ?? platformAdapter.getIpcPath(options.stateDir);
 
+  // Generate the handshake token and persist it for the server (--token-file)
+  // and for Gateway-side clients. Never passed via argv value or env.
+  const token = generateSessionServerToken();
+  const tokenPath = resolveSessionServerTokenPath(options.stateDir);
+  writeSessionServerTokenFile(tokenPath, token);
+
   // Resolve the Session Server entry point: compiled dist in production,
   // tsx-loaded TypeScript source in development.
   const { entry: serverEntry, loaderArgs } = resolveSessionServerEntry();
 
-  // Spawn the Session Server process
-  const child = spawn(process.execPath, [...loaderArgs, serverEntry, "--ipc", ipcPath], {
-    detached: process.platform !== "win32",
-    env: {
-      ...process.env,
-      ...options.env
-    },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  // Spawn the Session Server process with a sanitized environment — the
+  // Gateway's secrets (master key, JWT secret, provider keys) must never
+  // reach the server process or the ptys it spawns.
+  const child = spawn(
+    process.execPath,
+    [...loaderArgs, serverEntry, "--ipc", ipcPath, "--token-file", tokenPath],
+    {
+      detached: process.platform !== "win32",
+      env: {
+        ...buildSanitizedEnv(process.env),
+        FORGEBADGER_STATE_DIR: options.stateDir,
+        ...options.env
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    }
+  );
 
   // Log output from the Session Server
   child.stdout?.on("data", (chunk) => {
@@ -67,7 +86,7 @@ export async function startAndConnectSessionServer(options: {
   await waitForIpcReady(ipcPath, 15_000);
 
   // Connect the Gateway to the Session Server
-  const client = new SessionServerClient({ ipcPath, connectTimeoutMs: 5000 });
+  const client = new SessionServerClient({ ipcPath, token, connectTimeoutMs: 5000 });
   await client.connect();
 
   const stop = async () => {
