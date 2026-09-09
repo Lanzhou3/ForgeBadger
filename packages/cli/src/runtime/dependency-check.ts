@@ -25,28 +25,13 @@ export interface CliDependencyStatus {
   error?: string;
 }
 
-export type CliTerminalRuntimeMode =
-  | "native_tmux"
-  | "native_psmux"
-  | "tmux_missing"
-  | "psmux_missing"
-  | "psmux_outdated";
-
-export interface CliTerminalRuntimeStatus {
-  persistence: "tmux" | "psmux";
-  mode: CliTerminalRuntimeMode;
-  supported: boolean;
-  message: string;
-}
+export type NodePtyLoader = () => Promise<unknown>;
 
 interface CliDependencyCheck {
   name: string;
   args: string[];
   required: boolean;
 }
-
-const TMUX_DEPENDENCY_CHECK: CliDependencyCheck = { name: "tmux", args: ["-V"], required: true };
-const PSMUX_DEPENDENCY_CHECK: CliDependencyCheck = { name: "psmux", args: ["-V"], required: true };
 
 const OPTIONAL_CLI_DEPENDENCY_CHECKS: CliDependencyCheck[] = [
   { name: "claude", args: ["--version"], required: false },
@@ -55,10 +40,12 @@ const OPTIONAL_CLI_DEPENDENCY_CHECKS: CliDependencyCheck[] = [
   { name: "kimi", args: ["--version"], required: false }
 ];
 
+const NODE_PTY_REINSTALL_GUIDANCE =
+  "reinstall ForgeBadger to rebuild native modules (npm install -g forgebadger)";
+
 const DEFAULT_COMMAND_TIMEOUT_MS = 3000;
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_KILL_GRACE_MS = 250;
-const MINIMUM_PSMUX_VERSION = [3, 3, 8] as const;
 
 interface BoundedOutput {
   chunks: Buffer[];
@@ -67,63 +54,34 @@ interface BoundedOutput {
 
 export async function checkCliDependencies(
   runner: CliCommandRunner = runCommand,
-  platform: NodeJS.Platform = process.platform
+  loadNodePty: NodePtyLoader = loadNodePtyModule
 ): Promise<CliDependencyStatus[]> {
-  const checks = [terminalDependencyCheck(platform), ...OPTIONAL_CLI_DEPENDENCY_CHECKS];
-  return Promise.all(checks.map((check) => checkDependency(check, runner)));
+  const [nodePty, ...cliStatuses] = await Promise.all([
+    checkNodePtyLoadable(loadNodePty),
+    ...OPTIONAL_CLI_DEPENDENCY_CHECKS.map((check) => checkDependency(check, runner))
+  ]);
+  return [nodePty, ...cliStatuses];
 }
 
-export interface CliTerminalRuntimeCheckOptions {
-  runner?: CliCommandRunner | undefined;
-  platform?: NodeJS.Platform | undefined;
-}
-
-export async function checkCliTerminalRuntime(
-  options: CliTerminalRuntimeCheckOptions = {}
-): Promise<CliTerminalRuntimeStatus> {
-  const platform = options.platform ?? process.platform;
-  const dependency = await checkDependency(
-    terminalDependencyCheck(platform),
-    options.runner ?? runCommand
-  );
-  return describeCliTerminalRuntime([dependency], platform);
-}
-
-export function describeCliTerminalRuntime(
-  dependencies: CliDependencyStatus[],
-  platform: NodeJS.Platform = process.platform
-): CliTerminalRuntimeStatus {
-  const check = terminalDependencyCheck(platform);
-  const persistence: "tmux" | "psmux" = platform === "win32" ? "psmux" : "tmux";
-  const dependency = dependencies.find((item) => item.name === check.name);
-  if (dependency?.available) {
+export async function checkNodePtyLoadable(
+  load: NodePtyLoader = loadNodePtyModule
+): Promise<CliDependencyStatus> {
+  try {
+    await load();
+    return { name: "node-pty", available: true, required: true };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
     return {
-      persistence,
-      mode: persistence === "psmux" ? "native_psmux" : "native_tmux",
-      supported: true,
-      message: `${persistence} is available for persistent browser terminals.`
+      name: "node-pty",
+      available: false,
+      required: true,
+      error: `node-pty failed to load (${detail}); ${NODE_PTY_REINSTALL_GUIDANCE}`
     };
   }
-
-  if (persistence === "psmux" && isOutdatedPsmuxVersion(dependency?.version)) {
-    return {
-      persistence: "psmux",
-      mode: "psmux_outdated",
-      supported: false,
-      message: "Upgrade psmux to version 3.3.8 or newer for persistent browser terminals."
-    };
-  }
-
-  return {
-    persistence,
-    mode: persistence === "psmux" ? "psmux_missing" : "tmux_missing",
-    supported: false,
-    message: `Install ${persistence} to enable persistent browser terminals.`
-  };
 }
 
-function terminalDependencyCheck(platform: NodeJS.Platform): CliDependencyCheck {
-  return platform === "win32" ? PSMUX_DEPENDENCY_CHECK : TMUX_DEPENDENCY_CHECK;
+async function loadNodePtyModule(): Promise<unknown> {
+  return import("node-pty");
 }
 
 async function checkDependency(
@@ -148,17 +106,6 @@ function formatDependencyStatus(
 ): CliDependencyStatus {
   if (result.exitCode === 0) {
     const version = result.stdout.trim();
-    if (check.name === "psmux" && !isSupportedPsmuxVersion(version)) {
-      return {
-        name: check.name,
-        available: false,
-        required: check.required,
-        ...(version ? { version } : {}),
-        error: parsePsmuxVersion(version)
-          ? "psmux 3.3.8 or newer is required"
-          : "Unable to determine psmux version; version 3.3.8 or newer is required"
-      };
-    }
     return {
       name: check.name,
       available: true,
@@ -173,33 +120,6 @@ function formatDependencyStatus(
     required: check.required,
     error: result.stderr.trim() || `Command exited with ${result.exitCode}`
   };
-}
-
-function isSupportedPsmuxVersion(version: string): boolean {
-  const parsed = parsePsmuxVersion(version);
-  return parsed !== undefined && compareVersions(parsed, MINIMUM_PSMUX_VERSION) >= 0;
-}
-
-function isOutdatedPsmuxVersion(version: string | undefined): boolean {
-  const parsed = parsePsmuxVersion(version);
-  return parsed !== undefined && compareVersions(parsed, MINIMUM_PSMUX_VERSION) < 0;
-}
-
-function parsePsmuxVersion(version: string | undefined): readonly [number, number, number] | undefined {
-  const match = /(?:psmux|tmux)\s+(\d+)\.(\d+)\.(\d+)/i.exec(version ?? "");
-  if (!match) return undefined;
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-function compareVersions(
-  left: readonly [number, number, number],
-  right: readonly [number, number, number]
-): number {
-  for (let index = 0; index < left.length; index += 1) {
-    const difference = left[index]! - right[index]!;
-    if (difference !== 0) return difference;
-  }
-  return 0;
 }
 
 export function runCommand(

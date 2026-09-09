@@ -51,10 +51,6 @@ export function writeForgeBadgerInstallBanner(
   writer.write(renderForgeBadgerInstallBanner(options));
 }
 
-export function writeEnvironmentCheckStart(writer: OutputWriter): void {
-  writer.write("[1/2] Checking operating system and terminal runtime...\n");
-}
-
 function supportsColor(isTTY: boolean, env: NodeJS.ProcessEnv): boolean {
   if (!isTTY || env.NO_COLOR !== undefined || env.FORCE_COLOR === "0") {
     return false;

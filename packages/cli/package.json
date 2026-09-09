@@ -26,6 +26,8 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.71.1",
+    "@xterm/addon-serialize": "^0.13.0",
+    "@xterm/headless": "^5.5.0",
     "bcryptjs": "^3.0.2",
     "better-sqlite3": "^11.7.0",
     "croner": "10.0.1",
