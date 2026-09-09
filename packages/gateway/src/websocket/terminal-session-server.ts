@@ -174,6 +174,12 @@ export interface TerminalWebSocketOptions {
   maxConnectionsPerUser?: number;
   /** IPC socket path for the Session Server. Required for the custom architecture. */
   sessionServerIpcPath?: string;
+  /**
+   * Explicit IPC handshake token for the I/O stream (test seam). When unset,
+   * SessionServerPty reads the state-dir token file, which tracks daemon
+   * token rotation.
+   */
+  sessionServerToken?: string;
   runtimeAuthorizationInvalidator: RuntimeAuthorizationInvalidator;
   runtimeAuthorizationRegistry?: TerminalRuntimeAuthorizationRegistry;
 }
@@ -255,6 +261,7 @@ export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void
         registry,
         limits,
         sessionServerIpcPath,
+        options.sessionServerToken,
         options.db,
         userId,
         dbSession.projectId,
@@ -272,6 +279,7 @@ async function handleTerminalSocket(
   registry: TerminalConnectionRegistry,
   limits: WebSocketConnectionLimits<WebSocket>,
   sessionServerIpcPath: string | undefined,
+  sessionServerToken: string | undefined,
   db: Database,
   userId: string,
   projectId: string,
@@ -383,7 +391,11 @@ async function handleTerminalSocket(
     // Using the raw UUID here would cause attach/input/resize to target a
     // session that doesn't exist, silently (the session-server responds with
     // an error message that SessionServerPty.handleMessage ignores).
-    const serverPty = new SessionServerPty({ ipcPath: sessionServerIpcPath, sessionId: session.tmuxName });
+    const serverPty = new SessionServerPty({
+      ipcPath: sessionServerIpcPath,
+      sessionId: session.tmuxName,
+      ...(sessionServerToken !== undefined ? { token: sessionServerToken } : {})
+    });
     await serverPty.connect();
     pty = serverPty;
   } catch (error) {
@@ -423,6 +435,18 @@ async function handleTerminalSocket(
     void sessionManager.reconcileSessionStatus(sessionId).catch((error) => {
       console.error(`[terminal-ws] reconcile failed for session ${sessionId}`, error);
     });
+  });
+
+  // Transport loss (daemon crash / IPC failure) is not a process exit:
+  // close with 1011 so the browser reconnects, and leave status correction
+  // to the periodic scan — which marks the session `lost` when the daemon
+  // actually restarted. Never send terminal_exit here.
+  pty.onTransportClose(() => {
+    ptyExited = true;
+    console.error(`[terminal-ws] session server transport lost for session ${sessionId}`);
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.close(1011, "session server unreachable");
+    }
   });
 
   const heartbeat = new TerminalHeartbeat({ timeoutMs: TERMINAL_HEARTBEAT_TIMEOUT_MS });

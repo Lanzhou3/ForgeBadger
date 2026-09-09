@@ -22,6 +22,8 @@ export interface StartupResult {
   terminalRuntime: TerminalMultiplexerRuntime;
   /** Present when using the custom Session Server (non-tmux) architecture. */
   sessionServerClient?: SessionServerClient | undefined;
+  /** Stops the periodic session status correction scan. */
+  stopStatusCorrection: () => void;
 }
 
 export async function startupGateway(options: {
@@ -50,6 +52,7 @@ export async function startupGateway(options: {
     ?? options.sessionServerClient
     ?? createTmuxClient(terminalRuntime);
 
+  const sessionServerClient = options.sessionServerClient;
   const sessionManager = new InMemorySessionManager(
     terminalBackend,
     createDbSessionRecoveryStore(db, options.env.FORGEBADGER_MASTER_KEY),
@@ -57,6 +60,12 @@ export async function startupGateway(options: {
     {
       tmuxPrefix: options.env.FORGEBADGER_TMUX_PREFIX,
       db,
+      // The session-server client detects daemon restarts via the hello
+      // pid/startedAt identity; the correction scan consumes this to mark
+      // orphaned sessions `lost` instead of `exited`.
+      ...(sessionServerClient
+        ? { detectBackendRestart: () => sessionServerClient.consumeServerRestarted() }
+        : {}),
       runtimeInputAuthorizer(runtimeSession) {
         // Tenant check: the session must exist for the runtime user.
         const session = new SessionRepository(db, runtimeSession.userId).getById(runtimeSession.id);
@@ -76,12 +85,18 @@ export async function startupGateway(options: {
     }));
   });
 
+  // Periodic drift correction: marks sessions whose backing terminal
+  // disappeared (daemon restart → lost; otherwise exited). Unref'd, so it
+  // never keeps the process alive.
+  const stopStatusCorrection = sessionManager.startStatusCorrectionScan();
+
   return {
     db,
     sessionManager,
     apiKeyStore,
     eventBus,
     terminalRuntime,
-    sessionServerClient: options.sessionServerClient
+    sessionServerClient: options.sessionServerClient,
+    stopStatusCorrection
   };
 }

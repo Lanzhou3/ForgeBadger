@@ -64,6 +64,12 @@ export interface GatewayAppOptions {
   runtimeAuthorizationInvalidator?: RuntimeAuthorizationInvalidator | undefined;
   /** When set, use the Session Server for WebSocket terminal I/O. */
   sessionServerIpcPath?: string | undefined;
+  /**
+   * Explicit Session Server handshake token for the terminal I/O stream.
+   * Production leaves this unset — SessionServerPty reads the state-dir token
+   * file (which survives daemon token rotation). Tests inject it directly.
+   */
+  sessionServerToken?: string | undefined;
   /** Test-only model transport seam for the native Copilot runtime. */
   llmFetch?: typeof fetch | undefined;
 }
@@ -155,7 +161,10 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
       jwtSecret,
       db: options.db,
       runtimeAuthorizationInvalidator,
-      sessionServerIpcPath: options.sessionServerIpcPath
+      sessionServerIpcPath: options.sessionServerIpcPath,
+      ...(options.sessionServerToken !== undefined
+        ? { sessionServerToken: options.sessionServerToken }
+        : {})
     });
   } else {
     attachTerminalWebSocket({

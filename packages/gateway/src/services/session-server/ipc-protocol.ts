@@ -33,6 +33,10 @@ export interface HelloMessage {
 export interface HelloOkResponse {
   type: "hello_ok";
   protocolVersion: number;
+  /** Daemon process id — lets the Gateway distinguish a reused daemon from a respawned one. */
+  pid: number;
+  /** Daemon start time (ISO 8601); together with pid it identifies a daemon instance. */
+  startedAt: string;
 }
 
 export interface HelloErrorResponse {
@@ -123,6 +127,16 @@ export interface ConfigureSessionRequest {
   sessionId: string;
 }
 
+/**
+ * Ask the daemon to destroy every session and exit. This is an explicit
+ * maintenance path (tests, future CLI commands) — the Gateway's normal
+ * shutdown only disconnects and must never kill the daemon.
+ */
+export interface ShutdownServerRequest {
+  id: string;
+  type: "shutdown_server";
+}
+
 export type ManagementRequest =
   | CreateSessionRequest
   | KillSessionRequest
@@ -135,7 +149,8 @@ export type ManagementRequest =
   | InspectPaneRequest
   | StageProgrammaticInputRequest
   | PressEnterRequest
-  | ConfigureSessionRequest;
+  | ConfigureSessionRequest
+  | ShutdownServerRequest;
 
 // ---------------------------------------------------------------------------
 // Management responses (Session Server → Gateway)

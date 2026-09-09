@@ -14,19 +14,28 @@ interface HelloReply {
   type?: string;
   message?: string;
   protocolVersion?: number;
+  pid?: number;
+  startedAt?: string;
 }
 
 /**
- * Send hello and wait for hello_ok. Returns any bytes received after the
- * hello_ok line so the caller can seed its own line buffer with them.
+ * Send hello and wait for hello_ok. Returns the daemon identity (pid /
+ * startedAt, used for reuse logging and restart detection) plus any bytes
+ * received after the hello_ok line so the caller can seed its line buffer.
  */
+export interface ClientHelloResult {
+  leftover: string;
+  pid?: number | undefined;
+  startedAt?: string | undefined;
+}
+
 export function performClientHello(
   socket: Socket,
   token: string,
   timeoutMs: number
-): Promise<string> {
+): Promise<ClientHelloResult> {
   socket.setEncoding("utf8");
-  return new Promise<string>((resolve, reject) => {
+  return new Promise<ClientHelloResult>((resolve, reject) => {
     let buffer = "";
 
     function cleanup(): void {
@@ -56,7 +65,7 @@ export function performClientHello(
       }
       if (msg.type === "hello_ok") {
         cleanup();
-        resolve(rest);
+        resolve({ leftover: rest, pid: msg.pid, startedAt: msg.startedAt });
         return;
       }
       if (msg.type === "hello_error") {

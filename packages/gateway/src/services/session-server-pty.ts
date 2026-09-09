@@ -33,6 +33,12 @@ export interface SessionServerPtyOptions {
 interface PtyEventMap {
   data: (data: string) => void;
   exit: (event: { exitCode: number; signal?: number }) => void;
+  /**
+   * The IPC transport dropped without a session_exit message (daemon crash,
+   * socket failure). This is NOT a process exit — listeners must surface a
+   * reconnect/unreachable path and must never report exit code 0.
+   */
+  transportClose: () => void;
 }
 
 export class SessionServerPty {
@@ -45,6 +51,7 @@ export class SessionServerPty {
   private readonly token: string | undefined;
   private readonly connectTimeoutMs: number;
   private exited = false;
+  private detached = false;
 
   constructor(options: SessionServerPtyOptions) {
     this.ipcPath = options.ipcPath;
@@ -64,17 +71,16 @@ export class SessionServerPty {
     const socket = new Socket();
     await this.waitConnected(socket);
 
-    let leftover = "";
     try {
       const token = this.token ?? readSessionServerTokenFile(resolveSessionServerTokenPath());
-      leftover = await performClientHello(socket, token, this.connectTimeoutMs);
+      const hello = await performClientHello(socket, token, this.connectTimeoutMs);
+      this.buffer = hello.leftover;
     } catch (error) {
       socket.destroy();
       throw error;
     }
 
     this.socket = socket;
-    this.buffer = leftover;
     this.setupSocket(socket);
 
     // Send attach message
@@ -154,6 +160,16 @@ export class SessionServerPty {
     return { dispose: () => this.emitter.off("exit", listener) };
   }
 
+  /**
+   * Subscribe to unexpected transport loss. A dropped IPC connection is
+   * indistinguishable from a daemon crash, so this is an error/reconnect
+   * signal — never a clean exit.
+   */
+  onTransportClose(listener: PtyEventMap["transportClose"]): { dispose: () => void } {
+    this.emitter.on("transportClose", listener);
+    return { dispose: () => this.emitter.off("transportClose", listener) };
+  }
+
   // ------------------------------------------------------------------
   // Internal
   // ------------------------------------------------------------------
@@ -175,7 +191,11 @@ export class SessionServerPty {
 
     socket.on("close", () => {
       this.socket = undefined;
-      this.emitter.emit("exit", { exitCode: 0 });
+      // A session_exit message marks a real CLI exit. A transport close
+      // without one means the daemon (or the connection) died — surface it
+      // as transport loss, never as exit code 0.
+      if (this.exited || this.detached) return;
+      this.emitter.emit("transportClose");
     });
 
     socket.on("error", () => {
@@ -220,6 +240,7 @@ export class SessionServerPty {
 
   private detach(): void {
     if (!this.socket) return;
+    this.detached = true;
     this.sendIpc({
       type: "detach_client",
       sessionId: this.sessionId,

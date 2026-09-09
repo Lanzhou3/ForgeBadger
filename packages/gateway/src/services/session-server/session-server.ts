@@ -124,6 +124,7 @@ export class SessionServer {
       sessionId,
       userId,
       attachToken,
+      ownerSessionId: launchPlan.env.FORGEBADGER_SESSION_ID,
       pty,
       ringBuffer
     });
@@ -188,10 +189,18 @@ export class SessionServer {
   }
 
   showEnvironment(sessionId: string): Record<string, string> {
-    // The session server doesn't track per-session env in the same way tmux does.
-    // Return an empty object — the caller (session-manager) uses this for
-    // attach-token validation, which is handled differently in the new architecture.
-    return {};
+    // Mirror tmux show-environment semantics: expose the ForgeBadger
+    // ownership markers so session-manager.attachExistingSession can verify
+    // that a server-side session belongs to the requesting ForgeBadger
+    // session (and carries the same attach token).
+    const handle = this.requireSession(sessionId);
+    const env: Record<string, string> = {
+      FORGEBADGER_SESSION_ID: handle.ownerSessionId ?? handle.sessionId
+    };
+    if (handle.attachToken) {
+      env.FORGEBADGER_ATTACH_TOKEN = handle.attachToken;
+    }
+    return env;
   }
 
   resizeWindow(sessionId: string, cols: number, rows: number): void {

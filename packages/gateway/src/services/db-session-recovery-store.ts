@@ -94,6 +94,18 @@ class DbSessionRecoveryStore implements SessionRecoveryStore {
       .run("exited", sqliteTimestampSeconds(), id, userId);
   }
 
+  async markSessionLost(id: string, userId: string): Promise<void> {
+    // Keep tmux_session: the daemon lost the session, but the name is the
+    // only handle a future revive flow has to reference what was running.
+    this.db
+      .prepare(
+        `UPDATE sessions
+         SET status = ?, updated_at = ?
+         WHERE id = ? AND user_id = ?`
+      )
+      .run("lost", sqliteTimestampSeconds(), id, userId);
+  }
+
   private encryptAttachToken(token: string): string {
     if (!this.masterKey) {
       return token;

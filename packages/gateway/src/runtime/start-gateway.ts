@@ -107,7 +107,8 @@ export async function createGatewayRuntime(
     db,
     sessionManager,
     apiKeyStore,
-    eventBus
+    eventBus,
+    stopStatusCorrection
   } = await startupGateway(startupOptions);
 
   const runtime = createGatewayApp({
@@ -123,11 +124,15 @@ export async function createGatewayRuntime(
     sessionServerIpcPath
   });
 
-  // Attach shutdown hook for the Session Server
+  // Attach shutdown hook: the Gateway only disconnects from the Session
+  // Server daemon — the daemon (and its CLI sessions) must outlive the
+  // Gateway. Killing it is an explicit maintenance action
+  // (SessionServerIntegration.stop), never part of normal shutdown.
   const originalClose = runtime.close.bind(runtime);
   (runtime as { close: () => Promise<void> }).close = async () => {
+    stopStatusCorrection();
     await originalClose();
-    await sessionServerIntegration?.stop();
+    await sessionServerIntegration?.disconnect();
   };
 
   await runtime.recoveryReady;

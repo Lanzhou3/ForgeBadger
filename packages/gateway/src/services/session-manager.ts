@@ -19,7 +19,7 @@ import {
   programmaticDeliveryNeedle
 } from "./programmatic-terminal-submit.js";
 
-export type SessionStatus = "pending" | "running" | "detached" | "exited" | "error";
+export type SessionStatus = "pending" | "running" | "detached" | "exited" | "lost" | "error";
 
 export class SessionConflictError extends Error {
   constructor(message: string) {
@@ -69,6 +69,12 @@ export interface SessionRecoveryStore {
   listSessions(): Promise<StoredSession[]>;
   upsertSession(session: StoredSession): Promise<void>;
   removeSession(id: string, userId: string): Promise<void>;
+  /**
+   * Mark a session as lost: the backing terminal daemon restarted and its
+   * registry no longer contains the session. Unlike removeSession this keeps
+   * the tmux_session name so a future revive flow can reference it.
+   */
+  markSessionLost?(id: string, userId: string): Promise<void>;
 }
 
 export interface RecoveryResult {
@@ -82,6 +88,13 @@ export interface SessionManagerOptions {
   runtimeInputAuthorizer?: (session: Readonly<GateASession>) => void;
   programmaticSubmitSettleMs?: Partial<Record<AdapterId, number>>;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * One-shot probe consumed once per status-correction scan: returns true
+   * when the terminal backend daemon was restarted since the last scan
+   * (detected via the IPC hello pid/startedAt identity). Orphaned sessions
+   * are then marked `lost` instead of `exited`.
+   */
+  detectBackendRestart?: () => boolean;
 }
 
 export interface ProgrammaticTaskInput {
@@ -129,6 +142,7 @@ export class InMemorySessionManager {
   private readonly runtimeInputAuthorizer: ((session: Readonly<GateASession>) => void) | undefined;
   private readonly programmaticSubmitSettleMs: Readonly<Record<AdapterId, number>>;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly detectBackendRestart: (() => boolean) | undefined;
   private readonly sessionLocks = new Map<string, Promise<unknown>>();
   private correctionInterval: ReturnType<typeof setInterval> | undefined;
 
@@ -146,6 +160,7 @@ export class InMemorySessionManager {
       ...options.programmaticSubmitSettleMs
     };
     this.sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    this.detectBackendRestart = options.detectBackendRestart;
   }
 
   /**
@@ -196,6 +211,8 @@ export class InMemorySessionManager {
         args: input.launchPlan.args,
         env: {
           ...input.launchPlan.env,
+          FORGEBADGER_SESSION_ID: session.id,
+          FORGEBADGER_USER_ID: input.userId,
           FORGEBADGER_ATTACH_TOKEN: session.attachToken,
           // The Web terminal renders ANSI colors, so a NO_COLOR=1 leaked from
           // the host shell (inherited via the tmux server global environment)
@@ -347,13 +364,23 @@ export class InMemorySessionManager {
    * backing tmux session is gone, mark it exited and sync the DB; if it is
    * still alive (a detached terminal), mark it detached. Emits at most one
    * session_status_changed via updateSession.
+   *
+   * When `opts.backendRestarted` is true (the terminal daemon restarted and
+   * its registry was rebuilt empty), a previously live session that is now
+   * missing is marked `lost` instead of `exited` — the CLI process was
+   * killed with the daemon, it did not exit on its own (VS Code
+   * reconnect/revive model: never silently show a dead session as running,
+   * never report a daemon kill as a clean exit).
    */
-  async reconcileSessionStatus(id: string): Promise<GateASession | undefined> {
+  async reconcileSessionStatus(
+    id: string,
+    opts: { backendRestarted?: boolean } = {}
+  ): Promise<GateASession | undefined> {
     const session = this.sessions.get(id);
     if (!session) {
       return undefined;
     }
-    if (session.status === "exited" || session.status === "error") {
+    if (session.status === "exited" || session.status === "error" || session.status === "lost") {
       return session;
     }
 
@@ -367,6 +394,17 @@ export class InMemorySessionManager {
       return undefined;
     }
     if (!alive) {
+      const wasLive = current.status === "running" || current.status === "detached";
+      if (opts.backendRestarted && wasLive) {
+        const lost = this.updateSession(id, { status: "lost" });
+        try {
+          await this.recoveryStore.markSessionLost?.(id, current.userId);
+        } catch (error) {
+          console.error(`[session-manager] lost DB sync failed for ${id}`, error);
+        }
+        this.sessions.delete(id);
+        return lost;
+      }
       const exited = this.updateSession(id, { status: "exited" });
       try {
         await this.recoveryStore.removeSession(id, current.userId);
@@ -387,17 +425,20 @@ export class InMemorySessionManager {
 
   /**
    * Low-frequency correction scan (optional). Marks any in-memory session whose
-   * backing tmux session has disappeared as exited, and syncs the DB. Returns a
-   * teardown function to stop the timer.
+   * backing tmux session has disappeared as exited (or `lost` when the backend
+   * daemon restarted), and syncs the DB. Returns a teardown function to stop
+   * the timer. The backend-restart probe is consumed once per scan so every
+   * orphaned session of the same restart is marked consistently.
    */
   startStatusCorrectionScan(intervalMs = 30_000): () => void {
     if (this.correctionInterval) {
       clearInterval(this.correctionInterval);
     }
     const run = () => {
+      const backendRestarted = this.detectBackendRestart?.() ?? false;
       for (const session of this.sessions.values()) {
         if (session.status === "running" || session.status === "detached") {
-          void this.reconcileSessionStatus(session.id).catch((error) => {
+          void this.reconcileSessionStatus(session.id, { backendRestarted }).catch((error) => {
             console.error(`[session-manager] status correction failed for ${session.id}`, error);
           });
         }

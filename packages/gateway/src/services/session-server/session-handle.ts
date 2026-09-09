@@ -15,6 +15,8 @@ export interface SessionHandleOptions {
   sessionId: string;
   userId: string;
   attachToken: string;
+  /** Owning ForgeBadger session id (from launchPlan.env.FORGEBADGER_SESSION_ID). */
+  ownerSessionId?: string | undefined;
   pty: IPty;
   ringBuffer: OutputRingBuffer;
 }
@@ -23,6 +25,7 @@ export class SessionHandle {
   readonly sessionId: string;
   readonly userId: string;
   readonly attachToken: string;
+  readonly ownerSessionId: string | undefined;
   readonly pty: IPty;
   readonly ringBuffer: OutputRingBuffer;
 
@@ -35,6 +38,7 @@ export class SessionHandle {
     this.sessionId = options.sessionId;
     this.userId = options.userId;
     this.attachToken = options.attachToken;
+    this.ownerSessionId = options.ownerSessionId;
     this.pty = options.pty;
     this.ringBuffer = options.ringBuffer;
   }

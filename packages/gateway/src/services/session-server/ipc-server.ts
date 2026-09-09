@@ -20,6 +20,7 @@ import { timingSafeEqual } from "node:crypto";
 import { dirname } from "node:path";
 
 import { SessionServer } from "./session-server.js";
+import { startSocketSelfCheck } from "./socket-self-check.js";
 import {
   PROTOCOL_VERSION,
   type HelloErrorResponse,
@@ -44,6 +45,14 @@ export interface IpcServerOptions {
   token: string;
   /** Test hook: how long a connection may take to complete hello. */
   helloTimeoutMs?: number;
+  /**
+   * Called after a shutdown_server request has been acknowledged and all
+   * sessions destroyed. The host process decides how to exit; the Gateway's
+   * normal shutdown path never sends this message.
+   */
+  onShutdownRequested?: () => void;
+  /** Daemon start time reported in hello_ok (test hook for restart detection). */
+  startedAt?: string;
 }
 
 interface ConnectionState {
@@ -58,13 +67,19 @@ export class IpcServer {
   private readonly sessionServer: SessionServer;
   private readonly token: string;
   private readonly helloTimeoutMs: number;
+  private readonly startedAt: string;
+  private readonly onShutdownRequested: (() => void) | undefined;
   private readonly clients = new Map<string, Socket>();
+  /** Every live connection (management + I/O), so stop() can close them all. */
+  private readonly connections = new Set<Socket>();
 
   constructor(options: IpcServerOptions) {
     this.ipcPath = options.ipcPath;
     this.sessionServer = options.sessionServer;
     this.token = options.token;
     this.helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
+    this.startedAt = options.startedAt ?? new Date().toISOString();
+    this.onShutdownRequested = options.onShutdownRequested;
   }
 
   async start(): Promise<void> {
@@ -126,10 +141,13 @@ export class IpcServer {
   async stop(): Promise<void> {
     if (!this.server) return;
 
-    // Close all client connections
-    for (const socket of this.clients.values()) {
+    // Close every live connection — not just attached I/O clients:
+    // server.close() waits for open connections, and management connections
+    // are not in the clientId map.
+    for (const socket of this.connections) {
       socket.destroy();
     }
+    this.connections.clear();
     this.clients.clear();
 
     await new Promise<void>((resolve) => {
@@ -176,6 +194,7 @@ export class IpcServer {
   // ------------------------------------------------------------------
 
   private handleConnection(socket: Socket): void {
+    this.connections.add(socket);
     const state: ConnectionState = { authenticated: false, buffer: "", bufferedBytes: 0 };
     const helloTimer = setTimeout(() => {
       if (!state.authenticated) {
@@ -190,6 +209,7 @@ export class IpcServer {
 
     const cleanup = () => {
       clearTimeout(helloTimer);
+      this.connections.delete(socket);
       // Remove every clientId entry that still points at this socket —
       // attach_client maps clientId → socket, and both must be reaped.
       for (const [clientId, s] of this.clients) {
@@ -267,7 +287,12 @@ export class IpcServer {
     }
     state.authenticated = true;
     clearTimeout(helloTimer);
-    this.writeSocket(socket, { type: "hello_ok", protocolVersion: PROTOCOL_VERSION });
+    this.writeSocket(socket, {
+      type: "hello_ok",
+      protocolVersion: PROTOCOL_VERSION,
+      pid: process.pid,
+      startedAt: this.startedAt
+    });
     return true;
   }
 
@@ -341,6 +366,8 @@ export class IpcServer {
         return this.handlePressEnter(msg);
       case "configure_session":
         return this.handleConfigureSession(msg);
+      case "shutdown_server":
+        return this.handleShutdownServer(msg, socket);
       case "attach_client":
         return this.handleAttachClient(msg, socket);
       case "detach_client":
@@ -427,6 +454,21 @@ export class IpcServer {
     return { id: msg.id, type: "ok" };
   }
 
+  /**
+   * Maintenance shutdown: acknowledge first (flushed via socket.end), then
+   * destroy every session and hand over to the host process to exit.
+   */
+  private handleShutdownServer(
+    msg: import("./ipc-protocol.js").ShutdownServerRequest,
+    socket: Socket
+  ): null {
+    this.writeSocket(socket, { id: msg.id, type: "ok" });
+    socket.end(() => {
+      void this.sessionServer.destroy().finally(() => this.onShutdownRequested?.());
+    });
+    return null;
+  }
+
   // ------------------------------------------------------------------
   // I/O stream handlers
   // ------------------------------------------------------------------
@@ -479,7 +521,12 @@ export async function startSessionServer(options: {
   ipcPath: string;
   stateDir: string;
   token: string;
+  /** Stolen-socket self-check interval in ms (POSIX). 0 disables; default 30s. */
+  socketSelfCheckIntervalMs?: number;
+  /** How the host process exits (test hook); defaults to process.exit. */
+  onExit?: (code: number) => void;
 }): Promise<{ ipcServer: IpcServer; sessionServer: SessionServer; stop: () => Promise<void> }> {
+  const exit = options.onExit ?? ((code: number) => process.exit(code));
   const platformAdapter = createPlatformAdapter();
   const sessionServer = new SessionServer({
     platformAdapter,
@@ -492,11 +539,42 @@ export async function startSessionServer(options: {
   });
 
   const ipcPath = options.ipcPath ?? platformAdapter.getIpcPath(options.stateDir);
-  const ipcServer = new IpcServer({ ipcPath, sessionServer, token: options.token });
+
+  let stopped = false;
+  let stopSelfCheck: () => void = () => {};
+  const shutdown = async (exitCode: number) => {
+    if (stopped) return;
+    stopped = true;
+    stopSelfCheck();
+    await ipcServer.stop();
+    await sessionServer.destroy();
+    exit(exitCode);
+  };
+
+  const ipcServer = new IpcServer({
+    ipcPath,
+    sessionServer,
+    token: options.token,
+    onShutdownRequested: () => void shutdown(0)
+  });
 
   await ipcServer.start();
 
+  // gpg-agent style self-test: exit (after destroying sessions) when our
+  // socket file was stolen, so we never linger as an unreachable daemon.
+  stopSelfCheck = startSocketSelfCheck({
+    ipcPath,
+    intervalMs: options.socketSelfCheckIntervalMs ?? 30_000,
+    onStolen: () => {
+      console.error("[session-server] IPC socket was unlinked or replaced; shutting down");
+      void shutdown(1);
+    }
+  });
+
   const stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    stopSelfCheck();
     await ipcServer.stop();
     await sessionServer.destroy();
   };

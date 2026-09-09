@@ -45,6 +45,7 @@ export {
   StageProgrammaticInputRequest,
   PressEnterRequest,
   ConfigureSessionRequest,
+  ShutdownServerRequest,
   AttachClientMessage,
   DetachClientMessage,
   ClientInputMessage,

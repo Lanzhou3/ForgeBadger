@@ -28,8 +28,19 @@ export interface SessionServerClientOptions {
   ipcPath: string;
   /** Handshake token; when omitted, read from the state-dir token file. */
   token?: string;
+  /**
+   * Token file path re-read on every (re)connect. Preferred over `token`
+   * whenever the daemon may be respawned, because each spawn rotates it.
+   */
+  tokenPath?: string;
   connectTimeoutMs?: number;
   requestTimeoutMs?: number;
+}
+
+/** Identity of the daemon the client is currently connected to. */
+export interface SessionServerIdentity {
+  pid: number;
+  startedAt: string;
 }
 
 export class SessionServerClient implements TmuxClient {
@@ -42,8 +53,20 @@ export class SessionServerClient implements TmuxClient {
   }>();
   private readonly ipcPath: string;
   private readonly token: string | undefined;
+  private readonly tokenPath: string | undefined;
   private readonly connectTimeoutMs: number;
   private readonly requestTimeoutMs: number;
+  private intentionalClose = false;
+  private serverIdentity: SessionServerIdentity | undefined;
+  private restartPending = false;
+
+  /**
+   * Fired when the management socket closes unexpectedly (daemon crash or
+   * network failure). Not fired for an intentional disconnect().
+   */
+  onDisconnect: (() => void) | undefined;
+  /** Fired when a connect attempt fails — drives circuit-breaker re-arm. */
+  onConnectError: ((error: Error) => void) | undefined;
 
   /** Maps tmuxName → sessionId for TmuxClient interface compatibility. */
   private readonly nameToSessionId = new Map<string, string>();
@@ -51,6 +74,7 @@ export class SessionServerClient implements TmuxClient {
   constructor(options: SessionServerClientOptions) {
     this.ipcPath = options.ipcPath;
     this.token = options.token;
+    this.tokenPath = options.tokenPath;
     this.connectTimeoutMs = options.connectTimeoutMs ?? 5000;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
   }
@@ -59,31 +83,92 @@ export class SessionServerClient implements TmuxClient {
   // Connection management
   // ------------------------------------------------------------------
 
-  async connect(): Promise<void> {
+  async connect(timeoutOverrideMs?: number): Promise<void> {
     if (this.socket) return;
+    const timeoutMs = timeoutOverrideMs ?? this.connectTimeoutMs;
 
     const socket = new Socket();
-    await this.waitConnected(socket);
-
-    let leftover = "";
     try {
-      leftover = await performClientHello(socket, this.resolveToken(), this.connectTimeoutMs);
+      await this.waitConnected(socket, timeoutMs);
     } catch (error) {
-      socket.destroy();
+      this.onConnectError?.(error as Error);
       throw error;
     }
 
+    let hello;
+    try {
+      hello = await performClientHello(socket, this.resolveToken(), timeoutMs);
+    } catch (error) {
+      socket.destroy();
+      this.onConnectError?.(error as Error);
+      throw error;
+    }
+
+    // A changed pid/startedAt means the daemon was restarted behind us; its
+    // registry is empty and previously running sessions are gone (lost).
+    const nextIdentity: SessionServerIdentity = {
+      pid: hello.pid ?? 0,
+      startedAt: hello.startedAt ?? ""
+    };
+    if (
+      this.serverIdentity
+      && (this.serverIdentity.pid !== nextIdentity.pid
+        || this.serverIdentity.startedAt !== nextIdentity.startedAt)
+    ) {
+      this.restartPending = true;
+    }
+    this.serverIdentity = nextIdentity;
+
+    this.intentionalClose = false;
     this.socket = socket;
-    this.buffer = leftover;
+    this.buffer = hello.leftover;
     this.setupSocket(socket);
+    await this.syncSessionRegistry();
   }
 
-  private waitConnected(socket: Socket): Promise<void> {
+  /** Identity of the connected daemon (from hello_ok), for diagnostics. */
+  getServerIdentity(): SessionServerIdentity | undefined {
+    return this.serverIdentity;
+  }
+
+  /**
+   * One-shot restart signal: returns true once after a reconnect observed a
+   * different daemon instance. session-manager consumes this per correction
+   * scan and marks orphaned sessions `lost` instead of `exited`.
+   */
+  consumeServerRestarted(): boolean {
+    const restarted = this.restartPending;
+    this.restartPending = false;
+    return restarted;
+  }
+
+  /** Rebuild the name→sessionId map from the daemon's registry. The current
+   *  convention is "sessionId is the tmux-style name", so the mapping is
+   *  identity; this keeps it authoritative across Gateway restarts. Best
+   *  effort with a short timeout — connect must not stall on a daemon that
+   *  accepts the handshake but stalls management answers. */
+  private async syncSessionRegistry(): Promise<void> {
+    try {
+      const sessions = await this.sendRequest<Array<{ sessionId: string }>>({
+        id: randomUUID(),
+        type: "list_sessions"
+      }, 3000);
+      for (const session of sessions) {
+        if (!this.nameToSessionId.has(session.sessionId)) {
+          this.nameToSessionId.set(session.sessionId, session.sessionId);
+        }
+      }
+    } catch {
+      // Registry sync is best-effort; lookups fall back to the raw name.
+    }
+  }
+
+  private waitConnected(socket: Socket, timeoutMs: number): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         socket.destroy();
-        reject(new Error(`Session Server connection timed out after ${this.connectTimeoutMs}ms`));
-      }, this.connectTimeoutMs);
+        reject(new Error(`Session Server connection timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
 
       socket.connect(this.ipcPath, () => {
         clearTimeout(timer);
@@ -98,24 +183,29 @@ export class SessionServerClient implements TmuxClient {
   }
 
   private resolveToken(): string {
-    return this.token ?? readSessionServerTokenFile(resolveSessionServerTokenPath());
+    if (this.token) return this.token;
+    return readSessionServerTokenFile(this.tokenPath ?? resolveSessionServerTokenPath());
   }
 
   async disconnect(): Promise<void> {
     if (!this.socket) return;
     const socket = this.socket;
     this.socket = undefined;
+    this.intentionalClose = true;
 
-    // Reject all pending requests
-    for (const [id, pending] of this.pending) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error("Client disconnected"));
-    }
-    this.pending.clear();
+    this.rejectAllPending(new Error("Client disconnected"));
 
     return new Promise<void>((resolve) => {
       socket.end(() => resolve());
     });
+  }
+
+  private rejectAllPending(reason: Error): void {
+    for (const [, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      pending.reject(reason);
+    }
+    this.pending.clear();
   }
 
   private setupSocket(socket: Socket): void {
@@ -134,11 +224,20 @@ export class SessionServerClient implements TmuxClient {
     });
 
     socket.on("close", () => {
-      this.socket = undefined;
+      if (this.socket === socket) {
+        this.socket = undefined;
+      }
+      // A closed transport must reject in-flight requests immediately —
+      // they can never complete, and waiting out the request timeout would
+      // stall session operations for seconds after a daemon crash.
+      this.rejectAllPending(new Error("Session Server connection closed"));
+      if (!this.intentionalClose) {
+        this.onDisconnect?.();
+      }
     });
 
     socket.on("error", () => {
-      this.socket = undefined;
+      // The close event always follows; rejection happens there.
     });
   }
 
@@ -162,7 +261,10 @@ export class SessionServerClient implements TmuxClient {
     // separately via the onOutput/onExit callbacks
   }
 
-  private async sendRequest<T>(msg: { id: string; type: string; [key: string]: unknown }): Promise<T> {
+  private async sendRequest<T>(
+    msg: { id: string; type: string; [key: string]: unknown },
+    timeoutMs = this.requestTimeoutMs
+  ): Promise<T> {
     if (!this.socket) {
       await this.connect();
     }
@@ -172,7 +274,7 @@ export class SessionServerClient implements TmuxClient {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`IPC request timed out: ${msg.type}`));
-      }, this.requestTimeoutMs);
+      }, timeoutMs);
 
       this.pending.set(id, {
         resolve: (response) => {
@@ -205,12 +307,16 @@ export class SessionServerClient implements TmuxClient {
     const sessionId = this.nameToSessionId.get(options.name) ?? options.name;
     this.nameToSessionId.set(options.name, sessionId);
 
+    // Ownership metadata rides the launch env (session-manager injects
+    // FORGEBADGER_SESSION_ID / FORGEBADGER_ATTACH_TOKEN / FORGEBADGER_USER_ID);
+    // the server stores it on the handle so show_environment can prove
+    // ownership to a future attachExistingSession call.
     await this.sendRequest({
       id: randomUUID(),
       type: "create_session",
       sessionId,
-      userId: "",
-      attachToken: "",
+      userId: options.env.FORGEBADGER_USER_ID ?? "",
+      attachToken: options.env.FORGEBADGER_ATTACH_TOKEN ?? "",
       launchPlan: {
         command: options.command,
         args: options.args,
@@ -219,6 +325,14 @@ export class SessionServerClient implements TmuxClient {
         secretEnvNames: [],
         credentialMode: "host_environment"
       } satisfies LaunchPlanPayload
+    });
+  }
+
+  /** Maintenance path: ask the daemon to destroy all sessions and exit. */
+  async shutdownServer(): Promise<void> {
+    await this.sendRequest({
+      id: randomUUID(),
+      type: "shutdown_server"
     });
   }
 
