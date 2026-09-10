@@ -100,7 +100,7 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
             async prepare(ctx, input) {
                 const v = taskPrepareInput.parse(input);
                 const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi']).parse(v.aiTool ?? project(ctx, v.projectId).aiTool);
-                const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner);
+                const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
                 if (!status.launchEnabled)
                     throw new Error(`${status.label} is not available for launch`);
             },

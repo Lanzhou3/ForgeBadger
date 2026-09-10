@@ -2,8 +2,8 @@
  * Per-session headless terminal screen.
  *
  * Each session owns one @xterm/headless Terminal that absorbs all pty output,
- * so capture/inspect/replay operate on the *rendered* screen (tmux
- * capture-pane semantics) instead of a raw byte stream:
+ * so capture/inspect/replay operate on the *rendered* screen instead of a raw
+ * byte stream:
  *   - capture / attach snapshot  -> SerializeAddon output (ANSI preserved)
  *   - inspect (programmatic submit composer detection) -> buffer API
  *     (`translateToString(true)`), never parsed serialize output
@@ -16,7 +16,7 @@
  *   2. Resize is applied to the headless terminal in lockstep with the pty.
  *   3. Screen sampling (capture/inspect/snapshot) must wait for the write
  *      queue to drain (`whenIdle`) or it reads a stale frame.
- *   4. Scrollback replaces the tmux `history-limit 10000` default.
+ *   4. Scrollback is fixed at 10000 lines per session.
  */
 import xtermHeadless from "@xterm/headless";
 import addonSerialize from "@xterm/addon-serialize";

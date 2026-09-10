@@ -105,7 +105,7 @@ export function createSessionRoutes(
       return;
     }
 
-    const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner);
+    const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner, sessionManager.terminalBackendHealth());
     if (!launchStatus.launchEnabled) {
       res.status(409).json({
         code: 1,
@@ -160,7 +160,7 @@ export function createSessionRoutes(
       const updated = sessionRepo.update(dbSession.id, {
         status: "running",
         attachToken: session.attachToken,
-        tmuxSession: session.tmuxName,
+        runtimeSessionName: session.runtimeSessionName,
         lastActive: new Date()
       });
       recordSessionActivity(db, eventBus, userId, updated ?? dbSession, "session_started", "success", `Session ${dbSession.name} started`);
@@ -281,8 +281,8 @@ export function createSessionRoutes(
     // Prefer the live in-memory attach token (plaintext). The DB column now
     // holds the token encrypted at rest, so never surface it directly.
     const attachToken = liveSession?.attachToken ?? "";
-    const tmuxName = liveSession?.tmuxName ?? session.tmuxSession ?? undefined;
-    if (!attachToken || !tmuxName) {
+    const runtimeSessionName = liveSession?.runtimeSessionName ?? session.runtimeSessionName ?? undefined;
+    if (!attachToken || !runtimeSessionName) {
       res.status(409).json({ code: 1, message: "Session is not connectable" });
       return;
     }
@@ -292,7 +292,7 @@ export function createSessionRoutes(
       code: 0,
       data: {
         session: toSessionPayload(
-          session.tmuxSession === tmuxName ? session : { ...session, tmuxSession: tmuxName },
+          session.runtimeSessionName === runtimeSessionName ? session : { ...session, runtimeSessionName: runtimeSessionName },
           attachToken
         )
       },
@@ -342,16 +342,16 @@ export function createSessionRoutes(
 
     try {
       await sessionManager.runExclusive(req.params.id, async () => {
-        // Stop any still-live tmux session regardless of DB status, so a
-        // delete does not leave an orphan when the DB says idle/stopped but a
-        // tmux session is actually alive.
+        // Stop any still-live runtime session regardless of DB status, so a
+        // delete does not leave an orphan when the DB says idle/stopped but the
+        // backend session is actually alive.
         const live = sessionManager.getSession(req.params.id);
-        const tmuxName = live?.tmuxName ?? dbSession.tmuxSession ?? undefined;
-        if (live || tmuxName) {
+        const runtimeSessionName = live?.runtimeSessionName ?? dbSession.runtimeSessionName ?? undefined;
+        if (live || runtimeSessionName) {
           try {
-            await sessionManager.stopSession(req.params.id, tmuxName, userId);
+            await sessionManager.stopSession(req.params.id, runtimeSessionName, userId);
           } catch {
-            // Deleting the row should still be possible if the tmux pane is gone.
+            // Deleting the row should still be possible if the runtime session is gone.
           }
         }
       });
@@ -413,7 +413,6 @@ type SessionPayload = Omit<Session,
   | "credentialMode"
 > & {
   attachToken?: string;
-  tmuxName: string | null;
 };
 
 function toSessionPayload(session: Session, attachToken?: string): SessionPayload {
@@ -426,7 +425,6 @@ function toSessionPayload(session: Session, attachToken?: string): SessionPayloa
   } = session;
   return {
     ...safe,
-    tmuxName: session.tmuxSession,
     ...(attachToken ? { attachToken } : {})
   };
 }

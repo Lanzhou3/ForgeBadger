@@ -1,8 +1,8 @@
 /**
  * Gateway-side IPC client for the Session Server.
  *
- * Implements the TmuxClient interface so the SessionManager and WebSocket
- * handler can use it as a drop-in replacement. Internally, it translates
+ * Implements the TerminalBackendClient contract so the SessionManager and
+ * WebSocket handler can drive the Session Server. Internally, it translates
  * calls to IPC messages sent to the Session Server.
  *
  * The IPC connection is a single long-lived TCP/Unix socket connection.
@@ -12,12 +12,17 @@
 import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 
-import type { TmuxClient, TmuxCreateOptions, TmuxPaneSnapshot } from "./tmux.js";
+import type {
+  BackendPaneSnapshot,
+  TerminalBackendClient,
+  TerminalSessionOptions
+} from "./terminal-backend.js";
 import type {
   ManagementResponse,
   LaunchPlanPayload,
   PaneSnapshot
 } from "./session-server/index.js";
+import { isRecord } from "./session-server/ipc-validation.js";
 import { performClientHello } from "./session-server/hello-handshake.js";
 import {
   readSessionServerTokenFile,
@@ -43,8 +48,9 @@ export interface SessionServerIdentity {
   startedAt: string;
 }
 
-export class SessionServerClient implements TmuxClient {
+export class SessionServerClient implements TerminalBackendClient {
   private socket: Socket | undefined;
+  private connecting: Promise<void> | undefined;
   private buffer = "";
   private readonly pending = new Map<string, {
     resolve: (value: ManagementResponse) => void;
@@ -68,7 +74,8 @@ export class SessionServerClient implements TmuxClient {
   /** Fired when a connect attempt fails — drives circuit-breaker re-arm. */
   onConnectError: ((error: Error) => void) | undefined;
 
-  /** Maps tmuxName → sessionId for TmuxClient interface compatibility. */
+  /** Maps runtime session name → sessionId (the names are identical today;
+   *  the map keeps the historical fb-{user8}-{sessionId} naming contract). */
   private readonly nameToSessionId = new Map<string, string>();
 
   constructor(options: SessionServerClientOptions) {
@@ -84,13 +91,22 @@ export class SessionServerClient implements TmuxClient {
   // ------------------------------------------------------------------
 
   async connect(timeoutOverrideMs?: number): Promise<void> {
-    if (this.socket) return;
+    if (this.connecting) return this.connecting;
+    if (this.socket && !this.socket.destroyed) return;
+    const operation = this.openConnection(timeoutOverrideMs);
+    this.connecting = operation;
+    try { await operation; }
+    finally { if (this.connecting === operation) this.connecting = undefined; }
+  }
+
+  private async openConnection(timeoutOverrideMs?: number): Promise<void> {
     const timeoutMs = timeoutOverrideMs ?? this.connectTimeoutMs;
 
     const socket = new Socket();
     try {
       await this.waitConnected(socket, timeoutMs);
     } catch (error) {
+      socket.destroy();
       this.onConnectError?.(error as Error);
       throw error;
     }
@@ -143,7 +159,7 @@ export class SessionServerClient implements TmuxClient {
   }
 
   /** Rebuild the name→sessionId map from the daemon's registry. The current
-   *  convention is "sessionId is the tmux-style name", so the mapping is
+   *  convention is "sessionId is the runtime session name", so the mapping is
    *  identity; this keeps it authoritative across Gateway restarts. Best
    *  effort with a short timeout — connect must not stall on a daemon that
    *  accepts the handshake but stalls management answers. */
@@ -188,6 +204,7 @@ export class SessionServerClient implements TmuxClient {
   }
 
   async disconnect(): Promise<void> {
+    await this.connecting?.catch(() => {});
     if (!this.socket) return;
     const socket = this.socket;
     this.socket = undefined;
@@ -212,6 +229,7 @@ export class SessionServerClient implements TmuxClient {
     socket.setEncoding("utf8");
 
     socket.on("data", (chunk) => {
+      if (this.socket !== socket) return;
       this.buffer += chunk;
       let newlineIndex: number;
       while ((newlineIndex = this.buffer.indexOf("\n")) !== -1) {
@@ -224,9 +242,8 @@ export class SessionServerClient implements TmuxClient {
     });
 
     socket.on("close", () => {
-      if (this.socket === socket) {
-        this.socket = undefined;
-      }
+      if (this.socket !== socket) return;
+      this.socket = undefined;
       // A closed transport must reject in-flight requests immediately —
       // they can never complete, and waiting out the request timeout would
       // stall session operations for seconds after a daemon crash.
@@ -249,7 +266,7 @@ export class SessionServerClient implements TmuxClient {
       return;
     }
 
-    if (msg.type === "ok" || msg.type === "error") {
+    if (isRecord(msg) && typeof msg.id === "string" && (msg.type === "ok" || msg.type === "error")) {
       const pending = this.pending.get(msg.id);
       if (pending) {
         clearTimeout(pending.timer);
@@ -298,12 +315,17 @@ export class SessionServerClient implements TmuxClient {
     });
   }
 
+  /** Connection health for adapter launch gating (TerminalBackendClient). */
+  isAvailable(): boolean {
+    return this.socket !== undefined;
+  }
+
   // ------------------------------------------------------------------
-  // TmuxClient interface implementation
+  // TerminalBackendClient implementation
   // ------------------------------------------------------------------
 
-  async createSession(options: TmuxCreateOptions): Promise<void> {
-    // Extract sessionId from the tmuxName
+  async createSession(options: TerminalSessionOptions): Promise<void> {
+    // Extract sessionId from the runtime session name
     const sessionId = this.nameToSessionId.get(options.name) ?? options.name;
     this.nameToSessionId.set(options.name, sessionId);
 
@@ -361,7 +383,8 @@ export class SessionServerClient implements TmuxClient {
       id: randomUUID(),
       type: "list_sessions"
     });
-    // Return sessionIds (the new architecture doesn't use tmuxNames)
+    // Return sessionIds (runtime session names; the identity mapping above
+    // keeps the historical fb-{user8}-{sessionId} shape)
     return result.map((s) => s.sessionId);
   }
 
@@ -405,7 +428,7 @@ export class SessionServerClient implements TmuxClient {
     });
   }
 
-  async inspectPane(name: string): Promise<TmuxPaneSnapshot> {
+  async inspectPane(name: string): Promise<BackendPaneSnapshot> {
     const sessionId = this.nameToSessionId.get(name) ?? name;
     const result = await this.sendRequest<PaneSnapshot>({
       id: randomUUID(),
@@ -414,10 +437,7 @@ export class SessionServerClient implements TmuxClient {
     });
     return {
       content: result.content,
-      dead: result.dead,
-      // The session-server backend has no copy-mode concept; the legacy
-      // TmuxPaneSnapshot interface still requires the field until P4.
-      inMode: false
+      dead: result.dead
     };
   }
 

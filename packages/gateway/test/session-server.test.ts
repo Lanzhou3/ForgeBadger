@@ -33,10 +33,14 @@ describe("PlatformAdapter", () => {
 
   it("Windows adapter resolves .cmd shims when present", () => {
     const adapter = createPlatformAdapter("win32");
-    // Even without real shims, it should return a valid object
-    const resolved = adapter.resolveCommand("node", process.env);
-    assert.ok(resolved.command);
-    assert.ok(Array.isArray(resolved.args));
+    const dir = mkdtempSync(join(tmpdir(), "fb-winshim-"));
+    try {
+      const payload = join(dir, "node_modules", "example", "cli.js");
+      writeFileSync(join(dir, "example.cmd"), `@node "${payload}" %*`);
+      assert.deepStrictEqual(adapter.resolveCommand("example", { Path: dir }), {
+        command: process.execPath, args: [payload]
+      });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   it("Windows adapter resolves a bare name to its absolute .exe path", () => {
@@ -66,12 +70,12 @@ describe("PlatformAdapter", () => {
 
   it("provides correct IPC path format", () => {
     const posixAdapter = createPlatformAdapter("linux");
-    assert.ok(posixAdapter.getIpcPath("/tmp/fb").includes("session-server-v1.sock"));
+    assert.ok(posixAdapter.getIpcPath("/tmp/fb").includes("session-server-v2.sock"));
 
     const winAdapter = createPlatformAdapter("win32");
     const winPipe = winAdapter.getIpcPath("C:\\fb");
-    // Protocol-major version + per-user + random anti-squatting suffix
-    assert.ok(/^\\\\\.\\pipe\\forgebadger-session-server-v1-[a-zA-Z0-9_-]+-[0-9a-f]{8}$/.test(winPipe), winPipe);
+    // Protocol-major version + stable user/state-directory digest
+    assert.ok(/^\\\\\.\\pipe\\forgebadger-session-server-v2-[0-9a-f]{32}$/.test(winPipe), winPipe);
   });
 });
 

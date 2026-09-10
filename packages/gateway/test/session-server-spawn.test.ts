@@ -79,7 +79,7 @@ describe("Session Server spawn (e2e)", () => {
     assert.strictEqual(typeof (await client.capturePane("e2e-1")), "string");
 
     // The process exits on its own; once the exit is relayed the session
-    // must disappear (tmux has-session semantics).
+    // must disappear (backend has-session semantics).
     await pollUntilTrue(async () => !(await client.hasSession("e2e-1")), 15_000);
   });
 

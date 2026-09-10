@@ -62,7 +62,7 @@ describe("loadEnv security configuration", () => {
 
     assert.equal(env.FORGEBADGER_JWT_SECRET, jwtSecret);
     assert.equal(env.FORGEBADGER_MASTER_KEY, masterKey);
-    assert.equal(env.FORGEBADGER_TMUX_PREFIX, "fb-");
+    assert.equal(env.FORGEBADGER_SESSION_PREFIX, "fb-");
     assert.equal(env.FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED, false);
   });
 
@@ -130,14 +130,14 @@ describe("loadEnv security configuration", () => {
     assert.equal(env.FORGEBADGER_MASTER_KEY, hexMasterKey);
   });
 
-  it("loads a custom tmux prefix", () => {
+  it("loads a custom session prefix", () => {
     const env = loadEnv({
       FORGEBADGER_JWT_SECRET: jwtSecret,
       FORGEBADGER_MASTER_KEY: masterKey,
-      FORGEBADGER_TMUX_PREFIX: "fb-smoke-test-"
+      FORGEBADGER_SESSION_PREFIX: "fb-smoke-test-"
     });
 
-    assert.equal(env.FORGEBADGER_TMUX_PREFIX, "fb-smoke-test-");
+    assert.equal(env.FORGEBADGER_SESSION_PREFIX, "fb-smoke-test-");
   });
 
 });

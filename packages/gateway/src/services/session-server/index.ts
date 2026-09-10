@@ -1,5 +1,5 @@
 /**
- * Session Server module — replaces tmux/psmux with direct node-pty management.
+ * Session Server module — the single terminal backend: direct node-pty management.
  *
  * This module provides:
  *   - SessionServer: core pty session management

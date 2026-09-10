@@ -283,7 +283,7 @@ selects the CLI for the new session; it falls back to the project's `aiTool`,
 and returns `400` when neither is a known adapter. The selected adapter is
 gated by adapter discovery (`available` + launch-enabled + terminal support)
 and returns `409` with adapter details when unavailable. It does not start
-tmux, write terminal input, inject secrets, or grant autonomous host execution
+terminal processes, write terminal input, inject secrets, or grant autonomous host execution
 authority; the operator still starts/connects the session through the existing
 session lifecycle.
 
@@ -548,26 +548,21 @@ remain later phases.
 
 - `GET /api/v1/gate-a/dependencies`
 
-Returns the current host dependency report. `data.dependencies` includes the
-selected required runtime (`tmux` on macOS/Linux/WSL or `psmux` on native
-Windows) plus optional AI CLI commands. `data.terminalRuntime` contains:
+Returns the current host dependency report. Optional AI CLI commands appear in
+`data.dependencies`; there is no tmux/psmux dependency probe. `data.terminalRuntime` contains:
 
 ```json
 {
-  "persistence": "psmux",
-  "mode": "native_psmux",
+  "persistence": "session-server",
+  "mode": "ready",
   "supported": true,
   "message": "bounded readiness detail"
 }
 ```
 
-`persistence` is `tmux` or `psmux`; `mode` is `native_tmux`, `native_psmux`,
-`tmux_missing`, `psmux_missing`, or `psmux_outdated`. psmux must be 3.3.8 or
-newer. This endpoint and `forgebadger doctor` are
-read-only; they do not install a package or initialize local state. CLI
-`start`/`init` and direct Gateway startup fail closed while `supported` is
-false: CLI commands return non-zero, and Gateway rejects startup before account
-recovery, database/session recovery, or listen side effects.
+`mode` is `ready` or `unavailable`. Readiness checks the bundled terminal
+capability; it does not prove a physical-host browser lifecycle. This endpoint
+and `forgebadger doctor` remain read-only and install no system software.
 
 ### Adapter Discovery
 
@@ -576,7 +571,7 @@ recovery, database/session recovery, or listen side effects.
 Returns local AI CLI command discovery for Claude Code, OpenCode, Codex, and
 Kimi Code. All four adapters are launch-supported when the corresponding local
 command is available. `launchEnabled` is false when the command check fails, and
-session creation/start returns `409` before platform-multiplexer launch in that case. Every
+session creation/start returns `409` before Session Server launch in that case. Every
 adapter reports the `terminal` runtime mode; the former Codex
 `app-server-stdio`/`app-server-websocket` prototype modes were removed on
 2026-08-14.
@@ -939,7 +934,7 @@ latest) backup, returning `{ result: { adapter, backupId, restoredFiles } }`.
 ### Codex Provider Notes
 
 For Claude Code sessions, both create and restart paths merge ForgeBadger command
-hooks into `.claude/settings.local.json` before platform-multiplexer launch.
+hooks into `.claude/settings.local.json` before Session Server launch.
 
 OpenAI is a normal verified provider. Applying a provider to Codex writes
 `model`, `model_provider`, and a `model_providers.<id>` entry with `base_url`,
@@ -1111,7 +1106,7 @@ credential returns a disposition. Unreferenced credentials are physically
 `deleted`; session-referenced credentials are `revoked`, remain addressable for
 provenance, and make future start/recovery fail before decryption until the
 credential is explicitly rotated/reactivated. Rotation increments the
-credential generation; a running tmux environment is not mutated.
+credential generation; a running CLI environment is not mutated.
 
 ### Templates
 
@@ -1333,7 +1328,7 @@ Claude hooks use `http` handlers and send the raw Claude hook payload as JSON
 to ForgeBadger; Codex and Kimi use managed command scripts, while OpenCode uses a
 managed plugin whose Gateway request aborts after 4.5 seconds. Headers interpolate
 `FORGEBADGER_SESSION_ID` and
-`FORGEBADGER_ATTACH_TOKEN` from the selected multiplexer launch environment. The endpoint also
+`FORGEBADGER_ATTACH_TOKEN` from the Session Server launch environment. The endpoint also
 accepts the legacy wrapper payload used by older command-hook templates.
 
 ### Activities
@@ -1351,7 +1346,7 @@ Activities are tenant-scoped structured operation rows for session launch,
 start, stop, reconnect, delete, model switch, config write, permission prompt,
 permission denial, and adapter error events.
 They intentionally do not store terminal scrollback; terminal pane history
-remains in the selected tmux/psmux runtime.
+remains in the Session Server.
 
 ### Session Snapshots
 
@@ -1364,17 +1359,17 @@ Query parameters:
 - `projectId` filters snapshots to a project.
 
 Snapshots are tenant-scoped structured metadata records for
-multiplexer-backed session state: session, project, multiplexer session name,
+Session Server-backed session state: session, project, daemon session name,
 selected model, selected Agent, and
 optional config version. Snapshot metadata is sanitized and must not contain
 terminal scrollback; terminal pane history remains in the selected runtime.
 
-Snapshot restore is explicit and tenant-scoped. When the recorded multiplexer
+Snapshot restore is explicit and tenant-scoped. When the recorded daemon
 session still exists, ForgeBadger reattaches the database session to that session and
-returns `mode: "attach_tmux"` without rotating the existing session attach
-token. `tmux_session` and `attach_tmux` remain historical API/database
-compatibility names on both runtimes. When the selected multiplexer no longer
-has the recorded session, ForgeBadger recreates a new multiplexer-backed session
+returns `mode: "attach_runtime"` without rotating the existing session attach
+token. API responses use `runtimeSessionName`; storage uses
+`runtime_session_name`. Old field aliases are not returned. When the Session Server no longer
+has the recorded session, ForgeBadger recreates a new Session Server-backed session
 from the snapshot's project/model/Agent metadata plus any credential and API key
 metadata still available on the original session record. If the original session record is unavailable, restore falls back to the
 snapshot metadata and `host_environment` credentials. Restore returns
@@ -1422,7 +1417,7 @@ Browser clients cannot set arbitrary WebSocket headers, so terminal access uses:
   Bearer <jwt>` for non-browser clients.
 - `attachToken=<session attach token>` query parameter.
 
-The Gateway must verify the JWT before attaching to the selected multiplexer, then require the JWT
+The Gateway must verify the JWT before attaching to Session Server, then require the JWT
 subject to match the stored session owner and require the attach token to match
 the session attach token.
 
@@ -1460,8 +1455,18 @@ Client to server:
 Server to client:
 
 ```json
-{ "type": "terminal_output", "payload": { "data": "..." } }
+{ "type": "terminal_output", "payload": { "data": "...", "sequence": 1 } }
 ```
+
+Acknowledge output only after the browser xterm `write` callback completes:
+
+```json
+{ "type": "terminal_ack", "payload": { "sequence": 1 } }
+```
+
+Sequence is connection-local. The Gateway bounds unacknowledged output and
+WebSocket send buffering. Reconnect is allowed for temporary 1011/4001 closes;
+1000 (normal), 4000 (replaced), 4403 and 4404 do not auto-reconnect.
 
 Resize:
 
@@ -1485,7 +1490,7 @@ Error:
 
 MVP-0 must enforce:
 
-- JWT authentication before attaching to the selected tmux/psmux runtime.
+- JWT authentication before attaching to the Session Server.
 - Session ownership check before terminal access.
 - One active terminal WebSocket per session; new connection replaces old connection.
 - 30 second ping/pong heartbeat.

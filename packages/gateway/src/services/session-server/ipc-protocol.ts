@@ -18,11 +18,12 @@
  */
 
 /**
- * Protocol major version. Bumped on incompatible changes; the default socket
- * path / pipe name carries the same major version so incompatible daemons
- * coexist instead of fighting over one endpoint.
+ * Protocol major version. Version 2 requires attach receipts with snapshots.
+ * Endpoint and token paths use the same major version. Older daemons are
+ * not adopted or supported; operators must explicitly retire their sessions
+ * when cutting over to this runtime.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export interface HelloMessage {
   type: "hello";

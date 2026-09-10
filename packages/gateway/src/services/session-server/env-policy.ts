@@ -3,9 +3,7 @@
  *
  * The Session Server process and every pty it spawns must not inherit the
  * Gateway's secrets. Only an explicit allowlist of benign base variables is
- * forwarded (copied from terminal-multiplexer-runtime.ts; the multiplexer
- * identity tombstones are intentionally dropped — the Session Server has no
- * nested-multiplexer problem).
+ * forwarded.
  */
 
 const SAFE_BASE_ENV_KEYS = new Set([
@@ -26,8 +24,6 @@ const SAFE_BASE_ENV_KEYS = new Set([
   "PATH",
   "PATHEXT",
   "PROGRAMDATA",
-  "PSMUX_CONFIG_FILE",
-  "PSMUX_DATA_DIR",
   "SHELL",
   "SYSTEMDRIVE",
   "SYSTEMROOT",

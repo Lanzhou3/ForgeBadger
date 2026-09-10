@@ -1,19 +1,19 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Gauge, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
   formatQuotaAmount,
   quotaBarToneClass,
+  quotaTextToneClass,
   quotaUsagePercent,
 } from "@/components/sessions/provider-quota";
 import { useLanguage } from "@/hooks/use-language";
 import {
   checkProviderBalance,
   getAppliedProviderForAdapter,
-  getProviderBalance,
   type ProviderBalanceEntry,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,6 @@ const KNOWN_TOOLS = new Set(["claude", "opencode", "codex", "kimi"]);
 
 export function ProviderQuotaPanel({ aiTool }: Props) {
   const { t } = useLanguage();
-  const queryClient = useQueryClient();
   const knownTool = KNOWN_TOOLS.has(aiTool);
 
   const appliedQuery = useQuery({
@@ -39,25 +38,23 @@ export function ProviderQuotaPanel({ aiTool }: Props) {
   const applied = appliedQuery.data?.appliedProvider ?? null;
   const providerId = applied?.providerProfileId;
 
+  // Poll the probing endpoint (POST) rather than the cached GET read: the
+  // server caches GET reads for 60s, so polling it could only ever surface a
+  // fresh value every other cycle. One probe per minute stays far below the
+  // balance rate limit and keeps the sidebar number honest.
   const balanceQuery = useQuery({
     queryKey: ["provider-balance", providerId],
-    queryFn: () => getProviderBalance(providerId as string),
+    queryFn: () => checkProviderBalance(providerId as string),
     enabled: Boolean(providerId),
     refetchInterval: REFRESH_INTERVAL_MS,
+    refetchOnWindowFocus: true,
     retry: false,
-  });
-
-  const refreshMutation = useMutation({
-    mutationFn: () => checkProviderBalance(providerId as string),
-    onSuccess: (result) => {
-      queryClient.setQueryData(["provider-balance", providerId], result);
-    },
   });
 
   if (!knownTool) return null;
 
   const balance = balanceQuery.data;
-  const refreshing = balanceQuery.isFetching || refreshMutation.isPending;
+  const refreshing = balanceQuery.isFetching;
 
   return (
     <section className="rounded-lg border border-border p-3" data-testid="provider-quota-panel">
@@ -79,8 +76,8 @@ export function ProviderQuotaPanel({ aiTool }: Props) {
             variant="ghost"
             size="icon"
             className="size-6 shrink-0 text-muted-foreground"
-            disabled={refreshMutation.isPending}
-            onClick={() => refreshMutation.mutate()}
+            disabled={refreshing}
+            onClick={() => void balanceQuery.refetch()}
             aria-label={t("sessions.providerQuotaRefresh")}
             title={t("sessions.providerQuotaRefresh")}
           >
@@ -98,11 +95,18 @@ export function ProviderQuotaPanel({ aiTool }: Props) {
       ) : !balance.supported ? (
         <p className="mt-2 text-xs text-muted-foreground">{t("sessions.providerQuotaUnsupported")}</p>
       ) : (
-        <ul className="mt-3 space-y-1.5">
-          {balance.balances.map((entry) => (
-            <ProviderQuotaRow key={entry.label} entry={entry} />
-          ))}
-        </ul>
+        <>
+          <ul className="mt-3 space-y-2">
+            {balance.balances.map((entry) => (
+              <ProviderQuotaRow key={entry.label} entry={entry} />
+            ))}
+          </ul>
+          <p className="mt-2 text-right text-[10px] text-muted-foreground/60 tabular-nums">
+            {t("sessions.providerQuotaCheckedAt")}{" "}
+            {new Date(balance.checkedAt).toLocaleTimeString()}
+            {refreshing && " ·…"}
+          </p>
+        </>
       )}
     </section>
   );
@@ -112,29 +116,57 @@ function ProviderQuotaRow({ entry }: { entry: ProviderBalanceEntry }) {
   const { t } = useLanguage();
   const percent = quotaUsagePercent(entry);
   return (
-    <li className="rounded-md border border-border/70 bg-muted/10 px-2 py-1.5">
-      <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="shrink-0 text-muted-foreground">{entry.label}</span>
-        <span className="min-w-0 truncate font-mono text-[11px]">
-          {entry.limit !== undefined
-            ? `${formatQuotaAmount(entry.remaining)} / ${formatQuotaAmount(entry.limit)} ${entry.unit}`
-            : `${formatQuotaAmount(entry.remaining)} ${entry.unit}`}
-        </span>
+    <li className="rounded-md border border-border/70 bg-muted/10 px-2.5 py-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="min-w-0 truncate text-xs text-muted-foreground">{entry.label}</span>
+        {percent !== null ? (
+          <span
+            className={cn("shrink-0 text-sm font-semibold tabular-nums", quotaTextToneClass(percent))}
+            title={`${t("sessions.providerQuotaUsed")} ${percent}%`}
+          >
+            {percent}
+            <span className="text-[10px] font-normal">%</span>
+          </span>
+        ) : (
+          <span className="shrink-0 font-mono text-[11px] tabular-nums">
+            {formatQuotaAmount(entry.remaining)} {entry.unit}
+          </span>
+        )}
       </div>
       {percent !== null && (
         <div
-          className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted/60"
-          title={t("sessions.providerQuota") + ` ${percent}%`}
+          className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted/60"
+          role="progressbar"
+          aria-valuenow={percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`${entry.label} ${t("sessions.providerQuotaUsed")} ${percent}%`}
+          title={`${t("sessions.providerQuotaUsed")} ${percent}%`}
         >
           <div
-            className={cn("h-full rounded-full", quotaBarToneClass(percent))}
+            className={cn("h-full rounded-full transition-[width] duration-700 ease-out", quotaBarToneClass(percent))}
             style={{ width: `${percent}%` }}
           />
         </div>
       )}
-      {entry.resetsAt && (
-        <div className="mt-1 text-[10px] text-muted-foreground/70">
-          {t("sessions.providerQuotaResetAt")}: {new Date(entry.resetsAt).toLocaleString()}
+      {(entry.limit !== undefined || entry.unit === "%" || entry.resetsAt) && (
+        <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
+          {entry.limit !== undefined ? (
+            <span className="font-mono tabular-nums">
+              {formatQuotaAmount(entry.remaining)} / {formatQuotaAmount(entry.limit)} {entry.unit}
+            </span>
+          ) : entry.unit === "%" ? (
+            <span className="font-mono tabular-nums">
+              {t("sessions.providerQuotaRemaining")} {formatQuotaAmount(entry.remaining)}%
+            </span>
+          ) : (
+            <span />
+          )}
+          {entry.resetsAt && (
+            <span className="shrink-0 tabular-nums">
+              {t("sessions.providerQuotaResetAt")}: {new Date(entry.resetsAt).toLocaleString()}
+            </span>
+          )}
         </div>
       )}
     </li>

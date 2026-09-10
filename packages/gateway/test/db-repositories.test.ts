@@ -215,7 +215,7 @@ describe("db repositories", () => {
         type: "session_started",
         status: "success",
         message: "Session started",
-        metadata: { tmux: "of-test" }
+        metadata: { backend: "of-test" }
       });
       repoA.create({
         projectId: project.id,
@@ -407,13 +407,13 @@ describe("db repositories", () => {
         aiTool: "claude",
         workingDir: "/tmp/meta",
         attachToken: "attach-secret",
-        tmuxSession: "of-user-session",
+        runtimeSessionName: "of-user-session",
         credentialMode: "stored_encrypted_key",
         apiKeyId: apiKey.id
       });
 
       assert.equal(session.attachToken, "attach-secret");
-      assert.equal(session.tmuxSession, "of-user-session");
+      assert.equal(session.runtimeSessionName, "of-user-session");
       assert.equal(session.credentialMode, "stored_encrypted_key");
       assert.equal(session.apiKeyId, apiKey.id);
       assert.equal(repo.getById(session.id)?.attachToken, "attach-secret");

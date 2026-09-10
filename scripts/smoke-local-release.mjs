@@ -28,7 +28,7 @@ export function buildSmokeEnvironment(options = {}) {
     FORGEBADGER_DB_PATH: path.join(root, "forgebadger-smoke.db"),
     FORGEBADGER_MASTER_KEY: masterKey,
     FORGEBADGER_JWT_SECRET: jwtSecret,
-    FORGEBADGER_TMUX_PREFIX: "fb-smoke-"
+    FORGEBADGER_SESSION_PREFIX: "fb-smoke-"
   };
 }
 
@@ -61,7 +61,7 @@ export function buildSmokeCommandPlan(env = buildSmokeEnvironment()) {
     cleanup: [
       "Stop Gateway and Web processes",
       "Remove the disposable FORGEBADGER_DB_PATH",
-      "Confirm no tmux sessions remain with the FORGEBADGER_TMUX_PREFIX"
+      "Confirm test sessions are stopped in the Session Server; normal Gateway shutdown preserves live sessions"
     ],
     manualEvidence: requiredManualSmokeEvidence()
   };

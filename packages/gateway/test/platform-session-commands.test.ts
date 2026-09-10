@@ -35,12 +35,12 @@ test('owner stop persists a safe receipt once and preserves stopped lifecycle st
     const settled = new Promise<void>(resolve => {release=resolve;});
     const manager = new InMemorySessionManager({
       async createSession(){},async killSession(){kills++;},async listSessions(){return [];},async hasSession(){return true;},async capturePane(){return '';},
-      async inspectPane(){return {content:pane,dead:false,inMode:false};},
+      async inspectPane(){return {content:pane,dead:false};},
       async stageProgrammaticInput(_name,data){pane=`› ${data}\n\nmodel · cwd`;staged();},
       async pressEnter(){enters++;}
     },undefined,undefined,{sleep:async()=>settled});
     const live = await manager.createSession({userId:user.id,sessionId:session.id,launchPlan:{command:'codex',args:[],cwd:'/tmp',env:{},secretEnvNames:[],credentialMode:'host_environment'}});
-    repo.update(session.id,{status:'running',tmuxSession:live.tmuxName});
+    repo.update(session.id,{status:'running',runtimeSessionName:live.runtimeSessionName});
     const commands = new Map(createSessionCommands().map(command => [command.id,command]));
     const actions = new PlatformActions({db,userId:user.id,sessionManager:manager},commands);
     const intent = actions.preview({commandId:'session.stop',input:{sessionId:session.id},authority:'owner_action',idempotencyKey:'stop'});

@@ -18,7 +18,7 @@ import {
   type StoredSession
 } from "../src/services/session-manager.js";
 import { createDbSessionRecoveryStore } from "../src/services/db-session-recovery-store.js";
-import type { TmuxClient } from "../src/services/tmux.js";
+import type { TerminalBackendClient } from "../src/services/terminal-backend.js";
 import type { LaunchPlan } from "../src/adapters/claude.js";
 
 const launchPlan: LaunchPlan = {
@@ -31,7 +31,7 @@ const launchPlan: LaunchPlan = {
 };
 
 /** Backend where every session is gone (as after a daemon restart). */
-function deadBackend(): TmuxClient {
+function deadBackend(): TerminalBackendClient {
   return {
     async createSession() {},
     async killSession() {},
@@ -51,6 +51,22 @@ class RecordingRecoveryStore implements SessionRecoveryStore {
 }
 
 describe("reconcileSessionStatus lost semantics", () => {
+  it("marks durable sessions absent at cold startup lost without deleting provenance", async () => {
+    const store = new RecordingRecoveryStore();
+    store.listSessions = async () => [{ id: "cold", userId: "u1", runtimeSessionName: "fb-u1-cold", launchPlan, createdAt: new Date().toISOString() }];
+    const manager = new InMemorySessionManager(deadBackend(), store);
+    await manager.recoverForgeBadgerSessions({ userId: "system", cwd: "/tmp" });
+    assert.deepEqual(store.lost, ["cold"]);
+    assert.deepEqual(store.removed, []);
+  });
+
+  it("does not mark durable sessions lost when the backend inventory fails", async () => {
+    const store = new RecordingRecoveryStore();
+    store.listSessions = async () => [{ id: "cold", userId: "u1", runtimeSessionName: "fb-u1-cold", launchPlan, createdAt: new Date().toISOString() }];
+    const manager = new InMemorySessionManager({ ...deadBackend(), async listSessions() { throw new Error("unreachable"); } }, store);
+    await assert.rejects(manager.recoverForgeBadgerSessions({ userId: "system", cwd: "/tmp" }), /unreachable/);
+    assert.deepEqual(store.lost, []);
+  });
   it("marks a live session as lost when the backend restarted", async () => {
     const store = new RecordingRecoveryStore();
     const manager = new InMemorySessionManager(deadBackend(), store, undefined, {
@@ -82,7 +98,7 @@ describe("reconcileSessionStatus lost semantics", () => {
     const store = new RecordingRecoveryStore();
     // createSession leaves status pending until the backend create succeeds;
     // fail the backend create to keep the session out of `running`.
-    const failingBackend: TmuxClient = {
+    const failingBackend: TerminalBackendClient = {
       ...deadBackend(),
       async createSession() { throw new Error("spawn failed"); }
     };
@@ -129,7 +145,7 @@ describe("reconcileSessionStatus lost semantics", () => {
 });
 
 describe("DbSessionRecoveryStore.markSessionLost", () => {
-  it("sets status lost and keeps the tmux_session name", async () => {
+  it("sets status lost and keeps the runtime_session_name name", async () => {
     const db = new Database(":memory:");
     migrate(drizzle(db), {
       migrationsFolder: path.join(path.dirname(fileURLToPath(import.meta.url)), "../src/db/migrations")
@@ -144,19 +160,19 @@ describe("DbSessionRecoveryStore.markSessionLost", () => {
       id: "s1",
       userId: "u1",
       attachToken: "tok",
-      tmuxName: "fb-u1-s1",
+      runtimeSessionName: "fb-u1-s1",
       launchPlan,
       createdAt: new Date().toISOString()
     });
 
     await store.markSessionLost("s1", "u1");
 
-    const row = db.prepare("SELECT status, tmux_session FROM sessions WHERE id = 's1'").get() as {
+    const row = db.prepare("SELECT status, runtime_session_name FROM sessions WHERE id = 's1'").get() as {
       status: string;
-      tmux_session: string | null;
+      runtime_session_name: string | null;
     };
     assert.equal(row.status, "lost");
-    assert.equal(row.tmux_session, "fb-u1-s1", "lost keeps the session name for revive provenance");
+    assert.equal(row.runtime_session_name, "fb-u1-s1", "lost keeps the session name for revive provenance");
     db.close();
   });
 });

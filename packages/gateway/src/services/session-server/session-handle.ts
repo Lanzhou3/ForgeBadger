@@ -31,8 +31,8 @@ export interface SessionHandleOptions {
 }
 
 /** Bracketed-paste framing for programmatic input: the bytes reach the pty
- *  directly (no tmux control-mode hex staging), so the CLI treats the staged
- *  task as a paste and never auto-submits mid-content. */
+ *  directly, so the CLI treats the staged task as a paste and never
+ *  auto-submits mid-content. */
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
 
@@ -206,7 +206,7 @@ export class SessionHandle {
     this.screen.dispose();
   }
 
-  /** tmux `capture-pane -e -S -500` equivalent: rendered, ANSI preserved. */
+  /** Rendered scrollback (500 lines) + current screen, ANSI preserved. */
   async captureSerialized(scrollbackLines = 500): Promise<string> {
     await this.screen.whenIdle();
     return this.screen.serializeCapture(scrollbackLines);

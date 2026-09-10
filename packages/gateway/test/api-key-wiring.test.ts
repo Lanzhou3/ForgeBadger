@@ -25,7 +25,7 @@ function createTestDb(): Database {
   return db;
 }
 
-function createMockTmuxClient() {
+function createMockBackendClient() {
   return {
     async createSession() {},
     async killSession() {},
@@ -42,9 +42,10 @@ describe("Gateway API key wiring", () => {
   it("creates an encrypted API key store at application startup", async () => {
     const db = createTestDb();
     const apiKeyStore = new InMemoryApiKeyStore({ masterKey });
-    const sessionManager = new InMemorySessionManager(createMockTmuxClient());
+    const sessionManager = new InMemorySessionManager(createMockBackendClient());
 
     const gatewayApp = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
       db,

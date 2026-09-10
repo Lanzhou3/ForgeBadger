@@ -5,7 +5,8 @@ import { getGatewayBaseUrl } from "@/lib/runtime-config";
 export interface GateASession {
   id: string;
   attachToken: string;
-  tmuxName: string;
+  /** Historical API field name; identifies the built-in terminal session. */
+  runtimeSessionName: string;
   status: string;
 }
 
@@ -278,8 +279,8 @@ export interface TemplateVersion extends TemplatePackage {
 export interface Session {
   id: string;
   attachToken?: string;
-  tmuxName?: string | null;
-  tmuxSession?: string | null;
+  /** Session Server runtime session identifier. */
+  runtimeSessionName?: string | null;
   status: string;
   name?: string;
   projectId?: string;
@@ -296,15 +297,8 @@ export interface DependencyStatus {
 }
 
 export interface TerminalRuntimeStatus {
-  persistence: "tmux" | "psmux";
-  mode:
-    | "native_tmux"
-    | "native_psmux"
-    | "wsl_required"
-    | "tmux_missing"
-    | "psmux_missing"
-    | "psmux_outdated"
-    | string;
+  persistence: "session-server";
+  mode: "ready" | "unavailable";
   supported: boolean;
   message: string;
 }
@@ -640,7 +634,8 @@ export interface SessionSnapshot {
   id: string;
   sessionId?: string | null;
   projectId?: string | null;
-  tmuxSession?: string | null;
+  /** Historical API field name retained for persisted records. */
+  runtimeSessionName?: string | null;
   modelId?: string | null;
   configVersion?: string | null;
   metadata?: unknown;
@@ -696,7 +691,7 @@ export interface WorkspaceFileSnapshot {
 
 export interface SnapshotRestoreResult {
   session: Session;
-  mode: "attach_tmux" | "recreate_session";
+  mode: "attach_runtime" | "recreate_session";
 }
 
 export interface AuditLog {

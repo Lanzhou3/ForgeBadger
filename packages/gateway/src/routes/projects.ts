@@ -270,13 +270,13 @@ export function createProjectRoutes(
         .list()
         .filter((session) => session.projectId === project.id && session.status === "running");
       for (const session of projectSessions) {
-        if (!session.tmuxSession) {
+        if (!session.runtimeSessionName) {
           continue;
         }
         try {
-          await sessionManager.stopSession(session.id, session.tmuxSession, userId);
+          await sessionManager.stopSession(session.id, session.runtimeSessionName, userId);
         } catch {
-          // The project record can still be removed when an already-dead tmux pane is referenced.
+          // The project record can still be removed when an already-dead runtime session is referenced.
         }
       }
     }

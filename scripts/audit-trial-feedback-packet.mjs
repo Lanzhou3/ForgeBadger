@@ -26,7 +26,7 @@ const REQUIRED_FIELDS = [
   { label: "Shell" },
   { label: "Browser and version" },
   { label: "node --version" },
-  { label: "tmux -V" },
+  { label: "Terminal backend" },
   { label: "claude --version" },
   { label: "forgebadger doctor summary" },
   { label: "Diagnostics export attached", disallow: /yes\s*\/\s*no/i },

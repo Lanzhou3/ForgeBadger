@@ -16,8 +16,7 @@ const envSchema = z.object({
   FORGEBADGER_STATE_DIR: z.string(),
   FORGEBADGER_DB_PATH: z.string(),
   FORGEBADGER_JWT_SECRET: z.string().min(32),
-  FORGEBADGER_TMUX_PREFIX: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("fb-"),
-  FORGEBADGER_TERMINAL_BACKEND: z.enum(["session-server", "tmux"]).default("session-server"),
+  FORGEBADGER_SESSION_PREFIX: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("fb-"),
   FORGEBADGER_REGISTRATION: z.enum(["open", "off", "invite"]).default("open"),
   FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: strictEnvBoolean,
   FORGEBADGER_MASTER_KEY: z.string().refine((value) => isValidMasterKey(value), {

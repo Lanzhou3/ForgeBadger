@@ -26,7 +26,7 @@ import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { SessionServer } from "../src/services/session-server/session-server.js";
 import { IpcServer } from "../src/services/session-server/ipc-server.js";
 import { SessionServerClient } from "../src/services/session-server-client.js";
-import type { TmuxClient } from "../src/services/tmux.js";
+import type { TerminalBackendClient } from "../src/services/terminal-backend.js";
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "0123456789abcdef0123456789abcdef";
@@ -156,7 +156,7 @@ describe("terminal WS attach on session-server", () => {
 
     const backendClient = new SessionServerClient({ ipcPath, token: TOKEN });
     await backendClient.connect();
-    const sessionManager = new InMemorySessionManager(backendClient as TmuxClient);
+    const sessionManager = new InMemorySessionManager(backendClient as TerminalBackendClient);
     const created = await sessionManager.createSession({
       userId: "u1",
       sessionId: "s1",
@@ -172,7 +172,7 @@ describe("terminal WS attach on session-server", () => {
     });
     // Wait until the marker is rendered before attaching.
     const start = Date.now();
-    while (!(await backendClient.capturePane(created.tmuxName)).includes("hist-marker")) {
+    while (!(await backendClient.capturePane(created.runtimeSessionName)).includes("hist-marker")) {
       if (Date.now() - start > 10_000) throw new Error("timed out waiting for hist-marker");
       await new Promise((r) => setTimeout(r, 50));
     }

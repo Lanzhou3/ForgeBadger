@@ -45,14 +45,12 @@ evidence reports.
 - [ ] Shell and version:
 - [ ] Browser and version:
 - [ ] `node --version`:
-- [ ] Terminal runtime and version (`tmux -V` on macOS/Linux/WSL or `psmux -V`
-      on native Windows):
+- [ ] Terminal backend (`session-server`) and readiness:
 - [ ] `claude --version`:
 - [ ] npm/CLI only: `forgebadger doctor` output reviewed.
-- [ ] Native Windows only: psmux ≥ 3.3.8 and ConPTY/browser terminal lifecycle
+- [ ] Native Windows only: Session Server and ConPTY/browser terminal lifecycle
       result recorded.
-- [ ] WSL compatibility evidence, if claimed: distribution/version, tmux
-      version, and terminal trial result recorded.
+- [ ] WSL compatibility evidence, if claimed: distribution/version, ForgeBadger package version, and terminal trial result recorded.
 
 ### Account
 
@@ -274,7 +272,7 @@ feedback:
 
 | Requirement | Use When The Report Shows |
 |-------------|---------------------------|
-| UX-01 | Missing tmux/psmux, outdated psmux, missing Claude/Codex/OpenCode CLI, install-confirmation failure, or unclear runtime dependency guidance. |
+| UX-01 | Unavailable Session Server/native PTY, missing Claude/Codex/OpenCode CLI, or unclear runtime dependency guidance. |
 | UX-02 | Provider, model, or credential readiness failures that are hard to recover from or risk exposing secrets. |
 | UX-03 | Copilot run, pending-action, cancellation, or waiting-for-approval state is confusing after retry, refresh, or multiple tabs. |
 | UX-04 | Feedback lacks enough environment, command, browser, expected/actual, or reproduction detail to become an engineering task. |
@@ -334,10 +332,9 @@ For every `pass with caveats` or `blocked` result, record:
 
 ### Windows And WSL Evidence
 
-- Native Windows uses psmux 3.3.8 or newer over ConPTY; WSL uses tmux 3.2 or
-  newer.
+- Native Windows uses Session Server with node-pty/ConPTY; WSL uses POSIX PTYs.
 - Physical Windows/WSL terminal evidence remains a `Caveat` until a native
-  ConPTY + psmux run and/or a real WSL tmux run completes dependency checks,
+  ConPTY + Session Server run and/or a real WSL PTY run completes dependency checks,
   browser + real AI CLI attach/input/output/resize, WebSocket reconnect,
   Gateway restart recovery, stop, and session cleanup checks.
 - Record Windows version, selected runtime/version, `forgebadger doctor`, trial
@@ -347,7 +344,7 @@ For every `pass with caveats` or `blocked` result, record:
 ### Manual Evidence Boundary
 
 - CI can cover workspace tests, builds, provider/cli-config-apply regressions,
-  mocked Model Center behavior, focused tmux integration, and simulated Feishu
+  mocked Model Center behavior, focused Session Server integration, and simulated Feishu
   route regressions.
 - CI cannot replace real browser terminal behavior, real Claude Code permission
   prompt behavior, live OpenAI/provider behavior against a disposable

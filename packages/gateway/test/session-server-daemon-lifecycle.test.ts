@@ -34,7 +34,7 @@ import type {
   SessionRecoveryStore,
   StoredSession
 } from "../src/services/session-manager.js";
-import type { TmuxClient } from "../src/services/tmux.js";
+import type { TerminalBackendClient } from "../src/services/terminal-backend.js";
 import type { LaunchPlan } from "../src/adapters/claude.js";
 
 const isWin = process.platform === "win32";
@@ -191,11 +191,11 @@ describe("recovery after Gateway restart (daemon reuse)", () => {
       // list_sessions rebuilt the name mapping on reconnect.
       assert.ok((await client.listSessions()).includes("fb-user1-known"));
 
-      const manager = new InMemorySessionManager(client as unknown as TmuxClient, singleRecordStore({
+      const manager = new InMemorySessionManager(client as unknown as TerminalBackendClient, singleRecordStore({
         id: "db-s1",
         userId: "user1",
         attachToken: "tok-1",
-        tmuxName: "fb-user1-known",
+        runtimeSessionName: "fb-user1-known",
         launchPlan: launchPlan(),
         createdAt: new Date().toISOString()
       }));

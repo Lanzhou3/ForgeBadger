@@ -38,8 +38,8 @@ import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/health", createHealthRoutes());
-  app.use("/api/v1/gate-a/dependencies", createDependencyRoutes());
-  app.use("/api/v1/adapters", createAdapterRoutes());
+  app.use("/api/v1/gate-a/dependencies", createDependencyRoutes(deps.sessionManager));
+  app.use("/api/v1/adapters", createAdapterRoutes(deps.sessionManager));
   app.use(
     "/api/v1/auth",
     createAuthRouter(new UserRepository(deps.db), deps.jwtSecret, {
@@ -65,6 +65,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   ));
   app.use("/api/v1/projects", createProjectManagerRoutes(deps.db, {
     masterKey: deps.masterKey,
+    sessionManager: deps.sessionManager,
     ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
   }));
   app.use("/api/v1/projects", createProjectRoutes(

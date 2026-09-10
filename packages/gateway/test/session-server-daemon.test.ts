@@ -1,3 +1,4 @@
+import { PROTOCOL_VERSION } from "../src/services/session-server/ipc-protocol.js";
 /**
  * P2 daemon-behavior tests, driven in-process (IpcServer + SessionServer in
  * the test process):
@@ -183,7 +184,7 @@ describe("session ownership metadata", () => {
       const input = {
         userId: "user-1",
         sessionId: "db-session-1",
-        tmuxName: "fb-u1-owned",
+        runtimeSessionName: "fb-u1-owned",
         launchPlan: launchPlan(cwd)
       };
 
@@ -221,7 +222,7 @@ describe("pending request rejection", () => {
       socket.setEncoding("utf8");
       socket.on("data", (chunk: string) => {
         if (chunk.includes("\"hello\"")) {
-          socket.write(`${JSON.stringify({ type: "hello_ok", protocolVersion: 1, pid: 1, startedAt: "x" })}\n`);
+          socket.write(`${JSON.stringify({ type: "hello_ok", protocolVersion: PROTOCOL_VERSION, pid: 1, startedAt: "2026-09-09T00:00:00.000Z" })}\n`);
         }
       });
       socket.on("close", () => sockets.delete(socket));
@@ -231,23 +232,28 @@ describe("pending request rejection", () => {
     await new Promise((r) => setTimeout(r, 150));
 
     const client = new SessionServerClient({ ipcPath, token: TOKEN, requestTimeoutMs: 30_000 });
-    await client.connect();
+    try {
+      await client.connect();
 
-    const startedAt = Date.now();
-    let rejected: Error | undefined;
-    const pending = client.hasSession("anything").catch((error: Error) => {
-      rejected = error;
-    });
+      const startedAt = Date.now();
+      let rejected: Error | undefined;
+      const pending = client.hasSession("anything").catch((error: Error) => {
+        rejected = error;
+      });
 
-    // Kill the transport without answering.
-    for (const socket of sockets) socket.destroy();
-    await pending;
+      // Kill the transport without answering.
+      for (const socket of sockets) socket.destroy();
+      await pending;
 
-    assert.ok(rejected, "in-flight request must reject on transport close");
-    assert.match(rejected.message, /connection closed/);
-    assert.ok(Date.now() - startedAt < 5000, "rejection must not wait for the request timeout");
+      assert.ok(rejected, "in-flight request must reject on transport close");
+      assert.match(rejected.message, /connection closed/);
+      assert.ok(Date.now() - startedAt < 5000, "rejection must not wait for the request timeout");
 
-    await new Promise<void>((resolve) => fake.close(() => resolve()));
+    } finally {
+      await client.disconnect();
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => fake.close(() => resolve()));
+    }
   });
 });
 

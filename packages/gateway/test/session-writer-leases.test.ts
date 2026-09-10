@@ -15,7 +15,7 @@ for (const phase of ["inspect", "settle", "stop"] as const) {
       async capturePane() { return pane; },
       async inspectPane() {
         if (phase === "inspect") manager.takeoverSession("u", "s");
-        return { content: pane, dead: false, inMode: false };
+        return { content: pane, dead: false };
       },
       async stageProgrammaticInput(_name, data) { calls.push("stage"); pane = `› ${data}\n\nmodel · cwd`; },
       async pressEnter() { calls.push("enter"); }

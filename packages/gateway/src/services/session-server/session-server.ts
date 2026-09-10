@@ -1,7 +1,7 @@
 /**
  * Core Session Server — manages pty sessions for ForgeBadger.
  *
- * Replaces tmux/psmux with direct node-pty management:
+ * The single terminal backend, with direct node-pty management:
  *   - Spawns CLI processes via node-pty
  *   - Renders every session through a headless terminal screen
  *     (capture/inspect/replay read the rendered screen)
@@ -11,12 +11,15 @@
  * The Session Server runs as a standalone Node.js process and communicates
  * with the Gateway via IPC (Unix Domain Socket / Named Pipe).
  */
+import { createRequire } from "node:module";
 import { setImmediate as setImmediateCb } from "node:timers";
 
 import { createPlatformAdapter, disposePty, type PlatformPtyAdapter } from "./platform-adapter.js";
 import { SessionHandle } from "./session-handle.js";
 import { buildSanitizedEnv } from "./env-policy.js";
 import type { LaunchPlanPayload, PaneSnapshot, SessionInfo } from "./ipc-protocol.js";
+
+const require = createRequire(import.meta.url);
 
 export interface SessionServerOptions {
   platformAdapter?: PlatformPtyAdapter;
@@ -81,9 +84,8 @@ export class SessionServer {
   }): Promise<SessionHandle> {
     const { sessionId, userId, attachToken, launchPlan } = input;
 
-    // Claim the ID synchronously — the dynamic import below yields the event
-    // loop, and without this placeholder two concurrent creates with the same
-    // ID would both pass the existence check and double-spawn.
+    // Claim the ID before spawning and keep it reserved until creation settles,
+    // so concurrent requests cannot create the same session twice.
     if (this.sessions.has(sessionId) || this.pendingCreates.has(sessionId)) {
       throw new Error(`Session already exists: ${sessionId}`);
     }
@@ -122,9 +124,11 @@ export class SessionServer {
       ...launchPlan.env
     };
 
-    // Spawn via node-pty (dynamic import to avoid loading on server startup)
-    const { spawn } = await import("node-pty");
-    const pty = spawn(resolved.command, [...resolved.args, ...launchPlan.args], {
+    // Load this native CommonJS module lazily through its own exports. In the
+    // daemon path, ESM namespace snapshots can be empty even when the CJS
+    // cache is fully initialized; createRequire avoids that loader boundary.
+    const nodePty = require("node-pty") as typeof import("node-pty");
+    const pty = nodePty.spawn(resolved.command, [...resolved.args, ...launchPlan.args], {
       name: "xterm-256color",
       cwd: launchPlan.cwd,
       cols: 120,
@@ -200,17 +204,17 @@ export class SessionServer {
   // Terminal I/O
   // ------------------------------------------------------------------
 
-  /** tmux `capture-pane -e -S -500` equivalent (rendered, ANSI preserved). */
+  /** Rendered scrollback (500 lines) + current screen, ANSI preserved. */
   capturePane(sessionId: string): Promise<string> {
     const handle = this.requireSession(sessionId);
     return handle.captureSerialized(500);
   }
 
   showEnvironment(sessionId: string): Record<string, string> {
-    // Mirror tmux show-environment semantics: expose the ForgeBadger
-    // ownership markers so session-manager.attachExistingSession can verify
-    // that a server-side session belongs to the requesting ForgeBadger
-    // session (and carries the same attach token).
+    // Expose the ForgeBadger ownership markers so
+    // session-manager.attachExistingSession can verify that a server-side
+    // session belongs to the requesting ForgeBadger session (and carries the
+    // same attach token).
     const handle = this.requireSession(sessionId);
     const env: Record<string, string> = {
       FORGEBADGER_SESSION_ID: handle.ownerSessionId ?? handle.sessionId

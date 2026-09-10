@@ -25,6 +25,7 @@ export interface SessionServerPtyOptions {
   sessionId: string;
   /** Handshake token; when omitted, read from the state-dir token file. */
   token?: string;
+  tokenPath?: string;
   connectTimeoutMs?: number;
 }
 
@@ -54,9 +55,11 @@ export class SessionServerPty {
   private readonly ipcPath: string;
   private readonly sessionId: string;
   private readonly token: string | undefined;
+  private readonly tokenPath: string | undefined;
   private readonly connectTimeoutMs: number;
   private exited = false;
   private detached = false;
+  private outputPaused = false;
   private attachWaiter: {
     resolve: (result: SessionServerAttachResult) => void;
     reject: (reason: Error) => void;
@@ -69,12 +72,14 @@ export class SessionServerPty {
    */
   private preLiveData: string[] = [];
   private liveData = false;
+  private pendingExit: { exitCode: number } | undefined;
   private readonly pendingResize = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(options: SessionServerPtyOptions) {
     this.ipcPath = options.ipcPath;
     this.sessionId = options.sessionId;
     this.token = options.token;
+    this.tokenPath = options.tokenPath;
     this.connectTimeoutMs = options.connectTimeoutMs ?? 5000;
   }
 
@@ -92,7 +97,7 @@ export class SessionServerPty {
     await this.waitConnected(socket);
 
     try {
-      const token = this.token ?? readSessionServerTokenFile(resolveSessionServerTokenPath());
+      const token = this.token ?? readSessionServerTokenFile(this.tokenPath ?? resolveSessionServerTokenPath());
       const hello = await performClientHello(socket, token, this.connectTimeoutMs);
       this.buffer = hello.leftover;
     } catch (error) {
@@ -142,10 +147,25 @@ export class SessionServerPty {
   }
 
   private flushPreLiveData(): void {
-    const pending = this.preLiveData.splice(0);
     this.liveData = true;
-    for (const data of pending) {
+    while (this.preLiveData.length && !this.outputPaused && !this.detached) {
+      const data = this.preLiveData.shift()!;
       this.emitter.emit("data", data);
+    }
+    if (!this.preLiveData.length && this.pendingExit && !this.detached) {
+      const event = this.pendingExit;
+      this.pendingExit = undefined;
+      this.emitter.emit("exit", event);
+    }
+  }
+
+  /** Pause IPC consumption until the browser acknowledges rendered output. */
+  setOutputPaused(paused: boolean): void {
+    this.outputPaused = paused;
+    if (paused) this.socket?.pause();
+    else {
+      this.socket?.resume();
+      if (this.liveData) setImmediate(() => this.flushPreLiveData());
     }
   }
 
@@ -319,7 +339,7 @@ export class SessionServerPty {
 
     if (msg.type === "client_output" && msg.sessionId === this.sessionId && msg.clientId === this.clientId) {
       const data = msg.data ?? "";
-      if (this.liveData) {
+      if (this.liveData && !this.outputPaused && this.preLiveData.length === 0) {
         this.emitter.emit("data", data);
       } else {
         this.preLiveData.push(data);
@@ -329,7 +349,8 @@ export class SessionServerPty {
 
     if (msg.type === "session_exit" && msg.sessionId === this.sessionId) {
       this.exited = true;
-      this.emitter.emit("exit", { exitCode: msg.exitCode ?? 0 });
+      this.pendingExit = { exitCode: msg.exitCode ?? 0 };
+      if (this.liveData) this.flushPreLiveData();
       return;
     }
 
@@ -367,7 +388,11 @@ export class SessionServerPty {
       sessionId: this.sessionId,
       clientId: this.clientId
     });
-    this.socket.end();
+    // close cleanup in the daemon detaches this client. Destroy also releases
+    // paused reads; end() alone can leave a paused half-open socket forever.
+    this.socket.destroy();
     this.socket = undefined;
+    this.preLiveData = [];
+    this.clearPendingResize();
   }
 }

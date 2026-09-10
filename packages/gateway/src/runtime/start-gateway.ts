@@ -4,14 +4,10 @@ import type { GatewayEnv } from "../config/env.js";
 import { loadEnv } from "../config/env.js";
 import { createGatewayApp, type GatewayApp } from "../server.js";
 import { startupGateway } from "../services/startup.js";
-import type { TmuxClient } from "../services/tmux.js";
+import type { TerminalBackendClient } from "../services/terminal-backend.js";
 import { createLocalAccountRecovery } from "../services/local-account-recovery.js";
-import type { TerminalMultiplexerRuntime } from "../services/terminal-multiplexer-runtime.js";
-import { resolveTerminalMultiplexerRuntime } from "../services/terminal-multiplexer-runtime.js";
-import {
-  checkTerminalRuntimeReadiness,
-  type TerminalRuntimeStatus
-} from "../lib/dependency-check.js";
+import { createPlatformAdapter } from "../services/session-server/platform-adapter.js";
+import { resolveSessionServerTokenPath } from "../services/session-server/auth-token.js";
 import {
   startAndConnectSessionServer,
   type SessionServerIntegration
@@ -24,10 +20,9 @@ export interface StartedGateway extends GatewayApp {
 
 /** @internal Test/runtime wiring hook; production callers should use the defaults. */
 export interface GatewayRuntimeOverrides {
-  tmuxClient?: TmuxClient;
-  terminalRuntime?: TerminalMultiplexerRuntime;
-  terminalRuntimeCheck?: () => Promise<TerminalRuntimeStatus>;
-  /** Explicit Session Server IPC endpoint override (also forces the session-server backend). */
+  /** Test seam: inject a terminal backend directly (skips Session Server startup). */
+  backendClient?: TerminalBackendClient;
+  /** Explicit Session Server IPC endpoint override. */
   sessionServerIpcPath?: string;
   /** Pre-connected Session Server client (test override). */
   sessionServerClient?: import("../services/session-server-client.js").SessionServerClient;
@@ -38,122 +33,89 @@ export async function createGatewayRuntime(
   overrides: GatewayRuntimeOverrides = {}
 ): Promise<GatewayApp> {
   const env = resolveGatewayEnv(input);
-  const terminalRuntime = overrides.terminalRuntime ?? resolveTerminalMultiplexerRuntime();
+  const accountRecovery = createLocalAccountRecovery(env.FORGEBADGER_STATE_DIR);
 
-  // Determine terminal backend mode:
-  //   1. overrides.sessionServerClient → Session Server (pre-connected, test injection)
-  //   2. overrides.tmuxClient          → legacy tmux/psmux (test injection / explicit opt-in)
-  //   3. otherwise                     → FORGEBADGER_TERMINAL_BACKEND (default: session-server)
-  const useSessionServer =
-    overrides.sessionServerClient !== undefined
-      ? true
-      : overrides.tmuxClient !== undefined
-        ? false
-        : env.FORGEBADGER_TERMINAL_BACKEND === "session-server";
-
+  // The Session Server is the single terminal backend:
+  //   1. overrides.sessionServerClient → pre-connected client (test injection)
+  //   2. overrides.backendClient       → direct backend injection (test seam)
+  //   3. otherwise                     → probe/spawn the daemon and connect
   let sessionServerIntegration: SessionServerIntegration | undefined;
-  let sessionServerIpcPath: string | undefined;
-  let terminalRuntimeStatus: TerminalRuntimeStatus;
+  let sessionServerIpcPath: string;
 
   const ipcPathOverride =
     overrides.sessionServerIpcPath ?? env.FORGEBADGER_SESSION_SERVER_IPC_PATH;
 
-  if (useSessionServer) {
-    // Custom Session Server architecture — no tmux/psmux dependency check needed
-    if (overrides.sessionServerClient) {
-      // Pre-connected client (test override)
-      sessionServerIpcPath = ipcPathOverride;
-      terminalRuntimeStatus = {
-        persistence: "tmux", // Historical field name
-        mode: "native_tmux",
-        supported: true,
-        message: "Session Server client provided by test override."
-      };
-    } else {
-      // Start and connect to the Session Server; the IPC endpoint falls back to
-      // the platform default (Windows named pipe / POSIX state-dir socket).
-      sessionServerIntegration = await startAndConnectSessionServer({
-        stateDir: env.FORGEBADGER_STATE_DIR,
-        ...(ipcPathOverride ? { ipcPath: ipcPathOverride } : {})
-      });
-      sessionServerIpcPath = sessionServerIntegration.ipcPath;
-      terminalRuntimeStatus = {
-        persistence: "tmux",
-        mode: "native_tmux",
-        supported: true,
-        message: "Session Server is ready."
-      };
-    }
+  if (overrides.sessionServerClient || overrides.backendClient) {
+    // Injected backend (tests): no daemon is spawned; the WS handler still
+    // needs a syntactically valid IPC path even though nothing listens there.
+    sessionServerIpcPath = ipcPathOverride ?? defaultSessionServerIpcPath(env);
   } else {
-    // Legacy tmux/psmux architecture
-    terminalRuntimeStatus = await resolveTerminalRuntimeStatus(overrides, terminalRuntime);
-    if (!terminalRuntimeStatus.supported) {
-      throw new Error(`Terminal runtime is not ready: ${terminalRuntimeStatus.message}`);
-    }
+    // Probe-and-reuse or spawn the daemon; the IPC endpoint falls back to the
+    // platform default (Windows named pipe / POSIX state-dir socket).
+    sessionServerIntegration = await startAndConnectSessionServer({
+      stateDir: env.FORGEBADGER_STATE_DIR,
+      ...(ipcPathOverride ? { ipcPath: ipcPathOverride } : {})
+    });
+    sessionServerIpcPath = sessionServerIntegration.ipcPath;
   }
 
-  const startupOptions = {
-    env,
-    ...(overrides.tmuxClient === undefined ? {} : { tmuxClient: overrides.tmuxClient }),
-    terminalRuntime,
-    ...(sessionServerIntegration ? { sessionServerClient: sessionServerIntegration.client } : {}),
-    ...(overrides.sessionServerClient ? { sessionServerClient: overrides.sessionServerClient } : {})
-  };
-  const accountRecovery = createLocalAccountRecovery(env.FORGEBADGER_STATE_DIR);
-  console.info("[gateway] local account recovery key ready", {
-    path: accountRecovery.keyPath
-  });
-  const {
-    db,
-    sessionManager,
-    apiKeyStore,
-    eventBus,
-    stopStatusCorrection
-  } = await startupGateway(startupOptions);
+  try {
+    const startupOptions = {
+      env,
+      ...(overrides.backendClient === undefined ? {} : { backendClient: overrides.backendClient }),
+      ...(sessionServerIntegration ? { sessionServerClient: sessionServerIntegration.client } : {}),
+      ...(overrides.sessionServerClient ? { sessionServerClient: overrides.sessionServerClient } : {})
+    };
+    console.info("[gateway] local account recovery key ready", {
+      path: accountRecovery.keyPath
+    });
+    const {
+      db,
+      sessionManager,
+      apiKeyStore,
+      eventBus,
+      stopStatusCorrection
+    } = await startupGateway(startupOptions);
 
-  const runtime = createGatewayApp({
-    jwtSecret: env.FORGEBADGER_JWT_SECRET,
-    masterKey: env.FORGEBADGER_MASTER_KEY,
-    db,
-    sessionManager,
-    apiKeyStore,
-    eventBus,
-    accountRecovery,
-    terminalRuntime,
-    registrationMode: env.FORGEBADGER_REGISTRATION,
-    sessionServerIpcPath
-  });
+    const runtime = createGatewayApp({
+      jwtSecret: env.FORGEBADGER_JWT_SECRET,
+      masterKey: env.FORGEBADGER_MASTER_KEY,
+      db,
+      sessionManager,
+      apiKeyStore,
+      eventBus,
+      accountRecovery,
+      registrationMode: env.FORGEBADGER_REGISTRATION,
+      sessionServerIpcPath,
+      sessionServerTokenPath: resolveSessionServerTokenPath(env.FORGEBADGER_STATE_DIR)
+    });
 
-  // Attach shutdown hook: the Gateway only disconnects from the Session
-  // Server daemon — the daemon (and its CLI sessions) must outlive the
-  // Gateway. Killing it is an explicit maintenance action
-  // (SessionServerIntegration.stop), never part of normal shutdown.
-  const originalClose = runtime.close.bind(runtime);
-  (runtime as { close: () => Promise<void> }).close = async () => {
-    stopStatusCorrection();
-    await originalClose();
+    // Attach shutdown hook: the Gateway only disconnects from the Session
+    // Server daemon — the daemon (and its CLI sessions) must outlive the
+    // Gateway. Killing it is an explicit maintenance action
+    // (SessionServerIntegration.stop), never part of normal shutdown.
+    const originalClose = runtime.close.bind(runtime);
+    (runtime as { close: () => Promise<void> }).close = async () => {
+      try {
+        stopStatusCorrection();
+        await originalClose();
+      } finally {
+        await sessionServerIntegration?.disconnect();
+      }
+    };
+
+    await runtime.recoveryReady;
+    return runtime;
+  } catch (error) {
+    // We own only the Gateway connection; startup failures must not kill
+    // the independent daemon or the CLI sessions it continues hosting.
     await sessionServerIntegration?.disconnect();
-  };
-
-  await runtime.recoveryReady;
-  return runtime;
+    throw error;
+  }
 }
 
-async function resolveTerminalRuntimeStatus(
-  overrides: GatewayRuntimeOverrides,
-  runtime: TerminalMultiplexerRuntime
-): Promise<TerminalRuntimeStatus> {
-  if (overrides.terminalRuntimeCheck) return overrides.terminalRuntimeCheck();
-  // An injected client is a test/runtime boundary and cannot be probed through the host PATH.
-  if (overrides.tmuxClient) {
-    return {
-      persistence: runtime.kind,
-      mode: runtime.kind === "psmux" ? "native_psmux" : "native_tmux",
-      supported: true,
-      message: `${runtime.command} is provided by the injected terminal runtime.`
-    };
-  }
-  return checkTerminalRuntimeReadiness();
+function defaultSessionServerIpcPath(env: GatewayEnv): string {
+  return createPlatformAdapter().getIpcPath(env.FORGEBADGER_STATE_DIR);
 }
 
 export async function startGateway(

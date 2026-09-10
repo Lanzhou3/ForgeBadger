@@ -444,7 +444,7 @@ describe("retired protocol surface", () => {
       socket.write(`${JSON.stringify({ id: "cfg1", type: "configure_session", sessionId: "s" })}\n`);
       const msg = await reply;
       assert.strictEqual(msg.type, "error");
-      assert.match(String(msg.message), /Unknown message type: configure_session/);
+      assert.match(String(msg.message), /Invalid IPC request/);
       socket.destroy();
     } finally {
       await ipcServer.stop();

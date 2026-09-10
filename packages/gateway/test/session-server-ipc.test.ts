@@ -108,7 +108,7 @@ describe("Session Server IPC", () => {
       assert.strictEqual(await client.hasSession("ipc-x1"), true);
 
       // The process exits on its own; after the exit relay the server must
-      // drop the session so has_session reports false (tmux semantics, which
+      // drop the session so has_session reports false (backend semantics, which
       // session-manager.reconcileSessionStatus relies on).
       const start = Date.now();
       let has = true;

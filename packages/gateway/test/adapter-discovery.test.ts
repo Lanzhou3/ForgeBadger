@@ -24,8 +24,7 @@ describe("adapter discovery", () => {
   it("enables launch only when the supported adapter command is available", async () => {
     const runner: CommandRunner = async (command) => ({
       exitCode: command === "opencode" ? 127 : 0,
-      // psmux (and tmux) carry a minimum-version gate; use a supported version.
-      stdout: command === "psmux" || command === "tmux" ? `${command} 3.3.8\n` : `${command} 1.0.0\n`,
+      stdout: `${command} 1.0.0\n`,
       stderr: command === "opencode" ? "not found" : ""
     });
 
@@ -43,48 +42,10 @@ describe("adapter discovery", () => {
     assert.equal(codex?.launchEnabled, true);
   });
 
-  it("enables terminal launch on native Windows when psmux and adapter commands exist", async () => {
-    const runner: CommandRunner = async (command) => ({
-      exitCode: 0,
-      stdout: command === "psmux" ? "tmux 3.3.8\n" : `${command} 1.0.0\n`,
-      stderr: ""
-    });
-
-    const adapters = await discoverAdapters(runner, "win32");
-
-    assert.equal(adapters.every((adapter) => adapter.available), true);
-    assert.equal(adapters.every((adapter) => adapter.launchEnabled), true);
-    assert.equal(adapters.every((adapter) => adapter.error === undefined), true);
-  });
-
-  it("disables terminal launch on native Windows when psmux is missing", async () => {
-    const runner: CommandRunner = async (command) => ({
-      exitCode: command === "psmux" ? 127 : 0,
-      stdout: command === "psmux" ? "" : `${command} 1.0.0\n`,
-      stderr: command === "psmux" ? "psmux not found" : ""
-    });
-
-    const adapters = await discoverAdapters(runner, "win32");
-
-    assert.equal(adapters.every((adapter) => adapter.available), true);
-    assert.equal(adapters.every((adapter) => adapter.launchEnabled === false), true);
-    assert.match(adapters[0]?.error ?? "", /Install psmux/);
-  });
-
-  it("disables terminal launch when tmux is missing on Unix-like hosts", async () => {
-    const runner: CommandRunner = async (command) => ({
-      exitCode: command === "tmux" ? 127 : 0,
-      stdout: command === "tmux" ? "" : `${command} 1.0.0\n`,
-      stderr: command === "tmux" ? "tmux not found" : ""
-    });
-
-    const adapters = await discoverAdapters(runner, "linux");
-
-    assert.equal(adapters.every((adapter) => adapter.available), true);
-    assert.equal(adapters.every((adapter) => adapter.launchEnabled === false), true);
-    assert.match(
-      adapters.find((adapter) => adapter.id === "codex")?.error ?? "",
-      /Install tmux/
-    );
+  it("disables launch when the daemon is unavailable even with installed adapters", async () => {
+    const runner: CommandRunner = async (command) => ({ exitCode: 0, stdout: `${command} 1.0`, stderr: "" });
+    const adapters = await discoverAdapters(runner, { available: false, message: "daemon unavailable" });
+    assert.ok(adapters.every((adapter) => adapter.available && !adapter.launchEnabled));
+    assert.match(adapters[0]?.error ?? "", /daemon unavailable/);
   });
 });

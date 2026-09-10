@@ -17,7 +17,7 @@ body:
       options:
         - Gateway API
         - Web console
-        - terminal runtime (tmux/psmux)
+        - terminal runtime (Session Server)
         - project setup/import
         - provider/model readiness
         - Copilot conversations/approvals
@@ -41,8 +41,8 @@ body:
         Browser:
         node --version:
         pnpm --version:
-        Terminal runtime selected (tmux/psmux):
-        Actual runtime version (`tmux -V` or `psmux -V`):
+        Terminal backend:
+        Session Server readiness (ready/unavailable):
         claude --version, if checked:
         opencode --version, if checked:
         codex --version, if checked:

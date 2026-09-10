@@ -25,7 +25,7 @@ import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { SessionServer } from "../src/services/session-server/session-server.js";
 import { IpcServer } from "../src/services/session-server/ipc-server.js";
 import { SessionServerClient } from "../src/services/session-server-client.js";
-import type { TmuxClient } from "../src/services/tmux.js";
+import type { TerminalBackendClient } from "../src/services/terminal-backend.js";
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "0123456789abcdef0123456789abcdef";
@@ -65,7 +65,7 @@ describe("terminal WS on session-server transport loss", () => {
     await backendClient.connect();
 
     const db = createTestDb();
-    const sessionManager = new InMemorySessionManager(backendClient as TmuxClient);
+    const sessionManager = new InMemorySessionManager(backendClient as TerminalBackendClient);
     const created = await sessionManager.createSession({
       userId: "u1",
       sessionId: "s1",
@@ -118,7 +118,7 @@ describe("terminal WS on session-server transport loss", () => {
       // stopping the server earlier would test the attach-failure path, not
       // the transport-loss path.
       const attachStart = Date.now();
-      while (sessionServer.getSession(created.tmuxName)?.clientCount !== 1) {
+      while (sessionServer.getSession(created.runtimeSessionName)?.clientCount !== 1) {
         if (Date.now() - attachStart > 5000) {
           throw new Error("timed out waiting for the WS attach");
         }

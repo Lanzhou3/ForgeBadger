@@ -15,10 +15,12 @@
  *     timeout; anything else destroys the socket.
  */
 import { createServer, type Server as NetServer, type Socket } from "node:net";
-import { chmodSync, lstatSync, mkdirSync, unlinkSync } from "node:fs";
-import { timingSafeEqual } from "node:crypto";
-import { dirname } from "node:path";
+import { chmodSync, lstatSync, mkdirSync, unlinkSync, linkSync } from "node:fs";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { dirname, join } from "node:path";
 
+import { endpointIsAbsent, sameFile } from "./endpoint-lifecycle.js";
+import { parseIpcRequest, isRecord } from "./ipc-validation.js";
 import { SessionServer } from "./session-server.js";
 import { clientPauseSource } from "./session-handle.js";
 import { startSocketSelfCheck } from "./socket-self-check.js";
@@ -28,8 +30,7 @@ import {
   type ManagementRequest,
   type ManagementResponse,
   type IoStreamRequest,
-  type IoStreamResponse,
-  type LaunchPlanPayload
+  type IoStreamResponse
 } from "./ipc-protocol.js";
 import { createPlatformAdapter } from "./platform-adapter.js";
 
@@ -72,6 +73,7 @@ interface ConnectionState {
 
 export class IpcServer {
   private server: NetServer | undefined;
+  private socketIdentity: { dev: number; ino: number } | undefined;
   private readonly ipcPath: string;
   private readonly sessionServer: SessionServer;
   private readonly token: string;
@@ -102,7 +104,7 @@ export class IpcServer {
       const dir = dirname(this.ipcPath);
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       chmodSync(dir, 0o700);
-      this.removeStaleSocket();
+      await this.removeStaleSocket();
     }
 
     this.server = createServer((socket) => this.handleConnection(socket));
@@ -135,15 +137,19 @@ export class IpcServer {
         }
       }
       // Drop the session after the exit event has been relayed so
-      // has_session reports false once the CLI process is gone — matching
-      // tmux has-session semantics, which session-manager's
-      // reconcileSessionStatus and status-correction scan rely on.
+      // has_session reports false once the CLI process is gone — the
+      // semantics session-manager's reconcileSessionStatus and
+      // status-correction scan rely on.
       this.sessionServer.removeSession(sessionId);
     };
 
+    // Node unlinks its listen path on close. Bind a private path and publish a
+    // hard link atomically so closing a displaced instance cannot unlink a successor.
+    const listenPath = process.platform === "win32" ? this.ipcPath
+      : join(dirname(this.ipcPath), `.ss-${randomBytes(6).toString("hex")}.sock`);
     await new Promise<void>((resolve, reject) => {
       this.server!.once("error", reject);
-      this.server!.listen(this.ipcPath, () => {
+      this.server!.listen(listenPath, () => {
         this.server!.off("error", reject);
         resolve();
       });
@@ -152,7 +158,15 @@ export class IpcServer {
     // Restrict the socket to the owner (POSIX). Windows named pipes cannot
     // be ACL'd through libuv — the hello token carries authentication there.
     if (process.platform !== "win32") {
-      chmodSync(this.ipcPath, 0o600);
+      try {
+        chmodSync(listenPath, 0o600);
+        linkSync(listenPath, this.ipcPath);
+        this.socketIdentity = lstatSync(this.ipcPath);
+        unlinkSync(listenPath);
+      } catch (error) {
+        await this.stop();
+        throw error;
+      }
     }
   }
 
@@ -178,7 +192,7 @@ export class IpcServer {
     // Clean up socket file on POSIX (only if it is still our socket)
     if (process.platform !== "win32") {
       try {
-        if (lstatSync(this.ipcPath).isSocket()) {
+        if (this.socketIdentity && sameFile(this.ipcPath, this.socketIdentity)) {
           unlinkSync(this.ipcPath);
         }
       } catch {
@@ -196,7 +210,7 @@ export class IpcServer {
    * delete a path that is not a socket — the IPC path must never point at a
    * regular file the user owns.
    */
-  private removeStaleSocket(): void {
+  private async removeStaleSocket(): Promise<void> {
     let stat;
     try {
       stat = lstatSync(this.ipcPath);
@@ -206,7 +220,8 @@ export class IpcServer {
     if (!stat.isSocket()) {
       throw new Error(`Refusing to remove non-socket file at IPC path: ${this.ipcPath}`);
     }
-    unlinkSync(this.ipcPath);
+    if (!(await endpointIsAbsent(this.ipcPath))) throw new Error("IPC endpoint is already live");
+    if (sameFile(this.ipcPath, stat)) unlinkSync(this.ipcPath);
   }
 
   // ------------------------------------------------------------------
@@ -307,19 +322,19 @@ export class IpcServer {
     line: string,
     helloTimer: ReturnType<typeof setTimeout>
   ): boolean {
-    let msg: { type?: string; protocolVersion?: number; token?: string };
+    let msg: unknown;
     try {
       msg = JSON.parse(line) as typeof msg;
     } catch {
       this.failHandshake(socket, "invalid hello message");
       return false;
     }
-    if (msg.type !== "hello") {
+    if (!isRecord(msg) || msg.type !== "hello") {
       this.failHandshake(socket, "first message must be hello");
       return false;
     }
-    if (typeof msg.protocolVersion !== "number" || Math.trunc(msg.protocolVersion) !== PROTOCOL_VERSION) {
-      this.failHandshake(socket, `unsupported protocol version: ${String(msg.protocolVersion)}`);
+    if (msg.protocolVersion !== PROTOCOL_VERSION) {
+      this.failHandshake(socket, "unsupported protocol version");
       return false;
     }
     if (typeof msg.token !== "string" || !this.tokenMatches(msg.token)) {
@@ -354,13 +369,15 @@ export class IpcServer {
 
   private async handleMessage(socket: Socket, line: string): Promise<void> {
     let msg: ManagementRequest | IoStreamRequest;
+    let raw: unknown;
     try {
-      msg = JSON.parse(line) as ManagementRequest | IoStreamRequest;
+      raw = JSON.parse(line);
+      msg = parseIpcRequest(raw);
     } catch {
       this.writeSocket(socket, {
-        id: "",
+        id: isRecord(raw) && typeof raw.id === "string" ? raw.id : "",
         type: "error",
-        message: "Invalid JSON"
+        message: "Invalid IPC request"
       });
       return;
     }
@@ -410,7 +427,7 @@ export class IpcServer {
       case "attach_client":
         return this.handleAttachClient(msg, socket);
       case "detach_client":
-        return this.handleDetachClient(msg);
+        return this.handleDetachClient(msg, socket);
       case "client_input":
         return this.handleClientInput(msg);
       case "client_resize":
@@ -529,6 +546,10 @@ export class IpcServer {
       return null;
     }
 
+    if (socket.destroyed || !socket.writable) {
+      this.sessionServer.detachClient(msg.sessionId, msg.clientId);
+      return null;
+    }
     this.clients.set(msg.clientId, socket);
     this.clientSessions.set(msg.clientId, msg.sessionId);
     this.writeSocket(socket, {
@@ -551,9 +572,10 @@ export class IpcServer {
     return null;
   }
 
-  private async handleDetachClient(msg: import("./ipc-protocol.js").DetachClientMessage): Promise<null> {
+  private async handleDetachClient(msg: import("./ipc-protocol.js").DetachClientMessage, socket: Socket): Promise<null> {
     // Only drop the registry entry if it still points at this connection —
     // a re-attached client (new socket, same id) must not be clobbered.
+    if (this.clients.get(msg.clientId) !== socket) return null;
     this.clients.delete(msg.clientId);
     this.clientSessions.delete(msg.clientId);
     this.slowClients.delete(msg.clientId);

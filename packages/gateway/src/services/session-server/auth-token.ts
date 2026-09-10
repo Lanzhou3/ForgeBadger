@@ -2,7 +2,7 @@
  * Session Server handshake token management.
  *
  * The Gateway generates a random token each time it spawns a Session Server
- * and writes it to `<stateDir>/session-server-v1.token` (0600, atomic
+ * and writes it to `<stateDir>/session-server-v2.token` (0600, atomic
  * write-then-rename). The token is passed to the server via a `--token-file`
  * argument — never on the command line or through an environment variable —
  * and Gateway-side clients read it back from the same path when connecting.
@@ -12,7 +12,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const SESSION_SERVER_TOKEN_FILE_NAME = "session-server-v1.token";
+export const SESSION_SERVER_TOKEN_FILE_NAME = "session-server-v2.token";
 
 export function resolveSessionServerTokenPath(stateDir?: string): string {
   const dir = stateDir ?? process.env.FORGEBADGER_STATE_DIR ?? join(homedir(), ".forgebadger");

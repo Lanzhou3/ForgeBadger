@@ -6,14 +6,12 @@ import { InMemorySessionManager } from "./services/session-manager.js";
 import { ForgeBadgerEventBus } from "./services/event-bus.js";
 import { attachNotificationPersistence } from "./services/notification-events.js";
 import { attachTerminalWebSocket } from "./websocket/terminal.js";
-import { attachTerminalWebSocket as attachSessionServerTerminalWebSocket } from "./websocket/terminal-session-server.js";
 import { attachEventsWebSocket } from "./websocket/events.js";
 import type { Database } from "./db/types.js";
 import type { CommandRunner } from "./lib/dependency-check.js";
 import type { FeishuChannelRuntime } from "./services/integrations/feishu-channel-runtime.js";
 import type { RegistrationMode } from "./routes/auth.js";
 import type { LocalAccountRecovery } from "./services/local-account-recovery.js";
-import type { TerminalMultiplexerRuntime } from "./services/terminal-multiplexer-runtime.js";
 import type { AgentStackDeps } from "./services/agent/agent-stack.js";
 import { startAutomationScheduler, type AutomationScheduler } from "./services/automation/scheduler.js";
 import { startCopilotRuntime } from "./services/agent/runtime.js";
@@ -60,16 +58,16 @@ export interface GatewayAppOptions {
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
   registrationMode?: RegistrationMode | undefined;
   accountRecovery?: LocalAccountRecovery | undefined;
-  terminalRuntime?: TerminalMultiplexerRuntime | undefined;
   runtimeAuthorizationInvalidator?: RuntimeAuthorizationInvalidator | undefined;
-  /** When set, use the Session Server for WebSocket terminal I/O. */
-  sessionServerIpcPath?: string | undefined;
+  /** Session Server IPC endpoint for WebSocket terminal I/O (required: it is the single terminal backend). */
+  sessionServerIpcPath: string;
   /**
    * Explicit Session Server handshake token for the terminal I/O stream.
    * Production leaves this unset — SessionServerPty reads the state-dir token
    * file (which survives daemon token rotation). Tests inject it directly.
    */
   sessionServerToken?: string | undefined;
+  sessionServerTokenPath?: string | undefined;
   /** Test-only model transport seam for the native Copilot runtime. */
   llmFetch?: typeof fetch | undefined;
 }
@@ -151,31 +149,20 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     ? startAutomationScheduler(copilotAgent)
     : undefined;
 
-  // Mount the terminal WebSocket handler:
-  //   - If sessionServerIpcPath is set, use the Session Server WebSocket handler
-  //   - Otherwise, use the legacy tmux/psmux WebSocket handler
-  if (options.sessionServerIpcPath) {
-    attachSessionServerTerminalWebSocket({
-      server,
-      sessionManager,
-      jwtSecret,
-      db: options.db,
-      runtimeAuthorizationInvalidator,
-      sessionServerIpcPath: options.sessionServerIpcPath,
-      ...(options.sessionServerToken !== undefined
-        ? { sessionServerToken: options.sessionServerToken }
-        : {})
-    });
-  } else {
-    attachTerminalWebSocket({
-      server,
-      sessionManager,
-      jwtSecret,
-      db: options.db,
-      runtimeAuthorizationInvalidator,
-      ...(options.terminalRuntime ? { terminalRuntime: options.terminalRuntime } : {})
-    });
-  }
+  // The Session Server is the single terminal backend; the terminal
+  // WebSocket handler relays browser I/O to it over IPC.
+  attachTerminalWebSocket({
+    server,
+    sessionManager,
+    jwtSecret,
+    db: options.db,
+    runtimeAuthorizationInvalidator,
+    sessionServerIpcPath: options.sessionServerIpcPath,
+    ...(options.sessionServerTokenPath ? { sessionServerTokenPath: options.sessionServerTokenPath } : {}),
+    ...(options.sessionServerToken !== undefined
+      ? { sessionServerToken: options.sessionServerToken }
+      : {})
+  });
 
   attachEventsWebSocket({ server, eventBus, jwtSecret, db: options.db });
   // Opening the provider connection is intentionally last.

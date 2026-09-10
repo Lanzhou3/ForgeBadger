@@ -51,7 +51,7 @@ interface GitDiffResponseBody {
   };
 }
 
-const mockTmuxClient = {
+const mockBackendClient = {
   async createSession() {},
   async killSession() {},
   async capturePane() {
@@ -68,10 +68,11 @@ describe("project git-changes routes", () => {
 
   before(async () => {
     const app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
       db: createTestDb(),
-      sessionManager: new InMemorySessionManager(mockTmuxClient as never),
+      sessionManager: new InMemorySessionManager(mockBackendClient as never),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey })
     });
     await new Promise<void>((resolve) => {

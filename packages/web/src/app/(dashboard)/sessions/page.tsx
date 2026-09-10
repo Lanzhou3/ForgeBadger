@@ -92,7 +92,7 @@ export default function SessionsPage() {
       }
       return [
         session.name,
-        session.tmuxName,
+        session.runtimeSessionName,
         session.id,
         session.projectName,
         session.projectId,
@@ -280,7 +280,7 @@ export default function SessionsPage() {
                           <SessionStatusDot status={session.status} />
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-sm font-medium">
-                              {session.name || session.tmuxName || session.id}
+                              {session.name || session.runtimeSessionName || session.id}
                             </div>
                           </div>
                           {session.aiTool ? <CliBrandChip aiTool={session.aiTool} /> : null}

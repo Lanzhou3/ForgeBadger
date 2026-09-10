@@ -7,6 +7,7 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import type { CommandRunner } from "../lib/dependency-check.js";
 import { getAdapterLaunchStatus, isAdapterId } from "../services/adapter-discovery.js";
+import type { InMemorySessionManager } from "../services/session-manager.js";
 import {
   PROJECT_MANAGER_LEDGER_EVENT_TYPES,
   PROJECT_MANAGER_STAGE_STATUSES,
@@ -188,7 +189,7 @@ type ProjectManagerTaskPacketQueueStatus =
 
 export function createProjectManagerRoutes(
   db: Database,
-  options: { adapterCommandRunner?: CommandRunner; masterKey?: string } = {}
+  options: { adapterCommandRunner?: CommandRunner; masterKey?: string; sessionManager?: InMemorySessionManager } = {}
 ): Router {
   const router = Router({ mergeParams: true });
   router.use(authenticate);
@@ -372,7 +373,7 @@ export function createProjectManagerRoutes(
       });
       return;
     }
-    const launchStatus = await getAdapterLaunchStatus(requestedAdapter, options.adapterCommandRunner);
+    const launchStatus = await getAdapterLaunchStatus(requestedAdapter, options.adapterCommandRunner, options.sessionManager?.terminalBackendHealth());
     if (!launchStatus.launchEnabled) {
       res.status(409).json({
         code: 1,

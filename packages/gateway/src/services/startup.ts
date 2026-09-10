@@ -5,11 +5,7 @@ import { SessionRepository } from "../db/repositories/session-repository.js";
 import { InMemoryApiKeyStore } from "../secrets/api-key-store.js";
 import { InMemorySessionManager } from "./session-manager.js";
 import { createDbSessionRecoveryStore } from "./db-session-recovery-store.js";
-import { createTmuxClient, type TmuxClient } from "./tmux.js";
-import {
-  resolveTerminalMultiplexerRuntime,
-  type TerminalMultiplexerRuntime
-} from "./terminal-multiplexer-runtime.js";
+import type { TerminalBackendClient } from "./terminal-backend.js";
 import { ForgeBadgerEventBus } from "./event-bus.js";
 import { cleanupExpiredCliConfigBackups } from "./cli-config-apply.js";
 import type { SessionServerClient } from "./session-server-client.js";
@@ -19,8 +15,7 @@ export interface StartupResult {
   sessionManager: InMemorySessionManager;
   apiKeyStore: InMemoryApiKeyStore;
   eventBus: ForgeBadgerEventBus;
-  terminalRuntime: TerminalMultiplexerRuntime;
-  /** Present when using the custom Session Server (non-tmux) architecture. */
+  /** The connected Session Server client (the single terminal backend). */
   sessionServerClient?: SessionServerClient | undefined;
   /** Stops the periodic session status correction scan. */
   stopStatusCorrection: () => void;
@@ -28,9 +23,9 @@ export interface StartupResult {
 
 export async function startupGateway(options: {
   env: GatewayEnv;
-  tmuxClient?: TmuxClient;
-  terminalRuntime?: TerminalMultiplexerRuntime;
-  /** Session Server client for the custom (non-tmux) architecture. */
+  /** Test seam: inject a terminal backend directly instead of a Session Server client. */
+  backendClient?: TerminalBackendClient;
+  /** Session Server client for the single-backend architecture. */
   sessionServerClient?: SessionServerClient;
 }): Promise<StartupResult> {
   const db = initializeDatabase(options.env.FORGEBADGER_DB_PATH);
@@ -42,15 +37,12 @@ export async function startupGateway(options: {
     masterKey: options.env.FORGEBADGER_MASTER_KEY
   });
   const eventBus = new ForgeBadgerEventBus();
-  const terminalRuntime = options.terminalRuntime ?? resolveTerminalMultiplexerRuntime();
 
-  // Determine which terminal backend to use:
-  //   1. Explicit tmuxClient (test override) → use it
-  //   2. sessionServerClient (custom architecture) → use it
-  //   3. Default → create tmux client
-  const terminalBackend: TmuxClient = options.tmuxClient
+  // The Session Server is the only terminal backend; `backendClient` exists
+  // purely as a test seam.
+  const terminalBackend: TerminalBackendClient = options.backendClient
     ?? options.sessionServerClient
-    ?? createTmuxClient(terminalRuntime);
+    ?? requireTerminalBackend();
 
   const sessionServerClient = options.sessionServerClient;
   const sessionManager = new InMemorySessionManager(
@@ -58,7 +50,7 @@ export async function startupGateway(options: {
     createDbSessionRecoveryStore(db, options.env.FORGEBADGER_MASTER_KEY),
     eventBus,
     {
-      tmuxPrefix: options.env.FORGEBADGER_TMUX_PREFIX,
+      sessionPrefix: options.env.FORGEBADGER_SESSION_PREFIX,
       db,
       // The session-server client detects daemon restarts via the hello
       // pid/startedAt identity; the correction scan consumes this to mark
@@ -95,8 +87,11 @@ export async function startupGateway(options: {
     sessionManager,
     apiKeyStore,
     eventBus,
-    terminalRuntime,
     sessionServerClient: options.sessionServerClient,
     stopStatusCorrection
   };
+}
+
+function requireTerminalBackend(): never {
+  throw new Error("A terminal backend client is required (Session Server)");
 }

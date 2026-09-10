@@ -26,6 +26,7 @@ import {
   resolveSessionServerTokenPath,
   writeSessionServerTokenFile
 } from "./session-server/auth-token.js";
+import { endpointIsAbsent, withDaemonStartupLock } from "./session-server/endpoint-lifecycle.js";
 import { createPlatformAdapter } from "./session-server/platform-adapter.js";
 
 export interface SessionServerIntegration {
@@ -72,7 +73,6 @@ export interface SessionServerIntegrationOptions {
 }
 
 const PROBE_TIMEOUT_MS = 1500;
-const PROBE_ATTEMPTS = 2;
 const SPAWN_READY_TIMEOUT_MS = 15_000;
 
 export async function startAndConnectSessionServer(
@@ -87,13 +87,19 @@ export async function startAndConnectSessionServer(
 
   // Probe before spawning: a live daemon (hello succeeds with the token file)
   // is reused, keeping its sessions alive across Gateway restarts.
-  const reused = await probeExistingDaemon(client);
   let child: ChildProcess | undefined;
-  if (!reused) {
+  const reused = await withDaemonStartupLock(`${tokenPath}.lock`, async () => {
+    if (await probeExistingDaemon(client, ipcPath)) return true;
     child = supervision.spawnDaemon();
-    await waitForIpcReady(ipcPath, SPAWN_READY_TIMEOUT_MS);
-    await client.connect();
-  }
+    try {
+      await waitForIpcReady(ipcPath, SPAWN_READY_TIMEOUT_MS);
+      await client.connect();
+      return false;
+    } catch (error) {
+      await killSpawnedChild(child);
+      throw error;
+    }
+  });
   supervision.attach(child);
 
   const identity = client.getServerIdentity();
@@ -144,19 +150,11 @@ export async function connectToSessionServer(ipcPath: string): Promise<SessionSe
 // Reuse probe
 // ---------------------------------------------------------------------------
 
-/** hello timeouts do not prove the daemon is dead (it may be in GC), so the
- *  probe retries before the caller falls back to unlink + spawn. */
-async function probeExistingDaemon(client: SessionServerClient): Promise<boolean> {
-  for (let attempt = 0; attempt < PROBE_ATTEMPTS; attempt++) {
-    try {
-      await client.connect(PROBE_TIMEOUT_MS);
-      return true;
-    } catch {
-      // Missing token file, refused connection, or hello timeout — retry,
-      // then let the caller spawn a fresh daemon.
-    }
-  }
-  return false;
+/** Authentication, protocol and timeouts never authorize token replacement. */
+async function probeExistingDaemon(client: SessionServerClient, ipcPath: string): Promise<boolean> {
+  if (await endpointIsAbsent(ipcPath)) return false;
+  await client.connect(PROBE_TIMEOUT_MS);
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +216,9 @@ function createSupervision(
     if (process.platform !== "win32") {
       spawned.unref();
     }
+    spawned.on("error", (error) => {
+      if (spawned === child) onBackendDown(`daemon spawn failed: ${error.message}`);
+    });
     spawned.on("exit", (code, signal) => {
       if (spawned === child) {
         onBackendDown(`daemon exited (code=${String(code)} signal=${String(signal)})`);
@@ -256,15 +257,20 @@ function createSupervision(
 
   const doRestart = async (): Promise<void> => {
     try {
-      // A reconnect alone may suffice (an external supervisor may have
-      // restarted the daemon); otherwise spawn a fresh daemon ourselves.
-      try {
-        await client.connect(PROBE_TIMEOUT_MS);
-      } catch {
+      await withDaemonStartupLock(`${tokenPath}.lock`, async () => {
+        if (stopped) return;
+        if (await probeExistingDaemon(client, ipcPath)) return;
         child = spawnDaemon();
-        await waitForIpcReady(ipcPath, SPAWN_READY_TIMEOUT_MS);
-        await client.connect();
-      }
+        try {
+          await waitForIpcReady(ipcPath, SPAWN_READY_TIMEOUT_MS);
+          if (stopped) return;
+          await client.connect();
+        } catch (error) {
+          await killSpawnedChild(child);
+          throw error;
+        }
+      });
+      if (stopped) return;
       failures = [];
       backoffMs = restartCfg.initialBackoffMs;
       available = true;
@@ -329,18 +335,13 @@ function createSupervision(
 }
 
 async function killSpawnedChild(child: ChildProcess | undefined): Promise<void> {
-  if (!child || child.killed) return;
-  child.kill("SIGTERM");
-  // Give it 2 seconds to shut down gracefully
+  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
-      if (!child.killed) child.kill("SIGKILL");
-      resolve();
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     }, 2000);
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
+    child.once("exit", () => { clearTimeout(timer); resolve(); });
+    child.kill("SIGTERM");
   });
 }
 

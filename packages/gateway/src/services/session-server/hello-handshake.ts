@@ -8,15 +8,8 @@
  */
 import type { Socket } from "node:net";
 
+import { isRecord } from "./ipc-validation.js";
 import { PROTOCOL_VERSION } from "./ipc-protocol.js";
-
-interface HelloReply {
-  type?: string;
-  message?: string;
-  protocolVersion?: number;
-  pid?: number;
-  startedAt?: string;
-}
 
 /**
  * Send hello and wait for hello_ok. Returns the daemon identity (pid /
@@ -52,28 +45,48 @@ export function performClientHello(
 
     function onData(chunk: string): void {
       buffer += chunk;
+      if (Buffer.byteLength(buffer) > 64 * 1024) {
+        fail(new Error("Session Server hello exceeds size limit"));
+        return;
+      }
       const newlineIndex = buffer.indexOf("\n");
       if (newlineIndex === -1) return;
       const line = buffer.slice(0, newlineIndex);
       const rest = buffer.slice(newlineIndex + 1);
-      let msg: HelloReply;
+      let msg: unknown;
       try {
-        msg = JSON.parse(line) as HelloReply;
+        msg = JSON.parse(line);
       } catch {
         fail(new Error("Invalid hello response from Session Server"));
         return;
       }
+      if (!isRecord(msg) || typeof msg.type !== "string") {
+        fail(new Error("Invalid hello response from Session Server")); return;
+      }
       if (msg.type === "hello_ok") {
+        if (typeof msg.protocolVersion === "number" && Number.isSafeInteger(msg.protocolVersion)
+          && msg.protocolVersion > 0 && msg.protocolVersion !== PROTOCOL_VERSION) {
+          fail(new Error(`Incompatible Session Server protocol version: server v${msg.protocolVersion}, Gateway requires v${PROTOCOL_VERSION}. Finish or explicitly stop active sessions, then restart the Session Server and Gateway. Existing sessions were not stopped.`));
+          return;
+        }
+        if (msg.protocolVersion !== PROTOCOL_VERSION || !Number.isSafeInteger(msg.pid)
+          || typeof msg.pid !== "number" || msg.pid <= 0 || typeof msg.startedAt !== "string"
+          || !Number.isFinite(Date.parse(msg.startedAt))) {
+          fail(new Error("Invalid Session Server hello identity or protocol version")); return;
+        }
         cleanup();
         resolve({ leftover: rest, pid: msg.pid, startedAt: msg.startedAt });
         return;
       }
       if (msg.type === "hello_error") {
-        const detail = msg.message ?? "unknown";
-        fail(new Error(`Session Server hello rejected: ${detail} (server protocol v${msg.protocolVersion ?? "?"})`));
+        if (typeof msg.message !== "string" || typeof msg.protocolVersion !== "number"
+          || !Number.isSafeInteger(msg.protocolVersion) || msg.protocolVersion < 1) {
+          fail(new Error("Invalid hello error response from Session Server")); return;
+        }
+        fail(new Error(`Session Server hello rejected: ${msg.message} (server protocol v${msg.protocolVersion}, Gateway requires v${PROTOCOL_VERSION}). If incompatible, finish or explicitly stop active sessions, then restart the Session Server and Gateway. Existing sessions were not stopped.`));
         return;
       }
-      fail(new Error(`Unexpected first message from Session Server: ${msg.type ?? "unknown"}`));
+      fail(new Error("Unexpected first message from Session Server"));
     }
 
     function onError(error: Error): void {

@@ -4,7 +4,6 @@ import { describe, it } from "node:test";
 import {
   buildRegistrationPayload,
   buildNpmInstallArgs,
-  resolveTerminalMultiplexerCommand,
   runCommand
 } from "./smoke-npm-package-runner.mjs";
 
@@ -75,7 +74,5 @@ describe("npm package smoke command runner", () => {
     });
 
     assert.equal(observedOptions.shell, true);
-    assert.equal(resolveTerminalMultiplexerCommand("win32"), "psmux");
-    assert.equal(resolveTerminalMultiplexerCommand("darwin"), "tmux");
   });
 });

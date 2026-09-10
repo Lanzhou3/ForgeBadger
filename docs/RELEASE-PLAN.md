@@ -27,17 +27,17 @@ Operational runtime state:
 
 - SQLite data file at `FORGEBADGER_DB_PATH`.
 - Project-generated config files under user-approved project directories.
-- Runtime tmux sessions named with `FORGEBADGER_TMUX_PREFIX`, default `fb-`.
+- Session Server sessions named with `FORGEBADGER_SESSION_PREFIX`, default `fb-`.
 - User agent configuration directories such as `.claude`, `.codex`, and
   `.opencode`.
 - Local API keys, credentials, and user configuration files.
 
 Operational runtime state is never part of the npm package or release artifact.
 
-When multiple ForgeBadger instances share one operating-system account, assign
-each instance a unique `FORGEBADGER_TMUX_PREFIX`. Separate state or database
-paths do not isolate tmux's global server, and reusing the default `fb-` prefix
-can make one instance treat another instance's sessions as orphans.
+When multiple ForgeBadger instances share one operating-system account, use
+separate `FORGEBADGER_STATE_DIR` and `FORGEBADGER_DB_PATH` values. Session Server
+IPC, authentication and lifecycle ownership belong to that state domain. Do not
+share a daemon/state directory between unrelated database instances.
 
 The Gateway owns all API and WebSocket behavior. The Web console is a pure
 Next.js client that talks to the Gateway through `NEXT_PUBLIC_GATEWAY_URL`.
@@ -48,14 +48,13 @@ Minimum runtime dependencies:
 
 - Node.js 20.12 through 24.
 - pnpm 10 or newer.
-- tmux 3.2 or newer.
+- A loadable node-pty native module on the supported host.
 - Claude Code CLI on `PATH` for Claude sessions.
 - OpenCode and/or Codex CLI on `PATH` only when those adapters are in scope.
 - SQLite-compatible filesystem for `FORGEBADGER_DB_PATH`.
 
-Windows native hosts can run management UI workflows, but the built-in browser
-terminal requires WSL because terminal persistence depends on tmux. Run release
-terminal acceptance inside WSL for Windows users.
+Native Windows uses node-pty/ConPTY in Session Server. Physical Windows and
+WSL browser + real CLI acceptance remain separate external evidence gates.
 
 Required secrets:
 
@@ -77,7 +76,7 @@ FORGEBADGER_DB_PATH=/absolute/path/to/forgebadger.db
 FORGEBADGER_MASTER_KEY=<64-hex-characters>
 FORGEBADGER_JWT_SECRET=<32+-character-secret>
 FORGEBADGER_LOG_LEVEL=info
-FORGEBADGER_TMUX_PREFIX=of-
+FORGEBADGER_SESSION_PREFIX=fb-
 ```
 
 Do not commit `.env`, database files, API keys, JWTs, or generated user
@@ -87,7 +86,7 @@ Native dependency notes:
 
 - The npm package still declares runtime dependencies on native modules
   `better-sqlite3` and `node-pty`.
-- `tmux` is a system dependency and is not installed by npm.
+- Session Server is bundled; tmux/psmux are not runtime dependencies.
 - If prebuilt native binaries are unavailable for the operator's platform,
   dependency installation requires a working C/C++ build toolchain compatible
   with a supported Node.js release.
@@ -99,7 +98,7 @@ Run before building a release candidate:
 ```bash
 node --version
 pnpm --version
-tmux -V
+forgebadger doctor
 claude --version
 git status --short
 ```
@@ -107,7 +106,7 @@ git status --short
 Expected:
 
 - Node and pnpm satisfy `package.json` engines.
-- tmux and Claude Code are installed when terminal smoke is in scope.
+- Terminal backend reports session-server readiness and the target AI CLI is installed.
 - `git status --short` contains only intentional release changes.
 
 ## 4. Build And Migration
@@ -201,7 +200,7 @@ runtime scope. The first Phase C backlog should prioritize:
 - Windows/WSL terminal remediation based on physical host evidence;
 
 The Codex app-server control-plane prototype was removed on 2026-08-14; Codex
-runs exclusively as tmux-backed terminal sessions.
+runs exclusively as Session Server-backed terminal sessions.
 
 ## 9. Rollback
 
@@ -214,9 +213,12 @@ Rollback sequence:
 5. Restore the backed-up SQLite database if the new release wrote incompatible
    state.
 6. Start Gateway, then Web.
-7. Inspect `tmux list-sessions` and only terminate new failed `fb-*` sessions
-   after confirming they are not active user sessions.
+7. Inspect the authenticated Sessions page/API and stop only disposable failed
+   sessions belonging to this release smoke. Do not kill unrelated processes.
 
-Terminal scrollback is not stored in SQLite. Recovery depends on tmux sessions
-remaining alive, so do not kill tmux sessions during rollback unless they are
-confirmed orphaned.
+Terminal history is held in the daemon headless terminal, not SQLite. Gateway
+rollback/restart preserves CLI processes only while the same compatible daemon
+remains alive. Daemon or OS restart loses those processes and requires explicit
+new sessions. Legacy tmux/psmux processes are neither adopted nor terminated;
+finish old tasks before retiring the old runtime. Do not uninstall system tools
+or delete active daemon state as part of release cleanup.

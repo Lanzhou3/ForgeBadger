@@ -4,10 +4,11 @@
  * Abstracts the differences between Windows (ConPTY) and POSIX (forkpty)
  * so the rest of the Session Server is platform-agnostic.
  */
-import { randomBytes, createHash } from "node:crypto";
+import { resolvePosixIpcPath } from "./endpoint-lifecycle.js";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, win32 } from "node:path";
 import type { IPty } from "node-pty";
 
 export interface PlatformPtyAdapter {
@@ -36,7 +37,7 @@ class PosixPtyAdapter implements PlatformPtyAdapter {
   }
 
   getIpcPath(stateDir: string): string {
-    return join(stateDir, "session-server-v1.sock");
+    return resolvePosixIpcPath(stateDir);
   }
 
   readonly usesCrlf = false;
@@ -48,7 +49,7 @@ class PosixPtyAdapter implements PlatformPtyAdapter {
 
 class WindowsPtyAdapter implements PlatformPtyAdapter {
   resolveCommand(command: string, env: NodeJS.ProcessEnv): { command: string; args: string[] } {
-    const shim = resolveWindowsShimCommand(command, env);
+    const shim = resolveWindowsShimCommand(command, env, "win32");
     if (shim) return shim;
     // ConPTY (node-pty win/conpty.cc) resolves relative names via
     // `get_shell_path`, which does an exact filename match against PATH
@@ -77,38 +78,15 @@ class WindowsPtyAdapter implements PlatformPtyAdapter {
     return env.COMSPEC?.trim() || env.ComSpec?.trim() || "cmd.exe";
   }
 
-  getIpcPath(_stateDir: string): string {
-    // Named pipe on Windows. The name carries the protocol major version, a
-    // per-user component, and a per-process random suffix (memoized so the
-    // Gateway reuses one name for its lifetime) to defeat same-user named
-    // pipe squatting; node cannot set a pipe SDDL, so the hello token is
-    // the real authentication layer.
-    return windowsPipeName();
+  getIpcPath(stateDir: string): string {
+    // A stable user + canonical state-directory identity survives Gateway exits.
+    // The token remains the authentication boundary for named pipes.
+    const identity = `${userInfo().username}\0${win32.resolve(stateDir).toLowerCase()}`;
+    const digest = createHash("sha256").update(identity).digest("hex").slice(0, 32);
+    return `\\\\.\\pipe\\forgebadger-session-server-v2-${digest}`;
   }
 
   readonly usesCrlf = true;
-}
-
-let memoizedWindowsPipeName: string | undefined;
-
-function windowsPipeName(): string {
-  if (!memoizedWindowsPipeName) {
-    memoizedWindowsPipeName =
-      `\\\\.\\pipe\\forgebadger-session-server-v1-${windowsUserComponent()}-${randomBytes(4).toString("hex")}`;
-  }
-  return memoizedWindowsPipeName;
-}
-
-function windowsUserComponent(): string {
-  let username = "";
-  try {
-    username = userInfo().username;
-  } catch {
-    // Fall through to the hash of an empty name
-  }
-  const sanitized = username.replace(/[^a-zA-Z0-9_-]/g, "");
-  if (sanitized) return sanitized;
-  return createHash("sha256").update(username || "unknown").digest("hex").slice(0, 8);
 }
 
 export function createPlatformAdapter(
@@ -118,7 +96,7 @@ export function createPlatformAdapter(
 }
 
 // ---------------------------------------------------------------------------
-// Windows .cmd shim resolution (migrated from terminal-multiplexer-runtime.ts)
+// Windows .cmd shim resolution
 // ---------------------------------------------------------------------------
 
 interface ResolvedShim {
@@ -126,11 +104,22 @@ interface ResolvedShim {
   args: string[];
 }
 
-function resolveWindowsShimCommand(
+/**
+ * Windows-only: resolve a bare CLI name (e.g. "opencode") to an executable
+ * that child_process.spawn / ConPTY's CreateProcessW can launch directly.
+ * npm/cargo installs place a `.cmd` shim on PATH that bare spawn rejects
+ * (EINVAL since Node 20.12/CVE-2024-27980) and that CreateProcessW cannot
+ * launch (error 193), so read the shim and target its real payload: an
+ * `.exe`, or node + a `.js` entry. Returns undefined when no shim resolution
+ * applies (mac/Linux, a real .exe on PATH, or an unparseable shim) so callers
+ * keep the POSIX behavior of resolving through the shell/execvp unchanged.
+ */
+export function resolveWindowsShimCommand(
   command: string,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform
 ): ResolvedShim | undefined {
-  if (process.platform !== "win32") return undefined;
+  if (platform !== "win32") return undefined;
 
   const shimPath = isAbsolute(command)
     ? command
@@ -181,6 +170,24 @@ function findWindowsExecutable(command: string, env: NodeJS.ProcessEnv): string 
     if (existsSync(bare)) return bare;
   }
   return undefined;
+}
+
+/**
+ * Windows-only: returns true when `command` resolves (via PATH + PATHEXT) to a
+ * .cmd/.bat shim that bare child_process.spawn cannot execute. Always false on
+ * POSIX, where the command is run through execvp unchanged.
+ */
+export function isWindowsShimCommand(
+  command: string,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  if (process.platform !== "win32") return false;
+  if (isAbsolute(command) || command.includes("/") || command.includes("\\")) {
+    return /\.(?:cmd|bat)$/iu.test(command);
+  }
+  const resolved = findWindowsExecutable(command, env);
+  if (!resolved) return false;
+  return /\.(?:cmd|bat)$/iu.test(resolved);
 }
 
 // ---------------------------------------------------------------------------

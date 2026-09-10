@@ -238,7 +238,7 @@ describe("project-manager routes", () => {
       workingDir: "/tmp/forgebadger-route-pm",
       credentialMode: "host_environment"
     });
-    sessionRepo.update(session.id, { status: "running", tmuxSession: "of-task-packet" });
+    sessionRepo.update(session.id, { status: "running", runtimeSessionName: "of-task-packet" });
     const otherProjectId = new ProjectRepository(db, owner.id).create({
       name: "Other project",
       path: "/tmp/forgebadger-other-task-packet",

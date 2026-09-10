@@ -66,6 +66,7 @@ describe("Gateway Feishu shutdown ordering", () => {
       clearInterval: () => undefined
     });
     const app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
       db,
@@ -111,6 +112,7 @@ describe("Gateway Feishu shutdown ordering", () => {
       clearInterval: () => undefined
     });
     const app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
       db,

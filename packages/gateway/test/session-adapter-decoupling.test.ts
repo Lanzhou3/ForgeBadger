@@ -18,7 +18,7 @@ import { RuntimeAuthorizationInvalidator } from "../src/services/runtime-authori
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
 
-interface MockTmuxCreateInput {
+interface MockBackendCreateInput {
   name: string;
   cwd: string;
   command: string;
@@ -55,7 +55,7 @@ function createTestDb(): Database {
 }
 
 describe("session adapter decoupling", () => {
-  const tmuxCreates: MockTmuxCreateInput[] = [];
+  const backendCreates: MockBackendCreateInput[] = [];
   let gateway: ReturnType<typeof createGatewayApp>;
   let db: Database;
   let server: Server;
@@ -65,7 +65,7 @@ describe("session adapter decoupling", () => {
     db = createTestDb();
     const sessionManager = new InMemorySessionManager({
       async createSession(input) {
-        tmuxCreates.push(input);
+        backendCreates.push(input);
       },
       async killSession() {},
       async capturePane() {
@@ -77,6 +77,7 @@ describe("session adapter decoupling", () => {
     });
     const runtimeAuthorizationInvalidator = new RuntimeAuthorizationInvalidator();
     gateway = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
       db,
@@ -235,12 +236,12 @@ describe("session adapter decoupling", () => {
 
     assert.equal(sessionRes.status, 201);
     assert.equal(sessionData.data.session.aiTool, "codex");
-    assert.equal(tmuxCreates.at(-1)?.command, "codex");
-    assert.equal(tmuxCreates.at(-1)?.cwd, await realpath(rootPath));
+    assert.equal(backendCreates.at(-1)?.command, "codex");
+    assert.equal(backendCreates.at(-1)?.cwd, await realpath(rootPath));
   });
 
   it("creates Codex sessions in host_environment without provider or model fields", async () => {
-    const beforeCreateCount = tmuxCreates.length;
+    const beforeCreateCount = backendCreates.length;
     const token = await register("adapter-codex-host-env@example.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-codex-host-env-"));
 
@@ -270,13 +271,13 @@ describe("session adapter decoupling", () => {
     assert.equal(sessionData.data.session.aiTool, "codex");
     assert.equal(sessionData.data.session.credentialMode, undefined);
     assert.equal(sessionData.data.session.launchModelId, undefined);
-    assert.equal(tmuxCreates.length, beforeCreateCount + 1);
-    assert.equal(tmuxCreates.at(-1)?.command, "codex");
-    assert.equal(tmuxCreates.at(-1)?.env.OPENAI_API_KEY, undefined);
+    assert.equal(backendCreates.length, beforeCreateCount + 1);
+    assert.equal(backendCreates.at(-1)?.command, "codex");
+    assert.equal(backendCreates.at(-1)?.env.OPENAI_API_KEY, undefined);
   });
 
   it("rejects legacy credential and model fields for Kimi Code terminal sessions", async () => {
-    const beforeCreateCount = tmuxCreates.length;
+    const beforeCreateCount = backendCreates.length;
     const token = await register("adapter-kimi-provider-boundary@example.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-kimi-provider-boundary-"));
 
@@ -324,8 +325,8 @@ describe("session adapter decoupling", () => {
     assert.equal(storedCredentialRes.status, 400);
     assert.equal(modelOverrideRes.status, 400);
     assert.equal(plainRes.status, 201);
-    assert.equal(tmuxCreates.length, beforeCreateCount + 1);
-    assert.equal(tmuxCreates.at(-1)?.command, "kimi");
+    assert.equal(backendCreates.length, beforeCreateCount + 1);
+    assert.equal(backendCreates.at(-1)?.command, "kimi");
   });
 
   it("rejects legacy stored-credential fields for OpenCode sessions", async () => {
@@ -358,7 +359,7 @@ describe("session adapter decoupling", () => {
 
     assert.equal(sessionRes.status, 400);
     assert.equal(sessionData.message, "Invalid input");
-    assert.equal(tmuxCreates.some((entry) => entry.cwd === rootPath), false);
+    assert.equal(backendCreates.some((entry) => entry.cwd === rootPath), false);
   });
 });
 
