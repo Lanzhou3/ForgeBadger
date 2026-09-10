@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -21,7 +22,7 @@ describe("local release smoke harness", () => {
     assert.equal(env.FORGEBADGER_WEB_PORT, "48732");
     assert.equal(env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
     assert.equal(env.NEXT_PUBLIC_GATEWAY_URL, "http://127.0.0.1:48731");
-    assert.equal(env.FORGEBADGER_DB_PATH, "/tmp/forgebadger-smoke/forgebadger-smoke.db");
+    assert.equal(env.FORGEBADGER_DB_PATH, path.join("/tmp/forgebadger-smoke", "forgebadger-smoke.db"));
 
     assert.deepEqual(redactSmokeEnvironment(env), {
       ...env,

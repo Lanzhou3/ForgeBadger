@@ -36,6 +36,7 @@ import {
   sessionTaskPacketProjectManagerHref,
 } from "@/components/sessions/session-task-packet";
 import { GitChangesPanel } from "@/components/sessions/git-changes-panel";
+import { ProviderQuotaPanel } from "@/components/sessions/provider-quota-panel";
 import { SessionNotificationBell } from "@/components/sessions/session-notification-bell";
 import {
   auditSessionHandoffExportInput,
@@ -338,6 +339,9 @@ function SessionSidePanel({
           session={session}
           taskPacket={taskPacket}
         />
+        {session?.aiTool ? (
+          <ProviderQuotaPanel aiTool={session.aiTool} />
+        ) : null}
         {projectId ? (
           <GitChangesPanel projectId={projectId} />
         ) : null}

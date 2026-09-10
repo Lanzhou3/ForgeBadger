@@ -5,7 +5,8 @@ import { getGatewayBaseUrl } from "@/lib/runtime-config";
 export interface GateASession {
   id: string;
   attachToken: string;
-  tmuxName: string;
+  /** Historical API field name; identifies the built-in terminal session. */
+  runtimeSessionName: string;
   status: string;
 }
 
@@ -134,7 +135,6 @@ export interface ProjectManagerStarterPack {
 export interface ProjectManagerWorkItemInput {
   title: string;
   description?: string | null;
-  status?: ProjectManagerWorkItemStatus;
   priority?: number;
   acceptanceCriteria?: string[];
   evidenceRefs?: ProjectManagerEvidenceRef[];
@@ -239,6 +239,7 @@ export interface TemplateFile {
 export interface TemplateInput {
   name: string;
   description?: string;
+  adapter?: string;
   version?: string;
   visibility?: "private" | "shared" | "admin";
   files?: Array<{
@@ -278,8 +279,8 @@ export interface TemplateVersion extends TemplatePackage {
 export interface Session {
   id: string;
   attachToken?: string;
-  tmuxName?: string | null;
-  tmuxSession?: string | null;
+  /** Session Server runtime session identifier. */
+  runtimeSessionName?: string | null;
   status: string;
   name?: string;
   projectId?: string;
@@ -296,15 +297,8 @@ export interface DependencyStatus {
 }
 
 export interface TerminalRuntimeStatus {
-  persistence: "tmux" | "psmux";
-  mode:
-    | "native_tmux"
-    | "native_psmux"
-    | "wsl_required"
-    | "tmux_missing"
-    | "psmux_missing"
-    | "psmux_outdated"
-    | string;
+  persistence: "session-server";
+  mode: "ready" | "unavailable";
   supported: boolean;
   message: string;
 }
@@ -521,81 +515,6 @@ export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
 export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
-export type ProviderReadinessAdapter = ProviderSupportedAdapter;
-export type ProviderReadinessStatus = "ready" | "needs_attention" | "managed_elsewhere";
-export type ProviderReadinessCode =
-  | "ready"
-  | "provider_disabled"
-  | "unsupported_target"
-  | "missing_model"
-  | "missing_active_credential"
-  | "remote_validation_unavailable"
-  | "remote_model_missing"
-  | "remote_validation_failed"
-  | "native_auth_not_ready";
-export type ProviderReadinessCheckStatus =
-  | "ready"
-  | "disabled"
-  | "supported"
-  | "unsupported"
-  | "managed_elsewhere"
-  | "selected"
-  | "missing"
-  | "not_required"
-  | "passed"
-  | "missing_model"
-  | "unavailable"
-  | "failed"
-  | "skipped";
-
-export interface ProviderCatalogModel {
-  id: string;
-  name: string;
-  modelId: string;
-  capabilities: string[];
-  contextWindow?: number;
-}
-
-export interface ProviderCatalogPreset {
-  id: string;
-  name: string;
-  description: string;
-  baseUrl: string;
-  region: string;
-  productType: ProviderProductType;
-  authType: ProviderAuthType;
-  apiFormat: ProviderApiFormat;
-  supportedAdapters: ProviderSupportedAdapter[];
-  modelSource: "static" | "dynamic" | "models.dev";
-  endpoints: {
-    anthropic?: { baseUrl: string };
-    openai?: { baseUrl: string };
-  };
-  modelFetch?: {
-    strategy: "openai-compatible";
-    modelsUrl?: string;
-  };
-  defaultModels: ProviderCatalogModel[];
-  source?: "verified" | "models.dev";
-  claude?: {
-    env: {
-      baseUrl: string;
-      authToken: string;
-      model: string;
-      smallFastModel: string;
-      defaultSonnetModel: string;
-      defaultHaikuModel: string;
-      defaultOpusModel: string;
-      apiTimeoutMs: string;
-    };
-    defaultSmallFastModel?: string;
-  };
-  opencode?: {
-    npm: string;
-    api?: string;
-    env: string[];
-  };
-}
 
 export interface ProviderProfile {
   id: string;
@@ -610,6 +529,7 @@ export interface ProviderProfile {
   apiFormat: ProviderApiFormat;
   supportedAdapters: ProviderSupportedAdapter[];
   opencodeNpm?: string | null;
+  allowPlaintextHttp?: boolean;
   status: string;
 }
 
@@ -624,6 +544,7 @@ export interface ModelProfile {
   name: string;
   modelId: string;
   capabilities: string[];
+  contextWindow: number | null;
   status: string;
   isDefault: boolean;
 }
@@ -631,7 +552,63 @@ export interface ModelProfile {
 export interface ProviderModelSyncResult {
   fetchedCount: number;
   createdCount: number;
+  updatedCount?: number;
   models: ModelProfile[];
+}
+
+export interface ProviderBalanceEntry {
+  label: string;
+  remaining: number;
+  unit: string;
+  isAvailable?: boolean;
+  limit?: number;
+  resetsAt?: string;
+}
+
+export interface ProviderBalanceResult {
+  supported: boolean;
+  detectedProvider?: string;
+  balances: ProviderBalanceEntry[];
+  checkedAt: string;
+  cached?: boolean;
+}
+
+export interface AppliedProviderInfo {
+  providerProfileId: string;
+  providerName: string;
+  providerStatus: string;
+  modelProfileId: string | null;
+  appliedAt: string;
+}
+
+export interface AdapterAppliedProvider {
+  providerProfileId: string;
+  providerName: string | null;
+  providerStatus: string | null;
+  modelProfileId: string | null;
+  modelId: string | null;
+  modelName: string | null;
+  appliedAt: string;
+}
+
+/** Aggregated per-CLI applied pointer returned by GET /model-providers/applied. */
+export interface AdapterAppliedStatus {
+  adapter: ProviderSupportedAdapter;
+  applied: AdapterAppliedProvider | null;
+  /** CLI config default model; always null for non-admin users. */
+  configDefaultModel: string | null;
+  /** Pointer disagrees with the CLI config (or references a deleted record). */
+  stale: boolean;
+}
+
+export interface ModelProviderEndpointHealth {
+  healthy: boolean;
+  endpoint: string;
+  latencyMs: number;
+  timeoutMs: number;
+  statusCode?: number;
+  checkedAt: string;
+  error?: string;
 }
 
 export interface ProviderCredentialSummary {
@@ -640,46 +617,6 @@ export interface ProviderCredentialSummary {
   label: string | null;
   status: string;
   secretPreview: string;
-}
-
-export interface ModelProviderReadiness {
-  status: ProviderReadinessStatus;
-  code: ProviderReadinessCode;
-  checkedAt: string;
-  provider: {
-    id: string;
-    name: string;
-    providerKey: string;
-    apiFormat: string;
-    authType: string;
-  };
-  selection: {
-    adapter: ProviderReadinessAdapter;
-    modelProfileId?: string;
-    modelId?: string;
-    credentialId?: string;
-  };
-  checks: {
-    provider: ProviderReadinessCheckStatus;
-    adapter: ProviderReadinessCheckStatus;
-    model: ProviderReadinessCheckStatus;
-    credential: ProviderReadinessCheckStatus;
-    remoteModelList: ProviderReadinessCheckStatus;
-  };
-  remote?: {
-    checked: boolean;
-    modelCount?: number;
-    matchedModelId?: string;
-    errorCode?: string;
-    error?: string;
-  };
-  nativeAuth?: CodexNativeAuthStatus;
-  steps: string[];
-}
-
-export interface CodexNativeAuthStatus {
-  state: "ready" | "not_authenticated" | "cli_missing" | "unknown";
-  method: "chatgpt" | "api" | "unknown";
 }
 
 export interface SessionActivity {
@@ -697,7 +634,8 @@ export interface SessionSnapshot {
   id: string;
   sessionId?: string | null;
   projectId?: string | null;
-  tmuxSession?: string | null;
+  /** Historical API field name retained for persisted records. */
+  runtimeSessionName?: string | null;
   modelId?: string | null;
   configVersion?: string | null;
   metadata?: unknown;
@@ -753,7 +691,7 @@ export interface WorkspaceFileSnapshot {
 
 export interface SnapshotRestoreResult {
   session: Session;
-  mode: "attach_tmux" | "recreate_session";
+  mode: "attach_runtime" | "recreate_session";
 }
 
 export interface AuditLog {
@@ -1522,6 +1460,7 @@ export async function createProject(data: {
   name: string;
   path: string;
   description?: string;
+  templateId?: string;
 }): Promise<{ project: Project }> {
   return fetchJson("/api/v1/projects", {
     method: "POST",
@@ -1556,6 +1495,46 @@ export function isTemplateNotTrackedError(error: unknown): boolean {
   );
 }
 
+
+/**
+ * 从项目已有 AI CLI 配置(根指令文件 + 适配器配置目录)提取为新模板,
+ * 可选同时绑定到该项目。返回模板本体与被提取/跳过的文件清单。
+ */
+export interface ExtractProjectTemplateInput {
+  name: string;
+  description?: string;
+  adapter?: string;
+  bind?: boolean;
+}
+
+export interface ExtractedTemplateFile {
+  filePath: string;
+  sizeBytes: number;
+}
+
+export interface SkippedTemplateFile {
+  path: string;
+  reason: string;
+}
+
+export interface ExtractProjectTemplateResult {
+  template: Template;
+  extracted: ExtractedTemplateFile[];
+  skipped: SkippedTemplateFile[];
+}
+
+export async function extractProjectTemplate(
+  projectId: string,
+  data: ExtractProjectTemplateInput
+): Promise<ExtractProjectTemplateResult> {
+  return fetchJson(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/templates`,
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    }
+  ) as Promise<ExtractProjectTemplateResult>;
+}
 
 function aiConfigQuery(aiTool?: string): string {
   return aiTool ? `?aiTool=${encodeURIComponent(aiTool)}` : "";
@@ -1614,13 +1593,6 @@ export interface CliConfigSnapshot {
   defaultModel: string;
 }
 
-export interface CliProviderInput {
-  name?: string;
-  protocol?: string;
-  baseUrl?: string;
-  envKey?: string;
-}
-
 function cliConfigPath(adapter: string, suffix = ""): string {
   return `/api/v1/cli-config/${encodeURIComponent(adapter)}${suffix}`;
 }
@@ -1649,51 +1621,6 @@ export async function writeCliConfigFile(
   const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter, "/file"), {
     method: "PUT",
     body: JSON.stringify({ path, content }),
-  });
-  return snapshot;
-}
-
-export async function upsertCliProvider(
-  adapter: RuntimeAdapterId,
-  providerId: string,
-  input: CliProviderInput
-): Promise<CliConfigSnapshot> {
-  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
-    cliConfigPath(adapter, `/providers/${encodeURIComponent(providerId)}`),
-    { method: "PUT", body: JSON.stringify(input) }
-  );
-  return snapshot;
-}
-
-export async function removeCliProvider(
-  adapter: RuntimeAdapterId,
-  providerId: string
-): Promise<CliConfigSnapshot> {
-  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
-    cliConfigPath(adapter, `/providers/${encodeURIComponent(providerId)}`),
-    { method: "DELETE" }
-  );
-  return snapshot;
-}
-
-export async function upsertCliModel(
-  adapter: RuntimeAdapterId,
-  input: { alias: string; provider: string; modelId: string }
-): Promise<CliConfigSnapshot> {
-  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter, "/models"), {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
-  return snapshot;
-}
-
-export async function removeCliModel(
-  adapter: RuntimeAdapterId,
-  alias: string
-): Promise<CliConfigSnapshot> {
-  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter, "/models"), {
-    method: "DELETE",
-    body: JSON.stringify({ alias }),
   });
   return snapshot;
 }
@@ -1736,23 +1663,21 @@ export async function getCliConfigFieldValues(
   return fetchJson(cliConfigPath(adapter, "/field-values")) as Promise<{ values: Record<string, unknown> }>;
 }
 
-export async function patchCliConfigFields(
-  adapter: RuntimeAdapterId,
-  updates: Record<string, unknown>
-): Promise<CliConfigSnapshot> {
-  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
-    cliConfigPath(adapter, "/fields"),
-    { method: "PATCH", body: JSON.stringify({ updates }) }
-  );
-  return snapshot;
-}
-
 // ---- CLI config apply (cc-switch style provider application) ----
+
+export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
+export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
 
 export interface CliConfigApplyInput {
   providerProfileId: string;
   modelProfileId?: string;
   credentialId?: string;
+  /** Claude only: per-role model mapping; values are model profile ids. */
+  modelMapping?: Partial<Record<ClaudeModelSlot, string>>;
+  /** Codex only: model_reasoning_effort. */
+  reasoningEffort?: CodexReasoningEffort;
+  /** Claude only: apply through the Gateway route (OpenAI-protocol providers). */
+  routeThroughGateway?: boolean;
 }
 
 export interface CliConfigApplyFilePreview {
@@ -1821,6 +1746,36 @@ export async function rollbackCliConfigApply(
   return result;
 }
 
+// ---- Claude Code protocol routing (Gateway local-proxy switch) ----
+
+export interface ClaudeRouteAssignment {
+  providerProfileId: string;
+  providerName: string;
+  credentialId: string;
+  updatedAt: number;
+}
+
+export interface ClaudeRouteState {
+  enabled: boolean;
+  hasToken: boolean;
+  /** Loopback URL Claude Code is pointed at when a provider is applied through the route. */
+  gatewayUrl: string;
+  assignment: ClaudeRouteAssignment | null;
+}
+
+export async function getClaudeRoute(): Promise<ClaudeRouteState> {
+  const { routing } = await fetchJson<{ routing: ClaudeRouteState }>("/api/v1/cli-config/routing/claude");
+  return routing;
+}
+
+export async function setClaudeRoute(enabled: boolean): Promise<ClaudeRouteState> {
+  const { routing } = await fetchJson<{ routing: ClaudeRouteState }>("/api/v1/cli-config/routing/claude", {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+  return routing;
+}
+
 
 export async function getProjectWorkspaceTree(
   id: string,
@@ -1840,6 +1795,17 @@ export async function getProjectWorkspaceFile(
 ): Promise<WorkspaceFileSnapshot> {
   const searchParams = new URLSearchParams({ path: filePath });
   return fetchJson(projectWorkspacePath(id, `/file?${searchParams.toString()}`)) as Promise<WorkspaceFileSnapshot>;
+}
+
+export async function putProjectWorkspaceFile(
+  id: string,
+  filePath: string,
+  content: string
+): Promise<WorkspaceFileSnapshot> {
+  return fetchJson(projectWorkspacePath(id, "/file"), {
+    method: "PUT",
+    body: JSON.stringify({ path: filePath, content })
+  }) as Promise<WorkspaceFileSnapshot>;
 }
 
 // ---- Project graph (read-only CodeGraph index) ----
@@ -2556,6 +2522,7 @@ export async function scanProject(path: string): Promise<ScanResult> {
 export interface ImportProjectInput {
   path: string;
   name: string;
+  templateId?: string;
 }
 
 export async function importProject(input: ImportProjectInput): Promise<{ project: Project }> {
@@ -2564,8 +2531,32 @@ export async function importProject(input: ImportProjectInput): Promise<{ projec
     body: JSON.stringify({
       path: input.path,
       name: input.name,
+      templateId: input.templateId,
     }),
   }) as Promise<{ project: Project }>;
+}
+
+// Native directory picking (host-side dialog driven by the Gateway)
+export interface DesktopCapabilities {
+  platform: string;
+  directoryPickerSupported: boolean;
+}
+
+export async function getDesktopCapabilities(): Promise<DesktopCapabilities> {
+  return fetchJson("/api/v1/system/desktop") as Promise<DesktopCapabilities>;
+}
+
+export interface DirectoryPickerResult {
+  supported: boolean;
+  path?: string;
+  cancelled?: boolean;
+  reason?: string;
+}
+
+export async function selectNativeDirectory(): Promise<DirectoryPickerResult> {
+  return fetchJson("/api/v1/system/select-directory", {
+    method: "POST",
+  }) as Promise<DirectoryPickerResult>;
 }
 
 // Templates
@@ -2602,6 +2593,28 @@ export async function importTemplate(templatePackage: TemplatePackage): Promise<
   }) as Promise<{ template: Template }>;
 }
 
+export interface GitTemplateImportInput {
+  url: string;
+  branch?: string;
+  name?: string;
+  description?: string;
+}
+
+export interface GitTemplateImportResult {
+  templateId: string;
+  name: string;
+  adapter: "claude" | "opencode" | "codex" | "kimi" | null;
+  fileCount: number;
+  skippedFiles: string[];
+}
+
+export async function importTemplateFromGit(input: GitTemplateImportInput): Promise<GitTemplateImportResult> {
+  return fetchJson("/api/v1/templates/import/git", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<GitTemplateImportResult>;
+}
+
 export async function listTemplateVersions(id: string): Promise<{ versions: TemplateVersion[] }> {
   return fetchJson(`/api/v1/templates/${id}/versions`) as Promise<{ versions: TemplateVersion[] }>;
 }
@@ -2634,10 +2647,6 @@ export async function deleteTemplate(id: string): Promise<unknown> {
   return fetchJson(`/api/v1/templates/${id}`, { method: "DELETE" });
 }
 
-export async function listProviderCatalog(): Promise<{ providers: ProviderCatalogPreset[] }> {
-  return fetchJson("/api/v1/model-providers/catalog") as Promise<{ providers: ProviderCatalogPreset[] }>;
-}
-
 export async function listModelProviders(): Promise<{
   providers: ProviderProfile[];
   models: ModelProfile[];
@@ -2651,9 +2660,26 @@ export async function listModelProviders(): Promise<{
 }
 
 export async function createModelProvider(data: {
-  catalogId?: string;
+  name: string;
+  providerKey: string;
+  authType: ProviderAuthType;
+  apiFormat: ProviderApiFormat;
+  baseUrl?: string;
+  anthropicBaseUrl?: string;
+  openaiBaseUrl?: string;
+  region?: string;
+  productType?: ProviderProductType;
+  supportedAdapters?: ProviderSupportedAdapter[];
+  allowPlaintextHttp?: boolean;
+}): Promise<{ provider: ProviderProfile }> {
+  return fetchJson("/api/v1/model-providers", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ provider: ProviderProfile }>;
+}
+
+export async function updateModelProvider(providerId: string, data: {
   name?: string;
-  providerKey?: string;
   baseUrl?: string;
   anthropicBaseUrl?: string;
   openaiBaseUrl?: string;
@@ -2662,11 +2688,12 @@ export async function createModelProvider(data: {
   authType?: ProviderAuthType;
   apiFormat?: ProviderApiFormat;
   supportedAdapters?: ProviderSupportedAdapter[];
-}): Promise<{ provider: ProviderProfile; models: ModelProfile[] }> {
-  return fetchJson("/api/v1/model-providers", {
-    method: "POST",
+  allowPlaintextHttp?: boolean;
+}): Promise<{ provider: ProviderProfile }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}`, {
+    method: "PATCH",
     body: JSON.stringify(data),
-  }) as Promise<{ provider: ProviderProfile; models: ModelProfile[] }>;
+  }) as Promise<{ provider: ProviderProfile }>;
 }
 
 export async function deleteModelProvider(providerId: string): Promise<unknown> {
@@ -2704,7 +2731,7 @@ export async function deleteProviderCredential(providerId: string, credentialId:
 
 export async function createProviderModel(
   providerId: string,
-  data: { name: string; modelId: string; capabilities?: string[]; isDefault?: boolean }
+  data: { name: string; modelId: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean }
 ): Promise<{ model: ModelProfile }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/models`, {
     method: "POST",
@@ -2745,20 +2772,42 @@ export async function syncProviderModels(
   }) as Promise<ProviderModelSyncResult>;
 }
 
-export async function checkModelProviderReadiness(
+export async function checkProviderBalance(
   providerId: string,
-  data: {
-    adapter: ProviderReadinessAdapter;
-    modelProfileId?: string;
-    credentialId?: string;
-    timeoutMs?: number;
-    includeRemoteCheck?: boolean;
-  }
-): Promise<{ readiness: ModelProviderReadiness }> {
-  return fetchJson(`/api/v1/model-providers/${providerId}/readiness`, {
+  data: { credentialId?: string; timeoutMs?: number } = {}
+): Promise<ProviderBalanceResult> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/balance`, {
     method: "POST",
     body: JSON.stringify(data),
-  }) as Promise<{ readiness: ModelProviderReadiness }>;
+  }) as Promise<ProviderBalanceResult>;
+}
+
+export async function getAppliedProviderForAdapter(
+  adapter: string
+): Promise<{ appliedProvider: AppliedProviderInfo | null }> {
+  return fetchJson(
+    `/api/v1/model-providers/applied/${encodeURIComponent(adapter)}`
+  ) as Promise<{ appliedProvider: AppliedProviderInfo | null }>;
+}
+
+export async function getAppliedProviders(): Promise<{ adapters: AdapterAppliedStatus[] }> {
+  return fetchJson("/api/v1/model-providers/applied") as Promise<{ adapters: AdapterAppliedStatus[] }>;
+}
+
+export async function testModelProviderEndpoint(
+  providerId: string,
+  data: { timeoutMs?: number } = {}
+): Promise<{ health: ModelProviderEndpointHealth }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/test`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ health: ModelProviderEndpointHealth }>;
+}
+
+export async function getProviderBalance(providerId: string): Promise<ProviderBalanceResult> {
+  return fetchJson(
+    `/api/v1/model-providers/${providerId}/balance`
+  ) as Promise<ProviderBalanceResult>;
 }
 
 export async function listApiKeys(): Promise<{ apiKeys: ApiKeySummary[] }> {

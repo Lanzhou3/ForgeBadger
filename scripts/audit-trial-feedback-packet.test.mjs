@@ -14,7 +14,7 @@ describe("trial feedback packet audit", () => {
       os: "linux x64 6.8.0",
       shell: "/bin/zsh",
       nodeVersion: "v24.14.1",
-      tmuxVersion: "tmux 3.4",
+      terminalRuntime: "session-server",
       claudeVersion: "2.1.152"
     }));
 
@@ -111,9 +111,9 @@ function buildCompletedPacket() {
 ## Dependency Versions
 
 - node --version: v24.14.1
-- tmux -V: tmux 3.4
+- Terminal backend: session-server
 - claude --version: 2.1.152
-- forgebadger doctor summary: terminal native_tmux
+- forgebadger doctor summary: terminal ready
 
 ## Diagnostics Export
 
@@ -190,7 +190,7 @@ function buildPlaceholderPacket() {
 ## Dependency Versions
 
 - node --version: TBD
-- tmux -V: TODO
+- Terminal backend: TODO
 - claude --version: ...
 - forgebadger doctor summary: n/a
 

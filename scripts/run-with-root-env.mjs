@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
 
 export async function buildRootEnv(options = {}) {
@@ -43,14 +43,43 @@ export function buildRunCommand(argv, options = {}) {
   };
 }
 
+export function expandShellDefaults(commandText, env) {
+  return commandText.replace(
+    /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/gu,
+    (match, name, fallback) => {
+      const value = env[name];
+      if (value === undefined || value === "") return fallback ?? "";
+      return value;
+    }
+  );
+}
+
+export function buildWindowsInvocation(invocation, env) {
+  if (invocation.args[0] === "-lc") {
+    const commandText = expandShellDefaults(invocation.args[1] ?? "", env);
+    return {
+      command: env.ComSpec ?? "cmd.exe",
+      args: ["/d", "/s", "/c", commandText]
+    };
+  }
+
+  return {
+    command: invocation.command,
+    args: invocation.args,
+    useShell: true
+  };
+}
+
 export async function runWithRootEnv(argv = process.argv.slice(2), options = {}) {
   const env = await buildRootEnv(options);
   const invocation = buildRunCommand(argv, options);
+  const resolved = process.platform === "win32" ? buildWindowsInvocation(invocation, env) : invocation;
 
   return new Promise((resolve) => {
-    const child = spawn(invocation.command, invocation.args, {
+    const child = spawn(resolved.command, resolved.args, {
       env,
-      stdio: "inherit"
+      stdio: "inherit",
+      ...(resolved.useShell ? { shell: true } : {})
     });
 
     child.on("error", (error) => {
@@ -74,7 +103,11 @@ function sanitizeEnv(env) {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const invokedAsMain =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (invokedAsMain) {
   runWithRootEnv().then((code) => {
     process.exitCode = code;
   });

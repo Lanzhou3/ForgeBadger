@@ -28,7 +28,7 @@ import {
   type GatewayEvent,
   type StoredNotification,
 } from "@/lib/notifications";
-import { dispatchGatewayEvent } from "@/lib/gateway-events";
+import { dispatchGatewayEvent, FORGEBADGER_GATEWAY_CONNECTED } from "@/lib/gateway-events";
 import { eventsWebSocketProtocols, eventsWebSocketUrl } from "@/lib/ws";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
@@ -119,6 +119,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const connect = () => {
       socket = new WebSocket(eventsWebSocketUrl(), eventsWebSocketProtocols(token));
       socket.onopen = () => {
+        window.dispatchEvent(new Event(FORGEBADGER_GATEWAY_CONNECTED));
         reconnectDelayMs = 1_000;
       };
       socket.onmessage = (event) => {

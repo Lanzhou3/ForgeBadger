@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { Database } from "../types.js";
@@ -12,7 +12,7 @@ export interface CreateSessionInput {
   modelId?: string;
   workingDir: string;
   attachToken?: string;
-  tmuxSession?: string;
+  runtimeSessionName?: string;
   credentialMode?: SessionCredentialMode;
   apiKeyId?: string;
 }
@@ -28,7 +28,7 @@ export interface Session {
   modelId: string | null;
   status: string;
   attachToken: string;
-  tmuxSession: string | null;
+  runtimeSessionName: string | null;
   workingDir: string;
   credentialMode: SessionCredentialMode;
   apiKeyId: string | null;
@@ -49,7 +49,7 @@ const sessionColumns = {
   modelId: sessions.modelId,
   status: sessions.status,
   attachToken: sessions.attachToken,
-  tmuxSession: sessions.tmuxSession,
+  runtimeSessionName: sessions.runtimeSessionName,
   workingDir: sessions.workingDir,
   credentialMode: sessions.credentialMode,
   apiKeyId: sessions.apiKeyId,
@@ -77,7 +77,7 @@ export class SessionRepository {
         modelId: input.modelId ?? null,
         attachToken: input.attachToken ?? "",
         workingDir: input.workingDir,
-        tmuxSession: input.tmuxSession ?? null,
+        runtimeSessionName: input.runtimeSessionName ?? null,
         credentialMode: input.credentialMode ?? "host_environment",
         apiKeyId: input.apiKeyId ?? null
       })
@@ -92,6 +92,7 @@ export class SessionRepository {
       .from(sessions)
       .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(eq(sessions.userId, this.userId))
+      .orderBy(asc(sessions.createdAt), asc(sessions.id))
       .all()
       .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
   }
@@ -102,6 +103,7 @@ export class SessionRepository {
       .from(sessions)
       .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(and(eq(sessions.userId, this.userId), eq(sessions.projectId, projectId)))
+      .orderBy(asc(sessions.createdAt), asc(sessions.id))
       .all()
       .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
   }
@@ -117,6 +119,7 @@ export class SessionRepository {
         eq(sessions.projectId, projectId),
         inArray(sessions.id, ids)
       ))
+      .orderBy(asc(sessions.createdAt), asc(sessions.id))
       .all()
       .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
   }
@@ -145,7 +148,7 @@ export class SessionRepository {
     name: string;
     status: string;
     attachToken: string;
-    tmuxSession: string | null;
+    runtimeSessionName: string | null;
     credentialMode: SessionCredentialMode;
     apiKeyId: string | null;
     lastActive: Date | null;
@@ -156,7 +159,7 @@ export class SessionRepository {
     if (input.name !== undefined) updateData.name = input.name;
     if (input.status !== undefined) updateData.status = input.status;
     if (input.attachToken !== undefined) updateData.attachToken = input.attachToken;
-    if (input.tmuxSession !== undefined) updateData.tmuxSession = input.tmuxSession;
+    if (input.runtimeSessionName !== undefined) updateData.runtimeSessionName = input.runtimeSessionName;
     if (input.credentialMode !== undefined) updateData.credentialMode = input.credentialMode;
     if (input.apiKeyId !== undefined) updateData.apiKeyId = input.apiKeyId;
     if (input.lastActive !== undefined) updateData.lastActive = input.lastActive;
@@ -194,7 +197,7 @@ export class SessionRepository {
           modelId: record.modelId ?? null,
           status: record.status,
           attachToken: record.attachToken,
-          tmuxSession: record.tmuxSession ?? null,
+          runtimeSessionName: record.runtimeSessionName ?? null,
           workingDir: record.workingDir,
           credentialMode: record.credentialMode,
           apiKeyId: record.apiKeyId ?? null,
@@ -218,7 +221,7 @@ export class SessionRepository {
         modelId: record.modelId ?? null,
         status: record.status,
         attachToken: record.attachToken,
-        tmuxSession: record.tmuxSession ?? null,
+        runtimeSessionName: record.runtimeSessionName ?? null,
         workingDir: record.workingDir,
         credentialMode: record.credentialMode,
         apiKeyId: record.apiKeyId ?? null,

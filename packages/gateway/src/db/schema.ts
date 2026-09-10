@@ -47,6 +47,7 @@ export const modelProviderProfiles = sqliteTable("model_provider_profiles", {
   supportedAdapters: text("supported_adapters").notNull().default("[]"),
   defaultHeaders: text("default_headers").notNull().default("{}"),
   opencodeNpm: text("opencode_npm"),
+  allowPlaintextHttp: integer("allow_plaintext_http", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
@@ -103,12 +104,29 @@ export const providerCredentials = sqliteTable("provider_credentials", {
   statusCheck: check("provider_credentials_status_check", sql`${table.status} IN ('active', 'revoked')`)
 }));
 
+export const cliConfigAppliedProviders = sqliteTable("cli_config_applied_providers", {
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  adapter: text("adapter").notNull(),
+  providerProfileId: text("provider_profile_id")
+    .notNull()
+    .references(() => modelProviderProfiles.id, { onDelete: "cascade" }),
+  modelProfileId: text("model_profile_id"),
+  appliedAt: integer("applied_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.adapter] })
+}));
+
 export const templates = sqliteTable("templates", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
   version: text("version").notNull().default("1.0.0"),
+  adapter: text("adapter"),
   isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
   visibility: text("visibility").notNull().default("private"),
   usageCount: integer("usage_count").notNull().default(0),
@@ -406,6 +424,29 @@ export const catalogItems = sqliteTable(
   })
 );
 
+export const templateGitSources = sqliteTable(
+  "template_git_sources",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sourceId: text("source_id").notNull(),
+    label: text("label"),
+    url: text("url").notNull(),
+    branch: text("branch"),
+    status: text("status").notNull().default("idle"),
+    error: text("error"),
+    lastPulledAt: integer("last_pulled_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_template_git_sources_user_source: uniqueIndex("idx_template_git_sources_user_source").on(table.userId, table.sourceId),
+    idx_template_git_sources_user: index("idx_template_git_sources_user").on(table.userId)
+  })
+);
+
 export const notifications = sqliteTable(
   "notifications",
   {
@@ -414,6 +455,7 @@ export const notifications = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     type: text("type").notNull(),
+    category: text("category").notNull().default("session_event"),
     titleKey: text("title_key").notNull(),
     message: text("message").notNull(),
     href: text("href").notNull(),
@@ -506,7 +548,7 @@ export const sessions = sqliteTable(
     modelId: text("model_id").references(() => modelProfiles.id),
     status: text("status").notNull().default("idle"),
     attachToken: text("attach_token").notNull().default(""),
-    tmuxSession: text("tmux_session"),
+    runtimeSessionName: text("runtime_session_name"),
     workingDir: text("working_dir").notNull(),
     credentialMode: text("credential_mode").notNull().default("host_environment"),
     apiKeyId: text("api_key_id").references(() => apiKeys.id),
@@ -811,7 +853,7 @@ export const sessionSnapshots = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     sessionId: text("session_id").references(() => sessions.id, { onDelete: "set null" }),
     projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
-    tmuxSession: text("tmux_session"),
+    runtimeSessionName: text("runtime_session_name"),
     modelId: text("model_id"),
     configVersion: text("config_version"),
     metadata: text("metadata"),
@@ -850,8 +892,20 @@ export const userSettings = sqliteTable("user_settings", {
   theme: text("theme").notNull().default("light"),
   language: text("language").notNull().default("zh-CN"),
   modelId: text("model_id").references(() => modelProfiles.id),
+  // Claude Code protocol routing (cc-switch-style local proxy, Gateway edition).
+  claudeRouteEnabled: integer("claude_route_enabled", { mode: "boolean" }).notNull().default(false),
+  // EncryptedSecret JSON (master key) of the loopback route token; null until
+  // routing is first enabled.
+  claudeRouteToken: text("claude_route_token"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+});
+
+export const claudeRouteAssignments = sqliteTable("claude_route_assignments", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  providerProfileId: text("provider_profile_id").notNull().references(() => modelProviderProfiles.id, { onDelete: "cascade" }),
+  credentialId: text("credential_id").notNull().references(() => providerCredentials.id, { onDelete: "cascade" }),
+  updatedAt: integer("updated_at").notNull()
 });
 
 export const integrationFeishuConfigs = sqliteTable(
@@ -1323,11 +1377,13 @@ export const copilotConversations = sqliteTable("copilot_conversations", {
   dshSessionId: text("dsh_session_id"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ userLookup: index("idx_copilot_conversations_user_updated").on(table.userId, table.updatedAt) }));
+}, (table) => ({ userLookup: index("idx_copilot_conversations_user_updated").on(table.userId, table.updatedAt), tenant: uniqueIndex("idx_copilot_conversation_tenant").on(table.userId,table.id) }));
 
 export const copilotMessages = sqliteTable("copilot_messages", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   conversationId: text("conversation_id").notNull().references(() => copilotConversations.id, { onDelete: "cascade" }),
+  runId: text("run_id"),
+  stepId: text("step_id"),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   role: text("role").notNull(), // user | assistant | tool
   kind: text("kind").notNull(), // text | tool_call | tool_result | pending_action | error
@@ -1345,6 +1401,15 @@ export const copilotRuns = sqliteTable("copilot_runs", {
   conversationId: text("conversation_id").notNull().references(() => copilotConversations.id, { onDelete: "cascade" }),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("pending"), // pending | running | awaiting_approval | completed | cancelled | failed
+  runtimeVersion: integer("runtime_version").notNull().default(0),
+  source: text("source").notNull().default("user"),
+  inputJson: text("input_json").notNull().default("{}"),
+  maxSteps: integer("max_steps").notNull().default(16),
+  stopReason: text("stop_reason"),
+  revision: integer("revision").notNull().default(0),
+  leaseOwner: text("lease_owner"),
+  leaseExpiresAt: integer("lease_expires_at"),
+  fence: integer("fence").notNull().default(0),
   provider: text("provider"),
   model: text("model"),
   steps: integer("steps").notNull().default(0),
@@ -1353,11 +1418,13 @@ export const copilotRuns = sqliteTable("copilot_runs", {
   completedAt: integer("completed_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ conversationLookup: index("idx_copilot_runs_conversation_created").on(table.conversationId, table.createdAt), userLookup: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt) }));
+}, (table) => ({ tenantIdentity: uniqueIndex("idx_copilot_run_tenant").on(table.userId,table.id), activeConversation: uniqueIndex("idx_copilot_active_conversation").on(table.userId,table.conversationId).where(sql`${table.runtimeVersion} = 1 AND ${table.status} IN ('pending','running','awaiting_approval')`), conversationLookup: index("idx_copilot_runs_conversation_created").on(table.conversationId, table.createdAt), userLookup: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt) }));
 
 export const copilotPendingActions = sqliteTable("copilot_pending_actions", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   runId: text("run_id").notNull().references(() => copilotRuns.id, { onDelete: "cascade" }),
+  stepId: text("step_id"),
+  toolCallId: text("tool_call_id"),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   tool: text("tool").notNull(),
   inputJson: text("input_json").notNull(),
@@ -1366,10 +1433,11 @@ export const copilotPendingActions = sqliteTable("copilot_pending_actions", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   decidedAt: integer("decided_at", { mode: "timestamp" }),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ runLookup: index("idx_copilot_pending_actions_run").on(table.runId, table.status), userLookup: index("idx_copilot_pending_actions_user_status").on(table.userId, table.status) }));
+}, (table) => ({ stepIdentity: uniqueIndex("idx_copilot_action_step").on(table.userId,table.stepId), runLookup: index("idx_copilot_pending_actions_run").on(table.runId, table.status), userLookup: index("idx_copilot_pending_actions_user_status").on(table.userId, table.status) }));
 
 export const copilotMemory = sqliteTable("copilot_memory", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  conversationId: text("conversation_id"),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   scope: text("scope").notNull(), // global | project | session
   projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
@@ -1389,6 +1457,85 @@ export const copilotOperationLog = sqliteTable("copilot_operation_log", {
   resultJson: text("result_json"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date())
 }, (table) => ({ idempotency: uniqueIndex("idx_copilot_operation_user_op_key").on(table.userId, table.operation, table.idempotencyKey) }));
+
+// Scheduled Copilot automations: natural-language prompts that run on a
+// schedule (cron / interval / once) and deliver their result to the owner's
+// conversation + notifications. Runs are claimed via a lease (claim_token /
+// claim_expires_at) so overlapping ticks never double-execute a slot.
+export const copilotAutomations = sqliteTable("copilot_automations", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  status: text("status").notNull().default("draft"), // draft | enabled | paused
+  scopeType: text("scope_type").notNull(),           // global | project
+  scopePolicy: text("scope_policy").notNull(),       // JSON: { projectIds?: string[] }
+  prompt: text("prompt").notNull(),
+  scheduleKind: text("schedule_kind").notNull(),     // cron | interval | once
+  scheduleExpression: text("schedule_expression").notNull(), // cron expr / minutes / ISO ts
+  timezone: text("timezone").notNull().default("UTC"),
+  deliveryPlan: text("delivery_plan").notNull(),     // JSON: { notify: boolean, conversation: boolean }
+  authoritySnapshot: text("authority_snapshot").notNull(), // JSON: { readOnly: true, tools: string[] }
+  revision: integer("revision").notNull().default(1),
+  nextRunAt: integer("next_run_at", { mode: "timestamp" }),
+  lastRunAt: integer("last_run_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+}, (table) => ({
+  userStatus: index("idx_copilot_automations_user_status").on(table.userId, table.status, table.nextRunAt)
+}));
+
+export const copilotAutomationRuns = sqliteTable("copilot_automation_runs", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  automationId: text("automation_id").notNull().references(() => copilotAutomations.id, { onDelete: "cascade" }),
+  executionId: text("execution_id"),
+  scheduledSlot: text("scheduled_slot").notNull(),
+  triggerKind: text("trigger_kind").notNull(), // schedule | manual
+  status: text("status").notNull().default("pending"), // pending | claimed | running | completed | failed | cancelled
+  notBefore: integer("not_before", { mode: "timestamp" }).notNull(),
+  claimToken: text("claim_token"),
+  claimExpiresAt: integer("claim_expires_at", { mode: "timestamp" }),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  scopeSnapshot: text("scope_snapshot"),
+  generatedContentEncrypted: text("generated_content_encrypted"),
+  lastErrorCode: text("last_error_code"),
+  lastErrorMessage: text("last_error_message"),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+  completedAt: integer("completed_at", { mode: "timestamp" })
+}, (table) => ({
+  slotUnique: uniqueIndex("idx_copilot_automation_run_slot").on(table.userId, table.automationId, table.scheduledSlot),
+  executionUnique: uniqueIndex("idx_copilot_automation_execution").on(table.userId, table.executionId),
+  due: index("idx_copilot_automation_run_due").on(table.userId, table.status, table.notBefore)
+}));
+
+export const copilotAutomationRunProjects = sqliteTable(
+  "copilot_automation_run_projects",
+  {
+    runId: text("run_id").notNull().references(() => copilotAutomationRuns.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    projectName: text("project_name").notNull(),
+    ordinal: integer("ordinal").notNull()
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.runId, table.projectId] }),
+    snapshotUser: index("idx_copilot_automation_snapshot_user").on(table.userId, table.runId, table.ordinal)
+  })
+);
+
+export const copilotAutomationSuggestions = sqliteTable("copilot_automation_suggestions", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  source: text("source").notNull(), // catalog
+  dedupKey: text("dedup_key").notNull(),
+  status: text("status").notNull().default("pending"), // pending | accepted | dismissed
+  jobSpec: text("job_spec").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+}, (table) => ({
+  dedup: uniqueIndex("idx_copilot_automation_suggestion_dedup").on(table.userId, table.dedupKey)
+}));
 
 // Historical per-user DSH configuration; never read by the current runtime.
 export const copilotDshConfig = sqliteTable("copilot_dsh_config", {
@@ -1454,3 +1601,42 @@ export const authInvites = sqliteTable("auth_invites", {
 }, (table) => ({
   idx_auth_invites_created_by: index("idx_auth_invites_created_by").on(table.createdByUserId)
 }));
+
+export const copilotRunSteps = sqliteTable("copilot_run_steps", {
+ id: text("id").primaryKey(), userId: text("user_id").notNull().references(() => users.id, {onDelete:"cascade"}),
+ runId: text("run_id").notNull(), ordinal: integer("ordinal").notNull(), kind: text("kind").notNull(),
+ status: text("status").notNull().default("pending"), toolCallId: text("tool_call_id"), toolName: text("tool_name"),
+ inputJson: text("input_json"), inputDigest: text("input_digest"), resultJson: text("result_json"), effect: text("effect").notNull().default("read"),
+ attempt: integer("attempt").notNull().default(0), fence: integer("fence").notNull().default(0),
+ startedAt: integer("started_at"), completedAt: integer("completed_at")
+}, table => ({
+ owner: foreignKey({columns:[table.userId,table.runId],foreignColumns:[copilotRuns.userId,copilotRuns.id]}).onDelete("cascade"),
+ ordinal: uniqueIndex("idx_copilot_step_ordinal").on(table.userId,table.runId,table.ordinal),
+ call: uniqueIndex("idx_copilot_step_call").on(table.userId,table.runId,table.toolCallId)
+}));
+
+export const copilotGrants = sqliteTable('copilot_grants', {
+  id: text('id').primaryKey(), userId: text('user_id').notNull().references(() => users.id,{onDelete:'cascade'}),
+  actorUserId: text('actor_user_id').notNull().references(() => users.id,{onDelete:'cascade'}), name:text('name').notNull(),
+  status:text('status').notNull().default('active'),revision:integer('revision').notNull().default(1),scopeJson:text('scope_json').notNull(),
+  expiresAt:integer('expires_at').notNull(),maxActions:integer('max_actions').notNull(),maxConcurrency:integer('max_concurrency').notNull(),
+  usedActions:integer('used_actions').notNull().default(0),createdAt:integer('created_at').notNull()
+},t=>({tenant:uniqueIndex('idx_copilot_grant_tenant').on(t.userId,t.id)}));
+export const platformActionIntents = sqliteTable('platform_action_intents', {
+ id:text('id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),actorUserId:text('actor_user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),
+ grantId:text('grant_id'),grantRevision:integer('grant_revision'),authority:text('authority').notNull(),commandId:text('command_id').notNull(),inputJson:text('input_json').notNull(),digest:text('digest').notNull(),
+ resourcesJson:text('resources_json').notNull(),policyVersion:integer('policy_version').notNull(),expiresAt:integer('expires_at').notNull(),idempotencyKey:text('idempotency_key').notNull(),status:text('status').notNull(),createdAt:integer('created_at').notNull(),executionOwner:text('execution_owner'),executionLeaseExpiresAt:integer('execution_lease_expires_at')
+},t=>({lease:index('idx_platform_action_execution_lease').on(t.userId,t.status,t.executionLeaseExpiresAt),tenant:uniqueIndex('idx_platform_action_tenant').on(t.userId,t.id),idempotency:uniqueIndex('idx_platform_action_idempotency').on(t.userId,t.idempotencyKey),grant:foreignKey({columns:[t.userId,t.grantId],foreignColumns:[copilotGrants.userId,copilotGrants.id]})}));
+export const platformActionReceipts = sqliteTable('platform_action_receipts', {
+ intentId:text('intent_id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),outcome:text('outcome').notNull(),resultJson:text('result_json').notNull(),createdAt:integer('created_at').notNull()
+},t=>({intent:foreignKey({columns:[t.userId,t.intentId],foreignColumns:[platformActionIntents.userId,platformActionIntents.id]}).onDelete('cascade')}));
+export const copilotConversationGrants = sqliteTable('copilot_conversation_grants', {
+ conversationId:text('conversation_id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),grantId:text('grant_id').notNull(),createdAt:integer('created_at').notNull()
+},t=>({grant:foreignKey({columns:[t.userId,t.grantId],foreignColumns:[copilotGrants.userId,copilotGrants.id]}),conversation:foreignKey({columns:[t.userId,t.conversationId],foreignColumns:[copilotConversations.userId,copilotConversations.id]}).onDelete('cascade')}));
+export const projectManagerManagement=sqliteTable('project_manager_management',{
+ projectId:text('project_id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),mode:text('mode').notNull().default('manual'),ownerLabel:text('owner_label').notNull().default(''),nextAction:text('next_action').notNull().default(''),freshnessHours:integer('freshness_hours').notNull().default(72),revision:integer('revision').notNull().default(1),updatedAt:integer('updated_at').notNull()
+},t=>({project:foreignKey({columns:[t.userId,t.projectId],foreignColumns:[projects.userId,projects.id]}).onDelete('cascade')}));
+
+export const sessionWriterLeases=sqliteTable('session_writer_leases',{
+ workspace:text('workspace').primaryKey().notNull(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),projectId:text('project_id').notNull(),sessionId:text('session_id').notNull(),token:text('token'),fence:integer('fence').notNull().default(0),expiresAt:integer('expires_at').notNull().default(0)
+},t=>({session:foreignKey({columns:[t.userId,t.projectId,t.sessionId],foreignColumns:[sessions.userId,sessions.projectId,sessions.id]}).onDelete('cascade'),userSession:index('idx_session_writer_lease_user_session').on(t.userId,t.sessionId)}));

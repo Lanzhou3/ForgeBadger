@@ -9,6 +9,7 @@ export interface Notification {
   id: string;
   userId: string;
   type: string;
+  category: string;
   titleKey: string;
   message: string;
   href: string;
@@ -24,6 +25,7 @@ export interface CreateNotificationInput {
   titleKey: string;
   message: string;
   href: string;
+  category?: string | undefined;
   sessionId?: string | undefined;
   payload?: unknown;
 }
@@ -47,6 +49,7 @@ export class NotificationRepository {
         titleKey: input.titleKey,
         message: input.message,
         href: input.href,
+        ...(input.category !== undefined ? { category: input.category } : {}),
         sessionId: input.sessionId ?? null,
         payload: input.payload === undefined ? null : JSON.stringify(input.payload),
         isRead: false
@@ -56,11 +59,13 @@ export class NotificationRepository {
     return result as Notification;
   }
 
-  list(limit = 100): Notification[] {
+  list(limit = 100, category?: string): Notification[] {
+    const filters = [eq(notifications.userId, this.userId)];
+    if (category) filters.push(eq(notifications.category, category));
     return this.drizzle
       .select()
       .from(notifications)
-      .where(eq(notifications.userId, this.userId))
+      .where(and(...filters))
       .orderBy(desc(notifications.createdAt))
       .limit(limit)
       .all() as Notification[];

@@ -31,7 +31,7 @@ export interface Mvp0SessionRecord {
   userId: string;
   projectId: string;
   attachToken: string;
-  tmuxName: string;
+  runtimeSessionName: string;
   status: SessionStatus;
   createdAt: string;
   updatedAt: string;

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/src/db && cp -R src/db/migrations dist/src/db/",
+    "build": "tsc -p tsconfig.json && node ../../scripts/build-gateway-assets.mjs",
     "dev": "node ../../scripts/run-with-root-env.mjs tsx watch src/index.ts",
     "forgebadger": "tsx src/cli/init.ts",
     "start": "node ../../scripts/run-with-root-env.mjs node dist/src/index.js",
@@ -13,13 +13,15 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.71.1",
+    "@xterm/addon-serialize": "^0.13.0",
+    "@xterm/headless": "^5.5.0",
     "bcryptjs": "^3.0.2",
     "better-sqlite3": "^11.7.0",
+    "croner": "10.0.1",
     "drizzle-orm": "^0.36.4",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "node-pty": "^1.0.0",
-    "croner": "10.0.1",
     "smol-toml": "^1.7.1",
     "ws": "^8.18.0",
     "zod": "^3.24.1"

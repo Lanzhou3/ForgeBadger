@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as apiModule from "./api";
 import {
   createApiKey,
-  checkModelProviderReadiness,
+  checkProviderBalance,
   cloneTemplate,
+  createModelProvider,
   createProject,
   createSkill,
   createTemplate,
@@ -31,10 +32,6 @@ import {
   getCliConfig,
   getCliConfigFile,
   writeCliConfigFile,
-  upsertCliProvider,
-  removeCliProvider,
-  upsertCliModel,
-  removeCliModel,
   setCliDefaultModel,
   getGlobalAiConfig,
   getProjectAiConfig,
@@ -47,6 +44,8 @@ import {
   importProject,
   installCatalogTemplate,
   installCatalogSkill,
+  getDesktopCapabilities,
+  selectNativeDirectory,
   getUsageSummary,
   listActivities,
   listAuditLogs,
@@ -62,6 +61,7 @@ import {
   syncProviderModels,
   rotateProviderCredential,
   setDefaultProviderModel,
+  updateModelProvider,
   updateProviderModel,
   refreshCatalog,
   restoreTemplateVersion,
@@ -180,6 +180,52 @@ describe("api client", () => {
     );
   });
 
+  it("creates model provider profiles with manual fields only", async () => {
+    await createModelProvider({
+      name: "My Provider",
+      providerKey: "my-provider",
+      authType: "api_key",
+      apiFormat: "openai-compatible",
+      baseUrl: "https://provider.example.com/v1",
+      openaiBaseUrl: "https://provider.example.com/v1",
+      supportedAdapters: ["claude", "opencode"],
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "My Provider",
+          providerKey: "my-provider",
+          authType: "api_key",
+          apiFormat: "openai-compatible",
+          baseUrl: "https://provider.example.com/v1",
+          openaiBaseUrl: "https://provider.example.com/v1",
+          supportedAdapters: ["claude", "opencode"],
+        }),
+      })
+    );
+  });
+
+  it("updates model provider profiles through REST", async () => {
+    await updateModelProvider("provider-1", {
+      name: "My Provider (renamed)",
+      supportedAdapters: ["claude", "opencode", "codex"],
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          name: "My Provider (renamed)",
+          supportedAdapters: ["claude", "opencode", "codex"],
+        }),
+      })
+    );
+  });
+
   it("deletes model provider profiles through REST", async () => {
     await deleteModelProvider("provider-1");
 
@@ -201,28 +247,62 @@ describe("api client", () => {
     );
   });
 
-  it("checks model provider readiness through REST", async () => {
-    await checkModelProviderReadiness("provider-1", {
-      adapter: "claude",
-      modelProfileId: "model-1",
-      credentialId: "credential-1",
-      includeRemoteCheck: true,
-      timeoutMs: 5000,
-    });
+  it("checks provider balance through REST", async () => {
+    const balanceData = {
+      supported: true,
+      detectedProvider: "deepseek",
+      balances: [{ label: "余额", remaining: 12.5, unit: "CNY" }],
+      checkedAt: "2026-09-01T00:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn(() => mockEnvelope(balanceData)));
+
+    const result = await checkProviderBalance("provider-1", { credentialId: "credential-1" });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/readiness",
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/balance",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({
-          adapter: "claude",
-          modelProfileId: "model-1",
-          credentialId: "credential-1",
-          includeRemoteCheck: true,
-          timeoutMs: 5000,
-        }),
+        body: JSON.stringify({ credentialId: "credential-1" }),
       })
     );
+    expect(result).toEqual(balanceData);
+  });
+
+  it("returns an unsupported provider balance result without throwing", async () => {
+    vi.stubGlobal("fetch", vi.fn(() =>
+      mockEnvelope({ supported: false, balances: [], checkedAt: "2026-09-01T00:00:00.000Z" })
+    ));
+
+    const result = await checkProviderBalance("provider-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/balance",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({}) })
+    );
+    expect(result.supported).toBe(false);
+    expect(result.balances).toEqual([]);
+  });
+
+  it("surfaces the sanitized upstream message when a balance check fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 502,
+          json: () => Promise.resolve({
+            code: 1,
+            message: "Balance upstream request failed",
+            details: {},
+          }),
+        } as Response)
+      )
+    );
+
+    await expect(checkProviderBalance("provider-1")).rejects.toMatchObject({
+      message: "Balance upstream request failed",
+      status: 502,
+    });
   });
 
   it("previews, applies, and rolls back CLI config provider application", async () => {
@@ -349,7 +429,7 @@ describe("api client", () => {
         session: {
           id: "gate-a-session",
           attachToken: "attach-token",
-          tmuxName: "forgebadger-gate-a",
+          runtimeSessionName: "forgebadger-gate-a",
           status: "running",
         },
       })
@@ -680,7 +760,6 @@ describe("api client", () => {
     await projectManagerApi.createProjectManagerWorkItem("project/1", {
       title: "Expose tab",
       description: "Add a project detail surface",
-      status: "todo",
       priority: 10,
       acceptanceCriteria: ["Tab is visible"],
       evidenceRefs: [{ kind: "test", label: "API test", ref: "api.test.ts", path: "packages/web/src/lib/api.test.ts" }],
@@ -751,7 +830,6 @@ describe("api client", () => {
         body: JSON.stringify({
           title: "Expose tab",
           description: "Add a project detail surface",
-          status: "todo",
           priority: 10,
           acceptanceCriteria: ["Tab is visible"],
           evidenceRefs: [{ kind: "test", label: "API test", ref: "api.test.ts", path: "packages/web/src/lib/api.test.ts" }],
@@ -1267,6 +1345,55 @@ describe("api client", () => {
     );
   });
 
+  it("loads desktop capabilities from the Gateway", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          code: 0,
+          data: {
+            platform: "win32",
+            directoryPickerSupported: true,
+          },
+          message: "",
+        }),
+    } as Response);
+
+    const capabilities = await getDesktopCapabilities();
+    expect(capabilities.platform).toBe("win32");
+    expect(capabilities.directoryPickerSupported).toBe(true);
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/system/desktop",
+      expect.any(Object)
+    );
+  });
+
+  it("selects a directory through the host-side native picker", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          code: 0,
+          data: {
+            supported: true,
+            path: "C:\\Users\\dev\\projects\\demo",
+            cancelled: false,
+          },
+          message: "",
+        }),
+    } as Response);
+
+    const result = await selectNativeDirectory();
+    expect(result.supported).toBe(true);
+    expect(result.path).toBe("C:\\Users\\dev\\projects\\demo");
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/system/select-directory",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
   it("builds safe default config decisions from conflict reports", () => {
     const decisions = defaultConfigConflictDecisions([
       {
@@ -1473,18 +1600,6 @@ describe("api client", () => {
     await getCliConfig("kimi");
     await getCliConfigFile("kimi", "config.toml");
     await writeCliConfigFile("kimi", "config.toml", "default_model = \"k2\"");
-    await upsertCliProvider("kimi", "moonshot", {
-      baseUrl: "https://api.moonshot.cn/anthropic",
-      protocol: "anthropic",
-      envKey: "MOONSHOT_API_KEY",
-    });
-    await removeCliProvider("kimi", "moonshot");
-    await upsertCliModel("kimi", {
-      alias: "moonshot/kimi-k2.5",
-      provider: "moonshot",
-      modelId: "kimi-k2.5",
-    });
-    await removeCliModel("kimi", "moonshot/kimi-k2.5");
     await setCliDefaultModel("kimi", "moonshot/kimi-k2.5");
 
     expect(fetch).toHaveBeenNthCalledWith(
@@ -1507,43 +1622,6 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/providers/moonshot",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({
-          baseUrl: "https://api.moonshot.cn/anthropic",
-          protocol: "anthropic",
-          envKey: "MOONSHOT_API_KEY",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      5,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/providers/moonshot",
-      expect.objectContaining({ method: "DELETE" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      6,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/models",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({
-          alias: "moonshot/kimi-k2.5",
-          provider: "moonshot",
-          modelId: "kimi-k2.5",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      7,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/models",
-      expect.objectContaining({
-        method: "DELETE",
-        body: JSON.stringify({ alias: "moonshot/kimi-k2.5" }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      8,
       "http://127.0.0.1:48731/api/v1/cli-config/kimi/default-model",
       expect.objectContaining({
         method: "PUT",

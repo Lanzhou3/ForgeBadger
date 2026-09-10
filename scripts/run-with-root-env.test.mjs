@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { buildRootEnv, buildRunCommand } from "./run-with-root-env.mjs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+import {
+  buildRootEnv,
+  buildRunCommand,
+  buildWindowsInvocation,
+  expandShellDefaults
+} from "./run-with-root-env.mjs";
 
 describe("run-with-root-env", () => {
   it("loads root .env values without overriding inherited environment", async () => {
@@ -75,6 +83,44 @@ describe("run-with-root-env", () => {
     );
   });
 
+  it("expands shell parameter defaults from the provided environment", () => {
+    assert.equal(
+      expandShellDefaults("${A:-x} ${B} ${C:-y} ${D:-z}", { A: "1", B: "2", D: "" }),
+      "1 2 y z"
+    );
+    assert.equal(expandShellDefaults("plain command", {}), "plain command");
+  });
+
+  it("builds Windows invocations for direct and shell commands", () => {
+    assert.deepEqual(
+      buildWindowsInvocation(
+        {
+          command: "sh",
+          args: ["-lc", "next dev -H ${FORGEBADGER_WEB_HOST:-127.0.0.1} -p ${FORGEBADGER_WEB_PORT:-48732}"]
+        },
+        { FORGEBADGER_WEB_HOST: "127.0.0.1", ComSpec: "C:\\Windows\\system32\\cmd.exe" }
+      ),
+      {
+        command: "C:\\Windows\\system32\\cmd.exe",
+        args: ["/d", "/s", "/c", "next dev -H 127.0.0.1 -p 48732"]
+      }
+    );
+
+    assert.deepEqual(
+      buildWindowsInvocation({ command: "tsx", args: ["watch", "src/index.ts"] }, {}),
+      { command: "tsx", args: ["watch", "src/index.ts"], useShell: true }
+    );
+  });
+
+  it("runs the requested command when invoked as a script", () => {
+    const scriptPath = fileURLToPath(new URL("./run-with-root-env.mjs", import.meta.url));
+    const result = spawnSync(process.execPath, [scriptPath, "node", "--version"], {
+      encoding: "utf8"
+    });
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /^v\d+/u);
+  });
+
   it("wires source package scripts through the preserving env runner", async () => {
     const gatewayPackage = JSON.parse(await readFile("packages/gateway/package.json", "utf8"));
     const webPackage = JSON.parse(await readFile("packages/web/package.json", "utf8"));
@@ -90,11 +136,11 @@ describe("run-with-root-env", () => {
     assert.equal(webPackage.scripts.build, "node ../../scripts/run-with-root-env.mjs next build");
     assert.equal(
       webPackage.scripts.dev,
-      "node ../../scripts/run-with-root-env.mjs --shell 'next dev -H ${FORGEBADGER_WEB_HOST:-127.0.0.1} -p ${FORGEBADGER_WEB_PORT:-48732}'"
+      "node ../../scripts/run-next.mjs dev"
     );
     assert.equal(
       webPackage.scripts.start,
-      "node ../../scripts/run-with-root-env.mjs --shell 'next start -H ${FORGEBADGER_WEB_HOST:-127.0.0.1} -p ${FORGEBADGER_WEB_PORT:-48732}'"
+      "node ../../scripts/run-next.mjs start"
     );
   });
 });

@@ -1,3 +1,8 @@
+import { createPlatformActionRoutes } from "./platform-actions.js";
+import { createProjectManagementRoutes } from "./project-management.js";
+import { PlatformActions } from "../services/platform-commands/actions.js";
+import { createPlatformCommands } from "../services/platform-commands/catalog.js";
+import { randomUUID } from "node:crypto";
 import type { Express } from "express";
 
 import type { ServerDeps } from "../server.js";
@@ -19,6 +24,7 @@ import { createModelProviderRoutes } from "./model-providers.js";
 import { createSkillRoutes } from "./skills.js";
 import { createApiKeyRoutes } from "./api-keys.js";
 import { createCliConfigRoutes } from "./cli-config.js";
+import { createClaudeRouteRoutes } from "./claude-route.js";
 import { createDashboardRoutes } from "./dashboard.js";
 import { createNotificationRoutes } from "./notifications.js";
 import { createSessionHookRoutes } from "./session-hooks.js";
@@ -26,12 +32,14 @@ import { createSnapshotRoutes } from "./snapshots.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { createCopilotRoutes } from "./copilot.js";
+import { createAutomationRoutes } from "./automations.js";
+import { createSystemRoutes } from "./system.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/health", createHealthRoutes());
-  app.use("/api/v1/gate-a/dependencies", createDependencyRoutes());
-  app.use("/api/v1/adapters", createAdapterRoutes());
+  app.use("/api/v1/gate-a/dependencies", createDependencyRoutes(deps.sessionManager));
+  app.use("/api/v1/adapters", createAdapterRoutes(deps.sessionManager));
   app.use(
     "/api/v1/auth",
     createAuthRouter(new UserRepository(deps.db), deps.jwtSecret, {
@@ -57,6 +65,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   ));
   app.use("/api/v1/projects", createProjectManagerRoutes(deps.db, {
     masterKey: deps.masterKey,
+    sessionManager: deps.sessionManager,
     ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
   }));
   app.use("/api/v1/projects", createProjectRoutes(
@@ -77,7 +86,9 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/gate-a/sessions", createGateASessionRoutes(deps.sessionManager));
   app.use("/api/v1/templates", createTemplateRoutes(deps.db, deps.eventBus));
   app.use("/api/v1/usage", createUsageRoutes(deps.db, deps.masterKey));
-  app.use("/api/v1/model-providers", createModelProviderRoutes(deps.db, deps.masterKey));
+  app.use("/api/v1/model-providers", createModelProviderRoutes(deps.db, deps.masterKey, {
+    eventBus: deps.eventBus
+  }));
   app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
     db: deps.db,
     masterKey: deps.masterKey,
@@ -86,14 +97,22 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1", createSkillRoutes(deps.db));
   app.use("/api/v1/notifications", createNotificationRoutes(deps.db));
   app.use("/api/v1/api-keys", createApiKeyRoutes(deps.db, deps.masterKey));
-  app.use("/api/v1/cli-config", createCliConfigRoutes(deps.db, deps.masterKey));
+  app.use("/api/v1/cli-config", createCliConfigRoutes(deps.db, deps.masterKey, {
+    eventBus: deps.eventBus
+  }));
   app.use("/api/v1/dashboard", createDashboardRoutes(deps.db));
+  app.use("/api/v1", createPlatformActionRoutes({db:deps.db,masterKey:deps.masterKey,sessionManager:deps.sessionManager,adapterCommandRunner:deps.adapterCommandRunner,eventBus:deps.eventBus}));
+  app.use("/api/v1", createProjectManagementRoutes(deps.db, (userId,commandId,input) => new PlatformActions({db:deps.db,userId},createPlatformCommands()).executeOwner(commandId,input,randomUUID())));
   if (deps.copilotAgent) {
     app.use("/api/v1/copilot", createCopilotRoutes(deps.copilotAgent));
+    app.use("/api/v1/copilot", createAutomationRoutes(deps.copilotAgent));
   }
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
     db: deps.db,
     masterKey: deps.masterKey,
     appVersion: deps.appVersion
   }));
+  app.use("/api/v1/system", createSystemRoutes());
+  // Claude Code protocol routing data plane (route-token auth, not JWT).
+  app.use("/v1", createClaudeRouteRoutes(deps.db, deps.masterKey));
 }

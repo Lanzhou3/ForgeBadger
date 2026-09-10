@@ -1,3 +1,4 @@
+import { createPlatformManagementTools } from "./platform-management.js";
 /**
  * Aggregate all platform tool seams for the Copilot harness.
  *
@@ -16,6 +17,7 @@ import { createGraphTools } from "./graph.js";
 
 export function createPlatformTools(): AgentTool[] {
   return [
+    ...createPlatformManagementTools(),
     ...createSkillTools(),
     ...createProjectTools(),
     ...createSessionTools(),

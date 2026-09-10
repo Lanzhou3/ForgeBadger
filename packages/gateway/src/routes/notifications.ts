@@ -1,21 +1,31 @@
 import { Router } from "express";
+import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { NotificationRepository, type Notification } from "../db/repositories/notification-repository.js";
 import { SessionRepository, type Session } from "../db/repositories/session-repository.js";
 import type { Database } from "../db/types.js";
 
+const listQuerySchema = z.object({
+  category: z.enum(["session_event", "app_action"]).optional()
+}).strict();
+
 export function createNotificationRoutes(db: Database): Router {
   const router = Router();
   router.use(authenticate);
 
   router.get("/", (req, res) => {
+    const query = listQuerySchema.safeParse(req.query ?? {});
+    if (!query.success) {
+      res.status(400).json({ code: 1, message: "Invalid notification category filter" });
+      return;
+    }
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const repo = new NotificationRepository(db, userId);
     const sessionsById = new Map(
       new SessionRepository(db, userId).list().map((session) => [session.id, session])
     );
-    const notifications = repo.list().map((notification) =>
+    const notifications = repo.list(100, query.data.category).map((notification) =>
       toNotificationPayload(notification, notification.sessionId ? sessionsById.get(notification.sessionId) : undefined)
     );
     res.json({
@@ -77,6 +87,7 @@ function toNotificationPayload(notification: Notification, session?: Session) {
   return {
     id: notification.id,
     type: notification.type,
+    category: notification.category,
     titleKey: notification.titleKey,
     message: notification.message,
     href: notification.href,

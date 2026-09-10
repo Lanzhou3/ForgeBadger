@@ -8,8 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
+import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { AccountSecuritySettings } from "@/components/settings/AccountSecuritySettings";
-import { FeishuIntegrationSettings } from "@/components/settings/FeishuIntegrationSettings";
+import { ClaudeRouteSettings } from "@/components/settings/ClaudeRouteSettings";
 import {
   Card,
   CardContent,
@@ -69,7 +70,7 @@ export default function SettingsPage() {
     isError: adaptersError,
     refetch: refetchAdapters,
   } = useQuery({
-    queryKey: ["adapters", "discovery"],
+    queryKey: ADAPTER_DISCOVERY_QUERY_KEY,
     queryFn: discoverAdapters,
   });
   const {
@@ -365,8 +366,8 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <div className="forgebadger-animate-in" style={{ animationDelay: "160ms" }}>
-            <FeishuIntegrationSettings />
+          <div className="forgebadger-animate-in" style={{ animationDelay: "180ms" }}>
+            <ClaudeRouteSettings />
           </div>
         </div>
 

@@ -92,7 +92,7 @@ Result rubric:
 ## Dependency Versions
 
 - node --version:
-- terminal runtime version (`tmux -V` or `psmux -V`):
+- Terminal backend:
 - claude --version:
 - forgebadger doctor summary:
 
@@ -154,7 +154,7 @@ Requirement mapping guide:
 
 | Requirement | Use When The Report Shows |
 |-------------|---------------------------|
-| UX-01 | Missing tmux/psmux, outdated psmux, missing local CLI, install-confirmation failure, or unclear dependency/runtime guidance. |
+| UX-01 | Unavailable Session Server/native PTY, missing local CLI, or unclear dependency/runtime guidance. |
 | UX-02 | Provider/model/credential readiness failures or recovery paths that risk exposing secrets. |
 | UX-03 | Copilot run, pending-action, cancellation, or waiting-for-approval state confusion. |
 | UX-04 | Feedback is not reproducible enough to become an engineering task. |
@@ -195,5 +195,5 @@ Requirement mapping guide:
 
 - Gateway log summary, no raw log attachment:
 - Web log summary, no raw log attachment:
-- tmux session name:
+- Session Server session name (runtimeSessionName field):
 - Relevant command result summary, no raw private output:

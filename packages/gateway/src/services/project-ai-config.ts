@@ -1,9 +1,9 @@
-import { homedir } from "node:os";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { safeResolve, validateProjectRoot } from "../lib/safe-resolve.js";
 import type { AdapterId } from "./adapter-discovery.js";
+import { globalConfigRoot } from "./cli-config-target.js";
 
 export interface ProjectAiConfigFile {
   relativePath: string;
@@ -113,7 +113,7 @@ function primaryInstructionFilesForAdapter(adapter: AdapterId): string[] {
   return ["AGENTS.md"];
 }
 
-function candidateFilesForAdapter(adapter: AdapterId): string[] {
+export function candidateFilesForAdapter(adapter: AdapterId): string[] {
   if (adapter === "claude") {
     return ["CLAUDE.md"];
   }
@@ -221,20 +221,6 @@ async function readConfigFile(
   }
 }
 
-function globalConfigRoot(adapter: AdapterId): string {
-  if (adapter === "claude") {
-    return process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(homedir(), ".claude");
-  }
-  if (adapter === "opencode") {
-    return process.env.OPENCODE_CONFIG_DIR?.trim() ||
-      path.join(process.env.XDG_CONFIG_HOME?.trim() || path.join(homedir(), ".config"), "opencode");
-  }
-  if (adapter === "kimi") {
-    return process.env.KIMI_CODE_HOME?.trim() || path.join(homedir(), ".kimi-code");
-  }
-  return process.env.CODEX_HOME?.trim() || path.join(homedir(), ".codex");
-}
-
 function candidateGlobalFilesForAdapter(adapter: AdapterId): string[] {
   if (adapter === "claude") {
     return ["settings.json"];
@@ -271,7 +257,7 @@ function roleFor(relativePath: string): ProjectAiConfigFile["role"] {
   return "other";
 }
 
-function fileTypeFor(filePath: string): string {
+export function fileTypeFor(filePath: string): string {
   const extension = path.extname(filePath).toLowerCase();
   if (extension === ".md") return "markdown";
   if (extension === ".json" || extension === ".jsonc") return "json";

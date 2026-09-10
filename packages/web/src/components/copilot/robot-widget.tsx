@@ -16,6 +16,7 @@ import {
   toneIcons,
   type NotificationToastTone,
 } from "@/lib/notification-toast";
+import { dequeueBubble, enqueueBubble } from "@/lib/notification-queue";
 import {
   createNotificationFromEvent,
   notificationContextParts,
@@ -62,6 +63,7 @@ interface RobotBubble {
   href: string;
   tone: NotificationToastTone;
   duration: number;
+  isPermissionPrompt: boolean;
 }
 
 interface DragState {
@@ -88,8 +90,8 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
   const [blinking, setBlinking] = useState(false);
   const [walkFrame, setWalkFrame] = useState<RobotFrameKey>("walk1");
   const [sitFrame, setSitFrame] = useState<RobotFrameKey>("sit1");
-  const [bubble, setBubble] = useState<RobotBubble | null>(null);
-  const bubbleRef = useRef<RobotBubble | null>(null);
+  const [bubbleQueue, setBubbleQueue] = useState<RobotBubble[]>([]);
+  const bubbleQueueRef = useRef<RobotBubble[]>([]);
   const [nudge, setNudge] = useState(false);
 
   const robotRef = useRef<HTMLDivElement | null>(null);
@@ -107,11 +109,20 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
     modeRef.current = mode;
   }, [mode]);
 
+  // The queue's head is the bubble on screen; dismissals always drop the head.
+  const dismissHeadBubble = useCallback(() => {
+    const rest = dequeueBubble(bubbleQueueRef.current);
+    bubbleQueueRef.current = rest;
+    setBubbleQueue(rest);
+  }, []);
+
+  const bubble = bubbleQueue[0] ?? null;
+
   useEffect(() => {
     suppressBubblesRef.current = bubblesSuppressed;
     if (bubblesSuppressed) {
-      bubbleRef.current = null;
-      setBubble(null);
+      bubbleQueueRef.current = [];
+      setBubbleQueue([]);
     }
   }, [bubblesSuppressed]);
 
@@ -231,9 +242,11 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
           href: notification.href,
           tone: toastToneFor(notification.notificationType, message),
           duration: toastDurationFor(notification.notificationType),
+          isPermissionPrompt: notification.notificationType === "permission_prompt",
         };
-        bubbleRef.current = next;
-        setBubble(next);
+        const result = enqueueBubble(bubbleQueueRef.current, next);
+        bubbleQueueRef.current = result.queue;
+        setBubbleQueue(result.queue);
         if (!reducedMotionRef.current) {
           setNudge(true);
           if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
@@ -251,12 +264,11 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
     };
   }, [t]);
 
-  // Auto-dismiss the bubble; a new bubble replaces the timer.
+  // Auto-dismiss the displayed head; a new head replaces the timer.
   useEffect(() => {
     if (!bubble) return;
     bubbleTimerRef.current = setTimeout(() => {
-      bubbleRef.current = null;
-      setBubble(null);
+      dismissHeadBubble();
     }, bubble.duration);
     return () => {
       if (bubbleTimerRef.current) {
@@ -264,7 +276,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
         bubbleTimerRef.current = null;
       }
     };
-  }, [bubble]);
+  }, [bubble, dismissHeadBubble]);
 
   const snapToNearestCorner = useCallback((clientX: number, clientY: number) => {
     const viewport = currentViewport();
@@ -277,29 +289,27 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
 
   const openBubble = useCallback(() => {
     // Side effects (markRead / router.push touch other components' state) must
-    // run in the event handler, NOT inside the setBubble updater - React runs
-    // updaters during render and updating NotificationProvider from there is
-    // the "setState while rendering a different component" error.
-    const current = bubbleRef.current;
-    bubbleRef.current = null;
-    setBubble(null);
+    // run in the event handler, NOT inside the setBubbleQueue updater - React
+    // runs updaters during render and updating NotificationProvider from there
+    // is the "setState while rendering a different component" error.
+    const current = bubbleQueueRef.current[0];
+    dismissHeadBubble();
     if (current) {
       markRead(current.id);
       router.push(current.href);
     }
-  }, [markRead, router]);
+  }, [dismissHeadBubble, markRead, router]);
 
   // Opening the chat panel counts as reading the notification bubble that is
   // currently shown: dismiss it locally and mark it read, then toggle.
   const activate = useCallback(() => {
-    const current = bubbleRef.current;
+    const current = bubbleQueueRef.current[0];
     if (!panelOpen && current) {
-      bubbleRef.current = null;
-      setBubble(null);
+      dismissHeadBubble();
       markRead(current.id);
     }
     onActivate();
-  }, [panelOpen, markRead, onActivate]);
+  }, [panelOpen, dismissHeadBubble, markRead, onActivate]);
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0 || !pos) return;
@@ -484,10 +494,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
               type="button"
               aria-label={t("common.close")}
               className="-mr-1 -mt-0.5 shrink-0 rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-900/10 hover:text-zinc-700"
-              onClick={() => {
-                bubbleRef.current = null;
-                setBubble(null);
-              }}
+              onClick={dismissHeadBubble}
             >
               <XIcon className="size-3.5" aria-hidden="true" />
             </button>

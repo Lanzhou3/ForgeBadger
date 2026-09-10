@@ -1,43 +1,41 @@
 import { Router } from "express";
 import { z } from "zod";
 
-import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
+import { authenticate, type AuthenticatedRequest, userIsInstanceAdmin } from "../auth/middleware.js";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import { isForeignKeyError } from "../lib/db-errors.js";
+import { redactSensitiveErrorMessage } from "../lib/redaction.js";
 import {
   ModelProviderRepository,
   type ModelProfile,
   type CreateProviderProfileInput,
   type CreateModelProfileInput,
-  type ProviderApiFormat,
-  type ProviderAuthType,
-  type ProviderProductType,
   type ProviderProfile,
   type UpdateModelProfileInput
 } from "../db/repositories/model-provider-repository.js";
+import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
 import type { Database } from "../db/types.js";
-import {
-  isSafeOpenCodeNpmPackage,
-  loadProviderCatalog as loadProviderCatalogFromSource,
-  type ProviderCatalogPreset
-} from "../services/model-catalog.js";
 import { checkModelEndpoint } from "../services/model-endpoint-health.js";
-import {
-  buildModelProviderReadiness,
-  type ProviderReadinessAdapter
-} from "../services/model-provider-readiness.js";
 import {
   fetchProviderModels as fetchProviderModelsFromEndpoint,
   type FetchedProviderModel,
   type FetchProviderModelsInput
 } from "../services/provider-model-fetch.js";
+import {
+  fetchProviderBalance as fetchProviderBalanceFromEndpoint,
+  type FetchProviderBalanceInput,
+  type FetchProviderBalanceResult
+} from "../services/provider-balance.js";
 import { getProviderCapabilities } from "../services/provider-capabilities.js";
+import { buildAppliedProvidersOverview } from "../services/model-provider-applied.js";
+import type { AdapterId } from "../services/adapter-discovery.js";
+import type { CliConfigSnapshot } from "../services/cli-config.js";
+import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 
 const adapterSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
 const providerAdapterSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
 const productTypeSchema = z.enum(["payg_api", "coding_plan", "token_plan", "subscription", "local"]);
 const createProviderSchema = z.object({
-  catalogId: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   providerKey: z.string().min(1).optional(),
   baseUrl: z.string().optional(),
@@ -47,14 +45,15 @@ const createProviderSchema = z.object({
   productType: productTypeSchema.optional(),
   authType: z.enum(["api_key", "bearer_token", "oauth", "none"]).optional(),
   apiFormat: z.enum(["anthropic", "openai", "openai-compatible", "google", "bedrock", "local"]).optional(),
-  supportedAdapters: z.array(providerAdapterSchema).optional()
+  supportedAdapters: z.array(providerAdapterSchema).optional(),
+  allowPlaintextHttp: z.boolean().optional()
 });
-const updateProviderSchema = createProviderSchema.omit({ catalogId: true }).partial();
+const updateProviderSchema = createProviderSchema.partial();
 const createModelProfileSchema = z.object({
   name: z.string().min(1),
   modelId: z.string().min(1),
   capabilities: z.array(z.string().min(1)).optional(),
-  contextWindow: z.number().int().positive().optional(),
+  contextWindow: z.number().int().positive().nullable().optional(),
   isDefault: z.boolean().optional()
 });
 const updateModelProfileSchema = createModelProfileSchema.partial();
@@ -66,44 +65,134 @@ const rotateCredentialSchema = createCredentialSchema;
 const endpointTestSchema = z.object({
   timeoutMs: z.number().int().min(100).max(15000).optional()
 });
-const readinessSchema = z.object({
-  adapter: adapterSchema,
-  modelProfileId: z.string().min(1).optional(),
-  credentialId: z.string().min(1).optional(),
-  timeoutMs: z.number().int().min(100).max(30000).optional(),
-  includeRemoteCheck: z.boolean().optional()
-});
 const syncModelsSchema = z.object({
   credentialId: z.string().min(1).optional(),
   timeoutMs: z.number().int().min(100).max(30000).optional()
 });
+const balanceSchema = z.object({
+  credentialId: z.string().min(1).optional(),
+  timeoutMs: z.number().int().min(100).max(15000).optional()
+});
 
 export interface ModelProviderRouteOptions {
   fetchProviderModels?: (input: FetchProviderModelsInput) => Promise<FetchedProviderModel[]>;
-  loadProviderCatalog?: () => Promise<ProviderCatalogPreset[]>;
+  fetchProviderBalance?: (input: FetchProviderBalanceInput) => Promise<FetchProviderBalanceResult>;
+  /** Test seam for GET /applied: override the CLI config snapshot reader. */
+  readCliConfigSnapshot?: (adapter: AdapterId) => Promise<CliConfigSnapshot>;
+  eventBus?: ForgeBadgerEventBus | undefined;
 }
 
 export function createModelProviderRoutes(db: Database, masterKey: string, options: ModelProviderRouteOptions = {}): Router {
   const router = Router();
   const fetchProviderModels = options.fetchProviderModels ?? fetchProviderModelsFromEndpoint;
-  const loadProviderCatalog = options.loadProviderCatalog ?? loadProviderCatalogFromSource;
+  const fetchProviderBalance = options.fetchProviderBalance ?? fetchProviderBalanceFromEndpoint;
   router.use(authenticate);
 
   // Rate-limit network-probing endpoints (they trigger real outbound requests
   // to provider endpoints, so a stolen JWT must not be usable to spray them).
   const probeLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 30 });
-  const globalProbeLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 300, keyFn: () => "global" });
   router.use("/:id/test", probeLimiter);
-  router.use("/:id/readiness", globalProbeLimiter, probeLimiter);
   router.use("/:id/models/sync", probeLimiter);
+  router.use("/:id/balance", probeLimiter);
 
-  router.get("/catalog", async (_req, res) => {
-    const providers = await loadProviderCatalog();
-    res.json({ code: 0, data: { providers }, message: "" });
-  });
+  // Sidebar polling would otherwise spray provider endpoints; cache balance
+  // reads briefly and let POST /:id/balance act as the explicit refresh.
+  const balanceCacheTtlMs = 60_000;
+  const balanceCache = new Map<string, { payload: Record<string, unknown>; expiresAt: number }>();
+
+  const runBalanceQuery = async (
+    userId: string,
+    providerId: string,
+    options: { credentialId?: string | undefined; timeoutMs?: number | undefined }
+  ): Promise<
+    | { ok: true; result: FetchProviderBalanceResult }
+    | { ok: false; status: number; message: string }
+  > => {
+    const repo = new ModelProviderRepository(db, userId, masterKey);
+    const provider = repo.getProviderProfile(providerId);
+    if (!provider) {
+      return { ok: false, status: 404, message: "Provider not found" };
+    }
+    const baseUrls = [provider.openaiBaseUrl, provider.baseUrl].filter((value): value is string => Boolean(value));
+    if (baseUrls.length === 0) {
+      return { ok: false, status: 400, message: "Provider base URL is required" };
+    }
+    const credential = selectCredential(repo, provider.id, options.credentialId);
+    if (options.credentialId && !credential) {
+      return { ok: false, status: 400, message: "Credential does not belong to the selected provider" };
+    }
+    if (credential && credential.status !== "active") {
+      return { ok: false, status: 400, message: "An active provider credential is required to query balance" };
+    }
+    if (provider.authType !== "none" && !credential) {
+      return { ok: false, status: 400, message: "Provider credential is required to query balance" };
+    }
+    try {
+      // The credential secret is decrypted in memory only and never leaves the
+      // outbound Authorization header.
+      const result = await fetchProviderBalance({
+        baseUrls,
+        apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
+        allowPlaintextHttp: provider.allowPlaintextHttp,
+        ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {})
+      });
+      return { ok: true, result };
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : "Failed to query provider balance";
+      return { ok: false, status: 502, message: redactSensitiveErrorMessage(raw) };
+    }
+  };
 
   router.get("/capabilities", (_req, res) => {
     res.json({ code: 0, data: { adapters: getProviderCapabilities() }, message: "" });
+  });
+
+  // Aggregate read of the per-adapter applied pointers plus (for instance
+  // admins) the CLI config defaultModel comparison. Registered before
+  // /applied/:adapter so the literal path wins.
+  router.get("/applied", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    try {
+      const adapters = await buildAppliedProvidersOverview(db, userId, masterKey, {
+        isAdmin: userIsInstanceAdmin(db, userId),
+        readSnapshot: options.readCliConfigSnapshot
+      });
+      res.json({ code: 0, data: { adapters }, message: "" });
+    } catch {
+      res.status(500).json({ code: 1, message: "Failed to load applied providers" });
+    }
+  });
+
+  // Which provider was last applied to an adapter's global CLI config; read
+  // endpoint for the session sidebar (cli-config mutations stay admin-only).
+  router.get("/applied/:adapter", (req, res) => {
+    const parsed = adapterSchema.safeParse(req.params.adapter);
+    if (!parsed.success) {
+      res.status(400).json({ code: 1, message: "Unsupported CLI adapter" });
+      return;
+    }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const pointer = new CliConfigAppliedProviderRepository(db, userId).get(parsed.data);
+    const provider = pointer
+      ? repoFor(db, masterKey, req).getProviderProfile(pointer.providerProfileId)
+      : undefined;
+    if (!pointer || !provider) {
+      res.json({ code: 0, data: { appliedProvider: null }, message: "" });
+      return;
+    }
+    res.json({
+      code: 0,
+      data: {
+        appliedProvider: {
+          providerProfileId: provider.id,
+          providerName: provider.name,
+          providerStatus: provider.status,
+          modelProfileId: pointer.modelProfileId,
+          appliedAt: new Date(pointer.appliedAt).toISOString()
+        }
+      },
+      message: ""
+    });
   });
 
   router.get("/", (req, res) => {
@@ -119,7 +208,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     });
   });
 
-  router.post("/", async (req, res) => {
+  router.post("/", (req, res) => {
     const parseResult = createProviderSchema.safeParse(req.body ?? {});
     if (!parseResult.success) {
       res.status(400).json({ code: 1, message: "Invalid provider payload" });
@@ -127,9 +216,8 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     }
     const repo = repoFor(db, masterKey, req);
     try {
-      const catalog = await loadProviderCatalog();
-      const result = createProvider(repo, parseResult.data, catalog);
-      res.status(201).json({ code: 0, data: result, message: "" });
+      const provider = createCustom(repo, parseResult.data);
+      res.status(201).json({ code: 0, data: { provider }, message: "" });
     } catch (error) {
       res.status(400).json({
         code: 1,
@@ -144,10 +232,6 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       res.status(400).json({ code: 1, message: "Invalid provider payload" });
       return;
     }
-    if (parseResult.data.providerKey && isReservedProviderKey(parseResult.data.providerKey)) {
-      res.status(400).json({ code: 1, message: "Reserved provider keys can only be created from the verified catalog" });
-      return;
-    }
     const updateInput: Partial<CreateProviderProfileInput> = {};
     if (parseResult.data.name !== undefined) updateInput.name = parseResult.data.name;
     if (parseResult.data.providerKey !== undefined) updateInput.providerKey = parseResult.data.providerKey;
@@ -159,6 +243,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     if (parseResult.data.authType !== undefined) updateInput.authType = parseResult.data.authType;
     if (parseResult.data.apiFormat !== undefined) updateInput.apiFormat = parseResult.data.apiFormat;
     if (parseResult.data.supportedAdapters !== undefined) updateInput.supportedAdapters = parseResult.data.supportedAdapters;
+    if (parseResult.data.allowPlaintextHttp !== undefined) updateInput.allowPlaintextHttp = parseResult.data.allowPlaintextHttp;
     const provider = repoFor(db, masterKey, req).updateProviderProfile(req.params.id, updateInput);
     if (!provider) {
       res.status(404).json({ code: 1, message: "Provider not found" });
@@ -223,12 +308,13 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       return;
     }
     const repo = repoFor(db, masterKey, req);
+    const userId = (req as unknown as AuthenticatedRequest).userId;
     const provider = repo.getProviderProfile(req.params.id);
     if (!provider) {
       res.status(404).json({ code: 1, message: "Provider not found" });
       return;
     }
-    const modelFetchBaseUrl = provider.openaiBaseUrl ?? provider.baseUrl;
+    const modelFetchBaseUrl = modelFetchBaseUrlFor(provider);
     if (!modelFetchBaseUrl) {
       res.status(400).json({
         code: 1,
@@ -248,20 +334,6 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     }
 
     try {
-      const catalogPreset = (await loadProviderCatalog()).find((preset) => preset.id === provider.providerKey);
-      if (catalogPreset?.modelSource === "static") {
-        const created = seedMissingModelsForPreset(repo, provider, catalogPreset);
-        res.json({
-          code: 0,
-          data: {
-            fetchedCount: catalogPreset.defaultModels.length,
-            createdCount: created.length,
-            models: listPresetModels(repo, provider, catalogPreset)
-          },
-          message: ""
-        });
-        return;
-      }
       if (provider.authType !== "none" && !credential) {
         res.status(400).json({ code: 1, message: "Provider credential is required to sync models" });
         return;
@@ -269,25 +341,83 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       const fetchedModels = await fetchProviderModels({
         baseUrl: modelFetchBaseUrl,
         apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
-        modelsUrl: catalogPreset?.modelFetch?.modelsUrl,
+        apiFormat: provider.apiFormat,
+        defaultHeaders: provider.defaultHeaders,
+        allowPlaintextHttp: provider.allowPlaintextHttp,
         ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
       });
-      const created = syncFetchedModels(repo, provider, fetchedModels);
+      const { created, backfilled } = syncFetchedModels(repo, provider, fetchedModels);
+      emitModelSyncNotification(options.eventBus, {
+        userId,
+        status: "success",
+        provider,
+        detail: `Synced ${fetchedModels.length} models (${created.length} new, ${backfilled} updated)`
+      });
       res.json({
         code: 0,
         data: {
           fetchedCount: fetchedModels.length,
           createdCount: created.length,
+          updatedCount: backfilled,
           models: created
         },
         message: ""
       });
     } catch (error) {
+      const message = redactSensitiveErrorMessage(
+        error instanceof Error ? error.message : "Failed to sync provider models"
+      );
+      emitModelSyncNotification(options.eventBus, {
+        userId,
+        status: "error",
+        provider,
+        detail: message
+      });
       res.status(400).json({
         code: 1,
-        message: error instanceof Error ? error.message : "Failed to sync provider models"
+        message
       });
     }
+  });
+
+  router.get("/:id/balance", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const cacheKey = `${userId}:${req.params.id}`;
+    const cached = balanceCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      res.json({ code: 0, data: { ...cached.payload, cached: true }, message: "" });
+      return;
+    }
+    balanceCache.delete(cacheKey);
+    const outcome = await runBalanceQuery(userId, req.params.id, {});
+    if (!outcome.ok) {
+      res.status(outcome.status).json({ code: 1, message: outcome.message });
+      return;
+    }
+    const payload: Record<string, unknown> = { ...outcome.result, checkedAt: new Date().toISOString() };
+    balanceCache.set(cacheKey, { payload, expiresAt: Date.now() + balanceCacheTtlMs });
+    res.json({ code: 0, data: { ...payload, cached: false }, message: "" });
+  });
+
+  router.post("/:id/balance", async (req, res) => {
+    const parseResult = balanceSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid provider balance payload" });
+      return;
+    }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const outcome = await runBalanceQuery(userId, req.params.id, {
+      credentialId: parseResult.data.credentialId,
+      timeoutMs: parseResult.data.timeoutMs
+    });
+    if (!outcome.ok) {
+      res.status(outcome.status).json({ code: 1, message: outcome.message });
+      return;
+    }
+    const payload: Record<string, unknown> = { ...outcome.result, checkedAt: new Date().toISOString() };
+    // A manual refresh doubles as the latest read for sidebar polling.
+    balanceCache.set(`${userId}:${req.params.id}`, { payload, expiresAt: Date.now() + balanceCacheTtlMs });
+    res.json({ code: 0, data: payload, message: "" });
   });
 
   router.patch("/:id/models/:modelId", (req, res) => {
@@ -456,141 +586,18 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     }
     const health = await checkModelEndpoint({
       endpoint: provider.baseUrl,
+      allowPlaintextHttp: provider.allowPlaintextHttp,
       ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
     });
     res.json({ code: 0, data: { health }, message: "" });
   });
 
-  router.post("/:id/readiness", async (req, res) => {
-    const parseResult = readinessSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({ code: 1, message: "Invalid provider readiness payload" });
-      return;
-    }
-    const repo = repoFor(db, masterKey, req);
-    const provider = repo.getProviderProfile(req.params.id);
-    if (!provider) {
-      res.status(404).json({ code: 1, message: "Provider not found" });
-      return;
-    }
-    const model = selectModel(repo, provider, parseResult.data.modelProfileId);
-    const credential = selectCredential(repo, provider.id, parseResult.data.credentialId);
-    const catalogPreset = (await loadProviderCatalog()).find((preset) => preset.id === provider.providerKey);
-    const readiness = await buildModelProviderReadiness({
-      provider,
-      model,
-      credential,
-      adapter: parseResult.data.adapter as ProviderReadinessAdapter,
-      modelProfileId: parseResult.data.modelProfileId,
-      credentialId: parseResult.data.credentialId,
-      includeRemoteCheck: parseResult.data.includeRemoteCheck ?? false,
-      ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {}),
-      ...(catalogPreset?.modelFetch?.modelsUrl ? { modelsUrl: catalogPreset.modelFetch.modelsUrl } : {}),
-      decryptCredential: credential ? () => repo.decryptCredential(credential.id) : undefined,
-      fetchProviderModels
-    });
-    res.json({ code: 0, data: { readiness }, message: "" });
-  });
-
   return router;
-}
-
-function createProvider(
-  repo: ModelProviderRepository,
-  input: z.infer<typeof createProviderSchema>,
-  catalog: ProviderCatalogPreset[]
-) {
-  const preset = input.catalogId ? catalog.find((provider) => provider.id === input.catalogId) : undefined;
-  if (input.catalogId && !preset) {
-    throw new Error("Catalog provider not found");
-  }
-  const provider = preset ? createFromPreset(repo, preset) : createCustom(repo, input);
-  const models = preset ? seedMissingModelsForPreset(repo, provider, preset) : [];
-  return { provider, models };
-}
-
-function seedMissingModelsForPreset(
-  repo: ModelProviderRepository,
-  provider: ProviderProfile,
-  preset: ProviderCatalogPreset
-): ModelProfile[] {
-  const existingModelIds = new Set(repo.listModelProfiles(provider.id).map((model) => model.modelId));
-  const hasDefault = repo.listModelProfiles().some((model) => model.isDefault);
-  const created: ModelProfile[] = [];
-  for (const model of seedModelsForPreset(preset)) {
-    if (existingModelIds.has(model.modelId)) continue;
-    created.push(repo.createModelProfile({
-      providerProfileId: provider.id,
-      name: model.name,
-      modelId: model.modelId,
-      capabilities: model.capabilities,
-      contextWindow: model.contextWindow ?? null,
-      isDefault: !hasDefault && created.length === 0
-    }));
-  }
-  return created;
-}
-
-function seedModelsForPreset(preset: ProviderCatalogPreset) {
-  if (preset.modelSource === "models.dev") {
-    return preset.defaultModels.slice(0, 1);
-  }
-  if (preset.modelSource === "static") {
-    return preset.defaultModels;
-  }
-  return [];
-}
-
-function createFromPreset(repo: ModelProviderRepository, preset: ProviderCatalogPreset): ProviderProfile {
-  assertSafeDefaultHeaders(preset.headers);
-  if (preset.supportedAdapters.includes("opencode")) {
-    assertSafeOpenCodeNpm(preset.opencode?.npm);
-  }
-  return repo.ensureProviderProfile({
-    name: preset.name,
-    providerKey: preset.id,
-    baseUrl: preset.baseUrl,
-    region: preset.region ?? "global",
-    productType: (preset.productType ?? "payg_api") as ProviderProductType,
-    authType: preset.authType as ProviderAuthType,
-    apiFormat: preset.apiFormat as ProviderApiFormat,
-    supportedAdapters: preset.supportedAdapters,
-    ...(preset.endpoints?.anthropic?.baseUrl ? { anthropicBaseUrl: preset.endpoints.anthropic.baseUrl } : {}),
-    ...(preset.endpoints?.openai?.baseUrl ? { openaiBaseUrl: preset.endpoints.openai.baseUrl } : {}),
-    ...(preset.headers ? { defaultHeaders: preset.headers } : {}),
-    ...(preset.opencode?.npm ? { opencodeNpm: preset.opencode.npm } : {})
-  });
-}
-
-function assertSafeDefaultHeaders(headers: Record<string, string> | undefined): void {
-  if (!headers) return;
-  for (const [name, value] of Object.entries(headers)) {
-    if (isSensitiveHeaderName(name) || isSensitiveHeaderValue(value)) {
-      throw new Error("Catalog provider default headers must not contain credentials");
-    }
-  }
-}
-
-function isSensitiveHeaderName(name: string): boolean {
-  return /(^|[-_])(authorization|api[-_]?key|token|secret|credential|password|key)([-_]|$)/iu.test(name);
-}
-
-function isSensitiveHeaderValue(value: string): boolean {
-  return /(bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]+)/iu.test(value);
-}
-
-function assertSafeOpenCodeNpm(packageName: string | undefined): void {
-  if (!isSafeOpenCodeNpmPackage(packageName)) {
-    throw new Error("Catalog provider OpenCode npm package is invalid");
-  }
 }
 
 function createCustom(repo: ModelProviderRepository, input: z.infer<typeof createProviderSchema>): ProviderProfile {
   if (!input.name || !input.providerKey || !input.authType || !input.apiFormat) {
     throw new Error("Custom provider requires name, providerKey, authType, and apiFormat");
-  }
-  if (isReservedProviderKey(input.providerKey)) {
-    throw new Error("Reserved provider keys can only be created from the verified catalog");
   }
   return repo.createProviderProfile({
     name: input.name,
@@ -602,25 +609,9 @@ function createCustom(repo: ModelProviderRepository, input: z.infer<typeof creat
     ...(input.productType ? { productType: input.productType } : {}),
     authType: input.authType,
     apiFormat: input.apiFormat,
-    supportedAdapters: input.supportedAdapters ?? ["claude"]
+    supportedAdapters: input.supportedAdapters ?? ["claude"],
+    ...(input.allowPlaintextHttp !== undefined ? { allowPlaintextHttp: input.allowPlaintextHttp } : {})
   });
-}
-
-function isReservedProviderKey(providerKey: string): boolean {
-  return ["openai", "ollama", "lmstudio"].includes(providerKey.trim().toLowerCase());
-}
-
-function selectModel(
-  repo: ModelProviderRepository,
-  provider: ProviderProfile | undefined,
-  requestedModelId: string | undefined
-): ModelProfile | undefined {
-  if (!provider) return undefined;
-  if (requestedModelId) {
-    const model = repo.getModelProfile(requestedModelId);
-    return model?.providerProfileId === provider.id ? model : undefined;
-  }
-  return repo.listModelProfiles(provider.id)[0];
 }
 
 function selectCredential(repo: ModelProviderRepository, providerId: string, credentialId: string | undefined) {
@@ -631,40 +622,66 @@ function selectCredential(repo: ModelProviderRepository, providerId: string, cre
   return repo.listCredentials(providerId)[0];
 }
 
+function modelFetchBaseUrlFor(provider: ProviderProfile): string | null {
+  if (provider.apiFormat === "anthropic") {
+    return provider.anthropicBaseUrl ?? provider.baseUrl ?? provider.openaiBaseUrl;
+  }
+  return provider.openaiBaseUrl ?? provider.baseUrl ?? provider.anthropicBaseUrl;
+}
+
 function syncFetchedModels(
   repo: ModelProviderRepository,
   provider: ProviderProfile,
   fetchedModels: FetchedProviderModel[]
-): ModelProfile[] {
-  const existing = new Set(repo.listModelProfiles(provider.id).map((model) => model.modelId));
+): { created: ModelProfile[]; backfilled: number } {
+  const existing = new Map(repo.listModelProfiles(provider.id).map((model) => [model.modelId, model]));
   const created: ModelProfile[] = [];
+  let backfilled = 0;
   for (const fetched of fetchedModels) {
-    if (existing.has(fetched.id)) continue;
+    const current = existing.get(fetched.id);
+    if (current) {
+      // Backfill only a missing context window; values already set (by the
+      // user or an earlier sync) are never overwritten.
+      if (!current.contextWindow && fetched.contextWindow) {
+        repo.updateModelProfile(current.id, { contextWindow: fetched.contextWindow });
+        backfilled += 1;
+      }
+      continue;
+    }
     const model = repo.createModelProfile({
       providerProfileId: provider.id,
       name: fetched.id,
       modelId: fetched.id,
       capabilities: ["chat"],
-      isDefault: existing.size === 0 && created.length === 0
+      isDefault: existing.size === 0 && created.length === 0,
+      ...(fetched.contextWindow ? { contextWindow: fetched.contextWindow } : {})
     });
-    existing.add(fetched.id);
+    existing.set(fetched.id, model);
     created.push(model);
   }
-  return created;
-}
-
-function listPresetModels(
-  repo: ModelProviderRepository,
-  provider: ProviderProfile,
-  preset: ProviderCatalogPreset
-): ModelProfile[] {
-  const modelsById = new Map(repo.listModelProfiles(provider.id).map((model) => [model.modelId, model]));
-  return preset.defaultModels
-    .map((model) => modelsById.get(model.modelId))
-    .filter((model): model is ModelProfile => Boolean(model));
+  return { created, backfilled };
 }
 
 function repoFor(db: Database, masterKey: string, req: unknown): ModelProviderRepository {
   const userId = (req as unknown as AuthenticatedRequest).userId;
   return new ModelProviderRepository(db, userId, masterKey);
+}
+
+function emitModelSyncNotification(
+  eventBus: ForgeBadgerEventBus | undefined,
+  input: { userId: string; status: "success" | "error"; provider: ProviderProfile; detail: string }
+): void {
+  if (!eventBus) return;
+  eventBus.emitEvent({
+    type: "app_action_notification",
+    userId: input.userId,
+    action: "model_sync",
+    status: input.status,
+    titleKey: input.status === "success"
+      ? "notifications.modelSyncSucceeded"
+      : "notifications.modelSyncFailed",
+    message: `${input.detail} (${input.provider.name})`,
+    providerId: input.provider.id,
+    providerName: input.provider.name
+  });
 }

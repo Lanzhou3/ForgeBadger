@@ -10,6 +10,7 @@ packages/gateway/src/db/migrations/meta/*_snapshot.json
 !packages/gateway/src/db/migrations/meta/0002_snapshot.json
 dist/
 .next/
+.github/
 coverage/
 *.tsbuildinfo
 package-lock.json
@@ -33,12 +34,11 @@ AGENT.md
 AGENTS.md
 MEMORY.md
 CONTEXT.md
-!openspec/
-!openspec/changes/
-openspec/changes/*
-!openspec/changes/replace-copilot-with-portfolio-operations/
-!openspec/changes/replace-copilot-with-portfolio-operations/**
-openspec/config.yaml
+# OpenSpec change drafts are local planning notes, never repository inputs.
+openspec/
+# Dead template material at repo root; retained locally, never shipped.
+# Anchored to root so Next.js app routes under packages/web/src/app/(dashboard)/templates/ stay tracked.
+/templates/
 docs/*
 !docs/EXTERNAL-EVIDENCE-GATES.md
 !docs/OPEN-SOURCE-READINESS.md
@@ -52,6 +52,7 @@ docs/*
 !docs/TECH-ARCHITECTURE.md
 !docs/TEST-PLAN.md
 !docs/SMOKE-TEST.md
+!docs/MACOS-TERMINAL-ACCEPTANCE.md
 !docs/TRIAL-CHECKLIST.md
 !docs/TRIAL-FEEDBACK.md
 !docs/TRIAL-RUNBOOK.md
@@ -103,3 +104,7 @@ packages/gateway/mig-test.mts
 packages/gateway/pf-repro.mts
 packages/gateway/verify-copilot-mig.mts
 packages/gateway/tables.mts
+packages/gateway/pty-attach-e2e.mts
+
+# Local scratch / one-off debug scripts kept in the workspace but never shipped.
+packages/gateway/scratch-*.ts

@@ -102,34 +102,16 @@ node --version
 claude --version
 ```
 
-Then check the selected terminal runtime:
+Run `forgebadger doctor` and record Terminal backend: `session-server` plus
+`ready`/`unavailable` status. Required: Node.js 20.12 through 24, a loadable
+node-pty native module, a local shell, and the target AI CLI on PATH.
+No tmux/psmux installation is required.
 
-```text
-macOS/Linux/WSL: tmux -V
-native Windows:  psmux -V
-```
-
-Required:
-
-- Node.js 20.12 through 24.
-- `tmux` 3.2 or newer on macOS/Linux/WSL, or psmux 3.3.8 or newer on
-  native Windows.
-- Claude Code CLI on `PATH` for the main terminal smoke path.
-- A local shell where ForgeBadger can bind loopback ports.
-
-Native Windows uses psmux over ConPTY; WSL uses tmux. Either path must be
-recorded explicitly, and repository unit tests do not substitute for a physical
-Windows terminal run.
-
-For a Windows evidence pass, record both sides explicitly:
-
-1. On native Windows, run `forgebadger doctor` and `psmux -V`, then exercise
-   ConPTY + psmux + browser + a real AI CLI through attach, input/output,
-   resize, refresh/reconnect, Gateway restart recovery, stop, and cleanup.
-2. If testing WSL compatibility, record the WSL distribution/version and run
-   the equivalent lifecycle with tmux.
-3. Keep `WINDOWS-WSL` as `Caveat` until the physical-host artifact is reviewed;
-   management UI checks or simulated platform tests do not clear it.
+Native Windows uses node-pty/ConPTY; WSL uses a POSIX PTY. On each physical host,
+exercise browser + real CLI attach, input/output, resize, refresh/reconnect,
+Gateway restart recovery, stop and cleanup. Also verify daemon loss marks
+missing sessions `lost`. Keep `WINDOWS-WSL` as `Caveat` until the physical-host
+artifact is reviewed; simulated tests do not clear it.
 
 Required only for source fallback:
 
@@ -166,19 +148,10 @@ Run the doctor first:
 forgebadger doctor
 ```
 
-`forgebadger doctor` is read-only: it reports `native_tmux`, `native_psmux`,
-`tmux_missing`, `psmux_missing`, or `psmux_outdated`. `forgebadger start` and
-`forgebadger init` may offer a fixed install/upgrade command only in an
-interactive TTY outside CI; the prompt defaults to No and requires explicit
-`y`/`yes`, then rechecks the runtime. npm postinstall never installs system
-software. Native Windows uses
-`winget install --id marlocarlo.psmux --exact --source winget`, or
-`winget upgrade --id marlocarlo.psmux --exact --source winget` when below
-3.3.8. Linux detection is limited to the fixed apt-get/dnf/yum/pacman/zypper/apk
-allowlist. If the runtime is still not ready—for example after decline,
-non-interactive/CI execution, install failure, or a PATH refresh requirement—
-`start`/`init` return non-zero and stop before runtime config/project files,
-database recovery, Gateway/Web startup, or listener creation.
+`forgebadger doctor` is read-only. It reports `session-server` terminal
+capability as `ready` or `unavailable`; it does not launch a daemon or install
+system software. Resolve missing native modules or supported-platform issues
+before terminal smoke. `start`/`init` do not offer tmux/psmux installation.
 
 Against a new `FORGEBADGER_STATE_DIR`, `doctor` reports `(not initialized)` and
 diagnostic default URLs without creating the directory, config, secrets,
@@ -229,7 +202,7 @@ NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
 FORGEBADGER_DB_PATH=/tmp/forgebadger-trial/forgebadger.db
 FORGEBADGER_MASTER_KEY=<64-character-hex-key-from-openssl-rand-hex-32>
 FORGEBADGER_JWT_SECRET=<32-or-more-random-characters>
-FORGEBADGER_TMUX_PREFIX=fb-trial-
+FORGEBADGER_SESSION_PREFIX=fb-trial-
 ```
 
 Generate local secrets when needed:
@@ -303,7 +276,7 @@ Follow this path in order and record the exact point of any failure.
     usable.
 11. Refresh the browser and confirm reconnect attaches to the same session.
 12. Stop the session from the Web console.
-13. Restart Gateway and Web, then confirm existing multiplexer-backed sessions recover
+13. Restart Gateway and Web, then confirm existing Session Server sessions recover
     or show the expected stopped state.
 14. Export diagnostics if anything fails or behaves unexpectedly.
 15. Submit feedback with environment, commands, diagnostics, screenshots or logs,
@@ -411,43 +384,22 @@ For source fallback, stop both foreground dev processes with `Ctrl-C`:
 - `pnpm --dir packages/gateway dev`
 - `pnpm --dir packages/web dev`
 
-ForgeBadger sessions are multiplexer-backed. Stopping Gateway or Web should not
+ForgeBadger sessions are hosted by an independent Session Server daemon. Stopping Gateway or Web should not
 kill a running CLI session by itself.
 
 ## 8. Cleanup
 
-List ForgeBadger sessions using the branch for the current platform.
+Use the authenticated Sessions page or session API to inspect the exact trial
+sessions and explicitly stop/delete only those no longer needed. Keep Gateway
+running while issuing these actions. Verify their CLI processes exit.
 
-macOS/Linux/WSL (tmux):
+Stopping Gateway/Web leaves Session Server and live CLI sessions running.
+Do not delete the daemon state directory while it is live. Different disposable
+instances need separate state directories and databases.
 
-```bash
-tmux list-sessions | grep '^fb-'
-```
-
-Native Windows PowerShell (psmux ≥ 3.3.8):
-
-```powershell
-psmux list-sessions | Select-String '^fb-'
-```
-
-Kill a trial multiplexer session only after confirming it is no longer needed:
-
-macOS/Linux/WSL:
-
-```bash
-tmux kill-session -t <session-name>
-```
-
-Native Windows PowerShell:
-
-```powershell
-psmux kill-session -t <session-name>
-```
-
-The same safety boundary applies to both branches: verify the exact `fb-*`
-session belongs to this disposable trial before killing it. Do not use broad
-patterns or kill sessions that may belong to another user, project, or active
-AI CLI task.
+Legacy tmux/psmux sessions are not adopted or automatically terminated. Finish
+those tasks and retire their exact sessions separately if needed; this upgrade
+does not uninstall system terminal software. Never use broad kill patterns.
 
 ## 9. What CI Cannot Prove
 

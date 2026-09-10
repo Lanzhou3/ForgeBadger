@@ -1,10 +1,13 @@
-import { createHash } from "node:crypto";
+import { PlatformActions } from "../services/platform-commands/actions.js";
+import { createPlatformCommands } from "../services/platform-commands/catalog.js";
+import { createHash, randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import type { CommandRunner } from "../lib/dependency-check.js";
 import { getAdapterLaunchStatus, isAdapterId } from "../services/adapter-discovery.js";
+import type { InMemorySessionManager } from "../services/session-manager.js";
 import {
   PROJECT_MANAGER_LEDGER_EVENT_TYPES,
   PROJECT_MANAGER_STAGE_STATUSES,
@@ -62,7 +65,7 @@ const goalBodySchema = z.object({
 const workItemCreateSchema = z.object({
   title: z.string().min(1).max(256),
   description: z.string().min(1).max(4_000).nullable().optional(),
-  status: statusSchema.optional(),
+  status: z.literal("todo").optional(),
   priority: z.number().int().min(0).max(100).optional(),
   acceptanceCriteria: z.array(z.string().min(1).max(1_000)).max(50).optional(),
   evidenceRefs: z.array(evidenceRefSchema).max(20).optional(),
@@ -186,7 +189,7 @@ type ProjectManagerTaskPacketQueueStatus =
 
 export function createProjectManagerRoutes(
   db: Database,
-  options: { adapterCommandRunner?: CommandRunner; masterKey?: string } = {}
+  options: { adapterCommandRunner?: CommandRunner; masterKey?: string; sessionManager?: InMemorySessionManager } = {}
 ): Router {
   const router = Router({ mergeParams: true });
   router.use(authenticate);
@@ -229,14 +232,15 @@ export function createProjectManagerRoutes(
     res.json({ code: 0, data: { workItems }, message: "" });
   });
 
-  router.post("/:projectId/project-manager/work-items", (req, res) => {
+  router.post("/:projectId/project-manager/work-items", async (req, res) => {
     const parse = workItemCreateSchema.safeParse(req.body ?? {});
     if (!parse.success) return sendInvalidInput(res);
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
     try {
-      const workItem = new ProjectManagerRepository(db, userId).createWorkItem(project.id, parse.data);
+      const { status: _status, ...input } = parse.data;
+      const workItem = await new PlatformActions({db,userId,...options},createPlatformCommands()).executeOwner("pm.work_item.create_with_evidence",{projectId:project.id,...input},randomUUID()) as ProjectManagerWorkItem;
       res.status(201).json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Work item creation failed");
@@ -369,7 +373,7 @@ export function createProjectManagerRoutes(
       });
       return;
     }
-    const launchStatus = await getAdapterLaunchStatus(requestedAdapter, options.adapterCommandRunner);
+    const launchStatus = await getAdapterLaunchStatus(requestedAdapter, options.adapterCommandRunner, options.sessionManager?.terminalBackendHealth());
     if (!launchStatus.launchEnabled) {
       res.status(409).json({
         code: 1,
@@ -388,41 +392,19 @@ export function createProjectManagerRoutes(
     const workItem = repo.getWorkItem(project.id, req.params.workItemId);
     if (!workItem) return sendWorkItemNotFound(res);
 
-    const sessionRepo = new SessionRepository(db, userId);
-    const existingSession = resolveTaskPacketSession(db, userId, project.id, workItem);
-    if (existingSession) {
-      const packet = buildTaskPacket({ project, workItem, session: existingSession });
-      res.json({
-        code: 0,
-        data: { taskPacket: packet, session: toTaskPacketSessionDto(existingSession) },
-        message: ""
-      });
-      return;
-    }
-
     try {
-      const session = sessionRepo.create({
-        projectId: project.id,
-        name: createTaskPacketSessionName(workItem.title),
-        aiTool: requestedAdapter,
-        workingDir: project.path,
-        credentialMode: "host_environment"
-      });
-      const updated = repo.updateWorkItem(project.id, workItem.id, {
-        details: withTaskPacketSessionLink(workItem.details, session, project, createTaskPacketContext(workItem, project))
-      });
-      const packet = buildTaskPacket({ project, workItem: updated, session });
-      res.status(201).json({
-        code: 0,
-        data: { taskPacket: packet, session: toTaskPacketSessionDto(session) },
-        message: ""
+      const result = await new PlatformActions({db,userId,...options},createPlatformCommands()).executeOwner(
+        "pm.task.prepare",{projectId:project.id,workItemId:workItem.id,aiTool:requestedAdapter},randomUUID()
+      ) as {taskPacket:unknown;session:unknown;existed:boolean};
+      res.status(result.existed ? 200 : 201).json({
+        code:0,data:{taskPacket:result.taskPacket,session:result.session},message:""
       });
     } catch (error) {
       sendMutationError(res, error, "Task packet start failed");
     }
   });
 
-  router.patch("/:projectId/project-manager/work-items/:workItemId", (req, res) => {
+  router.patch("/:projectId/project-manager/work-items/:workItemId", async (req, res) => {
     const parse = workItemUpdateSchema.safeParse(req.body ?? {});
     if (!parse.success) return sendInvalidInput(res);
     const userId = userIdFor(req);
@@ -431,7 +413,7 @@ export function createProjectManagerRoutes(
     const repo = new ProjectManagerRepository(db, userId);
     if (!repo.getWorkItem(project.id, req.params.workItemId)) return sendWorkItemNotFound(res);
     try {
-      const workItem = repo.updateWorkItem(project.id, req.params.workItemId, parse.data);
+      const workItem = await new PlatformActions({db,userId,...options},createPlatformCommands()).executeOwner("pm.work_item.update",{projectId:project.id,workItemId:req.params.workItemId,...parse.data},randomUUID()) as ProjectManagerWorkItem;
       res.json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Work item update failed");
@@ -709,7 +691,6 @@ function createStarterPackWorkItemInput(pack: StarterTaskPack) {
   return {
     title: pack.name,
     description: pack.promptFrame,
-    status: "todo" as const,
     acceptanceCriteria: pack.acceptanceChecklist,
     details: {
       taskPacket: {

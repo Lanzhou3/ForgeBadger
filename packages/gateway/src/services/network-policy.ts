@@ -56,12 +56,31 @@ export async function validateOutboundHost(
   return undefined;
 }
 
+/**
+ * Optional per-provider trust switch. When `allowPlaintextHttp` is true, a
+ * plain `http:` endpoint is accepted INSTEAD OF `https:`. This relaxes ONLY the
+ * protocol requirement — every other SSRF check (metadata host, private/
+ * loopback/link-local IP incl. DNS-resolved, `.local`/`.internal`, embedded
+ * IPv4, and credentials-in-URL) is still enforced, so the switch can never be
+ * abused to point a managed secret at cloud metadata or the local network.
+ */
+export interface PublicEndpointOptions {
+  allowPlaintextHttp?: boolean | undefined;
+}
+
 /** Synchronous fail-closed guard used before persisting or decrypting managed credentials. */
-export function assertPublicHttpsEndpoint(endpoint: string | null | undefined): void {
+export function assertPublicHttpsEndpoint(
+  endpoint: string | null | undefined,
+  options: PublicEndpointOptions = {}
+): void {
   if (!endpoint) throw new Error("Managed credentials require a public HTTPS endpoint");
   let url: URL;
   try { url = new URL(endpoint); } catch { throw new Error("Managed credentials require a valid public HTTPS endpoint"); }
-  if (url.protocol !== "https:" || url.username || url.password) {
+  const isTrustedPlaintextHttp = url.protocol === "http:" && options.allowPlaintextHttp === true;
+  if (url.protocol !== "https:" && !isTrustedPlaintextHttp) {
+    throw new Error("Managed credentials require a public HTTPS endpoint");
+  }
+  if (url.username || url.password) {
     throw new Error("Managed credentials require a public HTTPS endpoint");
   }
   const hostname = url.hostname.toLowerCase().replace(/\.$/u, "");
@@ -75,9 +94,10 @@ export function assertPublicHttpsEndpoint(endpoint: string | null | undefined): 
 /** Full DNS-aware guard for the last boundary before managed-secret use or config I/O. */
 export async function assertResolvedPublicHttpsEndpoint(
   endpoint: string | null | undefined,
-  resolveHost: OutboundHostResolver = lookup
+  resolveHost: OutboundHostResolver = lookup,
+  options: PublicEndpointOptions = {}
 ): Promise<void> {
-  assertPublicHttpsEndpoint(endpoint);
+  assertPublicHttpsEndpoint(endpoint, options);
   const url = new URL(endpoint as string);
   const rejection = await validateOutboundHost(url.hostname, resolveHost);
   if (rejection) throw new Error(`Managed credential endpoint rejected: ${rejection}`);

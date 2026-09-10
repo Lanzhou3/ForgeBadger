@@ -43,6 +43,8 @@ Optional:
 - `FORGEBADGER_PORT` - default `3000`
 - `FORGEBADGER_DB_PATH` - default `~/.forgebadger/forgebadger.db`
 - `FORGEBADGER_LOG_LEVEL` - default `info`
+- `FORGEBADGER_TERMINAL_BACKEND` - `session-server` (default) or `tmux` for the legacy tmux/psmux multiplexer backend
+- `FORGEBADGER_SESSION_SERVER_IPC_PATH` - override the Session Server IPC endpoint (Windows named pipe / POSIX socket); per-platform default when unset
 - `FORGEBADGER_TMUX_PREFIX` - default `fb-`
 
 For npm CLI startup, do not hand-create `FORGEBADGER_MASTER_KEY` or

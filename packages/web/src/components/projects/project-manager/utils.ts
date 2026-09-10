@@ -59,16 +59,7 @@ export function createWorkItemDraft(): WorkItemDraft {
     title: "",
     description: "",
     priority: "0",
-    status: "todo",
     acceptanceCriteriaText: "",
-    evidenceKind: "",
-    evidenceLabel: "",
-    evidenceRef: "",
-    evidencePath: "",
-    feishuKind: "",
-    feishuLabel: "",
-    feishuRef: "",
-    feishuMessageId: "",
   };
 }
 
@@ -94,27 +85,12 @@ export function createEditWorkItemDraft(item: ProjectManagerWorkItem | null): Ed
 
 export function createWorkItemInput(draft: WorkItemDraft, title: string): ProjectManagerWorkItemInput {
   const priority = Number.parseInt(draft.priority, 10);
-  const evidenceRef = createReference({
-    kind: draft.evidenceKind,
-    label: draft.evidenceLabel,
-    ref: draft.evidenceRef,
-    path: draft.evidencePath,
-  });
-  const feishuRef = createReference({
-    kind: draft.feishuKind,
-    label: draft.feishuLabel,
-    ref: draft.feishuRef,
-    feishuMessageId: draft.feishuMessageId,
-  });
 
   return {
     title,
     description: draft.description.trim() || null,
     priority: Number.isFinite(priority) ? priority : 0,
-    status: draft.status,
     acceptanceCriteria: parseProjectManagerTextList(draft.acceptanceCriteriaText),
-    ...(evidenceRef ? { evidenceRefs: [evidenceRef] } : {}),
-    ...(feishuRef ? { feishuRefs: [feishuRef] } : {}),
   };
 }
 
@@ -156,20 +132,6 @@ export function createSingleEvidenceReference(draft: EvidenceDraft): ProjectMana
     ...(path ? { path } : {}),
     ...(sessionId ? { sessionId } : {}),
   };
-}
-
-export function createReference(ref: ProjectManagerEvidenceRef): ProjectManagerEvidenceRef | undefined {
-  const trimmed = Object.fromEntries(
-    Object.entries(ref)
-      .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])
-      .filter(([, value]) => typeof value === "string" && value.length > 0)
-  ) as ProjectManagerEvidenceRef;
-
-  if (!trimmed.ref && !trimmed.path && !trimmed.sessionId && !trimmed.feishuMessageId) {
-    return undefined;
-  }
-
-  return trimmed;
 }
 
 export function readEvidenceReferenceType(value: string): EvidenceReferenceType {

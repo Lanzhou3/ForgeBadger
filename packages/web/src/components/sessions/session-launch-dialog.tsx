@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
+import { AdapterSelect, ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -26,7 +27,7 @@ interface SessionLaunchDialogProps {
 export function SessionLaunchDialog({ projectId, open, onOpenChange, onCreated, initialAdapter }: SessionLaunchDialogProps) {
   const { t } = useLanguage();
   const [adapter, setAdapter] = useState<RuntimeAdapterId>(initialAdapter ?? "claude");
-  const discoveryQuery = useQuery({ queryKey: ["adapters", "discovery"], queryFn: discoverAdapters, enabled: open });
+  const discoveryQuery = useQuery({ queryKey: ADAPTER_DISCOVERY_QUERY_KEY, queryFn: discoverAdapters, enabled: open });
 
   const launchableAdapters = useMemo(
     () => (discoveryQuery.data?.adapters ?? []).filter((entry) => entry.available && entry.launchEnabled && entry.runtimeModes.includes("terminal")),
@@ -63,9 +64,14 @@ export function SessionLaunchDialog({ projectId, open, onOpenChange, onCreated, 
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="launch-adapter">{t("common.aiTool")}</Label>
-              <select id="launch-adapter" aria-label={t("common.aiTool")} className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={adapter} onChange={(event) => setAdapter(event.target.value as RuntimeAdapterId)}>
-                {launchableAdapters.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
-              </select>
+              <AdapterSelect
+                id="launch-adapter"
+                ariaLabel={t("common.aiTool")}
+                className="h-10 w-full"
+                value={adapter}
+                onValueChange={setAdapter}
+                placeholder={t("common.loading")}
+              />
             </div>
             <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
               <CliBrandChip aiTool={adapter} />

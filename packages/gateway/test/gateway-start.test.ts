@@ -1,7 +1,7 @@
+import { PROTOCOL_VERSION } from "../src/services/session-server/ipc-protocol.js";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { once } from "node:events";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,40 +11,18 @@ import bcrypt from "bcryptjs";
 import { signJwt } from "../src/auth/jwt.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import type { Database } from "../src/db/types.js";
-import type { TmuxClient } from "../src/services/tmux.js";
+import type { TerminalBackendClient } from "../src/services/terminal-backend.js";
 import { createGatewayRuntime } from "../src/runtime/start-gateway.js";
 
 describe("createGatewayRuntime", () => {
-  it("fails terminal runtime readiness before account recovery or session recovery", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-runtime-gate-"));
-    const tmux = createMockTmuxClient();
-
-    await assert.rejects(
-      createGatewayRuntime(gatewayEnv(root), {
-        tmuxClient: tmux.client,
-        terminalRuntimeCheck: async () => ({
-          persistence: "tmux",
-          mode: "tmux_missing",
-          supported: false,
-          message: "Install tmux to enable persistent browser terminals."
-        })
-      }),
-      /Install tmux to enable persistent browser terminals/
-    );
-
-    assert.equal(tmux.listSessionsCalls, 0);
-    assert.equal(existsSync(path.join(root, "account-recovery.key")), false);
-    assert.equal(existsSync(path.join(root, "forgebadger.db")), false);
-  });
-
   it("mounts local account recovery in the production runtime", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "forgebadger-account-recovery-runtime-"));
-    const tmux = createMockTmuxClient();
-    const restorePath = await installFailingTmuxShim(root);
+    const backend = createMockBackendClient();
+
     let runtime: Awaited<ReturnType<typeof createGatewayRuntime>> | undefined;
 
     try {
-      runtime = await createGatewayRuntime(gatewayEnv(root), { tmuxClient: tmux.client });
+      runtime = await createGatewayRuntime(gatewayEnv(root), { backendClient: backend.client });
       runtime.server.listen(0, "127.0.0.1");
       await once(runtime.server, "listening");
       const address = runtime.server.address() as AddressInfo;
@@ -74,7 +52,7 @@ describe("createGatewayRuntime", () => {
 
       assert.equal(response.status, 200);
     } finally {
-      restorePath();
+
       if (runtime) await runtime.close();
     }
   });
@@ -82,12 +60,12 @@ describe("createGatewayRuntime", () => {
   it("returns 404 for removed API endpoints", async () => {
     // Arrange
     const root = await mkdtemp(path.join(tmpdir(), "forgebadger-gateway-cutover-"));
-    const tmux = createMockTmuxClient();
-    const restorePath = await installFailingTmuxShim(root);
+    const backend = createMockBackendClient();
+
     let runtime: Awaited<ReturnType<typeof createGatewayRuntime>> | undefined;
 
     try {
-      runtime = await createGatewayRuntime(gatewayEnv(root), { tmuxClient: tmux.client });
+      runtime = await createGatewayRuntime(gatewayEnv(root), { backendClient: backend.client });
       runtime.server.listen(0, "127.0.0.1");
       await once(runtime.server, "listening");
       const address = runtime.server.address() as AddressInfo;
@@ -110,27 +88,27 @@ describe("createGatewayRuntime", () => {
       // Assert
       assert.deepEqual(removedEndpoints.map((response) => response.status), [404, 404]);
     } finally {
-      restorePath();
+
       if (runtime) await runtime.close();
     }
   });
 
   it("creates an app without binding a port", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "forgebadger-gateway-runtime-"));
-    const tmux = createMockTmuxClient();
-    const restorePath = await installFailingTmuxShim(root);
+    const backend = createMockBackendClient();
+
     let runtime: Awaited<ReturnType<typeof createGatewayRuntime>> | undefined;
 
     try {
-      runtime = await createGatewayRuntime(gatewayEnv(root), { tmuxClient: tmux.client });
+      runtime = await createGatewayRuntime(gatewayEnv(root), { backendClient: backend.client });
 
       assert.ok(runtime.app);
       assert.ok(runtime.server);
       assert.equal(runtime.server.listening, false);
-      assert.equal(tmux.listSessionsCalls, 1);
-      assert.deepEqual(tmux.killedSessions, []);
+      assert.equal(backend.listSessionsCalls, 1);
+      assert.deepEqual(backend.killedSessions, []);
     } finally {
-      restorePath();
+
       if (runtime) {
         await runtime.close();
       }
@@ -139,8 +117,8 @@ describe("createGatewayRuntime", () => {
 
   it("validates GatewayEnv-shaped input instead of trusting its shape", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "forgebadger-gateway-runtime-"));
-    const tmux = createMockTmuxClient();
-    const restorePath = await installFailingTmuxShim(root);
+    const backend = createMockBackendClient();
+
     let runtime: Awaited<ReturnType<typeof createGatewayRuntime>> | undefined;
     let rejected = false;
 
@@ -154,39 +132,39 @@ describe("createGatewayRuntime", () => {
           FORGEBADGER_MASTER_KEY: "a".repeat(64),
           FORGEBADGER_JWT_SECRET: "jwt-secret-for-gateway-runtime-test-456"
         },
-        { tmuxClient: tmux.client }
+        { backendClient: backend.client }
       );
     } catch (error) {
       rejected = true;
       assert.match(String(error), /FORGEBADGER_PORT|greater than 0|positive/i);
     } finally {
-      restorePath();
+
       if (runtime && "close" in runtime) {
         await runtime.close();
       }
     }
 
     assert.equal(rejected, true);
-    assert.equal(tmux.listSessionsCalls, 0);
+    assert.equal(backend.listSessionsCalls, 0);
   });
 
   it("rejects an invalid recovery key before starting runtime resources", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "forgebadger-invalid-recovery-key-"));
-    const tmux = createMockTmuxClient();
-    const restorePath = await installFailingTmuxShim(root);
+    const backend = createMockBackendClient();
+
 
     try {
       await writeFile(path.join(root, "account-recovery.key"), "invalid\n", "utf8");
 
       await assert.rejects(
-        createGatewayRuntime(gatewayEnv(root), { tmuxClient: tmux.client }),
+        createGatewayRuntime(gatewayEnv(root), { backendClient: backend.client }),
         /account recovery key file is invalid/i
       );
     } finally {
-      restorePath();
+
     }
 
-    assert.equal(tmux.listSessionsCalls, 0);
+    assert.equal(backend.listSessionsCalls, 0);
   });
 });
 
@@ -201,8 +179,8 @@ function gatewayEnv(root: string) {
   };
 }
 
-function createMockTmuxClient(): {
-  client: TmuxClient;
+function createMockBackendClient(): {
+  client: TerminalBackendClient;
   killedSessions: string[];
   listSessionsCalls: number;
 } {
@@ -228,6 +206,7 @@ function createMockTmuxClient(): {
       async capturePane() {
         throw new Error("capturePane should not be called during startup recovery");
       },
+      async hasSession() { return false; },
       async listSessions() {
         calls.listSessionsCalls += 1;
         return [];
@@ -236,22 +215,110 @@ function createMockTmuxClient(): {
   };
 }
 
-async function installFailingTmuxShim(root: string): Promise<() => void> {
-  const tmuxPath = path.join(root, "tmux");
-  await writeFile(
-    tmuxPath,
-    "#!/bin/sh\nprintf 'test tmux shim should not be invoked\\n' >&2\nexit 42\n"
-  );
-  await chmod(tmuxPath, 0o700);
+import { createServer, type Socket } from "node:net";
+import { mkdir, rm } from "node:fs/promises";
+import { createPlatformAdapter } from "../src/services/session-server/platform-adapter.js";
+import { resolveSessionServerTokenPath, writeSessionServerTokenFile } from "../src/services/session-server/auth-token.js";
 
-  const originalPath = process.env.PATH;
-  process.env.PATH = root;
-
-  return () => {
-    if (originalPath === undefined) {
-      delete process.env.PATH;
-      return;
+async function daemonFixture(root: string, protocolVersion = PROTOCOL_VERSION) {
+  const token = "a".repeat(64);
+  const ipcPath = createPlatformAdapter().getIpcPath(root);
+  writeSessionServerTokenFile(resolveSessionServerTokenPath(root), token);
+  const connections = new Set<Socket>();
+  let shutdowns = 0;
+  const server = createServer((socket) => {
+    connections.add(socket);
+    socket.on("close", () => connections.delete(socket));
+    socket.on("error", () => {});
+    socket.setEncoding("utf8");
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      let newline: number;
+      while ((newline = buffer.indexOf("\n")) !== -1) {
+        const message = JSON.parse(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+        if (message.type === "shutdown_server") shutdowns++;
+        socket.write(`${JSON.stringify(message.type === "hello"
+          ? { type: "hello_ok", protocolVersion, pid: process.pid, startedAt: "2026-09-10T00:00:00.000Z" }
+          : { type: "ok", id: message.id, data: [] })}\n`);
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(ipcPath, resolve));
+  return {
+    ipcPath,
+    get shutdowns() { return shutdowns; },
+    get connections() { return connections.size; },
+    async close() {
+      for (const socket of connections) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-    process.env.PATH = originalPath;
   };
 }
+
+async function assertManagementDisconnected(daemon: Awaited<ReturnType<typeof daemonFixture>>) {
+  const deadline = Date.now() + 300;
+  while (daemon.connections > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(daemon.connections, 0, "Gateway must release its management connection");
+  assert.equal(daemon.shutdowns, 0, "Gateway must preserve the daemon");
+}
+
+describe("owned daemon connection lifecycle", () => {
+  it("disconnects when database startup fails without shutting down the daemon", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "fb-runtime-fail-"));
+    const daemon = await daemonFixture(root);
+    const dbDirectory = path.join(root, "database-directory");
+    await mkdir(dbDirectory);
+    try {
+      await assert.rejects(createGatewayRuntime({ ...gatewayEnv(root), FORGEBADGER_DB_PATH: dbDirectory }));
+      await assertManagementDisconnected(daemon);
+    } finally {
+      await daemon.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+it("disconnects the daemon even when runtime close fails", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "fb-runtime-close-"));
+  const daemon = await daemonFixture(root);
+  let runtime: Awaited<ReturnType<typeof createGatewayRuntime>> | undefined;
+  let iterator: IterableIterator<unknown> | undefined;
+  let db: Database | undefined;
+  try {
+    runtime = await createGatewayRuntime(gatewayEnv(root));
+    db = runtime.app.locals.db as Database;
+    // An active native SQLite iterator prevents database close. Exercise the
+    // real shutdown aggregation without replacing Gateway implementation.
+    iterator = db.prepare("SELECT 1 AS value UNION ALL SELECT 2 AS value").iterate();
+    iterator.next();
+    await assert.rejects(runtime.close(), /GATEWAY_SHUTDOWN_FAILED/);
+    await assertManagementDisconnected(daemon);
+  } finally {
+    iterator?.return?.();
+    await runtime?.close();
+    if (db?.open) db.close();
+    await daemon.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+it("rejects an old daemon before opening or reconciling the database", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "fb-runtime-old-daemon-"));
+  const daemon = await daemonFixture(root, 1);
+  const dbPath = path.join(root, "untouched.db");
+  const original = "database must not be opened before protocol acceptance";
+  await writeFile(dbPath, original);
+  try {
+    await assert.rejects(createGatewayRuntime({ ...gatewayEnv(root), FORGEBADGER_DB_PATH: dbPath }), /Incompatible Session Server/);
+    assert.equal(await readFile(dbPath, "utf8"), original);
+    await assertManagementDisconnected(daemon);
+  } finally {
+    await daemon.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

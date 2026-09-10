@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { UIEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, Eye, FileCode2, FileText, Globe2, History, Link2, MoreHorizontal, Pencil, Plus, Save, TerminalSquare, Trash2, Wrench } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, Eye, FileCode2, FileText, Globe2, History, Link2, MoreHorizontal, Package, Pencil, Plus, Save, TerminalSquare, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,15 +17,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AdapterSelect, ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { CliBrandChip } from "@/components/cli-brand-chip";
-import { CliBrandIcon } from "@/components/cli-brand-icon";
-import { ProjectManagerPanel } from "@/components/projects/ProjectManagerPanel";
 import { ConfigSyncPanel, type ConfigSyncPanelHandle } from "@/components/projects/ConfigSyncPanel";
+import { ExtractTemplateDialog } from "@/components/projects/ExtractTemplateDialog";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
 import { WorkspaceExplorer } from "@/components/projects/workspace";
-import { ProjectGraphPanel } from "@/components/projects/graph/ProjectGraphPanel";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -35,6 +34,7 @@ import {
   discoverAdapters,
   listSessions,
   listActivities,
+  createSession,
   deleteProject,
   listProjectSkills,
   listSkills,
@@ -49,7 +49,6 @@ import {
   type ProjectManagerTaskPacket,
   type SessionActivity,
 } from "@/lib/api";
-import { runtimeAdapterLabel } from "@/lib/cli-brand";
 import { findSessionTaskPacket, sessionTaskPacketProjectManagerHref } from "@/components/sessions/session-task-packet";
 import { useLanguage } from "@/hooks/use-language";
 import { normalizeSessionStatus } from "@/lib/session-status";
@@ -57,7 +56,19 @@ import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highligh
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/projects/markdown-renderer";
-import { SessionLaunchDialog } from "@/components/sessions/session-launch-dialog";
+import { toast } from "@/lib/toast";
+
+// Heavy tab panels are code-split so their dependencies (@xyflow/react for the
+// graph, @dnd-kit for the project manager) load on first use of their tab,
+// keeping the project-detail page itself fast to open on low-end machines.
+const ProjectGraphPanel = dynamic(
+  () => import("@/components/projects/graph/ProjectGraphPanel").then((mod) => mod.ProjectGraphPanel),
+  { ssr: false }
+);
+const ProjectManagerPanel = dynamic(
+  () => import("@/components/projects/ProjectManagerPanel").then((mod) => mod.ProjectManagerPanel),
+  { ssr: false }
+);
 
 const PROJECT_DETAIL_TABS = [
   "sessions",
@@ -85,7 +96,7 @@ export default function ProjectDetailPage() {
   const [selectedConfigPath, setSelectedConfigPath] = useState("");
   const [configDraft, setConfigDraft] = useState("");
   const [pendingConfigAction, setPendingConfigAction] = useState<"preview" | null>(null);
-  const [launchDialogOpen, setLaunchDialogOpen] = useState(false);
+  const [extractDialogOpen, setExtractDialogOpen] = useState(false);
   const configSyncRef = useRef<ConfigSyncPanelHandle>(null);
 
   const { data: projectData, isLoading: projectLoading } = useQuery({
@@ -123,7 +134,7 @@ export default function ProjectDetailPage() {
   });
 
   const { data: adapterDiscoveryData, isLoading: adapterDiscoveryLoading } = useQuery({
-    queryKey: ["adapters", "discovery"],
+    queryKey: ADAPTER_DISCOVERY_QUERY_KEY,
     queryFn: discoverAdapters,
   });
 
@@ -149,6 +160,17 @@ export default function ProjectDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       router.push("/projects");
+    },
+  });
+
+  const createSessionMutation = useMutation({
+    mutationFn: () => createSession({ projectId: id, aiTool: selectedRuntimeAdapter as RuntimeAdapterId }),
+    onSuccess: ({ session }) => {
+      queryClient.invalidateQueries({ queryKey: ["sessions", { projectId: id }] });
+      router.push(`/sessions/${session.id}`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : t("projects.failedCreateSession"));
     },
   });
 
@@ -298,48 +320,28 @@ export default function ProjectDetailPage() {
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Select
-                value={selectedRuntimeAdapter || undefined}
-                onValueChange={(value) => setSelectedRuntimeAdapter(value as RuntimeAdapterId)}
+              <AdapterSelect
+                id="runtime-adapter"
+                ariaLabel={t("projects.selectRuntimeCli")}
+                value={selectedRuntimeAdapter || ""}
+                onValueChange={setSelectedRuntimeAdapter}
                 disabled={adapterDiscoveryLoading || runtimeAdapters.length === 0}
-              >
-                <SelectTrigger
-                  id="runtime-adapter"
-                  aria-label={t("projects.selectRuntimeCli")}
-                  size="sm"
-                  className="h-8 w-52"
-                >
-                  {/* Reflects the selected item's icon + label (see SelectItem below). */}
-                  <SelectValue
-                    placeholder={
-                      adapterDiscoveryLoading
-                        ? t("projects.loadingRuntimeCli")
-                        : t("projects.selectRuntimeCli")
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {runtimeAdapters.map((adapter) => (
-                    <SelectItem
-                      key={adapter.id}
-                      value={adapter.id}
-                      disabled={!isAdapterLaunchable(adapter)}
-                      className="pr-8"
-                    >
-                      <CliBrandIcon aiTool={adapter.id} />
-                      {runtimeAdapterLabel(adapter, t)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                size="sm"
+                className="h-8 w-52"
+                placeholder={
+                  adapterDiscoveryLoading
+                    ? t("projects.loadingRuntimeCli")
+                    : t("projects.selectRuntimeCli")
+                }
+              />
               <Button
                 size="sm"
                 className="bg-brand text-brand-foreground hover:bg-brand/90"
-                onClick={() => setLaunchDialogOpen(true)}
-                disabled={cannotCreateSession}
+                onClick={() => createSessionMutation.mutate()}
+                disabled={cannotCreateSession || createSessionMutation.isPending}
               >
                 <Plus className="size-4" />
-                {t("projects.newSession")}
+                {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -481,11 +483,11 @@ export default function ProjectDetailPage() {
                       <Button
                         size="sm"
                         className="bg-brand text-brand-foreground hover:bg-brand/90"
-                        onClick={() => setLaunchDialogOpen(true)}
-                        disabled={cannotCreateSession}
+                        onClick={() => createSessionMutation.mutate()}
+                        disabled={cannotCreateSession || createSessionMutation.isPending}
                       >
                         <Plus className="size-4" />
-                        {t("projects.newSession")}
+                        {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
                       </Button>
                     </CardContent>
                   </Card>
@@ -503,7 +505,7 @@ export default function ProjectDetailPage() {
                         <SessionStatusDot status={session.status} />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium">
-                            {session.name || session.tmuxName || session.id}
+                            {session.name || session.runtimeSessionName || session.id}
                           </div>
                         </div>
                         {linkedTaskPacket && <LinkedWorkItemChip packet={linkedTaskPacket} />}
@@ -590,6 +592,12 @@ export default function ProjectDetailPage() {
             </TabsContent>
 
             <TabsContent value="config" className="mt-4 space-y-4">
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={() => setExtractDialogOpen(true)}>
+                  <Package className="mr-2 size-4" />
+                  {t("templates.extract")}
+                </Button>
+              </div>
               <ConfigSyncPanel
                 ref={configSyncRef}
                 projectId={id}
@@ -619,14 +627,13 @@ export default function ProjectDetailPage() {
           </Tabs>
         </>
       )}
-      <SessionLaunchDialog
+      <ExtractTemplateDialog
         projectId={id}
-        open={launchDialogOpen}
-        onOpenChange={setLaunchDialogOpen}
-        initialAdapter={selectedRuntimeAdapter || undefined}
-        onCreated={(session) => {
-          queryClient.invalidateQueries({ queryKey: ["sessions", { projectId: id }] });
-          router.push(`/sessions/${session.id}`);
+        open={extractDialogOpen}
+        onOpenChange={setExtractDialogOpen}
+        onExtracted={() => {
+          queryClient.invalidateQueries({ queryKey: ["project", id] });
+          queryClient.invalidateQueries({ queryKey: ["templates"] });
         }}
       />
     </div>

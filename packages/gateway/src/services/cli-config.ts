@@ -1,4 +1,3 @@
-import { homedir } from "node:os";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -6,6 +5,8 @@ import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 
 import type { AdapterId } from "./adapter-discovery.js";
 import { atomicWriteConfig } from "./cli-config-fs.js";
+import { globalConfigRoot } from "./cli-config-target.js";
+import { maskSecrets } from "./cli-config-apply.js";
 import {
   findCliConfigField,
   listCliConfigFields,
@@ -17,6 +18,8 @@ export interface CliConfigFileEntry {
   fileType: string;
   exists: boolean;
   sizeBytes: number;
+  /** File content with credential values masked; omitted when unreadable or too large. */
+  content?: string;
 }
 
 export interface CliProviderEntry {
@@ -69,27 +72,25 @@ const cliConfigMeta: Record<AdapterId, CliConfigMeta> = {
     mainFile: "settings.json",
     editableFiles: ["settings.json"],
     fileType: "json",
-    configRoot: () => process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(homedir(), ".claude")
+    configRoot: () => globalConfigRoot("claude")
   },
   opencode: {
     mainFile: "opencode.json",
     editableFiles: ["opencode.json", "opencode.jsonc", "AGENTS.md"],
     fileType: "json",
-    configRoot: () =>
-      process.env.OPENCODE_CONFIG_DIR?.trim() ||
-      path.join(process.env.XDG_CONFIG_HOME?.trim() || path.join(homedir(), ".config"), "opencode")
+    configRoot: () => globalConfigRoot("opencode")
   },
   codex: {
     mainFile: "config.toml",
     editableFiles: ["config.toml", "AGENTS.md"],
     fileType: "toml",
-    configRoot: () => process.env.CODEX_HOME?.trim() || path.join(homedir(), ".codex")
+    configRoot: () => globalConfigRoot("codex")
   },
   kimi: {
     mainFile: "config.toml",
     editableFiles: ["config.toml", "mcp.json", "AGENTS.md"],
     fileType: "toml",
-    configRoot: () => process.env.KIMI_CODE_HOME?.trim() || path.join(homedir(), ".kimi-code")
+    configRoot: () => globalConfigRoot("kimi")
   }
 };
 
@@ -124,7 +125,26 @@ export async function readCliConfigFile(
   relativePath: string
 ): Promise<CliConfigFileEntry> {
   assertEditableFile(adapter, relativePath);
-  return readConfigFile(cliConfigMeta[adapter].configRoot(), relativePath);
+  const entry = await readConfigFile(cliConfigMeta[adapter].configRoot(), relativePath);
+  // Single-file reads include the content (secrets masked); snapshot listings
+  // omit it to keep list payloads small and avoid accidental secret exposure.
+  if (!entry.exists || entry.content !== undefined || entry.sizeBytes === 0) {
+    return entry;
+  }
+  const raw = await readFileIfExists(cliConfigMeta[adapter].configRoot(), relativePath);
+  if (raw === undefined) return entry;
+  let content = raw;
+  const fileType = entry.fileType;
+  if (fileType === "json" || fileType === "toml") {
+    try {
+      content = maskSecrets(fileType, raw);
+    } catch {
+      // Malformed config: withhold content rather than leak a secret in an
+      // unparseable payload.
+      return entry;
+    }
+  }
+  return { ...entry, content };
 }
 
 export async function writeCliConfigFile(
@@ -260,7 +280,15 @@ export async function upsertCliModel(
   return mutateKimiConfig((doc) => {
     const models = ensureRecord(doc, "models");
     const existing = asRecord(models[alias]);
-    models[alias] = { ...existing, provider: input.provider, model: input.modelId };
+    models[alias] = {
+      // Kimi CLI hard-errors on custom models without a positive
+      // max_context_size; keep any value already present and fall back to
+      // 256k, matching the apply-provider default.
+      max_context_size: 262144,
+      ...existing,
+      provider: input.provider,
+      model: input.modelId
+    };
   });
 }
 

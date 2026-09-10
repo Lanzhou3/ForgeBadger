@@ -13,7 +13,8 @@
     "LICENSE",
     "docs/README.zh-CN.md",
     "docs/README.zh-TW.md",
-    "package.json"
+    "package.json",
+    "postinstall.mjs"
   ],
   "engines": {
     "node": ">=20.12 <25"
@@ -22,10 +23,13 @@
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm --dir ../.. build:npm",
     "test": "node scripts/run-tests.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "postinstall": "node postinstall.mjs"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.71.1",
+    "@xterm/addon-serialize": "^0.13.0",
+    "@xterm/headless": "^5.5.0",
     "bcryptjs": "^3.0.2",
     "better-sqlite3": "^11.7.0",
     "croner": "10.0.1",

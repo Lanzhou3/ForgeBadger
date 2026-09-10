@@ -4,7 +4,8 @@ import { redactSensitiveErrorMessage } from "../lib/redaction.js";
 import {
   isBlockedIpAddress as checkBlockedIpAddress,
   isBlockedMetadataHost as checkBlockedMetadataHost,
-  validateOutboundHost
+  validateOutboundHost,
+  type PublicEndpointOptions
 } from "./network-policy.js";
 
 export interface ModelEndpointHealth {
@@ -26,6 +27,7 @@ export interface CheckModelEndpointInput {
     hostname: string,
     options: { all: true }
   ) => Promise<Array<{ address: string; family: number }>>;
+  allowPlaintextHttp?: boolean;
 }
 
 export async function checkModelEndpoint(input: CheckModelEndpointInput): Promise<ModelEndpointHealth> {
@@ -38,7 +40,9 @@ export async function checkModelEndpoint(input: CheckModelEndpointInput): Promis
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const validationError = await validatePublicHttpsEndpointUrl(input.endpoint, resolveHost);
+    const validationError = await validatePublicHttpsEndpointUrl(input.endpoint, resolveHost, {
+      allowPlaintextHttp: input.allowPlaintextHttp,
+    });
     if (validationError) {
       const latencyMs = Math.max(0, now() - start);
       const checkedAt = new Date().toISOString();
@@ -84,7 +88,8 @@ export async function checkModelEndpoint(input: CheckModelEndpointInput): Promis
 
 export async function validatePublicHttpsEndpointUrl(
   endpoint: string,
-  resolveHost: CheckModelEndpointInput["resolveHost"] = lookup
+  resolveHost: CheckModelEndpointInput["resolveHost"] = lookup,
+  options: PublicEndpointOptions = {}
 ): Promise<string | undefined> {
   let endpointUrl: URL;
   try {
@@ -93,7 +98,8 @@ export async function validatePublicHttpsEndpointUrl(
     return "Invalid endpoint URL";
   }
 
-  if (endpointUrl.protocol !== "https:") {
+  const isTrustedPlaintextHttp = endpointUrl.protocol === "http:" && options.allowPlaintextHttp === true;
+  if (endpointUrl.protocol !== "https:" && !isTrustedPlaintextHttp) {
     return "Only https protocol is allowed";
   }
 

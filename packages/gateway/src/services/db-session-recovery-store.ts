@@ -9,7 +9,7 @@ interface SessionRecoveryRow {
   id: string;
   user_id: string;
   attach_token: string | null;
-  tmux_session: string;
+  runtime_session_name: string;
   ai_tool: string;
   working_dir: string;
   credential_mode: string;
@@ -34,9 +34,10 @@ class DbSessionRecoveryStore implements SessionRecoveryStore {
   async listSessions(): Promise<StoredSession[]> {
     const rows = this.db
       .prepare(
-        `SELECT id, user_id, attach_token, tmux_session, ai_tool, working_dir, credential_mode, created_at
+        `SELECT id, user_id, attach_token, runtime_session_name, ai_tool, working_dir, credential_mode, created_at
          FROM sessions
-         WHERE tmux_session IS NOT NULL AND tmux_session <> ''`
+         WHERE runtime_session_name IS NOT NULL AND runtime_session_name <> ''
+           AND status IN ('running', 'detached')`
       )
       .all() as SessionRecoveryRow[];
 
@@ -44,7 +45,7 @@ class DbSessionRecoveryStore implements SessionRecoveryStore {
       const session: StoredSession = {
         id: row.id,
         userId: row.user_id,
-        tmuxName: row.tmux_session,
+        runtimeSessionName: row.runtime_session_name,
         launchPlan: buildRecoveredLaunchPlan(row),
         createdAt: toIsoString(row.created_at)
       };
@@ -63,12 +64,12 @@ class DbSessionRecoveryStore implements SessionRecoveryStore {
     const result = this.db
       .prepare(
         `UPDATE sessions
-         SET attach_token = ?, tmux_session = ?, status = ?, updated_at = ?
+         SET attach_token = ?, runtime_session_name = ?, status = ?, updated_at = ?
          WHERE id = ? AND user_id = ?`
       )
       .run(
         storedToken,
-        session.tmuxName,
+        session.runtimeSessionName,
         "running",
         sqliteTimestampSeconds(),
         session.id,
@@ -88,10 +89,23 @@ class DbSessionRecoveryStore implements SessionRecoveryStore {
     this.db
       .prepare(
         `UPDATE sessions
-         SET tmux_session = NULL, status = ?, updated_at = ?
+         SET runtime_session_name = NULL, status = ?, updated_at = ?
          WHERE id = ? AND user_id = ?`
       )
       .run("exited", sqliteTimestampSeconds(), id, userId);
+  }
+
+  async markSessionLost(id: string, userId: string): Promise<void> {
+    // Keep runtime_session_name: the daemon lost the
+    // session, but the name is the
+    // only handle a future revive flow has to reference what was running.
+    this.db
+      .prepare(
+        `UPDATE sessions
+         SET status = ?, updated_at = ?
+         WHERE id = ? AND user_id = ?`
+      )
+      .run("lost", sqliteTimestampSeconds(), id, userId);
   }
 
   private encryptAttachToken(token: string): string {

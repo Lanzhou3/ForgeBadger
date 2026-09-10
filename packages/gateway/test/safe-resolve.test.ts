@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 import { describe, it } from "node:test";
 
 import { safeResolve, validateProjectRoot } from "../src/lib/safe-resolve.js";
@@ -31,7 +31,8 @@ describe("safeResolve", () => {
   });
 
   it("rejects denied roots as project roots", () => {
-    assert.throws(() => validateProjectRoot("/etc"), /denied root/);
+    const deniedRoot = process.platform === "win32" ? parse(process.cwd()).root : "/etc";
+    assert.throws(() => validateProjectRoot(deniedRoot), /denied root/);
   });
 
   it("rejects symlink escapes", () => {

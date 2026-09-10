@@ -62,7 +62,7 @@ describe("built-in Claude template surface", () => {
     db.close();
   });
 
-  it("describes terminal persistence without assuming tmux on native Windows", () => {
+  it("describes the bundled Session Server on every platform", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("builtin-terminal-runtime@example.com", "hash");
     const repo = new TemplateRepository(db, user.id);
@@ -71,7 +71,7 @@ describe("built-in Claude template surface", () => {
     for (const templateId of ["builtin-claude-code", "builtin-opencode", "builtin-codex", "builtin-kimi"]) {
       const content = (repo.getById(templateId)?.files ?? []).map((file) => file.content).join("\n");
       assert.doesNotMatch(content, /Terminal sessions are tmux-backed/);
-      assert.match(content, /tmux on macOS\/Linux.*psmux on Windows/i);
+      assert.match(content, /Session Server/i);
     }
     db.close();
   });

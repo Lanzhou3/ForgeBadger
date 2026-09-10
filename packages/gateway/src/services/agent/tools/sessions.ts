@@ -1,3 +1,4 @@
+import { executeAgentAction } from "../../platform-commands/agent-actions.js";
 /**
  * Session tools for the Copilot harness — the "sessions" seam. Read tools
  * expose AI CLI session state; the operate tool (launch a session) is
@@ -9,13 +10,11 @@
 import { z } from "zod";
 import {
   getSessionDetail,
-  listSessionSummaries,
-  dispatchSessionInput
+  listSessionSummaries
 } from "../platform-access.js";
 import { SessionRepository } from "../../../db/repositories/session-repository.js";
 import type { Database } from "../../../db/types.js";
 import type { AgentTool, AgentToolContext } from "../tool-registry.js";
-import { isAdapterId } from "../../adapter-discovery.js";
 
 const listSessionsInput = z.object({
   projectId: z.string().max(128).optional(),
@@ -101,19 +100,7 @@ export function createSessionTools(): AgentTool[] {
       requiresApproval: true,
       inputSchema: dispatchSessionInputToolSchema,
       async execute(input, context) {
-        const { sessionId, message } = dispatchSessionInputToolSchema.parse(input);
-        const { db, userId } = toolDb(context);
-        const sessionManager = context.sessionManager as
-          | Parameters<typeof dispatchSessionInput>[0]
-          | undefined;
-        if (!sessionManager) {
-          return { dispatched: false, error: "session runtime is not available in this context" };
-        }
-        const session = new SessionRepository(db, userId).getById(sessionId);
-        if (!session || !isAdapterId(session.aiTool)) {
-          return { dispatched: false, error: "session not found or adapter is unsupported" };
-        }
-        return await dispatchSessionInput(sessionManager, sessionId, session.aiTool, message);
+        return executeAgentAction("dispatch_task_to_session", dispatchSessionInputToolSchema.parse(input), context);
       }
     }
   ];

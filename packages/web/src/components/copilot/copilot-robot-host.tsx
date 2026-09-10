@@ -2,9 +2,17 @@
 
 import { useCallback, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 
-import { RobotChatPanel } from "@/components/copilot/robot-chat-panel";
 import { RobotWidget } from "@/components/copilot/robot-widget";
+
+// Lazy-loaded so the chat panel's heavy dependencies (react-markdown,
+// remark-gfm, shiki) never ship in the shared app-shell bundle — they load
+// only when the user actually opens the floating chat.
+const RobotChatPanel = dynamic(
+  () => import("@/components/copilot/robot-chat-panel").then((mod) => mod.RobotChatPanel),
+  { ssr: false }
+);
 
 /**
  * Dashboard-mounted pixel robot. Clicking toggles a floating quick-chat panel

@@ -6,13 +6,30 @@
  * their markdown content survives here as ordinary skills with
  * `source: "builtin"` so users keep managing them through the Skills page.
  *
+ * The Copilot's builtin engineering playbooks are seeded the same way so the
+ * agent seam and the Skills page share one source of truth.
+ *
  * Seeding is idempotent (`createIfMissing`) and never overwrites user edits.
  */
+import { BUILTIN_COPILOT_SKILLS } from "./agent/skills/copilot-skills.js";
+import type { SkillRepository } from "../db/repositories/skill-repository.js";
+
 export interface BuiltinSkillSeed {
   name: string;
   description: string;
   content: string;
 }
+
+/**
+ * The Copilot's builtin engineering playbooks, seeded into the platform Skills
+ * store as `source: "builtin"` rows. Their content is plain body text (no YAML
+ * frontmatter) so `load_skill` serves it directly.
+ */
+export const copilotBuiltinSkillSeeds: BuiltinSkillSeed[] = BUILTIN_COPILOT_SKILLS.map((skill) => ({
+  name: skill.name,
+  description: skill.description,
+  content: skill.body
+}));
 
 export const builtinSkillSeeds: BuiltinSkillSeed[] = [
   {
@@ -47,3 +64,18 @@ export const builtinSkillSeeds: BuiltinSkillSeed[] = [
     ].join("\n"),
   },
 ];
+
+/** Seed every builtin skill (legacy + Copilot playbooks) for one user. */
+export function seedBuiltinSkills(repo: SkillRepository): void {
+  for (const seed of [...builtinSkillSeeds, ...copilotBuiltinSkillSeeds]) {
+    repo.createIfMissing({
+      name: seed.name,
+      description: seed.description,
+      source: "builtin",
+      content: seed.content,
+      version: "1.0.0",
+      visibility: "private",
+      isEnabled: true
+    });
+  }
+}

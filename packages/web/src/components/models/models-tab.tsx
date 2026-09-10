@@ -1,5 +1,5 @@
 import { type FormEvent } from "react";
-import { Pencil, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Pencil, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ModelProfile } from "@/lib/api";
 
-import { EmptyLine, type ModelForm, type Translate } from "./shared";
+import {
+  COMMON_MODEL_CAPABILITIES,
+  EmptyLine,
+  type ModelForm,
+  type Translate,
+} from "./shared";
 
 interface ModelsTabProps {
   models: ModelProfile[];
@@ -24,6 +29,9 @@ interface ModelsTabProps {
   isSaving: boolean;
   isSettingDefault: boolean;
   isDeleting: boolean;
+  isSyncing: boolean;
+  syncDisabled: boolean;
+  onSync: () => void;
   onModelFormChange: (form: ModelForm) => void;
   onDialogOpenChange: (open: boolean) => void;
   onNewModel: () => void;
@@ -42,6 +50,9 @@ export function ModelsTab({
   isSaving,
   isSettingDefault,
   isDeleting,
+  isSyncing,
+  syncDisabled,
+  onSync,
   onModelFormChange,
   onDialogOpenChange,
   onNewModel,
@@ -51,16 +62,39 @@ export function ModelsTab({
   onSubmitModel,
   t,
 }: ModelsTabProps) {
+  function toggleCapability(capability: string) {
+    const next = modelForm.capabilities.includes(capability)
+      ? modelForm.capabilities.filter((item) => item !== capability)
+      : [...modelForm.capabilities, capability];
+    onModelFormChange({ ...modelForm, capabilities: next });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="min-w-0 flex-1 text-sm text-muted-foreground">
           {t("models.modelsWorkspaceDescription")}
         </p>
-        <Button type="button" size="sm" variant="outline" onClick={onNewModel}>
-          <Plus className="size-4" />
-          {t("models.newModel")}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={syncDisabled || isSyncing}
+            title={syncDisabled ? t("models.syncRequiresCredential") : t("models.syncProviderModelsDescription")}
+            onClick={onSync}
+          >
+            <RefreshCw className={`size-4 ${isSyncing ? "animate-spin" : ""}`} />
+            {t("models.syncProviderModels")}
+          </Button>
+          {syncDisabled && (
+            <span className="text-xs text-muted-foreground">{t("models.syncRequiresCredential")}</span>
+          )}
+          <Button type="button" size="sm" variant="outline" onClick={onNewModel}>
+            <Plus className="size-4" />
+            {t("models.newModel")}
+          </Button>
+        </div>
       </div>
 
       {models.length === 0 ? (
@@ -156,12 +190,41 @@ export function ModelsTab({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="model-form-capabilities">{t("models.capabilities")}</Label>
+              <Label>{t("models.capabilities")}</Label>
+              <div className="flex flex-wrap gap-3">
+                {COMMON_MODEL_CAPABILITIES.map((capability) => (
+                  <label key={capability} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-brand"
+                      checked={modelForm.capabilities.includes(capability)}
+                      onChange={() => toggleCapability(capability)}
+                    />
+                    {capability}
+                  </label>
+                ))}
+              </div>
               <Input
-                id="model-form-capabilities"
-                value={modelForm.capabilities}
-                onChange={(event) => onModelFormChange({ ...modelForm, capabilities: event.target.value })}
+                id="model-form-custom-capabilities"
+                value={modelForm.customCapabilities}
+                onChange={(event) =>
+                  onModelFormChange({ ...modelForm, customCapabilities: event.target.value })
+                }
+                placeholder={t("models.customCapabilitiesPlaceholder")}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="model-form-context-window">{t("models.contextWindow")}</Label>
+              <Input
+                id="model-form-context-window"
+                type="number"
+                min={1}
+                step={1}
+                placeholder={t("models.contextWindowPlaceholder")}
+                value={modelForm.contextWindow}
+                onChange={(event) => onModelFormChange({ ...modelForm, contextWindow: event.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">{t("models.contextWindowHint")}</p>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" disabled={isSaving} onClick={() => onDialogOpenChange(false)}>

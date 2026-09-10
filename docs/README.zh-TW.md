@@ -50,6 +50,7 @@ ForgeBadger 品牌。以 `OF-` 開頭的歷史階段 ID 繼續作為穩定的證
 ## 功能
 
 - 專案建立和匯入流程，支援 AI 工具設定生成與合規檢查。
+- 將專案的 AI CLI 設定沉澱為可複用範本，建立或匯入專案時選擇範本，並從公開 Git 倉庫匯入範本。
 - 基於多工器的終端機工作階段，瀏覽器斷線或 Gateway 重啟後仍可恢復：
   macOS/Linux/WSL 使用 tmux，原生 Windows 使用 psmux。
 - 支援 Claude Code、OpenCode、Codex 的適配器偵測和受控工作階段啟動。

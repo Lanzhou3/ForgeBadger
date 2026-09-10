@@ -1,19 +1,8 @@
-/**
- * Project Manager tools for the Copilot harness — the "development management"
- * seam. Gives the Copilot visibility into the PM board's task-packet queue and
- * the one-shot dispatch flow: ensure a linked CLI session exists, launch its
- * runtime, and deliver the packet prompt (prompt + acceptance criteria +
- * verification + evidence requirements) to the session terminal.
- *
- * Packet construction and session linking reuse services/project-manager/
- * task-packets.ts — the exact implementation behind the project-manager HTTP
- * routes; runtime launching reuses services/session-runtime.ts, the same path
- * as POST /api/v1/sessions/:id/start.
- */
+import { executeAgentAction } from "../../platform-commands/agent-actions.js";
+/** Project Manager reads and governed task preparation. Preparation never launches a CLI. */
 import { z } from "zod";
 
 import { ProjectRepository, type Project } from "../../../db/repositories/project-repository.js";
-import { SessionRepository } from "../../../db/repositories/session-repository.js";
 import {
   ProjectManagerRepository,
   type ProjectManagerWorkItem
@@ -22,17 +11,10 @@ import type { Database } from "../../../db/types.js";
 import type { AgentTool, AgentToolContext } from "../tool-registry.js";
 import {
   buildTaskPacket,
-  createTaskPacketContext,
-  createTaskPacketSessionName,
   resolveTaskPacketSession,
   resolveTaskPacketSessions,
-  withTaskPacketSessionLink,
-  isActiveSessionStatus,
   type ProjectManagerTaskPacket
 } from "../../project-manager/task-packets.js";
-import { dispatchSessionInput } from "../platform-access.js";
-import { startSessionRuntime } from "../../session-runtime.js";
-import { isAdapterId } from "../../adapter-discovery.js";
 
 const projectIdInput = z.object({
   projectId: z.string().min(1).max(128)
@@ -50,18 +32,6 @@ const getPacketInput = z.object({
 const startPacketInput = getPacketInput.extend({
   aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional()
 }).strict();
-
-interface PmDeps {
-  db: Database;
-  userId: string;
-  sessionManager?: unknown;
-}
-
-function requireSessionManager(context: AgentToolContext):
-  | NonNullable<PmDeps["sessionManager"]>
-  | undefined {
-  return context.sessionManager as NonNullable<PmDeps["sessionManager"]> | undefined;
-}
 
 /** Load project + work item, or a recoverable not-found marker. */
 function loadWorkItem(
@@ -123,66 +93,12 @@ export function createProjectManagerTools(): AgentTool[] {
     {
       name: "pm_start_task_packet",
       description:
-        "Start executing a development work item autonomously: ensure a linked CLI session exists (create one when needed), launch its runtime, bind the task packet context, and deliver the packet prompt to the session terminal. Idempotent when the packet already has a live linked session (re-dispatches the prompt). Approval required.",
+        "Prepare a task packet and an idle linked CLI session. This does not start the CLI or submit a prompt.",
       risk: "operate",
       requiresApproval: true,
       inputSchema: startPacketInput,
       async execute(input, context) {
-        const { projectId, workItemId, aiTool } = startPacketInput.parse(input);
-        const db = context.db as Database;
-        const userId = context.userId as string;
-        const sessionManager = requireSessionManager(context);
-        const loaded = loadWorkItem(db, userId, projectId, workItemId);
-        if ("error" in loaded) return { started: false, ...loaded.error };
-
-        const { project, workItem: current } = loaded;
-        let workItem = current;
-        let session = resolveTaskPacketSession(db, userId, projectId, workItem);
-        if (!session) {
-          // Create the durable session record bound to this work item.
-          session = new SessionRepository(db, userId).create({
-            projectId: project.id,
-            name: createTaskPacketSessionName(workItem.title),
-            aiTool: aiTool ?? project.aiTool ?? "",
-            workingDir: project.path,
-            credentialMode: "host_environment"
-          });
-          workItem = new ProjectManagerRepository(db, userId).updateWorkItem(project.id, workItem.id, {
-            details: withTaskPacketSessionLink(workItem.details, session, project, createTaskPacketContext(workItem, project))
-          });
-        }
-
-        // Ensure the runtime is live (no-op when already running/detached-live).
-        if (!isActiveSessionStatus(session.status)) {
-          await startSessionRuntime({
-            db,
-            userId,
-            masterKey: context.masterKey as string,
-            eventBus: undefined,
-            adapterCommandRunner: context.adapterCommandRunner as never,
-            sessionManager: sessionManager as never
-          }, session.id);
-          session = new SessionRepository(db, userId).getById(session.id) ?? session;
-        }
-
-        // Deliver the packet prompt to the session terminal.
-        const packet = buildTaskPacket({ project, workItem, session });
-        if (!isAdapterId(session.aiTool)) {
-          throw new Error("PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH");
-        }
-        const delivery = await dispatchSessionInput(
-          sessionManager as never,
-          session.id,
-          session.aiTool,
-          packet.prompt
-        );
-
-        return {
-          started: true,
-          sessionId: session.id,
-          delivery: delivery.delivery ?? null,
-          taskPacket: packet
-        };
+        return executeAgentAction("pm_start_task_packet", startPacketInput.parse(input), context);
       }
     }
   ];

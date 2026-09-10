@@ -13,11 +13,14 @@ export type CopilotRunStatus =
   | "awaiting_approval"
   | "completed"
   | "cancelled"
-  | "failed";
+  | "failed"
+  | "stopped"
+  | "indeterminate";
 
 export interface CopilotConversation {
   id: string;
   title: string | null;
+  grantId?: string | null;
   status: string;
   created_at: number;
   updated_at: number;
@@ -39,6 +42,8 @@ export interface CopilotMessage {
 }
 
 export interface CopilotRun {
+  revision?: number;
+  stopReason?: string;
   id: string;
   conversationId: string;
   userId: string;
@@ -54,6 +59,8 @@ export interface CopilotRun {
 }
 
 export interface CopilotPendingAction {
+  platformIntentId?: string | null;
+  platformIntent?: import("@/lib/platform-actions-api").PlatformIntent | null;
   id: string;
   runId: string;
   userId: string;
@@ -91,10 +98,10 @@ export function listConversations() {
   return fetchJson<{ conversations: CopilotConversation[] }>("/api/v1/copilot/conversations");
 }
 
-export function createConversation(title?: string) {
+export function createConversation(title?: string, grantId?: string) {
   return fetchJson<{ conversation: CopilotConversation }>("/api/v1/copilot/conversations", {
     method: "POST",
-    body: JSON.stringify(title ? { title } : {}),
+    body: JSON.stringify({ ...(title ? { title } : {}), ...(grantId ? { grantId } : {}) }),
   });
 }
 
@@ -126,6 +133,12 @@ export function sendMessage(conversationId: string, content: string, modelId?: s
       method: "POST",
       body: JSON.stringify(modelId ? { content, modelId } : { content }),
     }
+  );
+}
+
+export function listConversationRuns(conversationId: string) {
+  return fetchJson<{ runs: CopilotRun[]; activeRun: CopilotRun | null }>(
+    `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/runs`
   );
 }
 
@@ -217,6 +230,119 @@ export async function ensureConversationExists(conversationId: string | undefine
   if (conversationId) return conversationId;
   const { conversation } = await createConversation();
   return conversation.id;
+}
+
+export type CopilotAutomationStatus = "draft" | "enabled" | "paused";
+export type CopilotAutomationRunStatus = "pending" | "claimed" | "running" | "completed" | "failed" | "cancelled";
+
+export interface CopilotAutomation {
+  id: string;
+  name: string;
+  status: CopilotAutomationStatus;
+  scopeType: "global" | "project";
+  scopePolicy: string;
+  prompt: string;
+  scheduleKind: "cron" | "interval" | "once";
+  scheduleExpression: string;
+  timezone: string;
+  deliveryPlan: string;
+  authoritySnapshot: string;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CopilotAutomationRun {
+  id: string;
+  automationId: string;
+  triggerKind: "schedule" | "manual";
+  status: CopilotAutomationRunStatus;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface CopilotAutomationSuggestion {
+  id: string;
+  source: string;
+  status: "pending" | "accepted" | "dismissed";
+  jobSpec: string;
+}
+
+export interface CreateAutomationInput {
+  name: string;
+  scopeType: "global" | "project";
+  scopePolicy?: Record<string, unknown>;
+  prompt: string;
+  scheduleKind: "cron" | "interval" | "once";
+  scheduleExpression: string;
+  timezone?: string;
+  delivery?: { notify: boolean; conversation: boolean };
+}
+
+export function listAutomations() {
+  return fetchJson<{ automations: CopilotAutomation[] }>("/api/v1/copilot/automations");
+}
+
+export function createAutomation(input: CreateAutomationInput) {
+  return fetchJson<{ automation: CopilotAutomation }>("/api/v1/copilot/automations", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function deleteAutomation(automationId: string) {
+  return fetchJson<{ deleted: boolean }>(
+    `/api/v1/copilot/automations/${encodeURIComponent(automationId)}`,
+    { method: "DELETE" }
+  );
+}
+
+export function pauseAutomation(automationId: string) {
+  return fetchJson<{ automation: CopilotAutomation }>(
+    `/api/v1/copilot/automations/${encodeURIComponent(automationId)}/pause`,
+    { method: "POST" }
+  );
+}
+
+export function enableAutomation(automationId: string) {
+  return fetchJson<{ automation: CopilotAutomation }>(
+    `/api/v1/copilot/automations/${encodeURIComponent(automationId)}/enable`,
+    { method: "POST" }
+  );
+}
+
+export function runAutomationNow(automationId: string) {
+  return fetchJson<{ runId: string }>(
+    `/api/v1/copilot/automations/${encodeURIComponent(automationId)}/run`,
+    { method: "POST" }
+  );
+}
+
+export function listAutomationRuns(automationId: string) {
+  return fetchJson<{ runs: CopilotAutomationRun[] }>(
+    `/api/v1/copilot/automations/${encodeURIComponent(automationId)}/runs`
+  );
+}
+
+export function listAutomationSuggestions() {
+  return fetchJson<{ suggestions: CopilotAutomationSuggestion[] }>("/api/v1/copilot/automations/suggestions");
+}
+
+export function acceptAutomationSuggestion(suggestionId: string) {
+  return fetchJson<{ automation: CopilotAutomation }>(
+    `/api/v1/copilot/automations/suggestions/${encodeURIComponent(suggestionId)}/accept`,
+    { method: "POST" }
+  );
+}
+
+export function dismissAutomationSuggestion(suggestionId: string) {
+  return fetchJson<{ dismissed: boolean }>(
+    `/api/v1/copilot/automations/suggestions/${encodeURIComponent(suggestionId)}/dismiss`,
+    { method: "POST" }
+  );
 }
 
 // Re-export the envelope helper for tests that assert on the HTTP envelope.

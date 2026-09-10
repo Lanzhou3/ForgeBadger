@@ -143,7 +143,6 @@ export interface UpsertProjectManagerGoalInput {
 export interface CreateProjectManagerWorkItemInput {
   title: string;
   description?: string | null | undefined;
-  status?: ProjectManagerWorkItemStatus | undefined;
   priority?: number | undefined;
   acceptanceCriteria?: string[] | undefined;
   evidenceRefs?: ProjectManagerEvidenceRef[] | undefined;
@@ -360,7 +359,7 @@ export class ProjectManagerRepository {
   createWorkItem(projectId: string, input: CreateProjectManagerWorkItemInput): ProjectManagerWorkItem {
     const id = randomUUID();
     const now = Date.now();
-    const status = normalizeStatus(input.status ?? "todo");
+    const status = "todo" as const;
     const item = normalizeWorkItemInput(input);
     const stageId = input.stageId ? this.requireStage(projectId, input.stageId).id : null;
     const eventDetails = mergeLedgerDetails({

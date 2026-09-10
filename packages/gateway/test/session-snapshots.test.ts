@@ -40,7 +40,7 @@ describe("session snapshots", () => {
       name: "Snapshot Session",
       aiTool: "claude",
       workingDir: project.path,
-      tmuxSession: "of-user-session"
+      runtimeSessionName: "of-user-session"
     });
 
     const snapshot = recordSessionSnapshot({
@@ -53,7 +53,7 @@ describe("session snapshots", () => {
 
     const stored = new SessionSnapshotRepository(db, user.id).list({ sessionId: session.id });
 
-    assert.equal(snapshot.tmuxSession, "of-user-session");
+    assert.equal(snapshot.runtimeSessionName, "of-user-session");
     assert.equal(stored.length, 1);
     assert.equal(stored[0]?.configVersion, "1.2.3");
     assert.equal(stored[0]?.metadata?.includes("terminalScrollback"), false);

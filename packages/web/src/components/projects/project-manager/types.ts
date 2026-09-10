@@ -21,16 +21,7 @@ export interface WorkItemDraft {
   title: string;
   description: string;
   priority: string;
-  status: ProjectManagerWorkItemStatus;
   acceptanceCriteriaText: string;
-  evidenceKind: string;
-  evidenceLabel: string;
-  evidenceRef: string;
-  evidencePath: string;
-  feishuKind: string;
-  feishuLabel: string;
-  feishuRef: string;
-  feishuMessageId: string;
 }
 
 export interface EvidenceDraft {

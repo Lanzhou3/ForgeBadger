@@ -1,8 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { runCommand } from "./smoke-npm-package-runner.mjs";
 
 const workspaceRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const cliDist = path.join(workspaceRoot, "packages/cli/dist");
@@ -69,13 +70,7 @@ async function copyReadmeForNpm(sourcePath, targetPath) {
 }
 
 function run(command, args) {
-  const result = spawnSync(command, args, { cwd: workspaceRoot, stdio: "inherit", shell: false });
-  if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(" ")} failed with ${result.status}`);
-  }
-  if (result.signal) {
-    throw new Error(`${command} ${args.join(" ")} failed with signal ${result.signal}`);
-  }
+  runCommand(command, args, { cwd: workspaceRoot, printOutput: true });
 }
 
 async function preserveFile(filePath) {

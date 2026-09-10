@@ -16,15 +16,6 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "settings.diagnostics")).toBe("诊断导出");
     expect(getTranslation("zh-TW", "settings.diagnosticsExport")).toContain("診斷 JSON");
     expect(getTranslation("en", "settings.diagnosticsNotice")).toContain("not uploaded automatically");
-    expect(getTranslation("zh-CN", "settings.feishuIntegration")).toBe("飞书集成");
-    expect(getTranslation("zh-TW", "settings.feishuIntegration")).toBe("飛書整合");
-    expect(getTranslation("en", "settings.feishuIntegration")).toBe("Feishu Integration");
-    expect(getTranslation("zh-CN", "settings.feishuPhaseOneNotice")).toContain("远程控制尚未启用");
-    expect(getTranslation("zh-TW", "settings.feishuPhaseOneNotice")).toContain("遠端控制尚未啟用");
-    expect(getTranslation("en", "settings.feishuPhaseOneNotice")).toContain("remote control is not enabled");
-    expect(getTranslation("zh-CN", "settings.feishuAuthAuthenticated")).toBe("已认证");
-    expect(getTranslation("zh-TW", "settings.feishuAuthUnauthenticated")).toBe("未驗證");
-    expect(getTranslation("en", "settings.feishuIdentityBot")).toBe("Bot");
     expect(getTranslation("zh-CN", "projects.configNeedsReviewTitle")).toBe("配置需要处理");
     expect(getTranslation("zh-TW", "projects.configNeedsReviewTitle")).toBe("設定需要處理");
     expect(getTranslation("en", "projects.configNeedsReviewTitle")).toBe("Config needs review");
@@ -69,8 +60,8 @@ describe("i18n", () => {
     expect(getTranslation("en", "sessions.focusMode")).toBe("Focus mode");
     expect(getTranslation("zh-CN", "models.applyTargets")).toBe("支持目标");
     expect(getTranslation("en", "models.saveAndSyncModels")).toBe("Save and sync models");
-    expect(getTranslation("zh-CN", "models.deleteProviderInlineLabel")).toBe("删除服务商");
-    expect(getTranslation("zh-TW", "models.deleteProviderConfirm")).toContain("供應商");
+    expect(getTranslation("zh-CN", "models.cliStatusStale")).toBe("配置已被外部修改");
+    expect(getTranslation("zh-TW", "models.diagnosticsTab")).toBe("診斷");
     expect(getTranslation("en", "models.applyToCli")).toContain("Apply to CLI");
     expect(getTranslation("zh-CN", "models.applyToCli")).toBe("应用到 CLI");
     expect(getTranslation("zh-CN", "terminal.historyOutput")).toBe("历史输出");
