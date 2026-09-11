@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { discoverAdapters, listAdapterDefinitions } from "../src/services/adapter-discovery.js";
+import {
+  discoverAdapters,
+  getAdapterLaunchStatus,
+  listAdapterDefinitions
+} from "../src/services/adapter-discovery.js";
 import type { CommandRunner } from "../src/lib/dependency-check.js";
 
 describe("adapter discovery", () => {
@@ -47,5 +51,51 @@ describe("adapter discovery", () => {
     const adapters = await discoverAdapters(runner, { available: false, message: "daemon unavailable" });
     assert.ok(adapters.every((adapter) => adapter.available && !adapter.launchEnabled));
     assert.match(adapters[0]?.error ?? "", /daemon unavailable/);
+  });
+});
+
+describe("getAdapterLaunchStatus", () => {
+  it("probes only the requested adapter", async () => {
+    const probed: string[] = [];
+    const runner: CommandRunner = async (command) => {
+      probed.push(command);
+      return { exitCode: 0, stdout: `${command} 0.41.0\n`, stderr: "" };
+    };
+
+    const result = await getAdapterLaunchStatus("kimi", runner);
+
+    assert.deepEqual(probed, ["kimi"]);
+    assert.equal(result.available, true);
+    assert.equal(result.status, "available");
+    assert.equal(result.version, "kimi 0.41.0");
+    assert.equal(result.launchEnabled, true);
+  });
+
+  it("reports check_failed when the probe times out", async () => {
+    const runner: CommandRunner = async () => ({
+      exitCode: 124,
+      stdout: "",
+      stderr: "Command timed out after 10000ms"
+    });
+
+    const result = await getAdapterLaunchStatus("kimi", runner);
+
+    assert.equal(result.available, false);
+    assert.equal(result.launchEnabled, false);
+    assert.equal(result.status, "check_failed");
+    assert.match(result.error ?? "", /timed out/);
+  });
+
+  it("reports missing when the command cannot be found", async () => {
+    const runner: CommandRunner = async () => ({
+      exitCode: 127,
+      stdout: "",
+      stderr: "spawn kimi ENOENT"
+    });
+
+    const result = await getAdapterLaunchStatus("kimi", runner);
+
+    assert.equal(result.available, false);
+    assert.equal(result.status, "missing");
   });
 });

@@ -58,11 +58,21 @@ export function chooseDefaultAdapter(
 }
 
 function adapterStatusSuffix(
-  adapter: Pick<AdapterDiscovery, "id" | "available" | "launchEnabled">,
+  adapter: Pick<AdapterDiscovery, "id" | "available" | "launchEnabled" | "status">,
   supported: readonly RuntimeAdapterId[] | undefined,
-  t: (key: "projects.runtimeUnavailable" | "projects.runtimeLaunchDisabled" | "models.adapterNotSupported") => string
+  t: (
+    key:
+      | "projects.runtimeUnavailable"
+      | "projects.runtimeCheckFailed"
+      | "projects.runtimeLaunchDisabled"
+      | "models.adapterNotSupported"
+  ) => string
 ): string | null {
-  if (!adapter.available) return t("projects.runtimeUnavailable");
+  if (!adapter.available) {
+    return adapter.status === "check_failed"
+      ? t("projects.runtimeCheckFailed")
+      : t("projects.runtimeUnavailable");
+  }
   if (supported && !supported.includes(adapter.id)) return t("models.adapterNotSupported");
   if (!adapter.launchEnabled) return t("projects.runtimeLaunchDisabled");
   return null;

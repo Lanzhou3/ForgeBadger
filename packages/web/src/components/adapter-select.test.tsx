@@ -121,6 +121,29 @@ describe("AdapterSelect", () => {
     await screen.findByRole("option", { name: "Claude Code" });
     expect(screen.queryByRole("option", { name: /Codex CLI/ })).toBeNull();
   });
+
+  it("labels a failed probe as detection failed rather than missing", async () => {
+    discoverAdaptersMock.mockResolvedValue({
+      adapters: [
+        CLAUDE,
+        makeAdapter("kimi", {
+          label: "Kimi Code",
+          available: false,
+          status: "check_failed",
+          error: "Command timed out after 10000ms"
+        })
+      ]
+    });
+
+    renderAdapterSelect({ value: "claude" });
+
+    await openAdapterSelect();
+
+    const option = screen.getByRole("option", {
+      name: "Kimi Code (projects.runtimeCheckFailed)"
+    });
+    expect(option.getAttribute("aria-disabled")).toBe("true");
+  });
 });
 
 describe("adapter selection helpers", () => {

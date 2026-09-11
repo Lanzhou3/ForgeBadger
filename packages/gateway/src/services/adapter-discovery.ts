@@ -1,5 +1,7 @@
 import {
+  checkAdapterCommand,
   checkForgeBadgerRuntimeDependencies,
+  describeTerminalRuntime,
   type CommandRunner,
   type DependencyStatus,
   type TerminalBackendHealth
@@ -20,7 +22,7 @@ export interface AdapterDefinition {
 
 export interface AdapterDiscoveryResult extends AdapterDefinition {
   available: boolean;
-  status: "available" | "missing";
+  status: "available" | "missing" | "check_failed";
   version?: string;
   error?: string;
 }
@@ -96,11 +98,11 @@ export async function getAdapterLaunchStatus(
   backendHealth?: TerminalBackendHealth
 ): Promise<AdapterDiscoveryResult> {
   const definition = getAdapterDefinition(adapterId);
-  const report = await checkForgeBadgerRuntimeDependencies(runner, backendHealth);
+  const status = await checkAdapterCommand(definition.command, definition.versionArgs, runner);
   return toAdapterDiscoveryResult(
     definition,
-    getDependencyStatus(report.dependencies, definition.command),
-    report.terminalRuntime
+    status,
+    describeTerminalRuntime(backendHealth)
   );
 }
 
@@ -140,7 +142,7 @@ function toAdapterDiscoveryResult(
     runtimeModes: [...definition.runtimeModes],
     launchEnabled: definition.launchEnabled && status.available && terminalLaunchSupported,
     available: status.available,
-    status: status.available ? "available" : "missing",
+    status: status.available ? "available" : status.checkFailed ? "check_failed" : "missing",
     ...(status.version ? { version: status.version } : {}),
     ...(error ? { error } : {})
   };

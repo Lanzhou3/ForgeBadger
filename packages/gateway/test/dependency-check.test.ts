@@ -7,6 +7,7 @@ import {
   checkForgeBadgerRuntimeDependencies,
   runCommand
 } from "../src/lib/dependency-check.js";
+import type { CommandRunner } from "../src/lib/dependency-check.js";
 
 describe("checkCommand", () => {
   it("reports an available command with version output", async () => {
@@ -91,5 +92,59 @@ describe("Session Server runtime dependencies", () => {
     assert.equal(ready.terminalRuntime.mode, "ready");
     const down = await checkForgeBadgerRuntimeDependencies(runner, { available: false, message: "IPC unavailable" });
     assert.deepEqual(down.terminalRuntime, { persistence: "session-server", mode: "unavailable", supported: false, message: "IPC unavailable" });
+  });
+});
+
+describe("checkCommand failure classification", () => {
+  it("marks timeouts as checkFailed instead of missing", async () => {
+    const result = await checkCommand("kimi", ["--version"], async () => ({
+      exitCode: 124,
+      stdout: "",
+      stderr: "Command timed out after 10000ms"
+    }));
+
+    assert.equal(result.available, false);
+    assert.equal(result.checkFailed, true);
+  });
+
+  it("marks command-not-found exits as missing", async () => {
+    for (const exitCode of [127, 9009]) {
+      const result = await checkCommand("kimi", ["--version"], async () => ({
+        exitCode,
+        stdout: "",
+        stderr: "not found"
+      }));
+
+      assert.equal(result.available, false);
+      assert.equal(result.checkFailed, undefined);
+    }
+  });
+
+  it("marks non-zero version exits as checkFailed", async () => {
+    const result = await checkCommand("kimi", ["--version"], async () => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: "boom"
+    }));
+
+    assert.equal(result.available, false);
+    assert.equal(result.checkFailed, true);
+  });
+});
+
+describe("per-adapter probe timeouts", () => {
+  it("forwards the configured timeout to the runner", async () => {
+    const calls = new Map<string, number | undefined>();
+    const runner: CommandRunner = async (command, _args, options) => {
+      calls.set(command, options?.timeoutMs);
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+
+    await checkForgeBadgerDependencies(runner);
+
+    assert.equal(calls.get("kimi"), 10_000);
+    assert.equal(calls.get("claude"), undefined);
+    assert.equal(calls.get("opencode"), undefined);
+    assert.equal(calls.get("codex"), undefined);
   });
 });

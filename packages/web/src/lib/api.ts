@@ -781,7 +781,7 @@ export interface AdapterDiscovery {
   configDir: string;
   runtimeModes: Array<"terminal" | string>;
   available: boolean;
-  status: "available" | "missing";
+  status: "available" | "missing" | "check_failed";
   version?: string;
   error?: string;
 }

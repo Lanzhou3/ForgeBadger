@@ -19,7 +19,8 @@ export interface CommandRunnerOptions {
 
 export type CommandRunner = (
   command: string,
-  args: string[]
+  args: string[],
+  options?: CommandRunnerOptions
 ) => Promise<CommandResult>;
 
 export interface DependencyStatus {
@@ -27,6 +28,7 @@ export interface DependencyStatus {
   available: boolean;
   required?: boolean;
   version?: string;
+  checkFailed?: boolean;
   error?: string;
 }
 
@@ -59,13 +61,21 @@ interface DependencyCheck {
   command: string;
   args: string[];
   required: boolean;
+  timeoutMs?: number;
 }
 
 const ADAPTER_DEPENDENCY_CHECKS: DependencyCheck[] = [
   { command: "claude", args: ["--version"], required: false },
   { command: "opencode", args: ["--version"], required: false },
   { command: "codex", args: ["--version"], required: false },
-  { command: "kimi", args: ["--version"], required: false }
+  {
+    // kimi's native launcher needs ~2-4s on a cold cache (measured on
+    // Windows); the 3s default intermittently reported it as missing.
+    command: "kimi",
+    args: ["--version"],
+    required: false,
+    timeoutMs: 10_000
+  }
 ];
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 3000;
@@ -77,13 +87,21 @@ interface BoundedOutput {
   byteLength: number;
 }
 
+const MISSING_EXIT_CODES = new Set([
+  // spawn failure (ENOENT/EPERM) or POSIX shell "command not found"
+  127,
+  // cmd.exe "not recognized" when the Windows shell fallback runs a bare name
+  9009
+]);
+
 export async function checkCommand(
   command: string,
   args: string[],
-  runner: CommandRunner = runCommand
+  runner: CommandRunner = runCommand,
+  options?: CommandRunnerOptions
 ): Promise<DependencyStatus> {
   try {
-    const result = await runner(command, args);
+    const result = await runner(command, args, options);
     if (result.exitCode === 0) {
       const version = result.stdout.trim();
       return {
@@ -96,6 +114,9 @@ export async function checkCommand(
     return {
       name: command,
       available: false,
+      // Not-found codes mean the CLI is absent; any other failure (timeout,
+      // non-zero --version exit) means it exists but the probe misbehaved.
+      ...(MISSING_EXIT_CODES.has(result.exitCode) ? {} : { checkFailed: true }),
       error: result.stderr.trim() || `Command exited with ${result.exitCode}`
     };
   } catch (error) {
@@ -107,12 +128,22 @@ export async function checkCommand(
   }
 }
 
+/** Probe a single CLI command, applying the per-adapter timeout when set. */
+export async function checkAdapterCommand(
+  command: string,
+  args: string[],
+  runner: CommandRunner = runCommand
+): Promise<DependencyStatus> {
+  const timeoutMs = ADAPTER_DEPENDENCY_CHECKS.find((check) => check.command === command)?.timeoutMs;
+  return checkCommand(command, args, runner, timeoutMs === undefined ? undefined : { timeoutMs });
+}
+
 export async function checkForgeBadgerDependencies(
   runner: CommandRunner = runCommand
 ): Promise<DependencyStatus[]> {
   return Promise.all(
     ADAPTER_DEPENDENCY_CHECKS.map(async (check) => {
-      const status = await checkCommand(check.command, check.args, runner);
+      const status = await checkAdapterCommand(check.command, check.args, runner);
       return {
         ...status,
         required: check.required

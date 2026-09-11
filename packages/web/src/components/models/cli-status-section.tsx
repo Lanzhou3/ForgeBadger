@@ -70,6 +70,7 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
             const brand = getCliBrand(adapter);
             const detected = discovered.get(adapter);
             const installed = detected?.available === true;
+            const probeFailed = detected?.status === "check_failed";
             const status = appliedStatusForAdapter(statuses, adapter);
             const applied = status?.applied ?? null;
             const activeHere = isProviderActiveOnAdapter(status, provider.id);
@@ -98,7 +99,11 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
                       </Badge>
                     )}
                     <Badge variant={installed ? "secondary" : "outline"} className="text-[10px]">
-                      {installed ? t("models.sdkInstalled") : t("models.sdkMissing")}
+                      {installed
+                        ? t("models.sdkInstalled")
+                        : probeFailed
+                          ? t("models.cliStatusCheckFailed")
+                          : t("models.sdkMissing")}
                     </Badge>
                   </span>
                 </div>
