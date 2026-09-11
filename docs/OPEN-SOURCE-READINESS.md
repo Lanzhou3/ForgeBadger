@@ -9,7 +9,7 @@ boundaries clear before broader community use.
 ForgeBadger should be introduced as an operations cockpit for existing AI CLIs,
 not as a replacement for Cursor, Claude Code, Codex, OpenCode, or hosted coding
 agents. Its open-source value is the control layer around local
-terminal-multiplexer sessions (tmux on macOS/Linux/WSL, psmux ≥ 3.3.8 on
+Session Server sessions (POSIX PTY on macOS/Linux/WSL, ConPTY on
 native Windows):
 first-value activation guidance, runtime readiness, recoverable sessions,
 Project Manager task packets, bounded handoff exports, Feishu long-connection
@@ -35,7 +35,7 @@ or autonomous remote execution service. Current scope is:
 - local Gateway and Web console;
 - Dashboard first-value activation path for runtime, CLI adapter, model,
   project, template, and first-session setup;
-- multiplexer-backed AI CLI sessions;
+- Session Server-backed AI CLI sessions;
 - project and session recovery;
 - provider/model readiness;
 - approval-gated native Copilot and Project Manager traceability;
@@ -79,7 +79,7 @@ the registry for state, artifact shape, owner, and closeout rules.
 | Caveat | Current State | Rerun Path |
 |--------|---------------|------------|
 | Live provider pass | Caveat until a disposable live provider credential and explicit model id are used. | Run the provider smoke/readiness flow with redacted output and record only bounded status/code/model metadata. |
-| Physical Windows/WSL terminal | Caveat until a physical native Windows ConPTY + psmux lifecycle and/or real WSL tmux lifecycle completes the checklist. | Run `docs/TRIAL-CHECKLIST.md` Windows/WSL section and attach bounded, redacted terminal-runtime evidence. Ubuntu/Linux CI does not clear this gate. |
+| Physical Windows/WSL terminal | Caveat until a physical native Windows ConPTY + Session Server lifecycle and/or real WSL POSIX PTY lifecycle completes the checklist. | Run `docs/TRIAL-CHECKLIST.md` Windows/WSL section and attach bounded, redacted terminal-runtime evidence. Ubuntu/Linux CI does not clear this gate. |
 | Feishu bot long connection | `FEISHU-BOT-WS` stays Caveat until a real Feishu bot persistent-connection run is recorded. | Configure a self-built Feishu bot for persistent connection event subscription, subscribe to `im.message.receive_v1`, run `pnpm smoke:feishu-bot-live -- --require-gate-evidence --output <report.json>`, audit the saved report with `pnpm evidence:feishu-bot-live-audit -- <report.json>`, generate `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output <report.md>`, and record redacted receive/reply/reconnect evidence. Public webhook verification is optional compatibility evidence, not the primary gate. |
 | Completed first-user feedback | `FIRST-USER-FEEDBACK` stays Caveat until at least one completed feedback packet is attached or linked. | Use `.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml` or `docs/TRIAL-FEEDBACK.md`; run `pnpm trial:feedback-audit -- <packet.md>` for Markdown packets, `pnpm trial:feedback-issue-audit -- --issue=<number>` for a specific GitHub issue-form feedback item, or `pnpm trial:feedback-issues-audit` to scan non-tracker GitHub feedback candidates before maintainer triage. |
 
@@ -90,8 +90,8 @@ Current closeout: `docs/reports/v1.4-external-evidence-closeout-2026-05-29.md`.
 Contributions should preserve:
 
 - Gateway/Web separation;
-- platform multiplexer as the terminal persistence layer: tmux on
-  macOS/Linux/WSL and psmux on native Windows;
+- independent Session Server as the terminal persistence layer, with node-pty on
+  macOS/Linux/WSL and native Windows;
 - no terminal scrollback or raw provider payload storage in SQLite;
 - explicit approval before write actions proposed by Copilot or Feishu;
 - tenant scoping on all Gateway-owned state;

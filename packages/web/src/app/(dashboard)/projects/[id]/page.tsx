@@ -34,6 +34,7 @@ import {
   discoverAdapters,
   listSessions,
   listActivities,
+  createSession,
   deleteProject,
   listProjectSkills,
   listSkills,
@@ -55,7 +56,7 @@ import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highligh
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/projects/markdown-renderer";
-import { SessionLaunchDialog } from "@/components/sessions/session-launch-dialog";
+import { toast } from "@/lib/toast";
 
 // Heavy tab panels are code-split so their dependencies (@xyflow/react for the
 // graph, @dnd-kit for the project manager) load on first use of their tab,
@@ -95,7 +96,6 @@ export default function ProjectDetailPage() {
   const [selectedConfigPath, setSelectedConfigPath] = useState("");
   const [configDraft, setConfigDraft] = useState("");
   const [pendingConfigAction, setPendingConfigAction] = useState<"preview" | null>(null);
-  const [launchDialogOpen, setLaunchDialogOpen] = useState(false);
   const [extractDialogOpen, setExtractDialogOpen] = useState(false);
   const configSyncRef = useRef<ConfigSyncPanelHandle>(null);
 
@@ -160,6 +160,17 @@ export default function ProjectDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       router.push("/projects");
+    },
+  });
+
+  const createSessionMutation = useMutation({
+    mutationFn: () => createSession({ projectId: id, aiTool: selectedRuntimeAdapter as RuntimeAdapterId }),
+    onSuccess: ({ session }) => {
+      queryClient.invalidateQueries({ queryKey: ["sessions", { projectId: id }] });
+      router.push(`/sessions/${session.id}`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : t("projects.failedCreateSession"));
     },
   });
 
@@ -326,11 +337,11 @@ export default function ProjectDetailPage() {
               <Button
                 size="sm"
                 className="bg-brand text-brand-foreground hover:bg-brand/90"
-                onClick={() => setLaunchDialogOpen(true)}
-                disabled={cannotCreateSession}
+                onClick={() => createSessionMutation.mutate()}
+                disabled={cannotCreateSession || createSessionMutation.isPending}
               >
                 <Plus className="size-4" />
-                {t("projects.newSession")}
+                {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -472,11 +483,11 @@ export default function ProjectDetailPage() {
                       <Button
                         size="sm"
                         className="bg-brand text-brand-foreground hover:bg-brand/90"
-                        onClick={() => setLaunchDialogOpen(true)}
-                        disabled={cannotCreateSession}
+                        onClick={() => createSessionMutation.mutate()}
+                        disabled={cannotCreateSession || createSessionMutation.isPending}
                       >
                         <Plus className="size-4" />
-                        {t("projects.newSession")}
+                        {createSessionMutation.isPending ? t("projects.creating") : t("projects.newSession")}
                       </Button>
                     </CardContent>
                   </Card>
@@ -494,7 +505,7 @@ export default function ProjectDetailPage() {
                         <SessionStatusDot status={session.status} />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium">
-                            {session.name || session.tmuxName || session.id}
+                            {session.name || session.runtimeSessionName || session.id}
                           </div>
                         </div>
                         {linkedTaskPacket && <LinkedWorkItemChip packet={linkedTaskPacket} />}
@@ -616,16 +627,6 @@ export default function ProjectDetailPage() {
           </Tabs>
         </>
       )}
-      <SessionLaunchDialog
-        projectId={id}
-        open={launchDialogOpen}
-        onOpenChange={setLaunchDialogOpen}
-        initialAdapter={selectedRuntimeAdapter || undefined}
-        onCreated={(session) => {
-          queryClient.invalidateQueries({ queryKey: ["sessions", { projectId: id }] });
-          router.push(`/sessions/${session.id}`);
-        }}
-      />
       <ExtractTemplateDialog
         projectId={id}
         open={extractDialogOpen}

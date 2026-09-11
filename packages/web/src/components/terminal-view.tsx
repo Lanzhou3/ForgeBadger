@@ -122,7 +122,7 @@ export function TerminalView({
     socketRef.current = socket;
 
     socket.addEventListener("open", () => {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || socketRef.current !== socket) return;
       attemptCountRef.current = 0;
       setAttemptCount(0);
       setStatus("connected");
@@ -130,7 +130,7 @@ export function TerminalView({
       lastSentSizeRef.current = null;
       fitAndSendResize(true);
       // Layout can settle right after open (fonts, dev-mode CSS); re-fit once
-      // and push any correction so the tmux window converges to the real pane.
+      // and push any correction so the terminal window converges to the real pane.
       window.setTimeout(() => {
         if (mountedRef.current) fitAndSendResize();
       }, RESIZE_SETTLE_DELAY_MS);
@@ -138,7 +138,7 @@ export function TerminalView({
 
     socket.addEventListener("message", (event) => {
       const terminal = terminalRef.current;
-      if (!terminal) return;
+      if (!terminal || !mountedRef.current || socketRef.current !== socket) return;
 
       const message = parseTerminalWebSocketMessage(String(event.data));
       if (!message) return;
@@ -151,11 +151,23 @@ export function TerminalView({
         // corrupt the live frame). The reset leaves a clean normal buffer for
         // the history; the live repaint that follows paints the current UI.
         terminal.reset();
-        terminal.write(message.payload.data);
       }
 
-      if (message.type === "terminal_output") {
-        terminal.write(message.payload.data);
+      if (message.type === "terminal_history" || message.type === "terminal_output") {
+        terminal.write(message.payload.data, () => {
+          if (message.payload.sequence !== undefined && mountedRef.current && socketRef.current === socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "terminal_ack", payload: { sequence: message.payload.sequence } }));
+          }
+        });
+      }
+
+      if (message.type === "terminal_exit") {
+        clearReconnectTimer();
+        replaceTerminalInputListener(inputDisposableRef, null);
+        socketRef.current = null;
+        socket.close(1000);
+        setStatus("disconnected");
+        writerRef.current.refresh();
       }
 
       if (message.type === "terminal_error") {
@@ -165,10 +177,10 @@ export function TerminalView({
     });
 
     socket.addEventListener("close", (event) => {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || socketRef.current !== socket) return;
       socketRef.current = null;
 
-      if (event.wasClean) {
+      if ([1000, 4000, 4403, 4404].includes(event.code) || (event.wasClean && ![1011, 4001].includes(event.code))) {
         replaceTerminalInputListener(inputDisposableRef, null);
         setStatus("disconnected");
         return;
@@ -208,7 +220,7 @@ export function TerminalView({
       });
       replaceTerminalInputListener(inputDisposableRef, disposable);
     }
-  }, [sessionId, authToken, attachToken, terminalReady, fitAndSendResize]);
+  }, [sessionId, authToken, attachToken, terminalReady, fitAndSendResize, clearReconnectTimer]);
 
   const handleManualReconnect = useCallback(() => {
     clearReconnectTimer();
@@ -371,7 +383,7 @@ export function TerminalView({
     <div
       data-testid="terminal-frame"
       className={cn(
-        "grid h-full min-h-0 overflow-hidden rounded-lg border border-border bg-[#05070a]",
+        "grid h-full min-h-0 overflow-hidden bg-[#05070a]",
         showStatusBar ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]"
       )}
     >

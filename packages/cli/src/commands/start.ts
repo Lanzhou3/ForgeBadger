@@ -16,18 +16,7 @@ import {
   writeWebRuntimeConfig,
   type WriteWebRuntimeConfigOptions
 } from "../runtime/web-runtime.js";
-import {
-  type CliCommandRunner
-} from "../runtime/dependency-check.js";
-import {
-  ensureCliTerminalRuntime,
-  type CliTerminalRuntimeInstallResult,
-  type EnsureCliTerminalRuntimeOptions
-} from "../runtime/terminal-runtime-install.js";
-import {
-  writeEnvironmentCheckStart,
-  writeForgeBadgerInstallBanner
-} from "../ui/install-banner.js";
+import { writeForgeBadgerInstallBanner } from "../ui/install-banner.js";
 
 interface OutputWriter {
   write(chunk: string): unknown;
@@ -42,14 +31,8 @@ export interface RunStartOptions extends LoadRuntimeConfigOptions {
   writeRuntimeConfig?: (options: WriteWebRuntimeConfigOptions) => Promise<string>;
   spawn?: (entry: string, env: NodeJS.ProcessEnv) => ChildProcess;
   installShutdown?: (children: ChildProcess[]) => ShutdownCleanup | void;
-  dependencyRunner?: CliCommandRunner;
-  platform?: NodeJS.Platform;
   isTTY?: boolean;
-  confirmInstall?: EnsureCliTerminalRuntimeOptions["confirmInstall"];
-  installRunner?: EnsureCliTerminalRuntimeOptions["installRunner"];
-  ensureTerminalRuntime?: typeof ensureCliTerminalRuntime;
   stdout?: OutputWriter;
-  stderr?: OutputWriter;
 }
 
 interface ChildResult {
@@ -82,25 +65,10 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
   const spawnProcess = options.spawn ?? spawnNode;
   const installShutdown = options.installShutdown ?? installShutdownHandlers;
   const stdout = options.stdout ?? process.stdout;
-  const stderr = options.stderr ?? process.stderr;
   const env = options.env ?? process.env;
   const isTTY = options.isTTY ?? process.stdin.isTTY === true;
 
   writeForgeBadgerInstallBanner(stdout, { isTTY, env });
-  writeEnvironmentCheckStart(stdout);
-
-  const runtimeReady = await ensureTerminalRuntimeReady({
-    dependencyRunner: options.dependencyRunner,
-    platform: options.platform ?? process.platform,
-    isTTY,
-    env,
-    confirmInstall: options.confirmInstall,
-    installRunner: options.installRunner,
-    ensureTerminalRuntime: options.ensureTerminalRuntime ?? ensureCliTerminalRuntime,
-    stdout,
-    stderr
-  });
-  if (!runtimeReady) return 1;
 
   const config = await loadConfig(toRuntimeConfigOptions(options));
   const paths = resolvePaths();
@@ -149,46 +117,6 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
   } finally {
     cleanupShutdown();
   }
-}
-
-async function ensureTerminalRuntimeReady(options: {
-  dependencyRunner?: CliCommandRunner | undefined;
-  platform: NodeJS.Platform;
-  isTTY: boolean;
-  env: NodeJS.ProcessEnv;
-  confirmInstall?: EnsureCliTerminalRuntimeOptions["confirmInstall"];
-  installRunner?: EnsureCliTerminalRuntimeOptions["installRunner"];
-  ensureTerminalRuntime: typeof ensureCliTerminalRuntime;
-  stdout: OutputWriter;
-  stderr: OutputWriter;
-}): Promise<boolean> {
-  const result = await options.ensureTerminalRuntime({
-    platform: options.platform,
-    isTTY: options.isTTY,
-    env: options.env,
-    ...(options.dependencyRunner ? { dependencyRunner: options.dependencyRunner } : {}),
-    ...(options.confirmInstall ? { confirmInstall: options.confirmInstall } : {}),
-    ...(options.installRunner ? { installRunner: options.installRunner } : {})
-  });
-  if (result.status === "ready") {
-    options.stdout.write(`[2/2] Environment ready: ${result.runtime.message}\n\n`);
-    return true;
-  }
-  options.stderr.write(formatRuntimeFailure(result, "Startup aborted; Gateway was not started."));
-  return false;
-}
-
-function formatRuntimeFailure(
-  result: CliTerminalRuntimeInstallResult,
-  continuation: string
-): string {
-  const reason = result.status === "non_tty"
-    ? "The runtime was not installed in this non-interactive environment."
-    : result.status === "declined"
-      ? "Runtime installation was declined."
-      : result.message ?? "Runtime installation did not complete.";
-  const command = result.installCommand ? ` Install with: ${result.installCommand}.` : "";
-  return `Terminal requirement failed: ${result.runtime.message} ${reason}${command} ${continuation} Run \`forgebadger doctor\` for dependency details.\n`;
 }
 
 function toRuntimeConfigOptions(options: RunStartOptions): LoadRuntimeConfigOptions {

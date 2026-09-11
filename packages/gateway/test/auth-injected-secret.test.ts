@@ -14,7 +14,7 @@ import { createGatewayApp } from "../src/server.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
-import type { TmuxClient } from "../src/services/tmux.js";
+import type { TerminalBackendClient } from "../src/services/terminal-backend.js";
 
 const masterKey = "abcdef0123456789abcdef0123456789";
 
@@ -28,10 +28,11 @@ describe("Gateway app auth secret injection", () => {
 
     const db = createTestDb();
     const gateway = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret: injectedSecret,
       masterKey,
       db,
-      sessionManager: new InMemorySessionManager(createMockTmuxClient()),
+      sessionManager: new InMemorySessionManager(createMockBackendClient()),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
       eventBus: new ForgeBadgerEventBus()
     });
@@ -79,7 +80,7 @@ function createTestDb(): Database {
   return db;
 }
 
-function createMockTmuxClient(): TmuxClient {
+function createMockBackendClient(): TerminalBackendClient {
   return {
     async createSession() {},
     async killSession() {},

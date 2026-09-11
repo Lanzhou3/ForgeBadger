@@ -2,7 +2,7 @@ import {
   checkForgeBadgerRuntimeDependencies,
   type CommandRunner,
   type DependencyStatus,
-  type TerminalRuntimeStatus
+  type TerminalBackendHealth
 } from "../lib/dependency-check.js";
 
 export type AdapterId = "claude" | "opencode" | "codex" | "kimi";
@@ -93,10 +93,10 @@ export function getAdapterDefinition(adapterId: AdapterId): AdapterDefinition {
 export async function getAdapterLaunchStatus(
   adapterId: AdapterId,
   runner?: CommandRunner,
-  platform: NodeJS.Platform = process.platform
+  backendHealth?: TerminalBackendHealth
 ): Promise<AdapterDiscoveryResult> {
   const definition = getAdapterDefinition(adapterId);
-  const report = await checkForgeBadgerRuntimeDependencies(runner, platform);
+  const report = await checkForgeBadgerRuntimeDependencies(runner, backendHealth);
   return toAdapterDiscoveryResult(
     definition,
     getDependencyStatus(report.dependencies, definition.command),
@@ -106,9 +106,9 @@ export async function getAdapterLaunchStatus(
 
 export async function discoverAdapters(
   runner?: CommandRunner,
-  platform: NodeJS.Platform = process.platform
+  backendHealth?: TerminalBackendHealth
 ): Promise<AdapterDiscoveryResult[]> {
-  const report = await checkForgeBadgerRuntimeDependencies(runner, platform);
+  const report = await checkForgeBadgerRuntimeDependencies(runner, backendHealth);
   return adapterDefinitions.map((definition) =>
     toAdapterDiscoveryResult(
       definition,
@@ -129,7 +129,7 @@ function getDependencyStatus(dependencies: DependencyStatus[], command: string):
 function toAdapterDiscoveryResult(
   definition: AdapterDefinition,
   status: DependencyStatus,
-  terminalRuntime: TerminalRuntimeStatus
+  terminalRuntime: { supported: boolean; message: string }
 ): AdapterDiscoveryResult {
   const terminalLaunchSupported = !definition.runtimeModes.includes("terminal") || terminalRuntime.supported;
   const terminalError = terminalLaunchSupported ? undefined : terminalRuntime.message;

@@ -3,7 +3,7 @@ import { basename } from "node:path";
 
 import type { LaunchPlan } from "../adapters/claude.js";
 import { isAdapterId, type AdapterId } from "./adapter-discovery.js";
-import type { TmuxClient } from "./tmux.js";
+import type { TerminalBackendClient } from "./terminal-backend.js";
 import type { ForgeBadgerEventBus } from "./event-bus.js";
 import { SessionOutputRing } from "./session-output-buffer.js";
 import { SessionWriterLeases } from "./session-writer-leases.js";
@@ -19,7 +19,7 @@ import {
   programmaticDeliveryNeedle
 } from "./programmatic-terminal-submit.js";
 
-export type SessionStatus = "pending" | "running" | "detached" | "exited" | "error";
+export type SessionStatus = "pending" | "running" | "detached" | "exited" | "lost" | "error";
 
 export class SessionConflictError extends Error {
   constructor(message: string) {
@@ -32,7 +32,8 @@ export interface GateASession {
   id: string;
   userId: string;
   attachToken: string;
-  tmuxName: string;
+  /** Session Server identifier, persisted as runtime_session_name. */
+  runtimeSessionName: string;
   launchPlan: LaunchPlan;
   status: SessionStatus;
   createdAt: string;
@@ -48,7 +49,8 @@ export interface CreateSessionInput {
 }
 
 export interface AttachExistingSessionInput extends CreateSessionInput {
-  tmuxName: string;
+  /** Runtime session name; see GateASession.runtimeSessionName. */
+  runtimeSessionName: string;
 }
 
 export interface RecoverSessionsInput {
@@ -60,7 +62,8 @@ export interface StoredSession {
   id: string;
   userId: string;
   attachToken?: string;
-  tmuxName: string;
+  /** Runtime session name; see GateASession.runtimeSessionName. */
+  runtimeSessionName: string;
   launchPlan: LaunchPlan;
   createdAt: string;
 }
@@ -69,6 +72,13 @@ export interface SessionRecoveryStore {
   listSessions(): Promise<StoredSession[]>;
   upsertSession(session: StoredSession): Promise<void>;
   removeSession(id: string, userId: string): Promise<void>;
+  /**
+   * Mark a session as lost: the backing terminal daemon restarted and its
+   * registry no longer contains the session. Unlike removeSession this keeps
+   * the runtime session name (DB `runtime_session_name` column) so
+   * a future revive flow can reference it.
+   */
+  markSessionLost?(id: string, userId: string): Promise<void>;
 }
 
 export interface RecoveryResult {
@@ -78,10 +88,18 @@ export interface RecoveryResult {
 
 export interface SessionManagerOptions {
   db?: Database;
-  tmuxPrefix?: string;
+  /** Runtime session name prefix (FORGEBADGER_SESSION_PREFIX; default fb-). */
+  sessionPrefix?: string;
   runtimeInputAuthorizer?: (session: Readonly<GateASession>) => void;
   programmaticSubmitSettleMs?: Partial<Record<AdapterId, number>>;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * One-shot probe consumed once per status-correction scan: returns true
+   * when the terminal backend daemon was restarted since the last scan
+   * (detected via the IPC hello pid/startedAt identity). Orphaned sessions
+   * are then marked `lost` instead of `exited`.
+   */
+  detectBackendRestart?: () => boolean;
 }
 
 export interface ProgrammaticTaskInput {
@@ -125,27 +143,29 @@ export class InMemorySessionManager {
   private readonly writerGenerations = new Map<string, number>();
   private readonly sessions = new Map<string, GateASession>();
   private readonly sessionOutputs = new Map<string, SessionOutputRing>();
-  private readonly tmuxPrefix: string;
+  private readonly sessionPrefix: string;
   private readonly runtimeInputAuthorizer: ((session: Readonly<GateASession>) => void) | undefined;
   private readonly programmaticSubmitSettleMs: Readonly<Record<AdapterId, number>>;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly detectBackendRestart: (() => boolean) | undefined;
   private readonly sessionLocks = new Map<string, Promise<unknown>>();
   private correctionInterval: ReturnType<typeof setInterval> | undefined;
 
   constructor(
-    private readonly tmux: TmuxClient,
+    private readonly backend: TerminalBackendClient,
     private readonly recoveryStore: SessionRecoveryStore = new EmptyRecoveryStore(),
     private readonly eventBus?: ForgeBadgerEventBus,
     options: SessionManagerOptions = {}
   ) {
     this.writerLeases = new SessionWriterLeases(options.db ? {db:options.db} : {});
-    this.tmuxPrefix = normalizeTmuxPrefix(options.tmuxPrefix);
+    this.sessionPrefix = normalizeSessionPrefix(options.sessionPrefix);
     this.runtimeInputAuthorizer = options.runtimeInputAuthorizer;
     this.programmaticSubmitSettleMs = {
       ...DEFAULT_PROGRAMMATIC_SETTLE_MS,
       ...options.programmaticSubmitSettleMs
     };
     this.sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    this.detectBackendRestart = options.detectBackendRestart;
   }
 
   /**
@@ -175,12 +195,12 @@ export class InMemorySessionManager {
 
   async createSession(input: CreateSessionInput): Promise<GateASession> {
     const now = new Date().toISOString();
-    const tmuxName = buildTmuxName(input.userId, input.sessionId, this.tmuxPrefix);
+    const runtimeSessionName = buildRuntimeSessionName(input.userId, input.sessionId, this.sessionPrefix);
     const session: GateASession = {
       id: input.sessionId,
       userId: input.userId,
       attachToken: input.attachToken ?? randomUUID(),
-      tmuxName,
+      runtimeSessionName,
       launchPlan: input.launchPlan,
       status: "pending",
       createdAt: now,
@@ -189,18 +209,19 @@ export class InMemorySessionManager {
     this.sessions.set(session.id, session);
 
     try {
-      await this.tmux.createSession({
-        name: tmuxName,
+      await this.backend.createSession({
+        name: runtimeSessionName,
         cwd: input.launchPlan.cwd,
         command: input.launchPlan.command,
         args: input.launchPlan.args,
         env: {
           ...input.launchPlan.env,
+          FORGEBADGER_SESSION_ID: session.id,
+          FORGEBADGER_USER_ID: input.userId,
           FORGEBADGER_ATTACH_TOKEN: session.attachToken,
           // The Web terminal renders ANSI colors, so a NO_COLOR=1 leaked from
-          // the host shell (inherited via the tmux server global environment)
-          // must be overridden to empty — CLI TUIs (e.g. Claude Code) then
-          // render in color instead of monochrome.
+          // the host shell must be overridden to empty — CLI TUIs (e.g.
+          // Claude Code) then render in color instead of monochrome.
           NO_COLOR: ""
         }
       });
@@ -208,7 +229,7 @@ export class InMemorySessionManager {
         id: session.id,
         userId: session.userId,
         attachToken: session.attachToken,
-        tmuxName: session.tmuxName,
+        runtimeSessionName: session.runtimeSessionName,
         launchPlan: session.launchPlan,
         createdAt: session.createdAt
       });
@@ -259,35 +280,33 @@ export class InMemorySessionManager {
   }
 
   async attachExistingSession(input: AttachExistingSessionInput): Promise<GateASession> {
-    const liveTmuxSessions = await this.tmux.listSessions();
-    if (!liveTmuxSessions.includes(input.tmuxName)) {
-      throw new Error(`terminal multiplexer session not found: ${input.tmuxName}`);
+    const liveBackendSessions = await this.backend.listSessions();
+    if (!liveBackendSessions.includes(input.runtimeSessionName)) {
+      throw new Error(`runtime session not found: ${input.runtimeSessionName}`);
     }
 
-    // Verify the tmux session belongs to this ForgeBadger session before adopting
-    // it, so snapshot/restore cannot attach to a session owned by another
-    // session id or a stale attach token (hook auth break).
-    if (this.tmux.showEnvironment) {
-      const env = await this.tmux.showEnvironment(input.tmuxName);
+    // Verify the runtime session belongs to this ForgeBadger session before
+    // adopting it, so snapshot/restore cannot attach to a session owned by
+    // another session id or a stale attach token (hook auth break).
+    if (this.backend.showEnvironment) {
+      const env = await this.backend.showEnvironment(input.runtimeSessionName);
       const storedSessionId = env.FORGEBADGER_SESSION_ID;
       if (storedSessionId && storedSessionId !== input.sessionId) {
-        throw new Error(`terminal multiplexer session belongs to another ForgeBadger session: ${storedSessionId}`);
+        throw new Error(`runtime session belongs to another ForgeBadger session: ${storedSessionId}`);
       }
       const storedToken = env.FORGEBADGER_ATTACH_TOKEN;
       const requestedToken = input.attachToken ?? "";
       if (storedToken && requestedToken && storedToken !== requestedToken) {
-        throw new Error("terminal multiplexer session attach token mismatch");
+        throw new Error("runtime session attach token mismatch");
       }
     }
-
-    await this.tmux.configureSession?.(input.tmuxName);
 
     const now = new Date().toISOString();
     const session: GateASession = {
       id: input.sessionId,
       userId: input.userId,
       attachToken: input.attachToken ?? randomUUID(),
-      tmuxName: input.tmuxName,
+      runtimeSessionName: input.runtimeSessionName,
       launchPlan: input.launchPlan,
       status: "running",
       createdAt: now,
@@ -298,7 +317,7 @@ export class InMemorySessionManager {
       id: session.id,
       userId: session.userId,
       attachToken: session.attachToken,
-      tmuxName: session.tmuxName,
+      runtimeSessionName: session.runtimeSessionName,
       launchPlan: session.launchPlan,
       createdAt: session.createdAt
     });
@@ -309,9 +328,21 @@ export class InMemorySessionManager {
     return [...this.sessions.values()];
   }
 
-  async stopSession(id: string, tmuxName?: string, userId?: string): Promise<GateASession> {
+  /**
+   * Terminal backend health for launch gating (adapter discovery) and the
+   * dependencies report. A backend without a health signal (tests, mocks) is
+   * assumed available.
+   */
+  terminalBackendHealth(): { available: boolean; message?: string } {
+    if (this.backend.isAvailable?.() === false) {
+      return { available: false, message: "Session Server connection is unavailable" };
+    }
+    return { available: true };
+  }
+
+  async stopSession(id: string, runtimeSessionName?: string, userId?: string): Promise<GateASession> {
     const session = this.sessions.get(id);
-    if (!session && !tmuxName) {
+    if (!session && !runtimeSessionName) {
       throw new Error(`Unknown session: ${id}`);
     }
 
@@ -319,7 +350,7 @@ export class InMemorySessionManager {
       this.invalidateWriter(session);
       let failure: unknown;
       try {
-        await this.tmux.killSession(session.tmuxName);
+        await this.backend.killSession(session.runtimeSessionName);
         await this.recoveryStore.removeSession(id, session.userId);
       } catch (error) {
         failure = error;
@@ -335,29 +366,39 @@ export class InMemorySessionManager {
       return stopped;
     }
 
-    await this.tmux.killSession(tmuxName as string);
+    await this.backend.killSession(runtimeSessionName as string);
     if (userId) {
       await this.recoveryStore.removeSession(id, userId);
     }
-    return fallbackStoppedSession(id, tmuxName as string, userId);
+    return fallbackStoppedSession(id, runtimeSessionName as string, userId);
   }
 
   /**
-   * Reconcile a single session's status against the live tmux state. If the
-   * backing tmux session is gone, mark it exited and sync the DB; if it is
-   * still alive (a detached terminal), mark it detached. Emits at most one
-   * session_status_changed via updateSession.
+   * Reconcile a single session's status against the live backend state. If
+   * the backing runtime session is gone, mark it exited and sync the DB; if
+   * it is still alive (a detached terminal), mark it detached. Emits at most
+   * one session_status_changed via updateSession.
+   *
+   * When `opts.backendRestarted` is true (the terminal daemon restarted and
+   * its registry was rebuilt empty), a previously live session that is now
+   * missing is marked `lost` instead of `exited` — the CLI process was
+   * killed with the daemon, it did not exit on its own (VS Code
+   * reconnect/revive model: never silently show a dead session as running,
+   * never report a daemon kill as a clean exit).
    */
-  async reconcileSessionStatus(id: string): Promise<GateASession | undefined> {
+  async reconcileSessionStatus(
+    id: string,
+    opts: { backendRestarted?: boolean } = {}
+  ): Promise<GateASession | undefined> {
     const session = this.sessions.get(id);
     if (!session) {
       return undefined;
     }
-    if (session.status === "exited" || session.status === "error") {
+    if (session.status === "exited" || session.status === "error" || session.status === "lost") {
       return session;
     }
 
-    const alive = await this.tmux.hasSession(session.tmuxName);
+    const alive = await this.backend.hasSession(session.runtimeSessionName);
     // hasSession may await long enough for a concurrent stopSession or another
     // reconcile to remove the session. Re-check synchronously before mutating
     // so a stale caller never throws "Unknown session" (an unhandled rejection
@@ -367,6 +408,17 @@ export class InMemorySessionManager {
       return undefined;
     }
     if (!alive) {
+      const wasLive = current.status === "running" || current.status === "detached";
+      if (opts.backendRestarted && wasLive) {
+        const lost = this.updateSession(id, { status: "lost" });
+        try {
+          await this.recoveryStore.markSessionLost?.(id, current.userId);
+        } catch (error) {
+          console.error(`[session-manager] lost DB sync failed for ${id}`, error);
+        }
+        this.sessions.delete(id);
+        return lost;
+      }
       const exited = this.updateSession(id, { status: "exited" });
       try {
         await this.recoveryStore.removeSession(id, current.userId);
@@ -387,17 +439,20 @@ export class InMemorySessionManager {
 
   /**
    * Low-frequency correction scan (optional). Marks any in-memory session whose
-   * backing tmux session has disappeared as exited, and syncs the DB. Returns a
-   * teardown function to stop the timer.
+   * backing runtime session has disappeared as exited (or `lost` when the
+   * backend daemon restarted), and syncs the DB. Returns a teardown function to stop
+   * the timer. The backend-restart probe is consumed once per scan so every
+   * orphaned session of the same restart is marked consistently.
    */
   startStatusCorrectionScan(intervalMs = 30_000): () => void {
     if (this.correctionInterval) {
       clearInterval(this.correctionInterval);
     }
     const run = () => {
+      const backendRestarted = this.detectBackendRestart?.() ?? false;
       for (const session of this.sessions.values()) {
         if (session.status === "running" || session.status === "detached") {
-          void this.reconcileSessionStatus(session.id).catch((error) => {
+          void this.reconcileSessionStatus(session.id, { backendRestarted }).catch((error) => {
             console.error(`[session-manager] status correction failed for ${session.id}`, error);
           });
         }
@@ -413,24 +468,29 @@ export class InMemorySessionManager {
     };
   }
 
+  /**
+   * Rendered scrollback + current screen for the session (serialize capture
+   * from the Session Server headless screen). Note: the WebSocket attach path
+   * does not use this — the attach ack already carries the snapshot.
+   */
   async captureHistory(id: string): Promise<string> {
     const session = this.requireSession(id);
-    return this.tmux.capturePane(session.tmuxName);
+    return this.backend.capturePane(session.runtimeSessionName);
   }
 
   async resizeSession(id: string, cols: number, rows: number): Promise<void> {
     const session = this.requireSession(id);
-    await this.tmux.resizeWindow?.(session.tmuxName, cols, rows);
+    await this.backend.resizeWindow?.(session.runtimeSessionName, cols, rows);
   }
 
   async sendInput(id: string, data: string): Promise<void> {
     const session = this.requireSession(id);
     this.assertManualInputAllowed(session.userId, id);
-    if (!this.tmux.sendInput) {
-      throw new Error("terminal multiplexer input is not supported");
+    if (!this.backend.sendInput) {
+      throw new Error("terminal backend input is not supported");
     }
     this.assertRuntimeInputAuthorized(session);
-    await this.tmux.sendInput(session.tmuxName, data);
+    await this.backend.sendInput(session.runtimeSessionName, data);
   }
 
   async submitProgrammaticTask(
@@ -449,14 +509,14 @@ export class InMemorySessionManager {
       if (session.status !== "running" && session.status !== "detached") {
         throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
       }
-      if (!this.tmux.inspectPane || !this.tmux.stageProgrammaticInput || !this.tmux.pressEnter) {
-        throw new Error("terminal multiplexer programmatic input is not supported");
+      if (!this.backend.inspectPane || !this.backend.stageProgrammaticInput || !this.backend.pressEnter) {
+        throw new Error("terminal backend programmatic input is not supported");
       }
 
       const lease = this.writerLeases.acquire({ userId: session.userId, sessionId: id, workspace: session.launchPlan.cwd });
       try {
-        const before = await this.tmux.inspectPane(session.tmuxName);
-        if (before.dead || before.inMode || !isProgrammaticComposerReady(input.adapter, before.content)) {
+        const before = await this.backend.inspectPane(session.runtimeSessionName);
+        if (before.dead || !isProgrammaticComposerReady(input.adapter, before.content)) {
           throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
         }
 
@@ -469,17 +529,16 @@ export class InMemorySessionManager {
         // the first terminal write, so pre-write rejection remains retry-safe.
         this.assertRuntimeInputAuthorized(session);
         this.writerLeases.assertCurrent(lease);
-        // Once staging starts, tmux may already have received some or all bytes.
-        // Any later failure is therefore indeterminate and must never be exposed
-        // as a safe-to-retry pre-write rejection.
+        // Once staging starts, the backend may already have received some or
+        // all bytes. Any later failure is therefore indeterminate and must
+        // never be exposed as a safe-to-retry pre-write rejection.
         try {
-          await this.tmux.stageProgrammaticInput(session.tmuxName, input.message);
+          await this.backend.stageProgrammaticInput(session.runtimeSessionName, input.message);
           await this.sleep(this.programmaticSubmitSettleMs[input.adapter]);
 
-          const staged = await this.tmux.inspectPane(session.tmuxName);
+          const staged = await this.backend.inspectPane(session.runtimeSessionName);
           if (
             staged.dead
-            || staged.inMode
             || !composerContainsStagedTask(input.adapter, staged.content, input.message, needle)
           ) {
             throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
@@ -487,7 +546,7 @@ export class InMemorySessionManager {
 
           this.assertRuntimeInputAuthorized(session);
           this.writerLeases.assertCurrent(lease);
-          await this.tmux.pressEnter(session.tmuxName);
+          await this.backend.pressEnter(session.runtimeSessionName);
           return { adapter: input.adapter, needle, stagedPane: staged.content };
         } catch {
           throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
@@ -529,21 +588,29 @@ export class InMemorySessionManager {
   }
 
   async recoverForgeBadgerSessions(input: RecoverSessionsInput): Promise<RecoveryResult> {
-    const names = await this.tmux.listSessions();
+    const names = await this.backend.listSessions();
     const indexed = await this.recoveryStore.listSessions();
-    const indexedByTmuxName = new Map(indexed.map((session) => [session.tmuxName, session]));
+    const indexedByRuntimeSessionName = new Map(indexed.map((session) => [session.runtimeSessionName, session]));
     const recovered: GateASession[] = [];
     const killedOrphans: string[] = [];
+    // Inventory succeeded: absent durable runtime records cannot be recovered.
+    // This also handles pre-Session-Server records without touching old host processes.
+    const liveNames = new Set(names);
+    for (const stored of indexed) {
+      if (!liveNames.has(stored.runtimeSessionName)) {
+        await this.recoveryStore.markSessionLost?.(stored.id, stored.userId);
+      }
+    }
 
-    for (const tmuxName of names) {
-      if (!isForgeBadgerTmuxName(tmuxName, this.tmuxPrefix)) {
+    for (const runtimeSessionName of names) {
+      if (!isForgeBadgerSessionName(runtimeSessionName, this.sessionPrefix)) {
         continue;
       }
 
-      const indexedSession = indexedByTmuxName.get(tmuxName);
+      const indexedSession = indexedByRuntimeSessionName.get(runtimeSessionName);
       if (!indexedSession) {
-        await this.tmux.killSession(tmuxName);
-        killedOrphans.push(tmuxName);
+        await this.backend.killSession(runtimeSessionName);
+        killedOrphans.push(runtimeSessionName);
         continue;
       }
 
@@ -551,17 +618,13 @@ export class InMemorySessionManager {
         continue;
       }
 
-      // tmux outlives Gateway restarts, so bring recovered sessions up to the
-      // current scrolling and history defaults before exposing them again.
-      await this.tmux.configureSession?.(tmuxName);
-
       const now = new Date().toISOString();
       const attachToken = indexedSession.attachToken ?? randomUUID();
       const session: GateASession = {
         id: indexedSession.id,
         userId: indexedSession.userId || input.userId,
         attachToken,
-        tmuxName,
+        runtimeSessionName,
         launchPlan: indexedSession.launchPlan || createFallbackLaunchPlan(input.cwd, indexedSession.id),
         status: "detached",
         createdAt: indexedSession.createdAt || now,
@@ -618,8 +681,12 @@ function adapterFromLaunchCommand(command: string): AdapterId | undefined {
   return isAdapterId(executable) ? executable : undefined;
 }
 
-export function buildTmuxName(userId: string, sessionId: string, tmuxPrefix = "fb-"): string {
-  return `${normalizeTmuxPrefix(tmuxPrefix)}${shortId(userId)}-${sanitizeId(sessionId)}`;
+/**
+ * Runtime session name: `fb-{user8}-{sessionId}` (prefix configurable via
+ * FORGEBADGER_SESSION_PREFIX), persisted in runtime_session_name.
+ */
+export function buildRuntimeSessionName(userId: string, sessionId: string, sessionPrefix = "fb-"): string {
+  return `${normalizeSessionPrefix(sessionPrefix)}${shortId(userId)}-${sanitizeId(sessionId)}`;
 }
 
 function shortId(value: string): string {
@@ -630,11 +697,11 @@ function sanitizeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
-function isForgeBadgerTmuxName(tmuxName: string, tmuxPrefix: string): boolean {
-  return tmuxName.startsWith(tmuxPrefix);
+function isForgeBadgerSessionName(sessionName: string, sessionPrefix: string): boolean {
+  return sessionName.startsWith(sessionPrefix);
 }
 
-function normalizeTmuxPrefix(value = "fb-"): string {
+function normalizeSessionPrefix(value = "fb-"): string {
   const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, "");
   return sanitized || "fb-";
 }
@@ -662,13 +729,13 @@ export function createFallbackLaunchPlan(
   };
 }
 
-function fallbackStoppedSession(id: string, tmuxName: string, userId = ""): GateASession {
+function fallbackStoppedSession(id: string, runtimeSessionName: string, userId = ""): GateASession {
   const now = new Date().toISOString();
   return {
     id,
     userId,
     attachToken: "",
-    tmuxName,
+    runtimeSessionName,
     launchPlan: createFallbackLaunchPlan(process.cwd(), id),
     status: "exited",
     createdAt: now,

@@ -38,7 +38,7 @@ function createTestDb(): Database {
   return db;
 }
 
-interface MockTmuxCreateInput {
+interface MockBackendCreateInput {
   name: string;
   cwd: string;
   command: string;
@@ -46,14 +46,14 @@ interface MockTmuxCreateInput {
   env: Record<string, string>;
 }
 
-const mockTmuxCalls: string[] = [];
-const mockTmuxCreates: MockTmuxCreateInput[] = [];
-const mockTmuxClient = {
-  async createSession(input: MockTmuxCreateInput) {
-    mockTmuxCreates.push(input);
+const mockBackendCalls: string[] = [];
+const mockBackendCreates: MockBackendCreateInput[] = [];
+const mockBackendClient = {
+  async createSession(input: MockBackendCreateInput) {
+    mockBackendCreates.push(input);
   },
   async killSession(name: string) {
-    mockTmuxCalls.push(`kill:${name}`);
+    mockBackendCalls.push(`kill:${name}`);
   },
   async capturePane() {
     return "";
@@ -85,11 +85,12 @@ describe("security hardening", () => {
 
   before(async () => {
     db = createTestDb();
-    const sessionManager = new InMemorySessionManager(mockTmuxClient as any);
+    const sessionManager = new InMemorySessionManager(mockBackendClient as any);
     const apiKeyStore = new InMemoryApiKeyStore({ masterKey });
     const runtimeAuthorizationInvalidator = new RuntimeAuthorizationInvalidator();
     runtimeAuthorizationInvalidator.subscribe((invalidation) => runtimeInvalidations.push(invalidation));
     const app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
       db,
@@ -446,7 +447,7 @@ describe("security hardening", () => {
   });
 
   it("creates sessions in host_environment without credential or model fields", async () => {
-    mockTmuxCreates.length = 0;
+    mockBackendCreates.length = 0;
     const registerRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -505,9 +506,9 @@ describe("security hardening", () => {
     assert.equal(sessionData.data.session.credentialMode, undefined);
     assert.equal(sessionData.data.session.apiKeyId, undefined);
     assert.equal(JSON.stringify(sessionData).includes("test-api-key-session-secret"), false);
-    // Host-environment sessions never receive stored key material through tmux env.
-    assert.equal(mockTmuxCreates.at(-1)?.env.ANTHROPIC_API_KEY, undefined);
-    assert.equal(mockTmuxCreates.at(-1)?.env.ANTHROPIC_AUTH_TOKEN, undefined);
+    // Host-environment sessions never receive stored key material through backend env.
+    assert.equal(mockBackendCreates.at(-1)?.env.ANTHROPIC_API_KEY, undefined);
+    assert.equal(mockBackendCreates.at(-1)?.env.ANTHROPIC_AUTH_TOKEN, undefined);
   });
 
 
@@ -619,7 +620,7 @@ describe("security hardening", () => {
   });
 
   it("deletes only the project record and stops running project sessions", async () => {
-    mockTmuxCalls.length = 0;
+    mockBackendCalls.length = 0;
     const invalidationCount = runtimeInvalidations.length;
     const registerRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: "POST",
@@ -681,7 +682,7 @@ describe("security hardening", () => {
       (session: { id: string }) => session.id === sessionData.data.session.id
     ), false);
     assert.equal((await stat(rootPath)).isDirectory(), true);
-    assert.deepEqual(mockTmuxCalls, [`kill:${sessionData.data.session.tmuxName}`]);
+    assert.deepEqual(mockBackendCalls, [`kill:${sessionData.data.session.runtimeSessionName}`]);
     assert.deepEqual(runtimeInvalidations.slice(invalidationCount), [{
       scope: "project",
       userId: new UserRepository(db).findByEmail("delete-project@test.com")?.id,

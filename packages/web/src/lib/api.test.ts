@@ -429,7 +429,7 @@ describe("api client", () => {
         session: {
           id: "gate-a-session",
           attachToken: "attach-token",
-          tmuxName: "forgebadger-gate-a",
+          runtimeSessionName: "forgebadger-gate-a",
           status: "running",
         },
       })

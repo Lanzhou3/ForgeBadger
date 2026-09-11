@@ -67,7 +67,7 @@ export async function ensureCodexNotificationSettings(
  * project-level `.kimi-code/config.toml` hook block is silently never read.
  * The managed block therefore lives in the global config and points at one
  * shared forwarding script in the ForgeBadger state dir; session identity comes
- * from tmux env at runtime, so non-ForgeBadger Kimi sessions no-op quietly.
+ * from the session environment at runtime, so non-ForgeBadger Kimi sessions no-op quietly.
  *
  * Also strips the obsolete per-project managed block that earlier versions
  * wrote into `<project>/.kimi-code/config.toml`.
@@ -169,8 +169,9 @@ function mergeKimiHookText(existing: string, scriptPath: string): string {
 
 function forwardingScript(adapter: NotificationAdapter): string {
   // The generated hook has no project secrets embedded in it. Session identity,
-  // Gateway location, and the short-lived attach token come from tmux env at
-  // runtime, matching the existing Claude and OpenCode notification paths.
+  // Gateway location, and the short-lived attach token come from the session
+  // environment at runtime, matching the existing Claude and OpenCode
+  // notification paths.
   return `// ForgeBadger managed lifecycle hook — do not edit by hand
 const chunks = [];
 process.stdin.setEncoding("utf8");

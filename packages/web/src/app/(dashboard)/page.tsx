@@ -334,7 +334,7 @@ export default function DashboardPage() {
                   <SessionStatusDot status={session.status} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">
-                      {session.name || session.tmuxName || session.id}
+                      {session.name || session.runtimeSessionName || session.id}
                     </div>
                     <div className="mt-0.5 truncate text-xs text-muted-foreground">
                       {session.projectName ?? "—"}

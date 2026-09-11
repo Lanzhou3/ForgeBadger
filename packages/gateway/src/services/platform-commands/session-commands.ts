@@ -53,11 +53,11 @@ async function preflight(ctx: CommandContext, sessionId: string, action: string)
         const adapter = normalizeAdapter(session.aiTool);
         if (!adapter)
             throw new PlatformNoEffectError("Unsupported session adapter", 400);
-        const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner);
+        const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
         if (!status.launchEnabled)
             throw new PlatformNoEffectError(`${status.label} is not available for launch`);
     }
-    else if (action === 'stop' && !live && !session.tmuxSession)
+    else if (action === 'stop' && !live && !session.runtimeSessionName)
         throw new PlatformNoEffectError("Session is not running");
     else if (action === 'takeover' && !live)
         throw new PlatformNoEffectError("Session is not running");
@@ -95,7 +95,7 @@ async function start(ctx: CommandContext, sessionId: string) {
                 }).httpStatus = 400;
                 throw err;
             }
-            const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner);
+            const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner, sessionManager.terminalBackendHealth());
             if (!launchStatus.launchEnabled) {
                 const err = new Error(`${launchStatus.label} is not available for launch`);
                 (err as Error & {
@@ -132,7 +132,7 @@ async function start(ctx: CommandContext, sessionId: string) {
             const updatedSession = sessionRepo.update(dbSession.id, {
                 status: "running",
                 attachToken: session.attachToken,
-                tmuxSession: session.tmuxName,
+                runtimeSessionName: session.runtimeSessionName,
                 lastActive: new Date()
             });
             recordSessionActivity(db, eventBus, userId, updatedSession ?? dbSession, "session_started", "success", `Session ${dbSession.name} started`);
@@ -181,18 +181,19 @@ async function stop(ctx: CommandContext, sessionId: string) {
     try {
         return await sessionManager.runExclusive(sessionId, async () => {
             const live = sessionManager.getSession(sessionId);
-            const tmuxName = live?.tmuxName ?? dbSession.tmuxSession ?? undefined;
-            if (!live && !tmuxName) {
+            // Runtime session name (DB column `runtime_session_name`, historical naming).
+            const runtimeSession = live?.runtimeSessionName ?? dbSession.runtimeSessionName ?? undefined;
+            if (!live && !runtimeSession) {
                 throw new SessionConflictError("Session is not running");
             }
             const oldStatus = live?.status ?? dbSession.status;
             authorize();
             effectsStarted = true;
-            await sessionManager.stopSession(sessionId, tmuxName, userId);
+            await sessionManager.stopSession(sessionId, runtimeSession, userId);
             const updatedSession = sessionRepo.update(dbSession.id, {
                 status: "exited",
                 attachToken: "",
-                tmuxSession: null,
+                runtimeSessionName: null,
                 lastActive: new Date()
             });
             recordSessionActivity(db, eventBus, userId, updatedSession ?? dbSession, "session_stopped", "success", `Session ${dbSession.name} stopped`);
@@ -227,5 +228,5 @@ function recordSessionActivity(db: Database, eventBus: ForgeBadgerEventBus | und
 }
 function safeSession(session: Session) {
     const { attachToken: _token, modelId: _model, apiKeyId: _key, credentialMode: _credential, ...safe } = session;
-    return { ...safe, tmuxName: session.tmuxSession };
+    return safe;
 }

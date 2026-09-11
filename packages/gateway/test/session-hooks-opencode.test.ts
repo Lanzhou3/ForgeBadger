@@ -54,7 +54,7 @@ function createOpenCodeSession(db: Database): TestSession {
     aiTool: "opencode",
     workingDir: project.path,
     attachToken: "opencode-session-token",
-    tmuxSession: "of-opencode-session"
+    runtimeSessionName: "of-opencode-session"
   });
   return { id: session.id, userId: user.id };
 }

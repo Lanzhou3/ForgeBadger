@@ -18,7 +18,7 @@ it('composes grant preview approval execution receipt and revocation over real H
     const masterKey = 'a'.repeat(32), jwtSecret = 'b'.repeat(32);
     const user = new UserRepository(db).create('actions-http@test.dev', 'hash');
     const project = new ProjectRepository(db, user.id).create({ name: 'platform', path: '/tmp/platform-http', aiTool: '' });
-    const app = createGatewayApp({ db, masterKey, jwtSecret, sessionManager: new InMemorySessionManager({ async listSessions() {
+    const app = createGatewayApp({ db, masterKey, jwtSecret, sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock", sessionManager: new InMemorySessionManager({ async listSessions() {
                 return [];
             }, async createSession() {
             }, async killSession() {

@@ -52,6 +52,7 @@ docs/*
 !docs/TECH-ARCHITECTURE.md
 !docs/TEST-PLAN.md
 !docs/SMOKE-TEST.md
+!docs/MACOS-TERMINAL-ACCEPTANCE.md
 !docs/TRIAL-CHECKLIST.md
 !docs/TRIAL-FEEDBACK.md
 !docs/TRIAL-RUNBOOK.md

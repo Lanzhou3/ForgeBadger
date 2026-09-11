@@ -162,12 +162,12 @@ OS: linux x64 6.8.0
 Shell: /bin/zsh
 Browser: Chromium 125
 node --version: v24.14.1
-tmux -V: tmux 3.4
+Terminal backend: session-server
 claude --version: 2.1.152
 
 ### forgebadger doctor summary
 
-terminal native_tmux
+terminal ready
 
 ### Startup and health checks
 

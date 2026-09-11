@@ -25,6 +25,7 @@ it("HTTP accepts before model completion, restores durable runs, rejects busy ed
   repo.createModelProfile({providerProfileId:provider.id,name:"fixture",modelId:"fixture",capabilities:["chat"],isDefault:true});
   let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
   const app=createGatewayApp({db,masterKey,jwtSecret,
+    sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
     sessionManager:new InMemorySessionManager({async listSessions(){return[];},async createSession(){},async killSession(){},async capturePane(){return "";}} as never),
     apiKeyStore:new InMemoryApiKeyStore({masterKey}),llmFetch:async()=>{await gate;return new Response(JSON.stringify({choices:[{message:{content:"late"}}]}));}});
   await new Promise<void>(resolve=>app.server.listen(0,"127.0.0.1",resolve));

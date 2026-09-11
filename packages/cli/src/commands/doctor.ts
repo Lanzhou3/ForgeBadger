@@ -1,7 +1,7 @@
 import {
   checkCliDependencies,
-  describeCliTerminalRuntime,
-  type CliCommandRunner
+  type CliCommandRunner,
+  type NodePtyLoader
 } from "../runtime/dependency-check.js";
 import {
   inspectRuntimeConfig,
@@ -16,12 +16,12 @@ interface OutputWriter {
 
 export interface DoctorOptions {
   dependencyRunner?: CliCommandRunner;
+  loadNodePty?: NodePtyLoader;
   loadConfig?: () => Promise<RuntimeConfig>;
   inspectConfig?: (options: LoadRuntimeConfigOptions) => Promise<RuntimeConfigInspection>;
   stateDir?: string;
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
-  platform?: NodeJS.Platform;
   stdout?: OutputWriter;
   stderr?: OutputWriter;
 }
@@ -30,10 +30,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   const inspection = await resolveDoctorRuntimeInspection(options);
-  const dependencies = await checkCliDependencies(
-    options.dependencyRunner,
-    options.platform ?? process.platform
-  );
+  const dependencies = await checkCliDependencies(options.dependencyRunner, options.loadNodePty);
   const requiredMissing = dependencies.filter((item) => item.required && !item.available);
 
   const initialization = inspection.initialized ? "" : " (not initialized)";
@@ -49,11 +46,9 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<number> {
     const error = item.error ? ` - ${item.error}` : "";
     stdout.write(`${marker} ${item.name}${version}${error}\n`);
   }
-  const terminalRuntime = describeCliTerminalRuntime(dependencies, options.platform);
-  stdout.write(`terminal ${terminalRuntime.mode} - ${terminalRuntime.message}\n`);
 
   if (requiredMissing.length > 0) {
-    stderr.write("Required dependencies are missing. Install them before launching terminal sessions.\n");
+    stderr.write("Required dependencies are missing. Resolve them before launching terminal sessions.\n");
     return 1;
   }
 

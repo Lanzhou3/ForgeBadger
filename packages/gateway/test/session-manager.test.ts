@@ -6,7 +6,7 @@ import {
   createFallbackLaunchPlan,
   InMemorySessionManager
 } from "../src/services/session-manager.js";
-import type { TmuxClient } from "../src/services/tmux.js";
+import type { TerminalBackendClient } from "../src/services/terminal-backend.js";
 
 function launchPlan(): LaunchPlan {
   return {
@@ -36,9 +36,9 @@ describe("fallback terminal launch plan", () => {
 });
 
 describe("InMemorySessionManager", () => {
-  it("creates a Gateway-owned tmux session and marks it running", async () => {
+  it("creates a Gateway-owned backend session and marks it running", async () => {
     const calls: string[] = [];
-    const manager = new InMemorySessionManager(fakeTmux(calls));
+    const manager = new InMemorySessionManager(fakeBackend(calls));
 
     const session = await manager.createSession({
       userId: "user_123456",
@@ -46,7 +46,7 @@ describe("InMemorySessionManager", () => {
       launchPlan: launchPlan()
     });
 
-    assert.equal(session.tmuxName, "fb-user_123-session_abcdef");
+    assert.equal(session.runtimeSessionName, "fb-user_123-session_abcdef");
     assert.equal(session.status, "running");
     assert.deepEqual(calls, ["create:fb-user_123-session_abcdef"]);
   });
@@ -54,7 +54,7 @@ describe("InMemorySessionManager", () => {
   it("clears NO_COLOR so CLI colors render in the Web terminal", async () => {
     let capturedEnv: Record<string, string> | undefined;
     const manager = new InMemorySessionManager({
-      ...fakeTmux([]),
+      ...fakeBackend([]),
       async createSession(options) {
         capturedEnv = options.env;
       }
@@ -67,7 +67,7 @@ describe("InMemorySessionManager", () => {
     });
 
     // The Web terminal renders ANSI colors, so a host-leaked NO_COLOR=1
-    // (inherited from the tmux server global environment) must be overridden
+    // (inherited from the backend server global environment) must be overridden
     // to an empty value — CLI TUI (e.g. Claude Code) then renders in color.
     assert.equal(capturedEnv?.NO_COLOR, "");
     assert.equal(capturedEnv?.["FORGEBADGER_ATTACH_TOKEN"]?.length, 36);
@@ -75,7 +75,7 @@ describe("InMemorySessionManager", () => {
 
   it("marks a session exited when stopped", async () => {
     const calls: string[] = [];
-    const manager = new InMemorySessionManager(fakeTmux(calls));
+    const manager = new InMemorySessionManager(fakeBackend(calls));
     const session = await manager.createSession({
       userId: "user_123456",
       sessionId: "session_abcdef",
@@ -92,9 +92,9 @@ describe("InMemorySessionManager", () => {
     ]);
   });
 
-  it("preserves caller user id when stopping a stale tmux-backed session", async () => {
+  it("preserves caller user id when stopping a stale backend-backed session", async () => {
     const calls: string[] = [];
-    const manager = new InMemorySessionManager(fakeTmux(calls));
+    const manager = new InMemorySessionManager(fakeBackend(calls));
 
     const stopped = await manager.stopSession(
       "session_stale",
@@ -107,8 +107,8 @@ describe("InMemorySessionManager", () => {
     assert.deepEqual(calls, ["kill:fb-user_123-session_stale"]);
   });
 
-  it("returns captured history from tmux", async () => {
-    const manager = new InMemorySessionManager(fakeTmux([]));
+  it("returns captured history from backend", async () => {
+    const manager = new InMemorySessionManager(fakeBackend([]));
     const session = await manager.createSession({
       userId: "user_123456",
       sessionId: "session_abcdef",
@@ -117,13 +117,13 @@ describe("InMemorySessionManager", () => {
 
     const history = await manager.captureHistory(session.id);
 
-    assert.equal(history, "hello from tmux");
+    assert.equal(history, "hello from backend");
   });
 
-  it("resizes the backing tmux window for an active session", async () => {
+  it("resizes the backing backend window for an active session", async () => {
     const calls: string[] = [];
     const manager = new InMemorySessionManager({
-      ...fakeTmux(calls),
+      ...fakeBackend(calls),
       async resizeWindow(name, cols, rows) {
         calls.push(`resize:${name}:${cols}x${rows}`);
       }
@@ -142,10 +142,10 @@ describe("InMemorySessionManager", () => {
     ]);
   });
 
-  it("sends raw input to the backing tmux session for an active session", async () => {
+  it("sends raw input to the backing backend session for an active session", async () => {
     const calls: string[] = [];
     const manager = new InMemorySessionManager({
-      ...fakeTmux(calls),
+      ...fakeBackend(calls),
       async sendInput(name, data) {
         calls.push(`send:${name}:${JSON.stringify(data)}`);
       }
@@ -169,10 +169,10 @@ describe("InMemorySessionManager", () => {
     let pane = "› Ask Codex to do anything\n\nmodel · cwd";
     const plan = { ...launchPlan(), command: "codex" };
     const manager = new InMemorySessionManager({
-      ...fakeTmux(calls),
+      ...fakeBackend(calls),
       async inspectPane() {
         calls.push("inspect");
-        return { content: pane, dead: false, inMode: false };
+        return { content: pane, dead: false };
       },
       async stageProgrammaticInput(_name, data) {
         calls.push(`stage:${data}`);
@@ -215,11 +215,11 @@ describe("InMemorySessionManager", () => {
       }
     };
     const manager = new InMemorySessionManager({
-      ...fakeTmux([]),
+      ...fakeBackend([]),
       async inspectPane() {
         terminalCalls.push("inspect");
         authorized = false;
-        return { content: "› Ask Codex to do anything\n\nmodel · cwd", dead: false, inMode: false };
+        return { content: "› Ask Codex to do anything\n\nmodel · cwd", dead: false };
       },
       async stageProgrammaticInput() { terminalCalls.push("stage"); },
       async pressEnter() { terminalCalls.push("enter"); }
@@ -241,10 +241,10 @@ describe("InMemorySessionManager", () => {
     const message = "请".repeat(2032);
     let pane = "› Ask Codex to do anything\n\nmodel · cwd";
     const manager = new InMemorySessionManager({
-      ...fakeTmux(calls),
+      ...fakeBackend(calls),
       async inspectPane() {
         calls.push("inspect");
-        return { content: pane, dead: false, inMode: false };
+        return { content: pane, dead: false };
       },
       async stageProgrammaticInput() {
         calls.push("stage");
@@ -268,13 +268,13 @@ describe("InMemorySessionManager", () => {
     assert.deepEqual(calls.slice(1), ["inspect", "stage", "settle", "inspect", "enter"]);
   });
 
-  it("rejects an adapter mismatch before writing to tmux", async () => {
+  it("rejects an adapter mismatch before writing to backend", async () => {
     const writes: string[] = [];
     const manager = new InMemorySessionManager({
-      ...fakeTmux([]),
+      ...fakeBackend([]),
       async inspectPane() {
         writes.push("inspect");
-        return { content: "", dead: false, inMode: false };
+        return { content: "", dead: false };
       },
       async stageProgrammaticInput() {
         writes.push("stage");
@@ -296,13 +296,13 @@ describe("InMemorySessionManager", () => {
     assert.deepEqual(writes, []);
   });
 
-  it("rejects unsafe terminal control characters before reading or writing tmux", async () => {
+  it("rejects unsafe terminal control characters before reading or writing backend", async () => {
     const terminalCalls: string[] = [];
     const manager = new InMemorySessionManager({
-      ...fakeTmux([]),
+      ...fakeBackend([]),
       async inspectPane() {
         terminalCalls.push("inspect");
-        return { content: "", dead: false, inMode: false };
+        return { content: "", dead: false };
       },
       async stageProgrammaticInput() {
         terminalCalls.push("stage");
@@ -325,10 +325,10 @@ describe("InMemorySessionManager", () => {
   it("marks a partially failed stage as indeterminate without resending", async () => {
     const terminalCalls: string[] = [];
     const manager = new InMemorySessionManager({
-      ...fakeTmux([]),
+      ...fakeBackend([]),
       async inspectPane() {
         terminalCalls.push("inspect");
-        return { content: "› Ask Codex to do anything\n\nmodel · cwd", dead: false, inMode: false };
+        return { content: "› Ask Codex to do anything\n\nmodel · cwd", dead: false };
       },
       async stageProgrammaticInput(_name, data) {
         terminalCalls.push(`stage:${data}`);
@@ -355,10 +355,10 @@ describe("InMemorySessionManager", () => {
     const terminalCalls: string[] = [];
     let pane = "› Ask Codex to do anything\n\nmodel · cwd";
     const manager = new InMemorySessionManager({
-      ...fakeTmux([]),
+      ...fakeBackend([]),
       async inspectPane() {
         terminalCalls.push("inspect");
-        return { content: pane, dead: false, inMode: false };
+        return { content: pane, dead: false };
       },
       async stageProgrammaticInput(_name, data) {
         terminalCalls.push(`stage:${data}`);
@@ -388,7 +388,7 @@ describe("InMemorySessionManager", () => {
   it("marks launch failures as errors", async () => {
     const manager = new InMemorySessionManager({
       async createSession() {
-        throw new Error("tmux failed");
+        throw new Error("backend failed");
       },
       async killSession() {},
       async capturePane() {
@@ -406,19 +406,18 @@ describe("InMemorySessionManager", () => {
           sessionId: "session_abcdef",
           launchPlan: launchPlan()
         }),
-      /tmux failed/
+      /backend failed/
     );
 
     assert.equal(manager.getSession("session_abcdef")?.status, "error");
   });
 
-  it("recovers existing ForgeBadger tmux sessions after Gateway restart", async () => {
-    const configured: string[] = [];
+  it("recovers existing ForgeBadger backend sessions after Gateway restart", async () => {
     const store = new MemoryRecoveryStore([
       {
         id: "session_recovered",
         userId: "gate-a-user",
-        tmuxName: "fb-gate-a-u-session_recovered",
+        runtimeSessionName: "fb-gate-a-u-session_recovered",
         launchPlan: launchPlan(),
         createdAt: "2026-04-27T00:00:00.000Z"
       }
@@ -431,9 +430,6 @@ describe("InMemorySessionManager", () => {
       },
       async listSessions() {
         return ["fb-gate-a-u-session_recovered"];
-      },
-      async configureSession(name) {
-        configured.push(name);
       }
     }, store);
 
@@ -445,10 +441,9 @@ describe("InMemorySessionManager", () => {
     assert.equal(recovered.recovered.length, 1);
     assert.equal(recovered.recovered[0]?.id, "session_recovered");
     assert.equal(manager.getSession("session_recovered")?.status, "detached");
-    assert.deepEqual(configured, ["fb-gate-a-u-session_recovered"]);
   });
 
-  it("kills ForgeBadger tmux sessions missing from the recovery index", async () => {
+  it("kills ForgeBadger backend sessions missing from the recovery index", async () => {
     const calls: string[] = [];
     const manager = new InMemorySessionManager({
       async createSession() {},
@@ -465,7 +460,7 @@ describe("InMemorySessionManager", () => {
       {
         id: "session_known",
         userId: "gate-a-user",
-        tmuxName: "fb-gate-a-u-session_known",
+        runtimeSessionName: "fb-gate-a-u-session_known",
         launchPlan: launchPlan(),
         createdAt: "2026-04-27T00:00:00.000Z"
       }
@@ -480,7 +475,7 @@ describe("InMemorySessionManager", () => {
     assert.deepEqual(calls, ["kill:fb-gate-a-u-session_orphan"]);
   });
 
-  it("only recovers and kills sessions matching the configured tmux prefix", async () => {
+  it("only recovers and kills sessions matching the configured backend prefix", async () => {
     const calls: string[] = [];
     const manager = new InMemorySessionManager({
       async createSession() {},
@@ -497,25 +492,25 @@ describe("InMemorySessionManager", () => {
       {
         id: "session_known",
         userId: "gate-a-user",
-        tmuxName: "smoke-user123-known",
+        runtimeSessionName: "smoke-user123-known",
         launchPlan: launchPlan(),
         createdAt: "2026-04-27T00:00:00.000Z"
       }
-    ]), undefined, { tmuxPrefix: "smoke-" });
+    ]), undefined, { sessionPrefix: "smoke-" });
 
     const result = await manager.recoverForgeBadgerSessions({
       userId: "gate-a-user",
       cwd: "/tmp"
     });
 
-    assert.equal(result.recovered[0]?.tmuxName, "smoke-user123-known");
+    assert.equal(result.recovered[0]?.runtimeSessionName, "smoke-user123-known");
     assert.deepEqual(result.killedOrphans, ["smoke-user123-orphan"]);
     assert.deepEqual(calls, ["kill:smoke-user123-orphan"]);
   });
 
   it("writes successfully created sessions to the recovery index", async () => {
     const store = new MemoryRecoveryStore([]);
-    const manager = new InMemorySessionManager(fakeTmux([]), store);
+    const manager = new InMemorySessionManager(fakeBackend([]), store);
 
     const session = await manager.createSession({
       userId: "user_123456",
@@ -524,12 +519,11 @@ describe("InMemorySessionManager", () => {
     });
 
     assert.equal(store.entries[0]?.id, session.id);
-    assert.equal(store.entries[0]?.tmuxName, session.tmuxName);
+    assert.equal(store.entries[0]?.runtimeSessionName, session.runtimeSessionName);
   });
 
-  it("preserves an existing attach token when reattaching a live tmux session", async () => {
+  it("preserves an existing attach token when reattaching a live backend session", async () => {
     const store = new MemoryRecoveryStore([]);
-    const configured: string[] = [];
     const manager = new InMemorySessionManager({
       async createSession() {},
       async killSession() {},
@@ -538,9 +532,6 @@ describe("InMemorySessionManager", () => {
       },
       async listSessions() {
         return ["fb-existing-live"];
-      },
-      async configureSession(name) {
-        configured.push(name);
       }
     }, store);
 
@@ -548,18 +539,17 @@ describe("InMemorySessionManager", () => {
       userId: "user_123456",
       sessionId: "session_abcdef",
       launchPlan: launchPlan(),
-      tmuxName: "fb-existing-live",
+      runtimeSessionName: "fb-existing-live",
       attachToken: "existing-live-token"
     });
 
     assert.equal(session.attachToken, "existing-live-token");
     assert.equal(store.entries[0]?.attachToken, "existing-live-token");
-    assert.deepEqual(configured, ["fb-existing-live"]);
   });
 
   it("serializes per-session lifecycle operations via runExclusive", async () => {
     const order: string[] = [];
-    const manager = new InMemorySessionManager(fakeTmux([]), new MemoryRecoveryStore([]));
+    const manager = new InMemorySessionManager(fakeBackend([]), new MemoryRecoveryStore([]));
 
     await Promise.all([
       manager.runExclusive("s1", async () => {
@@ -587,7 +577,7 @@ describe("InMemorySessionManager", () => {
   });
 
   it("clears the per-session lock entry once the chain settles", async () => {
-    const manager = new InMemorySessionManager(fakeTmux([]), new MemoryRecoveryStore([]));
+    const manager = new InMemorySessionManager(fakeBackend([]), new MemoryRecoveryStore([]));
     await manager.runExclusive("s1", async () => undefined);
     // Internal map should not retain a stale promise after success.
     assert.equal(
@@ -602,7 +592,7 @@ describe("InMemorySessionManager", () => {
         throw new Error("db unavailable");
       }
     }
-    const manager = new InMemorySessionManager(fakeTmux([]), new ThrowingRecoveryStore([]));
+    const manager = new InMemorySessionManager(fakeBackend([]), new ThrowingRecoveryStore([]));
     await manager.createSession({
       userId: "u1",
       sessionId: "s-err",
@@ -617,12 +607,12 @@ describe("InMemorySessionManager", () => {
     assert.equal(manager.getSession("s-err"), undefined);
   });
 
-  it("reconcileSessionStatus marks exited when the tmux session has disappeared and syncs DB", async () => {
+  it("reconcileSessionStatus marks exited when the backend session has disappeared and syncs DB", async () => {
     const store = new MemoryRecoveryStore([{
       id: "s-dead",
       userId: "u1",
       attachToken: "tok",
-      tmuxName: "fb-u1-s-dead",
+      runtimeSessionName: "fb-u1-s-dead",
       launchPlan: launchPlan(),
       createdAt: new Date().toISOString()
     }]);
@@ -651,7 +641,7 @@ describe("InMemorySessionManager", () => {
     assert.equal(store.entries.find((entry) => entry.id === "s-dead"), undefined);
   });
 
-  it("reconcileSessionStatus marks detached (not exited) when tmux is still alive", async () => {
+  it("reconcileSessionStatus marks detached (not exited) when backend is still alive", async () => {
     const emitted: Array<{ newStatus?: string }> = [];
     const manager = new InMemorySessionManager(
       {
@@ -716,7 +706,7 @@ describe("InMemorySessionManager", () => {
   });
 });
 
-function fakeTmux(calls: string[]): TmuxClient {
+function fakeBackend(calls: string[]): TerminalBackendClient {
   return {
     async createSession(options) {
       calls.push(`create:${options.name}`);
@@ -725,7 +715,7 @@ function fakeTmux(calls: string[]): TmuxClient {
       calls.push(`kill:${name}`);
     },
     async capturePane() {
-      return "hello from tmux";
+      return "hello from backend";
     },
     async listSessions() {
       return [];
@@ -744,7 +734,7 @@ class MemoryRecoveryStore {
     id: string;
     userId: string;
     attachToken?: string;
-    tmuxName: string;
+    runtimeSessionName: string;
     launchPlan: LaunchPlan;
     createdAt: string;
   }>) {}
@@ -757,7 +747,7 @@ class MemoryRecoveryStore {
     id: string;
     userId: string;
     attachToken?: string;
-    tmuxName: string;
+    runtimeSessionName: string;
     launchPlan: LaunchPlan;
     createdAt: string;
   }) {

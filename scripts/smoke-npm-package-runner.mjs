@@ -76,12 +76,6 @@ export function runCommand(command, args, options = {}) {
   return result;
 }
 
-export function resolveTerminalMultiplexerCommand(
-  platform = process.platform
-) {
-  return platform === "win32" ? "psmux" : "tmux";
-}
-
 export function formatCommandFailure(command, args, result, options = {}) {
   const lines = [];
   if (options.label) {

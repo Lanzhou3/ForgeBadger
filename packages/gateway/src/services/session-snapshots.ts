@@ -15,7 +15,7 @@ export function recordSessionSnapshot(input: RecordSessionSnapshotInput): Sessio
   return new SessionSnapshotRepository(input.db, input.userId).create({
     sessionId: input.session.id,
     projectId: input.session.projectId,
-    tmuxSession: input.session.tmuxSession,
+    runtimeSessionName: input.session.runtimeSessionName,
     modelId: input.session.modelId,
     configVersion: input.configVersion,
     metadata: {

@@ -17,7 +17,7 @@ import { ModelProviderRepository } from "../src/db/repositories/model-provider-r
 import { recordSessionSnapshot } from "../src/services/session-snapshots.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
-import type { TmuxCreateOptions } from "../src/services/tmux.js";
+import type { TerminalSessionOptions } from "../src/services/terminal-backend.js";
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
@@ -37,10 +37,10 @@ interface RestoreBody {
     session: {
       id: string;
       status: string;
-      tmuxSession?: string | null;
+      runtimeSessionName?: string | null;
       attachToken?: string;
     };
-    mode: "attach_tmux" | "recreate_session";
+    mode: "attach_runtime" | "recreate_session";
   };
 }
 
@@ -49,28 +49,29 @@ let baseUrl: string;
 describe("session snapshot restore", () => {
   let server: ReturnType<typeof createGatewayApp>["server"];
   let db: Database;
-  let tmuxSessions: string[];
-  let createdTmuxOptions: TmuxCreateOptions[];
+  let backendSessions: string[];
+  let createdBackendOptions: TerminalSessionOptions[];
 
   before(async () => {
     db = createTestDb();
-    tmuxSessions = [];
-    createdTmuxOptions = [];
+    backendSessions = [];
+    createdBackendOptions = [];
     const app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
       db,
       sessionManager: new InMemorySessionManager({
         async createSession(options) {
-          createdTmuxOptions.push(options);
-          tmuxSessions.push(options.name);
+          createdBackendOptions.push(options);
+          backendSessions.push(options.name);
         },
         async killSession() {},
         async capturePane() {
           return "";
         },
         async listSessions() {
-          return tmuxSessions;
+          return backendSessions;
         }
       }),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
@@ -94,13 +95,13 @@ describe("session snapshot restore", () => {
     db.close();
   });
 
-  it("reattaches to an existing tmux session from a snapshot", async () => {
+  it("reattaches to an existing backend session from a snapshot", async () => {
     const auth = await register("snapshot-attach@example.com");
     const liveAttachToken = "existing-live-hook-token";
     const { sessionId, snapshotId } = createStoppedSessionSnapshot(auth, "of-live-restore", {
       attachToken: liveAttachToken
     });
-    tmuxSessions = ["of-live-restore"];
+    backendSessions = ["of-live-restore"];
 
     const restoreRes = await fetch(`${baseUrl}/api/v1/snapshots/${snapshotId}/restore`, {
       method: "POST",
@@ -109,21 +110,21 @@ describe("session snapshot restore", () => {
     const body = (await restoreRes.json()) as RestoreBody;
 
     assert.equal(restoreRes.status, 200, JSON.stringify(body));
-    assert.equal(body.data?.mode, "attach_tmux");
+    assert.equal(body.data?.mode, "attach_runtime");
     assert.equal(body.data?.session.id, sessionId);
     assert.equal(body.data?.session.status, "running");
-    assert.equal(body.data?.session.tmuxSession, "of-live-restore");
+    assert.equal(body.data?.session.runtimeSessionName, "of-live-restore");
     assert.equal(body.data?.session.attachToken, liveAttachToken);
     const persisted = new SessionRepository(db, auth.userId).getById(sessionId);
     assert.equal(persisted?.attachToken, liveAttachToken);
-    assert.equal(createdTmuxOptions.length, 0);
+    assert.equal(createdBackendOptions.length, 0);
   });
 
-  it("recreates a session from snapshot metadata when tmux is unavailable", async () => {
+  it("recreates a session from snapshot metadata when backend is unavailable", async () => {
     const auth = await register("snapshot-recreate@example.com");
     const { sessionId, snapshotId } = createStoppedSessionSnapshot(auth, "of-missing-restore");
-    tmuxSessions = [];
-    createdTmuxOptions = [];
+    backendSessions = [];
+    createdBackendOptions = [];
 
     const restoreRes = await fetch(`${baseUrl}/api/v1/snapshots/${snapshotId}/restore`, {
       method: "POST",
@@ -135,8 +136,8 @@ describe("session snapshot restore", () => {
     assert.equal(body.data?.mode, "recreate_session");
     assert.equal(body.data?.session.id, sessionId);
     assert.equal(body.data?.session.status, "running");
-    assert.equal(createdTmuxOptions.length, 1);
-    assert.match(createdTmuxOptions[0]!.name, /^fb-/);
+    assert.equal(createdBackendOptions.length, 1);
+    assert.match(createdBackendOptions[0]!.name, /^fb-/);
   });
 
   it("recreates a deleted Codex session against the host environment", async () => {
@@ -153,7 +154,7 @@ describe("session snapshot restore", () => {
     });
     const snapshot = recordSessionSnapshot({ db, userId: auth.userId, session, metadata: { reason: "test" } });
     sessions.delete(session.id);
-    createdTmuxOptions = [];
+    createdBackendOptions = [];
 
     const restoreRes = await fetch(`${baseUrl}/api/v1/snapshots/${snapshot.id}/restore`, {
       method: "POST",
@@ -162,9 +163,9 @@ describe("session snapshot restore", () => {
     const body = (await restoreRes.json()) as RestoreBody;
 
     assert.equal(restoreRes.status, 200, JSON.stringify(body));
-    assert.equal(createdTmuxOptions.length, 1);
+    assert.equal(createdBackendOptions.length, 1);
     // Host-environment launch: no provider/model flags are injected at start.
-    assert.deepEqual(createdTmuxOptions[0]?.args, []);
+    assert.deepEqual(createdBackendOptions[0]?.args, []);
   });
 
   it("does not restore another user's snapshot", async () => {
@@ -184,7 +185,7 @@ describe("session snapshot restore", () => {
 
   function createStoppedSessionSnapshot(
     auth: AuthContext,
-    tmuxSession: string,
+    runtimeSessionName: string,
     options: { attachToken?: string } = {}
   ): {
     sessionId: string;
@@ -220,13 +221,13 @@ describe("session snapshot restore", () => {
     });
     sessionRepo.update(session.id, {
       status: "stopped",
-      tmuxSession: null,
+      runtimeSessionName: null,
       attachToken: options.attachToken ?? ""
     });
     const snapshot = new SessionSnapshotRepository(db, auth.userId).create({
       sessionId: session.id,
       projectId: project.id,
-      tmuxSession,
+      runtimeSessionName,
       modelId: model.id,
       metadata: { reason: "test" }
     });
