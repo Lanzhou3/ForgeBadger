@@ -16,6 +16,7 @@ export interface ActionIntent {
     idempotency_key: string;
     status: 'pending' | 'approved' | 'rejected' | 'executing' | 'completed' | 'indeterminate';
     created_at: number;
+    channel_conversation_id: string | null;
     execution_owner: string | null;
     execution_lease_expires_at: number | null;
 }
@@ -34,12 +35,18 @@ export class PlatformActionRepository {
     byKey(key: string) {
         return this.db.prepare('SELECT * FROM platform_action_intents WHERE user_id=? AND idempotency_key=?').get(this.userId, key) as ActionIntent | undefined;
     }
-    create(input: Omit<ActionIntent, 'id' | 'user_id' | 'created_at' | 'execution_owner' | 'execution_lease_expires_at'>) {
+    create(input: Omit<ActionIntent, 'id' | 'user_id' | 'created_at' | 'execution_owner' | 'execution_lease_expires_at' | 'channel_conversation_id'>) {
+        return this.db.transaction(() => {
         const id = randomUUID();
         this.db.prepare(`INSERT INTO platform_action_intents
  (id,user_id,actor_user_id,grant_id,grant_revision,authority,command_id,input_json,digest,resources_json,policy_version,expires_at,idempotency_key,status,created_at)
  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, this.userId, input.actor_user_id, input.grant_id, input.grant_revision, input.authority, input.command_id, input.input_json, input.digest, input.resources_json, input.policy_version, input.expires_at, input.idempotency_key, input.status, Date.now());
+        const origin=this.originConversation(input.idempotency_key);
+        if(origin && this.db.prepare('SELECT 1 FROM copilot_conversations WHERE user_id=? AND id=? AND channel_owned=1').get(this.userId,origin)) {
+            this.db.prepare('UPDATE platform_action_intents SET channel_conversation_id=? WHERE user_id=? AND id=?').run(origin,this.userId,id);
+        }
         return this.get(id)!;
+        }).immediate();
     }
     transition(id: string, from: string, to: ActionIntent['status']) {
         return this.db.prepare('UPDATE platform_action_intents SET status=? WHERE user_id=? AND id=? AND status=?').run(to, this.userId, id, from).changes === 1;
@@ -74,6 +81,12 @@ export class PlatformActionRepository {
     }
     rejectRun(runId: string) {
         this.db.prepare("UPDATE platform_action_intents SET status='rejected' WHERE user_id=? AND status IN ('pending','approved') AND idempotency_key IN (SELECT id FROM copilot_run_steps WHERE user_id=? AND run_id=?)").run(this.userId,this.userId,runId);
+    }
+    originConversation(key:string): string|undefined {
+        const row=this.db.prepare('SELECT r.conversation_id FROM copilot_run_steps s JOIN copilot_runs r ON r.user_id=s.user_id AND r.id=s.run_id WHERE s.user_id=? AND s.id=?').get(this.userId,key) as {conversation_id:string}|undefined;
+        const persisted=this.byKey(key)?.channel_conversation_id;
+        if(persisted && row?.conversation_id!==persisted) throw new Error('Channel action origin missing or mismatched');
+        return persisted ?? row?.conversation_id;
     }
     assertOriginActive(key: string) {
         const row=this.db.prepare("SELECT r.status FROM copilot_run_steps s JOIN copilot_runs r ON r.user_id=s.user_id AND r.id=s.run_id WHERE s.user_id=? AND s.id=?").get(this.userId,key) as {status:string}|undefined;

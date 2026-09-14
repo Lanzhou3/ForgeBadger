@@ -1,3 +1,4 @@
+import { assertChannelConversationAuthority } from "../channels/channel-run-authority.js";
 import { projectActionReceipt } from "../platform-commands/receipt-projection.js";
 import { PlatformActionRepository } from "../../db/repositories/platform-action-repository.js";
 import { CopilotGrantRepository } from "../../db/repositories/copilot-grant-repository.js";
@@ -72,9 +73,10 @@ export class CopilotRunLedger {
         } | undefined;
         if (user?.status !== "active")
             throw new AgentError("COPILOT_USER_INACTIVE", "User is not active");
+        assertChannelConversationAuthority(this.db,this.userId,input.conversationId);
         if (input.grantId) {
             const g = new CopilotGrantRepository(this.db, this.userId).get(input.grantId);
-            if (!g || g.status !== "active" || g.expiresAt <= Date.now()) throw new Error("Grant unavailable, expired or revoked");
+            if (!g || g.status !== "active" || (g.expiresAt !== null && g.expiresAt <= Date.now())) throw new Error("Grant unavailable, expired or revoked");
             if (input.projectId && !g.scope.projectIds.includes(input.projectId)) throw new Error("Project outside grant scope");
         }
         if (input.projectId && !this.db.prepare("SELECT id FROM projects WHERE user_id=? AND id=?").get(this.userId, input.projectId))
@@ -225,6 +227,7 @@ export class CopilotRunLedger {
             const a = this.log.getPendingAction(actionId);
             if (r?.status !== "awaiting_approval" || a?.runId !== runId || a.status !== "pending" || !a.stepId)
                 return false;
+            if (approved) assertChannelConversationAuthority(this.db,this.userId,r.conversation_id);
             const s = this.steps(runId).find(s => s.id === a.stepId);
             if (!s || s.status !== "awaiting_approval" || s.input_digest !== a.inputDigest || s.tool_call_id !== a.toolCallId)
                 return false;

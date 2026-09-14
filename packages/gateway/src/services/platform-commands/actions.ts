@@ -1,3 +1,4 @@
+import { assertChannelConversationAuthority } from "../channels/channel-run-authority.js";
 import { PlatformNoEffectError } from "./errors.js";
 import { TOOL_COMMANDS } from "./tool-commands.js";
 import { CopilotToolPreferenceRepository } from "../../db/repositories/copilot-tool-preference-repository.js";
@@ -41,7 +42,12 @@ export function canonicalRoot(value: string): string {
     return resolved;
 }
 const previewSchema = z.object({ commandId: z.string().min(1).max(100), input: z.unknown(), idempotencyKey: z.string().min(1).max(200), authority: z.enum(['owner_action', 'delegated_grant']), grantId: z.string().min(1).optional() }).strict();
-export const createGrantSchema = z.object({ name: z.string().trim().min(1).max(200), projectIds: z.array(z.string().min(1)).max(100), capabilities: z.array(z.string().min(1)).min(1).max(50), allowedRoots: z.array(z.string().min(1)).max(20).default([]), expiresAt: z.number().int().positive(), maxActions: z.number().int().min(1).max(10000), maxConcurrency: z.number().int().min(1).max(20).default(1) }).strict();
+export const createGrantSchema = z.object({ name: z.string().trim().min(1).max(200), projectIds: z.array(z.string().min(1)).max(100), allOperations: z.boolean().default(false), capabilities: z.array(z.string().min(1)).min(1).max(50).optional(), allowedRoots: z.array(z.string().min(1)).max(20).default([]), expiresAt: z.number().int().positive().nullable(), maxActions: z.number().int().min(1).max(10000).nullable(), maxConcurrency: z.number().int().min(1).max(20).default(1) }).strict().superRefine((value,ctx)=>{
+    if (value.allOperations) {
+        if (!value.projectIds.length) ctx.addIssue({code:z.ZodIssueCode.custom,path:['projectIds'],message:'Select at least one project'});
+        if (value.capabilities || value.allowedRoots.length) ctx.addIssue({code:z.ZodIssueCode.custom,message:'All operations scope is derived from selected projects'});
+    } else if (!value.capabilities?.length) ctx.addIssue({code:z.ZodIssueCode.custom,path:['capabilities'],message:'Select allowed operations'});
+});
 export class PlatformActions {
     readonly intents: PlatformActionRepository;
     readonly grants: CopilotGrantRepository;
@@ -60,20 +66,22 @@ export class PlatformActions {
     createGrant(raw: unknown) {
         this.activeActor();
         const v = createGrantSchema.parse(raw);
-        if (v.expiresAt <= Date.now())
+        if (v.expiresAt !== null && v.expiresAt <= Date.now())
             throw new Error('Grant expiry must be in the future');
         for (const id of v.projectIds)
             if (!new ProjectRepository(this.context.db, this.context.userId).getById(id))
                 throw new Error('Grant project not found');
-        for (const cap of v.capabilities)
+        const capabilities = v.allOperations ? [...new Set([...this.commands.values()].filter(c=>c.delegatable).map(c=>c.capability))] : v.capabilities!;
+        const roots = v.allOperations ? v.projectIds.map(id=>new ProjectRepository(this.context.db,this.context.userId).getById(id)!.path) : v.allowedRoots;
+        for (const cap of capabilities)
             if (![...this.commands.values()].some(c => c.capability === cap && c.delegatable))
                 throw new Error('Unsupported grant capability');
-        return this.grants.create({ name: v.name, scope: { projectIds: [...new Set(v.projectIds)], capabilities: [...new Set(v.capabilities)], allowedRoots: [...new Set(v.allowedRoots.map(canonicalRoot))] }, expiresAt: v.expiresAt, maxActions: v.maxActions, maxConcurrency: v.maxConcurrency });
+        return this.grants.create({ name: v.name, scope: { projectIds: [...new Set(v.projectIds)], capabilities: [...new Set(capabilities)], allowedRoots: [...new Set(roots.map(canonicalRoot))] }, expiresAt: v.expiresAt, maxActions: v.maxActions, maxConcurrency: v.maxConcurrency });
     }
     assertGrant(id: string) {
         this.activeActor();
         const g = this.grants.get(id);
-        if (!g || g.status !== 'active' || g.expiresAt <= Date.now() || g.actorUserId !== this.context.userId)
+        if (!g || g.status !== 'active' || (g.expiresAt !== null && g.expiresAt <= Date.now()) || g.actorUserId !== this.context.userId)
             throw new Error('Grant unavailable, expired or revoked');
         return g;
     }
@@ -90,7 +98,7 @@ export class PlatformActions {
             }))
                 throw new Error('Action outside grant root scope');
         }
-        if (g.usedActions >= g.maxActions)
+        if (g.maxActions !== null && g.usedActions >= g.maxActions)
             throw new Error('Grant action budget exhausted');
         if (this.intents.activeForGrant(g.id) >= g.maxConcurrency)
             throw new Error('Grant concurrency exhausted');
@@ -156,9 +164,14 @@ export class PlatformActions {
             throw new Error('Action already decided');
         return this.intents.get(id)!;
     }
+    private checkChannelOrigin(key:string) {
+        const conversationId=this.intents.originConversation(key);
+        if(conversationId) assertChannelConversationAuthority(this.context.db,this.context.userId,conversationId);
+    }
     private check(i: ActionIntent) {
         this.activeActor();
         this.intents.assertOriginActive(i.idempotency_key);
+        this.checkChannelOrigin(i.idempotency_key);
         if (i.status !== 'approved' || i.expires_at <= Date.now() || i.policy_version !== 1)
             throw new Error('Action is not approved or has expired');
         const c = this.commands.get(i.command_id);
@@ -228,6 +241,7 @@ export class PlatformActions {
             const result = await checked.c.execute({ ...this.context, authorize: () => {
                     this.activeActor();
                     this.intents.assertOriginActive(i.idempotency_key);
+        this.checkChannelOrigin(i.idempotency_key);
                     if (i.expires_at <= Date.now())
                         throw new Error("Action expired");
                     this.intents.assertExecutionOwner(id,checked.owner);

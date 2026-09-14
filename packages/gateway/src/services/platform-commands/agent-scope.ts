@@ -11,7 +11,7 @@ export function checkAgentScope(context: AgentToolContext, name: string, raw: un
     if (!grantId)
         return;
     const g = new CopilotGrantRepository(context.db, context.userId).get(grantId);
-    if (!g || g.status !== 'active' || g.expiresAt <= Date.now())
+    if (!g || g.status !== 'active' || (g.expiresAt !== null && g.expiresAt <= Date.now()))
         throw new Error('Grant unavailable, expired or revoked');
     if (!grantedToolVisible(name))
         throw new Error('Global capability unavailable in project grant');

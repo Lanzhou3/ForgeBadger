@@ -204,3 +204,54 @@ it('filters grant scope before the default 50-row limit for projects and session
  const last=await executeAgentTool(tools.tools.get('list_projects')!,{}, {...ctx,grantId:one.id});assert.equal((last.output as {projects:{id:string}[]}).projects[0]?.id,ids[64]);
  }finally{db.close();}
 });
+it('derives all current delegatable capabilities and roots only from selected owned projects',()=>{
+ const {db,user,p,outside,actions}=fixture();
+ try {
+  const grant=actions.createGrant({name:'all selected',projectIds:[p.id],allOperations:true,expiresAt:null,maxActions:null});
+  assert.deepEqual(grant.scope.projectIds,[p.id]);assert.ok(grant.scope.allowedRoots[0]?.endsWith('/allowed'));
+  assert.deepEqual(new Set(grant.scope.capabilities),new Set([...createPlatformCommands().values()].filter(c=>c.delegatable).map(c=>c.capability)));
+  assert.throws(()=>actions.createGrant({name:'empty',projectIds:[],allOperations:true,expiresAt:null,maxActions:null}));
+  for(const extra of [{capabilities:['memory.write']},{allowedRoots:['/private/tmp']}])assert.throws(()=>actions.createGrant({name:'mixed',projectIds:[p.id],allOperations:true,expiresAt:null,maxActions:null,...extra}));
+  const another=new UserRepository(db).create('other-all@test.dev','hash');const foreign=new ProjectRepository(db,another.id).create({name:'foreign',path:'/tmp/foreign',aiTool:''});
+  assert.throws(()=>actions.createGrant({name:'foreign',projectIds:[foreign.id],allOperations:true,expiresAt:null,maxActions:null}));
+  assert.throws(()=>actions.preview({commandId:'project.create',input:{name:'outside',path:'/tmp/outside-all-root'},grantId:grant.id,authority:'delegated_grant',idempotencyKey:'outside-root'}));
+  assert.ok(actions.preview({commandId:'project.create',input:{name:'inside',path:p.path+'/child'},grantId:grant.id,authority:'delegated_grant',idempotencyKey:'inside-root'}));
+  const future={...actions.commands.get('project.metadata.update')!,id:'future.operation',capability:'future.operation'};actions.commands.set(future.id,future);
+  assert.throws(()=>actions.preview({commandId:future.id,input:{projectId:p.id,name:'future'},grantId:grant.id,authority:'delegated_grant',idempotencyKey:'future-cap'}));
+  assert.throws(()=>actions.preview({commandId:'project.metadata.update',input:{projectId:outside.id,name:'no'},grantId:grant.id,authority:'delegated_grant',idempotencyKey:'outside-all'}));
+ }finally{db.close();}
+});
+it('retains direct memory scope checks for global, unbound, bound and owner contexts',()=>{
+ const {db,p,actions,grant,ledger}=fixture();
+ try {
+  const conversation=ledger.log.createConversation();
+  for(const input of [{scope:'global'},{scope:'session',conversationId:conversation.id}])assert.throws(()=>actions.preview({commandId:'memory.write',input:{kind:'fact',text:'blocked',...input},grantId:grant.id,authority:'delegated_grant',idempotencyKey:'memory-'+input.scope}));
+  assert.ok(actions.preview({commandId:'memory.write',input:{kind:'fact',text:'project only',scope:'project',projectId:p.id},grantId:grant.id,authority:'delegated_grant',idempotencyKey:'memory-project'}));
+  actions.grants.bind(conversation.id,grant.id);
+  assert.ok(actions.preview({commandId:'memory.write',input:{kind:'fact',text:'bound session',scope:'session',conversationId:conversation.id},grantId:grant.id,authority:'delegated_grant',idempotencyKey:'memory-bound'}));
+  assert.ok(actions.preview({commandId:'memory.write',input:{kind:'fact',text:'owner global',scope:'global'},authority:'owner_action',idempotencyKey:'memory-owner'}));
+ }finally{db.close();}
+});
+
+it('deletes only revoked grants while preserving immutable bindings and tenant isolation', () => {
+ const {db,user,grant,actions,ledger}=fixture();
+ try {
+  const other=new UserRepository(db).create('other-delete@test.dev','hash');
+  const outsider=new PlatformActions({db,userId:other.id},createPlatformCommands());
+  assert.throws(()=>outsider.grants.delete(grant.id),/Grant not found/);
+  assert.throws(()=>outsider.grants.delete('missing'),/Grant not found/);
+  assert.throws(()=>actions.grants.delete(grant.id),/Revoke grant/);
+  const convo=ledger.log.createConversation();
+  const run=ledger.admit({userId:user.id,conversationId:convo.id,userText:'hello',grantId:grant.id},4);
+  ledger.cancel(run);actions.grants.revoke(grant.id);actions.grants.delete(grant.id);
+  const revision=actions.grants.get(grant.id)!.revision;
+  actions.grants.delete(grant.id);
+  assert.equal(actions.grants.get(grant.id)!.revision,revision);
+  assert.equal(actions.grants.get(grant.id)!.status,'deleted');
+  assert.equal(actions.grants.list().length,0);
+  assert.equal(actions.grants.binding(convo.id),grant.id);
+  assert.throws(()=>ledger.admit({userId:user.id,conversationId:convo.id,userText:'escape'},4),/Grant unavailable/);
+  assert.equal(actions.grants.consume(grant.id,revision),false);
+  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
+ } finally {db.close();}
+});

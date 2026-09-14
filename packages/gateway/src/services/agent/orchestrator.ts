@@ -107,7 +107,11 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     async function drive(ledger: CopilotRunLedger, c: Claim, signal: AbortSignal): Promise<void> {
         const input = JSON.parse(ledger.get(c.runId)!.input_json) as TurnInput;
         ledger.validateScope(input);
-        const live = () => !control.stopped && !signal.aborted && ledger.owns(c);
+        const live = () => {
+            if (control.stopped || signal.aborted || !ledger.owns(c)) return false;
+            ledger.validateScope(input);
+            return true;
+        };
         while (live()) {
             ledger.validateScope(input);
             const pending = ledger.steps(c.runId).find(s => s.kind === "tool" && s.status !== "completed");
@@ -167,7 +171,8 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     emit(ledger, c.runId, { message: text });
                     // Await best-effort helpers so shutdown cannot close their database midway.
                     if (command === null && !control.stopped && ledger.get(c.runId)?.status === "completed") {
-                        await maybeAutoTitle({ log: ledger.log, userId: input.userId, conversationId: input.conversationId, userText: input.userText, assistantText: text, source: input.source ?? "user", signal, canCommit: () => !control.stopped && deps.db.open && !!ledger.log.getConversation(input.conversationId) && ledger.log.listRuns(input.conversationId)[0]?.id === c.runId, runId: c.runId, eventBus: deps.eventBus, llm: deps.llm, ...(input.modelId ? { modelId: input.modelId } : {}) }).catch(() => undefined);
+                        ledger.validateScope(input);
+                        await maybeAutoTitle({ log: ledger.log, userId: input.userId, conversationId: input.conversationId, userText: input.userText, assistantText: text, source: input.source ?? "user", signal, canCommit: () => { if(control.stopped || !deps.db.open)return false; ledger.validateScope(input); return !!ledger.log.getConversation(input.conversationId) && ledger.log.listRuns(input.conversationId)[0]?.id === c.runId; }, runId: c.runId, eventBus: deps.eventBus, llm: deps.llm, ...(input.modelId ? { modelId: input.modelId } : {}) }).catch(() => undefined);
                         // Durable memory writes are platform commands; background curation
                         // cannot bypass the selected grant or exact one-shot approval.
                     }

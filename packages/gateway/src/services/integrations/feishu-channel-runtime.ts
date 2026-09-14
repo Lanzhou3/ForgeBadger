@@ -1,3 +1,4 @@
+import { ChannelWorkerScheduler, type ChannelWorker } from "../channels/channel-worker-scheduler.js";
 import type { FeishuConnectionHealth } from "./feishu-connection-supervisor.js";
 import { redactFeishuError } from "./feishu-error-redaction.js";
 
@@ -10,7 +11,7 @@ interface FeishuRuntimeSupervisor {
 
 interface FeishuChannelRuntimeDependencies {
   supervisor: FeishuRuntimeSupervisor;
-  workers?: Array<() => Promise<unknown>>;
+  workers?: ChannelWorker[];
   workerIntervalMs?: number;
   drainTimeoutMs?: number;
   setInterval?: (callback: () => void, intervalMs: number) => unknown;
@@ -19,18 +20,17 @@ interface FeishuChannelRuntimeDependencies {
 }
 
 export class FeishuChannelRuntime {
-  private readonly workers: Array<() => Promise<unknown>>;
-  private readonly activeCycles = new Set<Promise<unknown>>();
-  private readonly setInterval: (callback: () => void, intervalMs: number) => unknown;
-  private readonly clearInterval: (handle: unknown) => void;
-  private intervalHandle: unknown;
+  private readonly scheduler: ChannelWorkerScheduler;
   private started = false;
   private stopped = false;
 
   constructor(private readonly dependencies: FeishuChannelRuntimeDependencies) {
-    this.workers = dependencies.workers ?? [];
-    this.setInterval = dependencies.setInterval ?? ((callback, intervalMs) => setInterval(callback, intervalMs));
-    this.clearInterval = dependencies.clearInterval ?? ((handle) => clearInterval(handle as NodeJS.Timeout));
+    this.scheduler = new ChannelWorkerScheduler({
+      ...dependencies,
+      onWorkerError: (workerIndex) => console.error("[feishu-runtime] worker failed", {
+        code: "FEISHU_WORKER_FAILED", workerIndex
+      })
+    });
   }
 
   async start(): Promise<void> {
@@ -40,16 +40,16 @@ export class FeishuChannelRuntime {
     void Promise.resolve().then(() => {
       if (!this.started || this.stopped) return undefined;
       return this.dependencies.supervisor.start();
-    }).catch(() => undefined);
-    this.intervalHandle = this.setInterval(
-      () => this.runWorkerCycle(),
-      clamp(this.dependencies.workerIntervalMs ?? 250, 50, 60_000)
-    );
+    }).catch(() => {
+      console.error("[feishu-runtime] supervisor startup failed", { code: "FEISHU_SUPERVISOR_START_FAILED" });
+    });
+    this.scheduler.start();
   }
 
   async reconcileAccount(userId: string): Promise<void> {
     if (!this.started || this.stopped) throw new Error("FEISHU_RUNTIME_NOT_RUNNING");
     await this.dependencies.prepareAccount?.(userId);
+    if (!this.started || this.stopped) throw new Error("FEISHU_RUNTIME_NOT_RUNNING");
     await this.dependencies.supervisor.reconcileAccount(userId);
   }
 
@@ -71,43 +71,9 @@ export class FeishuChannelRuntime {
     await this.shutdown();
   }
 
-  private runWorkerCycle(): void {
-    if (!this.started || this.stopped) return;
-    for (const worker of this.workers) {
-      const cycle = Promise.resolve().then(worker).catch(() => undefined);
-      this.activeCycles.add(cycle);
-      void cycle.finally(() => this.activeCycles.delete(cycle));
-    }
-  }
-
-  private async shutdown(): Promise<void> {
-    if (this.stopped) return;
+  private shutdown(): Promise<void> {
     this.stopped = true;
     this.started = false;
-    if (this.intervalHandle !== undefined) {
-      this.clearInterval(this.intervalHandle);
-      this.intervalHandle = undefined;
-    }
-    await this.dependencies.supervisor.stop();
-    await this.drainWorkers();
+    return this.scheduler.stop(() => this.dependencies.supervisor.stop());
   }
-
-  private async drainWorkers(): Promise<void> {
-    if (!this.activeCycles.size) return;
-    const timeoutMs = clamp(this.dependencies.drainTimeoutMs ?? 5_000, 100, 30_000);
-    let timeout: NodeJS.Timeout | undefined;
-    const deadline = new Promise<void>((resolve) => {
-      timeout = setTimeout(resolve, timeoutMs);
-      timeout.unref();
-    });
-    try {
-      await Promise.race([Promise.allSettled([...this.activeCycles]).then(() => undefined), deadline]);
-    } finally {
-      if (timeout) clearTimeout(timeout);
-    }
-  }
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(Math.max(Math.trunc(value), minimum), maximum);
 }

@@ -32,6 +32,7 @@ export interface Session {
   workingDir: string;
   credentialMode: SessionCredentialMode;
   apiKeyId: string | null;
+  lastPrompt: string | null;
   lastActive: Date | null;
   errorMessage: string | null;
   createdAt: Date;
@@ -52,6 +53,7 @@ const sessionColumns = {
   runtimeSessionName: sessions.runtimeSessionName,
   workingDir: sessions.workingDir,
   credentialMode: sessions.credentialMode,
+  lastPrompt: sessions.lastPrompt,
   apiKeyId: sessions.apiKeyId,
   lastActive: sessions.lastActive,
   errorMessage: sessions.errorMessage,
@@ -151,6 +153,7 @@ export class SessionRepository {
     runtimeSessionName: string | null;
     credentialMode: SessionCredentialMode;
     apiKeyId: string | null;
+    lastPrompt: string | null;
     lastActive: Date | null;
     errorMessage: string | null;
   }>): Session | undefined {
@@ -162,6 +165,7 @@ export class SessionRepository {
     if (input.runtimeSessionName !== undefined) updateData.runtimeSessionName = input.runtimeSessionName;
     if (input.credentialMode !== undefined) updateData.credentialMode = input.credentialMode;
     if (input.apiKeyId !== undefined) updateData.apiKeyId = input.apiKeyId;
+    if (input.lastPrompt !== undefined) updateData.lastPrompt = input.lastPrompt;
     if (input.lastActive !== undefined) updateData.lastActive = input.lastActive;
     if (input.errorMessage !== undefined) updateData.errorMessage = input.errorMessage;
 
@@ -201,6 +205,7 @@ export class SessionRepository {
           workingDir: record.workingDir,
           credentialMode: record.credentialMode,
           apiKeyId: record.apiKeyId ?? null,
+          lastPrompt: record.lastPrompt ?? null,
           lastActive: record.lastActive ?? null,
           errorMessage: record.errorMessage ?? null,
           updatedAt: record.updatedAt
@@ -225,6 +230,7 @@ export class SessionRepository {
         workingDir: record.workingDir,
         credentialMode: record.credentialMode,
         apiKeyId: record.apiKeyId ?? null,
+        lastPrompt: record.lastPrompt ?? null,
         lastActive: record.lastActive ?? null,
         errorMessage: record.errorMessage ?? null,
         createdAt: record.createdAt,

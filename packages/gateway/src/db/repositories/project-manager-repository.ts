@@ -428,6 +428,22 @@ export class ProjectManagerRepository {
     `).all(this.userId, projectId, limit) as WorkItemRow[]).map(toWorkItem);
   }
 
+  /**
+   * Work items across all of the user's projects whose task-packet details
+   * embed a session link. The LIKE filter is a static pattern (no user input);
+   * callers still verify the parsed sessionId against the caller's sessions.
+   */
+  listWorkItemsWithSessionLink(options: { limit?: number } = {}): ProjectManagerWorkItem[] {
+    const limit = clampLimit(options.limit ?? 200);
+    return (this.db.prepare(`
+      SELECT *
+      FROM project_manager_work_items
+      WHERE user_id = ? AND details_json LIKE '%"sessionId"%'
+      ORDER BY updated_at DESC, title ASC
+      LIMIT ?
+    `).all(this.userId, limit) as WorkItemRow[]).map(toWorkItem);
+  }
+
   getWorkItem(projectId: string, workItemId: string): ProjectManagerWorkItem | undefined {
     const row = this.db.prepare(`
       SELECT *
