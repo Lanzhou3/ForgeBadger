@@ -74,5 +74,9 @@
   "0073_claude_route.sql": "be9c96a8faccb13c2f7b542c7deef93c1abe79420ac24cc7e6c1f459aa762637",
   "0074_template_adapter_and_git_sources.sql": "53addfd93166944300e9e1c5511c248be75bd1451d9b3e61010d3e827961f9e9",
   "0075_notification_category.sql": "7c474fdd88f04e1e611d8837521ffe0f12e087017e51a3a46300c2fc4990020e",
-  "0076_session_runtime_names.sql": "2f07ea7d28e8520784e8621debbcbf2af5844344d481f57e4e7062d5e418ef22"
+  "0076_session_runtime_names.sql": "2f07ea7d28e8520784e8621debbcbf2af5844344d481f57e4e7062d5e418ef22",
+  "0077_sessions_last_prompt.sql": "1b96cd1d9ad413f4d6d838bf4be4a90ca4bf4c4b86b32f3345256a1df7f9fcab",
+  "0078_channel_identity_routes.sql": "2898650d563fdd1aad65f32eae052667931eb2ccefe23d9ee1923d85e7a13b74",
+  "0079_native_channel_messages.sql": "e8d5da6380e8569001a1f47d9f7d669ed917b3dd05251d679722778acd6c9577",
+  "0080_native_channel_deliveries.sql": "53719d05fea825ba76d7d80491f4dcac854a2f72d25ed4f6303fbcb6540c7f32"
 }

@@ -533,6 +533,34 @@
       "when": 1789200000001,
       "tag": "0076_session_runtime_names",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "6",
+      "when": 1789300000000,
+      "tag": "0077_sessions_last_prompt",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "6",
+      "when": 1789300000001,
+      "tag": "0078_channel_identity_routes",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1789300000002,
+      "tag": "0079_native_channel_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "6",
+      "when": 1789300000003,
+      "tag": "0080_native_channel_deliveries",
+      "breakpoints": true
     }
   ]
 }

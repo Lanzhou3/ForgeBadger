@@ -551,6 +551,7 @@ export const sessions = sqliteTable(
     runtimeSessionName: text("runtime_session_name"),
     workingDir: text("working_dir").notNull(),
     credentialMode: text("credential_mode").notNull().default("host_environment"),
+    lastPrompt: text("last_prompt"),
     apiKeyId: text("api_key_id").references(() => apiKeys.id),
     bindingId: text("binding_id"),
     providerProfileId: text("provider_profile_id"),
@@ -1364,6 +1365,7 @@ export const portfolioFacts = sqliteTable("portfolio_facts", {
 // ---------------------------------------------------------------------------
 
 export const copilotConversations = sqliteTable("copilot_conversations", {
+  channelOwned: integer('channel_owned').notNull().default(0),
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   title: text("title"),
@@ -1623,6 +1625,7 @@ export const copilotGrants = sqliteTable('copilot_grants', {
   usedActions:integer('used_actions').notNull().default(0),createdAt:integer('created_at').notNull()
 },t=>({tenant:uniqueIndex('idx_copilot_grant_tenant').on(t.userId,t.id)}));
 export const platformActionIntents = sqliteTable('platform_action_intents', {
+ channelConversationId:text('channel_conversation_id'),
  id:text('id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),actorUserId:text('actor_user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),
  grantId:text('grant_id'),grantRevision:integer('grant_revision'),authority:text('authority').notNull(),commandId:text('command_id').notNull(),inputJson:text('input_json').notNull(),digest:text('digest').notNull(),
  resourcesJson:text('resources_json').notNull(),policyVersion:integer('policy_version').notNull(),expiresAt:integer('expires_at').notNull(),idempotencyKey:text('idempotency_key').notNull(),status:text('status').notNull(),createdAt:integer('created_at').notNull(),executionOwner:text('execution_owner'),executionLeaseExpiresAt:integer('execution_lease_expires_at')
@@ -1640,3 +1643,61 @@ export const projectManagerManagement=sqliteTable('project_manager_management',{
 export const sessionWriterLeases=sqliteTable('session_writer_leases',{
  workspace:text('workspace').primaryKey().notNull(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),projectId:text('project_id').notNull(),sessionId:text('session_id').notNull(),token:text('token'),fence:integer('fence').notNull().default(0),expiresAt:integer('expires_at').notNull().default(0)
 },t=>({session:foreignKey({columns:[t.userId,t.projectId,t.sessionId],foreignColumns:[sessions.userId,sessions.projectId,sessions.id]}).onDelete('cascade'),userSession:index('idx_session_writer_lease_user_session').on(t.userId,t.sessionId)}));
+
+export const channelPairings = sqliteTable('channel_pairings', {
+  id: text('id').primaryKey(), userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  channel: text('channel').notNull(), accountId: text('account_id').notNull(), accountRevision: integer('account_revision').notNull(),
+  tokenHash: text('token_hash').notNull().unique(), status: text('status').notNull().default('pending'), revision: integer('revision').notNull().default(1),
+  externalUserId: text('external_user_id'), chatId: text('chat_id'), expiresAt: integer('expires_at').notNull(), createdAt: integer('created_at').notNull()
+}, t => ({ owner: index('idx_channel_pairing_owner').on(t.userId, t.accountId, t.createdAt) }));
+export const channelIdentities = sqliteTable('channel_identities', {
+  id: text('id').primaryKey(), userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  channel: text('channel').notNull(), accountId: text('account_id').notNull(), accountRevision: integer('account_revision').notNull(),
+  externalUserId: text('external_user_id').notNull(), chatId: text('chat_id').notNull(),
+  status: text('status').notNull().default('active'), revision: integer('revision').notNull().default(1), createdAt: integer('created_at').notNull()
+}, t => ({ tenant: uniqueIndex('idx_channel_identity_tenant').on(t.userId, t.id),
+  peer: uniqueIndex('idx_channel_identity_peer').on(t.userId, t.channel, t.accountId, t.accountRevision, t.externalUserId, t.chatId).where(sql`${t.status} = 'active'`) }));
+export const channelRoutes = sqliteTable('channel_routes', {
+  id: text('id').primaryKey(), userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  identityId: text('identity_id').notNull(), grantId: text('grant_id').notNull(), grantRevision: integer('grant_revision').notNull(),
+  conversationId: text('conversation_id').notNull(), status: text('status').notNull().default('active'),
+  revision: integer('revision').notNull().default(1), createdAt: integer('created_at').notNull()
+}, t => ({
+  identity: foreignKey({ columns: [t.userId, t.identityId], foreignColumns: [channelIdentities.userId, channelIdentities.id] }).onDelete('cascade'),
+  grant: foreignKey({ columns: [t.userId, t.grantId], foreignColumns: [copilotGrants.userId, copilotGrants.id] }),
+  conversation: foreignKey({ columns: [t.userId, t.conversationId], foreignColumns: [copilotConversations.userId, copilotConversations.id] }).onDelete('cascade'),
+  tenant: uniqueIndex('idx_channel_route_tenant').on(t.userId,t.id),
+  active: uniqueIndex('idx_channel_route_active').on(t.userId, t.identityId).where(sql`${t.status} = 'active'`),
+  history: uniqueIndex('idx_channel_route_conversation').on(t.userId, t.conversationId)
+}));
+
+export const channelMessages = sqliteTable('channel_messages', {
+  id: text('id').primaryKey(), userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  routeId: text('route_id').notNull(), accountId: text('account_id').notNull(), eventId: text('event_id').notNull(), messageId: text('message_id').notNull(),
+  payloadEncrypted: text('payload_encrypted').notNull(), payloadDigest: text('payload_digest').notNull(),
+  status: text('status').notNull().default('pending'), runId: text('run_id'), createdAt: integer('created_at').notNull()
+}, t => ({
+  route: foreignKey({ columns: [t.userId,t.routeId], foreignColumns: [channelRoutes.userId,channelRoutes.id] }),
+  run: foreignKey({ columns: [t.userId,t.runId], foreignColumns: [copilotRuns.userId,copilotRuns.id] }),
+  tenant: uniqueIndex('idx_channel_message_tenant').on(t.userId,t.id),
+  event: uniqueIndex('idx_channel_message_event').on(t.userId,t.accountId,t.eventId),
+  message: uniqueIndex('idx_channel_message_provider').on(t.userId,t.accountId,t.messageId),
+  runKey: uniqueIndex('idx_channel_message_run').on(t.userId,t.runId),
+  pending: index('idx_channel_message_pending').on(t.userId,t.status,t.createdAt)
+}));
+
+export const channelMessageEvents=sqliteTable('channel_message_events',{
+  userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),accountId:text('account_id').notNull(),
+  eventId:text('event_id').notNull(),inboxId:text('inbox_id').notNull()
+},t=>({key:primaryKey({columns:[t.userId,t.accountId,t.eventId]}),inbox:foreignKey({columns:[t.userId,t.inboxId],foreignColumns:[channelMessages.userId,channelMessages.id]}).onDelete('cascade')}));
+
+export const channelDeliveries = sqliteTable('channel_deliveries', {
+  id: text('id').primaryKey(), userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  inboxId: text('inbox_id').notNull(), phase: text('phase').notNull(), payloadEncrypted: text('payload_encrypted').notNull(),
+  status: text('status').notNull().default('pending'), claimToken: text('claim_token'), leaseUntil: integer('lease_until'),
+  providerMessageId: text('provider_message_id'), createdAt: integer('created_at').notNull()
+}, t => ({
+  inbox: foreignKey({ columns: [t.userId,t.inboxId], foreignColumns: [channelMessages.userId,channelMessages.id] }),
+  phase: uniqueIndex('idx_channel_delivery_phase').on(t.userId,t.inboxId,t.phase),
+  pending: index('idx_channel_delivery_pending').on(t.userId,t.status,t.createdAt)
+}));
