@@ -3,6 +3,9 @@
 > 版本：v1.1 (MVP 收窄版) | 2026-04-23
 > 状态：架构已确认（Gateway + Web 控制台），等待开发排期
 > 2026-04-26 补充：首轮交付按 MVP-0/MVP-1 分层执行，详见 `docs/TECH-ARCHITECTURE.md` 的「零点五、MVP-0 架构契约」。
+> 2026-09-12 说明：本文档是 MVP 阶段的需求快照，正文中的 tmux/psmux 终端实现已被
+> 内嵌 Session Server 替换（参见 `docs/TECH-ARCHITECTURE.md` 与根目录 `CLAUDE.md`），
+> 需求意图（断连/重启后会话可恢复）不变。
 
 ---
 

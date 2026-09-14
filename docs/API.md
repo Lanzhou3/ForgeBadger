@@ -490,8 +490,9 @@ unsupported grant capabilities are rejected.
 | Method/path | Input and returned `data` |
 |---|---|
 | `GET /copilot/grants` | `{grants,capabilities}`; capabilities contain `id`, `capability`, `effect`. |
-| `POST /copilot/grants` | `{name,projectIds,capabilities,allowedRoots?,expiresAt,maxActions,maxConcurrency?}` → `{grant}`. Expiry is Unix milliseconds; concurrency defaults to 1. |
+| `POST /copilot/grants` | `{name,projectIds,allOperations?,capabilities?,allowedRoots?,expiresAt,maxActions,maxConcurrency?}` → `{grant}`. Expiry is Unix milliseconds; concurrency defaults to 1. |
 | `POST /copilot/grants/:id/revoke` | `{grant}`; advances the revision and cancels active bound runs. |
+| `DELETE /copilot/grants/:id` | `{deleted:true}`; only revoked grants can be removed from lists. Repeated deletion is idempotent; active grants return 409. Historical bindings and audit references remain. |
 | `POST /platform-actions/preview` | `{commandId,input,idempotencyKey,grantId?}` → `{intent}`. No effect is executed. |
 | `GET /platform-actions/:id` | `{intent,receipt}`; receipt is null before an outcome exists. |
 | `POST /platform-actions/:id/decide` | `{digest,approved}` → `{intent}`. Digest must match the immutable preview. |
@@ -818,7 +819,9 @@ Project Agent orchestration:
 
 - `GET /api/v1/sessions`
 - `POST /api/v1/sessions`
+- `GET /api/v1/sessions/board`
 - `GET /api/v1/sessions/:id`
+- `PUT /api/v1/sessions/:id/last-prompt`
 - `POST /api/v1/sessions/:id/connect`
 - `POST /api/v1/sessions/:id/start`
 - `POST /api/v1/sessions/:id/stop`
@@ -844,6 +847,29 @@ environment at launch. Model/provider setup is per-CLI and user-global
 own global config files when it starts. `POST /:id/start` re-launches the
 adapter the same way and never restores a ForgeBadger-managed provider
 environment.
+
+`PUT /api/v1/sessions/:id/last-prompt` persists the last prompt submitted to a
+session so read-only surfaces (session lists, board) can label it. Body:
+
+```json
+{ "prompt": "修一下登录页" }
+```
+
+The prompt is trimmed and must be non-empty (`400` otherwise); values longer
+than 500 characters are truncated to 500. The session must belong to the
+caller (`404` otherwise). The response is `{ code: 0, data: { session } }`
+with the stored `lastPrompt` on the session payload; repeated writes are
+idempotent.
+
+`GET /api/v1/sessions/board` returns the session board aggregation in one
+request: `{ code: 0, data: { board } }` where `board` contains the caller's
+`projects` (project repository shape), all `sessions` (standard session
+payload including `projectName` and `lastPrompt`), and `sessionTasks`, a map
+from session id to at most 10 linked Project Manager work item summaries
+(`{ id, title, status, priority, projectId, updatedAt }`, ordered by
+`updatedAt` descending). A work item is linked when its task-packet details
+embed `taskPacket.sessionId`; only links to the caller's own sessions are
+returned, and work items with unparseable details are skipped.
 
 ### CLI Config and Provider Apply
 
@@ -1506,3 +1532,166 @@ Before frontend implementation begins, `.claude/rules/api.md`, `CLAUDE.md`, `doc
 ## 7. Retired Legacy Internal APIs
 
 The former DeepSeek Harness bridge under `/api/internal/v1/copilot-bridge/**` and the former Portfolio API under `/api/v1/portfolio/**` are retired and not mounted. Programmatic terminal submission remains an internal, approval-gated Project Manager/Copilot tool path with the standard session, tenant, and runtime authorization checks.
+
+### Copilot channel identity and route management (P2a backend)
+
+All endpoints below live under `/api/v1/copilot/channels`, require the normal
+active-user authentication, return the standard API envelope, and set
+`Cache-Control: no-store`. This backend supports Feishu private chats only.
+The default Gateway runtime connects enabled/configured accounts; these management
+endpoints do not themselves expose a public inbound relay.
+
+| Method | Path | Body / result |
+|---|---|---|
+| POST | `/pairings` | `{ channel: "feishu", accountId }` → `{ pairing, token }`; 201, token returned once, expires in 10 minutes |
+| GET | `/pairings` | `{ pairings }`; latest 100, excludes token and hash |
+| POST | `/pairings/:id/confirm` | `{ revision, externalUserId, chatId }` matching the claimed record → `{ identity }` |
+| POST | `/pairings/:id/cancel` | `{}` → `{ cancelled: true }` |
+| GET | `/identities` | `{ identities }`; latest 100 |
+| POST | `/identities/:id/revoke` | `{}` → `{ revoked: true }`; also revokes identity routes and outstanding account pairings |
+| POST | `/routes` | `{ identityId, grantId }` → `{ route }`; 201, creates a fresh native grant-bound conversation atomically |
+| GET | `/routes` | `{ routes }`; latest 100 |
+| POST | `/routes/:id/revoke` | `{}` → `{ revoked: true }` |
+
+A trusted SDK transport must first claim a pairing using the private sender/chat
+and current account revision; there is deliberately no public claim/admission
+HTTP endpoint. The owner then confirms the exact claimed identifiers and
+revision. Pairing alone grants no project authority. One pending/claimed pairing
+per account is retained as actionable; issuing another cancels its predecessor.
+
+Routes are immutable and one may be active per identity. Replacement uses a new
+conversation. Admission rechecks active user, identity, route, account revision,
+account/config enabled flags, emergency stop, chat allowlist, grant status,
+revision/expiry, project ownership and conversation grant binding. Native run admission, recovery, approval resumption, model output and platform
+action effect fences recheck this authority. Result access also rechecks it; a
+future delivery worker must check again immediately before sending. Resource
+resolution and action budgets remain enforced by native platform commands.
+Identity/account/grant mismatch does not fall back to unrestricted owner access.
+
+Invalid input returns 400 (`CHANNEL_INPUT_INVALID`); authority mismatch returns
+403 and database conflict returns 409 (`CHANNEL_AUTHORITY_REJECTED`). Responses
+never echo raw SQL errors, pairing tokens from previous calls, or credentials.
+The owner UI is `/copilot/channels`; the default runtime supplies authenticated SDK ingress.
+
+### Native channel inbox (internal service)
+
+`createFeishuNativeIngress` accepts normalized private SDK events using the
+account and revision captured by its authenticated connection. It separates
+`/pair` claims from conversation messages. It is an internal handler, not an
+HTTP relay. The default Gateway composes it under supervisor generation fences.
+
+`NativeChannelInbox.receive` checks the current route before storing an encrypted
+payload. Account-scoped message IDs and event aliases prevent duplicate runs and
+reject conflicting replay. A tenant can have at most 1000 pending messages;
+valid duplicate receipts remain available at this limit. Encryption applies to
+the inbox payload; the existing native transcript retains its current storage
+contract.
+
+`adoptNext` atomically binds one pending message to one native run, in receipt
+order per route, skipping busy conversations so other routes can progress. The
+native runtime owns execution and recovery after adoption. Channel ownership and
+action provenance persist independently of route/step joins; missing authority
+fails closed. Revocation prevents later outputs and authorized effects, but
+cannot undo an external effect that has already started.
+
+`result` returns an authorized snapshot from the native run ledger. This slice
+adds no public inbound endpoints, remote approval cards or Telegram transport.
+
+### Default native Feishu runtime and result delivery
+
+`createGatewayApp` now constructs a native Feishu runtime by default, while
+retaining runtime injection for tests. Only active users with enabled accounts,
+enabled integration config and emergency stop cleared can connect. SDK handlers
+capture the account revision of their connection. Four bounded scheduler lanes
+adopt pending input and project results fairly across tenants. The existing
+native recovery pump starts adopted tasks (currently on its five-second scan).
+
+Results use `channel_deliveries`, never the historical Feishu inbox/outbox.
+Completed tasks return only the final assistant text, excluding inline `<think>`
+reasoning blocks (including an unclosed tail). Empty answers use a fixed Web
+notice. Filtering also applies to older pending payloads without modifying the
+native transcript. Other terminal states use a fixed status notice. Each pending approval receives a deduplicated text notice
+directing the owner to Web Copilot; this does not authorize a remote decision.
+Encoded JSON text is capped at 12 KB with a continuation notice. Payloads are
+encrypted, and uniqueness is scoped by tenant, input message and phase.
+
+Sending requires current route/grant/account/chat authority, matching native
+phase, an unexpired owned claim and a live runtime. Checks run again after token
+and DNS awaits. Confirmed receipts are `delivered`; provider rejection or token
+failure is `failed`; ambiguous message responses/network failures and expired
+in-flight claims are `unknown`. Obsolete/unauthorized notices are `cancelled`.
+Only `pending` records are sent. Neither failed nor unknown records are retried
+automatically. Late receipts cannot overwrite an expired/replaced claim.
+
+The sender uses the official [Feishu message creation API](https://open.feishu.cn/document/server-docs/im-v1/message/create)
+with fixed domestic HTTPS endpoints, redirects disabled and a bounded request
+timeout. Provider UUID is included, but recovery does not assume an unlimited
+provider deduplication window. This change does not replay historical queues.
+Live activation and an actual recipient-visible send require separate operator
+verification; local composition tests use external I/O substitutes.
+
+### Owner channel management UI and delivery diagnostics
+
+`/copilot/channels` is linked from Copilot settings. Owners configure a write-only
+App Secret, check connection status, stop the channel, create a short-lived
+pairing, explicitly acknowledge the exact claimed private sender/chat and confirm
+the current revision. Candidate changes invalidate previous acknowledgement.
+Secrets and one-time pairing tokens stay out of query/mutation cache, URL and
+local storage. Saving account configuration increments its revision and requires
+new pairing/binding; the page states this before submission.
+
+The page reuses project/action grant management, previews projects, capabilities,
+allowed roots, expiry, action budget and concurrency, then creates a separate
+channel-bound conversation. Invalid grants/identities are not selectable. Route
+status reflects associated authority invalidation even when the stored route is
+still active. Owners can revoke identities/routes or open the bound Copilot
+conversation using its existing `?c=` navigation for Web approvals.
+
+`GET /api/v1/copilot/channels/deliveries` requires active-user authentication and
+returns `{ deliveries }` (standard envelope, `Cache-Control: no-store`). It lists
+at most 100 newest records for that tenant, explicitly selecting only `id`,
+`inboxId`, `phase`, `status`, `createdAt`, and boolean `receiptRecorded`. Payload,
+claim token, peer IDs and provider message IDs are never returned. The UI labels
+unknown outcomes as uncertain and offers no resend action.
+
+### Persistent Copilot grants
+
+`POST /api/v1/copilot/grants` requires explicit `expiresAt` and `maxActions`.
+Each accepts a positive integer or `null`; `null` means no time expiry or no
+cumulative action limit respectively. Omitted, zero and negative values are
+rejected. `projectIds` selects existing owned projects. With `allOperations: true`,
+at least one project is required; the server snapshots all currently delegatable
+capabilities and derives canonical allowed roots from those projects' paths.
+Supplying `capabilities` or nonempty `allowedRoots` with this mode is rejected.
+Future capabilities and newly created projects do not automatically enter the grant.
+Otherwise, `capabilities` must explicitly select at least one operation and
+`allowedRoots` retains its custom-scope meaning. Permanence does not widen scope. Existing numeric
+grants retain their expiry and budgets. `usedActions` continues increasing, and
+`maxConcurrency` remains enforced. Action intents still expire within15minutes.
+
+The owner form defaults to all operations and long-lived/unlimited cumulative
+use. Owners select projects; the name is generated automatically. Advanced settings
+allow a custom name, operations, roots and finite limits. Creation displays inline
+validation, request errors and success feedback, and prevents duplicate submissions.
+The channel page selects the newly created grant; creating its route remains explicit. A
+revoked grant is rejected on subsequent admission/execution, including after
+awaited external-operation preparation. Pairing codes retain their10minute TTL.
+
+Storage uses zero only as an internal sentinel in the existing non-null columns;
+repository reads expose null and writes encode null as zero. No migration was
+needed; preactivation inspection found no historical zero-bound grants.
+
+
+### Grant list cleanup and channel activation
+
+Deleted grants retain a non-active tombstone for immutable conversation, action and
+channel references; they never restore owner authority. Tenant-scoped grant lists
+exclude deleted records. The UI collapses revoked grants by default and exposes
+individual deletion after expanding the revoked count. Deletion preserves audit
+history and is not a physical purge of historical records.
+
+Channel connection alone does not authorize remote operations. The channel page
+shows whether a current, valid identity/grant route exists and provides an explicit
+“启用飞书远程操作” action after selection. Creating a project grant alone does not
+bind it to Feishu. Previously rejected messages are not replayed on activation;
+send a new message after binding.

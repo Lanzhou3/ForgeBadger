@@ -21,7 +21,7 @@ sensitive terminal output.
   `GET /api/v1/diagnostics/export`; it is authenticated, tenant scoped,
   local-only, and redacted.
 - Record ForgeBadger version or commit, startup path, OS, shell, browser, Node,
-  selected terminal runtime (`tmux -V` or `psmux -V`), Claude Code, and package
+  Session Server daemon status (attach/reconnect result), Claude Code, and package
   manager versions.
 - Share summaries, counts, statuses, sanitized error names, public metadata, and
   file paths. Do not share raw secrets or full payload bodies.
@@ -186,12 +186,13 @@ node --version
 claude --version
 pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line
 pnpm --dir packages/web exec playwright test e2e/gate-d-smoke.spec.ts --project=chromium --reporter=line
-RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
+pnpm --dir packages/gateway test test/session-server-daemon-lifecycle.test.ts
 ```
 
-Also record `tmux -V` on macOS/Linux/WSL or `psmux -V` on native Windows.
-The focused `RUN_TMUX_TESTS` command is Linux/macOS tmux evidence only; it is
-not native Windows psmux coverage.
+Also record whether the Session Server daemon survived a Gateway restart and
+restored the live terminal snapshot on reconnect. The focused
+`session-server-daemon-lifecycle` command is daemon lifecycle evidence; physical
+Windows ConPTY and WSL coverage remain separate platform caveats.
 
 Collect these redacted artifacts:
 
@@ -200,24 +201,24 @@ Collect these redacted artifacts:
 - browser terminal attach/input/resize evidence;
 - refresh/reconnect result;
 - stop-session and restart-recovery result;
-- selected multiplexer session name only when it is not sensitive;
+- runtime session name only when it is not sensitive;
 - relevant ForgeBadger error names, status codes, and request paths;
-- `mvp1-smoke`, `gate-d-smoke`, and focused tmux command summaries.
+- `mvp1-smoke`, `gate-d-smoke`, and focused session-server regression summaries.
 
 Classify:
 
-- Missing tmux/psmux, psmux below 3.3.8, missing local AI CLI, install-confirmation
-  failure, or unclear dependency guidance maps to UX-01.
-- Physical Windows/WSL remains `Caveat` until a native ConPTY + psmux and/or
-  real WSL tmux run records browser + real AI CLI attach/input/output/resize,
+- Missing `node-pty`, missing local AI CLI, or unclear dependency guidance maps
+  to UX-01.
+- Physical Windows/WSL remains `Caveat` until a native ConPTY and/or real WSL
+  run records browser + real AI CLI attach/input/output/resize,
   WebSocket reconnect, Gateway restart recovery, stop, and cleanup evidence.
 - `forgebadger start`/`init` must exit non-zero without state/process side
   effects when runtime readiness remains false. `doctor` must remain read-only,
   including against an absent state directory. Direct Gateway startup must fail
   before recovery/database/listen side effects.
 - `mvp1-smoke` is stable control-plane evidence. `gate-d-smoke` is
-  release/manual browser terminal evidence unless CI supplies Gateway/Web,
-  tmux, and real CLI prerequisites.
+  release/manual browser terminal evidence unless CI supplies live Gateway/Web
+  and real CLI prerequisites.
 
 Escalate when:
 
@@ -385,7 +386,9 @@ Escalate to engineering immediately when the evidence suggests:
 - unauthenticated REST or WebSocket access to tenant data;
 - secrets in diagnostics, logs, provider output, terminal evidence, or Feishu
   callback evidence;
-- terminal persistence no longer depends on the selected tmux/psmux runtime;
+- terminal persistence silently breaks: a Gateway or daemon restart kills CLI
+  processes, or vanished sessions are not marked `lost` by startup
+  reconciliation;
 - Copilot or Feishu can execute or approve without the pending-action boundary;
 - Feishu public webhook is exposed in a multi-instance topology without shared
   replay and shared rate-limit stores;
