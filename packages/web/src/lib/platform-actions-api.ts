@@ -10,8 +10,8 @@ export interface CopilotGrant {
     capabilities: string[];
     allowedRoots: string[];
   };
-  expiresAt: number;
-  maxActions: number;
+  expiresAt: number | null;
+  maxActions: number | null;
   maxConcurrency: number;
   usedActions: number;
 }
@@ -73,16 +73,20 @@ export function listGrants() {
 export function createGrant(input: {
   name: string;
   projectIds: string[];
-  capabilities: string[];
-  allowedRoots: string[];
-  expiresAt: number;
-  maxActions: number;
+  capabilities?: string[];
+  allOperations?: boolean;
+  allowedRoots?: string[];
+  expiresAt: number | null;
+  maxActions: number | null;
   maxConcurrency: number;
 }) {
   return fetchJson<{ grant: CopilotGrant }>("/api/v1/copilot/grants", {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+export function deleteGrant(id: string) {
+  return fetchJson<{ deleted: boolean }>(`/api/v1/copilot/grants/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 export function revokeGrant(id: string) {
   return fetchJson<{ grant: CopilotGrant }>(

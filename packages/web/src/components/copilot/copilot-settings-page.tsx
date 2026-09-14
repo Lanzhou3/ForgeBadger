@@ -78,6 +78,8 @@ export function CopilotSettingsPage() {
         </div>
       </div>
 
+      <Link href="/copilot/channels" className="rounded-lg border border-border p-4 text-sm hover:bg-muted">远程渠道 · 配置飞书、确认私聊身份和项目授权 →</Link>
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
           icon={<Activity className="size-4" />}

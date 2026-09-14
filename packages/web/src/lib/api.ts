@@ -286,6 +286,27 @@ export interface Session {
   projectId?: string;
   projectName?: string;
   aiTool?: string;
+  /** Most recent user prompt, reported by terminals or stored by the Gateway. */
+  lastPrompt?: string | null;
+  /** ISO timestamp of the last recorded activity, when the Gateway provides it. */
+  lastActive?: string | null;
+  /** ISO timestamp of session creation, when the Gateway provides it. */
+  createdAt?: string | null;
+}
+
+export interface SessionBoardTask {
+  id: string;
+  title: string;
+  status: ProjectManagerWorkItemStatus;
+  priority: number;
+  projectId: string;
+  updatedAt: number;
+}
+
+export interface SessionBoard {
+  projects: Project[];
+  sessions: Session[];
+  sessionTasks: Record<string, SessionBoardTask[]>;
 }
 
 export interface DependencyStatus {
@@ -2394,6 +2415,20 @@ export async function listSessions(params: { projectId?: string } = {}): Promise
   if (params.projectId) searchParams.set("projectId", params.projectId);
   const query = searchParams.toString();
   return fetchJson(`/api/v1/sessions${query ? `?${query}` : ""}`) as Promise<{ sessions: Session[] }>;
+}
+
+export async function getSessionBoard(): Promise<{ board: SessionBoard }> {
+  return fetchJson("/api/v1/sessions/board") as Promise<{ board: SessionBoard }>;
+}
+
+export async function updateSessionLastPrompt(
+  sessionId: string,
+  prompt: string
+): Promise<{ session: Session }> {
+  return fetchJson(`/api/v1/sessions/${sessionId}/last-prompt`, {
+    method: "PUT",
+    body: JSON.stringify({ prompt }),
+  }) as Promise<{ session: Session }>;
 }
 
 export async function createSession(data: {
