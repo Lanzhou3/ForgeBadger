@@ -209,6 +209,7 @@ export function createMvp0Api(options: Mvp0ApiOptions) {
         workingDir: project.path,
         credentialMode: input.credentialMode,
         apiKeyId: null,
+        lastPrompt: null,
         lastActive: null,
         errorMessage: null,
         createdAt: new Date(session.createdAt),

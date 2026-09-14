@@ -65,11 +65,12 @@ interface ConversationResponseBody {
 
 describe("copilot conversation routes", () => {
   let server: ReturnType<typeof createGatewayApp>["server"];
+  let runtime: ReturnType<typeof createGatewayApp>;
   let baseUrl: string;
 
   before(async () => {
     const db = createTestDb();
-    const app = createGatewayApp({
+    const app = runtime = createGatewayApp({
       sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
@@ -88,8 +89,8 @@ describe("copilot conversation routes", () => {
     });
   });
 
-  after(() => {
-    server.close();
+  after(async () => {
+    await runtime.close();
   });
 
   it("renames a conversation owned by the requesting user", async () => {
@@ -230,6 +231,7 @@ describe("copilot conversation routes", () => {
 
 describe("copilot edit-message route", () => {
   let server: ReturnType<typeof createGatewayApp>["server"];
+  let runtime: ReturnType<typeof createGatewayApp>;
   let baseUrl: string;
   let db: Database;
   let seededEmails: string[];
@@ -269,7 +271,7 @@ describe("copilot edit-message route", () => {
         choices: [{ message: { content: "stubbed answer", tool_calls: [] } }]
       })
     }) as Response;
-    const app = createGatewayApp({
+    const app = runtime = createGatewayApp({
       sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
@@ -300,8 +302,8 @@ describe("copilot edit-message route", () => {
     return body();
   }
 
-  after(() => {
-    server.close();
+  after(async () => {
+    await runtime.close();
   });
 
   it("truncates the edit target and everything after it before running a new turn", async () => {

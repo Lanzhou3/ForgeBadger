@@ -17,7 +17,7 @@ export function createProjectManagementRoutes(db: Database, executeOwner: Execut
       const userId = (req as AuthenticatedRequest).userId;
       const { grantId } = overviewQuery.parse(req.query);
       const grant = grantId ? new CopilotGrantRepository(db, userId).get(grantId) : undefined;
-      if (grantId && (!grant || grant.status !== "active" || grant.expiresAt <= Date.now() || grant.actorUserId !== userId)) {
+      if (grantId && (!grant || grant.status !== "active" || (grant.expiresAt !== null && grant.expiresAt <= Date.now()) || grant.actorUserId !== userId)) {
         res.status(403).json({ code: 1, message: "Grant unavailable, expired or revoked" }); return;
       }
       res.json({ code: 0, data: projectManagementOverview({ db, userId }, grant?.scope.projectIds), message: "" });

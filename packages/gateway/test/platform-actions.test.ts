@@ -176,3 +176,50 @@ it('recovers only expired execution leases and accepts a late factual receipt wi
  restarted.intents.finish(i.id,'confirmed',{late:true});assert.equal(restarted.intents.get(i.id)?.status,'completed');assert.equal((await restarted.execute(i.id)).outcome,'confirmed');
  }finally{db.close();}
 });
+
+it('keeps explicit permanent grants usable until revoked while retaining short-lived intents', async () => {
+ const {db,actions}=fixture();
+ try {
+  const grant=actions.createGrant({name:'permanent',projectIds:[],capabilities:['test.write'],expiresAt:null,maxActions:null,maxConcurrency:1});
+  assert.equal(grant.expiresAt,null);assert.equal(grant.maxActions,null);
+  assert.deepEqual(db.prepare('SELECT expires_at,max_actions FROM copilot_grants WHERE id=?').get(grant.id),{expires_at:0,max_actions:0});
+  for(let n=0;n<3;n++) {
+   const intent=actions.preview({commandId:'test.write',input:{value:n},idempotencyKey:`permanent-${n}`,authority:'delegated_grant',grantId:grant.id});
+   assert.ok(intent.expires_at<=Date.now()+15*60000);await actions.execute(intent.id);
+  }
+  assert.equal(actions.grants.get(grant.id)?.usedActions,3);
+  actions.grants.revoke(grant.id);
+  assert.throws(()=>actions.preview({commandId:'test.write',input:{value:4},idempotencyKey:'revoked-permanent',authority:'delegated_grant',grantId:grant.id}));
+  assert.equal(actions.grants.consume(grant.id,grant.revision),false);
+ }finally{db.close();}
+});
+it('requires explicit null rather than zero for permanent grant API values',()=>{
+ const {db,actions}=fixture();
+ try {for(const value of [0,-1,undefined])assert.throws(()=>actions.createGrant({name:'invalid',projectIds:[],capabilities:['test.write'],expiresAt:value,maxActions:null,maxConcurrency:1}));}
+ finally{db.close();}
+});
+
+for(const permanent of [false,true])for(const unlimited of [false,true])it(`preserves time/budget combination permanent=${permanent} unlimited=${unlimited}`,()=>{
+ const {db,actions}=fixture();
+ try {
+  const grant=actions.createGrant({name:'combination',projectIds:[],capabilities:['test.write'],expiresAt:permanent?null:Date.now()+60000,maxActions:unlimited?null:1,maxConcurrency:1});
+  assert.equal(actions.grants.consume(grant.id,grant.revision),true);
+  assert.equal(actions.grants.consume(grant.id,grant.revision),unlimited);
+  if(!permanent){db.prepare('UPDATE copilot_grants SET expires_at=1 WHERE id=?').run(grant.id);assert.throws(()=>actions.assertGrant(grant.id));assert.equal(actions.grants.consume(grant.id,grant.revision),false);}
+ }finally{db.close();}
+});
+it('rejects invalid explicit cumulative limits',()=>{
+ const {db,actions}=fixture();try{for(const value of [0,-1,undefined])assert.throws(()=>actions.createGrant({name:'invalid limit',projectIds:[],capabilities:['test.write'],expiresAt:null,maxActions:value}));}finally{db.close();}
+});
+it('keeps perpetual-grant concurrency limits and rechecks revocation after an await',async()=>{
+ const {db,actions,command}=fixture();let release!:()=>void;let began!:()=>void;const waiting=new Promise<void>(r=>release=r);const started=new Promise<void>(r=>began=r);let effects=0;
+ command.effect='external';command.execute=async ctx=>{began();await waiting;ctx.authorize!();effects++;return {};};
+ try {
+  const g=actions.createGrant({name:'long-lived',projectIds:[],capabilities:['test.write'],expiresAt:null,maxActions:null,maxConcurrency:1});
+  const make=(key:string)=>actions.preview({commandId:'test.write',input:{value:1},idempotencyKey:key,authority:'delegated_grant',grantId:g.id});
+  const first=make('long-first');const second=make('long-second');const running=actions.execute(first.id);await started;
+  await assert.rejects(actions.execute(second.id),/concurr/i);
+  actions.grants.revoke(g.id);release();await assert.rejects(running,/revoked/i);assert.equal(effects,0);
+  await assert.rejects(actions.execute(second.id),/revoked/i);
+ }finally{release?.();db.close();}
+});

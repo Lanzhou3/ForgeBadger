@@ -1,3 +1,4 @@
+import { createNativeFeishuRuntime, type NativeFeishuIO } from './services/channels/native-feishu-runtime.js';
 import express from "express";
 import { createServer as createHttpServer, type Server } from "node:http";
 
@@ -30,6 +31,7 @@ export interface ServerDeps {
   appVersion: string;
   adapterCommandRunner?: CommandRunner | undefined;
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
+  nativeFeishuIO?: NativeFeishuIO;
   registrationMode?: RegistrationMode | undefined;
   accountRecovery?: LocalAccountRecovery | undefined;
   copilotAgent?: AgentStackDeps | undefined;
@@ -56,6 +58,7 @@ export interface GatewayAppOptions {
   appVersion?: string;
   adapterCommandRunner?: CommandRunner | undefined;
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
+  nativeFeishuIO?: NativeFeishuIO;
   registrationMode?: RegistrationMode | undefined;
   accountRecovery?: LocalAccountRecovery | undefined;
   runtimeAuthorizationInvalidator?: RuntimeAuthorizationInvalidator | undefined;
@@ -123,6 +126,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
 
   const copilotRuntime = startCopilotRuntime(copilotAgent);
   const recoveryReady = copilotRuntime.ready;
+  const feishuChannelRuntime = options.feishuChannelRuntime ?? createNativeFeishuRuntime(options.db,options.masterKey,options.nativeFeishuIO);
 
   const app = createServer({
     db: options.db,
@@ -133,7 +137,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     eventBus,
     appVersion: options.appVersion ?? "0.0.0",
     adapterCommandRunner: options.adapterCommandRunner,
-    feishuChannelRuntime: options.feishuChannelRuntime,
+    feishuChannelRuntime,
     registrationMode: options.registrationMode,
     accountRecovery: options.accountRecovery,
     copilotAgent,
@@ -166,7 +170,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
 
   attachEventsWebSocket({ server, eventBus, jwtSecret, db: options.db });
   // Opening the provider connection is intentionally last.
-  void options.feishuChannelRuntime?.start().catch(() => {
+  void feishuChannelRuntime.start().catch(() => {
     console.error("[feishu-runtime] startup failed", { code: "FEISHU_RUNTIME_START_FAILED" });
   });
 
@@ -188,7 +192,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
         () => ({ ok: true as const }),
         (error: unknown) => ({ ok: false as const, error })
       );
-      await runShutdownStage(failures, () => options.feishuChannelRuntime?.stop());
+      await runShutdownStage(failures, () => feishuChannelRuntime.stop());
       automationScheduler?.stop();
       await runShutdownStage(failures, () => copilotRuntime.stop());
       const httpResult = await httpCloseResult;

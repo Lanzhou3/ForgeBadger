@@ -21,6 +21,7 @@ import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import type { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
 import { recordActivity } from "../services/activity-events.js";
 import { recordSessionSnapshot } from "../services/session-snapshots.js";
+import { buildSessionBoard } from "../services/session-board.js";
 import {
   createLaunchPlan,
   normalizeAdapter,
@@ -45,6 +46,12 @@ const listSessionsQuerySchema = z.object({
 const sessionOutputQuerySchema = z.object({
   maxLines: z.coerce.number().int().min(1).max(10000).default(2000)
 });
+
+const updateLastPromptSchema = z.object({
+  prompt: z.string()
+}).strict();
+
+const LAST_PROMPT_MAX_LENGTH = 500;
 
 export function createSessionRoutes(
   db: Database,
@@ -72,6 +79,16 @@ export function createSessionRoutes(
     res.json({
       code: 0,
       data: { sessions },
+      message: ""
+    });
+  });
+
+  router.get("/board", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const board = buildSessionBoard(db, userId);
+    res.json({
+      code: 0,
+      data: { board: { ...board, sessions: board.sessions.map((session) => toSessionPayload(session)) } },
       message: ""
     });
   });
@@ -225,6 +242,34 @@ export function createSessionRoutes(
     res.json({
       code: 0,
       data: { session: toSessionPayload(session) },
+      message: ""
+    });
+  });
+
+  router.put("/:id/last-prompt", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = updateLastPromptSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid last prompt payload" });
+      return;
+    }
+    const prompt = parseResult.data.prompt.trim();
+    if (prompt.length === 0) {
+      res.status(400).json({ code: 1, message: "Prompt must not be empty" });
+      return;
+    }
+
+    const repo = new SessionRepository(db, userId);
+    const session = repo.getById(req.params.id);
+    if (!session) {
+      res.status(404).json({ code: 1, message: "Session not found" });
+      return;
+    }
+    const lastPrompt = prompt.slice(0, LAST_PROMPT_MAX_LENGTH);
+    const updated = repo.update(req.params.id, { lastPrompt }) ?? { ...session, lastPrompt };
+    res.json({
+      code: 0,
+      data: { session: toSessionPayload(updated) },
       message: ""
     });
   });

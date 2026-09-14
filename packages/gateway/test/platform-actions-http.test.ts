@@ -58,7 +58,12 @@ it('composes grant preview approval execution receipt and revocation over real H
         assert.equal((db.prepare('SELECT count(*) n FROM project_manager_work_items').get() as {
             n: number;
         }).n, 1);
+        assert.equal((await fetch(base+`/copilot/grants/${grant.id}`,{method:'DELETE',headers})).status,409);
         assert.equal((await post(`/copilot/grants/${grant.id}/revoke`)).status, 200);
+        assert.equal((await fetch(base+`/copilot/grants/${grant.id}`,{method:'DELETE',headers})).status,200);
+        assert.equal((await fetch(base+`/copilot/grants/${grant.id}`,{method:'DELETE',headers})).status,200);
+        const listed=await (await fetch(base+'/copilot/grants',{headers})).json() as {data:{grants:unknown[]}};
+        assert.equal(listed.data.grants.length,0);
         assert.equal((await post('/platform-actions/preview', { commandId: 'pm.work_item.create', input: { projectId: project.id, title: 'Forbidden' }, grantId: grant.id, idempotencyKey: 'http-2' })).status, 409);
         const owner = await post('/platform-actions/preview', { commandId: 'project.metadata.update', input: { projectId: project.id, name: 'Renamed' }, idempotencyKey: 'owner-1' });
         const oi = owner.body.data.intent as ActionIntent;

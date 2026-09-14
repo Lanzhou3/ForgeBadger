@@ -21,6 +21,10 @@ export function createPlatformActionRoutes(deps: Omit<CommandContext, 'userId'>)
     };
     router.get('/copilot/grants', handler(req => ({ grants: service(req).grants.list(), capabilities: [...createPlatformCommands().values()].filter(c => c.delegatable).map(c => ({ id: c.id, capability: c.capability, effect: c.effect })) })));
     router.post('/copilot/grants', handler(req => ({ grant: service(req).createGrant(req.body) })));
+    router.delete('/copilot/grants/:id', handler(req => {
+        service(req).grants.delete(z.string().min(1).max(128).parse(req.params.id));
+        return { deleted: true };
+    }));
     router.post('/copilot/grants/:id/revoke', handler(req => {
         const s = service(req);
         return deps.db.transaction(() => {

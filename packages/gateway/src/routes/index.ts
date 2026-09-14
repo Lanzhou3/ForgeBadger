@@ -1,3 +1,4 @@
+import { createCopilotChannelRoutes } from "./copilot-channels.js";
 import { createPlatformActionRoutes } from "./platform-actions.js";
 import { createProjectManagementRoutes } from "./project-management.js";
 import { PlatformActions } from "../services/platform-commands/actions.js";
@@ -101,6 +102,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     eventBus: deps.eventBus
   }));
   app.use("/api/v1/dashboard", createDashboardRoutes(deps.db));
+  app.use("/api/v1/copilot/channels", createCopilotChannelRoutes({ db: deps.db, masterKey: deps.masterKey }));
   app.use("/api/v1", createPlatformActionRoutes({db:deps.db,masterKey:deps.masterKey,sessionManager:deps.sessionManager,adapterCommandRunner:deps.adapterCommandRunner,eventBus:deps.eventBus}));
   app.use("/api/v1", createProjectManagementRoutes(deps.db, (userId,commandId,input) => new PlatformActions({db:deps.db,userId},createPlatformCommands()).executeOwner(commandId,input,randomUUID())));
   if (deps.copilotAgent) {
