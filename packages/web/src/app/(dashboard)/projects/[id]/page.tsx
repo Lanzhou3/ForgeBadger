@@ -24,6 +24,8 @@ import { ExtractTemplateDialog } from "@/components/projects/ExtractTemplateDial
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
 import { WorkspaceExplorer } from "@/components/projects/workspace";
+import { GitBranchesPanel } from "@/components/projects/git-branches-panel";
+import { GitChangesPanel } from "@/components/sessions/git-changes-panel";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -72,6 +74,7 @@ const ProjectManagerPanel = dynamic(
 
 const PROJECT_DETAIL_TABS = [
   "sessions",
+  "git",
   "files",
   "graph",
   "project-manager",
@@ -450,6 +453,7 @@ export default function ProjectDetailPage() {
                   </span>
                 )}
               </TabsTrigger>
+              <TabsTrigger value="git">{t("projects.gitTab")}</TabsTrigger>
               <TabsTrigger value="files">{t("projects.filesTab")}</TabsTrigger>
               <TabsTrigger value="graph">{t("projects.graphTab")}</TabsTrigger>
               <TabsTrigger value="project-manager">{t("projects.devTasks")}</TabsTrigger>
@@ -518,6 +522,13 @@ export default function ProjectDetailPage() {
                   </div>
                 )}
                 <WorkspaceContextPanel projectId={id} enabled={activeTab === "sessions"} />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="git" className="mt-4">
+              <div className="grid gap-4 xl:grid-cols-2">
+                <GitBranchesPanel projectId={id} enabled={activeTab === "git"} />
+                <GitChangesPanel projectId={id} />
               </div>
             </TabsContent>
 

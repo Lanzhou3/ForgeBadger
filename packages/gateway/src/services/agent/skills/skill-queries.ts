@@ -1,25 +1,20 @@
-/**
- * Copilot skill queries — read the platform Skills store for the agent seam.
- *
- * The single source of truth for the Copilot's skill surface is the `skills`
- * table (SkillRepository). These helpers expose the user's readable + enabled
- * skills as name/description summaries for `list_skills`, `load_skill`, and the
- * `/skills` slash command so all three surfaces stay byte-identical.
- */
-import type { Database } from "../../../db/types.js";
-import { SkillRepository } from "../../../db/repositories/skill-repository.js";
-import { seedBuiltinSkills } from "../../builtin-skills.js";
+import type { Database } from '../../../db/types.js';
+import { CopilotSkillService, type CopilotSkillQueryOptions, type CopilotSkillDetail } from './copilot-skill-service.js';
 
-export interface CopilotSkillSummary {
-  name: string;
-  description: string;
+export type PlaybookQueryOptions = CopilotSkillQueryOptions;
+export interface CopilotPlaybookSummary { id: string; revisionId: string; name: string; description: string; }
+export type CopilotPlaybook = CopilotSkillDetail;
+
+/** Legacy playbook names share the versioned Skills service and current availability filters. */
+export function listCopilotPlaybooks(db: Database, userId: string, options: PlaybookQueryOptions = {}): CopilotPlaybook[] {
+  return new CopilotSkillService(db, userId).details(options);
 }
-
-export function listEnabledCopilotSkillSummaries(db: Database, userId: string): CopilotSkillSummary[] {
-  const repo = new SkillRepository(db, userId);
-  seedBuiltinSkills(repo);
-  return repo
-    .list()
-    .filter((skill) => skill.isEnabled)
-    .map((skill) => ({ name: skill.name, description: skill.description ?? "" }));
+export function listEnabledCopilotPlaybookSummaries(db: Database, userId: string, options: PlaybookQueryOptions = {}): CopilotPlaybookSummary[] {
+  return new CopilotSkillService(db, userId).list(options).filter(row => row.available)
+    .map(({ id, revisionId, name, description }) => ({ id, revisionId, name, description }));
+}
+export const listAvailableCopilotSkillSummaries = listEnabledCopilotPlaybookSummaries;
+export function loadCopilotPlaybook(db: Database, userId: string, id: string, options: PlaybookQueryOptions = {}): CopilotPlaybook | undefined {
+  const row = new CopilotSkillService(db, userId).get(id, options);
+  return row?.available ? row : undefined;
 }

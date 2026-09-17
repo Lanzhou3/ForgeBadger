@@ -211,7 +211,6 @@ export const projectManagerWorkItems = sqliteTable(
     priority: integer("priority").notNull().default(0),
     acceptanceCriteriaJson: text("acceptance_criteria_json").notNull().default("[]"),
     evidenceRefsJson: text("evidence_refs_json").notNull().default("[]"),
-    feishuRefsJson: text("feishu_refs_json").notNull().default("[]"),
     detailsJson: text("details_json").notNull().default("{}"),
     stageId: text("stage_id"),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
@@ -320,7 +319,6 @@ export const projectManagerLedgerEvents = sqliteTable(
     eventType: text("event_type").notNull(),
     status: text("status"),
     evidenceRefsJson: text("evidence_refs_json").notNull().default("[]"),
-    feishuRefsJson: text("feishu_refs_json").notNull().default("[]"),
     detailsJson: text("details_json").notNull().default("{}"),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date())
   },
@@ -349,6 +347,8 @@ export const skills = sqliteTable("skills", {
     .references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
+  runtimeTarget: text("runtime_target", { enum: ["cli", "copilot"] }).notNull().default("cli"),
+  resourceManifest: text("resource_manifest"),
   source: text("source").notNull().default("local"),
   content: text("content").notNull(),
   version: text("version").notNull().default("1.0.0"),
@@ -356,7 +356,7 @@ export const skills = sqliteTable("skills", {
   isEnabled: integer("is_enabled", { mode: "boolean" }).notNull().default(true),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ idx_skills_user_name: uniqueIndex("idx_skills_user_name").on(table.userId, table.name) }));
+}, (table) => ({ idx_skills_user_target_name: uniqueIndex("idx_skills_user_target_name").on(table.userId, table.runtimeTarget, table.name), idx_skills_id_user: uniqueIndex("idx_skills_id_user").on(table.id, table.userId) }));
 
 export const projectSkills = sqliteTable(
   "project_skills",
@@ -1720,3 +1720,41 @@ export const channelDeliveries = sqliteTable('channel_deliveries', {
   phase: uniqueIndex('idx_channel_delivery_phase').on(t.userId,t.inboxId,t.phase),
   pending: index('idx_channel_delivery_pending').on(t.userId,t.status,t.createdAt)
 }));
+
+// Immutable Copilot Skill package history; CLI skills never enter these tables.
+export const copilotSkillRevisions = sqliteTable("copilot_skill_revisions", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  skillId: text("skill_id").notNull(),
+  parentRevisionId: text("parent_revision_id"),
+  action: text("action").notNull(),
+  snapshotJson: text("snapshot_json").notNull(),
+  packageDigest: text("package_digest").notNull(),
+  createdAt: integer("created_at").notNull()
+}, table => ({
+  owner: index("idx_copilot_skill_revisions_owner").on(table.userId, table.skillId, table.createdAt),
+  identity: uniqueIndex("idx_copilot_skill_revisions_identity").on(table.id, table.userId, table.skillId),
+  skillOwner: foreignKey({columns:[table.skillId,table.userId],foreignColumns:[skills.id,skills.userId]}).onDelete("cascade"),
+  parentOwner: foreignKey({columns:[table.parentRevisionId,table.userId,table.skillId],foreignColumns:[table.id,table.userId,table.skillId]}),
+  validAction: check("copilot_skill_revision_action",sql`${table.action} IN ('import','update','rollback','legacy','builtin-update')`)
+}));
+export const copilotSkillHeads = sqliteTable("copilot_skill_heads", {
+  skillId: text("skill_id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  originKind: text("origin_kind").notNull(),
+  currentRevisionId: text("current_revision_id").notNull()
+}, table => ({
+  owner: index("idx_copilot_skill_heads_owner").on(table.userId),
+  skillOwner: foreignKey({columns:[table.skillId,table.userId],foreignColumns:[skills.id,skills.userId]}).onDelete("cascade"),
+  revisionOwner: foreignKey({columns:[table.currentRevisionId,table.userId,table.skillId],foreignColumns:[copilotSkillRevisions.id,copilotSkillRevisions.userId,copilotSkillRevisions.skillId]}),
+  validOrigin: check("copilot_skill_head_origin",sql`${table.originKind} IN ('builtin','external','legacy')`)
+}));
+
+export const copilotConnections = sqliteTable('copilot_connections', {
+ id: text('id').primaryKey(),
+ userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+ name: text('name').notNull(), endpoint: text('endpoint').notNull(), credentialEncrypted: text('credential_encrypted'),
+ enabled: integer('enabled').notNull().default(0), revision: integer('revision').notNull().default(1),
+ toolsJson: text('tools_json').notNull().default('[]'), enabledToolsJson: text('enabled_tools_json').notNull().default('[]'),
+ lastDiscoveredAt: integer('last_discovered_at'), createdAt: integer('created_at').notNull(), updatedAt: integer('updated_at').notNull()
+}, table => ({ idxCopilotConnectionsUser: index('idx_copilot_connections_user').on(table.userId) }));

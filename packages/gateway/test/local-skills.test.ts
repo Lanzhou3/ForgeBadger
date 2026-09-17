@@ -274,7 +274,7 @@ describe("local skill discovery", () => {
     assert.equal(skills.some((skill) => skill.name === "configured-review"), true);
   });
 
-  it("follows symlinked local Skill directories", async () => {
+  it("requires an explicit approved root for external symlinked Skill directories", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "forgebadger-symlink-skills-"));
     const realSkillDir = path.join(root, "real-skills", "linked-review");
     const skillRoot = path.join(root, ".claude", "skills");
@@ -295,7 +295,9 @@ describe("local skill discovery", () => {
 
     const skills = discoverLocalSkills({ roots: [skillRoot] });
 
-    assert.ok(skills.some((skill) => skill.name === "linked-review"));
+    assert.equal(skills.some((skill) => skill.name === "linked-review"), false);
+    const approved = discoverLocalSkills({ roots: [skillRoot, path.dirname(realSkillDir)] });
+    assert.ok(approved.some((skill) => skill.name === "linked-review"));
   });
 
   it("syncs discovered local Skills into the current user's library and refreshes changed content", async () => {

@@ -1,3 +1,5 @@
+import { hasFrontmatter } from "./skill-frontmatter.js";
+import { parseSkillResourceManifest, skillExportManifest, assertUniqueConfigPaths } from "./skill-resources.js";
 import type { TemplateFileInput } from "../config-generation/types.js";
 import type { ProjectSkill } from "../db/repositories/project-skill-repository.js";
 import type { AdapterId } from "./adapter-discovery.js";
@@ -11,12 +13,14 @@ export interface BuildProjectConfigFilesInput {
 
 export function buildProjectConfigFiles(input: BuildProjectConfigFilesInput): TemplateFileInput[] {
   const adapter = input.adapter ?? "claude";
-  return [
+  const files = [
     ...adaptTemplateFiles(input.templateFiles, adapter),
     ...(input.skills ?? [])
-      .filter((skill) => skill.isEnabled)
-      .map((skill) => skillToTemplateFile(skill, adapter))
+      .filter((skill) => skill.isEnabled && skill.runtimeTarget !== "copilot")
+      .flatMap((skill) => skillToTemplateFiles(skill, adapter))
   ];
+  assertUniqueConfigPaths(files);
+  return files;
 }
 
 function adaptTemplateFiles(
@@ -68,27 +72,20 @@ function adaptTemplateFiles(
   });
 }
 
-function skillToTemplateFile(skill: ProjectSkill, adapter: AdapterId): TemplateFileInput {
-  const slug = slugify(skill.name);
-  const content = [
-    "---",
-    `name: ${slug}`,
-    skill.description ? `description: ${skill.description}` : undefined,
-    "---",
-    "",
-    `# ${skill.name}`,
-    "",
-    skill.description ?? "",
-    "",
-    skill.content,
-    ""
-  ].filter((line): line is string => line !== undefined).join("\n");
-
-  return {
-    id: `skill:${skill.skillId}`,
-    relativePath: skillConfigPath(skill.name, adapter),
-    content
-  };
+function skillToTemplateFiles(skill: ProjectSkill, adapter: AdapterId): TemplateFileInput[] {
+  const relativePath = skillConfigPath(skill.name, adapter);
+  const directory = relativePath.slice(0, -"/SKILL.md".length);
+  const content = hasFrontmatter(skill.content) ? skill.content : [
+    "---", `name: ${JSON.stringify(slugify(skill.name))}`,
+    `description: ${JSON.stringify(skill.description ?? skill.name)}`, "---", "", skill.content
+  ].join("\n");
+  const files: TemplateFileInput[] = [{renderVariables:false,id:`skill:${skill.skillId}`,relativePath,content},
+    ...parseSkillResourceManifest(skill.resourceManifest).map(resource=>({
+      renderVariables:false,id:`skill:${skill.skillId}:${resource.relativePath}`,
+      relativePath:`${directory}/${resource.relativePath}`,content:resource.content
+    }))
+  ];
+  return [...files,skillExportManifest(skill.skillId,directory,files)];
 }
 
 function skillConfigPath(name: string, adapter: AdapterId): string {

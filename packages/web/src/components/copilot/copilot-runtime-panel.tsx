@@ -14,6 +14,7 @@ import {
   setCopilotToolEnabled,
   type CopilotToolInfo,
 } from "@/lib/copilot-api";
+import { copilotSkillsKey } from "@/lib/copilot-extensions-api";
 import type { TranslationKey } from "@/lib/i18n";
 
 export const modelProvidersQueryKey = ["model-providers"] as const;
@@ -67,6 +68,7 @@ export function CapabilitiesSection({ active }: { active: boolean }) {
     onSuccess: () => {
       setError(null);
       void queryClient.invalidateQueries({ queryKey: copilotCapabilitiesQueryKey });
+      void queryClient.invalidateQueries({ queryKey: copilotSkillsKey });
     },
     onError: () => setError(t("copilot.capabilitiesToggleError")),
   });
@@ -168,7 +170,7 @@ function ToolRow({
   return (
     <div
       className={`flex items-start justify-between gap-3 rounded-md border border-border/70 bg-card px-3 py-2 transition-opacity ${
-        tool.enabled ? "" : "opacity-60"
+        tool.enabled && tool.available ? "" : "opacity-60"
       }`}
       data-testid={`tool-row-${tool.name}`}
     >
@@ -181,19 +183,24 @@ function ToolRow({
               operate
             </Badge>
           ) : null}
-          {tool.requiresApproval ? (
+          {tool.requiresApproval && tool.available ? (
             <Badge variant="outline" className="px-1 py-0 text-[10px] text-muted-foreground">
-              approval
+              {t("copilot.toolAuthorization")}
             </Badge>
           ) : null}
         </p>
         <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>
+        {!tool.available ? (
+          <p className="text-xs text-amber-500">
+            {t("copilot.toolUnavailable")}: {tool.unavailableReason ?? t("copilot.toolUnavailable")}
+          </p>
+        ) : null}
       </div>
       <Switch
         aria-label={tool.name}
         size="sm"
         className="mt-0.5 shrink-0"
-        disabled={pending}
+        disabled={pending || !tool.available}
         checked={tool.enabled}
         onCheckedChange={onToggle}
       />

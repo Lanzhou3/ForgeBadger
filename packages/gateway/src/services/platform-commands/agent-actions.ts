@@ -23,7 +23,7 @@ export async function executeAgentAction(name: string, input: unknown, context: 
     const result = (await actions.execute(intentId)).result;
     if (name === 'create_project')
         return { created: true, ...result as object };
-    if (name === 'pm_start_task_packet')
+    if (name === 'pm_prepare_task_packet')
         return { prepared: true, ...result as object };
     return result;
 }

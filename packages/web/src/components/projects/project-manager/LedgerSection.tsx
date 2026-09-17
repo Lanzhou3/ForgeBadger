@@ -179,7 +179,6 @@ function ProjectManagerLedgerRow({
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <LedgerDatum label={t("projects.projectManagerEvidenceRefs")} value={event.evidenceRefCount} />
-        <LedgerDatum label={t("projects.projectManagerFeishuRefs")} value={event.feishuRefCount} />
       </div>
       {event.trace && <LedgerTraceGrid trace={event.trace} t={t} />}
     </div>

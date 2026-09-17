@@ -1,97 +1,56 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-
-import { CopilotSettingsPage } from "@/components/copilot/copilot-settings-page";
+import { beforeEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { CopilotSettingsPage } from "./copilot-settings-page";
 import { LanguageProvider } from "@/hooks/use-language";
-
-const { pushMock, getCapabilitiesMock, setToolEnabledMock } = vi.hoisted(() => ({
-  pushMock: vi.fn(),
-  getCapabilitiesMock: vi.fn(),
-  setToolEnabledMock: vi.fn(),
+const push = vi.hoisted(() => vi.fn());
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+vi.mock("@/lib/api", () => ({ listModelProviders: vi.fn().mockResolvedValue({ models: [] }) }));
+vi.mock("@/lib/platform-actions-api", () => ({
+  listGrants: vi.fn().mockResolvedValue({ grants: [], capabilities: [] }),
 }));
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: pushMock }),
+vi.mock("@/lib/copilot-extensions-api", () => ({
+  copilotSkillsKey: ["copilot", "skills"],
+  copilotConnectionsKey: ["copilot", "connections"],
+  listCopilotSkills: vi.fn().mockResolvedValue({ skills: [] }),
+  listCopilotConnections: vi.fn().mockResolvedValue({ connections: [] }),
 }));
-
-vi.mock("@/lib/copilot-api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/copilot-api")>();
-  return {
-    ...actual,
-    getCopilotCapabilities: getCapabilitiesMock,
-    setCopilotToolEnabled: setToolEnabledMock,
-  };
-});
-
-const capabilities = {
-  tools: [
-    {
-      name: "list_projects",
-      description: "List projects",
-      risk: "read" as const,
-      requiresApproval: false,
-      enabled: true,
-    },
-    {
-      name: "run_terminal",
-      description: "Run a terminal command",
-      risk: "operate" as const,
-      requiresApproval: true,
-      enabled: false,
-    },
-  ],
-};
-
-function renderPage() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+vi.mock("./copilot-memory-panel", () => ({ CopilotMemoryPanel: () => <div>Memory</div> }));
+function mount() {
+  render(
     <LanguageProvider>
-      <QueryClientProvider client={queryClient}>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <CopilotSettingsPage />
       </QueryClientProvider>
-    </LanguageProvider>
+    </LanguageProvider>,
   );
 }
-
-describe("CopilotSettingsPage", () => {
-  beforeEach(() => {
-    cleanup();
-    vi.clearAllMocks();
-    getCapabilitiesMock.mockResolvedValue(capabilities);
-    setToolEnabledMock.mockImplementation((name: string, enabled: boolean) =>
-      Promise.resolve({ toolName: name, enabled })
-    );
-  });
-
-  it("identifies the self-owned runtime and renders capability switches", async () => {
-    renderPage();
-
-    expect(screen.getByRole("heading", { name: "Copilot 设置" })).toBeTruthy();
-    expect(screen.getByText("Gateway 原生")).toBeTruthy();
-    expect(screen.getByText(/不依赖外部 Harness 服务/u)).toBeTruthy();
-    await waitFor(() => expect(screen.getByTestId("tool-row-list_projects")).toBeTruthy());
-    expect(screen.getByTestId("tool-row-run_terminal")).toBeTruthy();
-  });
-
-  it("returns to the Copilot console", () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "返回对话" }));
-    expect(pushMock).toHaveBeenCalledWith("/copilot");
-  });
-
-  it("updates a native capability switch", async () => {
-    renderPage();
-    const toggle = await screen.findByRole("switch", { name: "run_terminal" });
-    fireEvent.click(toggle);
-    await waitFor(() => expect(setToolEnabledMock).toHaveBeenCalledWith("run_terminal", true));
-  });
-
-  it("shows capability load failures without hiding the runtime boundary", async () => {
-    getCapabilitiesMock.mockRejectedValue(new Error("gateway unavailable"));
-    renderPage();
-    await waitFor(() => expect(screen.getByText("工具列表加载失败。")).toBeTruthy());
-    expect(screen.getByText("Gateway 原生")).toBeTruthy();
-  });
+beforeEach(() => { cleanup(); vi.clearAllMocks(); });
+it("renders the settings nav with entries into every Copilot settings section", () => {
+  mount();
+  expect(screen.getByRole("heading", { name: "Copilot 设置" })).toBeTruthy();
+  const nav = screen.getByRole("navigation", { name: "Copilot 设置导航" });
+  expect(nav.querySelector('a[href="/copilot/settings/access"]')).toBeTruthy();
+  expect(nav.querySelector('a[href="/copilot/extensions"]')).toBeTruthy();
+  expect(nav.querySelector('a[href="/copilot/channels"]')).toBeTruthy();
+  expect(nav.querySelector('a[href="/copilot/automations"]')).toBeTruthy();
+});
+it("links summary cards to access, extensions, channels and automations", () => {
+  mount();
+  expect(screen.getAllByRole("link", { name: /授权/ }).some((link) => link.getAttribute("href") === "/copilot/settings/access")).toBe(true);
+  expect(screen.getAllByRole("link", { name: /Copilot 扩展/ }).some((link) => link.getAttribute("href") === "/copilot/extensions")).toBe(true);
+  expect(screen.getAllByRole("link", { name: /远程渠道/ }).some((link) => link.getAttribute("href") === "/copilot/channels")).toBe(true);
+  expect(screen.getAllByRole("link", { name: /定时自动化/ }).some((link) => link.getAttribute("href") === "/copilot/automations")).toBe(true);
+});
+it("shows the native runtime with a model management entry and no standalone tool panels", () => {
+  mount();
+  expect(screen.getByText("Gateway 原生")).toBeTruthy();
+  expect(screen.getByRole("link", { name: "管理模型" }).getAttribute("href")).toBe("/models");
+  expect(screen.queryByRole("switch")).toBeNull();
+});
+it("returns to Copilot chat", () => {
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "返回对话" }));
+  expect(push).toHaveBeenCalledWith("/copilot");
 });

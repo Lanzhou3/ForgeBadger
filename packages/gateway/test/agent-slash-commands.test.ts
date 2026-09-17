@@ -1,3 +1,5 @@
+import { createPlatformTools } from "../src/services/agent/tools/index.js";
+import { visibleToolSchemas } from "../src/services/agent/tool-availability.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import path from "node:path";
@@ -11,7 +13,7 @@ import { CopilotConversationLog } from "../src/services/agent/conversation-log.j
 import { createCopilotOrchestrator } from "../src/services/agent/orchestrator.js";
 import type { AgentLlmClient, AgentLlmStreamEvent } from "../src/services/agent/orchestrator-types.js";
 import { resolveLocalCommandReply } from "../src/services/agent/slash-commands.js";
-import { listEnabledCopilotSkillSummaries } from "../src/services/agent/skills/skill-queries.js";
+import { listEnabledCopilotPlaybookSummaries } from "../src/services/agent/skills/skill-queries.js";
 import { createAgentToolRegistry } from "../src/services/agent/tool-registry.js";
 import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
 
@@ -57,15 +59,15 @@ function createStubLlm(reply = "stubbed answer", options: { forbidStream?: boole
 describe("resolveLocalCommandReply", () => {
   it("formats every enabled skill as name plus one-line description", () => {
     // Arrange
-    const summaries = [{ name: "session-dispatch", description: "dispatch summary" }, { name: "usage-analysis", description: "usage summary" }];
+    const summaries = [{ id:"first", name: "session-dispatch", description: "dispatch summary" }, { id:"second", name: "usage-analysis", description: "usage summary" }];
 
     // Act
-    const reply = resolveLocalCommandReply("/skills", () => summaries);
+    const reply = resolveLocalCommandReply("/playbooks", () => summaries);
 
     // Assert
     assert.ok(reply);
     const lines = reply.split("\n");
-    assert.equal(lines[0], `Enabled skills (${summaries.length}):`);
+    assert.equal(lines[0], `Available Copilot playbooks (${summaries.length}):`);
     assert.equal(lines.length, summaries.length + 1);
     for (const [index, skill] of summaries.entries()) {
       assert.equal(lines[index + 1], `- ${skill.name}: ${skill.description}`);
@@ -79,14 +81,14 @@ describe("resolveLocalCommandReply", () => {
     assert.equal(invoked, false);
   });
 
-  it("returns null for anything that is not exactly /skills after trimming", () => {
-    for (const input of ["hello", "/skills list", "/skillz", "look /skills", "/", "//skills"]) {
+  it("returns null for anything that is not exactly /playbooks after trimming", () => {
+    for (const input of ["hello", "/playbooks list", "/skillz", "look /playbooks", "/", "//playbooks"]) {
       assert.equal(resolveLocalCommandReply(input, () => []), null, `expected null for ${JSON.stringify(input)}`);
     }
   });
 });
 
-describe("copilot /skills command routing", () => {
+describe("copilot /playbooks command routing", () => {
   function setup(options: { forbidStream?: boolean } = {}) {
     // Arrange
     const db = createTestDb();
@@ -100,28 +102,28 @@ describe("copilot /skills command routing", () => {
     const orchestrator = createCopilotOrchestrator({
       db,
       masterKey: "abcdef0123456789abcdef0123456789",
-      toolRegistry: createAgentToolRegistry([]),
+      toolRegistry: createAgentToolRegistry(createPlatformTools()),
       llm: llm.client,
       eventBus
     });
     return { db, log, conversationId: conversation.id, userId: user.id, events, llm, orchestrator };
   }
 
-  it("answers /skills with the formatted listing and never calls the LLM", async () => {
+  it("answers /playbooks with the formatted listing and never calls the LLM", async () => {
     // Arrange
     const { db, log, conversationId, userId, events, llm, orchestrator } = setup({ forbidStream: true });
 
     try {
       // Act
-      const runId = await orchestrator.runTurn({ userId, conversationId, userText: "/skills" });
+      const runId = await orchestrator.runTurn({ userId, conversationId, userText: "/playbooks" });
 
       // Assert: run completes locally with the registry listing.
       const messages = log.listMessages(conversationId);
       assert.deepEqual(messages.map((message) => message.role), ["user", "assistant"]);
-      assert.equal(messages[0]?.content, "/skills");
-      const summaries = listEnabledCopilotSkillSummaries(db, userId);
+      assert.equal(messages[0]?.content, "/playbooks");
+      const summaries = listEnabledCopilotPlaybookSummaries(db, userId, { availableToolNames: visibleToolSchemas(createAgentToolRegistry(createPlatformTools()), {hasSessionManager:false}).map(tool => tool.name) });
       const expected = [
-        `Enabled skills (${summaries.length}):`,
+        `Available Copilot playbooks (${summaries.length}):`,
         ...summaries.map((skill) => `- ${skill.name}: ${skill.description}`)
       ].join("\n");
       assert.equal(messages[1]?.kind, "text");
@@ -145,11 +147,11 @@ describe("copilot /skills command routing", () => {
 
     try {
       // Act
-      const runId = await orchestrator.runTurn({ userId, conversationId, userText: "  /skills \t" });
+      const runId = await orchestrator.runTurn({ userId, conversationId, userText: "  /playbooks \t" });
 
       // Assert
       const assistant = log.listMessages(conversationId).find((message) => message.role === "assistant");
-      assert.match(assistant?.content ?? "", /^Enabled skills \(\d+\):\n- /);
+      assert.match(assistant?.content ?? "", /^Available Copilot playbooks \(\d+\):\n- /);
       assert.equal(log.getRun(runId)?.status, "completed");
       assert.equal(llm.streamCalls(), 0);
     } finally {
@@ -163,11 +165,11 @@ describe("copilot /skills command routing", () => {
 
     try {
       // Act
-      const runId = await orchestrator.runTurn({ userId, conversationId, userText: "/SKILLS" });
+      const runId = await orchestrator.runTurn({ userId, conversationId, userText: "/PLAYBOOKS" });
 
       // Assert
       const assistant = log.listMessages(conversationId).find((message) => message.role === "assistant");
-      assert.match(assistant?.content ?? "", /^Enabled skills \(\d+\):/);
+      assert.match(assistant?.content ?? "", /^Available Copilot playbooks \(\d+\):/);
       assert.equal(log.getRun(runId)?.status, "completed");
       assert.equal(llm.streamCalls(), 0);
     } finally {
@@ -190,7 +192,7 @@ describe("copilot /skills command routing", () => {
       assert.equal(assistant[0]?.content, "stubbed answer");
       assert.equal(log.getRun(runId)?.status, "completed");
       assert.equal(llm.streamCalls(), 1);
-      assert.equal(messages.some((message) => message.content.startsWith("Enabled skills")), false);
+      assert.equal(messages.some((message) => message.content.startsWith("Available Copilot playbooks")), false);
     } finally {
       db.close();
     }

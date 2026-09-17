@@ -656,9 +656,6 @@ function ProjectManagerBoardCard({
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <Badge variant="outline">{t("projects.projectManagerEvidenceRefs")}: {item.evidenceRefCount}</Badge>
-        {item.feishuRefCount > 0 && (
-          <Badge variant="outline">{t("projects.projectManagerFeishuRefs")}: {item.feishuRefCount}</Badge>
-        )}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <WorkItemSessionActions

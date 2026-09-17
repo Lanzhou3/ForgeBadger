@@ -133,9 +133,9 @@ not included.
 
 The Project Manager Ledger is Gateway-owned ForgeBadger control-plane state. It
 does not make Feishu or terminal sessions an authority for project-manager
-state; Feishu may be referenced only as bounded collaboration metadata, and
-terminal sessions may be referenced only by safe identifiers or evidence
-references.
+state; terminal sessions may be referenced only by safe identifiers or evidence
+references. (The legacy `feishuRefs` collaboration-metadata slot was retired in
+migration `0083_drop_pm_feishu_refs`.)
 
 Phase 4 introduces migration-backed durable state in
 `packages/gateway/src/db/migrations/0022_project_manager_ledger.sql` with these
@@ -233,14 +233,15 @@ work item as `todo`. Moving it to another state requires a separate
 `PATCH /work-items/:workItemId/status` mutation so the normal transition,
 evidence, ledger, and audit guards cannot be bypassed during creation.
 
-The Web create-work-item dialog does not collect or send initial evidence or
-Feishu references. Evidence is attached later from the work-item detail and
+The Web create-work-item dialog does not collect or send initial evidence.
+Evidence is attached later from the work-item detail and
 acceptance flow through `POST /work-items/:workItemId/evidence`. The lower-level
-Gateway create contract still accepts bounded `evidenceRefs` and `feishuRefs`
+Gateway create contract still accepts bounded `evidenceRefs`
 as compatibility metadata for historical records and approved integrations;
 their database and DTO fields remain intact. These references are pointers,
-not verified evidence bodies, and Feishu metadata never becomes an authority
-for Project Manager state.
+not verified evidence bodies. The former `feishuRefs` collaboration-metadata
+slot was retired (migration `0083_drop_pm_feishu_refs`): the columns are
+dropped and no API, tool, or DTO surface accepts or returns them anymore.
 
 Task packet endpoints derive a bounded operator handoff from a work item:
 project id/name, CLI adapter, template id, prompt, acceptance criteria,
@@ -599,6 +600,8 @@ adapter reports the `terminal` runtime mode; the former Codex
 - `GET /api/v1/projects/:id/workspace/file`
 - `GET /api/v1/projects/:id/git-changes`
 - `GET /api/v1/projects/:id/git-diff`
+- `GET /api/v1/projects/:id/git-branches`
+- `POST /api/v1/projects/:id/git-checkout`
 - `POST /api/v1/projects/:id/generate-config`
 - `GET /api/v1/projects/:id/agent-sequence`
 - `PUT /api/v1/projects/:id/agent-sequence`
@@ -781,9 +784,25 @@ Project workspace context:
   preview through the workspace safe-path boundary instead (git has no diff
   for untracked files). Paths are validated segment-by-segment; absolute paths
   and `..` traversal are rejected.
-- These routes are read-only. They do not store file contents, terminal
-  scrollback, or evidence blobs in SQLite; later Project Manager evidence uses
-  bounded references to these paths rather than copying raw content.
+- `GET /api/v1/projects/:id/git-branches` returns
+  `{ isGitRepo, current, branches, workingTree }`: the current branch (`null`
+  on detached HEAD), local branches with an `isCurrent` marker, and a
+  working-tree summary `{ clean, changedCount, sample }` (up to 5 changed
+  paths) so clients can warn before a checkout.
+- `POST /api/v1/projects/:id/git-checkout` switches the working tree to a
+  branch, body `{ branch, create? }`. With `create: true` the branch is
+  created from HEAD first (`git switch -c`). The project root is re-validated
+  (`validateProjectRoot`) and branch names are checked with
+  `git check-ref-format --branch` (leading `-` rejected up front). Switching
+  is refused when the working tree has any uncommitted change (tracked or
+  untracked): `409` with `details: { changedCount, sample }`. Other failures:
+  `400` invalid name / not a git repository, `404` branch not found, `409`
+  branch already exists on `create: true`. Success returns
+  `{ projectId, current, created }`.
+- These routes are read-only except `git-checkout`. They do not store file
+  contents, terminal scrollback, or evidence blobs in SQLite; later Project
+  Manager evidence uses bounded references to these paths rather than copying
+  raw content.
 
 CI usage example:
 
@@ -1749,3 +1768,94 @@ shows whether a current, valid identity/grant route exists and provides an expli
 “启用飞书远程操作” action after selection. Creating a project grant alone does not
 bind it to Feishu. Previously rejected messages are not replayed on activation;
 send a new message after binding.
+
+### Copilot Playbooks and CLI Skills (2026-09-17)
+
+Copilot operating guides are managed as Skills at `/api/v1/copilot/skills`.
+The legacy `/api/v1/copilot/playbooks` bridge uses the same versioned service; `/api/v1/skills` and
+project Skill selection are exclusively for CLI packages. Both retain the normal
+API envelope. A UUID from one runtime target cannot read or mutate the other.
+
+| Method | Path | Contract |
+| --- | --- | --- |
+| GET | `/api/v1/copilot/playbooks` | `{ playbooks }`: ID, name, description, content, stored `version`, `currentVersion`, `isEnabled`, `requiredTools`, `available`, `unavailableReason`, `reviewRequired`, `editable` |
+| PUT | `/api/v1/copilot/playbooks/:id` | `{ content, version }`, where `version` is the current bundled version explicitly reviewed by the owner; returns `{ playbook }`; stale version is 409 |
+| PUT | `/api/v1/copilot/playbooks/:id/enabled` | `{ enabled }`; returns `{ playbook }`; enabling an unreviewed version is 409 |
+
+`list_playbooks` and `load_playbook({ id })` list/load only enabled, reviewed
+playbooks whose required tools are currently available. Grant-bound turns may
+load only exact canonical bundled names, descriptions and bodies; edited or
+shared global instructions cannot acquire Grant trust. `/playbooks` uses the
+same query policy, including owner tool switches and scheduled read-only limits.
+The old `/skills` chat command returns an explanation pointing to the separate
+surfaces. `list_skills` and `load_skill` are retired native Copilot tool names.
+
+`pm_prepare_task_packet` replaces `pm_start_task_packet` and only prepares a task
+packet/linked idle session. It does not start a CLI or submit instructions.
+`dispatch_task_to_session` is not advertised by Copilot or MCP because autonomous
+CLI dispatch remains unavailable. The capability settings list reports it with
+`available: false`, `unavailableReason: "ADAPTER_AUTONOMY_UNVERIFIED"` and
+`effectiveEnabled: false`; attempts to toggle retired/unavailable names return
+404. `enabled` is a configured preference, `available` is runtime availability,
+and `authorization` describes `read`, `approval_or_grant`, or `unavailable`.
+Actual resource authorization is always checked again during execution.
+
+CLI Skill rows expose `runtimeTarget: "cli"` and nullable `resourceManifest`.
+A null manifest denotes Markdown-only content, including remote Markdown imports;
+it does not assert that referenced scripts/assets were installed. Local supported
+packages snapshot up to 64 additional UTF-8 text files, 128 KiB per file, 1 MiB
+combined, at most eight nested directory levels. Binary files, resource symlinks,
+escapes and oversized packages are rejected whole and reported in
+`discovery.rejectedSkills` (`path`, `reason`). Export preserves frontmatter and
+literal template syntax, copies supported text resources, rejects path collisions,
+and records `.forgebadger-skill.json` for obsolete-file review. Script execution,
+executable-bit installation and binary asset packaging are outside this text
+resource contract. Rejected refreshes block export of affected enabled snapshots.
+
+### Copilot extension management (2026-09-18)
+
+All routes below use JWT active-owner authentication and the standard API envelope.
+IDs and revisions are tenant-scoped; stale updates fail rather than overwrite.
+The Web entrypoint `/copilot/extensions` contains Skills and Connections tabs.
+
+| Method | Path below `/api/v1/copilot` | Request / response data |
+| --- | --- | --- |
+| GET | `/skills` | `{ skills }` summaries, without full bundle content |
+| POST | `/skills/imports` | `{ source: { kind: "paste" or "upload", label? }, files: [{ path, content }] }` or `{ source: { kind: "url", url } }`; returns `{ skill }`, initially disabled |
+| GET | `/skills/:id` | `{ skill }` with current revision and all files |
+| PUT | `/skills/:id` | `{ expectedRevisionId, files, reviewedVersion? }`; returns `{ skill }` |
+| PUT | `/skills/:id/enabled` | `{ expectedRevisionId, enabled }`; returns `{ skill }` |
+| GET | `/skills/:id/revisions` | `{ revisions }`, newest 100 retained revision summaries |
+| GET | `/skills/:id/revisions/:revisionId` | `{ revision }`, including files |
+| POST | `/skills/:id/rollback` | `{ expectedRevisionId, revisionId }`; appends a new revision and returns `{ skill }` |
+| GET | `/connections` | `{ connections }`, builtin `forgebadger` plus owner MCP connections |
+| POST | `/connections` | `{ name, endpoint, bearerToken? }`; `{ connection }`, initially disabled with no selected tools |
+| PUT | `/connections/:id` | `{ revision, name?, endpoint?, bearerToken?, enabled?, enabledTools? }`; `{ connection }` |
+| POST | `/connections/:id/discover` | `{ revision }`; atomically refreshed `{ connection }` |
+| DELETE | `/connections/:id?revision=N` | `{ deleted: true }`; stale existing revision is 409 |
+
+Skill summaries include `revisionId`, `source`, `kind`, `isEnabled`, `available`,
+`unavailableReason`, `compatible`, `incompatibilityReasons`, `requiredTools`,
+`reviewRequired`, `version` and `currentVersion`. Installation accepts up to 65
+UTF-8 files, 128 KiB per file and 1 MiB combined, including root `SKILL.md`.
+Paths, YAML and UTF-8 are validated; a rejected import writes nothing. Up to 32
+non-builtin packages may be installed per owner. URL imports retrieve only the
+single public HTTPS raw Markdown file; references must be supplied in a file bundle.
+Unsupported executable packages remain disabled and report their incompatibility.
+`read_skill_resource({ skillId, revisionId, relativePath, offset?, length? })` reads bounded
+current-revision resources under the same availability and Grant policy as
+`load_playbook`. Old function names and historical approval digests are preserved.
+
+Connections expose `hasCredential`, never a credential value. Omitting
+`bearerToken` retains it, a string replaces it, and `null` explicitly removes it.
+Public HTTPS endpoints cannot include credentials, query parameters or fragments.
+There are at most 20 connections and 100 discovered tools per connection.
+Unsupported JSON Schemas are marked incompatible and cannot be selected.
+Discovery alone does not enable tools; changed definitions are deselected.
+External execution always requires exact interactive owner approval, regardless
+of server annotations. Grants, scheduled and reactive turns cannot use these tools.
+Indeterminate external writes are not replayed automatically.
+
+The builtin connection is managed through existing `/capabilities` APIs. Those APIs
+list platform tools only. Gateway `/mcp` token management remains the outward
+platform integration surface and is separate from these outbound connections.

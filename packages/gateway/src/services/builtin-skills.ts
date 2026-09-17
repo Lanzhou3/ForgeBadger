@@ -1,17 +1,6 @@
-/**
- * Builtin skills seeded once per user when the skill list is first read.
- *
- * These skills previously shipped as the builtin Claude Code plugins
- * (claude-code-review / claude-safe-edits). The plugin module is retired;
- * their markdown content survives here as ordinary skills with
- * `source: "builtin"` so users keep managing them through the Skills page.
- *
- * The Copilot's builtin engineering playbooks are seeded the same way so the
- * agent seam and the Skills page share one source of truth.
- *
- * Seeding is idempotent (`createIfMissing`) and never overwrites user edits.
- */
+/** CLI skill seeds and separately scoped, versioned Copilot playbook upgrades. */
 import { BUILTIN_COPILOT_SKILLS } from "./agent/skills/copilot-skills.js";
+import { LEGACY_COPILOT_SKILLS } from "./agent/skills/legacy-copilot-skills.js";
 import type { SkillRepository } from "../db/repositories/skill-repository.js";
 
 export interface BuiltinSkillSeed {
@@ -20,11 +9,7 @@ export interface BuiltinSkillSeed {
   content: string;
 }
 
-/**
- * The Copilot's builtin engineering playbooks, seeded into the platform Skills
- * store as `source: "builtin"` rows. Their content is plain body text (no YAML
- * frontmatter) so `load_skill` serves it directly.
- */
+/** Copilot seed metadata; never included in the CLI seed list. */
 export const copilotBuiltinSkillSeeds: BuiltinSkillSeed[] = BUILTIN_COPILOT_SKILLS.map((skill) => ({
   name: skill.name,
   description: skill.description,
@@ -65,9 +50,10 @@ export const builtinSkillSeeds: BuiltinSkillSeed[] = [
   },
 ];
 
-/** Seed every builtin skill (legacy + Copilot playbooks) for one user. */
+/** Seed CLI skills only; playbooks use the explicit Copilot repository below. */
 export function seedBuiltinSkills(repo: SkillRepository): void {
-  for (const seed of [...builtinSkillSeeds, ...copilotBuiltinSkillSeeds]) {
+  if (repo.runtimeTarget !== "cli") throw new Error("CLI repository scope required");
+  for (const seed of builtinSkillSeeds) {
     repo.createIfMissing({
       name: seed.name,
       description: seed.description,
@@ -77,5 +63,23 @@ export function seedBuiltinSkills(repo: SkillRepository): void {
       visibility: "private",
       isEnabled: true
     });
+  }
+}
+
+/** Target-scoped seeding preserves IDs, disable choices and edited legacy bodies. */
+export function seedBuiltinCopilotPlaybooks(repo: SkillRepository): void {
+  if (repo.runtimeTarget !== "copilot") throw new Error("Copilot repository scope required");
+  for (const bundled of BUILTIN_COPILOT_SKILLS) {
+    const existing = repo.getByName(bundled.name);
+    if (!existing) {
+      repo.create({name: bundled.name, description: bundled.description, content: bundled.body,
+        version: bundled.version, source: "builtin", visibility: "private", isEnabled: true});
+      continue;
+    }
+    const legacy = LEGACY_COPILOT_SKILLS.find(skill => skill.name === bundled.name);
+    if (existing.source === "builtin" && existing.version === "1.0.0" && legacy &&
+        existing.content === legacy.body && existing.description === legacy.description) {
+      repo.update(existing.id, {content: bundled.body, description: bundled.description, version: bundled.version});
+    }
   }
 }

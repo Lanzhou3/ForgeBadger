@@ -27,7 +27,13 @@ import type { RuntimeAuthorizationInvalidator } from "../services/runtime-author
 import type { CredentialMode, WriteResult } from "../config-generation/types.js";
 import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } from "../services/project-ai-config.js";
 import { listWorkspaceTree, maxFileWriteBytes, readWorkspaceFile, writeWorkspaceFile } from "../services/workspace-context.js";
-import { getProjectGitChanges, getProjectGitFileDiff } from "../services/project-git.js";
+import {
+  checkoutProjectGitBranch,
+  getProjectGitBranches,
+  getProjectGitChanges,
+  getProjectGitFileDiff,
+  ProjectGitError
+} from "../services/project-git.js";
 import { recordActivity } from "../services/activity-events.js";
 import { buildConfigSyncSummary, buildProjectConfigRenderPlan } from "../services/project-config-render.js";
 import { extractProjectTemplate } from "../services/project-template-extract.js";
@@ -103,6 +109,23 @@ const gitDiffQuerySchema = z.object({
   path: z.string().min(1).max(512),
   untracked: z.enum(["0", "1"]).optional()
 }).strict();
+
+const gitCheckoutSchema = z.object({
+  branch: z.string().min(1).max(200),
+  create: z.boolean().optional().default(false)
+}).strict();
+
+function gitCheckoutErrorStatus(code: ProjectGitError["code"]): number {
+  switch (code) {
+    case "GIT_BRANCH_NOT_FOUND":
+      return 404;
+    case "GIT_WORKING_TREE_DIRTY":
+    case "GIT_BRANCH_EXISTS":
+      return 409;
+    default:
+      return 400;
+  }
+}
 
 // Projects are created CLI-agnostic: ai_tool stays an empty sentinel until an
 // explicit designation exists (e.g. a project draft naming an adapter).
@@ -1017,6 +1040,77 @@ export function createProjectRoutes(
       res.status(400).json({
         code: 1,
         message: error instanceof Error ? error.message : "Git diff read failed"
+      });
+    }
+  });
+
+  router.get("/:id/git-branches", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const projectRepo = new ProjectRepository(db, userId);
+    const project = projectRepo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const git = await getProjectGitBranches(project.path);
+      res.json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          git
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Git branches read failed"
+      });
+    }
+  });
+
+  router.post("/:id/git-checkout", async (req, res) => {
+    const parseResult = gitCheckoutSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const projectRepo = new ProjectRepository(db, userId);
+    const project = projectRepo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const result = await checkoutProjectGitBranch(project.path, parseResult.data.branch, {
+        create: parseResult.data.create
+      });
+      res.json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          ...result
+        },
+        message: ""
+      });
+    } catch (error) {
+      if (error instanceof ProjectGitError) {
+        const status = gitCheckoutErrorStatus(error.code);
+        res.status(status).json({
+          code: 1,
+          message: error.message,
+          ...(error.details ? { details: error.details } : {})
+        });
+        return;
+      }
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Git checkout failed"
       });
     }
   });

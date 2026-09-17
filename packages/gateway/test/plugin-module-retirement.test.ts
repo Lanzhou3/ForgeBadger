@@ -11,9 +11,9 @@ import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import { CatalogRepository } from "../src/db/repositories/catalog-repository.js";
 import { UserRepository } from "../src/db/repositories/index.js";
-import { builtinSkillSeeds, copilotBuiltinSkillSeeds } from "../src/services/builtin-skills.js";
+import { builtinSkillSeeds } from "../src/services/builtin-skills.js";
 
-const allBuiltinSeeds = [...builtinSkillSeeds, ...copilotBuiltinSkillSeeds];
+const allBuiltinSeeds = builtinSkillSeeds;
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";

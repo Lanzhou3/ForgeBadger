@@ -81,7 +81,6 @@ export interface ProjectManagerWorkItem {
   priority: number;
   acceptanceCriteria: string[];
   evidenceRefs: ProjectManagerEvidenceRef[];
-  feishuRefs: ProjectManagerEvidenceRef[];
   details: Record<string, unknown>;
   stageId: string | null;
   createdAt: number;
@@ -117,7 +116,6 @@ export interface ProjectManagerLedgerEvent {
   eventType: ProjectManagerLedgerEventType;
   status: ProjectManagerWorkItemStatus | null;
   evidenceRefs: ProjectManagerEvidenceRef[];
-  feishuRefs: ProjectManagerEvidenceRef[];
   details: Record<string, unknown>;
   createdAt: number;
 }
@@ -146,7 +144,6 @@ export interface CreateProjectManagerWorkItemInput {
   priority?: number | undefined;
   acceptanceCriteria?: string[] | undefined;
   evidenceRefs?: ProjectManagerEvidenceRef[] | undefined;
-  feishuRefs?: ProjectManagerEvidenceRef[] | undefined;
   details?: Record<string, unknown> | undefined;
   stageId?: string | null | undefined;
 }
@@ -219,7 +216,6 @@ interface WorkItemRow {
   priority: number;
   acceptance_criteria_json: string;
   evidence_refs_json: string;
-  feishu_refs_json: string;
   details_json: string;
   stage_id: string | null;
   created_at: number;
@@ -255,7 +251,6 @@ interface LedgerEventRow {
   event_type: string;
   status: string | null;
   evidence_refs_json: string;
-  feishu_refs_json: string;
   details_json: string;
   created_at: number;
 }
@@ -340,7 +335,7 @@ export class ProjectManagerRepository {
         now,
         now
       );
-      this.insertLedgerEvent(projectId, null, "goal_updated", null, [], [], {
+      this.insertLedgerEvent(projectId, null, "goal_updated", null, [], {
         status,
         acceptanceCriteriaCount: acceptanceCriteria.length,
         constraintCount: constraints.length
@@ -375,9 +370,9 @@ export class ProjectManagerRepository {
       this.db.prepare(`
         INSERT INTO project_manager_work_items (
           id, user_id, project_id, title, description, status, priority,
-          acceptance_criteria_json, evidence_refs_json, feishu_refs_json,
+          acceptance_criteria_json, evidence_refs_json,
           details_json, stage_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         this.userId,
@@ -388,13 +383,12 @@ export class ProjectManagerRepository {
         item.priority,
         JSON.stringify(item.acceptanceCriteria),
         JSON.stringify(item.evidenceRefs),
-        JSON.stringify(item.feishuRefs),
         JSON.stringify(item.details),
         stageId,
         now,
         now
       );
-      this.insertLedgerEvent(projectId, id, "work_item_created", status, item.evidenceRefs, item.feishuRefs, eventDetails, now);
+      this.insertLedgerEvent(projectId, id, "work_item_created", status, item.evidenceRefs, eventDetails, now);
       this.writeAudit("project_manager.work_item.create", "project_manager_work_item", id, {
         projectId,
         status,
@@ -510,7 +504,7 @@ export class ProjectManagerRepository {
         this.userId,
         projectId
       );
-      this.insertLedgerEvent(projectId, workItemId, "work_item_updated", existing.status, existing.evidenceRefs, existing.feishuRefs, eventDetails, now);
+      this.insertLedgerEvent(projectId, workItemId, "work_item_updated", existing.status, existing.evidenceRefs, eventDetails, now);
       this.writeAudit("project_manager.work_item.update", "project_manager_work_item", workItemId, {
         projectId,
         changedFields
@@ -550,7 +544,7 @@ export class ProjectManagerRepository {
         SET status = ?, evidence_refs_json = ?, details_json = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(nextStatus, JSON.stringify(evidenceRefs), JSON.stringify(details), now, workItemId, this.userId, projectId);
-      this.insertLedgerEvent(projectId, workItemId, eventType, nextStatus, evidenceRefs, existing.feishuRefs, eventDetails, now);
+      this.insertLedgerEvent(projectId, workItemId, eventType, nextStatus, evidenceRefs, eventDetails, now);
       this.writeAudit("project_manager.work_item.status_change", "project_manager_work_item", workItemId, {
         projectId,
         fromStatus: existing.status,
@@ -615,7 +609,7 @@ export class ProjectManagerRepository {
           this.userId,
           projectId
         );
-        this.insertLedgerEvent(projectId, item.existing.id, item.eventType, item.nextStatus, item.evidenceRefs, item.existing.feishuRefs, eventDetails, now);
+        this.insertLedgerEvent(projectId, item.existing.id, item.eventType, item.nextStatus, item.evidenceRefs, eventDetails, now);
         this.writeAudit("project_manager.work_item.status_change", "project_manager_work_item", item.existing.id, {
           projectId,
           fromStatus: item.existing.status,
@@ -646,7 +640,7 @@ export class ProjectManagerRepository {
     }, details);
     const now = Date.now();
     const write = this.db.transaction(() => {
-      this.insertLedgerEvent(projectId, null, "work_item_deleted", existing.status, existing.evidenceRefs, existing.feishuRefs, eventDetails, now);
+      this.insertLedgerEvent(projectId, null, "work_item_deleted", existing.status, existing.evidenceRefs, eventDetails, now);
       this.db.prepare(`
         DELETE FROM project_manager_work_item_links
         WHERE user_id = ? AND project_id = ? AND (blocker_work_item_id = ? OR blocked_work_item_id = ?)
@@ -687,7 +681,7 @@ export class ProjectManagerRepository {
         SET evidence_refs_json = ?, details_json = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(JSON.stringify(nextEvidenceRefs), JSON.stringify(details), now, workItemId, this.userId, projectId);
-      this.insertLedgerEvent(projectId, workItemId, "evidence_attached", existing.status, nextEvidenceRefs, existing.feishuRefs, eventDetails, now);
+      this.insertLedgerEvent(projectId, workItemId, "evidence_attached", existing.status, nextEvidenceRefs, eventDetails, now);
       this.writeAudit("project_manager.work_item.evidence_attach", "project_manager_work_item", workItemId, {
         projectId,
         evidenceRefCount: nextEvidenceRefs.length
@@ -753,7 +747,7 @@ export class ProjectManagerRepository {
         SET name = ?, description = ?, status = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(nextName, nextDescription, nextStatus, now, stageId, this.userId, projectId);
-      this.insertLedgerEvent(projectId, null, "stage_updated", null, [], [], {
+      this.insertLedgerEvent(projectId, null, "stage_updated", null, [], {
         targetType: "stage",
         targetId: stageId,
         changedFields
@@ -783,7 +777,7 @@ export class ProjectManagerRepository {
         DELETE FROM project_manager_stages
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(stageId, this.userId, projectId);
-      this.insertLedgerEvent(projectId, null, "stage_deleted", null, [], [], {
+      this.insertLedgerEvent(projectId, null, "stage_deleted", null, [], {
         targetType: "stage",
         targetId: stageId,
         name: existing.name
@@ -813,7 +807,7 @@ export class ProjectManagerRepository {
           WHERE id = ? AND user_id = ? AND project_id = ?
         `).run(index, now, id, this.userId, projectId);
       });
-      this.insertLedgerEvent(projectId, null, "stage_updated", null, [], [], {
+      this.insertLedgerEvent(projectId, null, "stage_updated", null, [], {
         targetType: "stage",
         action: "reorder",
         stageCount: stageIds.length
@@ -890,7 +884,7 @@ export class ProjectManagerRepository {
           id, user_id, project_id, blocker_work_item_id, blocked_work_item_id, created_at
         ) VALUES (?, ?, ?, ?, ?, ?)
       `).run(id, this.userId, projectId, blockerWorkItemId, blockedWorkItemId, now);
-      this.insertLedgerEvent(projectId, blockedWorkItemId, "dependency_added", null, [], [], {
+      this.insertLedgerEvent(projectId, blockedWorkItemId, "dependency_added", null, [], {
         targetType: "work_item_link",
         targetId: id,
         blockerWorkItemId,
@@ -922,7 +916,7 @@ export class ProjectManagerRepository {
       if (result.changes === 0) {
         throw new Error("Dependency link not found");
       }
-      this.insertLedgerEvent(projectId, blockedWorkItemId, "dependency_removed", null, [], [], {
+      this.insertLedgerEvent(projectId, blockedWorkItemId, "dependency_removed", null, [], {
         targetType: "work_item_link",
         blockerWorkItemId,
         blockedWorkItemId
@@ -1037,7 +1031,7 @@ export class ProjectManagerRepository {
         id, user_id, project_id, name, description, position, status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(stage.id, this.userId, projectId, stage.name, stage.description, stage.position, stage.status, now, now);
-    this.insertLedgerEvent(projectId, null, "stage_created", null, [], [], {
+    this.insertLedgerEvent(projectId, null, "stage_created", null, [], {
       targetType: "stage",
       targetId: stage.id,
       name: stage.name,
@@ -1080,15 +1074,14 @@ export class ProjectManagerRepository {
     eventType: ProjectManagerLedgerEventType,
     status: ProjectManagerWorkItemStatus | null,
     evidenceRefs: ProjectManagerEvidenceRef[],
-    feishuRefs: ProjectManagerEvidenceRef[],
     details: Record<string, unknown>,
     createdAt: number
   ): void {
     this.db.prepare(`
       INSERT INTO project_manager_ledger_events (
         id, user_id, project_id, work_item_id, event_type, status,
-        evidence_refs_json, feishu_refs_json, details_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        evidence_refs_json, details_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       randomUUID(),
       this.userId,
@@ -1097,7 +1090,6 @@ export class ProjectManagerRepository {
       eventType,
       status,
       JSON.stringify(normalizeEvidenceRefs(evidenceRefs)),
-      JSON.stringify(normalizeEvidenceRefs(feishuRefs)),
       JSON.stringify(normalizeDetails(details)),
       createdAt
     );
@@ -1158,7 +1150,6 @@ function normalizeWorkItemInput(input: CreateProjectManagerWorkItemInput) {
     priority: normalizePriority(input.priority),
     acceptanceCriteria: normalizeTextList(input.acceptanceCriteria ?? []),
     evidenceRefs: normalizeEvidenceRefs(input.evidenceRefs ?? []),
-    feishuRefs: normalizeEvidenceRefs(input.feishuRefs ?? []),
     details: normalizeDetails(input.details ?? {})
   };
 }
@@ -1381,7 +1372,6 @@ function toWorkItem(row: WorkItemRow): ProjectManagerWorkItem {
     priority: row.priority,
     acceptanceCriteria: parseJsonArray<string>(row.acceptance_criteria_json),
     evidenceRefs: parseJsonArray<ProjectManagerEvidenceRef>(row.evidence_refs_json),
-    feishuRefs: parseJsonArray<ProjectManagerEvidenceRef>(row.feishu_refs_json),
     details: parseJsonObject(row.details_json),
     stageId: row.stage_id,
     createdAt: row.created_at,
@@ -1423,7 +1413,6 @@ function toLedgerEvent(row: LedgerEventRow): ProjectManagerLedgerEvent {
     eventType: normalizeEventType(row.event_type),
     status: row.status ? normalizeStatus(row.status) : null,
     evidenceRefs: parseJsonArray<ProjectManagerEvidenceRef>(row.evidence_refs_json),
-    feishuRefs: parseJsonArray<ProjectManagerEvidenceRef>(row.feishu_refs_json),
     details: parseJsonObject(row.details_json),
     createdAt: row.created_at
   };

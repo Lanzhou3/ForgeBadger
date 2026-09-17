@@ -137,10 +137,9 @@ export function ProjectManagerWorkItemDetailSheet({
                 <span className="text-muted-foreground">-</span>
               )}
             </DetailField>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-2">
               <SummaryMetric label={t("projects.projectManagerPriority")} value={item.priority} />
               <SummaryMetric label={t("projects.projectManagerEvidenceRefs")} value={item.evidenceRefCount} />
-              <SummaryMetric label={t("projects.projectManagerFeishuRefs")} value={item.feishuRefCount} />
             </div>
             <DetailField label={t("projects.projectManagerStageAssign")}>
               <ProjectManagerStageSelect

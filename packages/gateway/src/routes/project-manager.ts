@@ -69,7 +69,6 @@ const workItemCreateSchema = z.object({
   priority: z.number().int().min(0).max(100).optional(),
   acceptanceCriteria: z.array(z.string().min(1).max(1_000)).max(50).optional(),
   evidenceRefs: z.array(evidenceRefSchema).max(20).optional(),
-  feishuRefs: z.array(evidenceRefSchema).max(20).optional(),
   stageId: z.string().min(1).max(128).nullable().optional()
 }).strict();
 
@@ -644,7 +643,6 @@ function toWorkItemDto(workItem: ProjectManagerWorkItem) {
     acceptanceCriteria: workItem.acceptanceCriteria,
     evidenceRefCount: workItem.evidenceRefs.length,
     evidenceRefs: workItem.evidenceRefs.map(toEvidenceRefDto),
-    feishuRefCount: workItem.feishuRefs.length,
     stageId: workItem.stageId,
     createdAt: workItem.createdAt,
     updatedAt: workItem.updatedAt
@@ -725,7 +723,6 @@ function toLedgerEventDto(event: ProjectManagerLedgerEvent) {
     eventType: event.eventType,
     status: event.status,
     evidenceRefCount: event.evidenceRefs.length,
-    feishuRefCount: event.feishuRefs.length,
     ...(trace ? { trace } : {}),
     createdAt: event.createdAt
   };
