@@ -34,6 +34,8 @@ import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { createCopilotRoutes } from "./copilot.js";
 import { createAutomationRoutes } from "./automations.js";
+import { createMcpRoutes } from "./mcp.js";
+import { createMcpTokenRoutes } from "./mcp-tokens.js";
 import { createSystemRoutes } from "./system.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
@@ -115,6 +117,10 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     appVersion: deps.appVersion
   }));
   app.use("/api/v1/system", createSystemRoutes());
+  if (deps.mcpEnabled) {
+    app.use("/api/v1/mcp/tokens", createMcpTokenRoutes(deps.db));
+    app.use("/mcp", createMcpRoutes(deps));
+  }
   // Claude Code protocol routing data plane (route-token auth, not JWT).
   app.use("/v1", createClaudeRouteRoutes(deps.db, deps.masterKey));
 }

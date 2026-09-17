@@ -561,6 +561,13 @@
       "when": 1789300000003,
       "tag": "0080_native_channel_deliveries",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "6",
+      "when": 1789300000004,
+      "tag": "0081_mcp_access_tokens",
+      "breakpoints": true
     }
   ]
 }

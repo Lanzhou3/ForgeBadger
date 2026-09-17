@@ -78,5 +78,6 @@
   "0077_sessions_last_prompt.sql": "1b96cd1d9ad413f4d6d838bf4be4a90ca4bf4c4b86b32f3345256a1df7f9fcab",
   "0078_channel_identity_routes.sql": "2898650d563fdd1aad65f32eae052667931eb2ccefe23d9ee1923d85e7a13b74",
   "0079_native_channel_messages.sql": "e8d5da6380e8569001a1f47d9f7d669ed917b3dd05251d679722778acd6c9577",
-  "0080_native_channel_deliveries.sql": "53719d05fea825ba76d7d80491f4dcac854a2f72d25ed4f6303fbcb6540c7f32"
+  "0080_native_channel_deliveries.sql": "53719d05fea825ba76d7d80491f4dcac854a2f72d25ed4f6303fbcb6540c7f32",
+  "0081_mcp_access_tokens.sql": "423669fd80b4c3f2874aa7622d96c8ef1c00634c5e9978c1915f23363581e6f1"
 }

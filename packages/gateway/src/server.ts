@@ -36,6 +36,8 @@ export interface ServerDeps {
   accountRecovery?: LocalAccountRecovery | undefined;
   copilotAgent?: AgentStackDeps | undefined;
   runtimeAuthorizationInvalidator: RuntimeAuthorizationInvalidator;
+  /** Mounts the external MCP endpoint (/mcp) and its token management routes. */
+  mcpEnabled?: boolean | undefined;
 }
 
 export interface GatewayApp {
@@ -73,6 +75,8 @@ export interface GatewayAppOptions {
   sessionServerTokenPath?: string | undefined;
   /** Test-only model transport seam for the native Copilot runtime. */
   llmFetch?: typeof fetch | undefined;
+  /** Mounts the external MCP endpoint (/mcp) and its token management routes. */
+  mcpEnabled?: boolean | undefined;
 }
 
 export function createServer(deps: ServerDeps): express.Express {
@@ -141,7 +145,8 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     registrationMode: options.registrationMode,
     accountRecovery: options.accountRecovery,
     copilotAgent,
-    runtimeAuthorizationInvalidator
+    runtimeAuthorizationInvalidator,
+    mcpEnabled: options.mcpEnabled
   });
 
   const server = createHttpServer(app);

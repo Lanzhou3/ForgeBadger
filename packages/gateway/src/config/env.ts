@@ -19,6 +19,7 @@ const envSchema = z.object({
   FORGEBADGER_SESSION_PREFIX: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("fb-"),
   FORGEBADGER_REGISTRATION: z.enum(["open", "off", "invite"]).default("open"),
   FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: strictEnvBoolean,
+  FORGEBADGER_MCP_ENABLED: strictEnvBoolean,
   FORGEBADGER_MASTER_KEY: z.string().refine((value) => isValidMasterKey(value), {
     message: "FORGEBADGER_MASTER_KEY must be 32 bytes or 64 hex characters"
   }),

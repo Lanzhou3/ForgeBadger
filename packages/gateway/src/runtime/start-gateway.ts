@@ -87,7 +87,8 @@ export async function createGatewayRuntime(
       accountRecovery,
       registrationMode: env.FORGEBADGER_REGISTRATION,
       sessionServerIpcPath,
-      sessionServerTokenPath: resolveSessionServerTokenPath(env.FORGEBADGER_STATE_DIR)
+      sessionServerTokenPath: resolveSessionServerTokenPath(env.FORGEBADGER_STATE_DIR),
+      mcpEnabled: env.FORGEBADGER_MCP_ENABLED
     });
 
     // Attach shutdown hook: the Gateway only disconnects from the Session

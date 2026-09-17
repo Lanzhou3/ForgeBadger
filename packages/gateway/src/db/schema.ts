@@ -1589,6 +1589,25 @@ export const authSessions = sqliteTable("auth_sessions", {
   idx_auth_sessions_expires: index("idx_auth_sessions_expires").on(table.expiresAt)
 }));
 
+// Long-lived access tokens for the external MCP endpoint (/mcp). Unlike
+// browser auth sessions these never expire on a schedule; revocation is
+// explicit via revokedAt. Only the SHA-256 hash of the token is stored — the
+// plaintext is returned once at creation time.
+export const mcpAccessTokens = sqliteTable("mcp_access_tokens", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  scopes: text("scopes").notNull().default('["read"]'),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
+  revokedAt: integer("revoked_at", { mode: "timestamp" })
+}, (table) => ({
+  idx_mcp_access_tokens_user: index("idx_mcp_access_tokens_user").on(table.userId, table.createdAt)
+}));
+
 // One-time invite codes for the invite-only registration mode. Codes are
 // short-lived plain values an admin hands to a teammate; redemption is
 // recorded by usedByUserId/usedAt.

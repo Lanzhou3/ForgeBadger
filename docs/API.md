@@ -1430,6 +1430,54 @@ in the path or `X-ForgeBadger-Session-Id`. The payload may carry an optional
 `task_failed`, or `session_ended` and emit a user-scoped `claude_notification` event on
 `/ws/events`.
 
+### External MCP Endpoint
+
+- `POST /mcp` (MCP Streamable HTTP, JSON-RPC; not part of `/api/v1`)
+- `POST /api/v1/mcp/tokens`
+- `GET /api/v1/mcp/tokens`
+- `DELETE /api/v1/mcp/tokens/:id`
+
+The Gateway can expose a Model Context Protocol server for external AI agents
+(Claude Code, Kimi Code, Cursor, …). It is mounted only when
+`FORGEBADGER_MCP_ENABLED=true`; otherwise `/mcp` and the token routes return
+`404`. The transport is Streamable HTTP in stateless mode: every `POST` is
+independent, no SSE streams or session state are kept, and `GET`/`DELETE`
+return `405`. The endpoint speaks MCP/JSON-RPC semantics, not the project
+response envelope.
+
+Authentication uses long-lived access tokens managed through the REST routes
+above (standard JWT/session auth + envelope). `POST /api/v1/mcp/tokens` accepts
+`{ name, scopes? }` (`scopes ⊆ ["read","operate"]`, default `["read"]`) and
+returns the plaintext token (`fbmcp_…`) exactly once; only its SHA-256 hash is
+stored. `GET` lists the caller's tokens without any secret material; `DELETE`
+revokes immediately. MCP requests present the token as
+`Authorization: Bearer fbmcp_…`; the owning user's status is re-read on every
+request and revocation takes effect at once.
+
+The tool surface reuses the native Copilot platform tools
+(`services/agent/tools`): read tools (`list_projects`, `get_project`,
+`list_sessions`, `get_session`, `get_session_output`, `list_skills`,
+`load_skill`, `search_memory`, `list_memory`, `get_usage_summary`,
+`pm_overview`, `pm_list_task_packets`, `pm_get_task_packet`,
+`project_graph_*`) are available to every token; operate tools
+(`create_project`, `update_project`, `start_session`, `stop_session`,
+`dispatch_task_to_session`, `pm_create_work_item`, `pm_update_work_item`,
+`pm_update_management`, `pm_start_task_packet`, `write_memory`) require the
+`operate` scope and are hidden from `tools/list` without it. The `operate`
+scope is the owner's standing authorization: platform command intents are
+previewed and approved inline with `owner_action` authority (the interactive
+approval loop does not exist for MCP callers), and every call still passes zod
+input validation, the security policy engine, the owner's per-tool enable
+settings, and the 48KB output cap. Tenant isolation is unchanged — all tools
+execute with the token owner's `userId`.
+
+Client configuration example (Claude Code):
+
+```bash
+claude mcp add --transport http forgebadger http://127.0.0.1:48731/mcp \
+  --header "Authorization: Bearer fbmcp_…"
+```
+
 ## 4. WebSocket Contract
 
 ### Paths

@@ -100,6 +100,7 @@ Runtra-Icon-Pack/
 
 # One-off local debugging scripts (never tracked).
 packages/gateway/copilot-smoke.tmp.ts
+packages/gateway/mcp-smoke.local.ts
 packages/gateway/mig-test.mts
 packages/gateway/pf-repro.mts
 packages/gateway/verify-copilot-mig.mts
