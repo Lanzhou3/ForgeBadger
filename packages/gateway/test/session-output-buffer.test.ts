@@ -11,7 +11,7 @@ import {
   MAX_BUFFERED_SESSIONS
 } from "../src/services/session-manager.js";
 import type { LaunchPlan } from "../src/adapters/claude.js";
-import type { TmuxClient } from "../src/services/tmux.js";
+import type { TerminalBackendClient } from "../src/services/terminal-backend.js";
 
 describe("SessionOutputRing", () => {
   it("appends raw pty output in order", () => {
@@ -86,7 +86,7 @@ describe("SessionOutputRing", () => {
 
 describe("InMemorySessionManager session output buffer", () => {
   it("no-ops appendSessionOutput when the session does not exist", () => {
-    const manager = new InMemorySessionManager(fakeTmux());
+    const manager = new InMemorySessionManager(fakeBackend());
 
     manager.appendSessionOutput("missing-session", "data\n");
 
@@ -94,7 +94,7 @@ describe("InMemorySessionManager session output buffer", () => {
   });
 
   it("records and returns output for a live session", async () => {
-    const manager = new InMemorySessionManager(fakeTmux());
+    const manager = new InMemorySessionManager(fakeBackend());
     await manager.createSession({
       userId: "user_1",
       sessionId: "session_1",
@@ -114,7 +114,7 @@ describe("InMemorySessionManager session output buffer", () => {
   });
 
   it("evicts the oldest buffered session once the cap is reached", async () => {
-    const manager = new InMemorySessionManager(fakeTmux());
+    const manager = new InMemorySessionManager(fakeBackend());
     for (let index = 0; index <= MAX_BUFFERED_SESSIONS; index += 1) {
       const sessionId = `session_${index}`;
       await manager.createSession({
@@ -131,7 +131,7 @@ describe("InMemorySessionManager session output buffer", () => {
   });
 
   it("removeSessionOutput drops the buffer", async () => {
-    const manager = new InMemorySessionManager(fakeTmux());
+    const manager = new InMemorySessionManager(fakeBackend());
     await manager.createSession({
       userId: "user_1",
       sessionId: "session_1",
@@ -157,7 +157,7 @@ function minimalLaunchPlan(): LaunchPlan {
   };
 }
 
-function fakeTmux(): TmuxClient {
+function fakeBackend(): TerminalBackendClient {
   return {
     async createSession() {},
     async killSession() {},

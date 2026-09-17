@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 import type { CreateSkillInput, Skill, SkillRepository } from "../db/repositories/skill-repository.js";
+import { expandUserPath } from "../lib/user-path.js";
 
 export interface DiscoveredLocalSkill {
   name: string;
@@ -127,13 +128,7 @@ export function defaultLocalSkillRoots(cwd: string, env: NodeJS.ProcessEnv): str
 }
 
 function expandConfiguredHome(value: string): string {
-  if (value === "~") {
-    return homedir();
-  }
-  if (value.startsWith("~/")) {
-    return path.join(homedir(), value.slice(2));
-  }
-  return value;
+  return expandUserPath(value);
 }
 
 function skillChanged(existing: Skill, incoming: CreateSkillInput): boolean {
@@ -239,9 +234,7 @@ function normalizeName(value: string): string {
 }
 
 function expandHome(value: string): string {
-  return value === "~" || value.startsWith("~/")
-    ? path.join(homedir(), value.slice(2))
-    : value;
+  return expandUserPath(value);
 }
 
 function uniqueRoots(roots: string[]): string[] {

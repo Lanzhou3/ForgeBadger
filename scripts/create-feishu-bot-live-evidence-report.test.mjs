@@ -3,10 +3,18 @@ import { describe, it } from "node:test";
 
 import {
   buildFeishuBotLiveEvidenceReport,
-  parseFeishuBotLiveEvidenceReportArgs
+  parseFeishuBotLiveEvidenceReportArgs,
+  workspaceRootFromMetaUrl
 } from "./create-feishu-bot-live-evidence-report.mjs";
 
 describe("Feishu bot live evidence report generator", () => {
+  it("decodes file URLs before resolving the workspace root", () => {
+    assert.equal(
+      workspaceRootFromMetaUrl("file:///tmp/Forge%20Badger/scripts/report.mjs"),
+      "/tmp/Forge Badger"
+    );
+  });
+
   it("builds a redacted Markdown report from an audited live smoke report", () => {
     const result = buildFeishuBotLiveEvidenceReport(buildGateClearingReport(), {
       reportPath: "docs/reports/feishu-live.json",

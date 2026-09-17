@@ -11,6 +11,7 @@ import WebSocket from "ws";
 import {
   authenticateTerminalRequest,
   formatTerminalClientError,
+  isTerminalMouseInput,
   TerminalHeartbeat,
   TerminalInputBuffer,
   TerminalInputRateLimiter,
@@ -174,7 +175,41 @@ describe("TerminalInputRateLimiter", () => {
   });
 });
 
+describe("isTerminalMouseInput", () => {
+  it("matches single and batched SGR mouse reports", () => {
+    assert.equal(isTerminalMouseInput("\x1b[<65;23;5M"), true); // wheel down
+    assert.equal(isTerminalMouseInput("\x1b[<64;23;5M"), true); // wheel up
+    assert.equal(isTerminalMouseInput("\x1b[<35;10;12M"), true); // motion
+    assert.equal(isTerminalMouseInput("\x1b[<0;23;5M\x1b[<0;23;5m"), true); // press+release
+    assert.equal(
+      isTerminalMouseInput("\x1b[<64;23;5M\x1b[<64;23;5M\x1b[<65;23;5M"),
+      true
+    ); // batched wheel events
+  });
+
+  it("rejects keystrokes, pasted text and other escape sequences", () => {
+    assert.equal(isTerminalMouseInput("a"), false);
+    assert.equal(isTerminalMouseInput("ls -la\r"), false);
+    assert.equal(isTerminalMouseInput("\x1b[A"), false); // arrow key
+    assert.equal(isTerminalMouseInput("\x1b[<65;23;5Ma"), false); // trailing junk
+    assert.equal(isTerminalMouseInput("a\x1b[<65;23;5M"), false); // leading junk
+    assert.equal(isTerminalMouseInput("\x1b[200~pasted\x1b[201~"), false); // bracketed paste
+    assert.equal(isTerminalMouseInput("\x1b[31mred\x1b[0m"), false); // SGR color
+    assert.equal(isTerminalMouseInput(""), false);
+  });
+});
+
 describe("TerminalInputBuffer", () => {
+  it("bounds input while the asynchronous attach is pending", () => {
+    const inputBuffer = new TerminalInputBuffer();
+    inputBuffer.writeOrStore(undefined, "x".repeat(1024 * 1024));
+    assert.throws(() => inputBuffer.writeOrStore(undefined, "overflow"), /buffer limit/);
+    inputBuffer.clear();
+    inputBuffer.writeOrStore(undefined, "recovered");
+    const writes: string[] = [];
+    inputBuffer.flush({ write: (data) => { writes.push(data); } });
+    assert.deepEqual(writes, ["recovered"]);
+  });
   it("flushes terminal input received before pty attach in order", () => {
     const writes: string[] = [];
     const inputBuffer = new TerminalInputBuffer();
@@ -323,6 +358,7 @@ describe("terminal websocket authentication", () => {
     });
     const apiKeyStore = new InMemoryApiKeyStore({ masterKey });
     const app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       db,
       jwtSecret,
       masterKey,
@@ -375,6 +411,7 @@ describe("terminal websocket authentication", () => {
     });
     const apiKeyStore = new InMemoryApiKeyStore({ masterKey });
     const app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       db,
       jwtSecret,
       masterKey,
@@ -407,6 +444,86 @@ describe("terminal websocket authentication", () => {
     });
 
     assert.equal(result.code, 4404);
+    await new Promise<void>((resolve) => {
+      app.server.closeAllConnections?.();
+      app.server.close(() => resolve());
+    });
+    db.close();
+  });
+
+  it("rejects a valid JWT with a mismatched attach token (4403)", async () => {
+    const db = createTestDb();
+    const now = Date.now();
+    db.prepare(
+      "INSERT INTO users (id, username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("user_123", "ws-tester", "test@example.com", "hash", "user", "active");
+    db.prepare(
+      "INSERT INTO projects (id, user_id, name, path, ai_tool, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run("project_123", "user_123", "P", "/tmp/p", "codex", "active", now, now);
+    db.prepare(
+      "INSERT INTO sessions (id, user_id, project_id, name, ai_tool, status, attach_token, working_dir, credential_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run("session-123", "user_123", "project_123", "S", "codex", "running", "tok", "/tmp/p", "host_environment");
+    const eventBus = new ForgeBadgerEventBus();
+    const sessionManager = new InMemorySessionManager({
+      async createSession() {},
+      async killSession() {},
+      async capturePane() {
+        return "";
+      },
+      async listSessions() {
+        return [];
+      }
+    });
+    // The in-memory session carries the real attach token; the WebSocket
+    // presents a different one and must be refused before any backend attach.
+    await sessionManager.createSession({
+      userId: "user_123",
+      sessionId: "session-123",
+      attachToken: "real-attach-token",
+      launchPlan: {
+        command: "bash",
+        args: [],
+        cwd: "/tmp",
+        env: {},
+        secretEnvNames: [],
+        credentialMode: "host_environment"
+      }
+    });
+    const apiKeyStore = new InMemoryApiKeyStore({ masterKey });
+    const app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
+      db,
+      jwtSecret,
+      masterKey,
+      sessionManager,
+      apiKeyStore,
+      eventBus
+    });
+
+    let serverUrl: string;
+    await new Promise<void>((resolve) => {
+      app.server.listen(0, "127.0.0.1", () => {
+        const address = app.server.address();
+        if (address && typeof address === "object") {
+          serverUrl = `ws://127.0.0.1:${address.port}`;
+        }
+        resolve();
+      });
+    });
+
+    const token = signJwt({ userId: "user_123", email: "test@example.com" }, jwtSecret);
+    const ws = new WebSocket(`${serverUrl}/ws/terminal/session-123`, [
+      "forgebadger-terminal",
+      token,
+      "wrong-attach-token"
+    ]);
+
+    const result = await new Promise<{ code: number }>((resolve) => {
+      ws.on("close", (code) => resolve({ code }));
+      ws.on("error", () => resolve({ code: 1006 }));
+    });
+
+    assert.equal(result.code, 4403);
     await new Promise<void>((resolve) => {
       app.server.closeAllConnections?.();
       app.server.close(() => resolve());

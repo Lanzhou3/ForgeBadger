@@ -3,24 +3,24 @@ import { describe, it } from "node:test";
 
 import {
   checkCommand,
-  checkGateADependencies,
   checkForgeBadgerDependencies,
   checkForgeBadgerRuntimeDependencies,
   runCommand
 } from "../src/lib/dependency-check.js";
+import type { CommandRunner } from "../src/lib/dependency-check.js";
 
 describe("checkCommand", () => {
   it("reports an available command with version output", async () => {
-    const result = await checkCommand("tmux", ["-V"], async () => ({
+    const result = await checkCommand("claude", ["--version"], async () => ({
       exitCode: 0,
-      stdout: "tmux 3.4\n",
+      stdout: "claude 1.0\n",
       stderr: ""
     }));
 
     assert.deepEqual(result, {
-      name: "tmux",
+      name: "claude",
       available: true,
-      version: "tmux 3.4"
+      version: "claude 1.0"
     });
   });
 
@@ -63,15 +63,10 @@ describe("runCommand", () => {
   it("bounds stdout and stderr to the configured maximum output bytes", async () => {
     const stdoutText = "o".repeat(128);
     const stderrText = "e".repeat(128);
+    const script = `process.stdout.write(${JSON.stringify(stdoutText)}); process.stderr.write(${JSON.stringify(stderrText)})`;
     const result = await runCommand(
-      "awk",
-      [
-        "-v",
-        `stdoutText=${stdoutText}`,
-        "-v",
-        `stderrText=${stderrText}`,
-        "BEGIN { printf \"%s\", stdoutText; printf \"%s\", stderrText > \"/dev/stderr\" }",
-      ],
+      process.execPath,
+      ["-e", script],
       { maxOutputBytes: 16 }
     );
 
@@ -80,182 +75,76 @@ describe("runCommand", () => {
   });
 });
 
-describe("checkGateADependencies", () => {
-  it("checks tmux and claude commands", async () => {
+describe("Session Server runtime dependencies", () => {
+  it("only probes optional AI CLI commands, never external multiplexers", async () => {
     const seen: string[] = [];
-
-    const result = await checkGateADependencies(async (command) => {
+    const result = await checkForgeBadgerDependencies(async (command) => {
       seen.push(command);
-      return {
-        exitCode: 0,
-        stdout: `${command} ok\n`,
-        stderr: ""
-      };
+      return { exitCode: 127, stdout: "", stderr: "not found" };
     });
-
-    assert.deepEqual(seen, ["tmux", "claude"]);
-    assert.equal(result.every((item) => item.available), true);
+    assert.deepEqual(seen, ["claude", "opencode", "codex", "kimi"]);
+    assert.ok(result.every((item) => !item.required && !item.available));
+  });
+  it("reports daemon availability independently of optional adapter binaries", async () => {
+    const runner = async () => ({ exitCode: 127, stdout: "", stderr: "not found" });
+    const ready = await checkForgeBadgerRuntimeDependencies(runner, { available: true });
+    assert.equal(ready.terminalRuntime.persistence, "session-server");
+    assert.equal(ready.terminalRuntime.mode, "ready");
+    const down = await checkForgeBadgerRuntimeDependencies(runner, { available: false, message: "IPC unavailable" });
+    assert.deepEqual(down.terminalRuntime, { persistence: "session-server", mode: "unavailable", supported: false, message: "IPC unavailable" });
   });
 });
 
-describe("checkForgeBadgerDependencies", () => {
-  it("marks tmux required and AI CLIs optional", async () => {
-    const result = await checkForgeBadgerDependencies(async (command) => ({
-      exitCode: command === "tmux" ? 0 : 127,
-      stdout: command === "tmux" ? "tmux 3.4\n" : "",
-      stderr: command === "tmux" ? "" : "not found"
+describe("checkCommand failure classification", () => {
+  it("marks timeouts as checkFailed instead of missing", async () => {
+    const result = await checkCommand("kimi", ["--version"], async () => ({
+      exitCode: 124,
+      stdout: "",
+      stderr: "Command timed out after 10000ms"
     }));
 
-    const tmux = result.find((item) => item.name === "tmux");
-    const claude = result.find((item) => item.name === "claude");
-    const opencode = result.find((item) => item.name === "opencode");
-    const codex = result.find((item) => item.name === "codex");
-
-    assert.equal(tmux?.required, true);
-    assert.equal(tmux?.available, true);
-    assert.equal(claude?.required, false);
-    assert.equal(claude?.available, false);
-    assert.equal(opencode?.required, false);
-    assert.equal(codex?.required, false);
-    const kimi = result.find((item) => item.name === "kimi");
-    assert.equal(kimi?.required, false);
-    assert.equal(kimi?.available, false);
+    assert.equal(result.available, false);
+    assert.equal(result.checkFailed, true);
   });
 
-  it("checks the ForgeBadger runtime command list in order", async () => {
-    const seen: Array<{ command: string; args: string[] }> = [];
+  it("marks command-not-found exits as missing", async () => {
+    for (const exitCode of [127, 9009]) {
+      const result = await checkCommand("kimi", ["--version"], async () => ({
+        exitCode,
+        stdout: "",
+        stderr: "not found"
+      }));
 
-    await checkForgeBadgerDependencies(async (command, args) => {
-      seen.push({ command, args });
-      return {
-        exitCode: 0,
-        stdout: `${command} ok\n`,
-        stderr: ""
-      };
-    });
-
-    assert.deepEqual(seen, [
-      { command: "tmux", args: ["-V"] },
-      { command: "claude", args: ["--version"] },
-      { command: "opencode", args: ["--version"] },
-      { command: "codex", args: ["--version"] },
-      { command: "kimi", args: ["--version"] }
-    ]);
+      assert.equal(result.available, false);
+      assert.equal(result.checkFailed, undefined);
+    }
   });
 
-  it("checks psmux instead of tmux on native Windows", async () => {
-    const seen: Array<{ command: string; args: string[] }> = [];
+  it("marks non-zero version exits as checkFailed", async () => {
+    const result = await checkCommand("kimi", ["--version"], async () => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: "boom"
+    }));
 
-    await checkForgeBadgerDependencies(async (command, args) => {
-      seen.push({ command, args });
-      return { exitCode: 0, stdout: `${command} ok\n`, stderr: "" };
-    }, "win32");
-
-    assert.deepEqual(seen[0], { command: "psmux", args: ["-V"] });
-    assert.equal(seen.some(({ command }) => command === "tmux"), false);
+    assert.equal(result.available, false);
+    assert.equal(result.checkFailed, true);
   });
 });
 
-describe("checkForgeBadgerRuntimeDependencies", () => {
-  it("reports native tmux terminal support on Unix-like systems when tmux is available", async () => {
-    const result = await checkForgeBadgerRuntimeDependencies(
-      async (command) => ({
-        exitCode: command === "tmux" ? 0 : 127,
-        stdout: command === "tmux" ? "tmux 3.4\n" : "",
-        stderr: command === "tmux" ? "" : "not found"
-      }),
-      "linux"
-    );
+describe("per-adapter probe timeouts", () => {
+  it("forwards the configured timeout to the runner", async () => {
+    const calls = new Map<string, number | undefined>();
+    const runner: CommandRunner = async (command, _args, options) => {
+      calls.set(command, options?.timeoutMs);
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
 
-    assert.deepEqual(result.terminalRuntime, {
-      persistence: "tmux",
-      mode: "native_tmux",
-      supported: true,
-      message: "tmux is available for persistent browser terminals."
-    });
-  });
+    await checkForgeBadgerDependencies(runner);
 
-  it("reports native psmux terminal support on Windows when psmux is available", async () => {
-    const result = await checkForgeBadgerRuntimeDependencies(
-      async (command) => ({
-        exitCode: command === "psmux" ? 0 : 127,
-        stdout: command === "psmux" ? "psmux 3.3.8\n" : "",
-        stderr: command === "psmux" ? "" : "not found"
-      }),
-      "win32"
-    );
-
-    assert.deepEqual(result.terminalRuntime, {
-      persistence: "psmux",
-      mode: "native_psmux",
-      supported: true,
-      message: "psmux is available for persistent browser terminals."
-    });
-  });
-
-  for (const versionOutput of ["psmux 3.3.7\n", "tmux 3.3.7\n"]) {
-    it(`rejects vulnerable psmux output ${versionOutput.trim()}`, async () => {
-      const result = await checkForgeBadgerRuntimeDependencies(
-        async (command) => ({
-          exitCode: command === "psmux" ? 0 : 127,
-          stdout: command === "psmux" ? versionOutput : "",
-          stderr: command === "psmux" ? "" : "not found"
-        }),
-        "win32"
-      );
-
-      assert.deepEqual(result.terminalRuntime, {
-        persistence: "psmux",
-        mode: "psmux_outdated",
-        supported: false,
-        message: "Upgrade psmux to version 3.3.8 or newer for persistent browser terminals."
-      });
-    });
-  }
-
-  it("accepts the fixed psmux version when its real version string uses the tmux product name", async () => {
-    const result = await checkForgeBadgerRuntimeDependencies(
-      async (command) => ({
-        exitCode: command === "psmux" ? 0 : 127,
-        stdout: command === "psmux" ? "tmux 3.3.8\n" : "",
-        stderr: command === "psmux" ? "" : "not found"
-      }),
-      "win32"
-    );
-
-    assert.equal(result.terminalRuntime.mode, "native_psmux");
-    assert.equal(result.terminalRuntime.supported, true);
-  });
-
-  it("reports psmux_missing on Windows when psmux is absent", async () => {
-    const result = await checkForgeBadgerRuntimeDependencies(
-      async () => ({ exitCode: 127, stdout: "", stderr: "not found" }),
-      "win32"
-    );
-
-    assert.deepEqual(result.terminalRuntime, {
-      persistence: "psmux",
-      mode: "psmux_missing",
-      supported: false,
-      message: "Install psmux to enable persistent browser terminals."
-    });
-  });
-
-  it("reports missing tmux when the host platform supports native terminal sessions but tmux is absent", async () => {
-    const result = await checkForgeBadgerRuntimeDependencies(
-      async () => ({
-        exitCode: 127,
-        stdout: "",
-        stderr: "not found"
-      }),
-      "darwin"
-    );
-
-    assert.deepEqual(result.terminalRuntime, {
-      persistence: "tmux",
-      mode: "tmux_missing",
-      supported: false,
-      message: "Install tmux to enable persistent browser terminals."
-    });
+    assert.equal(calls.get("kimi"), 10_000);
+    assert.equal(calls.get("claude"), undefined);
+    assert.equal(calls.get("opencode"), undefined);
+    assert.equal(calls.get("codex"), undefined);
   });
 });

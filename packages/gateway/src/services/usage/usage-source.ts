@@ -11,6 +11,8 @@
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { expandUserPath } from "../../lib/user-path.js";
+
 export type UsageTokenAdapter = "claude" | "opencode" | "codex" | "kimi";
 
 export interface TokenUsageRecord {
@@ -47,39 +49,79 @@ export interface UsageSource {
   scan(lastWatermark: string | null): UsageScanResult;
 }
 
-function pathJoinHome(...parts: string[]): string {
-  return path.join(homedir(), ...parts);
+interface UsagePathOptions {
+  env?: NodeJS.ProcessEnv;
+  homeDir?: string;
+  platform?: NodeJS.Platform;
+}
+
+function usagePathContext(options: UsagePathOptions): {
+  env: NodeJS.ProcessEnv;
+  homeDir: string;
+  pathApi: typeof path.posix | typeof path.win32;
+} {
+  const platform = options.platform ?? process.platform;
+  return {
+    env: options.env ?? process.env,
+    homeDir: options.homeDir ?? homedir(),
+    pathApi: platform === "win32" ? path.win32 : path.posix
+  };
 }
 
 /** Root of Claude Code JSONL transcripts (CLAUDE_CONFIG_DIR-aware). */
-export function claudeProjectsRoot(): string {
-  const configDir = process.env.CLAUDE_CONFIG_DIR?.trim();
-  return configDir ? path.join(configDir, "projects") : pathJoinHome(".claude", "projects");
+export function claudeProjectsRoot(options: UsagePathOptions = {}): string {
+  const { env, homeDir, pathApi } = usagePathContext(options);
+  const configDir = expandUserPath(
+    env.CLAUDE_CONFIG_DIR?.trim() || pathApi.join(homeDir, ".claude"),
+    homeDir,
+    pathApi
+  );
+  return pathApi.join(configDir, "projects");
 }
 
 /** Absolute path of the OpenCode SQLite database (OPENCODE_DB override aware). */
-export function opencodeDbPath(): string {
-  const override = process.env.OPENCODE_DB?.trim();
-  if (override) return path.join(override, "opencode.db");
-  const xdg = process.env.XDG_DATA_HOME?.trim();
-  const base = xdg || pathJoinHome(".local", "share");
-  return path.join(base, "opencode", "opencode.db");
+export function opencodeDbPath(options: UsagePathOptions = {}): string {
+  const { env, homeDir, pathApi } = usagePathContext(options);
+  const override = env.OPENCODE_DB?.trim();
+  if (override) return pathApi.join(expandUserPath(override, homeDir, pathApi), "opencode.db");
+  const base = expandUserPath(
+    env.XDG_DATA_HOME?.trim() || pathApi.join(homeDir, ".local", "share"),
+    homeDir,
+    pathApi
+  );
+  return pathApi.join(base, "opencode", "opencode.db");
 }
 
 /** Root of Codex rollout transcripts (CODEX_HOME-aware). */
-export function codexSessionsRoot(): string {
-  const codexHome = process.env.CODEX_HOME?.trim();
-  return path.join(codexHome || pathJoinHome(".codex"), "sessions");
+export function codexSessionsRoot(options: UsagePathOptions = {}): string {
+  const { env, homeDir, pathApi } = usagePathContext(options);
+  const codexHome = expandUserPath(
+    env.CODEX_HOME?.trim() || pathApi.join(homeDir, ".codex"),
+    homeDir,
+    pathApi
+  );
+  return pathApi.join(codexHome, "sessions");
 }
 
 /** Root of Kimi Code session transcripts (KIMI_CODE_HOME-aware). */
-export function kimiSessionsRoot(): string {
-  const kimiHome = process.env.KIMI_CODE_HOME?.trim();
-  return path.join(kimiHome || pathJoinHome(".kimi-code"), "sessions");
+export function kimiSessionsRoot(options: UsagePathOptions = {}): string {
+  const { env, homeDir, pathApi } = usagePathContext(options);
+  const kimiHome = expandUserPath(
+    env.KIMI_CODE_HOME?.trim() || pathApi.join(homeDir, ".kimi-code"),
+    homeDir,
+    pathApi
+  );
+  return pathApi.join(kimiHome, "sessions");
 }
 
 /** Decode a Claude encode-project-dir into an absolute path (`-Users-a-B` -> `/Users/a/B`). */
-export function decodeClaudeProjectDir(dirName: string): string {
+export function decodeClaudeProjectDir(
+  dirName: string,
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform === "win32" && /^[A-Za-z]--/u.test(dirName)) {
+    return `${dirName[0]}:\\${dirName.slice(3).replace(/-/g, "\\")}`;
+  }
   if (!dirName.startsWith("-")) return dirName;
   return `/${dirName.slice(1).replace(/-/g, "/")}`;
 }

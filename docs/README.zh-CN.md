@@ -11,7 +11,7 @@ ForgeBadger 是一个本地优先的 AI 编程 CLI 控制平面。它为开发�
 工具配置、模型、API Key、Agent、Skill、模板、插件、用量可视化和会话历史。
 
 ForgeBadger 面向自托管开发机器和私有工作区。Gateway 负责文件系统访问、SQLite
-持久化、终端复用器会话、WebSocket 终端流量、加密和 CLI 进程生命周期；Web 控制台是
+持久化、Session Server 终端会话、WebSocket 终端流量、加密和 CLI 进程生命周期；Web 控制台是
 纯 Next.js SPA，通过 HTTP 和 WebSocket 与 Gateway 通信。
 
 ## 项目状态
@@ -42,16 +42,16 @@ ForgeBadger 品牌。以 `OF-` 开头的历史阶段 ID 继续作为稳定的证
 
 - 在浏览器里查看和恢复长时间运行的 AI CLI 工作。
 - 统一管理 Claude Code、OpenCode、Codex 和 Kimi Code 会话，通过可预览、可回滚的绑定投影减少手工混改本地配置文件。
-- 使用主机终端复用器保存会话：macOS/Linux/WSL 使用 tmux，原生 Windows 使用
-  psmux；不依赖浏览器标签页或数据库日志。
+- 通过内嵌 Session Server 保存会话：浏览器断开或 Gateway 重启后仍可恢复，不依赖浏览器标签页或数据库日志。
 - 在一个开发者控制台里集中管理项目模板、Agent、Skill、API Key、模型和本地诊断。
 - 保持本地优先：密钥、项目路径、终端进程和 SQLite 状态都留在运行 Gateway 的主机上。
 
 ## 功能
 
 - 项目创建和导入流程，支持 AI 工具配置生成与合规检查。
-- 基于复用器的终端会话，浏览器断开或 Gateway 重启后仍可恢复：
-  macOS/Linux/WSL 使用 tmux，原生 Windows 使用 psmux。
+- 将项目的 AI CLI 配置沉淀为可复用模板，创建或导入项目时选择模板，并从公开 Git 仓库导入模板。
+- 基于 Session Server 的终端会话，浏览器断开或 Gateway 重启后仍可恢复：
+  macOS/Linux/WSL 经 Unix socket，原生 Windows 经命名管道 + ConPTY。
 - 支持 Claude Code、OpenCode、Codex 的适配器发现和受控会话启动。
 - 模型服务商 Profile、加密 API Key 存储，以及 OpenAI-compatible 服务商端点的
   在线模型同步。
@@ -64,9 +64,8 @@ ForgeBadger 品牌。以 `OF-` 开头的历史阶段 ID 继续作为稳定的证
 ```text
 浏览器 xterm.js
   -> WebSocket
-  -> Gateway
-  -> node-pty
-  -> tmux attach（macOS/Linux/WSL）或 psmux attach（原生 Windows）
+  -> Gateway（经 Session Server IPC）
+  -> Session Server daemon（node-pty）
   -> AI CLI 进程
 ```
 
@@ -75,7 +74,7 @@ ForgeBadger 品牌。以 `OF-` 开头的历史阶段 ID 继续作为稳定的证
 ```text
 packages/
   cli/       npm 分发的 ForgeBadger CLI 包装器
-  gateway/   Express、WebSocket、tmux 或 psmux/node-pty、SQLite、适配器、服务层
+  gateway/   Express、WebSocket、Session Server/node-pty、SQLite、适配器、服务层
   web/       Next.js App Router、React、Tailwind CSS、xterm.js
 docs/        架构、发布、冒烟测试、试用和多语言文档
 templates/   内置 AI CLI 配置模板
@@ -85,36 +84,18 @@ templates/   内置 AI CLI 配置模板
 
 - Gateway 和 Web 是两个独立服务。Gateway API 行为不放进 Next.js API routes。
 - REST API 位于 `/api/v1`；终端流量使用 `/ws/terminal/:sessionId`。
-- tmux（macOS/Linux/WSL）或 psmux（原生 Windows）是终端会话持久化层。
-- 终端历史通过复用器 `capture-pane` 恢复，不写入 SQLite。
-- API Key 只在 Gateway 内存中解密，并通过复用器环境变量注入 CLI 会话。
+- 内嵌 Session Server 是终端会话持久化层（唯一终端后端）。
+- 终端历史通过 Session Server 渲染快照恢复，不写入 SQLite。
+- API Key 只在 Gateway 内存中解密（AES-256-GCM），明文不出现在日志、事件或数据库中；会话以宿主机环境凭据启动，不注入任何 provider 密钥。
 
 ## 环境要求
 
 - Node.js 20.12 至 24
 - 源码开发需要 pnpm 10 或更高版本
-- macOS、Linux 或 WSL：tmux 3.2 或更高版本
-- 原生 Windows：psmux 3.3.8 或更高版本
 - 支持 SQLite 的本地文件系统
 - 如需真实 AI CLI 会话，需要在 `PATH` 中安装 Claude Code、OpenCode、Codex 和/或 Kimi Code
 
-原生 Windows 使用 [psmux](https://github.com/psmux/psmux)，WSL 继续使用 tmux。
-psmux 缺失时运行官方 WinGet 安装命令：
-
-```powershell
-winget install --id marlocarlo.psmux --exact --source winget
-```
-
-psmux 低于 3.3.8 时运行：
-
-```powershell
-winget upgrade --id marlocarlo.psmux --exact --source winget
-```
-
-依据见 [psmux 兼容性说明](https://github.com/psmux/psmux/blob/master/docs/compatibility.md)、
-[psmux v3.3.8 发布说明](https://github.com/psmux/psmux/releases/tag/v3.3.8)、
-[tmux 安装指南](https://github.com/tmux/tmux/wiki/installing)和
-[Microsoft WinGet 安装文档](https://learn.microsoft.com/zh-cn/windows/package-manager/winget/install)。
+终端会话由内嵌 Session Server daemon 提供，无需安装任何终端复用器或其他前置二进制。
 
 ## 从 npm 安装
 
@@ -126,18 +107,12 @@ forgebadger start
 
 在 `forgebadger start` 打印的 URL 打开 Web 控制台。
 
-交互式 `start` / `init` 预检会先绘制零依赖的 ForgeBadger 文字 Logo，再以
-两个简短阶段开始终端运行时检测。只有支持颜色的 TTY 使用品牌色；重定向输出、
-`NO_COLOR` 或 `TERM=dumb` 环境自动降级为纯文本。
+`forgebadger start` / `init` 启动时会绘制零依赖的 ForgeBadger 文字 Logo 环境预检横幅。
+只有支持颜色的 TTY 使用品牌色；重定向输出、`NO_COLOR` 或 `TERM=dumb` 环境自动降级为纯文本。
 
-npm 包的 postinstall 不安装系统软件；`forgebadger doctor` 只读检查依赖。
-`forgebadger start` 或 `forgebadger init` 发现终端运行时缺失时，会先显示固定的
-官方/包管理器命令，再询问是否执行。只有交互式 TTY、非 CI 环境会询问，默认 No，
-且必须明确输入 `y`/`yes`；执行后会复检。若运行时仍未就绪，命令会返回非零，
-并在创建运行时/项目状态或启动 Gateway/Web 之前终止。`forgebadger doctor` 只读；
-检查空状态目录不会创建配置、密钥、数据库或目录。Linux 只探测固定白名单中的
-`apt-get`、`dnf`、`yum`、`pacman`、`zypper`、`apk`。Claude Code、OpenCode、
-Codex 或 Kimi Code 仍需单独安装并放入 `PATH`。
+npm 包的 postinstall 不安装系统软件；`forgebadger start` / `init` 也不会安装或升级任何系统级依赖。
+`forgebadger doctor` 只读检查依赖：检查空状态目录不会创建配置、密钥、数据库或目录。
+Claude Code、OpenCode、Codex 或 Kimi Code 需单独安装并放入 `PATH`。
 
 ## 从源码开发
 

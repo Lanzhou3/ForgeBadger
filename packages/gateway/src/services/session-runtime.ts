@@ -65,7 +65,7 @@ export async function startSessionRuntime(deps: SessionRuntimeDeps, sessionId: s
       (err as Error & { httpStatus?: number }).httpStatus = 400;
       throw err;
     }
-    const launchStatus = await getAdapterLaunchStatus(adapter, deps.adapterCommandRunner);
+    const launchStatus = await getAdapterLaunchStatus(adapter, deps.adapterCommandRunner, deps.sessionManager.terminalBackendHealth());
     if (!launchStatus.launchEnabled) {
       const err = new Error(`${launchStatus.label} is not available for launch`);
       (err as Error & { httpStatus?: number }).httpStatus = 409;
@@ -97,7 +97,7 @@ export async function startSessionRuntime(deps: SessionRuntimeDeps, sessionId: s
     const updatedSession = sessionRepo.update(dbSession.id, {
       status: "running",
       attachToken: session.attachToken,
-      tmuxSession: session.tmuxName,
+      runtimeSessionName: session.runtimeSessionName,
       lastActive: new Date()
     });
     recordSessionActivity(deps, updatedSession ?? dbSession, "session_started", "success", `Session ${dbSession.name} started`);

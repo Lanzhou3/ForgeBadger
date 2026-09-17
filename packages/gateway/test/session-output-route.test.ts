@@ -33,23 +33,24 @@ describe("session output route", () => {
   let server: ReturnType<typeof createGatewayApp>["server"];
   let db: Database;
   let sessionManager: InMemorySessionManager;
-  const tmuxSessions: string[] = [];
+  const backendSessions: string[] = [];
 
   before(async () => {
     db = createTestDb();
     sessionManager = new InMemorySessionManager({
       async createSession(options) {
-        tmuxSessions.push(options.name);
+        backendSessions.push(options.name);
       },
       async killSession() {},
       async capturePane() {
         return "";
       },
       async listSessions() {
-        return tmuxSessions;
+        return backendSessions;
       }
     });
     const app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
       db,

@@ -2,7 +2,7 @@
 
 import { type FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Copy, Download, FileCode2, PackagePlus, Plus, RotateCcw, Save, Trash2, Upload } from "lucide-react";
+import { ChevronDown, Copy, Download, FileCode2, GitBranch, PackagePlus, Plus, RotateCcw, Save, Trash2, Upload } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
   exportTemplate,
   getTemplate,
   importTemplate,
+  importTemplateFromGit,
   installCatalogTemplate,
   listCatalogItems,
   listTemplates,
@@ -23,6 +24,7 @@ import {
 restoreTemplateVersion,
   updateTemplate,
   updateTemplateFile,
+  type GitTemplateImportInput,
   type Template,
   type TemplatePackage,
 } from "@/lib/api";
@@ -63,6 +65,11 @@ export default function TemplatesPage() {
   const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>("all");
   const [templatePackageText, setTemplatePackageText] = useState("");
   const [catalogExpanded, setCatalogExpanded] = useState(false);
+  const [gitImportExpanded, setGitImportExpanded] = useState(false);
+  const [gitImportUrl, setGitImportUrl] = useState("");
+  const [gitImportBranch, setGitImportBranch] = useState("");
+  const [gitImportName, setGitImportName] = useState("");
+  const [gitImportDescription, setGitImportDescription] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
@@ -210,6 +217,31 @@ export default function TemplatesPage() {
     },
   });
 
+  const importGitMutation = useMutation({
+    mutationFn: () => {
+      const input: GitTemplateImportInput = { url: gitImportUrl.trim() };
+      const branch = gitImportBranch.trim();
+      if (branch) input.branch = branch;
+      const name = gitImportName.trim();
+      if (name) input.name = name;
+      const description = gitImportDescription.trim();
+      if (description) input.description = description;
+      return importTemplateFromGit(input);
+    },
+    onSuccess: async (result) => {
+      setNotice(t("templates.gitImported"));
+      setGitImportUrl("");
+      setGitImportBranch("");
+      setGitImportName("");
+      setGitImportDescription("");
+      setSelectedTemplateId(result.templateId);
+      setEditName(result.name);
+      setEditDescription("");
+      setEditVisibility("private");
+      await queryClient.invalidateQueries({ queryKey: ["templates"] });
+    },
+  });
+
   const restoreMutation = useMutation({
     mutationFn: ({ templateId, versionId }: { templateId: string; versionId: number }) =>
       restoreTemplateVersion(templateId, versionId),
@@ -257,6 +289,7 @@ export default function TemplatesPage() {
     exportMutation.error ??
     importMutation.error ??
     installCatalogMutation.error ??
+    importGitMutation.error ??
     restoreMutation.error;
 
   return (
@@ -381,6 +414,82 @@ export default function TemplatesPage() {
                   </div>
                 ))
               ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-2 px-6 pt-6 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              onClick={() => setGitImportExpanded((current) => !current)}
+              aria-expanded={gitImportExpanded}
+              aria-label={t("templates.gitImport")}
+            >
+              <div className="flex items-center gap-2">
+                <GitBranch className="size-4" />
+                <span className="text-base font-semibold">{t("templates.gitImport")}</span>
+              </div>
+              <ChevronDown
+                className={`size-4 shrink-0 text-muted-foreground transition-transform ${
+                  gitImportExpanded ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+            <CardContent className="space-y-2 pt-4">
+              <p className="text-sm text-muted-foreground">{t("templates.gitImportDescription")}</p>
+              {gitImportExpanded && (
+                <form
+                  className="space-y-3"
+                  onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                    event.preventDefault();
+                    importGitMutation.mutate();
+                  }}
+                >
+                  <div className="space-y-2">
+                    <Label htmlFor="git-import-url">{t("templates.gitImportUrl")}</Label>
+                    <Input
+                      id="git-import-url"
+                      value={gitImportUrl}
+                      onChange={(event) => setGitImportUrl(event.target.value)}
+                      placeholder="https://github.com/your-org/ai-cli-config"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="git-import-branch">{t("templates.gitImportBranch")}</Label>
+                    <Input
+                      id="git-import-branch"
+                      value={gitImportBranch}
+                      onChange={(event) => setGitImportBranch(event.target.value)}
+                      placeholder="main"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="git-import-name">{t("common.name")}</Label>
+                    <Input
+                      id="git-import-name"
+                      value={gitImportName}
+                      onChange={(event) => setGitImportName(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="git-import-description">{t("common.description")}</Label>
+                    <Input
+                      id="git-import-description"
+                      value={gitImportDescription}
+                      onChange={(event) => setGitImportDescription(event.target.value)}
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={!gitImportUrl.trim() || importGitMutation.isPending}
+                  >
+                    <GitBranch className="size-4" />
+                    {importGitMutation.isPending ? t("templates.gitImporting") : t("templates.gitImport")}
+                  </Button>
+                </form>
+              )}
             </CardContent>
           </Card>
 

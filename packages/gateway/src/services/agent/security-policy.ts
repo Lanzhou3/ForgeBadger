@@ -12,7 +12,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, parse, resolve, sep } from "node:path";
 import { DENIED_ROOTS } from "../../lib/safe-resolve.js";
 import type { Database } from "../../db/types.js";
 
@@ -105,7 +105,8 @@ function evaluateCreateProject(input: unknown, home: string): SecurityDecision |
   }
 
   const homeLower = resolve(home).toLowerCase();
-  if (!normalized.startsWith(homeLower + "/") && normalized !== homeLower) {
+  const homeWithSep = homeLower.endsWith(sep) ? homeLower : homeLower + sep;
+  if (!normalized.startsWith(homeWithSep) && normalized !== homeLower) {
     return { action: "require_approval", reason: "project path outside home directory", riskClass: "high" };
   }
 
@@ -511,9 +512,21 @@ function containsTraversal(value: string): boolean {
 }
 
 function isUnderDeniedRoot(normalizedPath: string): boolean {
+  if (process.platform === "win32") {
+    // Deny drive roots (C:\, D:\) and system directories on Windows. Use the
+    // running system's environment rather than hardcoding C: so machines where
+    // Windows is installed on another drive are covered too.
+    if (normalizedPath === parse(normalizedPath).root.toLowerCase()) return true;
+    for (const systemRoot of [process.env.SystemRoot, process.env.ProgramFiles].filter(
+      (value): value is string => Boolean(value)
+    )) {
+      const root = resolve(systemRoot).toLowerCase();
+      if (normalizedPath === root || normalizedPath.startsWith(root + sep)) return true;
+    }
+  }
   for (const root of DENIED_ROOTS) {
     const r = root.toLowerCase();
-    if (normalizedPath === r || normalizedPath.startsWith(`${r}/`)) {
+    if (normalizedPath === r || normalizedPath.startsWith(`${r}/`) || normalizedPath.startsWith(`${r}\\`)) {
       return true;
     }
   }

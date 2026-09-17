@@ -9,28 +9,23 @@ import { pathToFileURL } from "node:url";
 import { runDoctor } from "../src/commands/doctor.js";
 import { isMainModule, runCli } from "../src/index.js";
 import {
+  commandSpawnOptions,
   checkCliDependencies,
-  checkCliTerminalRuntime,
-  describeCliTerminalRuntime,
+  checkNodePtyLoadable,
   runCommand
 } from "../src/runtime/dependency-check.js";
 import type { RuntimeConfig } from "../src/runtime/config.js";
 
 describe("checkCliDependencies", () => {
-  it("reports required and optional dependency statuses from the command list", async () => {
+  it("reports the node-pty self-check and optional dependency statuses", async () => {
     const seen: Array<{ command: string; args: string[] }> = [];
 
     const result = await checkCliDependencies(async (command, args) => {
       seen.push({ command, args });
-      return {
-        exitCode: command === "tmux" ? 0 : 127,
-        stdout: command === "tmux" ? "tmux 3.4\n" : "",
-        stderr: command === "tmux" ? "" : "not found"
-      };
-    });
+      return { exitCode: 127, stdout: "", stderr: "not found" };
+    }, async () => ({}));
 
     assert.deepEqual(seen, [
-      { command: "tmux", args: ["-V"] },
       { command: "claude", args: ["--version"] },
       { command: "opencode", args: ["--version"] },
       { command: "codex", args: ["--version"] },
@@ -45,7 +40,7 @@ describe("checkCliDependencies", () => {
         error: item.error
       })),
       [
-        { name: "tmux", available: true, required: true, version: "tmux 3.4", error: undefined },
+        { name: "node-pty", available: true, required: true, version: undefined, error: undefined },
         { name: "claude", available: false, required: false, version: undefined, error: "not found" },
         { name: "opencode", available: false, required: false, version: undefined, error: "not found" },
         { name: "codex", available: false, required: false, version: undefined, error: "not found" },
@@ -53,120 +48,35 @@ describe("checkCliDependencies", () => {
       ]
     );
   });
-
-  it("checks psmux instead of tmux on native Windows", async () => {
-    const seen: Array<{ command: string; args: string[] }> = [];
-
-    await checkCliDependencies(async (command, args) => {
-      seen.push({ command, args });
-      return { exitCode: 0, stdout: `${command} ok\n`, stderr: "" };
-    }, "win32");
-
-    assert.deepEqual(seen[0], { command: "psmux", args: ["-V"] });
-    assert.equal(seen.some(({ command }) => command === "tmux"), false);
-  });
 });
 
-describe("describeCliTerminalRuntime", () => {
-  it("reports native psmux support on Windows", () => {
-    const runtime = describeCliTerminalRuntime([
-      { name: "psmux", available: true, required: true, version: "psmux 3.3.8" }
-    ], "win32");
+describe("checkNodePtyLoadable", () => {
+  it("reports node-pty as available when the module loads", async () => {
+    const status = await checkNodePtyLoadable(async () => ({}));
 
-    assert.deepEqual(runtime, {
-      persistence: "psmux",
-      mode: "native_psmux",
-      supported: true,
-      message: "psmux is available for persistent browser terminals."
-    });
+    assert.deepEqual(status, { name: "node-pty", available: true, required: true });
   });
 
-  it("reports psmux_missing on Windows when psmux is absent", () => {
-    const runtime = describeCliTerminalRuntime([
-      { name: "psmux", available: false, required: true, error: "not found" }
-    ], "win32");
-
-    assert.deepEqual(runtime, {
-      persistence: "psmux",
-      mode: "psmux_missing",
-      supported: false,
-      message: "Install psmux to enable persistent browser terminals."
-    });
-  });
-
-  it("reports tmux_missing when Unix-like hosts do not have tmux", () => {
-    const runtime = describeCliTerminalRuntime([
-      { name: "tmux", available: false, required: true, error: "not found" }
-    ], "linux");
-
-    assert.deepEqual(runtime, {
-      persistence: "tmux",
-      mode: "tmux_missing",
-      supported: false,
-      message: "Install tmux to enable persistent browser terminals."
-    });
-  });
-});
-
-describe("checkCliTerminalRuntime", () => {
-  it("checks only tmux for Unix-like terminal runtime startup warnings", async () => {
-    const seen: Array<{ command: string; args: string[] }> = [];
-
-    const runtime = await checkCliTerminalRuntime({
-      platform: "linux",
-      runner: async (command, args) => {
-        seen.push({ command, args });
-        return { exitCode: 0, stdout: "tmux 3.4\n", stderr: "" };
-      }
+  it("reports node-pty as missing with reinstall guidance when loading fails", async () => {
+    const status = await checkNodePtyLoadable(async () => {
+      throw new Error("Cannot find module 'node-pty'");
     });
 
-    assert.deepEqual(seen, [{ command: "tmux", args: ["-V"] }]);
-    assert.equal(runtime.mode, "native_tmux");
-    assert.equal(runtime.supported, true);
-  });
-
-  it("checks only psmux for native Windows terminal runtime startup warnings", async () => {
-    const seen: Array<{ command: string; args: string[] }> = [];
-
-    const runtime = await checkCliTerminalRuntime({
-      platform: "win32",
-      runner: async (command, args) => {
-        seen.push({ command, args });
-        return { exitCode: 0, stdout: "psmux 3.3.8\n", stderr: "" };
-      }
-    });
-
-    assert.deepEqual(seen, [{ command: "psmux", args: ["-V"] }]);
-    assert.equal(runtime.mode, "native_psmux");
-    assert.equal(runtime.supported, true);
-  });
-
-  it("rejects psmux 3.3.7 even when the executable reports itself as tmux", async () => {
-    const runtime = await checkCliTerminalRuntime({
-      platform: "win32",
-      runner: async () => ({ exitCode: 0, stdout: "tmux 3.3.7\n", stderr: "" })
-    });
-
-    assert.deepEqual(runtime, {
-      persistence: "psmux",
-      mode: "psmux_outdated",
-      supported: false,
-      message: "Upgrade psmux to version 3.3.8 or newer for persistent browser terminals."
-    });
-  });
-
-  it("accepts psmux 3.3.8 when the executable reports itself as tmux", async () => {
-    const runtime = await checkCliTerminalRuntime({
-      platform: "win32",
-      runner: async () => ({ exitCode: 0, stdout: "tmux 3.3.8\n", stderr: "" })
-    });
-
-    assert.equal(runtime.mode, "native_psmux");
-    assert.equal(runtime.supported, true);
+    assert.equal(status.name, "node-pty");
+    assert.equal(status.available, false);
+    assert.equal(status.required, true);
+    assert.match(status.error ?? "", /node-pty failed to load/);
+    assert.match(status.error ?? "", /Cannot find module 'node-pty'/);
+    assert.match(status.error ?? "", /npm install -g forgebadger/);
   });
 });
 
 describe("runCommand", () => {
+  it("uses the Windows command shell for npm-installed CLI shims", () => {
+    assert.equal(commandSpawnOptions("win32").shell, true);
+    assert.equal(commandSpawnOptions("darwin").shell, undefined);
+  });
+
   it("returns a timeout error when the child process exceeds the configured timeout", async () => {
     const result = await runCommand(
       process.execPath,
@@ -218,11 +128,8 @@ describe("runDoctor", () => {
 
     const code = await runDoctor({
       env: { FORGEBADGER_STATE_DIR: stateDir },
-      dependencyRunner: async (command) => ({
-        exitCode: command === "tmux" ? 0 : 127,
-        stdout: command === "tmux" ? "tmux 3.4\n" : "",
-        stderr: command === "tmux" ? "" : "not found"
-      }),
+      dependencyRunner: async () => ({ exitCode: 127, stdout: "", stderr: "not found" }),
+      loadNodePty: async () => ({}),
       stdout,
       stderr
     });
@@ -241,10 +148,8 @@ describe("runDoctor", () => {
 
     const code = await runDoctor({
       loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
+      loadNodePty: async () => ({}),
       dependencyRunner: async (command) => {
-        if (command === "tmux") {
-          return { exitCode: 0, stdout: "tmux 3.4\n", stderr: "" };
-        }
         if (command === "claude") {
           return { exitCode: 0, stdout: "claude 1.2.3\n", stderr: "" };
         }
@@ -256,55 +161,34 @@ describe("runDoctor", () => {
 
     assert.equal(code, 0);
     assert.match(stdout.text, /ForgeBadger state: \/tmp\/forgebadger-state\n/);
-    assert.match(stdout.text, /ok tmux tmux 3\.4\n/);
+    assert.match(stdout.text, /ok node-pty\n/);
     assert.match(stdout.text, /ok claude claude 1\.2\.3\n/);
     assert.match(stdout.text, /optional-missing opencode - not found\n/);
-    assert.match(stdout.text, /terminal native_tmux - tmux is available for persistent browser terminals\.\n/);
     assert.equal(stderr.text, "");
   });
 
-  it("returns 1 and prints stderr when a required dependency is missing", async () => {
+  it("returns 1 and prints stderr when node-pty cannot be loaded", async () => {
     const stdout = createMemoryWriter();
     const stderr = createMemoryWriter();
 
     const code = await runDoctor({
       loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
+      loadNodePty: async () => {
+        throw new Error("native binding missing");
+      },
       dependencyRunner: async (command) => ({
-        exitCode: command === "tmux" ? 127 : 0,
-        stdout: command === "tmux" ? "" : `${command} ok\n`,
-        stderr: command === "tmux" ? "tmux not found" : ""
+        exitCode: 0,
+        stdout: `${command} ok\n`,
+        stderr: ""
       }),
       stdout,
       stderr
     });
 
     assert.equal(code, 1);
-    assert.match(stdout.text, /missing tmux - tmux not found\n/);
-    assert.match(stdout.text, /terminal tmux_missing - Install tmux to enable persistent browser terminals\.\n/);
+    assert.match(stdout.text, /missing node-pty - node-pty failed to load \(native binding missing\)/);
+    assert.match(stdout.text, /npm install -g forgebadger/);
     assert.match(stderr.text, /Required dependencies are missing/);
-  });
-
-  it("checks and prints native Windows psmux terminal readiness", async () => {
-    const stdout = createMemoryWriter();
-    const stderr = createMemoryWriter();
-
-    const code = await runDoctor({
-      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
-      dependencyRunner: async (command) => ({
-        exitCode: command === "psmux" || command !== "tmux" ? 0 : 127,
-        stdout: command === "psmux" ? "psmux 3.3.8\n" : `${command} ok\n`,
-        stderr: command === "tmux" ? "must not check tmux on Windows" : ""
-      }),
-      platform: "win32",
-      stdout,
-      stderr
-    });
-
-    assert.equal(code, 0);
-    assert.match(stdout.text, /ok psmux psmux 3\.3\.8/);
-    assert.match(stdout.text, /terminal native_psmux - psmux is available/);
-    assert.doesNotMatch(stdout.text, /tmux/);
-    assert.equal(stderr.text, "");
   });
 });
 

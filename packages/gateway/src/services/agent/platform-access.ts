@@ -22,11 +22,11 @@ export const COPILOT_DELIVERY_UNCONFIRMED = "COPILOT_DELIVERY_UNCONFIRMED";
 export function listSessionSummaries(
   db: Database,
   userId: string,
-  input: { projectId?: string; limit?: number }
+  input: { projectId?: string; limit?: number; allowedProjectIds?: string[] }
 ) {
   const repository = new SessionRepository(db, userId);
   const rows = input.projectId ? repository.listByProject(input.projectId) : repository.list();
-  return rows.slice(0, input.limit ?? 50).map((session) => ({
+  return rows.filter(row=>!input.allowedProjectIds||input.allowedProjectIds.includes(row.projectId)).slice(0, input.limit ?? 50).map((session) => ({
     id: session.id,
     name: session.name,
     aiTool: session.aiTool,
@@ -78,8 +78,8 @@ export async function dispatchSessionInput(
   return { dispatched: true, sessionId, delivery: "consumed" };
 }
 
-export function listProjectSummaries(db: Database, userId: string, input: { limit?: number }) {
-  return new ProjectRepository(db, userId).list().slice(0, input.limit ?? 50).map((project) => ({
+export function listProjectSummaries(db: Database, userId: string, input: { limit?: number; allowedProjectIds?: string[] }) {
+  return new ProjectRepository(db, userId).list().filter(row=>!input.allowedProjectIds||input.allowedProjectIds.includes(row.id)).slice(0, input.limit ?? 50).map((project) => ({
     id: project.id,
     name: project.name,
     path: project.path,
@@ -121,11 +121,12 @@ export function createProjectRecord(
 export function listMemoryEntries(
   db: Database,
   userId: string,
-  input: { scope: AgentMemoryScope["scope"]; projectId?: string; limit?: number }
+  input: { scope: AgentMemoryScope["scope"]; projectId?: string; conversationId?: string; limit?: number }
 ) {
   const scope: AgentMemoryScope = {
     scope: input.scope,
-    ...(input.projectId !== undefined ? { projectId: input.projectId } : {})
+    ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+    ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {})
   };
   return new AgentMemoryRepository(db, userId).list(scope, input.limit ?? 50).map(mapMemoryEntry);
 }
@@ -133,11 +134,12 @@ export function listMemoryEntries(
 export function searchMemoryEntries(
   db: Database,
   userId: string,
-  input: { query: string; scope: AgentMemoryScope["scope"]; projectId?: string; limit?: number }
+  input: { query: string; scope: AgentMemoryScope["scope"]; projectId?: string; conversationId?: string; limit?: number }
 ) {
   const scope: AgentMemoryScope = {
     scope: input.scope,
-    ...(input.projectId !== undefined ? { projectId: input.projectId } : {})
+    ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+    ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {})
   };
   return new AgentMemoryRepository(db, userId)
     .search(input.query, scope, input.limit ?? 10)
@@ -152,6 +154,7 @@ export function writeMemoryEntry(
     scope: AgentMemoryScope["scope"];
     text: string;
     projectId?: string;
+    conversationId?: string;
     metadata?: Record<string, unknown>;
   }
 ) {
@@ -160,6 +163,7 @@ export function writeMemoryEntry(
     scope: input.scope,
     text: input.text,
     ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+    ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {}),
     ...(input.metadata !== undefined ? { metadata: input.metadata } : {})
   });
   return { saved: true, id: entry.id };
@@ -171,7 +175,8 @@ function mapMemoryEntry(entry: AgentMemoryEntry) {
     kind: entry.kind,
     scope: entry.scope,
     text: entry.text,
-    projectId: entry.projectId ?? null
+    projectId: entry.projectId ?? null,
+    conversationId: entry.conversationId ?? null
   };
 }
 

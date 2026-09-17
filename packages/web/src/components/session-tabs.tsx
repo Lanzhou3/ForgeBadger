@@ -10,6 +10,9 @@ import { CliBrandIcon } from "@/components/cli-brand-icon";
 import { SessionLaunchDialog } from "@/components/sessions/session-launch-dialog";
 import { useLanguage } from "@/hooks/use-language";
 import { getCliBrand } from "@/lib/cli-brand";
+import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
+import type { GatewayEvent } from "@/lib/notifications";
+import { toast } from "@/lib/toast";
 import {
   groupSessionTabs,
   notifySessionTabsChanged,
@@ -84,7 +87,7 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
     };
   }, [tabs]);
 
-  const closeTab = (sessionId: string) => {
+  const closeTab = useCallback((sessionId: string) => {
     const nextTabs = removeSessionTab(sessionId);
     setTabs(nextTabs);
     if (sessionId !== activeSessionId) {
@@ -93,7 +96,34 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
 
     const nextActive = nextTabs.find((tab) => tab.id !== sessionId);
     router.push(nextActive ? `/sessions/${nextActive.id}` : "/sessions");
-  };
+  }, [activeSessionId, router]);
+
+  // When the CLI process exits on its own (e.g. the user runs /exit), the
+  // gateway flips the session to "exited"; close its tab instead of leaving a
+  // dead terminal behind. Other statuses only refresh the tab's status dot —
+  // "lost" in particular must stay visible as a failure state.
+  useEffect(() => {
+    const onGatewayEvent = (event: Event) => {
+      const detail = event instanceof CustomEvent ? (event.detail as GatewayEvent) : undefined;
+      if (detail?.type !== "session_status_changed") return;
+      const sessionId = detail.payload?.session_id;
+      const newStatus = detail.payload?.new_status;
+      if (typeof sessionId !== "string" || typeof newStatus !== "string") return;
+      const tab = readSessionTabs().find((entry) => entry.id === sessionId);
+      if (!tab) return;
+      if (newStatus === "exited") {
+        toast.info(`${tab.label} · ${t("sessions.sessionExitedTabClosed")}`);
+        closeTab(tab.id);
+        return;
+      }
+      if (tab.status !== newStatus) {
+        upsertSessionTab({ ...tab, status: newStatus, updatedAt: Date.now() });
+        notifySessionTabsChanged();
+      }
+    };
+    window.addEventListener(FORGEBADGER_GATEWAY_EVENT, onGatewayEvent);
+    return () => window.removeEventListener(FORGEBADGER_GATEWAY_EVENT, onGatewayEvent);
+  }, [closeTab, t]);
 
   return (
     <div className="flex h-10 min-w-0 items-end border-b border-border bg-muted/20 pl-2 pt-1.5">

@@ -119,7 +119,7 @@ export default function HistoryPage() {
             <option value="">{t("snapshots.allSessions")}</option>
             {sessionsForFilter.map((session) => (
               <option key={session.id} value={session.id}>
-                {session.name || session.tmuxName || session.id}
+                {session.name || session.runtimeSessionName || session.id}
               </option>
             ))}
           </select>
@@ -222,7 +222,7 @@ function SnapshotCard({
             </span>
           </div>
           <dl className="grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-4">
-            <SnapshotField label={t("snapshots.tmuxSession")} value={snapshot.tmuxSession} />
+            <SnapshotField label={t("snapshots.runtimeSessionName")} value={snapshot.runtimeSessionName} />
             <SnapshotField label={t("snapshots.model")} value={snapshot.modelId} />
             <SnapshotField label={t("snapshots.configVersion")} value={snapshot.configVersion} />
           </dl>

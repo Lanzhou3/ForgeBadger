@@ -67,6 +67,59 @@ describe("FeishuConnectionSupervisor", () => {
     assert.equal(fixture.handles.length, 1);
   });
 
+  it("ignores callbacks and inbound events from a replaced client", async () => {
+    const fixture = createFixture();
+    const supervisor = fixture.createSupervisor();
+    let admitted = 0;
+    supervisor.registerHandlers("user-1", { onMessage: () => { admitted += 1; } });
+    await supervisor.start();
+    const old = fixture.handles[0]!;
+    fixture.account.configRevision = 2;
+    await supervisor.reconcileAccount("user-1");
+    old.callbacks.onReady?.();
+    old.callbacks.onError?.(new Error("late error"));
+    await old.handlers.onMessage?.({}, { botOpenId: "bot" });
+    await flushAsyncCallbacks();
+    assert.equal(supervisor.getHealth("user-1").configRevision, 2);
+    assert.equal(supervisor.getHealth("user-1").state, "connecting");
+    assert.equal(fixture.handles[1]!.closed, false);
+    assert.equal(admitted, 0);
+    assert.equal(fixture.delays.length, 0);
+    await supervisor.stop();
+  });
+
+  it("does not resurrect a disabled account through a stale error or retry", async () => {
+    const fixture = createFixture();
+    const supervisor = fixture.createSupervisor();
+    await supervisor.start();
+    fixture.handles[0]!.callbacks.onError?.(new Error("failure"));
+    await flushAsyncCallbacks();
+    fixture.account.enabled = false;
+    await supervisor.reconcileAccount("user-1");
+    fixture.handles[0]!.callbacks.onError?.(new Error("late failure"));
+    await flushAsyncCallbacks();
+    await fixture.runNextTimer();
+    await fixture.runNextTimer();
+    assert.equal(fixture.handles.length, 1);
+    assert.equal(supervisor.getHealth("user-1").state, "disabled");
+    await supervisor.stop();
+  });
+
+  it("rechecks enabled configuration at retry time and coalesces repeated failures", async () => {
+    const fixture = createFixture();
+    const supervisor = fixture.createSupervisor();
+    await supervisor.start();
+    fixture.handles[0]!.callbacks.onError?.(new Error("first"));
+    fixture.handles[0]!.callbacks.onError?.(new Error("duplicate"));
+    await flushAsyncCallbacks();
+    assert.equal(fixture.delays.length, 1);
+    fixture.account.enabled = false;
+    await fixture.runNextTimer();
+    assert.equal(fixture.handles.length, 1);
+    assert.equal(supervisor.getHealth("user-1").state, "disabled");
+    await supervisor.stop();
+  });
+
   it("records safe health when construction fails without rejecting start", async () => {
     const fixture = createFixture();
     fixture.constructError = new Error("app_secret=plain-secret failed");
@@ -90,6 +143,7 @@ function createFixture() {
   const handles: Array<{
     callbacks: Record<string, ((error?: Error) => void) | undefined>;
     closed: boolean;
+    handlers: import("../src/services/integrations/feishu-sdk.js").FeishuSdkEventHandlers;
   }> = [];
   const timers: Array<() => void> = [];
   const delays: number[] = [];
@@ -111,10 +165,11 @@ function createFixture() {
           updateHealth: () => undefined
         },
         sdkFactory: {
-          createWebSocketClient: (_config, callbacks) => {
+          createWebSocketClient: (_config, callbacks, handlers) => {
             if (constructError) throw constructError;
             const handle = {
               callbacks,
+              handlers,
               closed: false,
               start: async () => new Promise<void>(() => undefined),
               close() { handle.closed = true; },
@@ -138,8 +193,7 @@ function createFixture() {
     async runNextTimer() {
       const callback = timers.shift();
       callback?.();
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
   };
 }

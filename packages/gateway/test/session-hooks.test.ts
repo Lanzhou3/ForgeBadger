@@ -60,7 +60,7 @@ describe("Claude Code session hook route", () => {
       aiTool: "claude",
       workingDir: project.path,
       attachToken: "session-token",
-      tmuxSession: "of-hook-session"
+      runtimeSessionName: "of-hook-session"
     });
     const eventPromise = waitForEvent(eventBus);
 
@@ -103,7 +103,7 @@ describe("Claude Code session hook route", () => {
       aiTool: "claude",
       workingDir: project.path,
       attachToken: "http-session-token",
-      tmuxSession: "of-http-hook-session"
+      runtimeSessionName: "of-http-hook-session"
     });
     const eventPromise = waitForEvent(eventBus);
 
@@ -147,7 +147,7 @@ describe("Claude Code session hook route", () => {
       aiTool: "claude",
       workingDir: project.path,
       attachToken: "notification-session-token",
-      tmuxSession: "of-notification-hook-session"
+      runtimeSessionName: "of-notification-hook-session"
     });
     const eventPromise = waitForEvent(eventBus);
 
@@ -189,7 +189,7 @@ describe("Claude Code session hook route", () => {
       aiTool: "claude",
       workingDir: project.path,
       attachToken: "path-session-token",
-      tmuxSession: "of-path-hook-session"
+      runtimeSessionName: "of-path-hook-session"
     });
     const eventPromise = waitForEvent(eventBus);
 
@@ -227,7 +227,7 @@ describe("Claude Code session hook route", () => {
       aiTool: "claude",
       workingDir: project.path,
       attachToken: "message-session-token",
-      tmuxSession: "of-message-hook-session"
+      runtimeSessionName: "of-message-hook-session"
     });
     const eventPromise = waitForEvent(eventBus);
 
@@ -265,7 +265,7 @@ describe("Claude Code session hook route", () => {
       aiTool: "claude",
       workingDir: project.path,
       attachToken: "denied-session-token",
-      tmuxSession: "of-denied-hook-session"
+      runtimeSessionName: "of-denied-hook-session"
     });
     const eventPromise = waitForEvent(eventBus);
 
@@ -318,7 +318,7 @@ describe("Claude Code session hook route", () => {
       aiTool: "kimi",
       workingDir: project.path,
       attachToken: "lifecycle-token",
-      tmuxSession: "of-lifecycle-session"
+      runtimeSessionName: "of-lifecycle-session"
     });
 
     const cases = [

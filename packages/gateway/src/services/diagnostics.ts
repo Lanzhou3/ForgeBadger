@@ -39,6 +39,8 @@ export interface LocalDiagnosticsExport {
     node: string;
     platform: NodeJS.Platform;
     arch: string;
+    /** Present only on Windows: Job Object kill-on-close advisory for the daemon. */
+    sessionServerDaemonNote?: string | undefined;
   };
   counts: Record<string, number>;
   dashboardHealth: unknown;
@@ -109,7 +111,10 @@ export function buildLocalDiagnosticsExport(
     runtime: {
       node: process.version,
       platform: process.platform,
-      arch: process.arch
+      arch: process.arch,
+      ...(windowsJobObjectAdvisory()
+        ? { sessionServerDaemonNote: windowsJobObjectAdvisory() }
+        : {})
     },
     counts: {
       projects: countTable(input.db, projects, projects.userId, input.userId),
@@ -200,6 +205,19 @@ function buildModelProviderDiagnostics(
   };
 }
 
+/**
+ * Node.js has no API to query Job Object membership, so this can only be an
+ * advisory: a Gateway running under a job with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+ * (some terminal hosts do this per tab) would kill the session-server daemon
+ * with it, taking every CLI session down. Surfaced in diagnostics on Windows.
+ */
+export function windowsJobObjectAdvisory(
+  platform: NodeJS.Platform = process.platform
+): string | undefined {
+  if (platform !== "win32") return undefined;
+  return "Windows Job Object membership cannot be detected from Node.js; if this process runs under a JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE job, the session-server daemon and all CLI sessions die with it. Start ForgeBadger from a regular console.";
+}
+
 export function redactDiagnosticValue(value: unknown, key = ""): unknown {
   if (sensitivePattern.test(key)) {
     return "[redacted]";
@@ -234,7 +252,7 @@ function pickDiagnosticEnv(
     FORGEBADGER_WEB_PORT: env.FORGEBADGER_WEB_PORT,
     FORGEBADGER_GATEWAY_URL: env.FORGEBADGER_GATEWAY_URL,
     FORGEBADGER_DB_PATH: env.FORGEBADGER_DB_PATH,
-    FORGEBADGER_TMUX_PREFIX: env.FORGEBADGER_TMUX_PREFIX
+    FORGEBADGER_SESSION_PREFIX: env.FORGEBADGER_SESSION_PREFIX
   };
 }
 

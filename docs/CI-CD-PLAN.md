@@ -17,7 +17,7 @@ pnpm trial:intake-validate
 pnpm evidence:gates-validate
 pnpm -r typecheck
 pnpm -r test
-RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
+pnpm --dir packages/gateway test test/session-server-daemon-lifecycle.test.ts
 pnpm --dir packages/gateway test test/model-provider-routes.test.ts test/model-provider-repository.test.ts test/cli-config-apply.test.ts test/codex-provider-env.test.ts test/session-adapter-decoupling.test.ts
 git diff --check
 ```
@@ -35,8 +35,8 @@ Acceptance:
   trial material or external gate registry changes are accepted.
 - TypeScript emits no type errors.
 - CLI, Gateway `node:test`, and Web Vitest suites pass.
-- Real tmux integration tests pass when tmux is installed. This job runs on
-  Linux/Ubuntu and does not exercise native Windows psmux/ConPTY.
+- Real Session Server/node-pty integration tests pass. This job runs on
+  Linux/Ubuntu and does not exercise native Windows Session Server/ConPTY.
 - Provider/cli-config-apply SSOT, Codex native-auth
   boundary, and session adapter-decoupling gates pass.
 - `git diff --check` reports no whitespace errors.
@@ -100,12 +100,11 @@ Acceptance:
   install/startup behavior. It also sets explicit npm fetch retry and timeout
   options so transient registry resets fail less often and still produce a
   bounded diagnostic when the network remains unavailable.
-- The current npm smoke runner is Linux/tmux-specific: its session cleanup
-  invokes `tmux` directly. A passing Ubuntu npm smoke proves the packaged
-  tmux path and CLI startup composition, not native Windows psmux behavior.
-- The `forgebadger` package ships the Next standalone Web runtime under `dist/`;
-  do not add `next`, `react`, or `react-dom` as top-level runtime dependencies
-  of the CLI package unless the standalone packaging strategy changes.
+- The npm smoke runner must exercise the packaged Session Server daemon and
+  clean up only its own disposable sessions and daemon. Passing Ubuntu smoke
+  proves that host composition; it does not clear native Windows/ConPTY evidence.
+
+
 
 Known skip:
 
@@ -116,10 +115,9 @@ Known skip:
   this happens, record the exact npm stdout/stderr and keep `pnpm build:npm`,
   `pnpm pack:npm`, and `node scripts/verify-npm-package.mjs` as required
   evidence.
-- `forgebadger doctor` must fail when the selected required runtime (`tmux` on
-  Linux/macOS/WSL or psmux ≥ 3.3.8 on native Windows) is unavailable. Doctor
-  must remain read-only even against an absent state directory. Treat a missing
-  runtime as an environment failure, not a passing smoke.
+- `forgebadger doctor` remains read-only against an absent state directory.
+  Record Session Server readiness and native-module failures explicitly;
+  tmux/psmux presence is no longer a readiness condition.
 
 ### Model Center Apply-Provider and Codex Gates
 
@@ -167,29 +165,29 @@ Known skip:
 
 CI requires `e2e/mvp1-smoke.spec.ts` as the stable control-plane happy path.
 `e2e/gate-d-smoke.spec.ts` remains release/manual evidence unless the host
-supplies Gateway/Web loopback listeners, tmux, and the real CLI prerequisites
+supplies Gateway/Web loopback listeners, Session Server/node-pty, and the real CLI prerequisites
 needed for terminal behavior.
 
-Focused Linux/macOS tmux evidence is the explicit command:
+Focused local Session Server evidence is the explicit command:
 
 ```bash
-RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts
+pnpm --dir packages/gateway test test/session-server-daemon-lifecycle.test.ts
 ```
 
 Do not claim `pnpm -r test` alone satisfies REL-06. If `gate-d-smoke` or the
-focused tmux command is skipped, record `Status: Caveat`, skip reason, owner,
+focused Session Server command is skipped, record `Status: Caveat`, skip reason, owner,
 and next action. The default owner is the release maintainer for the target
 host, and the next action is to rerun the skipped command on a host with the
 missing dependency installed.
 
 Neither this command nor the Ubuntu npm smoke is native Windows coverage.
-Windows acceptance requires physical ConPTY + psmux ≥ 3.3.8 browser/AI-CLI
+Windows acceptance requires physical ConPTY + Session Server browser/AI-CLI
 lifecycle evidence and remains `Caveat` until that artifact is reviewed.
 
 ### v1.1 Phase 6 Evidence Matrix
 
 The current v1.1 source of truth for live provider, physical Windows/WSL,
-CI core smoke, `gate-d`, focused tmux, Feishu live-exposure readiness, release
+CI core smoke, `gate-d`, focused Session Server, Feishu live-exposure readiness, release
 docs consistency, and redaction status is
 `docs/reports/v1.1-beta-evidence-burn-down-2026-05-21.md`.
 
@@ -204,9 +202,9 @@ Treat these as separate gates:
 
 - CI core smoke: `pnpm --dir packages/web exec playwright test e2e/mvp1-smoke.spec.ts --project=chromium --reporter=line`.
 - Release/manual browser terminal smoke: `pnpm --dir packages/web exec playwright test e2e/gate-d-smoke.spec.ts --project=chromium --reporter=line`.
-- Focused tmux integration: `RUN_TMUX_TESTS=1 pnpm --dir packages/gateway test test/integration/tmux.test.ts`.
-- Physical Windows/WSL terminal smoke: manual native ConPTY + psmux and/or WSL
-  tmux real-host checklist, not covered by Ubuntu CI or current-host Linux evidence.
+- Focused Session Server integration: `pnpm --dir packages/gateway test test/session-server-daemon-lifecycle.test.ts`.
+- Physical Windows/WSL terminal smoke: manual native ConPTY + Session Server and/or WSL
+  POSIX PTY real-host checklist, not covered by Ubuntu CI or current-host Linux evidence.
 - Feishu automated route and authority regression:
   `pnpm --dir packages/gateway test test/feishu-integration.test.ts test/copilot-routes.test.ts`.
 - Feishu manual/live bot long connection: configure a self-built Feishu bot for
@@ -222,7 +220,7 @@ Treat these as separate gates:
   compatibility path for deployments that deliberately expose Gateway.
 
 Do not mark the physical Windows/WSL row `Pass` unless the physical native
-Windows psmux and/or real WSL tmux checklist is completed and reviewed. Do not
+Windows ConPTY and/or real WSL PTY checklist is completed and reviewed. Do not
 mark the live provider row `Pass` unless a disposable live
 provider credential and explicit model id produce a successful redacted smoke
 result. Do not mark the Feishu bot row `Pass` unless a real persistent
@@ -299,7 +297,7 @@ Gate 3 - Manual acceptance:
 | Provider/cli-config-apply/Codex boundary regression | Required | Re-run if model/provider/session code changed |
 | Model Center apply-provider Playwright lifecycle | Environment-gated | Required on release host; record missing-browser blockers exactly |
 | Native Codex/OpenAI provider smoke | Not covered by unit CI | Required before claiming real account/provider evidence |
-| NPM build/verify/smoke | Required on Ubuntu CI with tmux | Re-run before publish or tag |
+| NPM build/verify/smoke | Required on Ubuntu CI with Session Server | Re-run before publish or tag |
 | Browser terminal end-to-end smoke | Environment-gated | Required on release host |
 | Real Claude Code permission prompt smoke | Environment-gated | Required when Claude behavior is in scope |
 | Physical Windows/WSL terminal smoke | Not covered by Ubuntu CI | Required before removing Windows caveat |

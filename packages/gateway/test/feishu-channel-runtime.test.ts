@@ -68,6 +68,45 @@ describe("FeishuChannelRuntime", () => {
     assert.equal(supervisorStops, 1, "stop remains idempotent");
   });
 
+  it("does not overlap a slow worker or accumulate a tick backlog", async () => {
+    let tick: (() => void) | undefined;
+    let release!: () => void;
+    let calls = 0;
+    const runtime = new FeishuChannelRuntime({
+      supervisor: {
+        start: async () => undefined, stop: async () => undefined,
+        reconcileAccount: async () => undefined, getHealth: () => health("connected")
+      },
+      workers: [async () => { calls += 1; await new Promise<void>((resolve) => { release = resolve; }); }],
+      setInterval: (callback) => { tick = callback; return 1; }, clearInterval: () => undefined
+    });
+    await runtime.start();
+    tick?.(); tick?.(); tick?.();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls, 1);
+    release();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls, 1);
+    await runtime.stop();
+  });
+
+  it("fences a queued worker when stop happens in the same tick", async () => {
+    let tick: (() => void) | undefined;
+    let calls = 0;
+    const runtime = new FeishuChannelRuntime({
+      supervisor: {
+        start: async () => undefined, stop: async () => undefined,
+        reconcileAccount: async () => undefined, getHealth: () => health("connected")
+      },
+      workers: [async () => { calls += 1; }],
+      setInterval: (callback) => { tick = callback; return 1; }, clearInterval: () => undefined
+    });
+    await runtime.start();
+    tick?.();
+    await runtime.stop();
+    assert.equal(calls, 0);
+  });
+
   it("drains active worker cycles before shutdown", async () => {
     let tick: (() => void) | undefined;
     let release: (() => void) | undefined;

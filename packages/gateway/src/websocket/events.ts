@@ -164,6 +164,17 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         ...(event.toolName ? { tool_name: event.toolName } : {}),
         ...notificationMeta
       };
+    case "app_action_notification":
+      return {
+        action: event.action,
+        status: event.status,
+        title_key: event.titleKey,
+        message: event.message,
+        ...(event.adapter ? { adapter: event.adapter } : {}),
+        ...(event.providerId ? { provider_id: event.providerId } : {}),
+        ...(event.providerName ? { provider_name: event.providerName } : {}),
+        ...notificationMeta
+      };
     case "activity_created":
       return {
         activity_id: event.activityId,
@@ -185,7 +196,8 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         ...(event.toolName ? { tool_name: event.toolName } : {}),
         ...(event.pendingActionId ? { pending_action_id: event.pendingActionId } : {}),
         ...(event.message !== undefined ? { message: event.message } : {}),
-        ...(event.titleUpdated !== undefined ? { title_updated: event.titleUpdated } : {})
+        ...(event.titleUpdated !== undefined ? { title_updated: event.titleUpdated } : {}),
+        ...(event.revision !== undefined ? {revision:event.revision} : {})
       };
     case "error":
       return {

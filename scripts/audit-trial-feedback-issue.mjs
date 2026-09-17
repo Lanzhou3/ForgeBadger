@@ -130,7 +130,7 @@ function issueFormBodyToTrialFeedbackPacket(body) {
 ## Dependency Versions
 
 - node --version: ${fieldValue(environment, "node --version")}
-- tmux -V: ${fieldValue(environment, "tmux -V")}
+- Terminal backend: ${fieldValue(environment, "Terminal backend")}
 - claude --version: ${fieldValue(environment, "claude --version")}
 - forgebadger doctor summary: ${singleLine(fields.get("forgebadger doctor summary"))}
 

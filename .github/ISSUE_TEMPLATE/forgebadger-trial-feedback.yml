@@ -56,15 +56,15 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Include commit/version, OS, shell, browser, Node, selected terminal runtime and actual tmux/psmux version, Claude Code, and optional OpenCode/Codex versions.
+      description: Include commit/version, OS, shell, browser, Node, Terminal backend and Session Server readiness, Claude Code, and optional OpenCode/Codex versions.
       value: |
         ForgeBadger version or commit:
         OS:
         Shell:
         Browser:
         node --version:
-        Terminal runtime selected (tmux/psmux):
-        Actual runtime version (`tmux -V` or `psmux -V`):
+        Terminal backend:
+        Session Server readiness (ready/unavailable):
         claude --version:
         opencode --version, if checked:
         codex --version, if checked:
@@ -191,12 +191,12 @@ body:
     id: windows_wsl
     attributes:
       label: Windows or WSL evidence
-      description: Record native Windows ConPTY + psmux or WSL + tmux evidence. Repository tests and Ubuntu CI do not clear the physical-host caveat.
+      description: Record native Windows ConPTY + Session Server or WSL + POSIX PTY evidence. Repository tests and Ubuntu CI do not clear the physical-host caveat.
       value: |
         Native Windows version:
-        Native psmux version and ConPTY terminal result:
+        Session Server readiness and native ConPTY terminal result:
         WSL distribution/version:
-        WSL tmux terminal trial result:
+        WSL Session Server terminal trial result:
         Browser + real AI CLI lifecycle completed: yes / no / blocked
     validations:
       required: false

@@ -1,5 +1,12 @@
 # ForgeBadger MVP 开发计划
 
+> 2026-09-10 终端契约更新：唯一运行后端为独立 Session Server + node-pty，
+> Gateway 经 IPC 连接；不再依赖或回退 tmux/psmux。本文旧阶段排期中的
+> tmux attach/capture-pane 与安装要求仅为历史规划，已被
+> [技术架构](TECH-ARCHITECTURE.md) 和 [测试计划 1.5](TEST-PLAN.md#15-session-server-可靠性回归2026-09-10) 取代。
+> 原有验收记录不代表新终端完成验收；Windows/ConPTY 和发布包生命周期证据须重跑。
+
+
 > 版本：v1.1 | 2026-04-24
 > 修订人：朱雀 🛠️（基于三方评审结论 + 盘古拍板）
 > 制定人：毕方 🏗️
@@ -712,9 +719,9 @@ Plan B: 降级方案
 
 | 依赖 | 版本 | 说明 |
 |------|------|------|
-| Node.js | ≥ 20 LTS | 运行环境 |
-| tmux | ≥ 3.2 | 会话持久化 |
-| pnpm | ≥ 8.0 | monorepo 包管理 |
+| Node.js | >=20.12 <25 | 运行环境 |
+| Session Server + node-pty | 随包提供 | 独立 daemon 持久化 |
+| pnpm | 10.33.2 | monorepo 包管理 |
 | gcc/g++/make | 系统默认 | 首次编译 node-pty（prebuild 可跳过） |
 
 ### 11.2 环境变量清单

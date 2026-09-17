@@ -1,16 +1,15 @@
+import { executeAgentAction } from "../../platform-commands/agent-actions.js";
 /**
  * Memory tools for the Copilot harness. The model can search what it remembers
  * about the platform/projects and write durable facts, preferences, decisions,
- * and project notes. Writes are scoped and read-tool only (no approval needed
- * to record a memory).
+ * and project notes. Writes are scoped side effects governed by the runtime policy.
  *
  * Queries and writes use the native Copilot platform-access service.
  */
 import { z } from "zod";
 import {
   listMemoryEntries,
-  searchMemoryEntries,
-  writeMemoryEntry
+  searchMemoryEntries
 } from "../platform-access.js";
 import type { Database } from "../../../db/types.js";
 import type { AgentTool, AgentToolContext } from "../tool-registry.js";
@@ -54,6 +53,7 @@ export function createMemoryTools(): AgentTool[] {
         const entries = searchMemoryEntries(db, userId, {
           query,
           scope,
+          ...(scope === "session" && context.conversationId ? { conversationId: context.conversationId } : {}),
           ...(projectId !== undefined ? { projectId } : {}),
           ...(limit !== undefined ? { limit } : {})
         });
@@ -71,6 +71,7 @@ export function createMemoryTools(): AgentTool[] {
         const { db, userId } = toolDb(context);
         const entries = listMemoryEntries(db, userId, {
           scope,
+          ...(scope === "session" && context.conversationId ? { conversationId: context.conversationId } : {}),
           ...(projectId !== undefined ? { projectId } : {}),
           ...(limit !== undefined ? { limit } : {})
         });
@@ -80,19 +81,11 @@ export function createMemoryTools(): AgentTool[] {
     {
       name: "write_memory",
       description: "Record a durable memory entry (fact, preference, decision, or project note).",
-      risk: "read",
-      requiresApproval: false,
+      risk: "operate",
+      requiresApproval: true,
       inputSchema: writeMemoryInput,
       async execute(input, context) {
-        const { kind, scope, text, projectId, metadata } = writeMemoryInput.parse(input);
-        const { db, userId } = toolDb(context);
-        return writeMemoryEntry(db, userId, {
-          kind,
-          scope,
-          text,
-          ...(projectId !== undefined ? { projectId } : {}),
-          ...(metadata !== undefined ? { metadata } : {})
-        });
+        return executeAgentAction("write_memory", writeMemoryInput.parse(input), context);
       }
     }
   ];

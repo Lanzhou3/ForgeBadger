@@ -6,11 +6,20 @@
  * list_skills and pulls full playbooks with load_skill only when relevant.
  * Executable capabilities remain native tools; skills teach how to compose
  * them.
+ *
+ * Skills resolve from the platform Skills store (the `skills` table) — the
+ * same surface the Skills page manages — so imported and local skills are
+ * immediately visible to the Copilot. The builtin engineering playbooks ship
+ * as seeded rows (`source: "builtin"`), not hardcoded constants.
  */
 import { z } from "zod";
 
-import { getCopilotSkill, listCopilotSkillSummaries } from "../skills/copilot-skills.js";
-import type { AgentTool } from "../tool-registry.js";
+import { SkillRepository } from "../../../db/repositories/skill-repository.js";
+import type { Database } from "../../../db/types.js";
+import { seedBuiltinSkills } from "../../builtin-skills.js";
+import { stripFrontmatter } from "../../skill-frontmatter.js";
+import { listEnabledCopilotSkillSummaries } from "../skills/skill-queries.js";
+import type { AgentTool, AgentToolContext } from "../tool-registry.js";
 
 const listSkillsInput = z.object({}).strict();
 
@@ -27,8 +36,8 @@ export function createSkillTools(): AgentTool[] {
       risk: "read",
       requiresApproval: false,
       inputSchema: listSkillsInput,
-      async execute() {
-        const skills = listCopilotSkillSummaries();
+      async execute(_input, context: AgentToolContext) {
+        const skills = listEnabledCopilotSkillSummaries(context.db as Database, context.userId as string);
         return { count: skills.length, skills };
       }
     },
@@ -39,11 +48,18 @@ export function createSkillTools(): AgentTool[] {
       risk: "read",
       requiresApproval: false,
       inputSchema: loadSkillInput,
-      async execute(input) {
+      async execute(input, context: AgentToolContext) {
         const { name } = loadSkillInput.parse(input);
-        const skill = getCopilotSkill(name);
+        const repo = new SkillRepository(context.db as Database, context.userId as string);
+        seedBuiltinSkills(repo);
+        const skill = repo.findReadableByName(name);
         if (!skill) return { found: false, name };
-        return { found: true, name: skill.name, description: skill.description, body: skill.body };
+        return {
+          found: true,
+          name: skill.name,
+          description: skill.description ?? "",
+          body: stripFrontmatter(skill.content)
+        };
       }
     }
   ];

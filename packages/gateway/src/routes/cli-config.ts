@@ -3,6 +3,9 @@ import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest, userIsInstanceAdmin } from "../auth/middleware.js";
 import type { Database } from "../db/types.js";
+import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
+import { ClaudeRouteRepository } from "../db/repositories/claude-route-repository.js";
+import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import { isAdapterId, type AdapterId } from "../services/adapter-discovery.js";
 import {
   applyCliConfigFieldPatch,
@@ -21,11 +24,14 @@ import {
   applyCliConfigToAdapter,
   CliConfigApplyError,
   previewCliConfigApply,
-  rollbackCliConfigApply
+  rollbackCliConfigApply,
+  type ClaudeModelSlot
 } from "../services/cli-config-apply.js";
 import { listCliConfigFields } from "../services/cli-config-fields.js";
+import { gatewayLoopbackUrl } from "../services/claude-route/gateway-url.js";
 import { cliConfigTargetPath, hashTargetLocator } from "../services/cli-config-target.js";
 import { acquireModelBindingTargetLock, ModelBindingTargetLockError } from "../services/model-binding-target-lock.js";
+import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 
 const providerBodySchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
@@ -65,17 +71,39 @@ const fieldPatchBodySchema = z.object({
 const applyProviderBodySchema = z.object({
   providerProfileId: z.string().min(1),
   modelProfileId: z.string().min(1).optional(),
-  credentialId: z.string().min(1).optional()
+  credentialId: z.string().min(1).optional(),
+  // Claude only: per-role alias mapping (opus/sonnet/haiku/fable/subagent),
+  // values are model profile ids owned by the provider.
+  modelMapping: z.object({
+    opus: z.string().min(1).optional(),
+    sonnet: z.string().min(1).optional(),
+    haiku: z.string().min(1).optional(),
+    fable: z.string().min(1).optional(),
+    subagent: z.string().min(1).optional()
+  }).strict().optional(),
+  // Codex only: model_reasoning_effort.
+  reasoningEffort: z.enum(["minimal", "low", "medium", "high"]).optional(),
+  // Claude only: apply through the Gateway route (OpenAI-protocol providers).
+  routeThroughGateway: z.boolean().optional()
 }).strict();
 
 const rollbackBodySchema = z.object({
   backupId: z.string().min(1).max(200).optional()
 }).strict();
 
+const claudeRouteBodySchema = z.object({
+  enabled: z.boolean()
+}).strict();
+
 export function createCliConfigRoutes(
   db: Database,
   masterKey: string,
-  options: { operationObserver?: ((operation: string) => void) | undefined } = {}
+  options: {
+    operationObserver?: ((operation: string) => void) | undefined;
+    /** Test seam: DNS resolver for the apply SSRF endpoint check. */
+    resolveHost?: import("../services/network-policy.js").OutboundHostResolver | undefined;
+    eventBus?: ForgeBadgerEventBus | undefined;
+  } = {}
 ): Router {
   const router = Router();
   router.use(authenticate);
@@ -91,6 +119,44 @@ export function createCliConfigRoutes(
       return;
     }
     res.json({ code: 0, data: { fields: listCliConfigFields(adapter) }, message: "" });
+  });
+
+  // Registered before the /:adapter middleware so "routing" is not parsed as
+  // an adapter id.
+  router.get("/routing/claude", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    if (!userIsInstanceAdmin(db, userId)) {
+      res.status(403).json({
+        code: 1,
+        message: "Instance administrator access is required",
+        details: { code: "INSTANCE_ADMIN_REQUIRED" }
+      });
+      return;
+    }
+    observe(options, "route.read");
+    handle(res, async () => ({ routing: readClaudeRouteState(db, masterKey, userId) }));
+  });
+
+  router.put("/routing/claude", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    if (!userIsInstanceAdmin(db, userId)) {
+      res.status(403).json({
+        code: 1,
+        message: "Instance administrator access is required",
+        details: { code: "INSTANCE_ADMIN_REQUIRED" }
+      });
+      return;
+    }
+    const body = claudeRouteBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ code: 1, message: "Invalid Claude route payload" });
+      return;
+    }
+    observe(options, "route.update");
+    handle(res, async () => {
+      new ClaudeRouteRepository(db, userId, masterKey).setEnabled(body.data.enabled);
+      return { routing: readClaudeRouteState(db, masterKey, userId) };
+    });
   });
 
   router.use("/:adapter", (req, res, next) => {
@@ -110,6 +176,13 @@ export function createCliConfigRoutes(
     }
     const targetPath = cliConfigTargetPath({ adapter, scope: "global" });
     const locatorHash = hashTargetLocator(masterKey, targetPath);
+    // Reads and dry-run previews never touch disk; only mutating calls
+    // serialize on the per-target lock. Locking previews too makes the web
+    // dialog's back-to-back preview refreshes race each other into 409s.
+    if (req.method === "GET" || req.path.endsWith("/apply-provider/preview")) {
+      next();
+      return;
+    }
     let lock: { release(): void };
     try {
       lock = acquireModelBindingTargetLock(locatorHash);
@@ -292,7 +365,7 @@ export function createCliConfigRoutes(
     }
     observe(options, "apply.preview");
     await handle(res, async () => ({
-      preview: await previewCliConfigApply(applyInput(db, masterKey, req, adapter, body.data))
+      preview: await previewCliConfigApply(applyInput(db, masterKey, req, adapter, body.data, options))
     }));
   });
 
@@ -307,10 +380,34 @@ export function createCliConfigRoutes(
       res.status(400).json({ code: 1, message: "Invalid apply payload" });
       return;
     }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
     observe(options, "apply.apply");
-    await handle(res, async () => ({
-      result: await applyCliConfigToAdapter(applyInput(db, masterKey, req, adapter, body.data))
-    }));
+    await handle(res, async () => {
+      const providerName = new ModelProviderRepository(db, userId, masterKey)
+        .getProviderProfile(body.data.providerProfileId)?.name;
+      try {
+        const result = await applyCliConfigToAdapter(applyInput(db, masterKey, req, adapter, body.data, options));
+        emitApplyProviderNotification(options.eventBus, {
+          userId,
+          status: "success",
+          adapter,
+          providerProfileId: body.data.providerProfileId,
+          providerName,
+          detail: `Provider applied to ${adapter}`
+        });
+        return { result };
+      } catch (error) {
+        emitApplyProviderNotification(options.eventBus, {
+          userId,
+          status: "error",
+          adapter,
+          providerProfileId: body.data.providerProfileId,
+          providerName,
+          detail: error instanceof Error ? error.message : "CLI config apply failed"
+        });
+        throw error;
+      }
+    });
   });
 
   router.post("/:adapter/rollback", async (req, res) => {
@@ -325,13 +422,17 @@ export function createCliConfigRoutes(
       return;
     }
     observe(options, "apply.rollback");
-    await handle(res, async () => ({
-      result: rollbackCliConfigApply({
+    await handle(res, async () => {
+      const result = rollbackCliConfigApply({
         masterKey,
         adapter,
         ...(body.data.backupId ? { backupId: body.data.backupId } : {})
-      })
-    }));
+      });
+      // The restored config's provider is unknown, so the applied-provider
+      // pointer is no longer trustworthy.
+      new CliConfigAppliedProviderRepository(db, (req as unknown as AuthenticatedRequest).userId).clear(adapter);
+      return { result };
+    });
   });
 
   return router;
@@ -342,7 +443,8 @@ function applyInput(
   masterKey: string,
   req: unknown,
   adapter: AdapterId,
-  body: z.infer<typeof applyProviderBodySchema>
+  body: z.infer<typeof applyProviderBodySchema>,
+  options: { resolveHost?: import("../services/network-policy.js").OutboundHostResolver | undefined } = {}
 ) {
   return {
     db,
@@ -351,20 +453,90 @@ function applyInput(
     adapter,
     providerProfileId: body.providerProfileId,
     ...(body.modelProfileId ? { modelProfileId: body.modelProfileId } : {}),
-    ...(body.credentialId ? { credentialId: body.credentialId } : {})
+    ...(body.credentialId ? { credentialId: body.credentialId } : {}),
+    ...(body.modelMapping ? { modelMapping: compactModelMapping(body.modelMapping) } : {}),
+    ...(body.reasoningEffort ? { reasoningEffort: body.reasoningEffort } : {}),
+    ...(body.routeThroughGateway !== undefined ? { routeThroughGateway: body.routeThroughGateway } : {}),
+    ...(options.resolveHost ? { resolveHost: options.resolveHost } : {})
   };
+}
+
+/** Drops undefined slot values so the input satisfies exactOptionalPropertyTypes. */
+function compactModelMapping(
+  mapping: Partial<Record<ClaudeModelSlot, string | undefined>>
+): Partial<Record<ClaudeModelSlot, string>> {
+  const compact: Partial<Record<ClaudeModelSlot, string>> = {};
+  for (const [slot, value] of Object.entries(mapping) as Array<[ClaudeModelSlot, string | undefined]>) {
+    if (value) compact[slot] = value;
+  }
+  return compact;
 }
 
 function observe(options: { operationObserver?: ((operation: string) => void) | undefined }, operation: string): void {
   options.operationObserver?.(operation);
 }
 
+interface ApplyProviderNotificationInput {
+  userId: string;
+  status: "success" | "error";
+  adapter: AdapterId;
+  providerProfileId: string;
+  providerName: string | undefined;
+  detail: string;
+}
+
+function emitApplyProviderNotification(
+  eventBus: ForgeBadgerEventBus | undefined,
+  input: ApplyProviderNotificationInput
+): void {
+  if (!eventBus) return;
+  const target = input.providerName ? `${input.providerName} -> ${input.adapter}` : input.adapter;
+  eventBus.emitEvent({
+    type: "app_action_notification",
+    userId: input.userId,
+    action: "apply_provider",
+    status: input.status,
+    titleKey: input.status === "success"
+      ? "notifications.applyProviderSucceeded"
+      : "notifications.applyProviderFailed",
+    message: `${input.detail} (${target})`,
+    adapter: input.adapter,
+    providerId: input.providerProfileId,
+    ...(input.providerName ? { providerName: input.providerName } : {})
+  });
+}
+
 function parseAdapter(value: string | undefined): AdapterId | undefined {
   return value !== undefined && isAdapterId(value) ? value : undefined;
 }
 
+/** Route switch state for the web UI; the token itself is never returned. */
+function readClaudeRouteState(db: Database, masterKey: string, userId: string): Record<string, unknown> {
+  const routeRepository = new ClaudeRouteRepository(db, userId, masterKey);
+  const settings = routeRepository.getSettings();
+  const assignment = routeRepository.getAssignment();
+  const provider = assignment
+    ? new ModelProviderRepository(db, userId, masterKey).getProviderProfile(assignment.providerProfileId)
+    : undefined;
+  return {
+    enabled: settings.enabled,
+    hasToken: settings.token !== null,
+    gatewayUrl: gatewayLoopbackUrl(),
+    assignment: assignment && provider
+      ? {
+          providerProfileId: assignment.providerProfileId,
+          providerName: provider.name,
+          credentialId: assignment.credentialId,
+          updatedAt: assignment.updatedAt
+        }
+      : null
+  };
+}
+
 function applyErrorStatus(error: CliConfigApplyError): number {
   if (error.code.endsWith("_NOT_FOUND")) return 404;
+  if (error.code === "CLI_CONFIG_APPLY_ROUTE_REQUIRED"
+    || error.code === "CLI_CONFIG_APPLY_ROUTE_DISABLED") return 409;
   if (error.code === "CLI_CONFIG_APPLY_FAILED"
     || error.code === "CLI_CONFIG_APPLY_VERIFY_FAILED"
     || error.code === "CLI_CONFIG_ROLLBACK_FAILED") return 500;

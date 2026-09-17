@@ -24,11 +24,14 @@ test("MVP-1 management console smoke", async ({ page }) => {
 
   await page.goto("/models");
   await page.getByRole("button", { name: "Add provider" }).first().click();
-  await page.getByText("Advanced: add a custom provider manually").click();
-  await page.locator("#provider-name").fill(`E2E Provider ${suffix}`);
-  await page.locator("#provider-key").fill(`e2e-provider-${suffix}`);
-  await page.locator("#provider-base-url").fill("https://e2e.example.com/v1");
-  await page.getByRole("button", { name: "Add custom Claude-compatible provider" }).click();
+  const addProviderDialog = page.getByRole("dialog", { name: "Add provider" });
+  await addProviderDialog.locator("#provider-name").fill(`E2E Provider ${suffix}`);
+  await addProviderDialog.locator("#provider-key").fill(`e2e-provider-${suffix}`);
+  await addProviderDialog.locator("#provider-anthropic-base-url").fill("https://e2e.example.com/v1");
+  // Model sync against the unreachable dummy endpoint fails with a toast; the
+  // provider itself is still created.
+  await addProviderDialog.getByRole("button", { name: "Save and sync models" }).click();
+  await expect(addProviderDialog).toHaveCount(0);
   await expect(page.getByText(`E2E Provider ${suffix}`).first()).toBeVisible();
 
   await page.getByRole("tab", { name: "API Keys" }).click();
@@ -41,7 +44,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await page.getByRole("button", { name: "New model" }).click();
   await page.locator("#model-form-name").fill("Claude E2E");
   await page.locator("#model-form-model-id").fill("claude-sonnet-e2e");
-  await page.locator("#model-form-capabilities").fill("chat,code");
+  await page.locator("#model-form-custom-capabilities").fill("long-context");
   await page.getByRole("button", { name: "Add Model" }).click();
   await expect(page.getByText("Claude E2E").first()).toBeVisible();
 

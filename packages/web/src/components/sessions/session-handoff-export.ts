@@ -78,7 +78,7 @@ export function buildSessionHandoffMarkdown(input: SessionHandoffExportInput): s
     input.openReviewItems.trim() || "- None recorded",
     "",
     "## Safety Boundary",
-    "- Terminal scrollback remains in tmux and is not stored in SQLite.",
+    "- Terminal scrollback remains in the built-in terminal service and is not stored in SQLite.",
     "- This handoff is manually authored and does not clear external evidence gates.",
     "- Do not paste secrets, raw provider payloads, Feishu message bodies, or raw terminal dumps.",
     ""

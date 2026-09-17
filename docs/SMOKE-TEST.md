@@ -14,7 +14,7 @@ Phase 8 first-user readiness handoff is
 `docs/reports/v1.1-readiness-closeout-2026-05-21.md`; use it with
 `docs/TRIAL-CHECKLIST.md` and `docs/SUPPORT-DIAGNOSTICS.md` when routing trial
   support. The matrix remains the detailed manual/live gate source for live
-  provider, physical Windows native psmux/WSL tmux, and Feishu bot
+  provider, physical Windows native ConPTY/WSL PTY, and Feishu bot
   long-connection evidence.
 
 Run this checklist before asking a user to try the local console, or when a
@@ -54,33 +54,16 @@ therefore takes precedence over the same key in `.env`.
 
 Open `http://127.0.0.1:48732`.
 
-Windows terminal acceptance has two explicit runtime variants: native Windows
-uses psmux 3.3.8 or newer over ConPTY; WSL uses tmux 3.2 or newer. Native psmux
-code/unit coverage is not acceptance evidence by itself. The external gate
-remains `Caveat` until a physical Windows run exercises the browser terminal
-and a real AI CLI through attach, input/output, resize, reconnect, Gateway
-restart recovery, stop, and cleanup.
+Windows terminal acceptance requires native node-pty/ConPTY + Session Server
+and, when WSL is claimed, a separate POSIX PTY run in WSL. The external gate
+remains `Caveat` until a physical host exercises browser + real AI CLI attach,
+input/output, resize, reconnect, Gateway restart recovery, stop and cleanup.
 
-Before starting on the selected host:
-
-```text
-macOS/Linux/WSL: tmux -V
-native Windows:  psmux -V
-all platforms:   forgebadger doctor
-```
-
-On native Windows, install a missing runtime with
-`winget install --id marlocarlo.psmux --exact --source winget`, or upgrade an
-older runtime with
-`winget upgrade --id marlocarlo.psmux --exact --source winget`. For first-run
-prompt coverage, confirm `forgebadger start`/`init` defaults to No, accepts only
-explicit `y`/`yes` in a TTY outside CI, and rechecks after installation. Do not
-expect npm `postinstall` or `forgebadger doctor` to install system software.
-If readiness is still false, confirm `start`/`init` return non-zero and do not
-create runtime/project state or start Gateway/Web. Against an absent disposable
-state directory, confirm `doctor` reports `(not initialized)` and leaves the
-path absent. Direct Gateway source startup must likewise fail before account
-recovery, database/session recovery, or listen side effects.
+Run `forgebadger doctor`; record Terminal backend: `session-server` and readiness.
+No tmux/psmux installation or version probe is required. Against an absent
+disposable state directory, confirm doctor leaves the directory absent.
+Test daemon loss separately: missing sessions become `lost`, with no automatic
+re-execution of their tasks. Gateway-only restart must preserve live processes.
 
 ## 2. Auth And Shell
 
@@ -144,7 +127,7 @@ Preferred manual path:
 - Confirm an ForgeBadger notification and session activity are created for the
   permission prompt.
 
-Fallback hook-path smoke from inside the tmux terminal:
+Fallback hook-path smoke from inside the browser terminal:
 
 ```bash
 printf '{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Smoke permission request"}' \
@@ -205,8 +188,8 @@ Automated CI can cover workspace tests, builds, npm package smoke, provider
 regression, native Copilot/Feishu account tests, and authenticated Copilot Web
 smoke. It cannot replace these manual checks:
 
-The current CI and `pnpm smoke:npm` runtime path is Ubuntu/Linux with tmux;
-neither command is native Windows psmux/ConPTY coverage.
+Ubuntu CI and the local `pnpm smoke:npm` run exercise Session Server on their
+actual host platform; neither substitutes for physical Windows/ConPTY coverage.
 
 - real browser terminal attach, input/output, resize, refresh, and reconnect;
 - real Claude Code permission prompt behavior;
@@ -220,10 +203,10 @@ neither command is native Windows psmux/ConPTY coverage.
   `pnpm evidence:feishu-bot-live-audit -- <report.json>` and
   `pnpm evidence:feishu-bot-live-report -- --report <report.json> --output
   <report.md>` before maintainer review;
-- physical Windows native ConPTY/psmux versus WSL tmux behavior;
+- physical Windows native ConPTY versus WSL PTY behavior;
 - local operator review that diagnostics and logs do not contain secrets.
 
 Record the host OS, shell, `forgebadger doctor` output, selected runtime and
-version (`psmux -V` or `tmux -V`), AI CLI version, and any skipped steps in
+backend (`session-server`) and readiness, AI CLI version, and any skipped steps in
 `docs/TRIAL-CHECKLIST.md`. Keep output bounded and redacted; do not attach raw
 terminal transcripts.

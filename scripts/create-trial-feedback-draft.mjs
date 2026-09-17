@@ -32,7 +32,7 @@ Review and redact this draft before attaching diagnostics, screenshots, or writt
 ## Dependency Versions
 
 - node --version: ${context.nodeVersion}
-- tmux -V: ${context.tmuxVersion}
+- Terminal backend: ${context.terminalRuntime}
 - claude --version: ${context.claudeVersion}
 - opencode --version, if checked: ${context.opencodeVersion}
 - codex --version, if checked: ${context.codexVersion}
@@ -114,7 +114,7 @@ export function collectTrialFeedbackDraftContext(options = {}) {
     ),
     shell: sanitizeDraftText(options.env?.SHELL ?? process.env.SHELL ?? "unknown", { fallback: "unknown" }),
     nodeVersion: sanitizeDraftText(options.nodeVersion ?? process.version, { fallback: "unknown" }),
-    tmuxVersion: commandFirstLine(commandRunner, "tmux", ["-V"], "unavailable"),
+    terminalRuntime: "session-server",
     claudeVersion: commandFirstLine(commandRunner, "claude", ["--version"], "unavailable"),
     opencodeVersion: commandFirstLine(commandRunner, "opencode", ["--version"], "unavailable"),
     codexVersion: commandFirstLine(commandRunner, "codex", ["--version"], "unavailable")
@@ -182,7 +182,7 @@ function normalizeDraftContext(input) {
     os: sanitizeDraftText(input.os, { fallback: "unknown" }),
     shell: sanitizeDraftText(input.shell, { fallback: "unknown" }),
     nodeVersion: sanitizeDraftText(input.nodeVersion, { fallback: "unknown" }),
-    tmuxVersion: sanitizeDraftText(input.tmuxVersion, { fallback: "unavailable" }),
+    terminalRuntime: sanitizeDraftText(input.terminalRuntime, { fallback: "unavailable" }),
     claudeVersion: sanitizeDraftText(input.claudeVersion, { fallback: "unavailable" }),
     opencodeVersion: sanitizeDraftText(input.opencodeVersion, { fallback: "unavailable" }),
     codexVersion: sanitizeDraftText(input.codexVersion, { fallback: "unavailable" }),

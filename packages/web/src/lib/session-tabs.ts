@@ -19,7 +19,7 @@ const MAX_SESSION_TABS = 8;
 export function sessionToTab(session: Session, now = Date.now()): SessionTab {
   return {
     id: session.id,
-    label: session.name || session.tmuxName || session.tmuxSession || session.id,
+    label: session.name || session.runtimeSessionName || session.id,
     ...(session.projectId ? { projectId: session.projectId } : {}),
     ...(session.projectName ? { projectName: session.projectName } : {}),
     ...(session.aiTool ? { aiTool: session.aiTool } : {}),

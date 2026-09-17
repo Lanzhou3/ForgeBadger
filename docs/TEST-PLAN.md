@@ -6,7 +6,7 @@
 > 2026-04-26 补充：测试执行按 MVP-0/MVP-1 分层，MVP-0 必须先覆盖 Claude Code 本地控制闭环和风险 Gate。
 > 2026-04-29 补充：MVP-1 smoke 已加入 `packages/web/e2e/mvp1-smoke.spec.ts`，覆盖注册、模型/API Key、模板克隆、Agent、Skill 项目启用、配置写入和 Dashboard 健康入口。
 > 2026-04-29 补充：MVP-1 稳定化新增 `dashboard-summary.test.ts`、`model-health.test.ts`、`agent-preview.test.ts`，覆盖 Dashboard 汇总、模型本地健康检查和 Agent 权限预览。
-> 2026-08-31 补充：终端持久层按平台选择——macOS/Linux/WSL 使用 tmux，原生 Windows 使用 psmux ≥ 3.3.8；安装确认和物理 Windows 外部证据分层验收。
+> 2026-09-10：终端唯一后端为 Session Server + node-pty；2026-08-31 的 tmux/psmux 与安装确认要求已废止。下方原 MVP 编号清单是历史测试规划，不是现存文件清单或当前通过证据；当前终端回归以 1.5 为准。
 
 ---
 
@@ -24,8 +24,8 @@
 | Crypto | AES-256-GCM 加解密、IV 随机、auth tag 篡改失败、密钥长度校验 |
 | Path | approved project root、denied root、`..`、编码 traversal、Unicode traversal、symlink escape |
 | Config | dry-run、变量渲染、冲突检测、identical auto-skip、modified skip/overwrite、backup、partial write rollback、rollback failure report |
-| Session | Gateway 按平台创建 tmux/psmux session、Claude adapter launch plan、`new-session -e` 注入、node-pty attach |
-| Restart | 浏览器刷新恢复、Gateway 重启恢复、`fb-*` orphan tmux/psmux 清理 |
+| Session | Gateway 通过 IPC 创建 daemon PTY、结构化 adapter launch plan、host-environment credentials |
+| Restart | 浏览器刷新恢复、Gateway 重启恢复、daemon live/database 对账与 missing→lost |
 | WebSocket | JWT auth、session ownership、单连接替换、malformed message、message size、heartbeat timeout、基础输入限流 |
 | Frontend | 登录、项目创建/导入、配置注入确认、session 列表、terminal 页面 smoke test |
 
@@ -46,14 +46,14 @@ Model Center 与 apply-provider 的真实浏览器门为
 `pnpm --dir packages/web exec playwright test e2e/models.spec.ts --project=chromium`。
 缺少 Playwright 浏览器可执行文件时必须记录为“进入断言前阻塞”，不得用 Vitest
 替代为 E2E Pass。真实 OpenAI credential/provider、Codex native account 与 native
-Windows psmux 也必须分别保留外部证据边界。官方 Codex native login 由 CLI 管理；
+Windows ConPTY 也必须分别保留外部证据边界。官方 Codex native login 由 CLI 管理；
 测试不得读取 `auth.json` 内容或 keyring。
 
 ### 0.3 Gate 对应测试要求
 
 | Gate | 最低测试证据 |
 |------|--------------|
-| Gate A Terminal Feasibility | macOS/Linux/WSL：真实 tmux + node-pty + WebSocket + xterm.js + Claude Code；原生 Windows：真实 ConPTY + psmux ≥ 3.3.8 + 同等 attach/input/resize/reconnect/restart/cleanup 生命周期 |
+| Gate A Terminal Feasibility | macOS/Linux/WSL：真实 Session Server + node-pty + WebSocket + xterm.js + Claude Code；原生 Windows：真实 ConPTY + Session Server + 同等 attach/input/resize/reconnect/restart/cleanup 生命周期 |
 | Gate B Config Contract | config generation 单元/集成测试覆盖 dry-run、冲突、回滚和路径安全 |
 | Gate C Security Baseline | auth、tenant、crypto、path、WebSocket ownership/limits 测试通过 |
 | Gate D MVP-0 Acceptance | MVP-0 必跑测试通过，或记录无法运行的命令和原因 |
@@ -66,7 +66,7 @@ Windows psmux 也必须分别保留外部证据边界。官方 Codex native logi
         ┌─────────┐
         │  E2E    │  Playwright — 12 个核心场景（含 4 个异常路径）
         ├─────────┤
-        │Integration│ node:test — 80+ API + DB + tmux 用例
+        │Integration│ node:test — 80+ API + DB + daemon 用例
         ├─────────────┤
         │   Unit    │  node:test + Vitest — 140+ 用例（含 20 个 WebSocket）
         └─────────────┘
@@ -89,7 +89,7 @@ Windows psmux 也必须分别保留外部证据边界。官方 Codex native logi
 | 数据仓储 | ✅ 高 | 内存 SQLite 可快速验证 |
 | 加密服务 | ✅ 高 | 确定性输入输出，易断言 |
 | 配置生成 | ✅ 中高 | 模板渲染可预测，文件 I/O 需 Mock |
-| 会话管理（tmux） | ⚠️ 中 | 先 POC 验证，后补测试。集成测试必须用真实 tmux |
+| 会话管理（Session Server） | ⚠️ 中 | 先 POC 验证，后补测试。集成测试必须用真实 daemon/PTY |
 | 终端代理（node-pty） | ⚠️ 中低 | pty 行为依赖操作系统，集成测试必须用真实 pty |
 | WebSocket Hub | ⚠️ 中 | 并发连接模拟复杂，用真实 WS 客户端测试 |
 
@@ -97,27 +97,27 @@ Windows psmux 也必须分别保留外部证据边界。官方 Codex native logi
 
 | Mock 对象 | 单元测试 | 集成测试 |
 |----------|---------|---------|
-| tmux | 可用抽象接口 Mock | **必须用真实 tmux** |
-| psmux | 可用平台运行时接口 Mock | **必须在物理 Windows 上用真实 psmux/ConPTY** |
+| Session Server | 可用 IPC 接口 Mock | **必须用真实 daemon 与 PTY** |
+| ConPTY | 可用平台接口 Mock | **必须在物理 Windows 上验收完整生命周期** |
 | node-pty | 可用抽象接口 Mock | **必须用真实 pty** |
 | 数据库 | 接口抽象 Mock | 内存 SQLite |
 | WebSocket | 客户端 Mock（前端） | 真实 WS 库（服务端） |
 
-### 1.5 Windows psmux 与安装确认回归（2026-08-31）
+### 1.5 Session Server 可靠性回归（2026-09-10）
 
 | 范围 | 自动化契约 | 外部/真实证据 |
 |------|------------|---------------|
-| 平台选择 | `terminal-multiplexer-runtime.test.ts` 覆盖 win32→psmux、其他平台→tmux，普通 attach 与 psmux `PSMUX_SESSION_NAME` + `-CC` control plan | 物理 Windows 上记录实际 psmux 进程与会话 |
-| 版本/依赖 | Gateway/CLI `dependency-check.test.ts` 覆盖 `native_psmux`、`psmux_missing`、`psmux_outdated`，最低版本 3.3.8 | PowerShell 中记录 `forgebadger doctor` 与 `psmux -V` 摘要 |
-| 安装确认 | `terminal-runtime-install.test.ts`、`doctor.test.ts`、`start.test.ts`、`init-command.test.ts` 覆盖 TTY、CI、默认 No、明确 `y`/`yes`、安装失败、PATH 未刷新及安装后复检 | 不要求自动化测试真实改动开发机包管理器 |
-| CLI fail-closed | `start.test.ts` / `init-command.test.ts` 覆盖所有非 ready 状态返回非零，且不创建运行时/项目状态、不导入 init runtime、不启动子进程 | 在发布包 smoke 中复核失败信息可执行且无残留状态 |
-| Doctor 零副作用 | `doctor.test.ts` 覆盖不存在的 state dir，仅报告 `(not initialized)` 和默认 URL，不创建目录/配置/密钥/数据库 | 首次用户试用前后对比状态路径 |
-| Gateway 直接启动 gate | `gateway-start.test.ts` 覆盖 readiness 失败发生在账户恢复、DB/session recovery、路由/listen 之前 | 物理目标主机上用缺失运行时复核无监听与状态残留 |
-| 命令安全 | 固定 `winget` 参数和 Linux `apt-get/dnf/yum/pacman/zypper/apk` 白名单；installer 使用 `shell:false` | 人工确认显示命令与官方包一致 |
-| 完整终端生命周期 | 单测覆盖 create/list/capture/resize/stop、环境身份清理、programmatic control plan | 必须在物理 Windows 验证 ConPTY + psmux + 浏览器 + 至少一个真实 AI CLI 的 attach/input/output/resize/reconnect/Gateway restart/cleanup |
+| daemon 生命周期 | `session-server-daemon-lifecycle.test.ts`：独立宿主、Gateway 断连后原 PTY 存续、重连 | 使用发布包和真实新 Gateway 进程验证默认配置 |
+| IPC 与启动安全 | `session-server-security.test.ts`、`session-server-lifecycle-safety.test.ts`：认证、畸形消息、启动竞争、endpoint 所有权 | 物理主机上复核默认 socket/pipe 与 state directory 隔离 |
+| 恢复对账 | 数据库有会话而 daemon 缺失时标 lost，不重放任务 | Gateway 停机期间 daemon 丢失、系统重启 |
+| PTY 与 headless | `session-server.test.ts`、`session-server-headless.test.ts`：创建、输入、尺寸、快照、退出 | 真实 CLI 的 ANSI/鼠标/全屏与 Unicode |
+| 浏览器链路 | `terminal-session-server-ws.test.ts`：output sequence/ACK、慢消费界限、关闭码 | 浏览器 xterm write 回调 ACK、重连快照与大量输出 |
+| Doctor 零副作用 | `doctor.test.ts`：缺失 state dir 不创建目录/配置/密钥/数据库 | 试用前后对比状态路径 |
+| 发布物 | `pnpm build:npm`、`pnpm verify:npm`、`pnpm smoke:npm` | tarball 安装后 daemon 必须真实创建 PTY、输入回显并停止，不能只检查入口和原生模块导入 |
 
-自动化和非 Windows 主机上的回归通过不能将 `WINDOWS-WSL` 门禁改为 `Pass`。
-该门禁在真实物理 Windows 生命周期证据审阅前保持 `Caveat`。
+所有命令须记录实际结果。非 Windows 自动化通过不能将 `WINDOWS-WSL` 改为
+Pass；物理 Windows ConPTY + 浏览器 + 真实 CLI、WSL POSIX PTY 必须分别记录。
+不再探测或安装 tmux/psmux，不再以 RUN_TMUX_TESTS 跳过核心持久化回归。
 
 ---
 
@@ -522,7 +522,7 @@ Windows psmux 也必须分别保留外部证据边界。官方 Codex native logi
 | 风险 | 影响 | 缓解措施 |
 |------|------|---------|
 | POC 测试未通过 | 终端方案需要调整，后续 B 模块测试废弃 | Day 2.5 前完成 POC 验证，不通过则暂停 |
-| tmux Mock 与真实行为差异 | 集成测试通过但生产环境失败 | 集成测试必须用真实 tmux |
+| tmux Mock 与真实行为差异 | 集成测试通过但生产环境失败 | 集成测试必须用真实 daemon/PTY |
 | node-pty 跨平台兼容性 | 不同 OS 行为差异 | CI 增加多平台测试 |
 | 前端组件测试工时超标 | Phase 2 延期 | 前端组件测试降为冒烟测试 |
 | E2E 调试耗时超预期 | Phase 3 延期 | 优先覆盖 happy path，异常路径用集成测试替代 |

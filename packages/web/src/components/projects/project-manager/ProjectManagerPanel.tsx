@@ -381,7 +381,9 @@ export function ProjectManagerPanel({
       queryClient.setQueryData<{ sessions: Session[] }>(
         ["sessions", { projectId }],
         (current) => current ? {
-          sessions: [...current.sessions.filter((existing) => existing.id !== session.id), session],
+          sessions: current.sessions.some((existing) => existing.id === session.id)
+            ? current.sessions.map((existing) => (existing.id === session.id ? session : existing))
+            : [...current.sessions, session],
         } : current
       );
       void queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] });

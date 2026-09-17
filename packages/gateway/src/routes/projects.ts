@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { PlatformActions } from "../services/platform-commands/actions.js";
+import { createPlatformCommands } from "../services/platform-commands/catalog.js";
 import { Router } from "express";
 import { existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
@@ -23,10 +26,11 @@ import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import type { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
 import type { CredentialMode, WriteResult } from "../config-generation/types.js";
 import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } from "../services/project-ai-config.js";
-import { listWorkspaceTree, readWorkspaceFile } from "../services/workspace-context.js";
+import { listWorkspaceTree, maxFileWriteBytes, readWorkspaceFile, writeWorkspaceFile } from "../services/workspace-context.js";
 import { getProjectGitChanges, getProjectGitFileDiff } from "../services/project-git.js";
 import { recordActivity } from "../services/activity-events.js";
 import { buildConfigSyncSummary, buildProjectConfigRenderPlan } from "../services/project-config-render.js";
+import { extractProjectTemplate } from "../services/project-template-extract.js";
 export {
   buildConfigSyncSummary,
   buildProjectConfigRenderPlan
@@ -38,11 +42,19 @@ const createProjectSchema = z.object({
   name: z.string().min(1),
   path: z.string().min(1),
   description: z.string().optional(),
-  techStack: z.string().optional()
+  techStack: z.string().optional(),
+  templateId: z.string().min(1).optional()
 });
 
 const updateProjectTemplateSchema = z.object({
   templateId: z.string().min(1).nullable().optional()
+});
+
+const extractTemplateSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  adapter: aiToolSchema.optional(),
+  bind: z.boolean().optional()
 });
 
 const configPreviewSchema = z.object({
@@ -82,6 +94,11 @@ const workspaceFileQuerySchema = z.object({
   path: z.string().min(1).max(512)
 }).strict();
 
+const workspaceFileWriteSchema = z.object({
+  path: z.string().min(1).max(512),
+  content: z.string().max(maxFileWriteBytes)
+}).strict();
+
 const gitDiffQuerySchema = z.object({
   path: z.string().min(1).max(512),
   untracked: z.enum(["0", "1"]).optional()
@@ -115,17 +132,17 @@ export function createProjectRoutes(
       return;
     }
 
+    if (parseResult.data.templateId) {
+      try {
+        resolveProjectTemplateId(db, userId, parseResult.data.templateId);
+      } catch {
+        res.status(404).json({ code: 1, message: "Template not found" });
+        return;
+      }
+    }
+
     try {
-      const { name, path: rawPath, description, techStack } = parseResult.data;
-      const rootPath = await prepareCreatedProjectRoot(rawPath);
-      const repo = new ProjectRepository(db, userId);
-      const project = repo.create({
-        name,
-        path: rootPath,
-        description,
-        techStack,
-        aiTool: unboundProjectAiTool
-      });
+      const project = await new PlatformActions({db,userId},createPlatformCommands()).executeOwner("project.create",parseResult.data,randomUUID());
       res.status(201).json({
         code: 0,
         data: { project },
@@ -205,8 +222,17 @@ export function createProjectRoutes(
       return;
     }
 
+    if (parseResult.data.templateId) {
+      try {
+        resolveProjectTemplateId(db, userId, parseResult.data.templateId);
+      } catch {
+        res.status(404).json({ code: 1, message: "Template not found" });
+        return;
+      }
+    }
+
     try {
-      const { name, path: rawPath, description, techStack } = parseResult.data;
+      const { name, path: rawPath, description, techStack, templateId } = parseResult.data;
       const rootPath = await prepareImportedProjectRoot(rawPath);
       const repo = new ProjectRepository(db, userId);
       const project = repo.import({
@@ -214,6 +240,7 @@ export function createProjectRoutes(
         path: rootPath,
         description,
         techStack,
+        templateId,
         aiTool: unboundProjectAiTool
       });
       res.status(201).json({
@@ -243,13 +270,13 @@ export function createProjectRoutes(
         .list()
         .filter((session) => session.projectId === project.id && session.status === "running");
       for (const session of projectSessions) {
-        if (!session.tmuxSession) {
+        if (!session.runtimeSessionName) {
           continue;
         }
         try {
-          await sessionManager.stopSession(session.id, session.tmuxSession, userId);
+          await sessionManager.stopSession(session.id, session.runtimeSessionName, userId);
         } catch {
-          // The project record can still be removed when an already-dead tmux pane is referenced.
+          // The project record can still be removed when an already-dead runtime session is referenced.
         }
       }
     }
@@ -312,6 +339,80 @@ export function createProjectRoutes(
       details: { name: project.name, templateId }
     });
     res.json({ code: 0, data: { project: updated ?? project }, message: "" });
+  });
+
+  router.post("/:id/templates", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = extractTemplateSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const repo = new ProjectRepository(db, userId);
+    const project = repo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    const adapter = parseResult.data.adapter ?? parseAiToolHint(project.aiTool);
+    if (!adapter) {
+      res.status(400).json({ code: 1, message: "An explicit adapter in the request body is required for CLI-agnostic projects" });
+      return;
+    }
+
+    try {
+      const extracted = await extractProjectTemplate(project.path, adapter);
+      if (extracted.files.length === 0) {
+        res.status(400).json({ code: 1, message: "No extractable AI config files found in project" });
+        return;
+      }
+
+      const { name, description, bind } = parseResult.data;
+      const template = new TemplateRepository(db, userId).create({
+        name,
+        adapter,
+        ...(description === undefined ? {} : { description }),
+        files: extracted.files.map((f) => ({
+          filePath: f.filePath,
+          content: f.content,
+          fileType: f.fileType
+        }))
+      });
+
+      if (bind ?? true) {
+        repo.updateTemplateId(project.id, template.id);
+      }
+
+      new AuditLogRepository(db, userId).create({
+        action: "template.extract",
+        resourceType: "template",
+        resourceId: template.id,
+        details: {
+          name,
+          projectId: project.id,
+          bind,
+          extractedFiles: extracted.files.map((f) => f.filePath),
+          skippedFiles: extracted.skipped
+        }
+      });
+
+      res.status(201).json({
+        code: 0,
+        data: {
+          template,
+          extracted: extracted.files.map((f) => ({
+            filePath: f.filePath,
+            sizeBytes: Buffer.byteLength(f.content, "utf8")
+          })),
+          skipped: extracted.skipped
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({ code: 1, message: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   router.post("/:id/config/preview", async (req, res) => {
@@ -817,6 +918,43 @@ export function createProjectRoutes(
       res.status(400).json({
         code: 1,
         message: error instanceof Error ? error.message : "Workspace file read failed"
+      });
+    }
+  });
+
+  router.put("/:id/workspace/file", async (req, res) => {
+    const parseResult = workspaceFileWriteSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const projectRepo = new ProjectRepository(db, userId);
+    const project = projectRepo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const file = await writeWorkspaceFile(
+        project.path,
+        parseResult.data.path,
+        parseResult.data.content
+      );
+      res.json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          ...file
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Workspace file write failed"
       });
     }
   });

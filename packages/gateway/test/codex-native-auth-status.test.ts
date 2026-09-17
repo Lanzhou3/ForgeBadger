@@ -71,7 +71,10 @@ describe("Codex native auth observation", () => {
       assert.ok(observedEnv);
       assert.equal(observedEnv.FORGEBADGER_MASTER_KEY, undefined);
       assert.equal(observedEnv.FORGEBADGER_JWT_SECRET, undefined);
-      assert.equal(observedEnv.PATH, process.env.PATH);
+      // Windows process.env exposes the PATH key with its native casing (Path),
+      // so resolve it case-insensitively to stay portable across platforms.
+      const observedPath = Object.entries(observedEnv).find(([key]) => key.toUpperCase() === "PATH")?.[1];
+      assert.equal(observedPath, process.env.PATH);
       assert.equal(observedEnv.CODEX_HOME, "/tmp/codex-status-home");
       assert.equal(observedEnv.CLAUDE_CONFIG_DIR, "/tmp/claude-status-home");
       assert.equal(observedEnv.OPENCODE_CONFIG_DIR, "/tmp/opencode-status-home");

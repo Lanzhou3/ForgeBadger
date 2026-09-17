@@ -24,6 +24,7 @@ export interface ProviderProfile {
   supportedAdapters: ProviderAdapter[];
   defaultHeaders: Record<string, string>;
   opencodeNpm: string | null;
+  allowPlaintextHttp: boolean;
   status: string;
   createdAt: number | null;
   updatedAt: number | null;
@@ -75,6 +76,7 @@ export interface CreateProviderProfileInput {
   supportedAdapters: ProviderAdapter[];
   defaultHeaders?: Record<string, string>;
   opencodeNpm?: string | null;
+  allowPlaintextHttp?: boolean;
 }
 
 export interface CreateModelProfileInput {
@@ -115,6 +117,7 @@ interface ProviderProfileRow {
   supported_adapters: string;
   default_headers: string;
   opencode_npm: string | null;
+  allow_plaintext_http: number;
   status: string;
   created_at: number | null;
   updated_at: number | null;
@@ -168,8 +171,8 @@ export class ModelProviderRepository {
       INSERT INTO model_provider_profiles (
         id, user_id, provider_key, name, base_url, anthropic_base_url, openai_base_url,
         region, product_type, auth_type, api_format, supported_adapters, default_headers,
-        opencode_npm, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        opencode_npm, allow_plaintext_http, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
     `).run(
       id,
       this.userId,
@@ -185,6 +188,7 @@ export class ModelProviderRepository {
       JSON.stringify(normalizeSupportedAdapters(input.supportedAdapters)),
       JSON.stringify(input.defaultHeaders ?? {}),
       emptyToNull(input.opencodeNpm),
+      input.allowPlaintextHttp ? 1 : 0,
       now,
       now
     );
@@ -237,14 +241,15 @@ export class ModelProviderRepository {
       apiFormat: input.apiFormat ?? existing.apiFormat,
       supportedAdapters: input.supportedAdapters ?? existing.supportedAdapters,
       defaultHeaders: input.defaultHeaders ?? existing.defaultHeaders,
-      opencodeNpm: input.opencodeNpm === undefined ? existing.opencodeNpm : input.opencodeNpm
+      opencodeNpm: input.opencodeNpm === undefined ? existing.opencodeNpm : input.opencodeNpm,
+      allowPlaintextHttp: input.allowPlaintextHttp ?? existing.allowPlaintextHttp
     };
     assertProviderEndpointsSafe(next);
     this.db.prepare(`
       UPDATE model_provider_profiles
       SET provider_key = ?, name = ?, base_url = ?, anthropic_base_url = ?, openai_base_url = ?,
         region = ?, product_type = ?, auth_type = ?, api_format = ?, supported_adapters = ?,
-        default_headers = ?, opencode_npm = ?, updated_at = ?
+        default_headers = ?, opencode_npm = ?, allow_plaintext_http = ?, updated_at = ?
       WHERE id = ? AND user_id = ?
     `).run(
       normalizeProviderKey(next.providerKey),
@@ -259,6 +264,7 @@ export class ModelProviderRepository {
       JSON.stringify(normalizeSupportedAdapters(next.supportedAdapters)),
       JSON.stringify(next.defaultHeaders),
       emptyToNull(next.opencodeNpm),
+      next.allowPlaintextHttp ? 1 : 0,
       Date.now(),
       id,
       this.userId
@@ -461,11 +467,11 @@ export class ModelProviderRepository {
   }
 }
 
-function assertProviderEndpointsSafe(input: Pick<CreateProviderProfileInput, "authType" | "baseUrl" | "anthropicBaseUrl" | "openaiBaseUrl">): void {
+function assertProviderEndpointsSafe(input: Pick<CreateProviderProfileInput, "authType" | "baseUrl" | "anthropicBaseUrl" | "openaiBaseUrl" | "allowPlaintextHttp">): void {
   if (input.authType === "none") return;
   const endpoints = [input.baseUrl, input.anthropicBaseUrl, input.openaiBaseUrl].filter((value): value is string => Boolean(value));
   if (endpoints.length === 0) throw new Error("Credential-bearing providers require an endpoint");
-  for (const endpoint of endpoints) assertPublicHttpsEndpoint(endpoint);
+  for (const endpoint of endpoints) assertPublicHttpsEndpoint(endpoint, { allowPlaintextHttp: input.allowPlaintextHttp });
 }
 
 function toProviderProfile(row: ProviderProfileRow): ProviderProfile {
@@ -484,6 +490,7 @@ function toProviderProfile(row: ProviderProfileRow): ProviderProfile {
     supportedAdapters: normalizeSupportedAdapters(parseJsonArray(row.supported_adapters).filter(isProviderAdapter)),
     defaultHeaders: parseJsonObject(row.default_headers),
     opencodeNpm: row.opencode_npm,
+    allowPlaintextHttp: row.allow_plaintext_http === 1,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at

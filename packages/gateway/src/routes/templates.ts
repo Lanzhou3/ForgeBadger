@@ -5,6 +5,10 @@ import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import {
+  importTemplateFromGit,
+  TemplateGitImportError
+} from "../services/template-git-import.js";
+import {
   applyTemplateSync,
   buildTemplateUsage,
   previewTemplateSync,
@@ -22,6 +26,7 @@ const createTemplateSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   version: z.string().optional(),
+  adapter: z.enum(["claude", "opencode", "codex", "kimi"]).optional(),
   visibility: z.enum(["private", "shared", "admin"]).optional(),
   files: z.array(templateFileSchema).optional()
 });
@@ -30,6 +35,7 @@ const updateTemplateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   version: z.string().optional(),
+  adapter: z.enum(["claude", "opencode", "codex", "kimi"]).nullable().optional(),
   visibility: z.enum(["private", "shared", "admin"]).optional(),
   status: z.string().optional()
 });
@@ -42,12 +48,20 @@ const templatePackageSchema = z.object({
   name: z.string().min(1),
   description: z.string().nullable().optional(),
   version: z.string().min(1),
+  adapter: z.string().nullable().optional(),
   files: z.array(templateFileSchema).min(1),
   exportedAt: z.string().optional()
 });
 
 const importTemplateSchema = z.object({
   templatePackage: templatePackageSchema
+});
+
+const gitImportTemplateSchema = z.object({
+  url: z.string().min(1).max(2048),
+  branch: z.string().min(1).max(200).optional(),
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(2000).optional()
 });
 
 const templateUsageQuerySchema = z.object({
@@ -155,6 +169,7 @@ export function createTemplateRoutes(db: Database, eventBus?: ForgeBadgerEventBu
       name: incoming.name,
       ...(incoming.description !== undefined ? { description: incoming.description } : {}),
       version: incoming.version,
+      ...(incoming.adapter !== undefined ? { adapter: incoming.adapter } : {}),
       files: incoming.files.map((file) => ({
         filePath: file.filePath,
         content: file.content,
@@ -167,6 +182,31 @@ export function createTemplateRoutes(db: Database, eventBus?: ForgeBadgerEventBu
       data: { template },
       message: ""
     });
+  });
+
+  router.post("/import/git", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const parseResult = gitImportTemplateSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    try {
+      const repo = new TemplateRepository(db, userId);
+      const result = await importTemplateFromGit(repo, parseResult.data);
+      res.status(201).json({
+        code: 0,
+        data: result,
+        message: ""
+      });
+    } catch (error) {
+      const status = error instanceof TemplateGitImportError ? error.status : 500;
+      res.status(status).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Failed to import template from git"
+      });
+    }
   });
 
   router.get("/:id/export", (req, res) => {

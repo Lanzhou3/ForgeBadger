@@ -15,7 +15,7 @@ describe("trial feedback draft generator", () => {
       os: "linux x64 6.8.0",
       shell: "/bin/zsh",
       nodeVersion: "v24.14.1",
-      tmuxVersion: "tmux 3.4",
+      terminalRuntime: "session-server",
       claudeVersion: "2.1.152",
       startupPath: "source fallback",
       webUrl: "http://127.0.0.1:48732",
@@ -41,7 +41,7 @@ describe("trial feedback draft generator", () => {
       commit: "abc1234",
       shell: "Bearer secret-token-value",
       nodeVersion: "sk-test-secret",
-      tmuxVersion: "forgebadger.token=secret",
+      terminalRuntime: "forgebadger.token=secret",
       claudeVersion: [
         "FORGEBADGER_MASTER_KEY=abc123",
         "OPENFORGE_MASTER_KEY=legacy-master",
@@ -69,7 +69,7 @@ describe("trial feedback draft generator", () => {
         const joined = [command, ...args].join(" ");
         return {
           "git rev-parse --short HEAD": { status: 0, stdout: "abc1234\n" },
-          "tmux -V": { status: 0, stdout: "tmux 3.4\n" },
+          "Terminal backend": { status: 0, stdout: "session-server\n" },
           "claude --version": { status: 0, stdout: "2.1.152\n" },
           "opencode --version": { status: 1, stderr: "missing\n" },
           "codex --version": { status: 0, stdout: "codex 0.134.0\n" }
@@ -80,7 +80,7 @@ describe("trial feedback draft generator", () => {
     assert.equal(context.commit, "abc1234");
     assert.equal(context.os, "linux x64 6.8.0");
     assert.equal(context.shell, "/bin/bash");
-    assert.equal(context.tmuxVersion, "tmux 3.4");
+    assert.equal(context.terminalRuntime, "session-server");
     assert.equal(context.claudeVersion, "2.1.152");
     assert.equal(context.opencodeVersion, "unavailable");
     assert.equal(context.codexVersion, "codex 0.134.0");

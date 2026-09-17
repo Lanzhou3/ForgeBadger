@@ -12,11 +12,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type {
-  ProjectManagerWorkItem,
-  ProjectManagerWorkItemStatus,
-} from "@/lib/api";
-import { WORK_ITEM_STATUSES, type EditWorkItemDraft, type Translate, type WorkItemDraft } from "./types";
+import type { ProjectManagerWorkItem } from "@/lib/api";
+import { type EditWorkItemDraft, type Translate, type WorkItemDraft } from "./types";
 import { statusLabel } from "./utils";
 
 export function CreateWorkItemDialog({
@@ -72,34 +69,16 @@ export function CreateWorkItemDialog({
               />
             </div>
           </div>
-          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_190px]">
-            <div className="space-y-2">
-              <Label htmlFor="project-manager-work-item-description">
-                {t("projects.projectManagerWorkItemDescription")}
-              </Label>
-              <Textarea
-                id="project-manager-work-item-description"
-                value={draft.description}
-                disabled={isSaving}
-                onChange={(event) => onDraftChange({ ...draft, description: event.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="project-manager-work-item-status">{t("common.status")}</Label>
-              <select
-                id="project-manager-work-item-status"
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
-                value={draft.status}
-                disabled={isSaving}
-                onChange={(event) => onDraftChange({ ...draft, status: event.target.value as ProjectManagerWorkItemStatus })}
-              >
-                {WORK_ITEM_STATUSES.map((status) => (
-                  <option key={status} value={status}>
-                    {statusLabel(status, t)}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="project-manager-work-item-description">
+              {t("projects.projectManagerWorkItemDescription")}
+            </Label>
+            <Textarea
+              id="project-manager-work-item-description"
+              value={draft.description}
+              disabled={isSaving}
+              onChange={(event) => onDraftChange({ ...draft, description: event.target.value })}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="project-manager-work-item-acceptance">
@@ -114,22 +93,6 @@ export function CreateWorkItemDialog({
             />
             <p className="text-xs text-muted-foreground">{t("projects.projectManagerTextListHint")}</p>
           </div>
-          <ReferenceDraftFields
-            disabled={isSaving}
-            draft={draft}
-            onDraftChange={onDraftChange}
-            prefix="evidence"
-            title={t("projects.projectManagerInitialEvidenceRefs")}
-            t={t}
-          />
-          <ReferenceDraftFields
-            disabled={isSaving}
-            draft={draft}
-            onDraftChange={onDraftChange}
-            prefix="feishu"
-            title={t("projects.projectManagerInitialFeishuRefs")}
-            t={t}
-          />
           {error && (
             <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
@@ -300,75 +263,6 @@ export function DeleteWorkItemDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function ReferenceDraftFields({
-  disabled,
-  draft,
-  onDraftChange,
-  prefix,
-  title,
-  t,
-}: {
-  disabled: boolean;
-  draft: WorkItemDraft;
-  onDraftChange: (draft: WorkItemDraft) => void;
-  prefix: "evidence" | "feishu";
-  title: string;
-  t: Translate;
-}) {
-  const isEvidence = prefix === "evidence";
-  const fieldId = `project-manager-${prefix}-ref`;
-  const kindKey = isEvidence ? "evidenceKind" : "feishuKind";
-  const labelKey = isEvidence ? "evidenceLabel" : "feishuLabel";
-  const refKey = isEvidence ? "evidenceRef" : "feishuRef";
-  const finalKey = isEvidence ? "evidencePath" : "feishuMessageId";
-
-  return (
-    <fieldset className="space-y-3 rounded-md border border-border/70 p-3">
-      <legend className="px-1 text-sm font-medium">{title}</legend>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor={`${fieldId}-kind`}>{t("projects.projectManagerRefKind")}</Label>
-          <Input
-            id={`${fieldId}-kind`}
-            value={draft[kindKey]}
-            disabled={disabled}
-            onChange={(event) => onDraftChange({ ...draft, [kindKey]: event.target.value })}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${fieldId}-label`}>{t("projects.projectManagerRefLabel")}</Label>
-          <Input
-            id={`${fieldId}-label`}
-            value={draft[labelKey]}
-            disabled={disabled}
-            onChange={(event) => onDraftChange({ ...draft, [labelKey]: event.target.value })}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${fieldId}-ref`}>{t("projects.projectManagerRefId")}</Label>
-          <Input
-            id={`${fieldId}-ref`}
-            value={draft[refKey]}
-            disabled={disabled}
-            onChange={(event) => onDraftChange({ ...draft, [refKey]: event.target.value })}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${fieldId}-final`}>
-            {isEvidence ? t("common.path") : t("projects.projectManagerFeishuMessageId")}
-          </Label>
-          <Input
-            id={`${fieldId}-final`}
-            value={draft[finalKey]}
-            disabled={disabled}
-            onChange={(event) => onDraftChange({ ...draft, [finalKey]: event.target.value })}
-          />
-        </div>
-      </div>
-    </fieldset>
   );
 }
 

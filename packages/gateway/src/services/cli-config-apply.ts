@@ -6,6 +6,8 @@ import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 
 import { decryptSecret, encryptSecret, type EncryptedSecret } from "../crypto/secret-box.js";
 import type { Database } from "../db/types.js";
+import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
+import { ClaudeRouteRepository } from "../db/repositories/claude-route-repository.js";
 import {
   ModelProviderRepository,
   type ModelProfile,
@@ -13,6 +15,7 @@ import {
   type ProviderProfile
 } from "../db/repositories/model-provider-repository.js";
 import type { AdapterId } from "./adapter-discovery.js";
+import { expandUserPath } from "../lib/user-path.js";
 import {
   atomicWriteConfig,
   fsyncFile,
@@ -21,6 +24,7 @@ import {
   safeUnlink
 } from "./cli-config-fs.js";
 import { cliConfigTargetPath, globalConfigRoot } from "./cli-config-target.js";
+import { gatewayLoopbackUrl } from "./claude-route/gateway-url.js";
 import {
   assertResolvedPublicHttpsEndpoint,
   type OutboundHostResolver
@@ -29,11 +33,34 @@ import {
 const backupMaxAgeMs = 7 * 24 * 60 * 60 * 1000;
 const inProcessLocks = new Map<string, Promise<void>>();
 
+/** cc-switch parity: Kimi For Coding exposes a 256k context window. */
+const kimiCodingContextTokens = "262144";
+
+/**
+ * MiniMax's Anthropic-compatible endpoints guarantee at least a 512k context
+ * window (M3 advertises 1M; 512k = 524288 tokens is the safe floor across plans).
+ */
+const minimaxAnthropicContextTokens = 524288;
+
+/**
+ * Kimi CLI hard-errors ("must define a positive max_context_size") on custom
+ * models without one. Synced /models payloads carry no context info, so fall
+ * back to 256k — correct for Kimi models and a workable default for
+ * Claude-compatible relays; users can override via the model profile's
+ * context window.
+ */
+const kimiDefaultMaxContextSize = 262144;
+
 export class CliConfigApplyError extends Error {
   constructor(readonly code: string, message = code) {
     super(message);
   }
 }
+
+/** Claude alias slots that can be mapped to distinct models (cc-switch role table). */
+export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
+
+export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
 
 export interface CliConfigApplyInput {
   db: Database;
@@ -43,16 +70,32 @@ export interface CliConfigApplyInput {
   providerProfileId: string;
   modelProfileId?: string | undefined;
   credentialId?: string | undefined;
+  /** Claude only: per-role model mapping; values are model profile ids. */
+  modelMapping?: Partial<Record<ClaudeModelSlot, string>> | undefined;
+  /** Codex only: model_reasoning_effort written into config.toml. */
+  reasoningEffort?: CodexReasoningEffort | undefined;
+  /**
+   * Claude only: point Claude Code at the Gateway route endpoint instead of
+   * the provider (required for OpenAI-protocol providers).
+   */
+  routeThroughGateway?: boolean | undefined;
+  /**
+   * Codex only: wire protocol the provider uses. Defaults to "chat"
+   * (OpenAI-compatible /chat/completions), which is correct for most
+   * third-party providers. Set to "responses" only when the provider
+   * supports the OpenAI /responses API (native OpenAI, Codex.app, etc.).
+   */
+  codexWireApi?: CodexWireApi | undefined;
   resolveHost?: OutboundHostResolver | undefined;
 }
 
 export interface CliConfigApplyFilePreview {
   targetPath: string;
   fileType: "json" | "toml";
-  operation: "create" | "update" | "none";
+  operation: "create" | "update" | "delete" | "none";
   /** Observed content with credential values masked; null when the file does not exist. */
   current: string | null;
-  /** Proposed content with credential values masked. */
+  /** Proposed content with credential values masked; empty when the file will be deleted. */
   proposed: string;
   changedFields: string[];
 }
@@ -70,7 +113,7 @@ export interface CliConfigApplyResult {
   adapter: AdapterId;
   backupId: string;
   changed: boolean;
-  files: Array<{ targetPath: string; operation: "create" | "update" | "none" }>;
+  files: Array<{ targetPath: string; operation: "create" | "update" | "delete" | "none" }>;
 }
 
 export interface CliConfigRollbackResult {
@@ -83,15 +126,50 @@ interface ApplyContext {
   adapter: AdapterId;
   provider: ProviderProfile;
   model: ModelProfile;
+  /** All active model profiles of the provider (OpenCode writes them all). */
+  activeModels: ModelProfile[];
+  /** Claude role slots resolved to model profiles (cc-switch normalize semantics). */
+  slotModels: Partial<Record<ClaudeModelSlot, ModelProfile>>;
+  reasoningEffort: CodexReasoningEffort | undefined;
   credential: ProviderCredentialSummary;
   providerKey: string;
+  /** The provider's own endpoint (SSRF-validated); used for context-window special cases. */
+  providerEndpoint: string | null;
+  /** Effective ANTHROPIC_BASE_URL: the provider endpoint, or the Gateway loopback URL when routed. */
   baseUrl: string | null;
+  /**
+   * Claude protocol routing state: "direct" = provider speaks Anthropic
+   * protocol; "routed" = applied through the Gateway endpoint;
+   * "route_required" = OpenAI protocol without routeThroughGateway (apply
+   * must fail; preview only).
+   */
+  routeMode: "direct" | "routed" | "route_required";
+  /** Loopback route token written as ANTHROPIC_AUTH_TOKEN when routed. */
+  routeToken: string | null;
+  /** What the previous apply to this adapter injected as the context window, if known. */
+  previousContextWindow: number | null;
+  /** Codex wire API for this provider: "chat" (default) or "responses". */
+  codexWireApi: CodexWireApi;
 }
+
+/**
+ * Codex wire API: "chat" = /chat/completions (OpenAI-compatible), "responses" = /responses.
+ * Third-party OpenAI-compatible APIs (Qwen, Moonshot AI, Ollama, etc.) only support
+ * chat completions. The official Codex default is "chat" when omitted; ForgeBadger
+ * previously hardcoded "responses" which broke every third-party provider.
+ */
+export type CodexWireApi = "chat" | "responses";
 
 interface ApplyTarget {
   targetPath: string;
   fileType: "json" | "toml";
   role: "config" | "auth";
+}
+
+interface ApplyDocumentPlan {
+  target: ApplyTarget;
+  /** null means the file should be deleted (e.g. an emptied Codex auth.json). */
+  serialized: string | null;
 }
 
 /** Dry-run: resolves the selection, SSRF-checks the endpoint, and diffs without touching disk. */
@@ -101,20 +179,25 @@ export async function previewCliConfigApply(input: CliConfigApplyInput): Promise
   const files = planApplyDocuments(context, null).map((plan) => {
     const observed = readObservedConfig(plan.target.targetPath);
     const current = observed.existed
-      ? maskSecrets(plan.target, serializeDocument(plan.target.fileType, parseDocument(plan.target.fileType, observed.content, plan.target.targetPath)))
+      ? maskSecrets(plan.target.fileType, serializeDocument(plan.target.fileType, parseDocument(plan.target.fileType, observed.content, plan.target.targetPath)))
       : null;
-    const proposed = maskSecrets(plan.target, plan.serialized);
+    const proposed = plan.serialized === null ? "" : maskSecrets(plan.target.fileType, plan.serialized);
     return {
       targetPath: plan.target.targetPath,
       fileType: plan.target.fileType,
-      operation: (!observed.existed ? "create" : observed.content === plan.serialized ? "none" : "update") as "create" | "update" | "none",
+      operation: planOperation(observed, plan.serialized),
       current,
       proposed,
-      changedFields: diffDocuments(plan.target.fileType, observed.content, plan.serialized)
+      changedFields: diffDocuments(plan.target.fileType, observed.content, plan.serialized ?? "")
     };
   });
   if (files.some((file) => file.fileType === "toml" && file.operation !== "none")) {
     warnings.push("Applying this change may normalize TOML comments and formatting in the config file.");
+  }
+  if (context.routeMode === "route_required") {
+    // Machine-readable marker; the web dialog renders a localized banner and
+    // filters this code out of the generic warning list.
+    warnings.push("OPENAI_PROTOCOL_REQUIRES_ROUTE");
   }
   return {
     adapter: context.adapter,
@@ -129,37 +212,53 @@ export async function previewCliConfigApply(input: CliConfigApplyInput): Promise
 /**
  * Applies the selected provider/model/credential to the adapter's global CLI
  * config with plaintext credentials (cc-switch semantics): encrypted backup
- * first, then atomic 0600 writes with read-back verification. A failure on a
- * later file (Codex auth.json) rolls back the files already written.
+ * first, then atomic 0600 writes (or deletes for emptied auth files) with
+ * read-back verification. A failure on a later file (Codex auth.json) rolls
+ * back the files already written.
  */
 export async function applyCliConfigToAdapter(input: CliConfigApplyInput): Promise<CliConfigApplyResult> {
   const context = await resolveApplyContext(input);
-  const secret = new ModelProviderRepository(input.db, input.userId, input.masterKey)
-    .decryptCredential(context.credential.id);
+  if (context.routeMode === "route_required") {
+    throw new CliConfigApplyError(
+      "CLI_CONFIG_APPLY_ROUTE_REQUIRED",
+      "OpenAI-protocol providers cannot be applied to Claude Code directly; enable the Gateway Claude route and apply with routeThroughGateway"
+    );
+  }
+  // Routed applies write the loopback route token, never the provider key.
+  const secret = context.routeToken
+    ?? new ModelProviderRepository(input.db, input.userId, input.masterKey)
+      .decryptCredential(context.credential.id);
   const primaryTarget = cliConfigTargetPath({ adapter: context.adapter, scope: "global" });
   return withInProcessLock(primaryTarget, async () => {
-    const targets = applyTargets(context.adapter);
-    // Plan, write, and verify one file at a time so a failure on a later file
-    // (e.g. Codex auth.json) still has in-memory observed state to roll back.
-    const planned: Array<{ target: ApplyTarget; observed: { existed: boolean; content: string }; serialized: string }> = [];
-    const backupFiles: Array<{ targetPath: string; existed: boolean; content: string }> = [];
-    for (const target of targets) {
-      const observed = readObservedConfig(target.targetPath);
-      const doc = parseDocument(target.fileType, observed.content, target.targetPath);
-      buildApplyDocument(context, target, doc, secret);
-      planned.push({ target, observed, serialized: serializeDocument(target.fileType, doc) });
-      backupFiles.push({ targetPath: target.targetPath, existed: observed.existed, content: observed.content });
-    }
-    const changed = planned.some(({ observed, serialized }) => !observed.existed || observed.content !== serialized);
+    // Plan every file up front, then write and verify one at a time so a
+    // failure on a later file (e.g. Codex auth.json) still has in-memory
+    // observed state to roll back.
+    const planned = planApplyDocuments(context, secret).map((plan) => {
+      const observed = readObservedConfig(plan.target.targetPath);
+      return { ...plan, observed, operation: planOperation(observed, plan.serialized) };
+    });
+    const backupFiles = planned.map(({ target, observed }) => ({
+      targetPath: target.targetPath,
+      existed: observed.existed,
+      content: observed.content
+    }));
+    const changed = planned.some(({ operation }) => operation !== "none");
     const backupId = writeApplyBackup(context.adapter, backupFiles, input.masterKey);
     const written: Array<{ targetPath: string; existed: boolean; content: string }> = [];
     try {
-      for (const { target, observed, serialized } of planned) {
-        if (observed.existed && observed.content === serialized) continue;
-        atomicWriteConfig(target.targetPath, serialized);
-        const reread = readObservedConfig(target.targetPath);
-        if (reread.content !== serialized) {
-          throw new CliConfigApplyError("CLI_CONFIG_APPLY_VERIFY_FAILED", "CLI config read-back verification failed");
+      for (const { target, observed, serialized, operation } of planned) {
+        if (operation === "none") continue;
+        if (operation === "delete") {
+          safeUnlink(target.targetPath);
+          if (readObservedConfig(target.targetPath).existed) {
+            throw new CliConfigApplyError("CLI_CONFIG_APPLY_VERIFY_FAILED", "CLI config delete verification failed");
+          }
+        } else if (serialized !== null) {
+          atomicWriteConfig(target.targetPath, serialized);
+          const reread = readObservedConfig(target.targetPath);
+          if (reread.content !== serialized) {
+            throw new CliConfigApplyError("CLI_CONFIG_APPLY_VERIFY_FAILED", "CLI config read-back verification failed");
+          }
         }
         written.push({ targetPath: target.targetPath, existed: observed.existed, content: observed.content });
       }
@@ -175,14 +274,26 @@ export async function applyCliConfigToAdapter(input: CliConfigApplyInput): Promi
         error instanceof Error ? error.message : "CLI config apply failed"
       );
     }
+    // The CLI config files are the source of truth for the CLI itself; this
+    // pointer only records the apply so read-only surfaces (session sidebar
+    // quota) can resolve the current provider without parsing CLI configs.
+    new CliConfigAppliedProviderRepository(input.db, input.userId)
+      .upsert(context.adapter, context.provider.id, context.model.id);
+    // Keep the route assignment in sync with what Claude Code now points at.
+    if (context.adapter === "claude") {
+      const routeRepository = new ClaudeRouteRepository(input.db, input.userId, input.masterKey);
+      if (context.routeMode === "routed") {
+        routeRepository.upsertAssignment(context.provider.id, context.credential.id);
+      } else {
+        // A direct (Anthropic-protocol) apply supersedes any routed target.
+        routeRepository.clearAssignment();
+      }
+    }
     return {
       adapter: context.adapter,
       backupId,
       changed,
-      files: planned.map(({ target, observed, serialized }) => ({
-        targetPath: target.targetPath,
-        operation: (!observed.existed ? "create" : observed.content === serialized ? "none" : "update") as "create" | "update" | "none"
-      }))
+      files: planned.map(({ target, operation }) => ({ targetPath: target.targetPath, operation }))
     };
   });
 }
@@ -291,6 +402,27 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
   if (!model) {
     throw new CliConfigApplyError("CLI_CONFIG_APPLY_MODEL_NOT_FOUND", "Model profile not found for the provider");
   }
+  if (input.modelMapping && Object.keys(input.modelMapping).length > 0 && input.adapter !== "claude") {
+    throw new CliConfigApplyError("CLI_CONFIG_APPLY_FIELD_UNSUPPORTED", "modelMapping is only supported for the Claude adapter");
+  }
+  if (input.reasoningEffort && input.adapter !== "codex") {
+    throw new CliConfigApplyError("CLI_CONFIG_APPLY_FIELD_UNSUPPORTED", "reasoningEffort is only supported for the Codex adapter");
+  }
+  if (input.routeThroughGateway === true && input.adapter !== "claude") {
+    throw new CliConfigApplyError("CLI_CONFIG_APPLY_FIELD_UNSUPPORTED", "routeThroughGateway is only supported for the Claude adapter");
+  }
+  const slotModels: Partial<Record<ClaudeModelSlot, ModelProfile>> = {};
+  if (input.modelMapping) {
+    for (const slot of ["opus", "sonnet", "haiku", "fable", "subagent"] as const) {
+      const profileId = input.modelMapping[slot];
+      if (!profileId) continue;
+      const slotModel = models.find((entry) => entry.id === profileId);
+      if (!slotModel) {
+        throw new CliConfigApplyError("CLI_CONFIG_APPLY_MODEL_NOT_FOUND", `Model profile not found for the ${slot} slot`);
+      }
+      slotModels[slot] = slotModel;
+    }
+  }
   const credential = input.credentialId
     ? repository.listCredentials(provider.id)
       .find((entry) => entry.status === "active" && entry.id === input.credentialId)
@@ -298,28 +430,86 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
   if (!credential) {
     throw new CliConfigApplyError("CLI_CONFIG_APPLY_CREDENTIAL_NOT_FOUND", "An active provider credential is required");
   }
-  const baseUrl = endpointForAdapter(provider, input.adapter);
+  // The provider endpoint is validated up front even when routed, so an
+  // unsafe target fails at apply time instead of on the first routed request
+  // (the forwarder re-checks per request regardless).
+  const providerEndpoint = endpointForAdapter(provider, input.adapter);
   try {
-    await assertResolvedPublicHttpsEndpoint(baseUrl, input.resolveHost);
+    await assertResolvedPublicHttpsEndpoint(providerEndpoint, input.resolveHost, { allowPlaintextHttp: provider.allowPlaintextHttp });
   } catch (error) {
     throw new CliConfigApplyError(
       "CLI_CONFIG_APPLY_ENDPOINT_UNSAFE",
       error instanceof Error ? error.message : "Provider endpoint is not a public HTTPS endpoint"
     );
   }
+  // An explicit Anthropic endpoint takes precedence over the provider's
+  // default protocol, including a stale routeThroughGateway request flag.
+  // Preserve legacy Anthropic providers whose endpoint lives in baseUrl.
+  let routeMode: ApplyContext["routeMode"] = "direct";
+  let routeToken: string | null = null;
+  if (input.adapter === "claude" && !provider.anthropicBaseUrl && provider.apiFormat !== "anthropic") {
+    routeMode = "route_required";
+    if (input.routeThroughGateway === true) {
+      const settings = new ClaudeRouteRepository(input.db, input.userId, input.masterKey).getSettings();
+      if (!settings.enabled || !settings.token) {
+        throw new CliConfigApplyError(
+          "CLI_CONFIG_APPLY_ROUTE_DISABLED",
+          "The Gateway Claude route is not enabled for this user"
+        );
+      }
+      routeMode = "routed";
+      routeToken = settings.token;
+    }
+  }
+  const baseUrl = routeMode === "direct" ? providerEndpoint : gatewayLoopbackUrl();
+  // The previous apply's injected context window, so switching providers can
+  // strip exactly the managed value (and nothing the user set by hand).
+  const previousPointer = new CliConfigAppliedProviderRepository(input.db, input.userId).get(input.adapter);
+  const previousProvider = previousPointer
+    ? repository.getProviderProfile(previousPointer.providerProfileId)
+    : undefined;
+  const previousModel = previousPointer?.modelProfileId
+    ? repository.getModelProfile(previousPointer.modelProfileId)
+    : undefined;
+  const previousContextWindow = previousProvider
+    ? claudeContextWindowTarget(endpointForAdapter(previousProvider, input.adapter), previousModel ?? null)
+    : null;
   return {
     adapter: input.adapter,
     provider,
     model,
+    activeModels: models,
+    slotModels,
+    reasoningEffort: input.reasoningEffort,
     credential,
     providerKey: normalizeProviderKey(provider.providerKey),
-    baseUrl
+    providerEndpoint,
+    baseUrl,
+    routeMode,
+    routeToken,
+    previousContextWindow,
+    codexWireApi: resolveCodexWireApi(input, provider, model)
   };
 }
 
-interface ApplyDocumentPlan {
-  target: ApplyTarget;
-  serialized: string;
+/** Resolves the Codex wire API: explicit input wins, else "chat" default, with "responses" for known OpenAI-native providers. */
+function resolveCodexWireApi(
+  input: CliConfigApplyInput,
+  provider: ProviderProfile,
+  model: ModelProfile
+): CodexWireApi {
+  if (input.codexWireApi) return input.codexWireApi;
+  // Only OpenAI's native providers support the /responses API. Everything else
+  // (Qwen, Moonshot AI, Moonshot, Ollama, generic OpenAI-compatible) is chat only.
+  const providerKey = provider.providerKey.toLowerCase();
+  if (providerKey === "openai" || providerKey === "codex" || providerKey === "chatgpt") {
+    return "responses";
+  }
+  const modelId = model.modelId.toLowerCase();
+  if (modelId.startsWith("gpt-") || modelId.startsWith("o3") || modelId.startsWith("o4-mini") || modelId.startsWith("codex-")) {
+    return "responses";
+  }
+  return "chat";
 }
 
 function planApplyDocuments(context: ApplyContext, plaintextSecret: string | null): ApplyDocumentPlan[] {
@@ -328,8 +518,23 @@ function planApplyDocuments(context: ApplyContext, plaintextSecret: string | nul
     const observed = readObservedConfig(target.targetPath);
     const doc = parseDocument(target.fileType, observed.content, target.targetPath);
     buildApplyDocument(context, target, doc, plaintextSecret);
-    return { target, serialized: serializeDocument(target.fileType, doc) };
+    // An auth file whose last managed field was removed is deleted outright:
+    // Codex reports an error for an empty auth.json but shows the login screen
+    // when the file is missing (cc-switch behavior).
+    const serialized = target.role === "auth" && Object.keys(doc).length === 0
+      ? null
+      : serializeDocument(target.fileType, doc);
+    return { target, serialized };
   });
+}
+
+function planOperation(
+  observed: { existed: boolean; content: string },
+  serialized: string | null
+): "create" | "update" | "delete" | "none" {
+  if (serialized === null) return observed.existed ? "delete" : "none";
+  if (!observed.existed) return "create";
+  return observed.content === serialized ? "none" : "update";
 }
 
 function applyTargets(adapter: AdapterId): ApplyTarget[] {
@@ -358,21 +563,47 @@ function buildApplyDocument(
     const env = record(doc.env);
     if (context.baseUrl) env.ANTHROPIC_BASE_URL = context.baseUrl;
     else delete env.ANTHROPIC_BASE_URL;
-    env.ANTHROPIC_AUTH_TOKEN = secret;
-    env.ANTHROPIC_MODEL = context.model.modelId;
-    env.ANTHROPIC_SMALL_FAST_MODEL = context.model.modelId;
-    env.ANTHROPIC_DEFAULT_SONNET_MODEL = context.model.modelId;
-    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = context.model.modelId;
-    env.ANTHROPIC_DEFAULT_OPUS_MODEL = context.model.modelId;
+    // Routed applies carry the loopback route token; the provider key stays
+    // in the Gateway vault and is injected per request by the forwarder.
+    env.ANTHROPIC_AUTH_TOKEN = context.routeToken ?? secret;
+    // A stale ANTHROPIC_API_KEY left by a previous apply (or by hand) must not
+    // shadow the freshly written token.
+    delete env.ANTHROPIC_API_KEY;
+    // Role mapping (official alias pinning): unset slots fall back to the
+    // primary model — fill only, matching cc-switch normalize semantics.
+    const primary = context.model;
+    const opus = context.slotModels.opus ?? primary;
+    const sonnet = context.slotModels.sonnet ?? primary;
+    const haiku = context.slotModels.haiku ?? primary;
+    env.ANTHROPIC_MODEL = primary.modelId;
+    env.ANTHROPIC_DEFAULT_OPUS_MODEL = opus.modelId;
+    env.ANTHROPIC_DEFAULT_SONNET_MODEL = sonnet.modelId;
+    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = haiku.modelId;
+    // ANTHROPIC_SMALL_FAST_MODEL is deprecated upstream in favor of
+    // ANTHROPIC_DEFAULT_HAIKU_MODEL; remove it instead of writing it.
+    delete env.ANTHROPIC_SMALL_FAST_MODEL;
+    // Display names shown in the /model picker (official *_MODEL_NAME keys).
+    env.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME = opus.name;
+    env.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME = sonnet.name;
+    env.ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME = haiku.name;
+    // Optional slots are managed keys: written when selected, removed otherwise.
+    writeOptionalClaudeSlot(env, "FABLE", context.slotModels.fable);
+    if (context.slotModels.subagent) env.CLAUDE_CODE_SUBAGENT_MODEL = context.slotModels.subagent.modelId;
+    else delete env.CLAUDE_CODE_SUBAGENT_MODEL;
     const timeout = claudeTimeout(context.provider.providerKey);
     if (timeout) env.API_TIMEOUT_MS = timeout;
     else delete env.API_TIMEOUT_MS;
+    applyClaudeContextWindow(env, context.providerEndpoint, primary, context.previousContextWindow);
     doc.env = env;
     return;
   }
   if (context.adapter === "codex") {
     if (target.role === "auth") {
-      doc.OPENAI_API_KEY = secret;
+      // cc-switch semantics (Codex 0.149+): third-party credentials live in
+      // model_providers.<id>.experimental_bearer_token, not in auth.json.
+      // Remove the legacy OPENAI_API_KEY slot but preserve other auth material
+      // (e.g. ChatGPT login tokens); the planner deletes an emptied file.
+      delete doc.OPENAI_API_KEY;
       return;
     }
     if (!context.baseUrl) {
@@ -380,11 +611,21 @@ function buildApplyDocument(
     }
     doc.model = context.model.modelId;
     doc.model_provider = context.providerKey;
+    // Third-party models may not recognize Codex's reasoning effort values
+    // (e.g. Qwen only accepts "xhigh"/"medium"/"low"). Only write the field
+    // for models Codex natively supports reasoning on; otherwise remove it
+    // so the provider uses its own default.
+    if (context.reasoningEffort && codexNativeReasoningModel(context.model.modelId)) {
+      doc.model_reasoning_effort = context.reasoningEffort;
+    } else {
+      delete doc.model_reasoning_effort;
+    }
     const providers = record(doc.model_providers);
     providers[context.providerKey] = {
       name: context.provider.name,
       base_url: context.baseUrl,
-      wire_api: "responses"
+      wire_api: context.codexWireApi,
+      experimental_bearer_token: secret
     };
     doc.model_providers = providers;
     return;
@@ -393,27 +634,155 @@ function buildApplyDocument(
     const providers = record(doc.provider);
     const options: Record<string, unknown> = { apiKey: secret };
     if (context.baseUrl) options.baseURL = context.baseUrl;
+    const existing = record(providers[context.providerKey]);
+    // Additive semantics (cc-switch): upsert the provider entry with every
+    // active model of the provider, merging into models already present from
+    // earlier applies. The top-level "model" key is user-owned and is never
+    // touched — model selection happens inside OpenCode.
+    const models = record(existing.models);
+    for (const activeModel of context.activeModels) {
+      const current = record(models[activeModel.modelId]);
+      const next: Record<string, unknown> = { ...current, name: activeModel.name };
+      // OpenCode validates limit strictly: output is required next to context,
+      // and a context-only limit makes the whole config invalid (the CLI exits
+      // on startup). We only know the context window, so never write limit —
+      // and drop the context-only shape left behind by earlier applies while
+      // keeping user-owned fields such as attachment.
+      const limit = record(next.limit);
+      if (typeof limit.context === "number" && typeof limit.output !== "number") delete next.limit;
+      models[activeModel.modelId] = next;
+    }
     providers[context.providerKey] = {
       npm: context.provider.opencodeNpm ?? openCodePackage(context.provider.apiFormat),
-      options
+      name: context.provider.name,
+      options,
+      models
     };
     doc.provider = providers;
-    doc.model = `${context.providerKey}/${context.model.modelId}`;
     return;
   }
   const providers = record(doc.providers);
   const definition: Record<string, unknown> = {
-    type: context.provider.apiFormat === "anthropic" ? "anthropic" : "openai",
+    type: kimiProviderType(context.provider.apiFormat, context.baseUrl),
     api_key: secret
   };
   if (context.baseUrl) definition.base_url = context.baseUrl;
   providers[context.providerKey] = definition;
-  const alias = `${context.providerKey}/${context.model.modelId}`;
+  // Additive semantics (cc-switch parity with the opencode branch): upsert
+  // every active model of the provider as an alias so the /model picker in
+  // Kimi Code can switch between them; default_model pins the selected one.
   const models = record(doc.models);
-  models[alias] = { provider: context.providerKey, model: context.model.modelId };
+  for (const activeModel of context.activeModels) {
+    models[`${context.providerKey}/${activeModel.modelId}`] = {
+      provider: context.providerKey,
+      model: activeModel.modelId,
+      max_context_size: activeModel.contextWindow && activeModel.contextWindow > 0
+        ? activeModel.contextWindow
+        : kimiDefaultMaxContextSize
+    };
+  }
   doc.providers = providers;
   doc.models = models;
-  doc.default_model = alias;
+  doc.default_model = `${context.providerKey}/${context.model.modelId}`;
+}
+
+/**
+ * Writes or removes an optional Claude alias slot (model id + display name).
+ * These are managed keys: an unset slot must not leave stale values behind
+ * from a previous apply.
+ */
+function writeOptionalClaudeSlot(
+  env: Record<string, unknown>,
+  role: "FABLE",
+  model: ModelProfile | undefined
+): void {
+  const modelKey = `ANTHROPIC_DEFAULT_${role}_MODEL`;
+  const nameKey = `ANTHROPIC_DEFAULT_${role}_MODEL_NAME`;
+  if (model) {
+    env[modelKey] = model.modelId;
+    env[nameKey] = model.name;
+    return;
+  }
+  delete env[modelKey];
+  delete env[nameKey];
+}
+
+/**
+ * Claude Code assumes a 200k window for model IDs outside its built-in model
+ * catalog and clamps auto-compact accordingly ("isn't described by this
+ * version's model catalog"). Fill in the override pair for known coding
+ * endpoints and for model profiles with an explicit context window — both
+ * keys are required (either alone is clamped back to 200k), and Claude Code
+ * only honors them for non-`claude-` prefixed model ids. Explicit user values
+ * are never overwritten; when switching away, only values equal to what a
+ * previous apply injected are stripped.
+ */
+function applyClaudeContextWindow(
+  env: Record<string, unknown>,
+  baseUrl: string | null,
+  model: ModelProfile,
+  previousContextWindow: number | null
+): void {
+  const target = claudeContextWindowTarget(baseUrl, model);
+  if (target !== null) {
+    const value = String(target);
+    env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ??= value;
+    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??= value;
+    return;
+  }
+  // Kimi predates the applied-provider pointer, so its injected default is
+  // always treated as managed even when no pointer records it.
+  const managed = new Set<string>([kimiCodingContextTokens]);
+  if (previousContextWindow !== null) managed.add(String(previousContextWindow));
+  for (const key of ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"] as const) {
+    const value = env[key];
+    if (typeof value === "string" && managed.has(value)) delete env[key];
+  }
+}
+
+/**
+ * Codex only sends `model_reasoning_effort` to models it natively recognizes
+ * as reasoning-capable (gpt-5, o3, o4-mini, codex-*). Third-party models may
+ * have their own effort vocabularies (e.g. Qwen uses "xhigh"/"medium"/"low")
+ * and will reject unsupported values with a 400 error.
+ */
+function codexNativeReasoningModel(modelId: string): boolean {
+  const lower = modelId.toLowerCase();
+  return lower.startsWith("gpt-5")
+    || lower.startsWith("o3")
+    || lower.startsWith("o4-mini")
+    || lower.startsWith("codex-");
+}
+
+function claudeContextWindowTarget(baseUrl: string | null, model: ModelProfile | null): number | null {
+  // Claude Code ignores the overrides for catalog-prefixed ids.
+  if (model && model.modelId.toLowerCase().startsWith("claude-")) return null;
+  if (model?.contextWindow && model.contextWindow > 0) return model.contextWindow;
+  if (isKimiCodingEndpoint(baseUrl)) return Number(kimiCodingContextTokens);
+  if (isMinimaxAnthropicEndpoint(baseUrl)) return minimaxAnthropicContextTokens;
+  return null;
+}
+
+function isKimiCodingEndpoint(baseUrl: string | null): boolean {
+  if (!baseUrl) return false;
+  try {
+    const url = new URL(baseUrl);
+    return url.hostname.toLowerCase() === "api.kimi.com" && url.pathname.startsWith("/coding");
+  } catch {
+    return false;
+  }
+}
+
+function isMinimaxAnthropicEndpoint(baseUrl: string | null): boolean {
+  if (!baseUrl) return false;
+  try {
+    const url = new URL(baseUrl);
+    const host = url.hostname.toLowerCase();
+    return (host === "api.minimaxi.com" || host === "api.minimax.io")
+      && url.pathname.startsWith("/anthropic");
+  } catch {
+    return false;
+  }
 }
 
 function parseDocument(fileType: "json" | "toml", content: string, targetPath: string): Record<string, unknown> {
@@ -434,21 +803,19 @@ function serializeDocument(fileType: "json" | "toml", doc: Record<string, unknow
 }
 
 /** Masks credential values so previews never surface plaintext secrets. */
-function maskSecrets(target: ApplyTarget, content: string): string {
-  const doc = parseDocument(target.fileType, content, target.targetPath);
-  if (target.role === "auth") {
-    maskValue(doc, "OPENAI_API_KEY");
-    return serializeDocument(target.fileType, doc);
-  }
+export function maskSecrets(fileType: "json" | "toml", content: string): string {
+  const doc = parseDocument(fileType, content, "");
   maskSecretsDeep(doc);
-  return serializeDocument(target.fileType, doc);
+  return serializeDocument(fileType, doc);
 }
 
 function maskSecretsDeep(value: Record<string, unknown>): void {
   for (const [key, child] of Object.entries(value)) {
     const normalized = key.replace(/[^a-z0-9]/giu, "").toLowerCase();
-    if ((normalized === "apikey" || normalized === "authtoken" || normalized.endsWith("apikey")
-      || normalized.endsWith("authtoken"))
+    // Suffix-match instead of a fixed allowlist: api_key / auth_token /
+    // bearer_token / access_token / refresh_token and any future *-key/*-token
+    // field are all masked (cc-switch sensitive-key convention).
+    if ((normalized === "apikey" || normalized.endsWith("apikey") || normalized.endsWith("token"))
       && typeof child === "string" && child.length > 0) {
       value[key] = "[redacted]";
       continue;
@@ -457,10 +824,6 @@ function maskSecretsDeep(value: Record<string, unknown>): void {
       maskSecretsDeep(child as Record<string, unknown>);
     }
   }
-}
-
-function maskValue(doc: Record<string, unknown>, key: string): void {
-  if (typeof doc[key] === "string" && (doc[key] as string).length > 0) doc[key] = "[redacted]";
 }
 
 function diffDocuments(fileType: "json" | "toml", currentContent: string, proposedContent: string): string[] {
@@ -523,7 +886,9 @@ function latestBackupId(dir: string): string | undefined {
 
 function stateDir(): string {
   if (process.env.NODE_TEST_CONTEXT) return path.join(tmpdir(), `forgebadger-test-${process.pid}`);
-  return path.resolve(process.env.FORGEBADGER_STATE_DIR ?? path.join(homedir(), ".forgebadger"));
+  return path.resolve(expandUserPath(
+    process.env.FORGEBADGER_STATE_DIR ?? path.join(homedir(), ".forgebadger")
+  ));
 }
 
 async function withInProcessLock<T>(key: string, action: () => Promise<T>): Promise<T> {
@@ -549,12 +914,37 @@ function normalizeProviderKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "") || "provider";
 }
 
-function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId): string | null {
-  if (adapter === "claude") return provider.anthropicBaseUrl ?? provider.baseUrl;
-  if (adapter === "opencode" && provider.apiFormat === "anthropic") {
+export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId): string | null {
+  if (adapter === "claude") {
+    return provider.anthropicBaseUrl
+      ?? (provider.apiFormat === "anthropic" ? provider.baseUrl : provider.openaiBaseUrl ?? provider.baseUrl);
+  }
+  if ((adapter === "opencode" || adapter === "kimi") && provider.apiFormat === "anthropic") {
     return provider.anthropicBaseUrl ?? provider.baseUrl;
   }
   return provider.openaiBaseUrl ?? provider.baseUrl;
+}
+
+/**
+ * Kimi Code provider types (official configuration docs): "kimi" is
+ * Moonshot's OpenAI-compatible protocol (managed service + Kimi Platform
+ * keys), "anthropic" speaks the Anthropic Messages protocol, and "openai"
+ * covers generic Chat Completions relays.
+ */
+function kimiProviderType(apiFormat: ProviderProfile["apiFormat"], baseUrl: string | null): string {
+  if (apiFormat === "anthropic") return "anthropic";
+  if (isMoonshotEndpoint(baseUrl)) return "kimi";
+  return "openai";
+}
+
+function isMoonshotEndpoint(baseUrl: string | null): boolean {
+  if (!baseUrl) return false;
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === "api.moonshot.ai" || host === "api.moonshot.cn" || host === "api.kimi.com";
+  } catch {
+    return false;
+  }
 }
 
 function openCodePackage(apiFormat: ProviderProfile["apiFormat"]): string {

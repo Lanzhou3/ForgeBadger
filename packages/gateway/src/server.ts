@@ -1,3 +1,4 @@
+import { createNativeFeishuRuntime, type NativeFeishuIO } from './services/channels/native-feishu-runtime.js';
 import express from "express";
 import { createServer as createHttpServer, type Server } from "node:http";
 
@@ -12,8 +13,9 @@ import type { CommandRunner } from "./lib/dependency-check.js";
 import type { FeishuChannelRuntime } from "./services/integrations/feishu-channel-runtime.js";
 import type { RegistrationMode } from "./routes/auth.js";
 import type { LocalAccountRecovery } from "./services/local-account-recovery.js";
-import type { TerminalMultiplexerRuntime } from "./services/terminal-multiplexer-runtime.js";
 import type { AgentStackDeps } from "./services/agent/agent-stack.js";
+import { startAutomationScheduler, type AutomationScheduler } from "./services/automation/scheduler.js";
+import { startCopilotRuntime } from "./services/agent/runtime.js";
 import { RuntimeAuthorizationInvalidator } from "./services/runtime-authorization-invalidation.js";
 
 import { mountRoutes } from "./routes/index.js";
@@ -29,10 +31,13 @@ export interface ServerDeps {
   appVersion: string;
   adapterCommandRunner?: CommandRunner | undefined;
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
+  nativeFeishuIO?: NativeFeishuIO;
   registrationMode?: RegistrationMode | undefined;
   accountRecovery?: LocalAccountRecovery | undefined;
   copilotAgent?: AgentStackDeps | undefined;
   runtimeAuthorizationInvalidator: RuntimeAuthorizationInvalidator;
+  /** Mounts the external MCP endpoint (/mcp) and its token management routes. */
+  mcpEnabled?: boolean | undefined;
 }
 
 export interface GatewayApp {
@@ -55,12 +60,23 @@ export interface GatewayAppOptions {
   appVersion?: string;
   adapterCommandRunner?: CommandRunner | undefined;
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
+  nativeFeishuIO?: NativeFeishuIO;
   registrationMode?: RegistrationMode | undefined;
   accountRecovery?: LocalAccountRecovery | undefined;
-  terminalRuntime?: TerminalMultiplexerRuntime | undefined;
   runtimeAuthorizationInvalidator?: RuntimeAuthorizationInvalidator | undefined;
+  /** Session Server IPC endpoint for WebSocket terminal I/O (required: it is the single terminal backend). */
+  sessionServerIpcPath: string;
+  /**
+   * Explicit Session Server handshake token for the terminal I/O stream.
+   * Production leaves this unset — SessionServerPty reads the state-dir token
+   * file (which survives daemon token rotation). Tests inject it directly.
+   */
+  sessionServerToken?: string | undefined;
+  sessionServerTokenPath?: string | undefined;
   /** Test-only model transport seam for the native Copilot runtime. */
   llmFetch?: typeof fetch | undefined;
+  /** Mounts the external MCP endpoint (/mcp) and its token management routes. */
+  mcpEnabled?: boolean | undefined;
 }
 
 export function createServer(deps: ServerDeps): express.Express {
@@ -83,6 +99,11 @@ export function createServer(deps: ServerDeps): express.Express {
     next();
   });
 
+  // The Claude route data plane carries Anthropic payloads with inlined image
+  // blocks (multi-MB); keep the management API at the default body limit.
+  // Workspace file edits can carry up to 1 MB of content (plus JSON overhead).
+  app.use("/v1", express.json({ limit: "64mb" }));
+  app.use("/api/v1/projects/*/workspace/file", express.json({ limit: "2mb" }));
   app.use(express.json());
 
   mountRoutes(app, deps);
@@ -98,7 +119,6 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const eventBus = options.eventBus ?? new ForgeBadgerEventBus();
   const runtimeAuthorizationInvalidator = options.runtimeAuthorizationInvalidator
     ?? new RuntimeAuthorizationInvalidator();
-  const recoveryReady = Promise.resolve();
   const copilotAgent: AgentStackDeps = {
     db: options.db,
     masterKey: options.masterKey,
@@ -107,6 +127,10 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     ...(options.adapterCommandRunner ? { adapterCommandRunner: options.adapterCommandRunner } : {}),
     ...(options.llmFetch ? { llmFetch: options.llmFetch } : {})
   };
+
+  const copilotRuntime = startCopilotRuntime(copilotAgent);
+  const recoveryReady = copilotRuntime.ready;
+  const feishuChannelRuntime = options.feishuChannelRuntime ?? createNativeFeishuRuntime(options.db,options.masterKey,options.nativeFeishuIO);
 
   const app = createServer({
     db: options.db,
@@ -117,27 +141,41 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     eventBus,
     appVersion: options.appVersion ?? "0.0.0",
     adapterCommandRunner: options.adapterCommandRunner,
-    feishuChannelRuntime: options.feishuChannelRuntime,
+    feishuChannelRuntime,
     registrationMode: options.registrationMode,
     accountRecovery: options.accountRecovery,
     copilotAgent,
-    runtimeAuthorizationInvalidator
+    runtimeAuthorizationInvalidator,
+    mcpEnabled: options.mcpEnabled
   });
 
   const server = createHttpServer(app);
   let closed = false;
   attachNotificationPersistence({ db: options.db, eventBus });
+  // The automation scheduler runs only when the native Copilot harness is
+  // mounted (same gate as the /api/v1/copilot routes).
+  const automationScheduler: AutomationScheduler | undefined = copilotAgent
+    ? startAutomationScheduler(copilotAgent)
+    : undefined;
+
+  // The Session Server is the single terminal backend; the terminal
+  // WebSocket handler relays browser I/O to it over IPC.
   attachTerminalWebSocket({
     server,
     sessionManager,
     jwtSecret,
     db: options.db,
     runtimeAuthorizationInvalidator,
-    ...(options.terminalRuntime ? { terminalRuntime: options.terminalRuntime } : {})
+    sessionServerIpcPath: options.sessionServerIpcPath,
+    ...(options.sessionServerTokenPath ? { sessionServerTokenPath: options.sessionServerTokenPath } : {}),
+    ...(options.sessionServerToken !== undefined
+      ? { sessionServerToken: options.sessionServerToken }
+      : {})
   });
+
   attachEventsWebSocket({ server, eventBus, jwtSecret, db: options.db });
   // Opening the provider connection is intentionally last.
-  void options.feishuChannelRuntime?.start().catch(() => {
+  void feishuChannelRuntime.start().catch(() => {
     console.error("[feishu-runtime] startup failed", { code: "FEISHU_RUNTIME_START_FAILED" });
   });
 
@@ -159,7 +197,9 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
         () => ({ ok: true as const }),
         (error: unknown) => ({ ok: false as const, error })
       );
-      await runShutdownStage(failures, () => options.feishuChannelRuntime?.stop());
+      await runShutdownStage(failures, () => feishuChannelRuntime.stop());
+      automationScheduler?.stop();
+      await runShutdownStage(failures, () => copilotRuntime.stop());
       const httpResult = await httpCloseResult;
       if (!httpResult.ok) {
         failures.push(httpResult.error);

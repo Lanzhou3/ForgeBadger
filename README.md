@@ -13,7 +13,7 @@ usage visibility, and session history across Claude Code, OpenCode, Codex,
 and Kimi Code.
 
 ForgeBadger is built for self-hosted developer machines and private workspaces.
-The Gateway owns filesystem access, SQLite persistence, terminal-multiplexer sessions,
+The Gateway owns filesystem access, SQLite persistence, terminal sessions,
 WebSocket terminal traffic, encryption, and CLI process lifecycle. The Web
 console is a pure Next.js SPA that talks to the Gateway over HTTP and
 WebSocket.
@@ -56,8 +56,8 @@ identifiers.
 - Keep long-running AI CLI work visible and recoverable from a browser.
 - Manage Claude Code, OpenCode, Codex, and Kimi Code sessions without mixing their local
   config files by hand.
-- Keep terminal persistence in the host multiplexer—tmux on macOS/Linux/WSL,
-  psmux on native Windows—not in a browser tab or database log.
+- Keep terminal persistence in the embedded Session Server—not in a browser
+  tab or database log.
 - Centralize project templates, Agents, Skills, API keys, models, and local
   diagnostics in one developer control surface.
 - Stay local-first: secrets, project paths, terminal processes, and SQLite
@@ -67,8 +67,11 @@ identifiers.
 
 - Project create/import flows with AI tool config generation and compliance
   checks.
-- Multiplexer-backed terminal sessions that survive browser disconnects and
-  Gateway restarts: tmux on macOS/Linux/WSL and psmux on native Windows.
+- Extract a project's AI CLI config into a reusable template, pick a template
+  when creating or importing a project, and import template repos from public
+  Git repositories.
+- Session Server-backed terminal sessions that survive browser disconnects and
+  Gateway restarts, with no external terminal runtime to install.
 - Adapter discovery and gated session launch for Claude Code, OpenCode, Codex,
   and Kimi Code.
 - Provider model profiles with encrypted API key storage and live model sync
@@ -88,8 +91,7 @@ identifiers.
 Browser xterm.js
   -> WebSocket
   -> Gateway
-  -> node-pty
-  -> tmux attach (macOS/Linux/WSL) or psmux attach (native Windows)
+  -> embedded Session Server (node-pty)
   -> AI CLI process
 ```
 
@@ -98,7 +100,7 @@ Repository layout:
 ```text
 packages/
   cli/       npm-distributed ForgeBadger CLI wrapper
-  gateway/   Express, WebSocket, tmux-or-psmux/node-pty, SQLite, adapters, services
+  gateway/   Express, WebSocket, Session Server/node-pty, SQLite, adapters, services
   web/       Next.js App Router, React, Tailwind CSS, xterm.js
 docs/        architecture, release, smoke-test, trial, and localized docs
 templates/   built-in AI CLI configuration templates
@@ -109,39 +111,19 @@ Key rules:
 - Gateway and Web are separate services. Gateway API behavior does not live in
   Next.js API routes.
 - REST APIs are under `/api/v1`; terminal traffic uses `/ws/terminal/:sessionId`.
-- tmux (macOS/Linux/WSL) or psmux (native Windows) is the persistence layer for
-  terminal sessions.
-- Terminal history is recovered from multiplexer `capture-pane`, not stored in SQLite.
+- The embedded Session Server is the persistence layer for terminal sessions.
+- Terminal history is recovered from the Session Server's rendered screen, not
+  stored in SQLite.
 - API keys are decrypted only in Gateway memory and injected into CLI sessions
-  through multiplexer environment variables.
+  through the session launch environment.
 
 ## Requirements
 
 - Node.js 20.12 through 24
 - pnpm 10 or newer for source development
-- tmux 3.2 or newer on macOS, Linux, or WSL
-- psmux 3.3.8 or newer on native Windows
 - SQLite-compatible local filesystem
 - Claude Code, OpenCode, Codex, and/or Kimi Code installed on `PATH` for real AI CLI
   sessions
-
-Native Windows uses [psmux](https://github.com/psmux/psmux); WSL continues to
-use tmux. If psmux is missing, install it with the official WinGet package:
-
-```powershell
-winget install --id marlocarlo.psmux --exact --source winget
-```
-
-If psmux is older than 3.3.8, upgrade it with:
-
-```powershell
-winget upgrade --id marlocarlo.psmux --exact --source winget
-```
-
-See the [psmux compatibility documentation](https://github.com/psmux/psmux/blob/master/docs/compatibility.md),
-[psmux v3.3.8 release](https://github.com/psmux/psmux/releases/tag/v3.3.8),
-[tmux install guide](https://github.com/tmux/tmux/wiki/installing), and
-[Microsoft WinGet install documentation](https://learn.microsoft.com/en-us/windows/package-manager/winget/install).
 
 ## Install From npm
 
@@ -154,21 +136,14 @@ forgebadger start
 Open the Web console at the URL printed by `forgebadger start`.
 
 The interactive `start` / `init` preflight prints a dependency-free ForgeBadger
-text logo before any environment probe, then reports the terminal-runtime check
-as a short two-stage flow. Color is used only on a capable TTY; redirected,
-`NO_COLOR`, and `TERM=dumb` output stays plain text.
+text logo before any environment probe. Color is used only on a capable TTY;
+redirected, `NO_COLOR`, and `TERM=dumb` output stays plain text.
 
 The npm package postinstall does not install system software. `forgebadger
-doctor` only reports dependency state. When `forgebadger start` or
-`forgebadger init` detects a missing terminal runtime, it shows the fixed
-official/package-manager command and asks before running it. Installation runs
-only in an interactive TTY outside CI, defaults to No, requires an explicit
-`y`/`yes`, and rechecks the runtime afterward. If the runtime is still not
-ready, the command exits non-zero before creating runtime/project state or
-starting Gateway/Web. `forgebadger doctor` is read-only: inspecting an empty
+doctor` only reports dependency state, including whether the bundled `node-pty`
+native module loads; if it does not, reinstall ForgeBadger to rebuild native
+modules. `forgebadger doctor` is read-only: inspecting an empty
 state directory does not create config, secrets, databases, or directories.
-Linux detection is limited to the fixed `apt-get`, `dnf`, `yum`, `pacman`,
-`zypper`, and `apk` allowlist.
 Install Claude Code, OpenCode, Codex, or Kimi Code separately and make sure the
 tools you plan to use are available on `PATH`.
 
@@ -230,8 +205,9 @@ regression set (`test/model-provider-routes.test.ts`,
 `test/codex-provider-env.test.ts`, `test/session-adapter-decoupling.test.ts`)
 plus the Web provider tests and `packages/web/e2e/models.spec.ts` against a
 real loopback Gateway and Next composition. A real OpenAI-provider smoke,
-native Codex-account smoke, and native Windows psmux lifecycle remain external
-evidence; unit/mocked coverage must not be reported as those real-host results.
+native Codex-account smoke, and native Windows Session Server lifecycle remain
+external evidence; unit/mocked coverage must not be reported as those real-host
+results.
 
 ## Documentation
 

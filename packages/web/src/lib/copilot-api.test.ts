@@ -47,6 +47,19 @@ describe("copilot api client", () => {
     );
   });
 
+  it("binds authority only when creating a new conversation", async () => {
+    await createConversation(undefined, "grant-1");
+    expect(fetch).toHaveBeenCalledWith(
+      `${BASE}/api/v1/copilot/conversations`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ grantId: "grant-1" }) })
+    );
+    await sendMessage("conv-1", "continue");
+    expect(fetch).toHaveBeenLastCalledWith(
+      `${BASE}/api/v1/copilot/conversations/conv-1/messages`,
+      expect.objectContaining({ body: JSON.stringify({ content: "continue" }) })
+    );
+  });
+
   it("lists messages for a conversation", async () => {
     await listMessages("conv-1");
     expect(fetch).toHaveBeenCalledWith(

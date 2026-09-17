@@ -188,7 +188,7 @@ export const REQUIRED_MARKDOWN_PHRASES = [
   "Startup path:",
   "ForgeBadger version or commit:",
   "node --version",
-  "tmux -V",
+  "Terminal backend",
   "claude --version",
   "forgebadger doctor",
   "Owner:",

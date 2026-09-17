@@ -68,7 +68,7 @@ function clickRobot(robot: HTMLElement) {
   fireEvent.pointerUp(robot, { clientX: 500, clientY: 500 });
 }
 
-function dispatchCliNotification() {
+function dispatchCliNotification(notificationId = "notif-1", message = "Build finished") {
   act(() => {
     window.dispatchEvent(
       new CustomEvent(FORGEBADGER_GATEWAY_EVENT, {
@@ -77,8 +77,8 @@ function dispatchCliNotification() {
           payload: {
             notification_type: "task_completed",
             session_id: "sess-1",
-            notification_id: "notif-1",
-            message: "Build finished",
+            notification_id: notificationId,
+            message,
           },
         },
       })
@@ -132,5 +132,47 @@ describe("RobotWidget activation", () => {
     // The bubble is dismissed locally instead of navigating to its href.
     expect(routerPushMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "打开会话" })).toBeNull();
+  });
+});
+
+describe("RobotWidget bubble queue", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("shows the queued bubble after the head is dismissed without marking it read", async () => {
+    renderWidget();
+
+    dispatchCliNotification("notif-1", "First build finished");
+    await waitFor(() => expect(screen.getByText(/First build finished/)).toBeTruthy());
+    dispatchCliNotification("notif-2", "Second build finished");
+
+    // Only the head of the queue is rendered.
+    expect(screen.queryByText(/Second build finished/)).toBeNull();
+
+    // Dismiss the head via the X button: no markRead, next bubble shows.
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+    await waitFor(() => expect(screen.getByText(/Second build finished/)).toBeTruthy());
+    expect(screen.queryByText(/First build finished/)).toBeNull();
+    expect(markReadMock).not.toHaveBeenCalled();
+  });
+
+  it("marks only the head as read when opening its session", async () => {
+    renderWidget();
+
+    dispatchCliNotification("notif-1", "First build finished");
+    await waitFor(() => expect(screen.getByText(/First build finished/)).toBeTruthy());
+    dispatchCliNotification("notif-2", "Second build finished");
+
+    fireEvent.click(screen.getByRole("button", { name: "打开会话" }));
+
+    expect(markReadMock).toHaveBeenCalledTimes(1);
+    expect(markReadMock).toHaveBeenCalledWith("notif-1");
+    expect(routerPushMock).toHaveBeenCalledWith("/sessions/sess-1");
+    // The next queued bubble takes over the display.
+    await waitFor(() => expect(screen.getByText(/Second build finished/)).toBeTruthy());
   });
 });

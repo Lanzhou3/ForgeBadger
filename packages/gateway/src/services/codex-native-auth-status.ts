@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { buildSanitizedMultiplexerEnv } from "./terminal-multiplexer-runtime.js";
+import { buildSanitizedEnv } from "./session-server/env-policy.js";
 
 export type CodexNativeAuthState = "ready" | "not_authenticated" | "cli_missing" | "unknown";
 export type CodexNativeAuthMethod = "chatgpt" | "api" | "unknown";
@@ -63,7 +63,7 @@ export async function observeCodexNativeAuthStatus(options: {
   try {
     const result = await (options.run ?? runCodexStatus)(
       "codex", ["login", "status"], controller.signal,
-      { env: buildSanitizedMultiplexerEnv(process.env) }
+      { env: buildSanitizedEnv(process.env) }
     );
     const output = `${result.stdout}\n${result.stderr}`;
     if (/not\s+(?:logged|signed)\s+in|unauthenticated/iu.test(output)) {

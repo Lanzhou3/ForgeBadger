@@ -1,8 +1,10 @@
 import {
+  checkAdapterCommand,
   checkForgeBadgerRuntimeDependencies,
+  describeTerminalRuntime,
   type CommandRunner,
   type DependencyStatus,
-  type TerminalRuntimeStatus
+  type TerminalBackendHealth
 } from "../lib/dependency-check.js";
 
 export type AdapterId = "claude" | "opencode" | "codex" | "kimi";
@@ -20,7 +22,7 @@ export interface AdapterDefinition {
 
 export interface AdapterDiscoveryResult extends AdapterDefinition {
   available: boolean;
-  status: "available" | "missing";
+  status: "available" | "missing" | "check_failed";
   version?: string;
   error?: string;
 }
@@ -93,22 +95,22 @@ export function getAdapterDefinition(adapterId: AdapterId): AdapterDefinition {
 export async function getAdapterLaunchStatus(
   adapterId: AdapterId,
   runner?: CommandRunner,
-  platform: NodeJS.Platform = process.platform
+  backendHealth?: TerminalBackendHealth
 ): Promise<AdapterDiscoveryResult> {
   const definition = getAdapterDefinition(adapterId);
-  const report = await checkForgeBadgerRuntimeDependencies(runner, platform);
+  const status = await checkAdapterCommand(definition.command, definition.versionArgs, runner);
   return toAdapterDiscoveryResult(
     definition,
-    getDependencyStatus(report.dependencies, definition.command),
-    report.terminalRuntime
+    status,
+    describeTerminalRuntime(backendHealth)
   );
 }
 
 export async function discoverAdapters(
   runner?: CommandRunner,
-  platform: NodeJS.Platform = process.platform
+  backendHealth?: TerminalBackendHealth
 ): Promise<AdapterDiscoveryResult[]> {
-  const report = await checkForgeBadgerRuntimeDependencies(runner, platform);
+  const report = await checkForgeBadgerRuntimeDependencies(runner, backendHealth);
   return adapterDefinitions.map((definition) =>
     toAdapterDiscoveryResult(
       definition,
@@ -129,7 +131,7 @@ function getDependencyStatus(dependencies: DependencyStatus[], command: string):
 function toAdapterDiscoveryResult(
   definition: AdapterDefinition,
   status: DependencyStatus,
-  terminalRuntime: TerminalRuntimeStatus
+  terminalRuntime: { supported: boolean; message: string }
 ): AdapterDiscoveryResult {
   const terminalLaunchSupported = !definition.runtimeModes.includes("terminal") || terminalRuntime.supported;
   const terminalError = terminalLaunchSupported ? undefined : terminalRuntime.message;
@@ -140,7 +142,7 @@ function toAdapterDiscoveryResult(
     runtimeModes: [...definition.runtimeModes],
     launchEnabled: definition.launchEnabled && status.available && terminalLaunchSupported,
     available: status.available,
-    status: status.available ? "available" : "missing",
+    status: status.available ? "available" : status.checkFailed ? "check_failed" : "missing",
     ...(status.version ? { version: status.version } : {}),
     ...(error ? { error } : {})
   };

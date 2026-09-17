@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit";
 import type { Terminal as TerminalInstance } from "@xterm/xterm";
+import { ArrowDown } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 
+import { useTerminalWriter } from "@/hooks/use-terminal-writer";
 import { Button } from "@/components/ui/button";
 import { SessionOutputHistory } from "@/components/sessions/session-output-history";
 import { useLanguage } from "@/hooks/use-language";
+import { updateSessionLastPrompt } from "@/lib/api";
 import { resolveWheelAction } from "@/lib/terminal-scroll";
 import { copySelectedTerminalText, shouldCopyTerminalSelection } from "@/lib/terminal-copy";
 import { createTerminalInputMessage, createTerminalResizeMessage } from "@/lib/terminal-messages";
@@ -26,6 +30,15 @@ type ConnectionStatus =
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000];
+/**
+ * xterm latches `isUserScrolling` on any upward scroll and then never follows
+ * output again until the user returns to the very bottom. Trackpad momentum
+ * can set that latch unnoticed, and a large commit burst (e.g. Codex flushing
+ * a finished task into scrollback) then leaves the viewport stranded at the
+ * top/middle. New output re-pins the viewport to the bottom unless the user
+ * actively scrolled up within this window.
+ */
+const AUTO_STICK_WINDOW_MS = 10_000;
 /** Fonts and dev-mode CSS can settle right after the socket opens; re-fit once
  * shortly after connect so the server-side window converges to the real pane. */
 const RESIZE_SETTLE_DELAY_MS = 400;
@@ -50,6 +63,10 @@ export function TerminalView({
   onHistoryClose?: () => void;
 }) {
   const { t } = useLanguage();
+  const writer = useTerminalWriter(sessionId);
+  const queryClient = useQueryClient();
+  const writerRef = useRef(writer);
+  writerRef.current = writer;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<TerminalInstance | null>(null);
   const fitAddonRef = useRef<FitAddonInstance | null>(null);
@@ -61,16 +78,62 @@ export function TerminalView({
   const promptCaptureRef = useRef(createTerminalPromptCapture());
   const lastSentSizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const mountedRef = useRef(true);
+  const lastWheelUpAtRef = useRef(0);
+  const atBottomRef = useRef(true);
 
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [attemptCount, setAttemptCount] = useState(0);
   const [terminalReady, setTerminalReady] = useState(false);
+  const [atBottom, setAtBottom] = useState(true);
+
+  /* Fire-and-forget: the session board prefers the freshest prompt, so report
+     terminal input to the Gateway without blocking the input path. */
+  const reportSessionPrompt = useCallback(
+    (id: string, prompt: string) => {
+      void updateSessionLastPrompt(id, prompt)
+        .then(() => queryClient.invalidateQueries({ queryKey: ["sessions-board"] }))
+        .catch((error) => {
+          console.warn("Failed to report session last prompt", error);
+        });
+    },
+    [queryClient]
+  );
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
+  }, []);
+
+  const syncAtBottom = useCallback(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const buffer = terminal.buffer.active;
+    const next = buffer.type !== "normal" || buffer.viewportY >= buffer.baseY;
+    if (atBottomRef.current !== next) {
+      atBottomRef.current = next;
+      setAtBottom(next);
+    }
+  }, []);
+
+  const stickToBottomUnlessUserScrolled = useCallback(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const buffer = terminal.buffer.active;
+    if (buffer.type !== "normal" || buffer.viewportY >= buffer.baseY) return;
+    if (Date.now() - lastWheelUpAtRef.current < AUTO_STICK_WINDOW_MS) return;
+    terminal.scrollToBottom();
+    syncAtBottom();
+  }, [syncAtBottom]);
+
+  const handleScrollToBottom = useCallback(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.scrollToBottom();
+    lastWheelUpAtRef.current = 0;
+    atBottomRef.current = true;
+    setAtBottom(true);
   }, []);
 
   /**
@@ -118,7 +181,7 @@ export function TerminalView({
     socketRef.current = socket;
 
     socket.addEventListener("open", () => {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || socketRef.current !== socket) return;
       attemptCountRef.current = 0;
       setAttemptCount(0);
       setStatus("connected");
@@ -126,7 +189,7 @@ export function TerminalView({
       lastSentSizeRef.current = null;
       fitAndSendResize(true);
       // Layout can settle right after open (fonts, dev-mode CSS); re-fit once
-      // and push any correction so the tmux window converges to the real pane.
+      // and push any correction so the terminal window converges to the real pane.
       window.setTimeout(() => {
         if (mountedRef.current) fitAndSendResize();
       }, RESIZE_SETTLE_DELAY_MS);
@@ -134,25 +197,51 @@ export function TerminalView({
 
     socket.addEventListener("message", (event) => {
       const terminal = terminalRef.current;
-      if (!terminal) return;
+      if (!terminal || !mountedRef.current || socketRef.current !== socket) return;
 
       const message = parseTerminalWebSocketMessage(String(event.data));
       if (!message) return;
 
-      if (message.type === "terminal_output") {
-        terminal.write(message.payload.data);
+      if (message.type === "terminal_history") {
+        // Scrollback replay, always sent before the live attach stream. Reset
+        // first: on a socket reconnect the same xterm instance is reused, and
+        // replaying on top of the old buffer would duplicate every line (and,
+        // if a full-screen TUI had switched xterm to the alternate buffer,
+        // corrupt the live frame). The reset leaves a clean normal buffer for
+        // the history; the live repaint that follows paints the current UI.
+        terminal.reset();
+      }
+
+      if (message.type === "terminal_history" || message.type === "terminal_output") {
+        stickToBottomUnlessUserScrolled();
+        terminal.write(message.payload.data, () => {
+          syncAtBottom();
+          if (message.payload.sequence !== undefined && mountedRef.current && socketRef.current === socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "terminal_ack", payload: { sequence: message.payload.sequence } }));
+          }
+        });
+      }
+
+      if (message.type === "terminal_exit") {
+        clearReconnectTimer();
+        replaceTerminalInputListener(inputDisposableRef, null);
+        socketRef.current = null;
+        socket.close(1000);
+        setStatus("disconnected");
+        writerRef.current.refresh();
       }
 
       if (message.type === "terminal_error") {
+        writerRef.current.refresh();
         terminal.writeln(`\r\n[forgebadger] ${message.payload.message}`);
       }
     });
 
     socket.addEventListener("close", (event) => {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || socketRef.current !== socket) return;
       socketRef.current = null;
 
-      if (event.wasClean) {
+      if ([1000, 4000, 4403, 4404].includes(event.code) || (event.wasClean && ![1011, 4001].includes(event.code))) {
         replaceTerminalInputListener(inputDisposableRef, null);
         setStatus("disconnected");
         return;
@@ -180,10 +269,12 @@ export function TerminalView({
     if (terminal) {
       replaceTerminalInputListener(inputDisposableRef, null);
       const disposable = terminal.onData((data) => {
+        if (writerRef.current.readOnly) return;
         const prompt = promptCaptureRef.current.push(data);
         if (prompt) {
           setSessionTabPrompt(sessionId, prompt);
           notifySessionTabsChanged();
+          reportSessionPrompt(sessionId, prompt);
         }
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(createTerminalInputMessage(data));
@@ -191,7 +282,7 @@ export function TerminalView({
       });
       replaceTerminalInputListener(inputDisposableRef, disposable);
     }
-  }, [sessionId, authToken, attachToken, terminalReady, fitAndSendResize]);
+  }, [sessionId, authToken, attachToken, terminalReady, fitAndSendResize, clearReconnectTimer, stickToBottomUnlessUserScrolled, syncAtBottom, reportSessionPrompt]);
 
   const handleManualReconnect = useCallback(() => {
     clearReconnectTimer();
@@ -208,6 +299,10 @@ export function TerminalView({
   // Initialize terminal instance once
   useEffect(() => {
     let cancelled = false;
+    let scrollDisposable: { dispose(): void } | null = null;
+    const onWheelCapture = (event: WheelEvent) => {
+      if (event.deltaY < 0) lastWheelUpAtRef.current = Date.now();
+    };
     const timer = window.setTimeout(() => {
       void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]).then(
         ([xterm, fit]) => {
@@ -256,6 +351,10 @@ export function TerminalView({
           terminal.open(host);
           terminalRef.current = terminal;
           fitAddonRef.current = fitAddon;
+          scrollDisposable = terminal.onScroll(syncAtBottom);
+          // Track upward wheel intent (incl. trackpad momentum) so output can
+          // re-pin the viewport once the user has not scrolled for a while.
+          host.addEventListener("wheel", onWheelCapture, { capture: true, passive: true });
 
           window.requestAnimationFrame(() => {
             if (cancelled) return;
@@ -270,11 +369,13 @@ export function TerminalView({
       cancelled = true;
       window.clearTimeout(timer);
       setTerminalReady(false);
+      scrollDisposable?.dispose();
+      hostRef.current?.removeEventListener("wheel", onWheelCapture, { capture: true });
       terminalRef.current?.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, []);
+  }, [syncAtBottom]);
 
   // Manage connection lifecycle
   useEffect(() => {
@@ -354,7 +455,7 @@ export function TerminalView({
     <div
       data-testid="terminal-frame"
       className={cn(
-        "grid h-full min-h-0 overflow-hidden rounded-lg border border-border bg-[#05070a]",
+        "grid h-full min-h-0 overflow-hidden bg-[#05070a]",
         showStatusBar ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]"
       )}
     >
@@ -388,12 +489,41 @@ export function TerminalView({
           the host's computed width/height (border-box under Tailwind preflight)
           without subtracting host padding, so padding here would overshoot
           cols/rows and clip the rightmost character column. */}
-      <div className="relative h-full min-h-0 overflow-hidden p-2">
+      <div className="relative flex h-full min-h-0 flex-col overflow-hidden p-2">
+        {writer.readOnly && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 p-2 text-xs text-amber-300" role="status">
+            <span>
+              {writer.loading
+                ? "正在检查终端写入权限…"
+                : writer.error
+                  ? "写入状态同步失败，终端保持只读。"
+                  : "Copilot 正在操作此工作区，终端只读。"}
+            </span>
+            <Button size="sm" variant="outline" disabled={writer.loading || writer.takingOver} onClick={writer.takeover}>
+              接管终端
+            </Button>
+            <Button size="sm" variant="ghost" onClick={writer.refresh}>刷新状态</Button>
+            {writer.error && <span role="alert">{writer.error.message}</span>}
+          </div>
+        )}
         <div
           ref={hostRef}
           data-testid="terminal-host"
-          className="h-full min-h-0 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
+          className="min-h-0 flex-1 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
         />
+        {!atBottom && (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={handleScrollToBottom}
+            className="absolute bottom-4 right-4 z-10 gap-1 shadow"
+            aria-label={t("terminal.backToBottom")}
+          >
+            <ArrowDown className="size-3.5" />
+            {t("terminal.backToBottom")}
+          </Button>
+        )}
         {historyOpen && (
           <SessionOutputHistory
             sessionId={sessionId}

@@ -32,7 +32,6 @@ jobs:
       FORGEBADGER_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
       FORGEBADGER_JWT_SECRET: "ci-jwt-secret-not-for-production-32chars"
       NEXT_TELEMETRY_DISABLED: "1"
-      RUN_TMUX_TESTS: "1"
       CI: "true"
 
     steps:
@@ -50,8 +49,6 @@ jobs:
           node-version: "22"
           cache: pnpm
 
-      - name: Install terminal runtime dependency
-        run: sudo apt-get update && sudo apt-get install -y tmux
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -124,8 +121,6 @@ jobs:
           node-version: "22"
           cache: pnpm
 
-      - name: Install terminal runtime dependency
-        run: sudo apt-get update && sudo apt-get install -y tmux
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -150,11 +145,7 @@ jobs:
           {
             echo "## Environment-gated checks"
             echo
-            if command -v tmux >/dev/null 2>&1; then
-              echo "- tmux: available"
-            else
-              echo "- tmux: unavailable; tmux integration smoke is skipped in CI."
-            fi
+            echo "- Terminal backend: bundled Session Server; real OS terminal evidence remains separately gated."
             if command -v claude >/dev/null 2>&1; then
               echo "- Claude Code CLI: available"
             else

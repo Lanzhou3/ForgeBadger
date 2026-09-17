@@ -174,7 +174,9 @@ function openDatabase(dbPath: string) {
 }
 
 function resolveDbPath(dbPath: string): string {
-  return dbPath.startsWith("~/") ? path.join(homedir(), dbPath.slice(2)) : dbPath;
+  if (dbPath === "~") return homedir();
+  if (!dbPath.startsWith("~/") && !dbPath.startsWith("~\\")) return dbPath;
+  return path.join(homedir(), ...dbPath.slice(2).split(/[\\/]+/u).filter(Boolean));
 }
 
 function workspaceRoot(): string {

@@ -2,8 +2,14 @@ import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
+import { expandUserPath } from "../lib/user-path.js";
+
 export class ModelBindingTargetLockError extends Error {
   readonly code = "BINDING_TARGET_LOCKED";
+
+  constructor() {
+    super("Another CLI config operation is in progress; retry in a moment");
+  }
 }
 
 export function acquireModelBindingTargetLock(hash: string): { release(): void } {
@@ -36,7 +42,9 @@ function recoverStaleLock(lockPath: string): boolean {
 
 function stateDir(): string {
   if (process.env.NODE_TEST_CONTEXT) return path.join(tmpdir(), `forgebadger-test-${process.pid}`);
-  return path.resolve(process.env.FORGEBADGER_STATE_DIR ?? path.join(homedir(), ".forgebadger"));
+  return path.resolve(expandUserPath(
+    process.env.FORGEBADGER_STATE_DIR ?? path.join(homedir(), ".forgebadger")
+  ));
 }
 
 function safeUnlink(file: string): void {

@@ -33,10 +33,6 @@ vi.mock("@/components/settings/AccountSecuritySettings", () => ({
   AccountSecuritySettings: () => null,
 }));
 
-vi.mock("@/components/settings/FeishuIntegrationSettings", () => ({
-  FeishuIntegrationSettings: () => null,
-}));
-
 function createQueryClient() {
   return new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -66,48 +62,15 @@ describe("SettingsPage terminal runtime", () => {
     listAuditLogsMock.mockResolvedValue({ auditLogs: [] });
   });
 
-  it("shows the psmux dependency and persistence for a native Windows runtime", async () => {
+  it.each([true, false])("shows built-in terminal persistence (ready=%s)", async (ready) => {
     getDependenciesMock.mockResolvedValue({
-      dependencies: [
-        { name: "tmux", available: false, error: "stale tmux dependency" },
-        { name: "psmux", available: false, error: "psmux is not installed" },
-      ],
-      terminalRuntime: {
-        persistence: "psmux",
-        mode: "psmux_missing",
-        supported: false,
-        message: "psmux is not installed",
-      },
+      dependencies: [{ name: "session-server", available: ready, ...(ready ? { version: "built-in" } : { error: "service unavailable" }) }],
+      terminalRuntime: { persistence: "session-server", mode: ready ? "ready" : "unavailable", supported: ready, message: ready ? "built-in" : "service unavailable" },
     });
-
     renderSettingsPage();
-
-    await waitFor(() => expect(screen.getByText("psmux is not installed")).toBeTruthy());
-    expect(screen.queryByText("stale tmux dependency")).toBeNull();
-    expect(
-      screen.getByText("winget install --id marlocarlo.psmux --exact --source winget")
-    ).toBeTruthy();
-    expect(screen.queryByText("wsl --install")).toBeNull();
-    expect(within(terminalPersistenceRow()).getByText("psmux")).toBeTruthy();
-  });
-
-  it("keeps tmux dependency and persistence messaging on macOS and Linux", async () => {
-    getDependenciesMock.mockResolvedValue({
-      dependencies: [{ name: "tmux", available: true, version: "tmux 3.5a" }],
-      terminalRuntime: {
-        persistence: "tmux",
-        mode: "native_tmux",
-        supported: true,
-        message: "tmux 3.5a",
-      },
-    });
-
-    renderSettingsPage();
-
-    await waitFor(() => expect(screen.getByText("tmux 3.5a")).toBeTruthy());
-    expect(within(terminalPersistenceRow()).getByText("tmux")).toBeTruthy();
-    expect(screen.queryByText(/winget (?:install|upgrade)/)).toBeNull();
-    expect(screen.queryByText("wsl --install")).toBeNull();
+    await waitFor(() => expect(within(terminalPersistenceRow()).getByText("session-server")).toBeTruthy());
+    expect(screen.queryByText(/winget|apt-get|tmux|psmux/)).toBeNull();
+    expect(screen.getByText(ready ? "runtimeSetup.readyDescription" : "runtimeSetup.unavailableDescription")).toBeTruthy();
   });
 
   it("shows an undetected persistence value while terminal runtime discovery is pending", () => {

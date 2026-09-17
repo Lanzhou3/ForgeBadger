@@ -71,12 +71,13 @@ describe("session launch hook credentials", () => {
       }
     } as never);
     const app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
       db,
       sessionManager,
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
-      adapterCommandRunner: async () => ({ exitCode: 0, stdout: "claude", stderr: "" })
+      adapterCommandRunner: async (command: string) => ({ exitCode: 0, stdout: `${command} 3.3.8`, stderr: "" })
     });
     await new Promise<void>((resolve) => {
       server = app.server.listen(0, "127.0.0.1", () => {
@@ -96,7 +97,7 @@ describe("session launch hook credentials", () => {
     db.close();
   });
 
-  it("persists the Claude hook attach token before tmux can emit early hook events", async () => {
+  it("persists the Claude hook attach token before backend can emit early hook events", async () => {
     const token = await register("session-launch-hooks@example.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-session-hook-project-"));
     await mkdir(rootPath, { recursive: true });

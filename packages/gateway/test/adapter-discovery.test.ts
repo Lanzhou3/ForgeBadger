@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { discoverAdapters, listAdapterDefinitions } from "../src/services/adapter-discovery.js";
+import {
+  discoverAdapters,
+  getAdapterLaunchStatus,
+  listAdapterDefinitions
+} from "../src/services/adapter-discovery.js";
 import type { CommandRunner } from "../src/lib/dependency-check.js";
 
 describe("adapter discovery", () => {
@@ -24,7 +28,7 @@ describe("adapter discovery", () => {
   it("enables launch only when the supported adapter command is available", async () => {
     const runner: CommandRunner = async (command) => ({
       exitCode: command === "opencode" ? 127 : 0,
-      stdout: command === "codex" ? "codex 1.0.0\n" : `${command} 1.0.0\n`,
+      stdout: `${command} 1.0.0\n`,
       stderr: command === "opencode" ? "not found" : ""
     });
 
@@ -42,48 +46,56 @@ describe("adapter discovery", () => {
     assert.equal(codex?.launchEnabled, true);
   });
 
-  it("enables terminal launch on native Windows when psmux and adapter commands exist", async () => {
-    const runner: CommandRunner = async (command) => ({
-      exitCode: 0,
-      stdout: command === "psmux" ? "tmux 3.3.8\n" : `${command} 1.0.0\n`,
-      stderr: ""
-    });
+  it("disables launch when the daemon is unavailable even with installed adapters", async () => {
+    const runner: CommandRunner = async (command) => ({ exitCode: 0, stdout: `${command} 1.0`, stderr: "" });
+    const adapters = await discoverAdapters(runner, { available: false, message: "daemon unavailable" });
+    assert.ok(adapters.every((adapter) => adapter.available && !adapter.launchEnabled));
+    assert.match(adapters[0]?.error ?? "", /daemon unavailable/);
+  });
+});
 
-    const adapters = await discoverAdapters(runner, "win32");
+describe("getAdapterLaunchStatus", () => {
+  it("probes only the requested adapter", async () => {
+    const probed: string[] = [];
+    const runner: CommandRunner = async (command) => {
+      probed.push(command);
+      return { exitCode: 0, stdout: `${command} 0.41.0\n`, stderr: "" };
+    };
 
-    assert.equal(adapters.every((adapter) => adapter.available), true);
-    assert.equal(adapters.every((adapter) => adapter.launchEnabled), true);
-    assert.equal(adapters.every((adapter) => adapter.error === undefined), true);
+    const result = await getAdapterLaunchStatus("kimi", runner);
+
+    assert.deepEqual(probed, ["kimi"]);
+    assert.equal(result.available, true);
+    assert.equal(result.status, "available");
+    assert.equal(result.version, "kimi 0.41.0");
+    assert.equal(result.launchEnabled, true);
   });
 
-  it("disables terminal launch on native Windows when psmux is missing", async () => {
-    const runner: CommandRunner = async (command) => ({
-      exitCode: command === "psmux" ? 127 : 0,
-      stdout: command === "psmux" ? "" : `${command} 1.0.0\n`,
-      stderr: command === "psmux" ? "psmux not found" : ""
+  it("reports check_failed when the probe times out", async () => {
+    const runner: CommandRunner = async () => ({
+      exitCode: 124,
+      stdout: "",
+      stderr: "Command timed out after 10000ms"
     });
 
-    const adapters = await discoverAdapters(runner, "win32");
+    const result = await getAdapterLaunchStatus("kimi", runner);
 
-    assert.equal(adapters.every((adapter) => adapter.available), true);
-    assert.equal(adapters.every((adapter) => adapter.launchEnabled === false), true);
-    assert.match(adapters[0]?.error ?? "", /Install psmux/);
+    assert.equal(result.available, false);
+    assert.equal(result.launchEnabled, false);
+    assert.equal(result.status, "check_failed");
+    assert.match(result.error ?? "", /timed out/);
   });
 
-  it("disables terminal launch when tmux is missing on Unix-like hosts", async () => {
-    const runner: CommandRunner = async (command) => ({
-      exitCode: command === "tmux" ? 127 : 0,
-      stdout: command === "tmux" ? "" : `${command} 1.0.0\n`,
-      stderr: command === "tmux" ? "tmux not found" : ""
+  it("reports missing when the command cannot be found", async () => {
+    const runner: CommandRunner = async () => ({
+      exitCode: 127,
+      stdout: "",
+      stderr: "spawn kimi ENOENT"
     });
 
-    const adapters = await discoverAdapters(runner, "linux");
+    const result = await getAdapterLaunchStatus("kimi", runner);
 
-    assert.equal(adapters.every((adapter) => adapter.available), true);
-    assert.equal(adapters.every((adapter) => adapter.launchEnabled === false), true);
-    assert.match(
-      adapters.find((adapter) => adapter.id === "codex")?.error ?? "",
-      /Install tmux/
-    );
+    assert.equal(result.available, false);
+    assert.equal(result.status, "missing");
   });
 });

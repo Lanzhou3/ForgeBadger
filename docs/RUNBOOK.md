@@ -6,7 +6,7 @@ This runbook captures operational checks and failure handling for the MVP-0 Clau
 
 First-user local trial startup now begins in [TRIAL-RUNBOOK.md](TRIAL-RUNBOOK.md).
 Use this runbook for deeper operational notes, dependency checks, failure
-handling, and manual terminal-multiplexer inspection after the trial path needs
+handling, and manual session troubleshooting after the trial path needs
 more detail.
 
 ## 1. Required Local Dependencies
@@ -14,15 +14,16 @@ more detail.
 NPM runtime:
 
 - Node.js 20+
-- tmux 3.2+ on macOS/Linux/WSL, or psmux 3.3.8+ on native Windows
 - SQLite-compatible filesystem
 
-The built-in browser terminal uses tmux on macOS/Linux/WSL and psmux over
-ConPTY on native Windows.
+The built-in browser terminal is served by the embedded Session Server
+daemon. It uses a POSIX Unix socket on macOS/Linux/WSL and a named pipe
+with ConPTY on native Windows. No host terminal multiplexer or other
+prerequisite binary is required.
 
 Optional runtime dependencies:
 
-- Claude Code CLI, OpenCode, and/or Codex on `PATH`, only for the corresponding
+- Claude Code CLI, OpenCode, Codex, and/or Kimi Code on `PATH`, only for the corresponding
   real CLI sessions.
 
 Optional during development:
@@ -42,8 +43,8 @@ Optional:
 
 - `FORGEBADGER_PORT` - default `3000`
 - `FORGEBADGER_DB_PATH` - default `~/.forgebadger/forgebadger.db`
-- `FORGEBADGER_LOG_LEVEL` - default `info`
-- `FORGEBADGER_TMUX_PREFIX` - default `fb-`
+- `FORGEBADGER_SESSION_PREFIX` - default `fb-`
+- `FORGEBADGER_SESSION_SERVER_IPC_PATH` - override the Session Server IPC endpoint (Windows named pipe / POSIX socket); per-platform default when unset
 
 For npm CLI startup, do not hand-create `FORGEBADGER_MASTER_KEY` or
 `FORGEBADGER_JWT_SECRET`. The CLI generates them on first startup and stores
@@ -56,8 +57,6 @@ Before Gate A:
 
 ```text
 node --version
-macOS/Linux/WSL: tmux -V
-native Windows:  psmux -V
 ```
 
 For source development:
@@ -77,13 +76,13 @@ codex --version
 Expected:
 
 - Node.js is 20 or newer.
-- The platform terminal runtime is installed.
-- `forgebadger doctor` reports `terminal native_tmux` on macOS/Linux/WSL or
-  `terminal native_psmux` on native Windows. Missing runtimes report
-  `tmux_missing`/`psmux_missing`; psmux below 3.3.8 reports `psmux_outdated`.
+- `forgebadger doctor` reports `ok node-pty`. A `missing node-pty` entry
+  means the native module failed to load; reinstall ForgeBadger to rebuild
+  native modules (`npm install -g forgebadger`).
 - pnpm is installed for source development workflows.
-- Claude Code, OpenCode, or Codex is available on `PATH` only when that adapter
-  is being used for real sessions.
+- Claude Code, OpenCode, Codex, or Kimi Code is available on `PATH` only when that adapter
+  is being used for real sessions; missing optional CLIs are reported as
+  `optional-missing` and do not block startup.
 
 ## 4. NPM CLI Startup
 
@@ -94,92 +93,75 @@ forgebadger doctor
 forgebadger start --gateway-port 48731 --web-port 48732
 ```
 
-`forgebadger start` checks the platform terminal runtime before loading or
-creating runtime configuration. Only a ready runtime proceeds to Gateway/Web
-child-process startup and prints the Web console URL. If the browser cannot connect
-immediately, wait for initialization or inspect logs and `forgebadger doctor`
-output. Runtime state defaults to `~/.forgebadger`; use `FORGEBADGER_STATE_DIR`
-when testing against disposable state or running multiple isolated installs.
-
-Native Windows installs missing psmux with
-`winget install --id marlocarlo.psmux --exact --source winget`, or upgrades a
-version below 3.3.8 with
-`winget upgrade --id marlocarlo.psmux --exact --source winget`. WSL remains an
-optional tmux-based compatibility path, not a prerequisite for native Windows.
+`forgebadger start` loads or creates runtime configuration and then starts
+the Gateway and Web child processes, printing the Web console URL. If the
+browser cannot connect immediately, wait for initialization or inspect logs
+and `forgebadger doctor` output. Runtime state defaults to `~/.forgebadger`;
+use `FORGEBADGER_STATE_DIR` when testing against disposable state or running
+multiple isolated installs.
 
 The npm postinstall and `forgebadger doctor` never install system software.
-`doctor` is fully read-only: inspecting an empty state path does not create the
-directory, runtime config, secrets, SQLite database, or recovery key.
-`forgebadger start`/`init` may offer the fixed command only in an interactive
-TTY outside CI; default No and any answer other than explicit `y`/`yes` leaves
-the host unchanged. The CLI executes accepted commands without a shell and
-rechecks afterward. If the runtime remains unready, both commands return
-non-zero and stop before config/project-state creation or process startup.
-Linux detection is limited to apt-get, dnf, yum, pacman, zypper, and apk.
-
-For Unix-like hosts where `forgebadger doctor` reports `terminal tmux_missing`,
-install tmux with the platform package manager, then re-run `forgebadger doctor`
-before launching terminal sessions. Examples: `sudo apt install tmux` on
-Ubuntu/Debian or `brew install tmux` on macOS.
+`doctor` is fully read-only: inspecting an empty state path does not create
+the directory, runtime config, secrets, SQLite database, or recovery key.
 
 ## 5. Gateway Startup Behavior
 
 On startup, Gateway must:
 
-1. Open SQLite database.
-2. Run or verify migrations.
-3. Validate required env vars.
-4. Scan `fb-*` platform-multiplexer sessions.
-5. Recover matching DB sessions.
-6. Kill orphan `fb-*` platform-multiplexer sessions.
-7. Start HTTP and WebSocket server.
+1. Validate required env vars.
+2. Open SQLite database and run or verify migrations.
+3. Construct secrets, event bus, and session manager.
+4. Connect to the Session Server daemon and reconcile live sessions
+   against database sessions; sessions whose processes are gone are marked
+   `lost` and are not silently recreated.
+5. Mount HTTP routes and WebSocket endpoints and listen.
+
+The Session Server daemon survives Gateway restarts: browser or Gateway
+reconnect restores the live terminal snapshot and continues output. Daemon
+death or an OS restart loses the original processes; startup reconciliation
+marks the affected database sessions `lost`.
 
 ## 6. Common Failure Handling
 
 | Failure | Expected behavior |
 |---------|-------------------|
-| Missing/outdated native Windows psmux | Abort CLI/Gateway startup before state initialization/listen and show the exact WinGet install/upgrade guidance |
-| Missing `tmux` | Abort CLI/Gateway startup before state initialization/listen with allowlisted package-manager guidance |
-| Missing Claude Code | Block session launch with adapter dependency error |
-| API key decrypt fails | Block launch; do not create tmux session |
+| Session Server daemon fails to start or IPC connect fails | Abort startup before listen; surface the daemon error in logs |
+| Session process exits while attached | Send terminal exit event; mark session `exited` |
+| Session process gone after Gateway/daemon restart | Mark database session `lost`; do not silently recreate the task |
+| Missing Claude Code / OpenCode / Codex / Kimi Code | Block session launch with adapter dependency error |
 | Project under denied root | Reject before render/write/launch |
-| node-pty attach fails | Keep tmux session if it exists; return terminal error |
-| tmux session disappears | Mark session `exited` or `error` |
-| Claude process exits | Send terminal exit event; mark session `exited` |
-| WebSocket auth invalid | Reject before attaching to tmux |
-| `capture-pane` fails | Attach anyway; show history restoration warning |
+| API key decrypt fails | Block launch; do not create a terminal session |
+| WebSocket auth invalid | Reject before attaching to the terminal |
+| Snapshot restore fails | Attach anyway; show history restoration warning |
 | config rollback fails | Return affected files for manual recovery |
 
-## 7. Manual Multiplexer Inspection
+## 7. Manual Session Troubleshooting
 
-Use `tmux` below on macOS/Linux/WSL and `psmux` on native Windows. PowerShell
-users can omit the `grep` filter and inspect the bounded session list directly.
+Session inspection goes through the Gateway API and WebSocket event stream;
+there is no separate host-side CLI for enumerating terminal sessions.
 
-List ForgeBadger sessions:
-
-```bash
-tmux list-sessions | grep '^of-'
-```
-
-Attach manually:
+List sessions and their runtime state:
 
 ```bash
-tmux attach -t <session-name>
+curl -H "Authorization: Bearer <token>" \
+  http://127.0.0.1:48731/api/v1/sessions
 ```
 
-Capture pane:
+Watch session status events in real time:
 
-```bash
-tmux capture-pane -e -S -500 -t <session-name> -p
+```text
+/ws/events  (Sec-WebSocket-Protocol: forgebadger-events, <jwt>)
 ```
 
-Kill orphan manually:
+Attach to a live terminal:
 
-```bash
-tmux kill-session -t <session-name>
-```
+- Open the session in the Web console, or
+- connect to `/ws/terminal/:sessionId` with the
+  `forgebadger-terminal, <jwt>, <attachToken>` subprotocol.
 
-Use manual cleanup only after confirming Gateway did not already reconcile the session.
+Stop or delete a session from the Sessions page or the
+`/api/v1/sessions/:id` endpoints. Stop/delete is explicit: deleting a
+session terminates its terminal process.
 
 ## 8. Plan B: External Terminal Handoff
 
@@ -187,7 +169,8 @@ If Gate A fails:
 
 1. Freeze embedded terminal UI deep work.
 2. Continue project/config management only.
-3. Show the user the generated platform multiplexer attach command.
+3. Re-attach to the affected session through the Web console or the
+   `/ws/terminal/:sessionId` endpoint.
 4. Record failure reason and required fix.
 5. Revisit embedded terminal after the POC blocker is resolved.
 

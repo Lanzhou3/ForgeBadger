@@ -42,7 +42,7 @@ describe("Gate D auth and project API contracts", () => {
             id: input.sessionId,
             userId: input.userId,
             attachToken: "attach-token",
-            tmuxName: `fb-${input.userId.slice(0, 8)}-${input.sessionId}`,
+            runtimeSessionName: `fb-${input.userId.slice(0, 8)}-${input.sessionId}`,
             launchPlan: input.launchPlan,
             status: "running",
             createdAt: "2026-04-27T00:00:00.000Z",
@@ -227,7 +227,7 @@ describe("Gate D auth and project API contracts", () => {
     assert.deepEqual(sessions.body.data.sessions.map((session) => session.id), [
       created.body.data.session.id
     ]);
-    assert.equal(sessions.body.data.sessions[0].tmuxName, created.body.data.session.tmuxName);
+    assert.equal(sessions.body.data.sessions[0].runtimeSessionName, created.body.data.session.runtimeSessionName);
     const otherSessions = await api.listSessions(otherUser.body.data.user.id);
     assert.deepEqual(otherSessions.body.data.sessions, []);
   });

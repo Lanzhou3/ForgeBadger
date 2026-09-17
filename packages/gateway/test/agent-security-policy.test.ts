@@ -86,12 +86,18 @@ describe("security policy", () => {
   });
 
   it("denies create_project under denied roots", () => {
+    // /etc is denied on POSIX; on Windows use the running system root so the
+    // policy's platform-aware denied-root check is exercised everywhere.
+    const deniedPath =
+      process.platform === "win32"
+        ? path.join(process.env.SystemRoot ?? "C:\\Windows", "my-app")
+        : "/etc/my-app";
     const decision = policy.evaluate({
       userId: "u1",
       toolName: "create_project",
       toolRisk: "operate",
       requiresApproval: true,
-      input: { name: "x", path: "/etc/my-app" }
+      input: { name: "x", path: deniedPath }
     });
     assert.equal(decision.action, "deny");
     assert.equal(decision.riskClass, "high");

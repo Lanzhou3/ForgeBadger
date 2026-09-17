@@ -18,6 +18,7 @@ import {
   indexToolResults,
 } from "@/components/copilot/copilot-message-primitives";
 import { CopilotSettings } from "@/components/copilot/copilot-settings";
+import { CopilotManagementPanel } from "@/components/copilot/CopilotManagementPanel";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
@@ -64,6 +65,7 @@ export function CopilotChat() {
   const [editDraft, setEditDraft] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [managementOpen, setManagementOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarSheetOpen, setSidebarSheetOpen] = useState(false);
 
@@ -92,12 +94,13 @@ export function CopilotChat() {
   }, []);
 
   const selectConversation = useCallback(async (id: string) => {
+    conversationIdRef.current = id;
     setConversationId(id);
     setLoadError(null);
     setSendError(false);
     try {
       const { messages: next } = await listMessages(id);
-      setMessages(next);
+      if (conversationIdRef.current === id) setMessages(next);
       setPinnedToBottom(true);
     } catch {
       setLoadError(t("copilot.loadError"));
@@ -128,7 +131,13 @@ export function CopilotChat() {
 
   // Refresh the conversation list when the reactive loop opens a fresh
   // proactive conversation, so its report becomes visible.
-  const { active, startRun, startEditedRun, approveAction, clearActive, markPending } = useCopilotRun({
+  const { active, startRun, startEditedRun, approveAction, clearActive, markPending, reconcile, syncError } = useCopilotRun({
+    conversationId,
+    onSettled: async (id) => {
+      const { messages: next } = await listMessages(id);
+      if (conversationIdRef.current === id) setMessages(next);
+      await refreshConversations();
+    },
     onReactiveUpdate: refreshConversations,
     onTitleUpdated: ({ conversationId, title }) => {
       // Patch the in-memory list first so the sidebar + header update without
@@ -139,14 +148,15 @@ export function CopilotChat() {
     },
   });
 
-  const newConversation = useCallback(async () => {
+  const newConversation = useCallback(async (grantId?: string) => {
     setCreating(true);
     try {
-      const { conversation } = await createConversation();
+      const { conversation } = await createConversation(undefined, grantId);
       await refreshConversations();
       await selectConversation(conversation.id);
-    } catch {
+    } catch (error) {
       setLoadError(t("copilot.loadError"));
+      if (grantId) throw error;
     } finally {
       setCreating(false);
     }
@@ -160,7 +170,7 @@ export function CopilotChat() {
   const send = useCallback(async (textOverride?: string) => {
     const text = (textOverride ?? input).trim();
     const id = conversationId;
-    if (!text || !id || sending) return;
+    if (!text || !id || sending || (active && ["pending", "running", "awaiting_approval"].includes(active.status))) return;
     lastSentRef.current = text;
     setMessages((current) => [
       ...current,
@@ -195,7 +205,7 @@ export function CopilotChat() {
     } finally {
       setSending(false);
     }
-  }, [input, conversationId, sending, conversations, startRun, clearActive, markPending, reloadActiveConversation]);
+  }, [input, conversationId, sending, active, conversations, startRun, clearActive, markPending, reloadActiveConversation]);
 
   const onRename = useCallback(async (id: string, title: string) => {
     await renameConversation(id, title).catch(() => undefined);
@@ -213,11 +223,13 @@ export function CopilotChat() {
 
   const stopRun = useCallback(async () => {
     if (!active?.runId) return;
-    await cancelRun(active.runId).catch(() => undefined);
-    clearActive();
+    try {
+      await cancelRun(active.runId);
+      await reconcile();
+    } catch { setLoadError("取消未确认，请同步状态后重试。"); }
     const id = active.conversationId;
     if (id) await reloadActiveConversation(id);
-  }, [active, clearActive, reloadActiveConversation]);
+  }, [active, reconcile, reloadActiveConversation]);
 
   const onDecide = useCallback(
     async (approved: boolean) => {
@@ -294,6 +306,7 @@ export function CopilotChat() {
 
   const activeConversation = conversations.find((item) => item.id === conversationId);
   const isRunning = active && (active.status === "running" || active.status === "pending");
+  const isBusy = Boolean(isRunning || active?.status === "awaiting_approval");
 
   // Index tool_result rows by their provider toolCallId so MessageRow can pair
   // them with the corresponding tool_call row and render a single status
@@ -302,6 +315,20 @@ export function CopilotChat() {
 
   return (
     <div className="mx-auto flex h-full w-full max-w-[1600px] gap-4 p-4 md:p-6">
+      <Sheet open={managementOpen} onOpenChange={setManagementOpen}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-2xl" aria-describedby={undefined}>
+          <SheetTitle className="px-4 pt-4">授权与项目管理</SheetTitle>
+          {managementOpen && (
+            <CopilotManagementPanel
+              boundGrantId={activeConversation?.grantId}
+              onStartConversation={async id => {
+                await newConversation(id);
+                setManagementOpen(false);
+              }}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
       {sidebarOpen && (
         <Card className="hidden max-h-[calc(100vh-6rem)] w-[280px] shrink-0 flex-col overflow-hidden md:flex">
           <ConversationSidebar
@@ -350,11 +377,18 @@ export function CopilotChat() {
                 {t("copilot.running")}
               </Badge>
             ) : null}
+            <Button size="sm" variant="outline" onClick={() => setManagementOpen(true)}>授权与项目</Button>
             <CopilotSettings />
           </div>
         </div>
 
         <CopilotStatusBar />
+        {activeConversation?.grantId && (
+          <p className="border-b px-3 py-2 text-xs text-muted-foreground">
+            此会话绑定项目授权，范围不可切换。
+            <button className="ml-2 underline" onClick={() => setManagementOpen(true)}>查看授权</button>
+          </p>
+        )}
 
         <div className="relative flex min-h-0 flex-1 flex-col">
           <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-3 py-4">
@@ -377,7 +411,7 @@ export function CopilotChat() {
                     editDraft={editDraft}
                     editError={editError}
                     editSubmitting={editSubmitting}
-                    canEdit={!isRunning && editingMessageId === null}
+                    canEdit={!isBusy && editingMessageId === null}
                     onBeginEdit={beginEditMessage}
                     onChangeDraft={setEditDraft}
                     onSubmitEdit={submitEditMessage}
@@ -385,6 +419,7 @@ export function CopilotChat() {
                   />
                 );
               })}
+              {(syncError || active?.error) && <p role="status" className="text-sm text-muted-foreground">{syncError || active?.error}</p>}
               {active?.thinking ? (
                 <ThinkingSection text={active.thinking} />
               ) : null}
@@ -464,7 +499,7 @@ export function CopilotChat() {
                 size="icon"
                 className="size-9 shrink-0 rounded-full"
                 onClick={() => void send()}
-                disabled={sending || !input.trim() || !conversationId}
+                disabled={sending || isBusy || !input.trim() || !conversationId}
                 aria-label={t("copilot.send")}
                 title={t("copilot.send")}
               >

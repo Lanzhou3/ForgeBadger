@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -7,6 +7,20 @@ import { describe, it } from "node:test";
 import { verifyNpmPackage } from "./verify-npm-package.mjs";
 
 describe("verifyNpmPackage", () => {
+  it("rejects a package missing its native-helper postinstall entry", async () => {
+    const root = await createPackageTree();
+    await rm(path.join(root, "postinstall.mjs"));
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /postinstall\.mjs/);
+  });
+  it("rejects stale retired terminal backend artifacts", async () => {
+    const root = await createPackageTree();
+    await writeFile(await ensureFile(root, "dist/gateway/src/services/tmux.js"), "");
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /retired terminal backend/);
+  });
   it("accepts a complete npm package artifact tree", async () => {
     const root = await createPackageTree();
 
@@ -168,7 +182,8 @@ describe("verifyNpmPackage", () => {
 async function createPackageTree(options = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "forgebadger-npm-verify-"));
   const packageJson = {
-    files: ["dist", "README.md", "LICENSE", "docs/README.zh-CN.md", "docs/README.zh-TW.md", "package.json"],
+    files: ["dist", "README.md", "LICENSE", "docs/README.zh-CN.md", "docs/README.zh-TW.md", "package.json", "postinstall.mjs"],
+    scripts: { postinstall: "node postinstall.mjs" },
     ...options.packageJson
   };
   await writeFile(
@@ -182,7 +197,9 @@ async function createPackageTree(options = {}) {
   await writeFile(path.join(root, "docs", "README.zh-TW.md"), "# ForgeBadger\n");
 
   await writeFile(await ensureFile(root, "dist/index.js"), "");
+  await writeFile(await ensureFile(root, "postinstall.mjs"), "");
   await writeFile(await ensureFile(root, "dist/gateway/src/index.js"), "");
+  await writeFile(await ensureFile(root, "dist/gateway/src/services/session-server-entry.js"), "");
   await writeFile(await ensureFile(root, "dist/gateway/src/db/migrations/0001.sql"), "");
   await writeFile(await ensureFile(root, "dist/web/standalone/packages/web/server.js"), "");
   if (!options.skipBuildId) {

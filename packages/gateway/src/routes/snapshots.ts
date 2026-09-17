@@ -102,7 +102,7 @@ interface RestoreSnapshotInput {
 async function restoreSnapshot(input: RestoreSnapshotInput): Promise<{
   session: Session;
   attachToken: string;
-  mode: "attach_tmux" | "recreate_session";
+  mode: "attach_runtime" | "recreate_session";
 }> {
   const sessionRepo = new SessionRepository(input.db, input.userId);
   const projectRepo = new ProjectRepository(input.db, input.userId);
@@ -136,7 +136,7 @@ async function restoreSnapshot(input: RestoreSnapshotInput): Promise<{
   if (!adapter) {
     throw new Error("Unsupported session adapter");
   }
-  const launchStatus = await getAdapterLaunchStatus(adapter, input.adapterCommandRunner);
+  const launchStatus = await getAdapterLaunchStatus(adapter, input.adapterCommandRunner, input.sessionManager.terminalBackendHealth());
   if (!launchStatus.launchEnabled) {
     throw new Error(`${launchStatus.label} is not available for launch`);
   }
@@ -161,10 +161,10 @@ async function restoreSnapshot(input: RestoreSnapshotInput): Promise<{
     ...(pluginDirs.length > 0 ? { pluginDirs } : {})
   });
 
-  const live = input.snapshot.tmuxSession
+  const live = input.snapshot.runtimeSessionName
     ? await tryAttachExistingSession(input, baseSession, launchPlan)
     : undefined;
-  const mode = live ? "attach_tmux" : "recreate_session";
+  const mode = live ? "attach_runtime" : "recreate_session";
   let session = live;
   if (!session) {
     const attachToken = randomUUID();
@@ -184,7 +184,7 @@ async function restoreSnapshot(input: RestoreSnapshotInput): Promise<{
   const updated = sessionRepo.update(baseSession.id, {
     status: "running",
     attachToken: session.attachToken,
-    tmuxSession: session.tmuxName,
+    runtimeSessionName: session.runtimeSessionName,
     lastActive: new Date()
   }) ?? baseSession;
 
@@ -214,14 +214,14 @@ async function tryAttachExistingSession(
   session: Session,
   launchPlan: ReturnType<typeof createLaunchPlan>
 ) {
-  if (!input.snapshot.tmuxSession) {
+  if (!input.snapshot.runtimeSessionName) {
     return undefined;
   }
   try {
     return await input.sessionManager.attachExistingSession({
       userId: input.userId,
       sessionId: session.id,
-      tmuxName: input.snapshot.tmuxSession,
+      runtimeSessionName: input.snapshot.runtimeSessionName,
       launchPlan,
       ...(session.attachToken ? { attachToken: session.attachToken } : {})
     });
@@ -235,7 +235,7 @@ function toSnapshotPayload(snapshot: SessionSnapshot) {
     id: snapshot.id,
     sessionId: snapshot.sessionId,
     projectId: snapshot.projectId,
-    tmuxSession: snapshot.tmuxSession,
+    runtimeSessionName: snapshot.runtimeSessionName,
     modelId: snapshot.modelId,
     configVersion: snapshot.configVersion,
     metadata: parseMetadata(snapshot.metadata),

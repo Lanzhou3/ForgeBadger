@@ -51,7 +51,9 @@ test("complete MVP-0 user journey", async ({ page }) => {
   await page.getByRole("button", { name: "New Session" }).click();
   const launchDialog = page.getByRole("dialog");
   await expect(launchDialog).toBeVisible();
-  await expect(launchDialog.locator("#launch-adapter")).toHaveValue("claude");
+  // The launch dialog CLI picker is the same unified Radix dropdown, so
+  // assert the displayed brand label instead of a native select value.
+  await expect(launchDialog.locator("#launch-adapter")).toContainText("Claude Code");
   await launchDialog.getByRole("button", { name: "New Session" }).click();
 
   // 8. Session creation navigates straight to the session terminal

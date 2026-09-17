@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Wrench } from "lucide-react";
+import { Search, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useLanguage } from "@/hooks/use-language";
 import { listModelProviders } from "@/lib/api";
@@ -51,6 +52,7 @@ export function CapabilitiesSection({ active }: { active: boolean }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const capabilities = useQuery({
     queryKey: copilotCapabilitiesQueryKey,
@@ -70,30 +72,82 @@ export function CapabilitiesSection({ active }: { active: boolean }) {
   });
 
   const tools = capabilities.data?.tools ?? [];
+  const normalized = query.trim().toLowerCase();
+  const filtered = normalized
+    ? tools.filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(normalized))
+    : tools;
+  const operateTools = filtered.filter((tool) => tool.risk === "operate");
+  const readTools = filtered.filter((tool) => tool.risk !== "operate");
 
   return (
-    <section className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
-      <p className="text-sm font-medium">{t("copilot.capabilities")}</p>
+    <section className="space-y-3 rounded-lg border border-border bg-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-medium">{t("copilot.capabilities")}</p>
+        {!capabilities.isPending && !capabilities.isError && tools.length > 0 ? (
+          <div className="relative w-48 max-w-full">
+            <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("copilot.toolsSearch")}
+              className="h-8 pl-8 text-xs"
+            />
+          </div>
+        ) : null}
+      </div>
       {capabilities.isPending ? (
         <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
       ) : capabilities.isError ? (
         <p className="text-xs text-destructive">{t("copilot.capabilitiesLoadError")}</p>
       ) : tools.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t("copilot.capabilitiesEmpty")}</p>
+      ) : filtered.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("copilot.toolsSearchEmpty")}</p>
       ) : (
-        <div className="space-y-1.5">
-          {tools.map((tool) => (
-            <ToolRow
-              key={tool.name}
-              tool={tool}
+        <div className="space-y-3">
+          {operateTools.length > 0 ? (
+            <ToolGroup
+              title={t("copilot.toolGroupOperate")}
+              tools={operateTools}
               pending={toggleMutation.isPending}
-              onToggle={(enabled) => toggleMutation.mutate({ name: tool.name, enabled })}
+              onToggle={(name, enabled) => toggleMutation.mutate({ name, enabled })}
             />
-          ))}
+          ) : null}
+          {readTools.length > 0 ? (
+            <ToolGroup
+              title={t("copilot.toolGroupRead")}
+              tools={readTools}
+              pending={toggleMutation.isPending}
+              onToggle={(name, enabled) => toggleMutation.mutate({ name, enabled })}
+            />
+          ) : null}
         </div>
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </section>
+  );
+}
+
+function ToolGroup({
+  title,
+  tools,
+  pending,
+  onToggle,
+}: {
+  title: string;
+  tools: CopilotToolInfo[];
+  pending: boolean;
+  onToggle: (name: string, enabled: boolean) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-semibold tracking-wide text-muted-foreground/70 uppercase">
+        {title}
+      </p>
+      {tools.map((tool) => (
+        <ToolRow key={tool.name} tool={tool} pending={pending} onToggle={(enabled) => onToggle(tool.name, enabled)} />
+      ))}
+    </div>
   );
 }
 

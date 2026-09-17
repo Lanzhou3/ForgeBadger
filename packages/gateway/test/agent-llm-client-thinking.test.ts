@@ -124,3 +124,54 @@ describe("copilot llm thinking", () => {
     assert.equal(events.some((event) => event.type === "thinking_delta"), false);
   });
 });
+
+for (const format of ["anthropic", "openai"] as const) {
+  it(`preserves correlated tool batches in ${format} requests`, async () => {
+    const db = createTestDb();
+    try {
+      const { client, calls } = setupClient(db, format, {});
+      await client.stream({ messages: [
+        { role: "user", content: "inspect" },
+        { role: "assistant", content: "checking", toolCalls: [
+          { id: "a", name: "read_a", arguments: "{}" },
+          { id: "b", name: "read_b", arguments: "{}" }
+        ] },
+        { role: "tool", toolCallId: "a", content: "result a" },
+        { role: "tool", toolCallId: "b", content: "result b" }
+      ], tools: [], onEvent() {} });
+      const body = calls[0]!.body;
+      assert.equal("max_steps" in body, false, "Agent step budgets are not provider request fields");
+      const messages = body.messages as Array<Record<string, unknown>>;
+      if (format === "openai") {
+        assert.equal(messages[0]?.role, "system");
+        assert.match(String(messages[0]?.content), /ForgeBadger/);
+        assert.equal(messages[3]?.tool_call_id, "a");
+        assert.equal(messages[4]?.tool_call_id, "b");
+      } else {
+        assert.deepEqual(messages[1]?.content, [
+          { type: "text", text: "checking" },
+          { type: "tool_use", id: "a", name: "read_a", input: {} },
+          { type: "tool_use", id: "b", name: "read_b", input: {} }
+        ]);
+        assert.deepEqual(messages[2], { role: "user", content: [
+          { type: "tool_result", tool_use_id: "a", content: "result a" },
+          { type: "tool_result", tool_use_id: "b", content: "result b" }
+        ] });
+      }
+    } finally { db.close(); }
+  });
+}
+
+it("removes abort listeners after completion and avoids sending pre-cancelled requests", async () => {
+  const { getEventListeners } = await import("node:events");
+  const db = createTestDb();
+  try {
+    const { client, calls } = setupClient(db, "openai", {});
+    const controller = new AbortController();
+    await client.stream({ messages: [{ role: "user", content: "hi" }], tools: [], signal: controller.signal, onEvent() {} });
+    assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+    controller.abort();
+    await assert.rejects(client.stream({ messages: [], tools: [], signal: controller.signal, onEvent() {} }));
+    assert.equal(calls.length, 1);
+  } finally { db.close(); }
+});

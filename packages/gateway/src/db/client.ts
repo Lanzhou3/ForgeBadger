@@ -7,14 +7,12 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 
 import type { Database } from "./types.js";
+import { expandUserPath } from "../lib/user-path.js";
 
 let dbInstance: Database | null = null;
 
 function resolveDbPath(dbPath: string): string {
-  if (dbPath.startsWith("~/")) {
-    return path.join(homedir(), dbPath.slice(2));
-  }
-  return dbPath;
+  return path.resolve(expandUserPath(dbPath, homedir()));
 }
 
 export function initializeDatabase(dbPath: string): Database {

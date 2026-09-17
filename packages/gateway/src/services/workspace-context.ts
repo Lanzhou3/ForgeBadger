@@ -1,4 +1,4 @@
-import { lstat, open, readdir } from "node:fs/promises";
+import { lstat, open, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { safeResolve, validateProjectRoot } from "../lib/safe-resolve.js";
@@ -42,6 +42,8 @@ const maxTreeDepth = 3;
 const defaultTreeLimit = 200;
 const maxTreeLimit = 500;
 const maxFilePreviewBytes = 64 * 1024;
+
+export const maxFileWriteBytes = 1024 * 1024;
 
 export async function listWorkspaceTree(
   projectRoot: string,
@@ -119,6 +121,39 @@ export async function readWorkspaceFile(
   } finally {
     await file.close();
   }
+}
+
+export async function writeWorkspaceFile(
+  projectRoot: string,
+  userPath: string,
+  content: string
+): Promise<WorkspaceFileSnapshot> {
+  const rootPath = validateProjectRoot(projectRoot);
+  const requestedPath = normalizeUserPath(userPath);
+  if (!requestedPath) {
+    throw new Error("Workspace file path is required");
+  }
+  if (Buffer.byteLength(content, "utf8") > maxFileWriteBytes) {
+    throw new Error(`Workspace file content exceeds maximum size: ${maxFileWriteBytes} bytes`);
+  }
+  if (content.includes("\u0000")) {
+    throw new Error("Workspace file content must be UTF-8 text");
+  }
+
+  const absolutePath = safeResolve(rootPath, requestedPath);
+  const fileStats = await lstat(absolutePath);
+  if (fileStats.isSymbolicLink()) {
+    throw new Error("Workspace file path cannot be a symbolic link");
+  }
+  if (!fileStats.isFile()) {
+    throw new Error("Workspace file path must be a file");
+  }
+  if (fileStats.size > maxFilePreviewBytes) {
+    throw new Error(`Workspace file is too large to edit; only the first ${maxFilePreviewBytes / 1024} KB can be loaded`);
+  }
+
+  await writeFile(absolutePath, content, "utf8");
+  return readWorkspaceFile(rootPath, requestedPath);
 }
 
 async function listDirectory(

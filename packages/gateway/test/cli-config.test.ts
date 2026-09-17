@@ -89,8 +89,8 @@ describe("cli-config service", () => {
       assert.equal("redacted" in configFile, false);
 
       const directRead = await readCliConfigFile("kimi", "config.toml");
-      assert.equal("content" in directRead, false);
-      assert.equal("redacted" in directRead, false);
+      assert.equal(typeof directRead.content, "string");
+      assert.match(directRead.content!, /default_model = "moonshot\/kimi-k2\.5"/);
     });
 
     it("keeps the existing api key when updating a provider without one", async () => {

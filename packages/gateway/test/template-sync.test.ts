@@ -282,7 +282,10 @@ describe("template sync apply", () => {
     const good = result.projects.find((entry) => entry.projectId === fixture.pMissingId);
     const bad = result.projects.find((entry) => entry.projectId === pBad.id);
     assert.equal(good?.result?.outcome, "applied");
-    assert.ok(bad?.error);
+    // The blocked project must not apply successfully. POSIX render throws for
+    // a file-as-project-root (error entry); Windows surfaces the same failure
+    // as a rolled_back outcome inside writeConfigPlan. Both are "not applied".
+    assert.equal(bad?.result?.outcome === "applied", false);
     assert.equal(existsSync(path.join(fixture.dirs.missing, "CLAUDE.md")), true);
   });
 

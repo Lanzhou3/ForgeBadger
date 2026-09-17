@@ -1,0 +1,152 @@
+/**
+ * MCP (Model Context Protocol) bridge for the Gateway.
+ *
+ * External AI agents connect to the /mcp endpoint and invoke the same
+ * platform tools the native Copilot uses. The bridge reuses the AgentTool
+ * registry as-is: zod input validation, the security policy engine, the
+ * 48KB output cap, and — for operate tools — the platform command pipeline
+ * (intent preview/decide/execute with durable receipts).
+ *
+ * Approval semantics: an MCP caller cannot complete the interactive approval
+ * loop, so the `operate` scope on the access token is the owner's standing
+ * authorization — intents are previewed and approved inline with
+ * `owner_action` authority. Tools the owner disabled in the Copilot
+ * capability settings are hidden and rejected here too.
+ */
+import { randomUUID } from "node:crypto";
+
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema
+} from "@modelcontextprotocol/sdk/types.js";
+
+import { CopilotToolPreferenceRepository } from "../../db/repositories/copilot-tool-preference-repository.js";
+import type { McpTokenScope } from "../../db/repositories/mcp-token-repository.js";
+import type { Database } from "../../db/types.js";
+import type { CommandRunner } from "../../lib/dependency-check.js";
+import { createSecurityPolicy, logSecurityDecision, type SecurityPolicyInput } from "../agent/security-policy.js";
+import {
+  executeAgentTool,
+  zodToJsonSchema,
+  type AgentTool,
+  type AgentToolContext
+} from "../agent/tool-registry.js";
+import { createPlatformTools } from "../agent/tools/index.js";
+import { agentActionInput, agentActions, TOOL_COMMANDS } from "../platform-commands/agent-actions.js";
+import { checkAgentScope } from "../platform-commands/agent-scope.js";
+import type { InMemorySessionManager } from "../session-manager.js";
+
+export interface McpBridgeDeps {
+  db: Database;
+  masterKey: string;
+  userId: string;
+  scopes: McpTokenScope[];
+  appVersion: string;
+  sessionManager?: InMemorySessionManager | undefined;
+  adapterCommandRunner?: CommandRunner | undefined;
+}
+
+export function buildMcpServer(deps: McpBridgeDeps): Server {
+  const preferences = new CopilotToolPreferenceRepository(deps.db, deps.userId);
+  const canOperate = deps.scopes.includes("operate");
+  const tools = createPlatformTools().filter(
+    (tool) => (tool.risk === "read" || canOperate) && preferences.isEnabled(tool.name)
+  );
+  const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+
+  const server = new Server(
+    { name: "forgebadger-gateway", version: deps.appVersion },
+    { capabilities: { tools: {} } }
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.modelInputSchema ?? zodToJsonSchema(tool.inputSchema)
+    }))
+  }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const tool = toolsByName.get(request.params.name);
+    if (!tool) {
+      return {
+        isError: true,
+        content: [{ type: "text" as const, text: `Unknown or unavailable tool: ${request.params.name}` }]
+      };
+    }
+    try {
+      const output = await executeMcpTool(tool, request.params.arguments ?? {}, deps);
+      return { content: [{ type: "text" as const, text: JSON.stringify(output) }] };
+    } catch (error) {
+      return {
+        isError: true,
+        content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Tool execution failed" }]
+      };
+    }
+  });
+
+  return server;
+}
+
+async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridgeDeps): Promise<unknown> {
+  const parsed = tool.inputSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    throw new Error("Tool input is invalid");
+  }
+
+  const context: AgentToolContext = {
+    userId: deps.userId,
+    db: deps.db,
+    masterKey: deps.masterKey,
+    ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}),
+    ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
+  };
+  checkAgentScope(context, tool.name, parsed.data);
+
+  const policy = createSecurityPolicy();
+  const policyInput: SecurityPolicyInput = {
+    userId: deps.userId,
+    toolName: tool.name,
+    toolRisk: tool.risk,
+    requiresApproval: tool.requiresApproval,
+    input: parsed.data
+  };
+  const decision = policy.evaluate(policyInput);
+  logSecurityDecision({
+    db: deps.db,
+    userId: deps.userId,
+    operation: tool.name,
+    input: parsed.data,
+    action: decision.action,
+    reason: decision.reason
+  });
+  if (decision.action === "deny") {
+    throw new Error(`Denied by security policy: ${decision.reason}`);
+  }
+
+  if (tool.risk === "operate") {
+    const commandId = TOOL_COMMANDS[tool.name];
+    if (!commandId) {
+      throw new Error("Tool requires interactive approval and is unavailable over MCP");
+    }
+    const actions = agentActions(context);
+    let intent = actions.preview({
+      commandId,
+      input: agentActionInput(tool.name, parsed.data, context),
+      idempotencyKey: randomUUID(),
+      authority: "owner_action"
+    });
+    if (intent.status === "pending") {
+      intent = actions.decide(intent.id, intent.digest, true);
+    }
+    context.platformIntentId = intent.id;
+  }
+
+  const result = await executeAgentTool(tool, parsed.data, context);
+  if (!result.ok) {
+    throw new Error(result.error ?? "Tool execution failed");
+  }
+  return result.output;
+}

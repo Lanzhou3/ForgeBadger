@@ -57,7 +57,6 @@ export interface AgentLlmProviderResolution {
   defaultHeaders: Record<string, string>;
 }
 
-const DEFAULT_MAX_STEPS = 24;
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 export type AgentFetch = typeof fetch;
@@ -71,9 +70,18 @@ export function createAgentLlmClient(input: {
   const fetchImpl = input.fetchImpl ?? fetch;
   const resolveHost = input.resolveHost ?? lookup;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  // Per-client resolution cache. The client is constructed per user per stack,
+  // so a cached resolution lives only for the current turn/stack — this avoids
+  // re-decrypting credentials across the step loop and the summarize/title/
+  // curation calls that each resolve independently.
+  const resolutionCache = new Map<string, AgentLlmProviderResolution>();
 
   /** Resolve a model profile to a concrete provider resolution. */
   function resolveProvider(modelId?: string): AgentLlmProviderResolution {
+    const cacheKey = modelId ?? "__default__";
+    const cached = resolutionCache.get(cacheKey);
+    if (cached) return cached;
+
     const repo = input.modelProviderRepository;
     const profile = modelId ? repo.getModelProfile(modelId) : repo.listModelProfiles().find((m) => m.isDefault) ?? repo.listModelProfiles()[0];
     if (!profile) throw new AgentError("AGENT_NO_MODEL", "No model provider configured");
@@ -86,7 +94,7 @@ export function createAgentLlmClient(input: {
     const apiKey = repo.decryptCredential(credential.id);
     const baseUrl = pickBaseUrl(provider.apiFormat, provider.anthropicBaseUrl ?? profile.baseUrl, provider.openaiBaseUrl ?? profile.baseUrl);
     if (!baseUrl) throw new AgentError("AGENT_NO_BASE_URL", "Provider has no base URL");
-    return {
+    const resolution: AgentLlmProviderResolution = {
       modelProfileId: profile.id,
       providerKey: provider.providerKey,
       modelId: profile.modelId,
@@ -96,6 +104,8 @@ export function createAgentLlmClient(input: {
       authType: provider.authType,
       defaultHeaders: provider.defaultHeaders
     };
+    resolutionCache.set(cacheKey, resolution);
+    return resolution;
   }
 
   /** Stream one model request; emits text/tool deltas. Resolves on completion. */
@@ -105,34 +115,37 @@ export function createAgentLlmClient(input: {
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const outer = request.signal;
     if (outer?.aborted) controller.abort();
-    outer?.addEventListener("abort", () => controller.abort(), { once: true });
+    const abort = () => controller.abort();
+    outer?.addEventListener("abort", abort, { once: true });
     try {
+      controller.signal.throwIfAborted();
       const host = new URL(resolution.baseUrl).hostname;
       const blocked = await validateOutboundHost(host, resolveHost);
+      controller.signal.throwIfAborted();
       if (blocked) throw new AgentError("AGENT_HOST_BLOCKED", `Outbound host blocked: ${blocked}`);
 
-      const maxSteps = request.maxSteps ?? DEFAULT_MAX_STEPS;
       if (resolution.apiFormat === "anthropic") {
-        return await streamAnthropic(resolution, request, maxSteps, fetchImpl, controller.signal, input.timeoutMs);
+        return await streamAnthropic(resolution, request, fetchImpl, controller.signal, input.timeoutMs);
       }
-      return await streamOpenAi(resolution, request, maxSteps, fetchImpl, controller.signal, input.timeoutMs);
+      return await streamOpenAi(resolution, request, fetchImpl, controller.signal, input.timeoutMs);
     } catch (error) {
       if (error instanceof AgentError) throw error;
       throw new AgentError("AGENT_LLM_FAILED", redactAgentErrorMessage(error instanceof Error ? error.message : "LLM request failed"));
     } finally {
       clearTimeout(timeout);
-      outer?.removeEventListener("abort", () => controller.abort());
+      outer?.removeEventListener("abort", abort);
     }
   }
 
   /** Fold a message list into a concise summary (non-streaming; used for context compression). */
-  async function summarize(input: { messages: AgentLlmMessage[]; modelId?: string }): Promise<string> {
+  async function summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal }): Promise<string> {
     let text = "";
     await stream({
       messages: input.messages,
       tools: [],
       system: SUMMARY_SYSTEM_PROMPT,
       ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
       onEvent: (event) => {
         if (event.type === "text_delta") text += event.text ?? "";
       }
@@ -147,7 +160,7 @@ export function createAgentLlmClient(input: {
    * the model returned nothing usable. Never throws — failures fall through to
    * the empty result and the conversation keeps its null title.
    */
-  async function generateTitle(input: { userText: string; assistantText: string; modelId?: string }): Promise<string> {
+  async function generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<string> {
     let text = "";
     await stream({
       messages: [
@@ -157,6 +170,7 @@ export function createAgentLlmClient(input: {
       tools: [],
       system: TITLE_SYSTEM_PROMPT,
       ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
       onEvent: (event) => {
         if (event.type === "text_delta") text += event.text ?? "";
       }
@@ -164,7 +178,35 @@ export function createAgentLlmClient(input: {
     return sanitizeTitle(text);
   }
 
-  return { resolveProvider, stream, summarize, generateTitle };
+  /**
+   * Propose durable memory entries from a completed turn. Returns an empty
+   * array on parse failure or an unusable model response — curation is always
+   * best-effort and never throws.
+   */
+  async function proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<Array<{
+    kind: "fact" | "preference" | "decision" | "project_note";
+    scope: "global" | "project" | "session";
+    text: string;
+    projectId?: string;
+  }>> {
+    let text = "";
+    await stream({
+      messages: [
+        { role: "user", content: input.userText },
+        { role: "assistant", content: input.assistantText }
+      ],
+      tools: [],
+      system: MEMORY_PROPOSAL_SYSTEM_PROMPT,
+      ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+      onEvent: (event) => {
+        if (event.type === "text_delta") text += event.text ?? "";
+      }
+    });
+    return parseMemoryProposals(text);
+  }
+
+  return { resolveProvider, stream, summarize, generateTitle, proposeMemory };
 }
 
 const SUMMARY_SYSTEM_PROMPT = [
@@ -195,17 +237,22 @@ function authHeaders(resolution: AgentLlmProviderResolution): Record<string, str
 async function streamAnthropic(
   resolution: AgentLlmProviderResolution,
   request: AgentLlmRequest,
-  maxSteps: number,
   fetchImpl: AgentFetch,
   signal: AbortSignal,
   timeoutMs: number | undefined
 ): Promise<{ message: string }> {
-  const system = request.system ?? buildSystemPrompt();
-  const apiMessages = request.messages
-    .filter((m) => m.role !== "tool")
-    .map((m) => (m.role === "assistant"
-      ? { role: "assistant" as const, content: m.content, ...(m.toolCalls?.length ? { tool_use: m.toolCalls.map((tc) => ({ id: tc.id, name: tc.name, input: safeJsonParse(tc.arguments) })) } : {}) }
-      : { role: "user" as const, content: m.content }));
+  const system = request.system ?? SYSTEM_PROMPT;
+  const apiMessages: Array<{ role: "user" | "assistant"; content: Array<Record<string, unknown>> }> = [];
+  for (const message of request.messages) {
+    const role = message.role === "assistant" ? "assistant" : "user";
+    const content: Array<Record<string, unknown>> = message.role === "tool"
+      ? [{ type: "tool_result", tool_use_id: message.toolCallId, content: message.content }]
+      : [...(message.content ? [{ type: "text", text: message.content }] : []),
+        ...(message.toolCalls ?? []).map((call) => ({ type: "tool_use", id: call.id, name: call.name, input: safeJsonParse(call.arguments) }))];
+    const previous = apiMessages.at(-1);
+    if (previous?.role === role) previous.content.push(...content);
+    else apiMessages.push({ role, content });
+  }
 
   const body: Record<string, unknown> = {
     model: resolution.modelId,
@@ -214,7 +261,6 @@ async function streamAnthropic(
     messages: apiMessages,
     tools: request.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema }))
   };
-  if (maxSteps) body.max_steps = maxSteps;
 
   const response = await fetchImpl(`${resolution.baseUrl}/v1/messages`, {
     method: "POST",
@@ -234,6 +280,7 @@ async function streamAnthropic(
     content?: Array<{ type: string; text?: string; thinking?: string; name?: string; id?: string; input?: unknown }>;
     stop_reason?: string;
   };
+  signal.throwIfAborted();
   let message = "";
   for (const block of data.content ?? []) {
     if (block.type === "thinking" && block.thinking) {
@@ -256,7 +303,6 @@ async function streamAnthropic(
 async function streamOpenAi(
   resolution: AgentLlmProviderResolution,
   request: AgentLlmRequest,
-  maxSteps: number,
   fetchImpl: AgentFetch,
   signal: AbortSignal,
   timeoutMs: number | undefined
@@ -274,16 +320,13 @@ async function streamOpenAi(
     }
     return { role: m.role as "user" | "assistant", content: m.content };
   });
-  const apiMessages = request.system
-    ? [{ role: "system" as const, content: request.system }, ...mapped]
-    : mapped;
+  const apiMessages = [{ role: "system" as const, content: request.system ?? SYSTEM_PROMPT }, ...mapped];
 
   const body: Record<string, unknown> = {
     model: resolution.modelId,
     messages: apiMessages,
     tools: request.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }))
   };
-  if (maxSteps) body.max_steps = maxSteps;
 
   const response = await fetchImpl(`${resolution.baseUrl}/chat/completions`, {
     method: "POST",
@@ -308,6 +351,7 @@ async function streamOpenAi(
       };
     }>;
   };
+  signal.throwIfAborted();
   const choice = data.choices?.[0];
   let message = choice?.message?.content ?? "";
   const reasoning = choice?.message?.reasoning_content ?? "";
@@ -320,19 +364,17 @@ async function streamOpenAi(
   return { message };
 }
 
-function buildSystemPrompt(): string {
-  return [
-    "You are Copilot, the platform agent for ForgeBadger.",
-    "You can observe and operate the whole platform through the provided tools:",
-    "- projects: list and inspect projects",
-    "- sessions: list and inspect AI CLI sessions",
-    "- memory: read/write scoped memory (global, project, session)",
-    "",
-    "Be concise. When you need to take an operate action, request it and it will be",
-    "approved by the owner before it executes. Never claim a write happened until",
-    "the tool result confirms it."
-  ].join("\n");
-}
+const SYSTEM_PROMPT = [
+  "You are Copilot, the platform agent for ForgeBadger.",
+  "You can observe and operate the whole platform through the provided tools:",
+  "- projects: list and inspect projects",
+  "- sessions: list and inspect AI CLI sessions",
+  "- memory: read/write scoped memory (global, project, session)",
+  "",
+  "Be concise. When you need to take an operate action, request it and it will be",
+  "approved by the owner before it executes. Never claim a write happened until",
+  "the tool result confirms it."
+].join("\n");
 
 function safeJsonParse(value: string): unknown {
   try { return JSON.parse(value); } catch { return {}; }
@@ -362,6 +404,49 @@ const TITLE_SYSTEM_PROMPT = [
   "- user asks for a haiku about autumn → 'Autumn haiku'",
   "- 用户让 Copilot 总结最近一周项目状态 → '本周项目状态回顾'"
 ].join("\n");
+
+const MEMORY_PROPOSAL_SYSTEM_PROMPT = [
+  "You extract durable memory entries from a single Copilot turn.",
+  "From the user message and the assistant reply, identify facts, preferences,",
+  "or decisions that will be useful in FUTURE turns, and return them as a JSON",
+  "array. Each entry is {\"kind\": \"fact\"|\"preference\"|\"decision\"|\"project_note\",",
+  "\"scope\": \"global\"|\"project\"|\"session\", \"text\": \"...\"}.",
+  "Rules:",
+  "- Write only concrete, non-transient information; skip trivial chatter.",
+  "- Prefer 'global' scope unless the fact is clearly project-specific.",
+  "- Return [] when nothing is worth remembering. Return ONLY the JSON array,",
+  "no prose, no markdown fences."
+].join("\n");
+
+function parseMemoryProposals(raw: string): Array<{
+  kind: "fact" | "preference" | "decision" | "project_note";
+  scope: "global" | "project" | "session";
+  text: string;
+  projectId?: string;
+}> {
+  try {
+    const parsed = JSON.parse(raw.trim()) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const valid: Array<{ kind: "fact" | "preference" | "decision" | "project_note"; scope: "global" | "project" | "session"; text: string; projectId?: string }> = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const record = item as Record<string, unknown>;
+      const kind = record.kind;
+      const scope = record.scope;
+      const text = record.text;
+      if (
+        (kind === "fact" || kind === "preference" || kind === "decision" || kind === "project_note")
+        && (scope === "global" || scope === "project" || scope === "session")
+        && typeof text === "string" && text.trim().length > 0
+      ) {
+        valid.push({ kind, scope, text: text.trim().slice(0, 8 * 1024) });
+      }
+    }
+    return valid;
+  } catch {
+    return [];
+  }
+}
 
 const TITLE_MAX_CHARS = 24;
 

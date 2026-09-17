@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,6 +10,7 @@ import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   DEFAULT_NPM_INSTALL_TIMEOUT_MS,
   buildNpmInstallArgs,
+  buildRegistrationPayload,
   readPositiveIntegerEnv,
   runCommand
 } from "./smoke-npm-package-runner.mjs";
@@ -20,7 +21,7 @@ const packDir = path.join(smokeRoot, "pack");
 const npmPrefix = path.join(smokeRoot, "npm-prefix");
 const npmCache = path.join(smokeRoot, "npm-cache");
 const stateDir = path.join(smokeRoot, "state");
-const tmuxPrefix = `fb-smoke-${process.pid}-`;
+const sessionPrefix = `fb-smoke-${process.pid}-`;
 const commandTimeoutMs = readPositiveIntegerEnv(
   process.env,
   "FORGEBADGER_NPM_SMOKE_COMMAND_TIMEOUT_MS",
@@ -60,13 +61,13 @@ try {
   runStep("run installed forgebadger doctor", forgebadgerBin, ["doctor"], {
     env: {
       FORGEBADGER_STATE_DIR: stateDir,
-      FORGEBADGER_TMUX_PREFIX: tmuxPrefix
+      FORGEBADGER_SESSION_PREFIX: sessionPrefix
     }
   });
   console.log("[smoke:npm] start installed services and run API smoke");
   await runStartSmoke(forgebadgerBin);
 } finally {
-  cleanupTmuxSessions();
+  await cleanupSessionServer();
   if (process.env.FORGEBADGER_KEEP_NPM_SMOKE_ROOT !== "1") {
     await rm(smokeRoot, { recursive: true, force: true });
   }
@@ -152,9 +153,10 @@ async function runStartSmoke(forgebadgerBin) {
       ...process.env,
       npm_config_update_notifier: "false",
       FORGEBADGER_STATE_DIR: stateDir,
-      FORGEBADGER_TMUX_PREFIX: tmuxPrefix
+      FORGEBADGER_SESSION_PREFIX: sessionPrefix
     },
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    ...(process.platform === "win32" ? { shell: true } : {})
   });
 
   let output = "";
@@ -174,10 +176,11 @@ async function runStartSmoke(forgebadgerBin) {
 
     const email = `smoke-${Date.now()}@example.com`;
     const password = randomBytes(18).toString("base64url");
-    const registered = await postJson(`http://127.0.0.1:${gatewayPort}/api/v1/auth/register`, {
-      email,
-      password
-    });
+    const recoveryKey = (await readFile(path.join(stateDir, "account-recovery.key"), "utf8")).trim();
+    const registered = await postJson(
+      `http://127.0.0.1:${gatewayPort}/api/v1/auth/register`,
+      buildRegistrationPayload(email, password, recoveryKey)
+    );
     const token = registered.data.token;
     await postJson(`http://127.0.0.1:${gatewayPort}/api/v1/auth/login`, { email, password });
     await postJson(
@@ -189,20 +192,52 @@ async function runStartSmoke(forgebadgerBin) {
       },
       token
     );
+    await smokeInstalledTerminal(projectRoot);
   } finally {
     await stopChild(child, exitPromise);
   }
 }
 
-function cleanupTmuxSessions() {
-  spawnSync("tmux", ["list-sessions", "-F", "#{session_name}"], {
-    encoding: "utf8",
-    shell: false
-  }).stdout?.split("\n")
-    .filter((name) => name.startsWith(tmuxPrefix))
-    .forEach((name) => {
-      spawnSync("tmux", ["kill-session", "-t", name], { stdio: "ignore", shell: false });
+async function smokeInstalledTerminal(projectRoot) {
+  const client = await createInstalledSessionServerClient();
+  const name = `${sessionPrefix}terminal`;
+  try {
+    await client.connect();
+    await client.createSession({
+      name, cwd: projectRoot, command: process.execPath,
+      args: ["-e", 'process.stdin.on("data", d => process.stdout.write("PTY_ECHO:" + d)); console.log("PTY_READY");'],
+      env: {}
     });
+    await client.sendInput(name, "installed-terminal-smoke\r");
+    const deadline = Date.now() + 10_000;
+    while (!(await client.capturePane(name)).includes("PTY_ECHO:installed-terminal-smoke")) {
+      if (Date.now() >= deadline) throw new Error("Installed terminal failed to echo input");
+      await delay(100);
+    }
+    await client.killSession(name);
+    if (await client.hasSession(name)) throw new Error("Installed terminal did not stop");
+    console.log("[smoke:npm] installed daemon PTY spawn/input/output/stop passed");
+  } finally {
+    await client.killSession(name).catch(() => {});
+    await client.disconnect();
+  }
+}
+
+async function createInstalledSessionServerClient() {
+  const moduleRoot = path.join(npmPrefix, "node_modules/forgebadger/dist/gateway/src/services");
+  const { pathToFileURL } = await import("node:url");
+  const { SessionServerClient } = await import(pathToFileURL(path.join(moduleRoot, "session-server-client.js")));
+  const { createPlatformAdapter } = await import(pathToFileURL(path.join(moduleRoot, "session-server/platform-adapter.js")));
+  const { resolveSessionServerTokenPath } = await import(pathToFileURL(path.join(moduleRoot, "session-server/auth-token.js")));
+  return new SessionServerClient({ ipcPath: createPlatformAdapter().getIpcPath(stateDir), tokenPath: resolveSessionServerTokenPath(stateDir) });
+}
+
+async function cleanupSessionServer() {
+  // Only the daemon created in this disposable smoke state directory.
+  if (!existsSync(path.join(stateDir, "session-server-v2.token"))) return;
+  const client = await createInstalledSessionServerClient();
+  try { await client.connect(); await client.shutdownServer(); }
+  finally { await client.disconnect(); }
 }
 
 async function getAvailablePort() {

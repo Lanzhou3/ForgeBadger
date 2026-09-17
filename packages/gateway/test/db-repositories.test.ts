@@ -215,7 +215,7 @@ describe("db repositories", () => {
         type: "session_started",
         status: "success",
         message: "Session started",
-        metadata: { tmux: "of-test" }
+        metadata: { backend: "of-test" }
       });
       repoA.create({
         projectId: project.id,
@@ -296,6 +296,43 @@ describe("db repositories", () => {
       assert.equal(updated!.status, "running");
     });
 
+    it("keeps a stable list order when session status changes", () => {
+      const user = userRepo.create("order-user@example.com", "hash");
+      const projectRepo = new ProjectRepository(db, user.id);
+      const projectA = projectRepo.create({ name: "Order A", path: "/tmp/oa", aiTool: "claude" });
+      const projectB = projectRepo.create({ name: "Order B", path: "/tmp/ob", aiTool: "claude" });
+      const repo = new SessionRepository(db, user.id);
+
+      const sessionA1 = repo.create({
+        projectId: projectA.id,
+        name: "A1",
+        aiTool: "claude",
+        workingDir: "/tmp/oa"
+      });
+      repo.create({
+        projectId: projectB.id,
+        name: "B1",
+        aiTool: "claude",
+        workingDir: "/tmp/ob"
+      });
+      repo.create({
+        projectId: projectA.id,
+        name: "A2",
+        aiTool: "claude",
+        workingDir: "/tmp/oa"
+      });
+
+      const baseline = repo.list().map((session) => session.id);
+      assert.equal(baseline.length, 3);
+      assert.equal(baseline[0], sessionA1.id);
+
+      repo.updateStatus(sessionA1.id, "running");
+      assert.deepEqual(repo.list().map((session) => session.id), baseline);
+
+      repo.updateStatus(sessionA1.id, "exited");
+      assert.deepEqual(repo.list().map((session) => session.id), baseline);
+    });
+
     it("enforces tenant isolation for sessions", () => {
       const userA = userRepo.create("sa@example.com", "hash");
       const userB = userRepo.create("sb@example.com", "hash");
@@ -370,13 +407,13 @@ describe("db repositories", () => {
         aiTool: "claude",
         workingDir: "/tmp/meta",
         attachToken: "attach-secret",
-        tmuxSession: "of-user-session",
+        runtimeSessionName: "of-user-session",
         credentialMode: "stored_encrypted_key",
         apiKeyId: apiKey.id
       });
 
       assert.equal(session.attachToken, "attach-secret");
-      assert.equal(session.tmuxSession, "of-user-session");
+      assert.equal(session.runtimeSessionName, "of-user-session");
       assert.equal(session.credentialMode, "stored_encrypted_key");
       assert.equal(session.apiKeyId, apiKey.id);
       assert.equal(repo.getById(session.id)?.attachToken, "attach-secret");

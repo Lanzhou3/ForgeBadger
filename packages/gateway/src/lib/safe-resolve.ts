@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, resolve, sep } from "node:path";
+import { dirname, isAbsolute, parse, resolve, sep } from "node:path";
 
 export const DENIED_ROOTS = new Set([
   "/",
@@ -16,7 +16,9 @@ export const DENIED_ROOTS = new Set([
 export function validateProjectRoot(projectRoot: string): string {
   const resolvedRoot = realpathSync(projectRoot);
 
-  if (DENIED_ROOTS.has(resolvedRoot)) {
+  // The filesystem root itself ("/" on POSIX, a drive root like "C:\" on
+  // Windows) is always denied, in addition to the POSIX-only DENIED_ROOTS.
+  if (DENIED_ROOTS.has(resolvedRoot) || resolvedRoot === parse(resolvedRoot).root) {
     throw new Error(`Project root is a denied root: ${resolvedRoot}`);
   }
 

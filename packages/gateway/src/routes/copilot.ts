@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { CopilotGrantRepository } from "../db/repositories/copilot-grant-repository.js";
+import { PlatformActions } from "../services/platform-commands/actions.js";
+import { createPlatformCommands } from "../services/platform-commands/catalog.js";
+import { PlatformActionRepository } from "../db/repositories/platform-action-repository.js";
 /**
  * Copilot agent routes — /api/v1/copilot/*.
  *
@@ -15,6 +20,7 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { buildAgentStack, type AgentStackDeps } from "../services/agent/agent-stack.js";
 import { createPlatformTools } from "../services/agent/tools/index.js";
+import { CopilotRunLedger } from "../services/agent/run-ledger.js";
 import { AgentError } from "../services/agent/types.js";
 import { CopilotToolPreferenceRepository } from "../db/repositories/copilot-tool-preference-repository.js";
 
@@ -22,10 +28,12 @@ const idSchema = z.string().trim().min(1).max(128);
 const titleSchema = z.string().trim().min(1).max(200).optional();
 const renameConversationSchema = z.object({ title: z.string().trim().min(1).max(200) }).strict();
 const modelIdSchema = z.string().trim().min(1).max(128).optional();
-const createConversationSchema = z.object({ title: titleSchema }).strict();
+const createConversationSchema = z.object({ title: titleSchema, grantId: idSchema.optional() }).strict();
 const sendMessageSchema = z.object({
   content: z.string().trim().min(1).max(32 * 1024),
-  modelId: modelIdSchema
+  modelId: modelIdSchema,
+  projectId: idSchema.optional(),
+  grantId: idSchema.optional()
 }).strict();
 const memoryScopeSchema = z.enum(["global", "project", "session"]);
 const writeMemorySchema = z.object({
@@ -33,10 +41,11 @@ const writeMemorySchema = z.object({
   scope: memoryScopeSchema,
   text: z.string().trim().min(1).max(8 * 1024),
   projectId: z.string().max(128).optional(),
+  conversationId: idSchema.optional(),
   metadata: z.record(z.unknown()).optional()
 }).strict();
-const listMemorySchema = z.object({ scope: memoryScopeSchema.default("global"), projectId: z.string().max(128).optional(), limit: z.coerce.number().int().min(1).max(100).optional() }).strict();
-const searchMemorySchema = z.object({ q: z.string().trim().min(1).max(512), scope: memoryScopeSchema.default("global"), projectId: z.string().max(128).optional(), limit: z.coerce.number().int().min(1).max(50).optional() }).strict();
+const listMemorySchema = z.object({ scope: memoryScopeSchema.default("global"), projectId: z.string().max(128).optional(), conversationId: idSchema.optional(), limit: z.coerce.number().int().min(1).max(100).optional() }).strict();
+const searchMemorySchema = z.object({ q: z.string().trim().min(1).max(512), scope: memoryScopeSchema.default("global"), projectId: z.string().max(128).optional(), conversationId: idSchema.optional(), limit: z.coerce.number().int().min(1).max(50).optional() }).strict();
 const toolEnabledSchema = z.object({ enabled: z.boolean() }).strict();
 
 export type CopilotRouteDeps = AgentStackDeps;
@@ -73,13 +82,20 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
 
   router.post("/conversations", (req, res) => withBody(req.body, createConversationSchema, res, (value) => {
     const { log } = buildAgentStack(deps, userId(req));
-    const conversation = log.createConversation(value.title);
-    res.status(201).json(ok({ conversation }));
+    try {
+      const conversation = deps.db.transaction(() => {
+        if(value.grantId) new PlatformActions({db:deps.db,userId:userId(req)},createPlatformCommands()).assertGrant(value.grantId);
+        const created = log.createConversation(value.title);
+        if(value.grantId) new CopilotGrantRepository(deps.db,userId(req)).bind(created.id,value.grantId);
+        return {...created,grantId:value.grantId??null};
+      }).immediate();
+      res.status(201).json(ok({ conversation }));
+    } catch(error) { domainError(res,error); }
   }));
 
   router.get("/conversations", (_req, res) => {
     const { log } = buildAgentStack(deps, userId(_req));
-    res.json(ok({ conversations: log.listConversations() }));
+    res.json(ok({ conversations: log.listConversations().map(c=>({...c,grantId:new CopilotGrantRepository(deps.db,userId(_req)).binding(c.id)??null})) }));
   });
 
   router.get("/conversations/:id/messages", (req, res) => {
@@ -104,8 +120,10 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   router.delete("/conversations/:id", (req, res) => {
     const id = parseId(req.params.id, res); if (!id) return;
     const { log } = buildAgentStack(deps, userId(req));
-    if (!log.deleteConversation(id)) return notFound(res);
-    res.json(ok({ deleted: true }));
+    try {
+      if (!log.deleteConversation(id)) return notFound(res);
+      res.json(ok({ deleted: true }));
+    } catch(error) { domainError(res,error); }
   });
 
   // Edit a user message: rewrite it in place, drop everything after it, then
@@ -118,16 +136,17 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     withBody(req.body, editMessageSchema, res, async (value) => {
       const { log, orchestrator } = buildAgentStack(deps, userId(req));
       if (!log.getConversation(id)) return notFound(res);
-      const truncated = log.truncateAfterMessage(value.messageId, value.content);
-      if (!truncated) return notFound(res);
       try {
-        const runId = await orchestrator.runTurn({
+        const runId = deps.db.transaction(() => {
+          if (!log.truncateAfterMessage(value.messageId,value.content,id)) throw new AgentError("COPILOT_NOT_FOUND","Message not found");
+          return orchestrator.enqueue({
           userId: userId(req),
           conversationId: id,
           userText: value.content,
           source: "user",
           skipUserMessage: true
-        });
+          });
+        }).immediate();
         res.status(201).json(ok({ runId }));
       } catch (error) {
         domainError(res, error);
@@ -143,11 +162,13 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     if (!log.getConversation(id)) return notFound(res);
     withBody(req.body, sendMessageSchema, res, async (value) => {
       try {
-        const runId = await orchestrator.runTurn({
+        const runId = orchestrator.enqueue({
           userId: userId(req),
           conversationId: id,
           userText: value.content,
-          ...(value.modelId !== undefined ? { modelId: value.modelId } : {})
+          ...(value.modelId !== undefined ? { modelId: value.modelId } : {}),
+          ...(value.projectId ? {projectId:value.projectId}: {}),
+          ...(value.grantId ? {grantId:value.grantId}: {})
         });
         res.status(201).json(ok({ runId }));
       } catch (error) {
@@ -156,18 +177,25 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     });
   });
 
+  router.get("/conversations/:id/runs", (req,res)=>{
+    const id=parseId(req.params.id,res);if(!id)return;
+    const {log}=buildAgentStack(deps,userId(req));if(!log.getConversation(id))return notFound(res);
+    const runs=log.listRuns(id);
+    res.json(ok({runs:runs.slice(0,50),activeRun:runs.find(r=>["pending","running","awaiting_approval"].includes(r.status)) ?? null}));
+  });
+
   router.get("/runs/:id", (req, res) => {
     const id = parseId(req.params.id, res); if (!id) return;
     const { log } = buildAgentStack(deps, userId(req));
     const run = log.getRun(id);
     if (!run) return notFound(res);
-    res.json(ok({ run, pendingActions: log.listPendingActions(id) }));
+    res.json(ok({ run, pendingActions: log.listPendingActions(id).map(a=>({...a,platformIntentId:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)?.id??null:null,platformIntent:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)??null:null})), steps: new CopilotRunLedger(deps.db,userId(req)).steps(id) }));
   });
 
-  router.post("/runs/:id/cancel", (req, res) => {
+  router.post("/runs/:id/cancel", async (req, res) => {
     const id = parseId(req.params.id, res); if (!id) return;
     const { orchestrator } = buildAgentStack(deps, userId(req));
-    const result = orchestrator.cancelRun({ userId: userId(req), runId: id });
+    const result = await orchestrator.cancelRun({ userId: userId(req), runId: id });
     res.json(ok(result));
   });
 
@@ -181,7 +209,8 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
           userId: userId(req),
           runId,
           actionId,
-          approved: value.approved
+          approved: value.approved,
+          async: true
         });
         res.json(ok(result));
       } catch (error) {
@@ -192,25 +221,20 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
 
   router.get("/memory/entries", (req, res) => withQuery(req.query, listMemorySchema, res, (value) => {
     const { memory } = buildAgentStack(deps, userId(req));
-    const scope = { scope: value.scope ?? "global", ...(value.projectId !== undefined ? { projectId: value.projectId } : {}) };
+    const scope = { scope: value.scope ?? "global", ...(value.projectId !== undefined ? { projectId: value.projectId } : {}), ...(value.conversationId ? {conversationId:value.conversationId} : {}) };
     res.json(ok({ entries: memory.list(scope, value.limit ?? 50) }));
   }));
 
-  router.post("/memory/entries", (req, res) => withBody(req.body, writeMemorySchema, res, (value) => {
-    const { memory } = buildAgentStack(deps, userId(req));
-    const entry = memory.create({
-      kind: value.kind,
-      scope: value.scope,
-      text: value.text,
-      ...(value.projectId !== undefined ? { projectId: value.projectId } : {}),
-      ...(value.metadata !== undefined ? { metadata: value.metadata } : {})
-    });
-    res.status(201).json(ok({ entry }));
+  router.post("/memory/entries", (req, res) => withBody(req.body, writeMemorySchema, res, async (value) => {
+    try {
+      const entry=await new PlatformActions({db:deps.db,userId:userId(req)},createPlatformCommands()).executeOwner("memory.write",value,randomUUID());
+      res.status(201).json(ok({entry}));
+    }catch(error){domainError(res,error);}
   }));
 
   router.get("/memory/search", (req, res) => withQuery(req.query, searchMemorySchema, res, (value) => {
     const { memory } = buildAgentStack(deps, userId(req));
-    const scope = { scope: value.scope ?? "global", ...(value.projectId !== undefined ? { projectId: value.projectId } : {}) };
+    const scope = { scope: value.scope ?? "global", ...(value.projectId !== undefined ? { projectId: value.projectId } : {}), ...(value.conversationId ? {conversationId:value.conversationId} : {}) };
     res.json(ok({ entries: memory.search(value.q, scope, value.limit ?? 10) }));
   }));
 
@@ -234,12 +258,14 @@ function parseId(value: string | undefined, res: Response): string | undefined {
 function withBody<T>(body: unknown, schema: z.ZodType<T>, res: Response, callback: (value: T) => void): void {
   const parsed = schema.safeParse(body);
   if (!parsed.success) return invalid(res);
-  callback(parsed.data);
+  try { Promise.resolve(callback(parsed.data)).catch(error=>domainError(res,error)); }
+  catch(error) { domainError(res,error); }
 }
 function withQuery<T>(query: unknown, schema: z.ZodType<T>, res: Response, callback: (value: T) => void): void {
   const parsed = schema.safeParse(query);
   if (!parsed.success) return invalid(res);
-  callback(parsed.data);
+  try { Promise.resolve(callback(parsed.data)).catch(error=>domainError(res,error)); }
+  catch(error) { domainError(res,error); }
 }
 function invalid(res: Response, message = "Invalid input"): void {
   res.status(400).json({ code: 1, message, details: { code: "COPILOT_INVALID_INPUT" } });
@@ -248,10 +274,11 @@ function notFound(res: Response): void {
   res.status(404).json({ code: 1, message: "Copilot record not found", details: { code: "COPILOT_NOT_FOUND" } });
 }
 function domainError(res: Response, error: unknown): void {
-  if (error instanceof AgentError && error.code === "COPILOT_RUN_BUSY") {
+  if (error instanceof AgentError && ["COPILOT_RUN_BUSY","COPILOT_CONVERSATION_BUSY"].includes(error.code)) {
     res.status(409).json({ code: 1, message: error.message, details: { code: error.code } });
     return;
   }
+  if(error instanceof AgentError && error.code === "COPILOT_NOT_FOUND")return notFound(res);
   const code = error instanceof Error ? error.message : "COPILOT_OPERATION_FAILED";
   res.status(400).json({ code: 1, message: "Copilot operation rejected", details: { code } });
 }

@@ -15,8 +15,8 @@ team coordination.
 The differentiated promise should be:
 
 > Start a local AI coding task in under 10 minutes, keep it recoverable through
-> tmux, govern what it can do, and export a bounded handoff/evidence packet for
-> review or team follow-up.
+> the embedded Session Server, govern what it can do, and export a bounded
+> handoff/evidence packet for review or team follow-up.
 
 ## Competitive Baseline
 
@@ -34,8 +34,8 @@ The differentiated promise should be:
 ForgeBadger should avoid becoming a general IDE or a hosted autonomous developer.
 The fast path is to own the layer between AI CLIs and the team:
 
-1. **Local-first runtime control:** tmux-backed, browser-accessible, recoverable
-   sessions for existing AI CLIs.
+1. **Local-first runtime control:** Session Server-backed, browser-accessible,
+   recoverable sessions for existing AI CLIs.
 2. **Multi-agent/CLI governance:** one place to see runtime readiness, model
    provider readiness, project context, sessions, and approval boundaries.
 3. **Task-to-session continuity:** convert project-manager work items into
@@ -54,8 +54,8 @@ Goal: reduce first useful session setup to one guided path.
 
 Deliverables:
 
-- Dashboard "Start here" flow that checks tmux, CLI adapters, provider/model
-  readiness, and project availability.
+- Dashboard "Start here" flow that checks the Session Server runtime, CLI
+  adapters, provider/model readiness, and project availability.
 - One-click route to create/import a project and start the first Claude Code
   session with the selected template.
 - Settings/runtime refresh remains available, but first-run blockers are

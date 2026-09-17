@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 import type { ProviderAdapter } from "../db/repositories/model-provider-repository.js";
+import { expandUserPath } from "../lib/user-path.js";
 
 export type CliConfigScope = "global" | "project";
 
@@ -33,12 +34,21 @@ export function cliConfigTargetPath(input: {
   return path.join(globalConfigRoot(input.adapter), mainFiles[input.adapter]);
 }
 
-export function globalConfigRoot(adapter: ProviderAdapter): string {
-  if (adapter === "claude") return path.resolve(process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(homedir(), ".claude"));
-  if (adapter === "codex") return path.resolve(process.env.CODEX_HOME?.trim() || path.join(homedir(), ".codex"));
-  if (adapter === "kimi") return path.resolve(process.env.KIMI_CODE_HOME?.trim() || path.join(homedir(), ".kimi-code"));
-  return path.resolve(process.env.OPENCODE_CONFIG_DIR?.trim()
-    || path.join(process.env.XDG_CONFIG_HOME?.trim() || path.join(homedir(), ".config"), "opencode"));
+export function globalConfigRoot(
+  adapter: ProviderAdapter,
+  options: { env?: NodeJS.ProcessEnv; homeDir?: string } = {}
+): string {
+  const env = options.env ?? process.env;
+  const homeDir = options.homeDir ?? homedir();
+  if (adapter === "claude") return resolveUserRoot(env.CLAUDE_CONFIG_DIR, path.join(homeDir, ".claude"), homeDir);
+  if (adapter === "codex") return resolveUserRoot(env.CODEX_HOME, path.join(homeDir, ".codex"), homeDir);
+  if (adapter === "kimi") return resolveUserRoot(env.KIMI_CODE_HOME, path.join(homeDir, ".kimi-code"), homeDir);
+  const xdgRoot = resolveUserRoot(env.XDG_CONFIG_HOME, path.join(homeDir, ".config"), homeDir);
+  return resolveUserRoot(env.OPENCODE_CONFIG_DIR, path.join(xdgRoot, "opencode"), homeDir);
+}
+
+function resolveUserRoot(value: string | undefined, fallback: string, homeDir: string): string {
+  return path.resolve(expandUserPath(value?.trim() || fallback, homeDir));
 }
 
 /** Canonicalizes the nearest existing ancestor without creating or opening the target file. */

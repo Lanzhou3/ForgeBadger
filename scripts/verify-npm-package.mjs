@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 
 const required = [
   { path: "dist/index.js", type: "file" },
+  { path: "postinstall.mjs", type: "file" },
   { path: "dist/gateway/src/index.js", type: "file" },
+  { path: "dist/gateway/src/services/session-server-entry.js", type: "file" },
   { path: "dist/gateway/src/db/migrations", type: "directory", nonEmpty: true },
   { path: "dist/web/standalone/packages/web/server.js", type: "file" },
   { path: "dist/web/standalone/packages/web/.next/BUILD_ID", type: "file" },
@@ -20,7 +22,7 @@ const required = [
   { path: "docs/README.zh-TW.md", type: "file" }
 ];
 
-const packageArtifactRoots = ["dist", "README.md", "LICENSE", "docs"];
+const packageArtifactRoots = ["postinstall.mjs", "dist", "README.md", "LICENSE", "docs"];
 
 const forbiddenNames = new Set([
   ".env",
@@ -46,6 +48,14 @@ export async function verifyNpmPackage(options = {}) {
   const gatewayPackageRoot = path.resolve(options.gatewayPackageRoot ?? path.join(cliPackageRoot, "..", "gateway"));
   const packageJson = readPackageJson(cliPackageRoot);
   const errors = [];
+  if (packageJson.scripts?.postinstall !== "node postinstall.mjs") {
+    errors.push("package postinstall must run node postinstall.mjs");
+  }
+  for (const retired of ["tmux.js", "terminal-multiplexer-runtime.js"]) {
+    if (existsSync(path.join(cliPackageRoot, "dist/gateway/src/services", retired))) {
+      errors.push(`retired terminal backend bundled: ${retired}`);
+    }
+  }
 
   for (const artifact of required) {
     await verifyRequiredArtifact(cliPackageRoot, artifact, errors);
@@ -159,7 +169,8 @@ function hasAllowedFilesWhitelist(cliPackageRoot) {
     "LICENSE",
     "docs/README.zh-CN.md",
     "docs/README.zh-TW.md",
-    "package.json"
+    "package.json",
+    "postinstall.mjs"
   ];
   return hasSameStringItems(packageJson.files, expected);
 }

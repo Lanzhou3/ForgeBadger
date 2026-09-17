@@ -55,6 +55,15 @@ function adaptTemplateFiles(
         content: adaptInstructionContent(file.content, adapter)
       }];
     }
+    if (adapter === "opencode" && (file.relativePath === "opencode.json" || file.relativePath === "opencode.jsonc")) {
+      return [file];
+    }
+    if (adapter === "codex" && file.relativePath === "AGENTS.override.md") {
+      return [file];
+    }
+    if (adapter === "codex" && file.relativePath.startsWith(".agents/skills/")) {
+      return [file];
+    }
     return [];
   });
 }
@@ -90,7 +99,7 @@ function skillConfigPath(name: string, adapter: AdapterId): string {
   return `${adapterConfigRoot(adapter)}/skills/${slug}/SKILL.md`;
 }
 
-function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" | ".kimi-code" {
+export function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" | ".kimi-code" {
   if (adapter === "opencode") return ".opencode";
   if (adapter === "codex") return ".codex";
   if (adapter === "kimi") return ".kimi-code";

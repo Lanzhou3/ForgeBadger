@@ -88,6 +88,7 @@ describe("events WebSocket", () => {
     const apiKeyStore = new InMemoryApiKeyStore({ masterKey });
 
     app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       db,
       jwtSecret,
       masterKey,

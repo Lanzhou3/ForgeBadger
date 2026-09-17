@@ -7,7 +7,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { runStart, type RunStartOptions } from "../src/commands/start.js";
+import { runStart } from "../src/commands/start.js";
 import { runCli } from "../src/index.js";
 import type { RuntimeConfig } from "../src/runtime/config.js";
 import { resolveInstalledPaths } from "../src/runtime/paths.js";
@@ -96,7 +96,7 @@ describe("runStart", () => {
     delete process.env.FORGEBADGER_JWT_SECRET;
 
     try {
-      const codePromise = runStartWithReadyRuntime({
+      const codePromise = runStart({
         gatewayPort: 49931,
         webPort: 49932,
         host: "127.0.0.1",
@@ -213,7 +213,7 @@ describe("runStart", () => {
     process.env.FORGEBADGER_EXTRA_SECRET = "parent-forgebadger-extra";
 
     try {
-      const codePromise = runStartWithReadyRuntime({
+      const codePromise = runStart({
         loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
         resolvePaths: () => createInstalledPaths(),
         checkPort: async () => undefined,
@@ -252,7 +252,7 @@ describe("runStart", () => {
     const stdout = createMemoryWriter();
     const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
 
-    const codePromise = runStartWithReadyRuntime({
+    const codePromise = runStart({
       loadConfig: async () =>
         createRuntimeConfig("/tmp/forgebadger-state", {
           gateway: { host: "0.0.0.0", port: 48731 },
@@ -284,96 +284,12 @@ describe("runStart", () => {
     assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/127\.0\.0\.1:48731\n/);
   });
 
-  it("fails closed before config loading or process spawn when psmux is unavailable non-interactively", async () => {
-    const stderr = createMemoryWriter();
-    const children: FakeChild[] = [];
-    let dependencyChecks = 0;
-    let configLoaded = false;
-
-    const codePromise = runStart({
-      loadConfig: async () => {
-        configLoaded = true;
-        return createRuntimeConfig("/tmp/forgebadger-state");
-      },
-      resolvePaths: () => createInstalledPaths(),
-      checkPort: async () => undefined,
-      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
-      dependencyRunner: async () => {
-        dependencyChecks += 1;
-        return { exitCode: 127, stdout: "", stderr: "psmux not found" };
-      },
-      platform: "win32",
-      isTTY: false,
-      spawn: () => {
-        const child = new FakeChild();
-        children.push(child);
-        return child;
-      },
-      installShutdown: (spawnedChildren) => {
-        setImmediate(() => spawnedChildren[1]?.emit("exit", 0, null));
-      },
-      stdout: createMemoryWriter(),
-      stderr
-    });
-
-    const code = await codePromise;
-
-    assert.equal(code, 1);
-    assert.equal(configLoaded, false);
-    assert.equal(children.length, 0);
-    assert.equal(dependencyChecks, 1);
-    assert.match(stderr.text, /winget install --id marlocarlo\.psmux --exact --source winget/);
-    assert.match(stderr.text, /non-interactive|not installed/i);
-    assert.match(stderr.text, /forgebadger doctor/);
-  });
-
-  it("fails closed after checking the Linux package-manager allowlist", async () => {
-    const stderr = createMemoryWriter();
-    const seen: Array<{ command: string; args: string[] }> = [];
-
-    const codePromise = runStart({
-      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
-      resolvePaths: () => createInstalledPaths(),
-      checkPort: async () => undefined,
-      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
-      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
-      dependencyRunner: async (command, args) => {
-        seen.push({ command, args });
-        return { exitCode: 127, stdout: "", stderr: "tmux not found" };
-      },
-      platform: "linux",
-      spawn: () => new FakeChild(),
-      installShutdown: (spawnedChildren) => {
-        setImmediate(() => spawnedChildren[1]?.emit("exit", 0, null));
-      },
-      stdout: createMemoryWriter(),
-      stderr
-    });
-
-    const code = await codePromise;
-
-    assert.equal(code, 1);
-    assert.deepEqual(seen, [
-      { command: "tmux", args: ["-V"] },
-      { command: "apt-get", args: ["--version"] },
-      { command: "dnf", args: ["--version"] },
-      { command: "yum", args: ["--version"] },
-      { command: "pacman", args: ["--version"] },
-      { command: "zypper", args: ["--version"] },
-      { command: "apk", args: ["--version"] }
-    ]);
-    assert.match(stderr.text, /Install tmux manually with your system package manager/);
-    assert.match(stderr.text, /aborted|cannot start/i);
-    assert.match(stderr.text, /forgebadger doctor/);
-  });
-
   it("formats IPv6 browser URLs with brackets", async () => {
     // Arrange
     const stdout = createMemoryWriter();
     const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
 
-    const codePromise = runStartWithReadyRuntime({
+    const codePromise = runStart({
       loadConfig: async () =>
         createRuntimeConfig("/tmp/forgebadger-state", {
           gateway: { host: "::1", port: 48731 },
@@ -412,7 +328,7 @@ describe("runStart", () => {
     // Act / Assert
     await assert.rejects(
       () =>
-        runStartWithReadyRuntime({
+        runStart({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "127.0.0.1", port: 48731 },
@@ -442,7 +358,7 @@ describe("runStart", () => {
     // Act / Assert
     await assert.rejects(
       () =>
-        runStartWithReadyRuntime({
+        runStart({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "0.0.0.0", port: 48731 },
@@ -472,7 +388,7 @@ describe("runStart", () => {
     // Act / Assert
     await assert.rejects(
       () =>
-        runStartWithReadyRuntime({
+        runStart({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "localhost", port: 48731 },
@@ -502,7 +418,7 @@ describe("runStart", () => {
     // Act / Assert
     await assert.rejects(
       () =>
-        runStartWithReadyRuntime({
+        runStart({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
               gateway: { host: "localhost", port: 48731 },
@@ -532,7 +448,7 @@ describe("runStart", () => {
     const children: FakeChild[] = [];
     const spawnError = new Error("gateway spawn failed");
 
-    const codePromise = runStartWithReadyRuntime({
+    const codePromise = runStart({
       loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
@@ -567,7 +483,7 @@ describe("runStart", () => {
     const originalSigtermCount = process.listenerCount("SIGTERM");
     const children: FakeChild[] = [];
 
-    const codePromise = runStartWithReadyRuntime({
+    const codePromise = runStart({
       loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
@@ -603,7 +519,7 @@ describe("runStart", () => {
     const originalSigtermCount = process.listenerCount("SIGTERM");
     const children: FakeChild[] = [];
 
-    const codePromise = runStartWithReadyRuntime({
+    const codePromise = runStart({
       loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
@@ -643,7 +559,7 @@ describe("runStart", () => {
     // Act / Assert
     await assert.rejects(
       () =>
-        runStartWithReadyRuntime({
+        runStart({
           loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
           resolvePaths: () => paths,
           checkPort: async () => undefined,
@@ -789,21 +705,6 @@ function createMemoryWriter() {
       this.text += chunk;
     }
   };
-}
-
-function runStartWithReadyRuntime(options: RunStartOptions): Promise<number> {
-  return runStart({
-    ensureTerminalRuntime: async () => ({
-      status: "ready",
-      runtime: {
-        persistence: "tmux",
-        mode: "native_tmux",
-        supported: true,
-        message: "tmux is available for persistent browser terminals."
-      }
-    }),
-    ...options
-  });
 }
 
 function captureEnv(names: string[]): Record<string, string | undefined> {

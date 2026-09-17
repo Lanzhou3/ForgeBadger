@@ -19,6 +19,7 @@ const {
   cancelRunMock,
   decidePendingActionMock,
   getRunMock,
+  listRunsMock,
 } = vi.hoisted(() => ({
   createConversationMock: vi.fn(),
   listMessagesMock: vi.fn(),
@@ -27,6 +28,7 @@ const {
   cancelRunMock: vi.fn(),
   decidePendingActionMock: vi.fn(),
   getRunMock: vi.fn(),
+  listRunsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/copilot-api", async (importOriginal) => {
@@ -40,6 +42,7 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     cancelRun: cancelRunMock,
     decidePendingAction: decidePendingActionMock,
     getRun: getRunMock,
+    listConversationRuns: listRunsMock,
   };
 });
 
@@ -119,6 +122,7 @@ describe("RobotChatPanel", () => {
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
+    listRunsMock.mockResolvedValue({ runs: [], activeRun: null });
     window.localStorage.clear();
     createConversationMock.mockResolvedValue({ conversation: newConversation });
     listMessagesMock.mockResolvedValue({ messages: [] });
@@ -223,6 +227,7 @@ describe("RobotChatPanel", () => {
     // stays until the first delta or terminal event arrives.
     expect(screen.getByText("Copilot 正在思考…")).toBeTruthy();
 
+    getRunMock.mockResolvedValue({ run: { id: "run-1", conversationId: "conv-new", status: "completed", revision: 3 }, pendingActions: [] });
     dispatchRunUpdated({ run_id: "run-1", status: "completed" });
     await waitFor(() => expect(screen.queryByText("Copilot 正在思考…")).toBeNull());
   });
@@ -257,6 +262,7 @@ describe("RobotChatPanel", () => {
 
     await waitFor(() => expect(screen.getByText("正在生成回复")).toBeTruthy());
 
+    getRunMock.mockResolvedValue({ run: { id: "run-1", conversationId: "conv-new", status: "completed", revision: 3 }, pendingActions: [] });
     dispatchRunUpdated({ run_id: "run-1", status: "completed" });
     await waitFor(() => expect(screen.queryByText("正在生成回复")).toBeNull());
   });
@@ -272,6 +278,7 @@ describe("RobotChatPanel", () => {
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-stored", "跑一下构建", undefined));
 
+    getRunMock.mockResolvedValue({ run: { id: "run-1", conversationId: "conv-stored", status: "awaiting_approval", revision: 2 }, pendingActions: [{ id: "act-1", runId: "run-1", tool: "run_terminal", status: "pending", inputJson: "{}", inputDigest: "digest" }] });
     dispatchRunUpdated({
       run_id: "run-1",
       status: "awaiting_approval",

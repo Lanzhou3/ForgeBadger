@@ -19,6 +19,7 @@ const {
   getCopilotCapabilitiesMock,
   listModelProvidersMock,
   getRunMock,
+  listRunsMock,
 } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   listConversationsMock: vi.fn(),
@@ -32,6 +33,7 @@ const {
   getCopilotCapabilitiesMock: vi.fn(),
   listModelProvidersMock: vi.fn(),
   getRunMock: vi.fn(),
+  listRunsMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -53,6 +55,7 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     editMessage: editMessageMock,
     getCopilotCapabilities: getCopilotCapabilitiesMock,
     getRun: getRunMock,
+    listConversationRuns: listRunsMock,
   };
 });
 
@@ -158,6 +161,7 @@ describe("CopilotChat console layout", () => {
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
+    listRunsMock.mockResolvedValue({ runs: [], activeRun: null });
     window.localStorage.clear();
     window.history.replaceState({}, "", "/copilot");
     listConversationsMock.mockResolvedValue({ conversations: [baseConversation] });
@@ -322,4 +326,17 @@ describe("CopilotChat console layout", () => {
 
     await waitFor(() => expect(screen.getByText("编辑失败，请重试。")).toBeTruthy());
   });
+  it("does not submit Enter while a restored approval is pending", async () => {
+    const run = { id: "run-1", conversationId: "conv-1", status: "awaiting_approval", revision: 3 };
+    listRunsMock.mockResolvedValue({ runs: [run], activeRun: run });
+    getRunMock.mockResolvedValue({ run, pendingActions: [{ id: "action", runId: "run-1", tool: "create_project", status: "pending", inputJson: "{}", inputDigest: "digest" }] });
+    renderChat();
+    await waitFor(() => expect(screen.getByText("需要批准")).toBeTruthy());
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "继续" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    await act(async () => {});
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(screen.getByText("需要批准")).toBeTruthy();
+  });
+
 });

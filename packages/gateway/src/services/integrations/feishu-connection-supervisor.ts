@@ -44,43 +44,58 @@ interface SupervisorTimers {
 
 interface RuntimeEntry {
   account: FeishuSupervisorAccount;
-  client: FeishuWebSocketHandle;
-  retryAttempt: number;
+  client?: FeishuWebSocketHandle;
+  generation: number;
+  failed: boolean;
   retryTimer?: unknown;
 }
 
 export class FeishuConnectionSupervisor {
   private readonly runtimes = new Map<string, RuntimeEntry>();
   private readonly health = new Map<string, FeishuConnectionHealth>();
+  private readonly healthWrites = new Map<string, Promise<void>>();
+  private readonly operations = new Map<string, number>();
   private readonly handlers = new Map<string, FeishuSdkEventHandlers>();
   private started = false;
+  private lifecycle = 0;
+  private stopping?: Promise<void>;
 
   constructor(private readonly dependencies: {
     accounts: AccountSource;
     sdkFactory: SupervisorSdkFactory;
+    createHandlers?: (account: FeishuSupervisorAccount) => FeishuSdkEventHandlers;
     timers?: SupervisorTimers;
     jitter?: () => number;
   }) {}
 
   async start(): Promise<void> {
-    if (this.started) return;
+    if (this.started || this.stopping) return;
     this.started = true;
+    const lifecycle = ++this.lifecycle;
     const accounts = await this.dependencies.accounts.listEnabled();
-    // Connection attempts are detached so Feishu availability never gates Gateway readiness.
-    for (const account of accounts) await this.connect(account, 0);
+    if (!this.started || lifecycle !== this.lifecycle) return;
+    await Promise.allSettled(accounts.map((account) => {
+      // A concurrent explicit reconcile is newer than the startup snapshot.
+      if (this.operations.has(account.userId)) return Promise.resolve();
+      return this.reconcileAccount(account.userId);
+    }));
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.stopping) return this.stopping;
+    let resolve!: () => void;
+    this.stopping = new Promise<void>((done) => { resolve = done; });
     this.started = false;
-    for (const [userId, runtime] of this.runtimes) {
-      if (runtime.retryTimer !== undefined) this.timers.clear(runtime.retryTimer);
-      runtime.client.close(true);
-      await this.publishHealth(userId, {
-        ...this.getHealth(userId),
-        state: "stopped"
-      });
-    }
+    this.lifecycle += 1;
+    const runtimes = [...this.runtimes.entries()];
     this.runtimes.clear();
+    this.operations.clear();
+    for (const [userId, runtime] of runtimes) {
+      this.closeEntry(runtime);
+      this.publishHealth(userId, { ...this.getHealth(userId), state: "stopped" });
+    }
+    void Promise.allSettled([...this.healthWrites.values()]).then(resolve);
+    return this.stopping;
   }
 
   registerHandlers(userId: string, handlers: FeishuSdkEventHandlers): void {
@@ -88,95 +103,140 @@ export class FeishuConnectionSupervisor {
   }
 
   async reconcileAccount(userId: string): Promise<void> {
-    const account = await this.dependencies.accounts.get(userId);
-    const current = this.runtimes.get(userId);
-    if (!account?.enabled) {
-      if (current?.retryTimer !== undefined) this.timers.clear(current.retryTimer);
-      current?.client.close(true);
-      this.runtimes.delete(userId);
-      await this.publishHealth(userId, disabledHealth(account));
-      return;
-    }
-    if (current?.account.configRevision === account.configRevision) return;
-    if (current?.retryTimer !== undefined) this.timers.clear(current.retryTimer);
-    current?.client.close(true);
-    await this.connect(account, 0);
+    return this.refreshAccount(userId, 0);
   }
 
   getHealth(userId: string): FeishuConnectionHealth {
     return this.health.get(userId) ?? disabledHealth(undefined);
   }
 
-  private async connect(account: FeishuSupervisorAccount, retryAttempt: number): Promise<void> {
+  private async refreshAccount(userId: string, retryAttempt: number): Promise<void> {
     if (!this.started) return;
-    try {
-      const callbacks = this.createCallbacks(account, retryAttempt);
-      const client = this.dependencies.sdkFactory.createWebSocketClient(
-        account,
-        callbacks,
-        this.handlers.get(account.userId) ?? {}
-      );
-      this.runtimes.set(account.userId, { account: { ...account }, client, retryAttempt });
-      await this.publishHealth(account.userId, {
-        state: "connecting",
-        accountId: account.accountId,
-        configRevision: account.configRevision,
-        reconnectAttempt: retryAttempt,
-        lastConnectedAt: this.getHealth(account.userId).lastConnectedAt,
-        lastErrorMessage: null
-      });
-      void client.start().catch((error: unknown) => callbacks.onError?.(toError(error)));
-    } catch (error) {
-      await this.handleTerminalError(account, retryAttempt, toError(error), false);
+    const lifecycle = this.lifecycle;
+    const generation = (this.operations.get(userId) ?? 0) + 1;
+    this.operations.set(userId, generation);
+    const current = this.runtimes.get(userId);
+    let account: FeishuSupervisorAccount | undefined;
+    try { account = await this.dependencies.accounts.get(userId); }
+    catch {
+      if (this.isOperationCurrent(userId, generation, lifecycle)) {
+        if (current) this.closeEntry(current);
+        this.runtimes.delete(userId);
+        this.publishHealth(userId, { ...this.getHealth(userId), state: "unhealthy", lastErrorMessage: "FEISHU_ACCOUNT_READ_FAILED" });
+      }
+      return;
     }
+    if (!this.isOperationCurrent(userId, generation, lifecycle)) return;
+    if (!account?.enabled || account.userId !== userId) {
+      if (current) this.closeEntry(current);
+      this.runtimes.delete(userId);
+      this.publishHealth(userId, disabledHealth(account));
+      return;
+    }
+    if (current && !current.failed && current.account.configRevision === account.configRevision
+      && current.account.accountId === account.accountId) {
+      current.generation = generation;
+      return;
+    }
+    if (current) this.closeEntry(current);
+    this.connect({ ...account }, generation, retryAttempt);
   }
 
-  private createCallbacks(account: FeishuSupervisorAccount, retryAttempt: number): FeishuSdkCallbacks {
+  private connect(account: FeishuSupervisorAccount, generation: number, retryAttempt: number): void {
+    const entry: RuntimeEntry = { account, generation, failed: false };
+    this.runtimes.set(account.userId, entry);
+    const callbacks = this.createCallbacks(entry, retryAttempt);
+    try {
+      entry.client = this.dependencies.sdkFactory.createWebSocketClient(account, callbacks, this.guardHandlers(entry));
+      this.publishHealth(account.userId, {
+        state: "connecting", accountId: account.accountId, configRevision: account.configRevision,
+        reconnectAttempt: retryAttempt, lastConnectedAt: this.getHealth(account.userId).lastConnectedAt,
+        lastErrorMessage: null
+      });
+      void entry.client.start().catch((error: unknown) => callbacks.onError?.(toError(error)));
+    } catch (error) { this.handleTerminalError(entry, retryAttempt, toError(error)); }
+  }
+
+  private guardHandlers(entry: RuntimeEntry): FeishuSdkEventHandlers {
+    const handlers = this.dependencies.createHandlers?.(entry.account) ?? this.handlers.get(entry.account.userId) ?? {};
     return {
-      onReady: () => void this.publishHealth(account.userId, connectedHealth(account)),
-      onReconnecting: () => void this.publishHealth(account.userId, {
-        ...this.getHealth(account.userId),
-        state: "reconnecting"
-      }),
-      onReconnected: () => void this.publishHealth(account.userId, connectedHealth(account)),
-      onError: (error) => void this.handleTerminalError(account, retryAttempt, error, true)
+      onMessage: (event, context) => this.isActive(entry) ? handlers.onMessage?.(event, context) : undefined,
+      onCardAction: (event) => this.isActive(entry) ? handlers.onCardAction?.(event) : undefined
     };
   }
 
-  private async handleTerminalError(
-    account: FeishuSupervisorAccount,
-    retryAttempt: number,
-    error: Error,
-    closeClient: boolean
-  ): Promise<void> {
-    if (!this.started) return;
-    const runtime = this.runtimes.get(account.userId);
-    if (closeClient) runtime?.client.close(true);
-    const nextAttempt = retryAttempt + 1;
-    await this.publishHealth(account.userId, {
-      state: "unhealthy",
-      accountId: account.accountId,
-      configRevision: account.configRevision,
-      reconnectAttempt: nextAttempt,
-      lastConnectedAt: this.getHealth(account.userId).lastConnectedAt,
-      lastErrorMessage: redactFeishuError(error)
-    });
-    const timer = this.timers.set(() => {
-      if (!this.started) return;
-      void this.connect(account, nextAttempt);
-    }, backoffDelay(nextAttempt, this.dependencies.jitter?.() ?? Math.random()));
-    if (runtime) runtime.retryTimer = timer;
-    else this.runtimes.set(account.userId, {
-      account: { ...account },
-      client: noOpClient,
-      retryAttempt: nextAttempt,
-      retryTimer: timer
-    });
+  private createCallbacks(entry: RuntimeEntry, retryAttempt: number): FeishuSdkCallbacks {
+    const publish = (health: () => FeishuConnectionHealth): void => {
+      if (this.isActive(entry)) this.publishHealth(entry.account.userId, health());
+    };
+    return {
+      onReady: () => publish(() => connectedHealth(entry.account)),
+      onReconnecting: () => publish(() => ({ ...this.getHealth(entry.account.userId), state: "reconnecting" })),
+      onReconnected: () => publish(() => connectedHealth(entry.account)),
+      onError: (error) => this.handleTerminalError(entry, retryAttempt, error)
+    };
   }
 
-  private async publishHealth(userId: string, health: FeishuConnectionHealth): Promise<void> {
+  private handleTerminalError(entry: RuntimeEntry, retryAttempt: number, error: Error): void {
+    if (!this.isActive(entry)) {
+      // Preserve terminal failure during a configuration read without restoring authority.
+      if (this.started && this.runtimes.get(entry.account.userId) === entry && !entry.failed) {
+        entry.failed = true;
+        this.closeEntry(entry);
+      }
+      return;
+    }
+    entry.failed = true;
+    this.closeEntry(entry);
+    const userId = entry.account.userId;
+    const nextAttempt = retryAttempt + 1;
+    this.publishHealth(userId, {
+      state: "unhealthy", accountId: entry.account.accountId, configRevision: entry.account.configRevision,
+      reconnectAttempt: nextAttempt, lastConnectedAt: this.getHealth(userId).lastConnectedAt,
+      lastErrorMessage: redactFeishuError(error)
+    });
+    entry.retryTimer = this.timers.set(() => {
+      if (!this.isOwned(entry)) return;
+      entry.retryTimer = undefined;
+      void this.refreshAccount(userId, nextAttempt).catch(() => this.reportFailure("FEISHU_RETRY_FAILED"));
+    }, backoffDelay(nextAttempt, this.dependencies.jitter?.() ?? Math.random()));
+  }
+
+  private isOperationCurrent(userId: string, generation: number, lifecycle: number): boolean {
+    return this.started && this.lifecycle === lifecycle && this.operations.get(userId) === generation;
+  }
+
+  private isOwned(entry: RuntimeEntry): boolean {
+    return this.started && this.runtimes.get(entry.account.userId) === entry
+      && this.operations.get(entry.account.userId) === entry.generation;
+  }
+
+  private isActive(entry: RuntimeEntry): boolean {
+    return this.isOwned(entry) && !entry.failed;
+  }
+
+  private closeEntry(entry: RuntimeEntry): void {
+    try {
+      if (entry.retryTimer !== undefined) this.timers.clear(entry.retryTimer);
+    } catch { this.reportFailure("FEISHU_TIMER_CLEAR_FAILED"); }
+    entry.retryTimer = undefined;
+    try { entry.client?.close(true); }
+    catch { this.reportFailure("FEISHU_CLIENT_CLOSE_FAILED"); }
+  }
+
+  private publishHealth(userId: string, health: FeishuConnectionHealth): void {
     this.health.set(userId, health);
-    await this.dependencies.accounts.updateHealth(userId, health);
+    const previous = this.healthWrites.get(userId) ?? Promise.resolve();
+    const write = previous.then(async () => {
+      if (this.health.get(userId) !== health) return;
+      await this.dependencies.accounts.updateHealth(userId, health);
+    }).catch(() => this.reportFailure("FEISHU_HEALTH_WRITE_FAILED"));
+    this.healthWrites.set(userId, write);
+    void write.then(() => { if (this.healthWrites.get(userId) === write) this.healthWrites.delete(userId); });
+  }
+
+  private reportFailure(code: string): void {
+    console.error("[feishu-supervisor] lifecycle operation failed", { code });
   }
 
   private get timers(): SupervisorTimers {
@@ -187,12 +247,6 @@ export class FeishuConnectionSupervisor {
 const defaultTimers: SupervisorTimers = {
   set: (callback, delayMs) => setTimeout(callback, delayMs),
   clear: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>)
-};
-
-const noOpClient: FeishuWebSocketHandle = {
-  start: async () => undefined,
-  close: () => undefined,
-  getConnectionStatus: () => ({ state: "idle", reconnectAttempts: 0 })
 };
 
 function disabledHealth(account: FeishuSupervisorAccount | undefined): FeishuConnectionHealth {

@@ -110,6 +110,25 @@ describe("ProjectManagerRepository", () => {
     assert.equal(auditLogs.length, 2);
   });
 
+  it("always creates work items in todo even when an untrusted caller supplies done", () => {
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const untrustedInput = {
+      title: "Cannot bypass the completion gate",
+      status: "done"
+    } as unknown as Parameters<ProjectManagerRepository["createWorkItem"]>[1];
+
+    const item = repo.createWorkItem(projectId, untrustedInput);
+    const events = repo.listLedgerEvents(projectId, { workItemId: item.id });
+    const auditLogs = new AuditLogRepository(db, owner.id).list({
+      resourceType: "project_manager_work_item",
+      resourceId: item.id
+    });
+
+    assert.equal(item.status, "todo");
+    assert.equal(events[0]?.status, "todo");
+    assert.equal(JSON.parse(auditLogs[0]?.details ?? "{}").status, "todo");
+  });
+
   it("edits and deletes work items with ledger and audit rows", () => {
     const repo = new ProjectManagerRepository(db, owner.id);
     const item = repo.createWorkItem(projectId, {

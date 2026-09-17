@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { buildActivationReadiness } from "./activation-readiness";
 
 const readyRuntime = {
-  persistence: "tmux" as const,
-  mode: "native_tmux",
+  persistence: "session-server" as const,
+  mode: "ready" as const,
   supported: true,
-  message: "tmux 3.6b",
+  message: "Session server ready",
 };
 
 const readyAdapter = {
@@ -23,9 +23,9 @@ describe("buildActivationReadiness", () => {
     const readiness = buildActivationReadiness({
       terminalRuntime: {
         ...readyRuntime,
-        mode: "tmux_missing",
+        mode: "unavailable",
         supported: false,
-        message: "tmux not found",
+        message: "Session server unavailable",
       },
       adapters: [readyAdapter],
       modelsHealthy: true,

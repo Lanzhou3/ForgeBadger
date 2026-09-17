@@ -22,7 +22,7 @@ function createTestDb(): Database {
 }
 
 describe("DbSessionRecoveryStore", () => {
-  it("uses the sessions table as the tmux recovery index", async () => {
+  it("uses the sessions table as the runtime recovery index", async () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("recovery@example.com", "hash");
     const project = new ProjectRepository(db, user.id).create({
@@ -37,9 +37,10 @@ describe("DbSessionRecoveryStore", () => {
       aiTool: "claude",
       workingDir: project.path,
       attachToken: "attach-old",
-      tmuxSession: "of-user-session",
+      runtimeSessionName: "of-user-session",
       credentialMode: "host_environment"
     });
+    db.prepare("UPDATE sessions SET status = ?").run("running");
     const store = createDbSessionRecoveryStore(db);
 
     const listed = await store.listSessions();
@@ -47,7 +48,7 @@ describe("DbSessionRecoveryStore", () => {
     assert.equal(listed[0]?.id, session.id);
     assert.equal(listed[0]?.userId, user.id);
     assert.equal(listed[0]?.attachToken, "attach-old");
-    assert.equal(listed[0]?.tmuxName, "of-user-session");
+    assert.equal(listed[0]?.runtimeSessionName, "of-user-session");
     assert.equal(listed[0]?.launchPlan.command, "claude");
     assert.equal(listed[0]?.launchPlan.cwd, project.path);
     assert.equal(listed[0]?.createdAt, session.createdAt.toISOString());
@@ -60,12 +61,12 @@ describe("DbSessionRecoveryStore", () => {
     await store.upsertSession({
       ...listed[0]!,
       attachToken: "attach-new",
-      tmuxName: "of-user-session-new"
+      runtimeSessionName: "of-user-session-new"
     });
 
     const updated = repo.getById(session.id);
     assert.equal(updated?.attachToken, "attach-new");
-    assert.equal(updated?.tmuxSession, "of-user-session-new");
+    assert.equal(updated?.runtimeSessionName, "of-user-session-new");
     assert.equal(updated?.status, "running");
     const rawUpdated = db.prepare("SELECT updated_at FROM sessions WHERE id = ?")
       .get(session.id) as { updated_at: number };
@@ -73,12 +74,12 @@ describe("DbSessionRecoveryStore", () => {
 
     await store.removeSession(session.id, "other-user");
 
-    assert.equal(repo.getById(session.id)?.tmuxSession, "of-user-session-new");
+    assert.equal(repo.getById(session.id)?.runtimeSessionName, "of-user-session-new");
 
     await store.removeSession(session.id, user.id);
 
     assert.deepEqual(await store.listSessions(), []);
-    assert.equal(repo.getById(session.id)?.tmuxSession, null);
+    assert.equal(repo.getById(session.id)?.runtimeSessionName, null);
   });
 
   it("encrypts the attach token at rest when a master key is configured", async () => {
@@ -96,9 +97,10 @@ describe("DbSessionRecoveryStore", () => {
       aiTool: "claude",
       workingDir: project.path,
       attachToken: "plaintext-token",
-      tmuxSession: "of-enc-session",
+      runtimeSessionName: "of-enc-session",
       credentialMode: "host_environment"
     });
+    db.prepare("UPDATE sessions SET status = ?").run("running");
 
     const masterKey = "a".repeat(64); // 64 hex chars
     const store = createDbSessionRecoveryStore(db, masterKey);
@@ -107,7 +109,7 @@ describe("DbSessionRecoveryStore", () => {
       id: session.id,
       userId: user.id,
       attachToken: "secret-attach-token",
-      tmuxName: "of-enc-session",
+      runtimeSessionName: "of-enc-session",
       launchPlan: {
         command: "claude",
         args: [],
@@ -148,9 +150,10 @@ describe("DbSessionRecoveryStore", () => {
       aiTool: "claude",
       workingDir: project.path,
       attachToken: "legacy-plaintext",
-      tmuxSession: "of-legacy-session",
+      runtimeSessionName: "of-legacy-session",
       credentialMode: "host_environment"
     });
+    db.prepare("UPDATE sessions SET status = ?").run("running");
 
     const store = createDbSessionRecoveryStore(db);
     const listed = await store.listSessions();

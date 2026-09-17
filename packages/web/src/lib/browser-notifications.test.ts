@@ -30,6 +30,7 @@ function notification(overrides: Partial<StoredNotification> = {}): StoredNotifi
   return {
     id: "notification-1",
     type: "claude_notification",
+    category: "session_event",
     titleKey: "notifications.claudePermissionRequest",
     message: "Bash: Claude needs permission",
     createdAt: "2026-05-02T00:00:00.000Z",

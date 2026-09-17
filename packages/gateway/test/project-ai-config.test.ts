@@ -30,7 +30,7 @@ function createTestDb(): Database {
   return db;
 }
 
-const mockTmuxClient = {
+const mockBackendClient = {
   async createSession() {},
   async killSession() {},
   async capturePane() {
@@ -90,10 +90,11 @@ describe("project AI config routes", () => {
   before(async () => {
     const db = createTestDb();
     const app = createGatewayApp({
+      sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
       masterKey,
       db,
-      sessionManager: new InMemorySessionManager(mockTmuxClient as never),
+      sessionManager: new InMemorySessionManager(mockBackendClient as never),
       apiKeyStore: new InMemoryApiKeyStore({ masterKey })
     });
     await new Promise<void>((resolve) => {

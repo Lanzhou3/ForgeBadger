@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { validateFeishuBotLiveReport } from "./audit-feishu-bot-live-report.mjs";
 
@@ -187,12 +187,16 @@ function requireValue(args, index, flag) {
 
 function currentCommit() {
   const result = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
-    cwd: path.resolve(path.dirname(new URL(import.meta.url).pathname), ".."),
+    cwd: workspaceRootFromMetaUrl(import.meta.url),
     encoding: "utf8",
     timeout: 3000,
     windowsHide: true
   });
   return result.status === 0 ? sanitizeLine(result.stdout) : "unknown";
+}
+
+export function workspaceRootFromMetaUrl(metaUrl) {
+  return path.resolve(path.dirname(fileURLToPath(metaUrl)), "..");
 }
 
 function errorMessage(error) {

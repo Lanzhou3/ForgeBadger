@@ -77,4 +77,36 @@ describe("model provider repository", () => {
     }));
   });
 
+  it("persists the plaintext-http trust flag and still blocks private targets", () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("plaintext-http@example.com", "hash");
+    const repo = new ModelProviderRepository(db, user.id, masterKey);
+
+    // Without the flag a credential-bearing http:// endpoint is rejected.
+    assert.throws(() => repo.createProviderProfile({
+      name: "Lingsoul", providerKey: "lingsoul-dlife", anthropicBaseUrl: "http://lingsoul-dlife.cn",
+      authType: "api_key", apiFormat: "anthropic", supportedAdapters: ["claude"]
+    }), /public HTTPS endpoint/u);
+
+    // With the flag it is accepted and the flag round-trips.
+    const provider = repo.createProviderProfile({
+      name: "Lingsoul", providerKey: "lingsoul-dlife", anthropicBaseUrl: "http://lingsoul-dlife.cn",
+      authType: "api_key", apiFormat: "anthropic", supportedAdapters: ["claude"], allowPlaintextHttp: true
+    });
+    assert.equal(repo.getProviderProfile(provider.id)?.allowPlaintextHttp, true);
+    assert.equal(repo.listProviderProfiles()[0]?.allowPlaintextHttp, true);
+    // Default stays false when the flag is not supplied.
+    const flagless = repo.createProviderProfile({
+      name: "DeepSeek", providerKey: "deepseek-flagless", baseUrl: "https://api.deepseek.com",
+      authType: "api_key", apiFormat: "openai-compatible", supportedAdapters: ["opencode"]
+    });
+    assert.equal(repo.getProviderProfile(flagless.id)?.allowPlaintextHttp, false);
+
+    // The flag never relaxes the private/loopback guard.
+    assert.throws(() => repo.createProviderProfile({
+      name: "Private http", providerKey: "private-http", baseUrl: "http://192.168.1.10/v1",
+      authType: "api_key", apiFormat: "openai-compatible", supportedAdapters: ["opencode"], allowPlaintextHttp: true
+    }), /private or loopback/iu);
+  });
+
 });

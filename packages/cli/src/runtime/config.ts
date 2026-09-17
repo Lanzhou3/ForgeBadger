@@ -128,7 +128,7 @@ function expandHomeDir(filePath: string, homeDir: string): string {
   if (filePath === "~") {
     return homeDir;
   }
-  if (filePath.startsWith("~/")) {
+  if (filePath.startsWith("~/") || filePath.startsWith("~\\")) {
     return path.join(homeDir, filePath.slice(2));
   }
   return filePath;

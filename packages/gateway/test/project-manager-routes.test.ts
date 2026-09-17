@@ -56,7 +56,7 @@ describe("project-manager routes", () => {
     app.use(express.json());
     app.use("/api/v1/projects", createProjectManagerRoutes(db, {
       masterKey,
-      adapterCommandRunner: async () => ({ exitCode: 0, stdout: "claude 1.0.0 (Claude Code)", stderr: "" })
+      adapterCommandRunner: async (command: string) => ({ exitCode: 0, stdout: `${command} 3.3.8`, stderr: "" })
     }));
   });
 
@@ -94,6 +94,41 @@ describe("project-manager routes", () => {
     assert.equal(status.body.data.workItem.status, "in_progress");
     assert.equal(evidence.body.data.workItem.evidenceRefCount, 1);
     assert.equal(ledger.body.data.events.length, 4);
+  });
+
+  it("only accepts omitted or explicit todo status when creating work items", async () => {
+    const omitted = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items`, {
+      title: "Create with default status"
+    });
+    const explicitTodo = await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items`, {
+      title: "Create with explicit todo",
+      status: "todo"
+    });
+
+    assert.equal(omitted.status, 201);
+    assert.equal(omitted.body.data.workItem.status, "todo");
+    assert.equal(explicitTodo.status, 201);
+    assert.equal(explicitTodo.body.data.workItem.status, "todo");
+
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const auditRepo = new AuditLogRepository(db, owner.id);
+    const workItemCount = repo.listWorkItems(projectId).length;
+    const ledgerCount = repo.listLedgerEvents(projectId).length;
+    const auditCount = auditRepo.list({ action: "project_manager.work_item.create" }).length;
+    const forbiddenStatuses = ["in_progress", "blocked", "ready_for_review", "done", "cancelled"];
+    const responses = [];
+
+    for (const status of forbiddenStatuses) {
+      responses.push(await request("POST", `/api/v1/projects/${projectId}/project-manager/work-items`, {
+        title: `Reject ${status}`,
+        status
+      }));
+    }
+
+    assert.deepEqual(responses.map((response) => response.status), [400, 400, 400, 400, 400]);
+    assert.equal(repo.listWorkItems(projectId).length, workItemCount);
+    assert.equal(repo.listLedgerEvents(projectId).length, ledgerCount);
+    assert.equal(auditRepo.list({ action: "project_manager.work_item.create" }).length, auditCount);
   });
 
   it("returns a bounded task packet derived from a work item without raw details", async () => {
@@ -140,30 +175,32 @@ describe("project-manager routes", () => {
     const repo = new ProjectManagerRepository(db, owner.id);
     const planned = repo.createWorkItem(projectId, {
       title: "Plan task",
-      status: "todo",
       acceptanceCriteria: ["planned queue"],
       details: { rawTerminalOutput: "$ unsafe" }
     });
     const running = repo.createWorkItem(projectId, {
       title: "Run task",
-      status: "in_progress",
       acceptanceCriteria: ["running queue"]
     });
+    repo.updateWorkItemStatus(projectId, running.id, { status: "in_progress" });
     const waiting = repo.createWorkItem(projectId, {
       title: "Review task",
-      status: "ready_for_review",
       acceptanceCriteria: ["review queue"]
     });
+    repo.updateWorkItemStatus(projectId, waiting.id, { status: "in_progress" });
+    repo.updateWorkItemStatus(projectId, waiting.id, { status: "ready_for_review" });
     const blocked = repo.createWorkItem(projectId, {
       title: "Blocked task",
-      status: "blocked",
       acceptanceCriteria: ["blocked queue"]
     });
+    repo.updateWorkItemStatus(projectId, blocked.id, { status: "blocked" });
     const completed = repo.createWorkItem(projectId, {
       title: "Done task",
-      status: "done",
-      acceptanceCriteria: ["completed queue"]
+      acceptanceCriteria: ["completed queue"],
+      evidenceRefs: [{ kind: "test", status: "passed", ref: "test/project-manager-routes.test.ts" }]
     });
+    repo.updateWorkItemStatus(projectId, completed.id, { status: "in_progress" });
+    repo.updateWorkItemStatus(projectId, completed.id, { status: "done" });
 
     const response = await request("GET", `/api/v1/projects/${projectId}/project-manager/task-packets?limit=10`);
     const packets = response.body.data.taskPackets as Array<{
@@ -201,7 +238,7 @@ describe("project-manager routes", () => {
       workingDir: "/tmp/forgebadger-route-pm",
       credentialMode: "host_environment"
     });
-    sessionRepo.update(session.id, { status: "running", tmuxSession: "of-task-packet" });
+    sessionRepo.update(session.id, { status: "running", runtimeSessionName: "of-task-packet" });
     const otherProjectId = new ProjectRepository(db, owner.id).create({
       name: "Other project",
       path: "/tmp/forgebadger-other-task-packet",

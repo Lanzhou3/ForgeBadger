@@ -43,7 +43,7 @@ describe("session handoff export helpers", () => {
     const input = {
       generatedAt: "2026-06-14T00:00:00.000Z",
       openReviewItems: "Confirm reviewer sign-off",
-      operatorNotes: "Implemented the review checklist and kept terminal history in tmux.",
+      operatorNotes: "Implemented the review checklist and kept terminal history in the built-in terminal service.",
       session,
       taskPacket,
       verificationNotes: "Ran pnpm --dir packages/web typecheck.",
@@ -56,7 +56,7 @@ describe("session handoff export helpers", () => {
     expect(buildSessionHandoffMarkdown(input)).toContain("## Operator Notes");
     expect(buildSessionHandoffMarkdown(input)).toContain("Implemented the review checklist");
     expect(buildSessionHandoffMarkdown(input)).toContain("## Safety Boundary");
-    expect(buildSessionHandoffMarkdown(input)).toContain("Terminal scrollback remains in tmux");
+    expect(buildSessionHandoffMarkdown(input)).toContain("Terminal scrollback remains in the built-in terminal service");
   });
 
   it("rejects secrets, placeholders, and raw terminal dumps before export", () => {
