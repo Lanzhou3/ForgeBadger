@@ -91,6 +91,7 @@ describe("db schema", () => {
       "integration_feishu_user_mappings",
       "integration_feishu_webhook_rate_windows",
       "integration_feishu_webhook_replay_entries",
+      "mcp_access_tokens",
       "model_cost_rates",
       "model_profiles",
       "model_provider_bindings",

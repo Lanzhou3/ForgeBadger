@@ -228,6 +228,55 @@ describe("mcp endpoint", () => {
     assert.equal(result?.isError, true);
   });
 
+  it("refuses high-risk approval-gated operations instead of auto-approving them", async (t) => {
+    // Arrange: the security policy marks project creation outside the home
+    // directory as require_approval + high risk. With no human in the loop,
+    // MCP must refuse rather than silently approve.
+    if (process.platform === "win32") {
+      t.skip("POSIX-only absolute path fixture");
+      return;
+    }
+
+    // Act
+    const res = await mcpRpc(port, operateToken, "tools/call", {
+      name: "create_project",
+      arguments: { name: "outside-home", path: `/mcp-denied-${randomUUID()}` }
+    });
+
+    // Assert
+    const result = res.messages[0]?.result;
+    assert.equal(result?.isError, true);
+    assert.match(result?.content?.[0]?.text ?? "", /Denied by security policy/i);
+  });
+
+  it("rejects session-scoped memory writes with an actionable message", async () => {
+    const res = await mcpRpc(port, operateToken, "tools/call", {
+      name: "write_memory",
+      arguments: { kind: "fact", scope: "session", text: "hello over mcp" }
+    });
+
+    const result = res.messages[0]?.result;
+    assert.equal(result?.isError, true);
+    assert.match(result?.content?.[0]?.text ?? "", /requires a Copilot conversation/i);
+  });
+
+  it("answers malformed JSON bodies with a JSON-RPC parse error", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        authorization: `Bearer ${readToken}`
+      },
+      body: "this is not json{{"
+    });
+
+    assert.equal(res.status, 400);
+    const body = await res.json() as { jsonrpc?: string; error?: { code?: number } };
+    assert.equal(body.jsonrpc, "2.0");
+    assert.equal(body.error?.code, -32700);
+  });
+
   it("rejects GET and DELETE in stateless mode", async () => {
     const getRes = await fetch(`http://127.0.0.1:${port}/mcp`, {
       headers: { authorization: `Bearer ${readToken}` }

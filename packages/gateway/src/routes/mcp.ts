@@ -48,7 +48,7 @@ export function createMcpRoutes(deps: Pick<ServerDeps, "db" | "masterKey" | "ses
     }
   });
 
-  router.post("/", authenticateMcp, rateLimiter, async (req: McpAuthenticatedRequest, res: Response, next: NextFunction) => {
+  router.post("/", authenticateMcp, rateLimiter, async (req: McpAuthenticatedRequest, res: Response) => {
     const auth = req.mcpAuth;
     if (!auth) {
       res.status(401).json({ error: "unauthorized" });
@@ -76,9 +76,16 @@ export function createMcpRoutes(deps: Pick<ServerDeps, "db" | "masterKey" | "ses
     try {
       await server.connect(transport as unknown as Transport);
       await transport.handleRequest(req, res, req.body);
-    } catch (error) {
+    } catch {
+      // MCP clients expect a JSON-RPC error envelope, not the project's REST
+      // envelope — never delegate to the shared errorHandler from here.
       if (!res.headersSent) {
-        next(error);
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: "Internal error" },
+          id: null
+        });
+        return;
       }
     }
   });

@@ -10,7 +10,9 @@
  * Approval semantics: an MCP caller cannot complete the interactive approval
  * loop, so the `operate` scope on the access token is the owner's standing
  * authorization — intents are previewed and approved inline with
- * `owner_action` authority. Tools the owner disabled in the Copilot
+ * `owner_action` authority (the same authority the Web console uses).
+ * Operations the security policy marks as high-risk approval-gated are
+ * refused instead of auto-approved. Tools the owner disabled in the Copilot
  * capability settings are hidden and rejected here too.
  */
 import { randomUUID } from "node:crypto";
@@ -105,6 +107,13 @@ async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridg
   };
   checkAgentScope(context, tool.name, parsed.data);
 
+  // Session-scoped memory is bound to a Copilot conversation, which does not
+  // exist for MCP callers; fail with an actionable message instead of the
+  // platform command's bare "Conversation not found".
+  if (tool.name === "write_memory" && (parsed.data as { scope?: string }).scope === "session") {
+    throw new Error("Session-scoped memory requires a Copilot conversation; use scope 'global' or 'project' over MCP");
+  }
+
   const policy = createSecurityPolicy();
   const policyInput: SecurityPolicyInput = {
     userId: deps.userId,
@@ -122,7 +131,13 @@ async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridg
     action: decision.action,
     reason: decision.reason
   });
-  if (decision.action === "deny") {
+  // The operate scope on the token authorizes low/medium approval-gated calls
+  // (there is no human in the loop to approve them). High-risk operations the
+  // policy says a human must confirm are refused outright instead.
+  if (
+    decision.action === "deny" ||
+    (decision.action === "require_approval" && decision.riskClass === "high")
+  ) {
     throw new Error(`Denied by security policy: ${decision.reason}`);
   }
 

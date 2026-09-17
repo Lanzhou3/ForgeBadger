@@ -1468,7 +1468,13 @@ scope is the owner's standing authorization: platform command intents are
 previewed and approved inline with `owner_action` authority (the interactive
 approval loop does not exist for MCP callers), and every call still passes zod
 input validation, the security policy engine, the owner's per-tool enable
-settings, and the 48KB output cap. Tenant isolation is unchanged — all tools
+settings, and the 48KB output cap. Operations the security policy marks as
+high-risk approval-gated (for example `create_project` with a path outside the
+home directory) are refused rather than auto-approved, and `write_memory` with
+`scope: "session"` is rejected because session memory is bound to a Copilot
+conversation. Error responses on this endpoint use JSON-RPC error envelopes
+(`-32700` parse error, `-32603` internal error), never the project REST
+envelope. Tenant isolation is unchanged — all tools
 execute with the token owner's `userId`.
 
 Client configuration example (Claude Code):
