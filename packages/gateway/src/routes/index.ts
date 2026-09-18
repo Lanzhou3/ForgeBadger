@@ -35,6 +35,7 @@ import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { createCopilotRoutes } from "./copilot.js";
 import { createAutomationRoutes } from "./automations.js";
 import { createMcpRoutes } from "./mcp.js";
+import { createMcpStatusRoutes } from "./mcp-status.js";
 import { createMcpTokenRoutes } from "./mcp-tokens.js";
 import { createSystemRoutes } from "./system.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
@@ -117,6 +118,8 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     appVersion: deps.appVersion
   }));
   app.use("/api/v1/system", createSystemRoutes());
+  // Status probe is unconditional so the console can render the disabled state.
+  app.use("/api/v1/mcp", createMcpStatusRoutes({ mcpEnabled: deps.mcpEnabled }));
   if (deps.mcpEnabled) {
     app.use("/api/v1/mcp/tokens", createMcpTokenRoutes(deps.db));
     app.use("/mcp", createMcpRoutes(deps));

@@ -48,7 +48,11 @@ async function preflight(ctx: CommandContext, sessionId: string, action: string)
         throw new PlatformNoEffectError("Session not found", 404);
     const live = manager.getSession(sessionId);
     if (action === 'start') {
-        if (live?.status === 'running' || session.status === 'running')
+        // A `running` status is only a real conflict if a pty is actually alive.
+        // A stale claim (CLI exited with no attached terminal, or the daemon
+        // restarted) must not block a restart — start proceeds and heals it.
+        const claimsRunning = live?.status === 'running' || session.status === 'running';
+        if (claimsRunning && await manager.hasLiveTerminal(sessionId, session.runtimeSessionName ?? undefined))
             throw new PlatformNoEffectError("Session already running");
         const adapter = normalizeAdapter(session.aiTool);
         if (!adapter)
@@ -80,11 +84,15 @@ async function start(ctx: CommandContext, sessionId: string) {
     };
     try {
         return await sessionManager.runExclusive(sessionId, async () => {
-            // Re-check state inside the mutex (memory + DB), not just DB, to catch
-            // concurrent starts. Conflict → 409 with a stable code.
-            const live = sessionManager.getSession(sessionId);
+            // Re-check state inside the mutex. A `running` claim is only a
+            // conflict when a pty is genuinely alive; a stale claim (CLI exited
+            // unobserved / daemon restart) is startable and gets healed by the
+            // createSession below overwriting the row.
             const fresh = sessionRepo.getById(sessionId);
-            if (live?.status === "running" || fresh?.status === "running") {
+            if (
+                (fresh?.status === "running") &&
+                (await sessionManager.hasLiveTerminal(sessionId, fresh.runtimeSessionName ?? undefined))
+            ) {
                 throw new SessionConflictError("Session already running");
             }
             const adapter = normalizeAdapter(dbSession.aiTool);

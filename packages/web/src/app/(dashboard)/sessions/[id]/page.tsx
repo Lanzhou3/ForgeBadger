@@ -28,6 +28,7 @@ import {
   type Session,
 } from "@/lib/api";
 import { getToken } from "@/lib/auth";
+import { toast } from "@/lib/toast";
 import { sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import { useLanguage } from "@/hooks/use-language";
@@ -95,6 +96,13 @@ export default function TerminalPage() {
       connectMutation.reset();
       connectMutation.mutate();
     },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error && error.message
+          ? `${t("sessions.startFailed")}: ${error.message}`
+          : t("sessions.startFailed")
+      );
+    },
   });
 
   const stopMutation = useMutation({
@@ -102,6 +110,13 @@ export default function TerminalPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["session", id] });
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error && error.message
+          ? `${t("sessions.stopFailed")}: ${error.message}`
+          : t("sessions.stopFailed")
+      );
     },
   });
 

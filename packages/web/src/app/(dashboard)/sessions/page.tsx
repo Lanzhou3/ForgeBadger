@@ -37,8 +37,9 @@ import {
   stopSession,
 } from "@/lib/api";
 import { notifySessionTabsChanged } from "@/components/session-tabs";
-import { pruneSessionTabs, sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
+import { pruneSessionTabs, readSessionTabs, sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
+import { toast } from "@/lib/toast";
 import { useLanguage } from "@/hooks/use-language";
 import { cn } from "@/lib/utils";
 
@@ -51,7 +52,7 @@ export default function SessionsPage() {
   const [selectedCliTools, setSelectedCliTools] = useState<ReadonlySet<string>>(new Set());
   const [showEmptyProjects, setShowEmptyProjects] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching, isError } = useQuery({
     queryKey: ["sessions-board"],
     queryFn: getSessionBoard,
   });
@@ -69,14 +70,35 @@ export default function SessionsPage() {
   const startMutation = useMutation({
     mutationFn: (id: string) => startSession(id),
     onSuccess: refreshSessions,
+    onError: (error) => {
+      toast.error(
+        error instanceof Error && error.message
+          ? `${t("sessions.startFailed")}: ${error.message}`
+          : t("sessions.startFailed")
+      );
+    },
   });
   const stopMutation = useMutation({
     mutationFn: (id: string) => stopSession(id),
     onSuccess: refreshSessions,
+    onError: (error) => {
+      toast.error(
+        error instanceof Error && error.message
+          ? `${t("sessions.stopFailed")}: ${error.message}`
+          : t("sessions.stopFailed")
+      );
+    },
   });
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteSession(id),
     onSuccess: refreshSessions,
+    onError: (error) => {
+      toast.error(
+        error instanceof Error && error.message
+          ? `${t("sessions.deleteFailed")}: ${error.message}`
+          : t("sessions.deleteFailed")
+      );
+    },
   });
 
   const board = data?.board;
@@ -90,13 +112,27 @@ export default function SessionsPage() {
     terminalRuntime?.supported
   );
   const runtimeBlocked = !dependenciesLoading && terminalSetupGuidance.blocked;
+  // Prune only against a settled, current board. On mount the board query may
+  // first paint a stale cache (staleTime is 0) while it refetches, and a
+  // background refetch that fails keeps serving the stale board with
+  // isFetching back to false — in either case pruning to that snapshot would
+  // permanently drop tabs for sessions created since.
+  //
+  // The board's allowlist is additionally widened with locally-running tabs: a
+  // session that was started while a fetch was in flight is not in that
+  // fetch's snapshot, and a running tab must never be dropped by a settle. A
+  // running session is always in the next settled board (creation is committed
+  // before its tab is written), so this cannot mask a genuinely dead session.
   useEffect(() => {
-    if (!board) {
+    if (!board || isFetching || isError) {
       return;
     }
-    pruneSessionTabs(new Set(sessions.map((session) => session.id)));
+    const runningTabIds = readSessionTabs()
+      .filter((tab) => tab.status === "running")
+      .map((tab) => tab.id);
+    pruneSessionTabs(new Set([...sessions.map((session) => session.id), ...runningTabIds]));
     notifySessionTabsChanged();
-  }, [board, sessions]);
+  }, [board, sessions, isFetching, isError]);
 
   const cliTools = useMemo(() => collectSessionCliTools(sessions), [sessions]);
   const filteredSessions = useMemo(

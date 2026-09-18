@@ -1829,6 +1829,50 @@ export async function setClaudeRoute(enabled: boolean): Promise<ClaudeRouteState
   return routing;
 }
 
+// --- MCP integration (external agents connecting to this Gateway) ---
+
+export interface McpStatus {
+  enabled: boolean;
+  endpoint: string;
+}
+
+export type McpTokenScope = "read" | "operate";
+
+export interface McpToken {
+  id: string;
+  name: string;
+  scopes: McpTokenScope[];
+  createdAt: string;
+  lastUsedAt: string | null;
+  revoked: boolean;
+}
+
+export const mcpStatusKey = ["mcp-status"] as const;
+export const mcpTokensKey = ["mcp-tokens"] as const;
+
+export async function getMcpStatus(): Promise<McpStatus> {
+  return fetchJson<McpStatus>("/api/v1/mcp");
+}
+
+export async function listMcpTokens(): Promise<{ tokens: McpToken[] }> {
+  return fetchJson<{ tokens: McpToken[] }>("/api/v1/mcp/tokens");
+}
+
+export async function createMcpToken(input: {
+  name: string;
+  scopes: McpTokenScope[];
+}): Promise<{ token: McpToken; plaintext: string }> {
+  return fetchJson<{ token: McpToken; plaintext: string }>("/api/v1/mcp/tokens", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function revokeMcpToken(id: string): Promise<{ revoked: boolean }> {
+  return fetchJson<{ revoked: boolean }>(`/api/v1/mcp/tokens/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
 
 export async function getProjectWorkspaceTree(
   id: string,

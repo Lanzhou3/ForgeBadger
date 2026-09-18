@@ -102,3 +102,48 @@ for (const change of ['disabled','expired','resource','revoked'] as const) test(
  await assert.rejects(execution,change==='resource'?/Stale resource/:new RegExp(change));assert.equal(launches,0);assert.equal(repo.getById(s.id)?.status,'idle');assert.equal(actions.grants.get(grant.id)?.usedActions,0);assert.equal(actions.intents.receipt(intent.id)?.outcome,'no_effect');
  }finally{Date.now=realNow;release?.();db.close();}
 });
+// A session whose status still claims `running` but whose backing terminal is
+// gone (CLI exited with no attached terminal, or the daemon restarted) must be
+// startable — the liveness probe treats it as a stale claim, not a conflict,
+// and the restart overwrites the stale row.
+test('start succeeds for a stale running session whose terminal already exited',async()=>{
+ const db=new Database(':memory:');let launches=0;
+ try{
+ migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations',import.meta.url))});
+ const user=new UserRepository(db).create('stale-start@test.dev','hash');const p=new ProjectRepository(db,user.id).create({name:'p',path:'/tmp',aiTool:'codex'});
+ const repo=new SessionRepository(db,user.id);const s=repo.create({projectId:p.id,name:'s',aiTool:'codex',workingDir:'/tmp'});
+ const manager=new InMemorySessionManager({
+   async createSession(){launches++;},async killSession(){},async listSessions(){return[];},async hasSession(){return false;},async capturePane(){return '';}
+ });
+ const live=await manager.createSession({userId:user.id,sessionId:s.id,launchPlan:{command:'codex',args:[],cwd:'/tmp',env:{},secretEnvNames:[],credentialMode:'host_environment'}});
+ repo.update(s.id,{status:'running',runtimeSessionName:live.runtimeSessionName});
+ launches=0; // ignore the setup launch; only count the start's launch
+ const actions=new PlatformActions({db,userId:user.id,sessionManager:manager,adapterCommandRunner:async()=>({exitCode:0,stdout:'codex 1.0.0',stderr:''})},new Map(createSessionCommands().map(c=>[c.id,c])));
+ const i=actions.preview({commandId:'session.start',input:{sessionId:s.id},authority:'owner_action',idempotencyKey:'stale-start'});
+ actions.decide(i.id,i.digest,true);
+ await actions.execute(i.id);
+ assert.equal(launches,1);
+ assert.equal(repo.getById(s.id)?.status,'running');
+ }finally{db.close();}
+});
+// Conversely, a genuinely-alive terminal is still a real conflict: starting
+// must be rejected without launching a second process.
+test('start is rejected when a running session has a live terminal',async()=>{
+ const db=new Database(':memory:');let launches=0;
+ try{
+ migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations',import.meta.url))});
+ const user=new UserRepository(db).create('alive-start@test.dev','hash');const p=new ProjectRepository(db,user.id).create({name:'p',path:'/tmp',aiTool:'codex'});
+ const repo=new SessionRepository(db,user.id);const s=repo.create({projectId:p.id,name:'s',aiTool:'codex',workingDir:'/tmp'});
+ const manager=new InMemorySessionManager({
+   async createSession(){launches++;},async killSession(){},async listSessions(){return[];},async hasSession(){return true;},async capturePane(){return '';}
+ });
+ const live=await manager.createSession({userId:user.id,sessionId:s.id,launchPlan:{command:'codex',args:[],cwd:'/tmp',env:{},secretEnvNames:[],credentialMode:'host_environment'}});
+ repo.update(s.id,{status:'running',runtimeSessionName:live.runtimeSessionName});
+ launches=0; // ignore the setup launch; only count the start's launch
+ const actions=new PlatformActions({db,userId:user.id,sessionManager:manager,adapterCommandRunner:async()=>({exitCode:0,stdout:'codex 1.0.0',stderr:''})},new Map(createSessionCommands().map(c=>[c.id,c])));
+ const i=actions.preview({commandId:'session.start',input:{sessionId:s.id},authority:'owner_action',idempotencyKey:'alive-start'});
+ actions.decide(i.id,i.digest,true);
+ await assert.rejects(actions.execute(i.id),/already running/i);
+ assert.equal(launches,0);
+ }finally{db.close();}
+});
