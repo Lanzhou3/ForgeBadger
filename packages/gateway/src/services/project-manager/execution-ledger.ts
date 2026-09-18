@@ -151,8 +151,8 @@ export class ProjectManagerExecutionLedgerService {
       this.db.prepare(`
         INSERT INTO project_manager_ledger_events (
           id, user_id, project_id, work_item_id, event_type, status,
-          evidence_refs_json, feishu_refs_json, details_json, created_at
-        ) VALUES (?, ?, ?, ?, 'execution_state_changed', NULL, '[]', '[]', ?, ?)
+          evidence_refs_json, details_json, created_at
+        ) VALUES (?, ?, ?, ?, 'execution_state_changed', NULL, '[]', ?, ?)
       `).run(
         randomUUID(),
         this.userId,

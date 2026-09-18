@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 
+import { validateProjectRoot } from "../lib/safe-resolve.js";
 import { readWorkspaceFile } from "./workspace-context.js";
 
 export interface GitWorkingTreeEntry {
@@ -179,4 +180,155 @@ export async function getProjectGitFileDiff(
 
   const truncated = truncateDiff(diff);
   return { path: safePath, kind: "diff", diff: truncated.diff, truncated: truncated.truncated };
+}
+
+export interface GitBranchEntry {
+  name: string;
+  isCurrent: boolean;
+}
+
+export interface ProjectGitWorkingTree {
+  clean: boolean;
+  changedCount: number;
+  /** First few changed paths, for block-message display. */
+  sample: string[];
+}
+
+export interface ProjectGitBranches {
+  isGitRepo: boolean;
+  /** Null on detached HEAD. */
+  current: string | null;
+  branches: GitBranchEntry[];
+  workingTree: ProjectGitWorkingTree;
+}
+
+export type ProjectGitErrorCode =
+  | "GIT_NOT_REPO"
+  | "GIT_BRANCH_NOT_FOUND"
+  | "GIT_BRANCH_EXISTS"
+  | "GIT_WORKING_TREE_DIRTY"
+  | "GIT_INVALID_BRANCH_NAME"
+  | "GIT_SWITCH_FAILED";
+
+export class ProjectGitError extends Error {
+  constructor(
+    readonly code: ProjectGitErrorCode,
+    message: string,
+    readonly details?: Record<string, unknown>
+  ) {
+    super(message);
+    this.name = "ProjectGitError";
+  }
+}
+
+const WORKING_TREE_SAMPLE_SIZE = 5;
+
+function summarizeWorkingTree(statusOutput: string): ProjectGitWorkingTree {
+  const entries = parsePorcelain(statusOutput);
+  return {
+    clean: entries.length === 0,
+    changedCount: entries.length,
+    sample: entries.slice(0, WORKING_TREE_SAMPLE_SIZE).map((entry) => entry.path)
+  };
+}
+
+export async function getProjectGitBranches(projectPath: string): Promise<ProjectGitBranches> {
+  try {
+    await runGit(projectPath, ["rev-parse", "--is-inside-work-tree"]);
+  } catch {
+    return {
+      isGitRepo: false,
+      current: null,
+      branches: [],
+      workingTree: { clean: true, changedCount: 0, sample: [] }
+    };
+  }
+
+  const [current, listOutput, statusOutput] = await Promise.all([
+    runGit(projectPath, ["branch", "--show-current"]).catch(() => ""),
+    runGit(projectPath, ["branch", "--list", "--format=%(refname:short)"]).catch(() => ""),
+    runGit(projectPath, ["status", "--porcelain=v1", "-z", "-uall"]).catch(() => "")
+  ]);
+
+  const trimmedCurrent = current.trim() || null;
+  return {
+    isGitRepo: true,
+    current: trimmedCurrent,
+    branches: listOutput
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((name) => ({ name, isCurrent: name === trimmedCurrent })),
+    workingTree: summarizeWorkingTree(statusOutput)
+  };
+}
+
+async function assertGitBranchName(projectPath: string, branchName: string): Promise<string> {
+  const trimmed = branchName.trim();
+  // Reject leading dashes outright so a name can never be parsed as a git
+  // option, then let git's own ref-format rules decide the rest.
+  if (!trimmed || trimmed !== branchName || trimmed.length > 200 || trimmed.startsWith("-")) {
+    throw new ProjectGitError("GIT_INVALID_BRANCH_NAME", "Invalid branch name");
+  }
+  try {
+    await runGit(projectPath, ["check-ref-format", "--branch", trimmed]);
+  } catch {
+    throw new ProjectGitError("GIT_INVALID_BRANCH_NAME", "Invalid branch name");
+  }
+  return trimmed;
+}
+
+/**
+ * Switch the project's working tree to another branch, optionally creating it
+ * from HEAD first. Switching is refused while the working tree has any
+ * uncommitted change (tracked or untracked) so an operator never loses work
+ * to an accidental checkout.
+ */
+export async function checkoutProjectGitBranch(
+  projectPath: string,
+  branchName: string,
+  options: { create: boolean }
+): Promise<{ current: string; created: boolean }> {
+  const root = validateProjectRoot(projectPath);
+
+  try {
+    await runGit(root, ["rev-parse", "--is-inside-work-tree"]);
+  } catch {
+    throw new ProjectGitError("GIT_NOT_REPO", "Project is not a git repository");
+  }
+
+  const name = await assertGitBranchName(root, branchName);
+  const existing = new Set(
+    (await runGit(root, ["branch", "--list", "--format=%(refname:short)"]).catch(() => ""))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+  );
+  if (options.create && existing.has(name)) {
+    throw new ProjectGitError("GIT_BRANCH_EXISTS", `Branch already exists: ${name}`);
+  }
+  if (!options.create && !existing.has(name)) {
+    throw new ProjectGitError("GIT_BRANCH_NOT_FOUND", `Branch not found: ${name}`);
+  }
+
+  const workingTree = summarizeWorkingTree(
+    await runGit(root, ["status", "--porcelain=v1", "-z", "-uall"]).catch(() => "")
+  );
+  if (!workingTree.clean) {
+    throw new ProjectGitError(
+      "GIT_WORKING_TREE_DIRTY",
+      `Working tree has ${workingTree.changedCount} uncommitted change(s); commit or clean them before switching branches`,
+      { changedCount: workingTree.changedCount, sample: workingTree.sample }
+    );
+  }
+
+  try {
+    await runGit(root, options.create ? ["switch", "-c", name] : ["switch", name]);
+  } catch (error) {
+    throw new ProjectGitError(
+      "GIT_SWITCH_FAILED",
+      error instanceof Error ? error.message : "git switch failed"
+    );
+  }
+  return { current: name, created: options.create };
 }

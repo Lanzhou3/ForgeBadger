@@ -79,5 +79,9 @@
   "0078_channel_identity_routes.sql": "2898650d563fdd1aad65f32eae052667931eb2ccefe23d9ee1923d85e7a13b74",
   "0079_native_channel_messages.sql": "e8d5da6380e8569001a1f47d9f7d669ed917b3dd05251d679722778acd6c9577",
   "0080_native_channel_deliveries.sql": "53719d05fea825ba76d7d80491f4dcac854a2f72d25ed4f6303fbcb6540c7f32",
-  "0081_mcp_access_tokens.sql": "423669fd80b4c3f2874aa7622d96c8ef1c00634c5e9978c1915f23363581e6f1"
+  "0081_mcp_access_tokens.sql": "423669fd80b4c3f2874aa7622d96c8ef1c00634c5e9978c1915f23363581e6f1",
+  "0082_copilot_playbook_boundary.sql": "6bfe496e6dd5d0be417f23dd4b783cb679f6be1243ffa2c0c199dfb3541b41fc",
+  "0083_drop_pm_feishu_refs.sql": "7edfc6a4b955721250a1fa653069dc74fa023aa2d485239f4ac997063c309180",
+  "0084_copilot_connections.sql": "6556c1bfcc313b6d77eafc69b75b06c88b23f9135eae0193707051e05573a98d",
+  "0085_copilot_skill_revisions.sql": "c47a912f9ddb28dbf6cb604633320d91b2507469561d878ef553eac292f986e9"
 }

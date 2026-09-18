@@ -31,7 +31,7 @@ describe("automation runner read-only registry", () => {
       assert.equal(tool.risk, "read", `${name} must be read-only`);
     }
     // The operate-only Project Manager dispatch tool is stripped.
-    assert.ok(!registry.tools.has("pm_start_task_packet"));
+    assert.ok(!registry.tools.has("pm_prepare_task_packet"));
   });
 });
 

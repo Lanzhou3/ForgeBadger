@@ -57,6 +57,8 @@ export interface RollbackResult {
 }
 
 export interface TemplateFileInput {
+  /** Raw Skill documents/resources must not be interpreted as platform templates. */
+  renderVariables?: boolean;
   id: string;
   relativePath: string;
   content: string;

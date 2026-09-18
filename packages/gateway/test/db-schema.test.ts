@@ -63,6 +63,7 @@ describe("db schema", () => {
       "copilot_automation_runs",
       "copilot_automation_suggestions",
       "copilot_automations",
+      "copilot_connections",
       "copilot_conversation_grants",
       "copilot_conversations",
       "copilot_dsh_config",
@@ -79,6 +80,8 @@ describe("db schema", () => {
       "copilot_pending_actions",
       "copilot_run_steps",
       "copilot_runs",
+      "copilot_skill_heads",
+      "copilot_skill_revisions",
       "copilot_tool_preferences",
       "feishu_card_actions",
       "feishu_channel_accounts",
@@ -396,9 +399,9 @@ describe("db schema", () => {
       () => db.prepare(`
         INSERT INTO project_manager_work_items (
           id, user_id, project_id, title, status, priority,
-          acceptance_criteria_json, evidence_refs_json, feishu_refs_json, details_json,
+          acceptance_criteria_json, evidence_refs_json, details_json,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'todo', 0, '[]', '[]', '[]', '{}', 1, 1)
+        ) VALUES (?, ?, ?, ?, 'todo', 0, '[]', '[]', '{}', 1, 1)
       `).run("cross-tenant-item", "tenant-a", "project-b", "Must fail"),
       /FOREIGN KEY constraint failed/u
     );
@@ -514,17 +517,17 @@ describe("db schema", () => {
     db.prepare(`
       INSERT INTO project_manager_work_items (
         id, user_id, project_id, title, status, priority,
-        acceptance_criteria_json, evidence_refs_json, feishu_refs_json, details_json,
+        acceptance_criteria_json, evidence_refs_json, details_json,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run("pm-work-1", "pm-user", "pm-project", "First", "todo", 0, "[]", "[]", "[]", "{}", 1, 1);
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run("pm-work-1", "pm-user", "pm-project", "First", "todo", 0, "[]", "[]", "{}", 1, 1);
     db.prepare(`
       INSERT INTO project_manager_work_items (
         id, user_id, project_id, title, status, priority,
-        acceptance_criteria_json, evidence_refs_json, feishu_refs_json, details_json,
+        acceptance_criteria_json, evidence_refs_json, details_json,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run("pm-work-2", "pm-user", "pm-project", "Second", "todo", 0, "[]", "[]", "[]", "{}", 1, 1);
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run("pm-work-2", "pm-user", "pm-project", "Second", "todo", 0, "[]", "[]", "{}", 1, 1);
 
     const insertAttempt = db.prepare(`
       INSERT INTO project_manager_task_attempts (

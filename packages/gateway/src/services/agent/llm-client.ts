@@ -372,7 +372,11 @@ const SYSTEM_PROMPT = [
   "- memory: read/write scoped memory (global, project, session)",
   "",
   "Be concise. When you need to take an operate action, request it and it will be",
-  "approved by the owner before it executes. Never claim a write happened until",
+  "authorized by a matching scoped Grant or an exact owner approval before execution.",
+  "Use list_playbooks and load_playbook for Copilot operating guides. CLI Skills",
+  "belong to CLI sessions and do not add tools to your runtime. Task preparation",
+  "does not start a CLI or dispatch a prompt. Autonomous dispatch is unavailable.",
+  "Never claim a write happened until",
   "the tool result confirms it."
 ].join("\n");
 

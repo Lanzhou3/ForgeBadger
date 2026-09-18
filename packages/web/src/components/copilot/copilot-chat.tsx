@@ -18,7 +18,6 @@ import {
   indexToolResults,
 } from "@/components/copilot/copilot-message-primitives";
 import { CopilotSettings } from "@/components/copilot/copilot-settings";
-import { CopilotManagementPanel } from "@/components/copilot/CopilotManagementPanel";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
@@ -65,7 +64,6 @@ export function CopilotChat() {
   const [editDraft, setEditDraft] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
-  const [managementOpen, setManagementOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarSheetOpen, setSidebarSheetOpen] = useState(false);
 
@@ -148,15 +146,14 @@ export function CopilotChat() {
     },
   });
 
-  const newConversation = useCallback(async (grantId?: string) => {
+  const newConversation = useCallback(async () => {
     setCreating(true);
     try {
-      const { conversation } = await createConversation(undefined, grantId);
+      const { conversation } = await createConversation();
       await refreshConversations();
       await selectConversation(conversation.id);
-    } catch (error) {
+    } catch {
       setLoadError(t("copilot.loadError"));
-      if (grantId) throw error;
     } finally {
       setCreating(false);
     }
@@ -315,20 +312,6 @@ export function CopilotChat() {
 
   return (
     <div className="mx-auto flex h-full w-full max-w-[1600px] gap-4 p-4 md:p-6">
-      <Sheet open={managementOpen} onOpenChange={setManagementOpen}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-2xl" aria-describedby={undefined}>
-          <SheetTitle className="px-4 pt-4">授权与项目管理</SheetTitle>
-          {managementOpen && (
-            <CopilotManagementPanel
-              boundGrantId={activeConversation?.grantId}
-              onStartConversation={async id => {
-                await newConversation(id);
-                setManagementOpen(false);
-              }}
-            />
-          )}
-        </SheetContent>
-      </Sheet>
       {sidebarOpen && (
         <Card className="hidden max-h-[calc(100vh-6rem)] w-[280px] shrink-0 flex-col overflow-hidden md:flex">
           <ConversationSidebar
@@ -377,19 +360,11 @@ export function CopilotChat() {
                 {t("copilot.running")}
               </Badge>
             ) : null}
-            <Button size="sm" variant="outline" onClick={() => setManagementOpen(true)}>授权与项目</Button>
             <CopilotSettings />
           </div>
         </div>
 
         <CopilotStatusBar />
-        {activeConversation?.grantId && (
-          <p className="border-b px-3 py-2 text-xs text-muted-foreground">
-            此会话绑定项目授权，范围不可切换。
-            <button className="ml-2 underline" onClick={() => setManagementOpen(true)}>查看授权</button>
-          </p>
-        )}
-
         <div className="relative flex min-h-0 flex-1 flex-col">
           <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-3 py-4">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">

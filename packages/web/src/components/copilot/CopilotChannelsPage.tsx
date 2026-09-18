@@ -9,6 +9,8 @@ import { getFeishuChannelAccount, getFeishuConnectionHealth, saveFeishuChannelAc
 import { listGrants, getProjectOverview } from '@/lib/platform-actions-api';
 import * as channels from '@/lib/copilot-channels-api';
 import { CopilotManagementPanel } from './CopilotManagementPanel';
+import { CopilotSettingsShell } from './copilot-settings-shell';
+import { useSettingsCopy } from './settings-copy';
 
 const channelKey=['copilot-channels'];
 const states:Record<string,string>={pending:'待处理',claimed:'等待确认',confirmed:'已确认',cancelled:'已取消',active:'有效',revoked:'已撤销',sending:'发送中',delivered:'飞书已接收',failed:'发送失败',unknown:'结果不确定',connected:'已连接',connecting:'连接中',reconnecting:'重新连接中',unhealthy:'连接异常',stopped:'已停止',disabled:'未启用'};
@@ -16,6 +18,7 @@ const label=(state:string)=>states[state]??state;
 const pairingKey=(p:channels.ChannelPairing|undefined)=>p?`${p.id}:${p.revision}:${p.externalUserId}:${p.chatId}`:'';
 
 export function CopilotChannelsPage() {
+  const copy=useSettingsCopy();
   const client=useQueryClient();
   const query=useQuery({queryKey:channelKey,queryFn:async()=>{
     const [account,health,records]=await Promise.all([getFeishuChannelAccount(),getFeishuConnectionHealth(),channels.getChannelRecords()]);
@@ -57,9 +60,10 @@ export function CopilotChannelsPage() {
     catch {setError('操作未完成。请刷新状态后重试；身份、授权或连接状态可能已变化。');setToken(null);setAck('');}
     finally{setBusy(false);setSecret('');}
   }
-  return <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 md:p-6">
-    <header className="pl-12 md:pl-0"><Link href="/copilot/settings" className="text-sm text-muted-foreground">← Copilot 设置</Link><h1 className="mt-2 text-xl font-semibold">远程渠道</h1><p className="mt-1 text-sm text-muted-foreground">通过飞书私聊操作已授权项目。身份确认和项目授权缺一不可。</p></header>
-    {query.isPending && <p role="status">正在加载渠道…</p>}
+  return (
+    <CopilotSettingsShell active="channels" title={copy.channelsCardTitle} description={copy.channelsCardDescription}>
+      <div className="flex flex-col gap-4">
+        {query.isPending && <p role="status">正在加载渠道…</p>}
     {(query.isError || grants.isError) && <div role="alert">加载失败。<Button variant="outline" onClick={()=>{void query.refetch();void grants.refetch();}}>重新加载</Button></div>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {success && <p role="status" className="text-sm">{success}</p>}
@@ -112,6 +116,8 @@ export function CopilotChannelsPage() {
         {!data.deliveries.length && <p>暂无回传记录。</p>}
         {data.deliveries.map(d=><div key={d.id} className="flex flex-wrap justify-between gap-2 rounded-md border border-border/70 p-3"><span>{d.phase==='terminal'?'任务结果':'审批提示'} · {label(d.status)}</span><time>{new Date(d.createdAt).toLocaleString()}</time></div>)}
       </CardContent></Card>
-    </>}
-  </div>;
+      </>}
+    </div>
+    </CopilotSettingsShell>
+  );
 }

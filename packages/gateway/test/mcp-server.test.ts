@@ -180,7 +180,8 @@ describe("mcp endpoint", () => {
     assert.ok(readerNames.includes("list_sessions"));
     assert.equal(readerNames.includes("dispatch_task_to_session"), false);
     assert.equal(readerNames.includes("stop_session"), false);
-    assert.ok(operatorNames.includes("dispatch_task_to_session"));
+    assert.equal(operatorNames.includes("dispatch_task_to_session"), false);
+    assert.ok(operatorNames.includes("pm_prepare_task_packet"));
     assert.ok(operatorNames.includes("stop_session"));
   });
 

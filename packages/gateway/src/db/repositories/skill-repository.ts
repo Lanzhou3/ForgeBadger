@@ -10,12 +10,14 @@ export interface CreateSkillInput {
   description?: string | undefined;
   source?: string | undefined;
   content: string;
+  resourceManifest?: string | null | undefined;
   version?: string | undefined;
   visibility?: "private" | "shared" | "admin" | undefined;
   isEnabled?: boolean | undefined;
 }
 
 export interface UpdateSkillInput {
+  resourceManifest?: string | null | undefined;
   name?: string | undefined;
   description?: string | undefined;
   source?: string | undefined;
@@ -25,6 +27,8 @@ export interface UpdateSkillInput {
 }
 
 export interface Skill {
+  runtimeTarget: "cli" | "copilot";
+  resourceManifest: string | null;
   id: string;
   userId: string;
   name: string;
@@ -41,7 +45,7 @@ export interface Skill {
 export class SkillRepository {
   private drizzle;
 
-  constructor(db: Database, private userId: string) {
+  constructor(db: Database, private userId: string, readonly runtimeTarget: "cli" | "copilot" = "cli") {
     this.drizzle = drizzle(db);
   }
 
@@ -50,6 +54,8 @@ export class SkillRepository {
       .insert(skills)
       .values({
         userId: this.userId,
+        runtimeTarget: this.runtimeTarget,
+        resourceManifest: input.resourceManifest ?? null,
         name: input.name,
         description: input.description ?? null,
         source: input.source ?? "local",
@@ -78,11 +84,19 @@ export class SkillRepository {
       .all() as Skill[];
   }
 
+  listOwned(): Skill[] {
+    return this.drizzle.select().from(skills).where(and(eq(skills.runtimeTarget, this.runtimeTarget), eq(skills.userId, this.userId))).all() as Skill[];
+  }
+
+  getOwnedById(id: string): Skill | undefined {
+    return this.drizzle.select().from(skills).where(and(eq(skills.runtimeTarget, this.runtimeTarget), eq(skills.userId, this.userId), eq(skills.id, id))).get() as Skill | undefined;
+  }
+
   listOwnedBySource(source: string): Skill[] {
     return this.drizzle
       .select()
       .from(skills)
-      .where(and(eq(skills.userId, this.userId), eq(skills.source, source)))
+      .where(and(eq(skills.runtimeTarget, this.runtimeTarget), eq(skills.userId, this.userId), eq(skills.source, source)))
       .all() as Skill[];
   }
 
@@ -104,7 +118,7 @@ export class SkillRepository {
     return this.drizzle
       .select()
       .from(skills)
-      .where(and(eq(skills.name, name), eq(skills.userId, this.userId)))
+      .where(and(eq(skills.runtimeTarget, this.runtimeTarget), eq(skills.name, name), eq(skills.userId, this.userId)))
       .get() as Skill | undefined;
   }
 
@@ -115,6 +129,7 @@ export class SkillRepository {
 
   update(id: string, input: UpdateSkillInput): Skill | undefined {
     const updateData: Record<string, unknown> = {};
+    if (input.resourceManifest !== undefined) updateData.resourceManifest = input.resourceManifest;
     if (input.name !== undefined) updateData.name = input.name;
     if (input.description !== undefined) updateData.description = input.description;
     if (input.source !== undefined) updateData.source = input.source;
@@ -125,7 +140,7 @@ export class SkillRepository {
     return this.drizzle
       .update(skills)
       .set(updateData)
-      .where(and(eq(skills.id, id), eq(skills.userId, this.userId)))
+      .where(and(eq(skills.runtimeTarget, this.runtimeTarget), eq(skills.id, id), eq(skills.userId, this.userId)))
       .returning()
       .get() as Skill | undefined;
   }
@@ -134,7 +149,7 @@ export class SkillRepository {
     return this.drizzle
       .update(skills)
       .set({ isEnabled: enabled })
-      .where(and(eq(skills.id, id), eq(skills.userId, this.userId)))
+      .where(and(eq(skills.runtimeTarget, this.runtimeTarget), eq(skills.id, id), eq(skills.userId, this.userId)))
       .returning()
       .get() as Skill | undefined;
   }
@@ -142,7 +157,7 @@ export class SkillRepository {
   delete(id: string): void {
     this.drizzle
       .delete(skills)
-      .where(and(eq(skills.id, id), eq(skills.userId, this.userId)))
+      .where(and(eq(skills.runtimeTarget, this.runtimeTarget), eq(skills.id, id), eq(skills.userId, this.userId)))
       .run();
   }
 
@@ -151,7 +166,7 @@ export class SkillRepository {
     if (this.isAdminUser()) {
       base.push(eq(skills.visibility, "admin"));
     }
-    return or(...base);
+    return and(eq(skills.runtimeTarget, this.runtimeTarget), or(...base));
   }
 
   private isAdminUser(): boolean {

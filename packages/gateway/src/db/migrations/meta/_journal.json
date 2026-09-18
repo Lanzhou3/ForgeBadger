@@ -568,6 +568,34 @@
       "when": 1789300000004,
       "tag": "0081_mcp_access_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "6",
+      "when": 1789600000000,
+      "tag": "0082_copilot_playbook_boundary",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1789600000001,
+      "tag": "0083_drop_pm_feishu_refs",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "6",
+      "when": 1789600000002,
+      "tag": "0084_copilot_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1789600000003,
+      "tag": "0085_copilot_skill_revisions",
+      "breakpoints": true
     }
   ]
 }

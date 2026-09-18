@@ -374,6 +374,27 @@ export class InMemorySessionManager {
   }
 
   /**
+   * Read-only liveness probe: does this session currently have a live backing
+   * terminal (pty)? A session whose DB/manager status still says `running` but
+   * whose pty has vanished (the CLI exited with no attached terminal to observe
+   * it, or the daemon restarted and rebuilt an empty registry) reports
+   * `false` — a stale claim, not a real conflict. The start preflight uses this
+   * to decide whether a `running` claim should actually block a restart; a
+   * subsequent start heals the stale claim by overwriting the DB row and
+   * in-memory entry in createSession.
+   */
+  async hasLiveTerminal(id: string, runtimeSessionName?: string): Promise<boolean> {
+    const live = this.sessions.get(id);
+    if (!live) {
+      return runtimeSessionName ? this.backend.hasSession(runtimeSessionName) : false;
+    }
+    if (live.status !== "running" && live.status !== "detached") {
+      return false;
+    }
+    return this.backend.hasSession(live.runtimeSessionName);
+  }
+
+  /**
    * Reconcile a single session's status against the live backend state. If
    * the backing runtime session is gone, mark it exited and sync the DB; if
    * it is still alive (a detached terminal), mark it detached. Emits at most

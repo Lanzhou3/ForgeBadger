@@ -249,6 +249,16 @@ export default function SkillsPage() {
               </span>
             </div>
             <p className="text-xs text-muted-foreground">{t("skills.discoveryHint")}</p>
+            {(data.discovery.rejectedSkills?.length ?? 0) > 0 && (
+              <div role="alert" className="space-y-2 rounded-md border border-amber-500/40 p-3 text-xs">
+                <p className="font-medium text-amber-500">{t("skills.packagesRejected")}</p>
+                <ul className="max-h-40 space-y-1 overflow-y-auto text-muted-foreground">
+                  {data.discovery.rejectedSkills?.map((item) => (
+                    <li key={item.path} className="break-all"><code>{item.path}</code>: {item.reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="grid gap-2 md:grid-cols-2">
               {(data.discovery.discoveredRoots ?? []).slice(0, 6).map((root) => (
                 <code key={root} className="truncate rounded-md border border-border/70 bg-muted/30 px-2 py-1 text-xs">
@@ -459,6 +469,9 @@ export default function SkillsPage() {
                   />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{skill.name}</div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {t(skill.resourceManifest ? "skills.resourcePackage" : "skills.markdownOnly")}
+                    </p>
                     {skill.description && (
                       <div className="mt-0.5 truncate text-xs text-muted-foreground">
                         {skill.description}

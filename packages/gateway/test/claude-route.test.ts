@@ -22,6 +22,7 @@ import {
   forwardClaudeMessages,
   listClaudeRouteModels,
   resolveRouteTarget,
+  streamFirstByteBudgetMs,
   type SseResponseLike
 } from "../src/services/claude-route/forwarder.js";
 import { gatewayLoopbackUrl } from "../src/services/claude-route/gateway-url.js";
@@ -116,6 +117,22 @@ function sseSource(lines: string[]): AsyncIterable<Uint8Array> {
       for (const line of lines) yield encoder.encode(`${line}\n`);
     }
   };
+}
+
+/**
+ * A streaming body whose FIRST chunk only arrives after `delayMs` — models an
+ * upstream that returns response headers and then stalls before producing any
+ * data (stuck inference / dead proxy half-connection).
+ */
+function delayedSseStream(delayMs: number, lines: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      for (const line of lines) controller.enqueue(encoder.encode(`${line}\n`));
+      controller.close();
+    }
+  });
 }
 
 interface RouteFixture {
@@ -378,6 +395,100 @@ describe("openai -> anthropic SSE stream transform", () => {
       collectStream(failing, "m"),
       /connection refused/u
     );
+  });
+
+  // Regression: the terminal pair MUST be emitted at [DONE] even when the
+  // upstream sent no usage chunk. Before the fix, [DONE] flushed into a
+  // discarded buffer and dropped both message_delta and message_stop, leaving
+  // the client hanging on a stream that never terminates.
+  it("still emits message_delta + message_stop at [DONE] when there is no usage chunk", async () => {
+    const events = await collectStream(sseSource([
+      `data: ${JSON.stringify({ id: "c1", choices: [{ delta: { content: "Hi" } }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}`,
+      "data: [DONE]"
+    ]), "m");
+    const names = events.map((event) => /event: (\w+)/u.exec(event)?.[1]);
+    assert.deepEqual(names.slice(-2), ["message_delta", "message_stop"]);
+    assert.equal(names.filter((n) => n === "message_delta").length, 1);
+    const delta = JSON.parse(/data: (\{.*\})/u.exec(events.at(-2) ?? "")?.[1] ?? "{}") as Record<string, any>;
+    assert.equal(delta.delta.stop_reason, "end_turn");
+    assert.deepEqual(delta.usage, { input_tokens: 0, output_tokens: 0 });
+  });
+
+  // Finalization must also fire when the upstream simply closes the socket
+  // after sending its last chunk, without the [DONE] marker.
+  it("finalizes the message when the stream closes without [DONE]", async () => {
+    const events = await collectStream(sseSource([
+      `data: ${JSON.stringify({ id: "c1", choices: [{ delta: { content: "Hi" } }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}`,
+      `data: ${JSON.stringify({ usage: { prompt_tokens: 5, completion_tokens: 2 } })}`
+    ]), "m");
+    const names = events.map((event) => /event: (\w+)/u.exec(event)?.[1]);
+    assert.deepEqual(names.slice(-2), ["message_delta", "message_stop"]);
+    const delta = JSON.parse(/data: (\{.*\})/u.exec(events.at(-2) ?? "")?.[1] ?? "{}") as Record<string, any>;
+    assert.deepEqual(delta.usage, { input_tokens: 5, output_tokens: 2 });
+  });
+
+  // vLLM/OpenRouter shape: the finish chunk carries `usage: null`, and the real
+  // usage arrives in a later chunk. The final usage must reflect the trailing
+  // chunk, not be zeroed by an early flush.
+  it("folds in a trailing usage chunk that follows a usage-null finish chunk", async () => {
+    const events = await collectStream(sseSource([
+      `data: ${JSON.stringify({ id: "c1", choices: [{ delta: { content: "Hello" }, finish_reason: "stop" }], usage: null })}`,
+      `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 9, completion_tokens: 4 } })}`,
+      "data: [DONE]"
+    ]), "m");
+    const names = events.map((event) => /event: (\w+)/u.exec(event)?.[1]);
+    assert.equal(names.filter((n) => n === "message_delta").length, 1);
+    const delta = JSON.parse(/data: (\{.*\})/u.exec(events.at(-2) ?? "")?.[1] ?? "{}") as Record<string, any>;
+    assert.deepEqual(delta.usage, { input_tokens: 9, output_tokens: 4 });
+  });
+
+  // An upstream may close (or send [DONE]) after emitting no chunks at all —
+  // an empty completion. The client must still receive a well-formed message
+  // (message_start present), never a bare message_delta/message_stop.
+  it("emits a well-formed empty message when the stream has no content chunks", async () => {
+    const events = await collectStream(sseSource(["data: [DONE]"]), "m");
+    const names = events.map((event) => /event: (\w+)/u.exec(event)?.[1]);
+    assert.deepEqual(names, ["message_start", "message_delta", "message_stop"]);
+  });
+
+  // Some gateways repeat the finish chunk; only ONE message_delta may be emitted.
+  it("emits only one message_delta when the finish chunk is repeated", async () => {
+    const events = await collectStream(sseSource([
+      `data: ${JSON.stringify({ id: "c1", choices: [{ delta: { content: "Hi" } }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}`,
+      `data: ${JSON.stringify({ usage: { prompt_tokens: 1, completion_tokens: 1 } })}`,
+      "data: [DONE]"
+    ]), "m");
+    const names = events.map((event) => /event: (\w+)/u.exec(event)?.[1]);
+    assert.equal(names.filter((n) => n === "message_delta").length, 1);
+    assert.equal(names.filter((n) => n === "message_stop").length, 1);
+  });
+});
+
+describe("stream first-byte budget", () => {
+  // A small request must still fail fast (base budget, no per-token growth)
+  // so a genuinely stalled upstream is answered as 502 within seconds.
+  it("keeps a small request on the base budget", () => {
+    const small = streamFirstByteBudgetMs(100);
+    assert.ok(small >= 30_000, `expected base budget, got ${small}`);
+    assert.ok(small <= 40_000, `small request should stay near base, got ${small}`);
+  });
+
+  // A large context must get a much larger budget — this is the regression
+  // guard for the flat-90s deadline that cut legitimate 200K+ prefill requests.
+  it("grows the budget with input size", () => {
+    const large = streamFirstByteBudgetMs(200_000);
+    assert.ok(large > 90_000, `expected >90s for a 200K context, got ${large}`);
+    assert.ok(large > streamFirstByteBudgetMs(1_000), "budget must be monotonic in size");
+  });
+
+  // The budget can never exceed the total stream backstop.
+  it("caps the budget at the total stream timeout", () => {
+    const huge = streamFirstByteBudgetMs(10_000_000);
+    assert.ok(huge <= 600_000, `budget must not exceed the 10min backstop, got ${huge}`);
   });
 });
 
@@ -645,6 +756,30 @@ describe("claude route forwarder", () => {
     assert.match(stream, /event: message_delta/u);
     assert.match(stream, /event: message_stop/u);
     assert.ok(stream.indexOf("message_start") < stream.indexOf("message_stop"));
+  });
+
+  it("answers a stuck upstream (headers but no data) with a 502 before committing the stream", async () => {
+    const fixture = await createRouteFixture();
+    const { fetchImpl } = stubFetch(() => new Response(
+      delayedSseStream(300, [
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "never" } }] })}`
+      ]),
+      { status: 200, headers: { "content-type": "text/event-stream" } }
+    ));
+
+    const res = fakeRes();
+    await forwardClaudeMessages(
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, streamFirstByteTimeoutMs: 60 },
+      res,
+      fixture.token,
+      { model: "deepseek-chat", messages: [{ role: "user", content: "hi" }], stream: true },
+      {}
+    );
+
+    // Not 200, and nothing was written to the (never-committed) SSE stream.
+    assert.equal(res.statusCode, 502);
+    assert.equal(res.written.length, 0);
+    assert.match(String((res.jsonBody as Record<string, any>).error.message), /no data within/u);
   });
 
   it("estimates count_tokens locally for OpenAI providers and serves the model catalog", async () => {

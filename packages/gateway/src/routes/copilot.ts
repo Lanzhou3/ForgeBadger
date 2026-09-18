@@ -1,3 +1,7 @@
+import { createCopilotSkillRoutes } from "./copilot-skills.js";
+import { createCopilotConnectionRoutes } from "./copilot-connections.js";
+import { createCopilotPlaybookRoutes } from "./copilot-playbooks.js";
+import { visibleToolSchemas, toolUnavailableReason } from "../services/agent/tool-availability.js";
 import { randomUUID } from "node:crypto";
 import { CopilotGrantRepository } from "../db/repositories/copilot-grant-repository.js";
 import { PlatformActions } from "../services/platform-commands/actions.js";
@@ -53,21 +57,43 @@ export type CopilotRouteDeps = AgentStackDeps;
 export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   const router = Router();
   router.use(authenticate);
+  router.use(createCopilotConnectionRoutes(deps.db, deps.masterKey));
 
   const KNOWN_TOOL_NAMES = new Set<string>(createPlatformTools().map((tool) => tool.name));
+  router.use(createCopilotPlaybookRoutes(deps.db, {
+    availableToolNames: (actingUser) => visibleToolSchemas(buildAgentStack(deps, actingUser).toolRegistry, {
+      hasSessionManager: !!deps.sessionManager,
+      isToolDisabled: name => !new CopilotToolPreferenceRepository(deps.db, actingUser).isEnabled(name)
+    }).map(tool => tool.name)
+  }));
+  router.use(createCopilotSkillRoutes(deps.db, {
+    availableToolNames: (actingUser) => visibleToolSchemas(buildAgentStack(deps, actingUser).toolRegistry, {
+      hasSessionManager: !!deps.sessionManager,
+      isToolDisabled: name => !new CopilotToolPreferenceRepository(deps.db, actingUser).isEnabled(name)
+    }).map(tool => tool.name)
+  }));
 
   router.get("/capabilities", (req, res) => {
     const actingUser = userId(req);
     const preferences = new CopilotToolPreferenceRepository(deps.db, actingUser);
-    const tools = Array.from(buildAgentStack(deps, actingUser).toolRegistry.tools.values()).map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      risk: tool.risk,
-      requiresApproval: tool.requiresApproval
-    }));
-    res.json(ok({
-      tools: tools.map((t) => ({ ...t, enabled: preferences.isEnabled(t.name) }))
-    }));
+    const tools = createPlatformTools().map((tool) => {
+      const unavailableReason = toolUnavailableReason(tool.name, !!deps.sessionManager);
+      const enabled = preferences.isEnabled(tool.name);
+      return {
+        name: tool.name, description: tool.description, risk: tool.risk,
+        requiresApproval: tool.requiresApproval, enabled,
+        available: unavailableReason === null, unavailableReason,
+        effectiveEnabled: enabled && unavailableReason === null,
+        authorization: tool.risk === "read" ? "read" : "approval_or_grant"
+      };
+    });
+    tools.push({
+      name: "dispatch_task_to_session", description: "Autonomous CLI task dispatch is unavailable; use the terminal manually.",
+      risk: "operate", requiresApproval: true, enabled: preferences.isEnabled("dispatch_task_to_session"),
+      available: false, unavailableReason: "ADAPTER_AUTONOMY_UNVERIFIED", effectiveEnabled: false,
+      authorization: "unavailable"
+    });
+    res.json(ok({ tools }));
   });
 
   router.put("/capabilities/:toolName/enabled", (req, res) => withBody(req.body, toolEnabledSchema, res, (value) => {

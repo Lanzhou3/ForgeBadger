@@ -8,6 +8,9 @@ import {
   getCopilotCapabilities,
   getRun,
   listConversations,
+  listCopilotPlaybooks,
+  setCopilotPlaybookEnabled,
+  updateCopilotPlaybook,
   listMemoryEntries,
   listMessages,
   searchMemory,
@@ -135,6 +138,17 @@ describe("copilot api client", () => {
       `${BASE}/api/v1/copilot/memory/entries/mem-1`,
       expect.objectContaining({ method: "DELETE" })
     );
+  });
+
+  it("manages playbooks through isolated Copilot routes and stable encoded IDs", async () => {
+    await listCopilotPlaybooks();
+    expect(fetch).toHaveBeenLastCalledWith(`${BASE}/api/v1/copilot/playbooks`, expect.anything());
+    await setCopilotPlaybookEnabled("owner/id", false);
+    expect(fetch).toHaveBeenLastCalledWith(`${BASE}/api/v1/copilot/playbooks/owner%2Fid/enabled`,
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ enabled: false }) }));
+    await updateCopilotPlaybook("owner/id", { content: "Reviewed body", version: "2.0.0" });
+    expect(fetch).toHaveBeenLastCalledWith(`${BASE}/api/v1/copilot/playbooks/owner%2Fid`,
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ content: "Reviewed body", version: "2.0.0" }) }));
   });
 
   it("fetches capabilities", async () => {

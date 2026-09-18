@@ -92,6 +92,43 @@ export interface CopilotToolInfo {
   requiresApproval: boolean;
   /** Owner's per-tool switch; absent-row default is true (server always sends it). */
   enabled: boolean;
+  available: boolean;
+  unavailableReason: string | null;
+  effectiveEnabled?: boolean;
+  authorization?: "read" | "approval_or_grant" | "unavailable";
+}
+
+export interface CopilotPlaybook {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  version: string;
+  currentVersion: string;
+  isEnabled: boolean;
+  requiredTools: string[];
+  available: boolean;
+  unavailableReason: string | null;
+  reviewRequired: boolean;
+  editable: boolean;
+}
+
+export function listCopilotPlaybooks() {
+  return fetchJson<{ playbooks: CopilotPlaybook[] }>("/api/v1/copilot/playbooks");
+}
+
+export function updateCopilotPlaybook(id: string, input: { content: string; version: string }) {
+  return fetchJson<{ playbook: CopilotPlaybook }>(
+    `/api/v1/copilot/playbooks/${encodeURIComponent(id)}`,
+    { method: "PUT", body: JSON.stringify(input) }
+  );
+}
+
+export function setCopilotPlaybookEnabled(id: string, enabled: boolean) {
+  return fetchJson<{ playbook: CopilotPlaybook }>(
+    `/api/v1/copilot/playbooks/${encodeURIComponent(id)}/enabled`,
+    { method: "PUT", body: JSON.stringify({ enabled }) }
+  );
 }
 
 export function listConversations() {

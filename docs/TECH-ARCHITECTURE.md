@@ -187,7 +187,7 @@ ForgeBadger 保留两个清晰边界：Copilot 负责对话、记忆、只读查
 - `/copilot` 与 `/api/v1/copilot/*` 是唯一助手入口，使用 Gateway 自有 provider、conversation、memory、approval、tool 与 event 服务。
 - Project Manager 的工作项与 Task Packet 继续使用现有 `/api/v1/projects/:projectId/project-manager/*` 路径和 tenant-scoped repository。
 - 新工作项始终以 `todo` 落库；创建 API 只接受省略 `status` 或显式 `todo`，其他状态必须在创建后通过独立 status mutation 按状态机、证据、Ledger 与审计约束变更。
-- Web 创建弹窗不采集或发送初始 evidence/Feishu refs；证据从工作项详情与验收流程追加。Gateway 底层创建契约仍保留 bounded `evidenceRefs` / `feishuRefs` 作为历史数据和受控集成的兼容元数据，不删除对应 DB/DTO 字段，也不使飞书成为 Project Manager 状态权威。
+- Web 创建弹窗不采集或发送初始 evidence refs；证据从工作项详情与验收流程追加。Gateway 底层创建契约仍保留 bounded `evidenceRefs` 作为历史数据和受控集成的兼容元数据，不删除对应 DB/DTO 字段，也不使飞书成为 Project Manager 状态权威。原 `feishuRefs` 协作元数据槽位已退役（migration `0083_drop_pm_feishu_refs`）：列已删除，API、平台工具与 DTO 不再接受或返回该字段。
 - Session Manager 和 Session Server 作为 CLI 生命周期与终端输入的唯一执行边界；浏览器与程序化输入都必须经过会话所有权和 runtime authorization 校验。
 - Portfolio Operations 的页面、API、仓储、worker、scheduler、event、Feishu handler 和 session fence 已退役，不得重新作为兼容层引入。
 - 已应用的 Portfolio migrations 与 schema declarations 仅为迁移连续性和数据安全保留；live runtime 不读取或写入这些表。
@@ -1578,3 +1578,86 @@ _毕方 🏗️ | 观全局而建 | 2026-04-24_
 ### Session Server v2 cutover (2026-09-10)
 
 The terminal runtime uses IPC protocol v2 and v2 socket, named-pipe and token names. No v1 discovery, adoption or fallback is supported. Retire old daemon sessions explicitly before cutover; a stopped CLI is never silently recreated. Database/API historical field names do not select a runtime.
+
+### Copilot / CLI knowledge boundary (2026-09-17)
+
+Native Copilot retains its durable Gateway agent, platform commands, exact
+approval/Grant gates and independent Session Server boundary. Procedural knowledge
+is a Copilot Skill (builtin guides were previously called Playbooks); it does not grant executable capability. CLI Skills remain
+adapter/project configuration assets. Migration 0082 adds `skills.runtime_target`
+and `resource_manifest`, changes name uniqueness to `(user_id, runtime_target,
+name)`, and moves known builtin Copilot rows to their own target without deleting
+IDs, user-edited content, enable choices or inert project associations. Repository
+reads and mutations always include the selected target; the default is CLI.
+
+The bundled Playbook catalog declares current versions and required tools. Exact
+unedited v1 builtin bodies/metadata can upgrade to v2 during target-scoped seed;
+modified copies remain preserved and require owner review against currentVersion.
+Grant contexts additionally require byte-equal canonical name/description/body;
+source labels alone are not trusted. Full edited/global content stays outside
+Grant model context. UI, slash listings and tool loads use the same availability
+and review policy. Old tool preference disables migrate conservatively; historical
+run inputs, approvals, action digests and receipts are never renamed. Retired
+pending actions cannot be approved; previously approved retired steps fail closed.
+
+Before rollout, back up the live database using SQLite's consistent backup API.
+Migration/reopen/restore tests use disposable populated databases and do not apply
+the migration to the running service. Rollback requires the matching old source
+and pre-upgrade backup; do not run old code against the migrated state blindly.
+
+Existing project files are not deleted by the database migration. Config planning
+reports possible old Copilot Playbooks by exact adapter-relative path and blocks
+until reviewed. For each reported file, inspect its contents and compute a digest,
+for example `shasum -a 256 -- '<project-relative-path>'` from the project directory.
+Compare against the previously exported file or a known backup, and preserve a
+copy before manually retiring it. A matching name is not proof that the file is
+unmodified or owned by ForgeBadger. User edits must be reconciled explicitly.
+New export manifests include content hashes; obsolete tracked files also block
+planning and remain untouched. Existing unmanaged/renamed copies require operator
+review because neither filename nor database target establishes their ownership.
+
+### Copilot extensions: Skills and Connections (2026-09-18)
+
+`/copilot/extensions` owns two management objects. Skills package procedural
+instructions and text references; Connections provide executable tools. Function
+calling remains the model invocation protocol, not a third installable object.
+Builtin ForgeBadger tools execute in process through the existing platform command
+and approval paths. The outward `/mcp` endpoint still exposes only platform tools;
+it does not proxy installed external servers.
+
+Skills use standard YAML-frontmatter `SKILL.md` plus a bounded UTF-8 file bundle.
+Paste, file upload and public HTTPS raw Markdown imports create disabled packages.
+Unsupported scripts, hooks, CLI tool permissions and subagents are visible as
+incompatible; installing them never creates an execution environment. Only enabled,
+compatible, dependency-satisfied metadata enters model context; full instructions
+and resources load on demand. Disabled loader tools suppress the corresponding
+catalog instructions. Resource reads bind Skill ID, current revision and safe path.
+CLI Skills retain their separate runtime target and configuration export.
+
+Migration 0085 adds immutable tenant-scoped package revisions and current heads.
+Existing guides are captured lazily without changing IDs, edits, enable choices or
+historical call digests. Edit and rollback append revisions with compare-and-swap;
+rollback never overwrites history. Builtin provenance is immutable and imported
+names cannot impersonate it. Grant-bound context accepts only exact canonical
+single-file builtin content, never imported or edited global instructions.
+
+Migration 0084 stores tenant-scoped Connections, encrypted bearer credentials,
+revisioned discovery catalogs and explicit tool selections. This iteration supports
+public HTTPS Streamable HTTP only. Stdio process launching, local/private servers,
+OAuth enrollment and Skill script execution require separate runtime designs.
+Outbound requests validate all resolved addresses and pin the socket to those
+addresses while retaining original-host TLS verification. Redirects are rejected;
+requests, response bytes, tool counts and schema complexity are bounded.
+
+Discovery saves atomically; changed tool definitions lose their selections.
+Tool names include the connection revision, so changed credentials/endpoints or
+catalogs invalidate old approval targets. Every external call requires an exact
+owner approval; platform Grants and scheduled/reactive turns cannot authorize it.
+The actual send rechecks active user, lease, approval, revision and tool selection.
+Timeout, disconnection or MCP error after attempting a write yields an indeterminate
+receipt and is never automatically replayed. Discovery annotations do not confer
+read-only trust. Credentials remain write-only and are redacted from tool output.
+
+Rollback after activation requires the matching pre-upgrade source and a consistent
+SQLite backup. Isolated migration/reopen/restore checks do not activate the live
+Gateway or migrate its database.

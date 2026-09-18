@@ -3,9 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CopilotChannelsPage } from './CopilotChannelsPage';
+import { LanguageProvider } from '@/hooks/use-language';
 import * as api from '@/lib/api';
 import * as channels from '@/lib/copilot-channels-api';
 import * as grants from '@/lib/platform-actions-api';
+vi.mock('next/navigation',()=>({useRouter:()=>({push:vi.fn()})}));
 vi.mock('@/lib/api',()=>({getFeishuChannelAccount:vi.fn(),getFeishuConnectionHealth:vi.fn(),saveFeishuChannelAccount:vi.fn(),emergencyStopFeishu:vi.fn()}));
 vi.mock('@/lib/copilot-channels-api',()=>({getChannelRecords:vi.fn(),createChannelPairing:vi.fn(),confirmChannelPairing:vi.fn(),cancelChannelPairing:vi.fn(),revokeChannelIdentity:vi.fn(),createChannelRoute:vi.fn(),revokeChannelRoute:vi.fn()}));
 vi.mock('@/lib/platform-actions-api',()=>({listGrants:vi.fn(),getProjectOverview:vi.fn()}));
@@ -21,7 +23,7 @@ beforeEach(()=>{vi.resetAllMocks();client=new QueryClient({defaultOptions:{queri
  vi.mocked(grants.listGrants).mockResolvedValue({grants:[grant],capabilities:[]});vi.mocked(grants.getProjectOverview).mockResolvedValue({projects:[],observedAt:Date.now()});
 });
 afterEach(()=>{cleanup();client.clear();});
-async function mount(){render(<QueryClientProvider client={client}><CopilotChannelsPage /></QueryClientProvider>);await screen.findByText('2. 确认私聊身份');}
+async function mount(){render(<LanguageProvider><QueryClientProvider client={client}><CopilotChannelsPage /></QueryClientProvider></LanguageProvider>);await screen.findByText('2. 确认私聊身份');}
 it('requires exact claim acknowledgement and clears it when revision changes',async()=>{
  await mount();const confirm=screen.getByRole('button',{name:'确认身份'});expect(confirm).toHaveProperty('disabled',true);
  fireEvent.click(screen.getByRole('checkbox'));expect(confirm).toHaveProperty('disabled',false);

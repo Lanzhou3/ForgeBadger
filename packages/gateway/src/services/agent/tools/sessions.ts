@@ -1,4 +1,3 @@
-import { executeAgentAction } from "../../platform-commands/agent-actions.js";
 /**
  * Session tools for the Copilot harness — the "sessions" seam. Read tools
  * expose AI CLI session state; the operate tool (launch a session) is
@@ -28,11 +27,6 @@ const getSessionInput = z.object({
 const getSessionOutputInput = z.object({
   sessionId: z.string().min(1).max(128),
   maxLines: z.number().int().min(1).max(500).optional()
-}).strict();
-
-const dispatchSessionInputToolSchema = z.object({
-  sessionId: z.string().min(1).max(128),
-  message: z.string().min(1).max(4000)
 }).strict();
 
 function toolDb(context: AgentToolContext): { db: Database; userId: string } {
@@ -90,17 +84,6 @@ export function createSessionTools(): AgentTool[] {
         if (!ring) return { found: true, live: false, output: "", truncated: false, lineCount: 0 };
         const tail = ring.getTail(maxLines ?? 80);
         return { found: true, live: true, ...tail };
-      }
-    },
-    {
-      name: "dispatch_task_to_session",
-      description:
-        "Dispatch a task message into a running AI CLI session's terminal as its next instruction, confirming delivery by reading back the terminal screen (approval required).",
-      risk: "operate",
-      requiresApproval: true,
-      inputSchema: dispatchSessionInputToolSchema,
-      async execute(input, context) {
-        return executeAgentAction("dispatch_task_to_session", dispatchSessionInputToolSchema.parse(input), context);
       }
     }
   ];

@@ -90,7 +90,6 @@ export interface ProjectManagerWorkItem {
   acceptanceCriteria: string[];
   evidenceRefCount: number;
   evidenceRefs: ProjectManagerEvidenceRef[];
-  feishuRefCount: number;
   stageId: string | null;
   createdAt: number;
   updatedAt: number;
@@ -138,7 +137,6 @@ export interface ProjectManagerWorkItemInput {
   priority?: number;
   acceptanceCriteria?: string[];
   evidenceRefs?: ProjectManagerEvidenceRef[];
-  feishuRefs?: ProjectManagerEvidenceRef[];
   stageId?: string | null;
 }
 
@@ -207,7 +205,6 @@ export interface ProjectManagerLedgerEvent {
   eventType: ProjectManagerLedgerEventType;
   status: ProjectManagerWorkItemStatus | null;
   evidenceRefCount: number;
-  feishuRefCount: number;
   trace?: ProjectManagerLedgerTrace;
   createdAt: number;
 }
@@ -446,6 +443,8 @@ export interface LocalDiagnosticsExport {
 }
 
 export interface Skill {
+  /** Null or absent means this entry contains Markdown only. */
+  resourceManifest?: string | null;
   id: string;
   name: string;
   source: string;
@@ -457,6 +456,7 @@ export interface Skill {
 }
 
 export interface SkillDiscovery {
+  rejectedSkills?: { path: string; reason: string }[];
   roots: string[];
   discoveredRoots?: string[];
   discoveredCount: number;
@@ -1829,6 +1829,50 @@ export async function setClaudeRoute(enabled: boolean): Promise<ClaudeRouteState
   return routing;
 }
 
+// --- MCP integration (external agents connecting to this Gateway) ---
+
+export interface McpStatus {
+  enabled: boolean;
+  endpoint: string;
+}
+
+export type McpTokenScope = "read" | "operate";
+
+export interface McpToken {
+  id: string;
+  name: string;
+  scopes: McpTokenScope[];
+  createdAt: string;
+  lastUsedAt: string | null;
+  revoked: boolean;
+}
+
+export const mcpStatusKey = ["mcp-status"] as const;
+export const mcpTokensKey = ["mcp-tokens"] as const;
+
+export async function getMcpStatus(): Promise<McpStatus> {
+  return fetchJson<McpStatus>("/api/v1/mcp");
+}
+
+export async function listMcpTokens(): Promise<{ tokens: McpToken[] }> {
+  return fetchJson<{ tokens: McpToken[] }>("/api/v1/mcp/tokens");
+}
+
+export async function createMcpToken(input: {
+  name: string;
+  scopes: McpTokenScope[];
+}): Promise<{ token: McpToken; plaintext: string }> {
+  return fetchJson<{ token: McpToken; plaintext: string }>("/api/v1/mcp/tokens", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function revokeMcpToken(id: string): Promise<{ revoked: boolean }> {
+  return fetchJson<{ revoked: boolean }>(`/api/v1/mcp/tokens/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
 
 export async function getProjectWorkspaceTree(
   id: string,
@@ -2059,6 +2103,46 @@ export async function getProjectGitFileDiff(
     `/api/v1/projects/${encodeURIComponent(id)}/git-diff?${searchParams.toString()}`
   );
   return file;
+}
+
+export interface GitBranchEntry {
+  name: string;
+  isCurrent: boolean;
+}
+
+export interface ProjectGitWorkingTree {
+  clean: boolean;
+  changedCount: number;
+  sample: string[];
+}
+
+export interface ProjectGitBranches {
+  isGitRepo: boolean;
+  current: string | null;
+  branches: GitBranchEntry[];
+  workingTree: ProjectGitWorkingTree;
+}
+
+export async function getProjectGitBranches(id: string): Promise<ProjectGitBranches> {
+  const { git } = await fetchJson<{ git: ProjectGitBranches }>(
+    `/api/v1/projects/${encodeURIComponent(id)}/git-branches`
+  );
+  return git;
+}
+
+export interface ProjectGitCheckoutResult {
+  current: string;
+  created: boolean;
+}
+
+export async function checkoutProjectGitBranch(
+  id: string,
+  input: { branch: string; create?: boolean }
+): Promise<ProjectGitCheckoutResult> {
+  return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/git-checkout`, {
+    method: "POST",
+    body: JSON.stringify({ branch: input.branch, ...(input.create ? { create: true } : {}) }),
+  }) as Promise<ProjectGitCheckoutResult>;
 }
 
 export async function updateProjectAiConfigFile(

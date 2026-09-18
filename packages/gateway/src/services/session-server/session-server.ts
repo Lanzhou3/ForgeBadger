@@ -86,7 +86,16 @@ export class SessionServer {
 
     // Claim the ID before spawning and keep it reserved until creation settles,
     // so concurrent requests cannot create the same session twice.
-    if (this.sessions.has(sessionId) || this.pendingCreates.has(sessionId)) {
+    // Allow recreating a session that has already exited (natural CLI exit).
+    const existing = this.sessions.get(sessionId);
+    if (existing) {
+      if (existing.status === "exited") {
+        this.removeSession(sessionId);
+      } else if (existing.status === "running" || existing.status === "error") {
+        throw new Error(`Session already exists: ${sessionId}`);
+      }
+    }
+    if (this.pendingCreates.has(sessionId)) {
       throw new Error(`Session already exists: ${sessionId}`);
     }
     this.pendingCreates.add(sessionId);
