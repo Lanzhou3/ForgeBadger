@@ -18,7 +18,7 @@ import type { CliConfigSnapshot } from "../src/services/cli-config.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
-const ADAPTERS: AdapterId[] = ["claude", "opencode", "codex", "kimi"];
+const ADAPTERS: AdapterId[] = ["claude", "opencode", "codex", "kimi", "pi"];
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
@@ -99,7 +99,7 @@ describe("model providers applied overview route", () => {
     db.prepare("UPDATE users SET role = ? WHERE id = ?").run("admin", id);
   }
 
-  it("returns all four adapters with null applied when no pointers exist", async () => {
+  it("returns all five adapters with null applied when no pointers exist", async () => {
     const res = await getOverview();
 
     assert.equal(res.status, 200);
@@ -200,6 +200,25 @@ describe("model providers applied overview route", () => {
     });
     const kimiDrift = drifted.body.data.adapters.find((entry: any) => entry.adapter === "kimi");
     assert.equal(kimiDrift.stale, true);
+  });
+
+  it("compares the PI bare defaultModel id directly (no alias parsing)", async () => {
+    promoteToAdmin(userId);
+    const { providerId, modelProfileId } = createProviderAndModel("DeepSeek", "DeepSeek Chat", "deepseek-chat");
+    new CliConfigAppliedProviderRepository(db, userId).upsert("pi", providerId, modelProfileId);
+
+    const matching = await getOverview(token, {
+      readCliConfigSnapshot: async (adapter) => snapshotWith(adapter === "pi" ? "deepseek-chat" : "")
+    });
+    const piMatch = matching.body.data.adapters.find((entry: any) => entry.adapter === "pi");
+    assert.equal(piMatch.configDefaultModel, "deepseek-chat");
+    assert.equal(piMatch.stale, false);
+
+    const drifted = await getOverview(token, {
+      readCliConfigSnapshot: async (adapter) => snapshotWith(adapter === "pi" ? "other-model" : "")
+    });
+    const piDrift = drifted.body.data.adapters.find((entry: any) => entry.adapter === "pi");
+    assert.equal(piDrift.stale, true);
   });
 
   it("keeps stale=false when the snapshot cannot be read", async () => {

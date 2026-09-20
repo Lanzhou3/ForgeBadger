@@ -36,7 +36,7 @@ export type { LaunchPlanInput } from "../services/session-launch-plan.js";
 
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional()
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional()
 }).strict();
 
 const listSessionsQuerySchema = z.object({
@@ -156,7 +156,7 @@ export function createSessionRoutes(
     });
 
     try {
-      const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, project.path, dbSession.id);
+      const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, project.path);
       const launchPlan = createLaunchPlan({
         adapter,
         projectRoot: project.path,

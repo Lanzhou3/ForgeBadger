@@ -36,8 +36,8 @@ export interface ClaudeHookSettings {
   };
 }
 
-export function buildForgeBadgerClaudeHookSettings(gatewayUrl: string, sessionId?: string): ClaudeHookSettings {
-  const httpHook = buildForgeBadgerHttpHook(gatewayUrl, sessionId);
+export function buildForgeBadgerClaudeHookSettings(gatewayUrl: string): ClaudeHookSettings {
+  const httpHook = buildForgeBadgerHttpHook(gatewayUrl);
   return {
     allowedHttpHookUrls: [forgeBadgerHookUrlAllowlist(gatewayUrl)],
     httpHookAllowedEnvVars: forgeBadgerHookEnvVars(),
@@ -74,12 +74,11 @@ export function buildForgeBadgerClaudeHookSettings(gatewayUrl: string, sessionId
 
 export async function ensureClaudeNotificationSettings(
   projectRoot: string,
-  gatewayUrl: string,
-  sessionId?: string
+  gatewayUrl: string
 ): Promise<{ path: string; changed: boolean }> {
   const settingsPath = safeResolve(projectRoot, ".claude/settings.local.json");
   const existing = await readJsonObject(settingsPath);
-  const merged = mergeForgeBadgerHookSettings(existing, gatewayUrl, sessionId);
+  const merged = mergeForgeBadgerHookSettings(existing, gatewayUrl);
   const changed = JSON.stringify(existing) !== JSON.stringify(merged);
 
   if (changed) {
@@ -92,13 +91,12 @@ export async function ensureClaudeNotificationSettings(
 
 function mergeForgeBadgerHookSettings(
   existing: Record<string, unknown>,
-  gatewayUrl: string,
-  sessionId?: string
+  gatewayUrl: string
 ): Record<string, unknown> {
   const next = cloneRecord(existing);
   const existingHooks = isRecord(next.hooks) ? next.hooks : {};
   const hooks: Record<string, unknown> = { ...existingHooks };
-  const forgeBadgerHook = buildForgeBadgerHttpHook(gatewayUrl, sessionId);
+  const forgeBadgerHook = buildForgeBadgerHttpHook(gatewayUrl);
 
   hooks.PermissionRequest = ensureHookGroup(
     hooks.PermissionRequest,
@@ -176,11 +174,15 @@ function normalizeHookGroups(value: unknown): ClaudeHookGroup[] {
     });
 }
 
-function buildForgeBadgerHttpHook(gatewayUrl: string, sessionId?: string): ClaudeHttpHook {
-  const sessionPath = sessionId ? `/${encodeURIComponent(sessionId)}` : "";
+// The hook URL intentionally carries NO session id. Claude Code expands the
+// `x-forgebadger-session-id` / `x-forgebadger-session-token` headers from the
+// worker's environment at request time, so the shared project-level settings
+// file never has to be rewritten per session — and one session's hook can no
+// longer be pointed at a stale session whose attach token no longer matches.
+function buildForgeBadgerHttpHook(gatewayUrl: string): ClaudeHttpHook {
   return {
     type: "http",
-    url: `${gatewayUrl.replace(/\/+$/u, "")}/api/v1/session-hooks/claude-notification${sessionPath}`,
+    url: `${gatewayUrl.replace(/\/+$/u, "")}/api/v1/session-hooks/claude-notification`,
     headers: {
       "x-forgebadger-session-id": "$FORGEBADGER_SESSION_ID",
       "x-forgebadger-session-token": "$FORGEBADGER_ATTACH_TOKEN"

@@ -96,10 +96,11 @@ function skillConfigPath(name: string, adapter: AdapterId): string {
   return `${adapterConfigRoot(adapter)}/skills/${slug}/SKILL.md`;
 }
 
-export function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" | ".kimi-code" {
+export function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" | ".kimi-code" | ".pi" {
   if (adapter === "opencode") return ".opencode";
   if (adapter === "codex") return ".codex";
   if (adapter === "kimi") return ".kimi-code";
+  if (adapter === "pi") return ".pi";
   return ".claude";
 }
 

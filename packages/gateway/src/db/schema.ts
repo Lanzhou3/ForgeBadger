@@ -508,7 +508,7 @@ export const modelProviderBindings = sqliteTable(
     idxBindingActiveRealpath: uniqueIndex("idx_model_provider_bindings_active_realpath")
       .on(table.targetRealpathHash)
       .where(sql`${table.status} = 'active' AND ${table.targetRealpathHash} IS NOT NULL`),
-    adapterCheck: check("model_provider_bindings_adapter_check", sql`${table.adapter} IN ('claude','opencode','codex','kimi')`),
+    adapterCheck: check("model_provider_bindings_adapter_check", sql`${table.adapter} IN ('claude','opencode','codex','kimi','pi')`),
     authModeCheck: check("model_provider_bindings_auth_mode_check", sql`${table.authMode} IN ('managed_credential','native_cli_login','host_environment','none')`),
     statusCheck: check("model_provider_bindings_status_check", sql`${table.status} IN ('active','revoked')`),
     revisionCheck: check("model_provider_bindings_revision_check", sql`${table.desiredRevision} >= 1`),

@@ -13,7 +13,7 @@ import path from "node:path";
 
 import { expandUserPath } from "../../lib/user-path.js";
 
-export type UsageTokenAdapter = "claude" | "opencode" | "codex" | "kimi";
+export type UsageTokenAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi";
 
 export interface TokenUsageRecord {
   /** Which CLI the record came from. */
@@ -112,6 +112,24 @@ export function kimiSessionsRoot(options: UsagePathOptions = {}): string {
     pathApi
   );
   return pathApi.join(kimiHome, "sessions");
+}
+
+/**
+ * Root of PI session transcripts.
+ *
+ * Precedence (pi docs, environment-variables.md): `PI_CODING_AGENT_SESSION_DIR`
+ * wins; otherwise `<PI_CODING_AGENT_DIR | ~/.pi/agent>/sessions`.
+ */
+export function piSessionsRoot(options: UsagePathOptions = {}): string {
+  const { env, homeDir, pathApi } = usagePathContext(options);
+  const sessionDir = env.PI_CODING_AGENT_SESSION_DIR?.trim();
+  if (sessionDir) return expandUserPath(sessionDir, homeDir, pathApi);
+  const agentDir = expandUserPath(
+    env.PI_CODING_AGENT_DIR?.trim() || pathApi.join(homeDir, ".pi", "agent"),
+    homeDir,
+    pathApi
+  );
+  return pathApi.join(agentDir, "sessions");
 }
 
 /** Decode a Claude encode-project-dir into an absolute path (`-Users-a-B` -> `/Users/a/B`). */

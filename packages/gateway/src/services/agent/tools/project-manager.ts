@@ -30,7 +30,7 @@ const getPacketInput = z.object({
 }).strict();
 
 const startPacketInput = getPacketInput.extend({
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional()
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional()
 }).strict();
 
 /** Load project + work item, or a recoverable not-found marker. */

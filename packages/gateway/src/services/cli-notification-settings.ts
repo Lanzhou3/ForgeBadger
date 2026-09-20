@@ -4,8 +4,9 @@ import path from "node:path";
 
 import { safeResolve } from "../lib/safe-resolve.js";
 import { expandUserPath } from "../lib/user-path.js";
+import { globalConfigRoot } from "./cli-config-target.js";
 
-type NotificationAdapter = "codex" | "kimi";
+type NotificationAdapter = "codex" | "kimi" | "pi";
 
 interface CodexHookCommand {
   type: "command";
@@ -99,6 +100,87 @@ export async function ensureKimiNotificationSettings(
     console.warn(`[cli-notification-settings] failed to configure Kimi hooks at ${configPath}:`, error);
     return { path: configPath, changed: false };
   }
+}
+
+/**
+ * PI loads extensions from the GLOBAL config dir (`<PI_CODING_AGENT_DIR | ~/.pi/agent>/extensions/`)
+ * at startup for every project — no project-local file, no trust prompt, no per-project
+ * merge. The managed extension reads session identity from the environment at runtime,
+ * so PI sessions started outside ForgeBadger (no FORGEBADGER_* env) no-op quietly.
+ *
+ * Event mapping (pi 0.86.0, verified against dist/core/extensions/types.d.ts):
+ * - `agent_settled`      -> Stop            (task_completed; fires once per settled turn)
+ * - `ui_prompt_start`    -> PermissionRequest (pi is waiting on a blocking user prompt)
+ * - `session_shutdown`   -> SessionEnd      (quit/reload/new/resume/fork)
+ */
+export async function ensurePiNotificationSettings(): Promise<{ path: string; changed: boolean }> {
+  const extensionsDir = path.join(globalConfigRoot("pi"), "extensions");
+  const extensionPath = path.join(extensionsDir, "forgebadger-notify.ts");
+  try {
+    const changed = await writeIfChanged(extensionPath, piNotificationExtension());
+    return { path: extensionPath, changed };
+  } catch (error) {
+    console.warn(`[cli-notification-settings] failed to configure PI extension at ${extensionPath}:`, error);
+    return { path: extensionPath, changed: false };
+  }
+}
+
+/**
+ * Generated PI extension source. Deliberately JS-compatible TypeScript (pi loads
+ * it through jiti); no type annotations, no imports, no secrets — the gateway URL,
+ * session id, and attach token all come from the session environment at runtime.
+ */
+function piNotificationExtension(): string {
+  return `// ForgeBadger managed PI notification extension — do not edit by hand.
+// Session identity comes from the FORGEBADGER_* environment; sessions started
+// outside ForgeBadger simply do nothing.
+export default function (pi) {
+  const sessionId = process.env.FORGEBADGER_SESSION_ID || "";
+  const gatewayUrl = process.env.FORGEBADGER_GATEWAY_URL || "";
+  const attachToken = process.env.FORGEBADGER_ATTACH_TOKEN || "";
+  if (!sessionId || !gatewayUrl || !attachToken) return;
+
+  const post = (hookEventName, extra) => {
+    try {
+      const url =
+        gatewayUrl.replace(/\\/+$/u, "") +
+        "/api/v1/session-hooks/claude-notification/" +
+        encodeURIComponent(sessionId);
+      return fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forgebadger-session-id": sessionId,
+          "x-forgebadger-session-token": attachToken
+        },
+        body: JSON.stringify({ hook_event_name: hookEventName, adapter: "pi", ...extra }),
+        signal: AbortSignal.timeout(4500)
+      }).catch(() => {});
+    } catch {
+      // Notification delivery is fail-open and must never break the CLI.
+      return Promise.resolve();
+    }
+  };
+
+  pi.on("agent_settled", () => {
+    post("Stop");
+  });
+
+  pi.on("ui_prompt_start", (event) => {
+    const title = typeof event.title === "string" && event.title ? event.title : "";
+    const kind = typeof event.kind === "string" && event.kind ? event.kind : "input";
+    post("PermissionRequest", {
+      message: "PI is waiting for your " + kind + (title ? ": " + title : "")
+    });
+  });
+
+  pi.on("session_shutdown", async () => {
+    // Awaited: pi waits for session_shutdown handlers before process exit, so
+    // the report lands instead of dying with the in-flight fetch.
+    await post("SessionEnd");
+  });
+}
+`;
 }
 
 /** Best-effort removal of the legacy project-level managed block (never read by Kimi). */

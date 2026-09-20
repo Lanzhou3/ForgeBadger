@@ -97,6 +97,44 @@ function kimiComposer(lines: string[]): string {
   return selected.join("\n");
 }
 
+// PI TUI (measured 2026-09-20, pi 0.86.0, 160x50, live-verified against a
+// real tool-call turn): the footer is anchored to the pane bottom — a cwd
+// line above the status line (`0.9%/262k (auto)  <model> • <thinking>`),
+// which is always the last line of the current screen. Staged composer input
+// renders BELOW the status line at the very bottom of the screen. While the
+// agent runs, the box bar above the cwd line becomes a ` ── ⠦ Working ─…`
+// spinner bar (fixed slot, a few lines above the status); folded multi-line
+// input shows an `↑ N more` marker in the input block. Stale spinner frames
+// from earlier turns remain in the scrollback (capturePane returns 500 lines
+// of it), so busy/fold matching is restricted to a small window around the
+// status line instead of scanning the whole pane.
+const PI_STATUS_LINE = /\d+(\.\d+)?%\/\d+[kmKM]/u;
+const PI_BUSY_BAR = /Working\s*─+/u;
+const PI_FOLD_MARKER = /↑\s*\d+\s*more/u;
+// Box-bar/spacer slots above the status line that the busy spinner occupies.
+const PI_FOOTER_WINDOW = 4;
+
+function isPiComposerReady(lines: string[]): boolean {
+  const statusIndex = lastIndexMatching(lines, PI_STATUS_LINE);
+  if (statusIndex < 1) return false;
+  const footer = lines.slice(Math.max(0, statusIndex - PI_FOOTER_WINDOW));
+  if (footer.some((line) => PI_BUSY_BAR.test(line) || PI_FOLD_MARKER.test(line))) return false;
+  return piComposer(lines) === "";
+}
+
+function piComposer(lines: string[]): string {
+  const statusIndex = lastIndexMatching(lines, PI_STATUS_LINE);
+  if (statusIndex < 0) return "";
+  const selected: string[] = [];
+  for (const line of lines.slice(statusIndex + 1)) {
+    if (PI_FOLD_MARKER.test(line)) continue; // `↑ N more` fold line, not input
+    if (PI_BUSY_BAR.test(line)) continue; // spinner bar, not input
+    if (line.trim() === "") continue;
+    selected.push(line.trimStart());
+  }
+  return selected.join("\n");
+}
+
 export function currentProgrammaticComposer(adapter: AdapterId, pane: string): string {
   const lines = stripTerminalControl(pane).split("\n");
   switch (adapter) {
@@ -108,6 +146,8 @@ export function currentProgrammaticComposer(adapter: AdapterId, pane: string): s
       return opencodeComposer(lines);
     case "kimi":
       return kimiComposer(lines);
+    case "pi":
+      return piComposer(lines);
   }
 }
 
@@ -123,6 +163,8 @@ export function isProgrammaticComposerReady(adapter: AdapterId, pane: string): b
       return /Ask anything\.\.\./.test(plain) && composer === "";
     case "kimi":
       return /^\s*│\s*>\s*.*│\s*$/m.test(plain) && normalizeComparable(composer) === "" && /context:\s*\d+%/i.test(plain);
+    case "pi":
+      return isPiComposerReady(plain.split("\n"));
   }
 }
 

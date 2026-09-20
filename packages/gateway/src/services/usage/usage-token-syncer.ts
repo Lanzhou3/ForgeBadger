@@ -12,6 +12,7 @@ import { ClaudeCodeSource } from "./claude-code-source.js";
 import { CodexSource } from "./codex-source.js";
 import { KimiSource } from "./kimi-source.js";
 import { OpenCodeSource } from "./opencode-source.js";
+import { PiSource } from "./pi-source.js";
 import type { UsageSource, UsageTokenAdapter } from "./usage-source.js";
 
 export interface UsageSyncResult {
@@ -27,7 +28,7 @@ export interface UsageSyncSummary {
 
 export function createUsageTokenSyncer(db: Database): {
   syncForUser: (userId: string, source: UsageSource) => UsageSyncResult;
-  /** Run every built-in source (Claude + OpenCode + Codex + Kimi) for a user and return totals. */
+  /** Run every built-in source (Claude + OpenCode + Codex + Kimi + PI) for a user and return totals. */
   syncAllForUser: (userId: string) => UsageSyncSummary;
 } {
   const syncForUser = (userId: string, source: UsageSource): UsageSyncResult => {
@@ -50,7 +51,8 @@ export function createUsageTokenSyncer(db: Database): {
         syncForUser(userId, new ClaudeCodeSource()),
         syncForUser(userId, new OpenCodeSource()),
         syncForUser(userId, new CodexSource()),
-        syncForUser(userId, new KimiSource())
+        syncForUser(userId, new KimiSource()),
+        syncForUser(userId, new PiSource())
       ];
       return {
         byAdapter: results,

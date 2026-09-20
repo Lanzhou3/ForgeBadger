@@ -20,7 +20,7 @@ export const workItemCreateInput = z.object({ projectId: id, title: z.string().m
 const evidenceRef = z.object({ kind: z.string().min(1).max(64).optional(), label: z.string().min(1).max(256).optional(), status: z.string().min(1).max(64).optional(), ref: z.string().min(1).max(512).optional(), path: z.string().min(1).max(512).optional(), sessionId: id.optional(), feishuChatId: id.optional(), feishuMessageId: id.optional(), createdAt: z.string().min(1).max(64).optional() }).strict();
 const workItemWithEvidence = workItemCreateInput.extend({ status: z.literal('todo').optional(), evidenceRefs: z.array(evidenceRef).max(20).optional() });
 export const workItemUpdateInput = z.object({ projectId: id, workItemId: id, title: z.string().min(1).max(256).optional(), description: z.string().max(4000).nullable().optional(), priority: z.number().int().min(0).max(100).optional(), acceptanceCriteria: z.array(z.string().max(1000)).max(50).optional(), stageId: id.nullable().optional() }).strict();
-export const taskPrepareInput = z.object({ projectId: id, workItemId: id, aiTool: z.enum(['claude', 'opencode', 'codex', 'kimi']).optional() }).strict();
+export const taskPrepareInput = z.object({ projectId: id, workItemId: id, aiTool: z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).optional() }).strict();
 export const memoryWriteInput = z.object({ kind: z.enum(['fact', 'preference', 'decision', 'project_note']), scope: z.enum(['global', 'project', 'session']), text: z.string().min(1).max(8192), projectId: id.optional(), conversationId: id.optional(), metadata: z.record(z.unknown()).optional() }).strict();
 function project(ctx: CommandContext, id: string) {
     const p = new ProjectRepository(ctx.db, ctx.userId).getById(id);
@@ -99,7 +99,7 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
         command({ id: 'pm.task.prepare', effect: 'database', delegatable: true, inputSchema: taskPrepareInput, resolve: itemResources,
             async prepare(ctx, input) {
                 const v = taskPrepareInput.parse(input);
-                const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi']).parse(v.aiTool ?? project(ctx, v.projectId).aiTool);
+                const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? project(ctx, v.projectId).aiTool);
                 const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
                 if (!status.launchEnabled)
                     throw new Error(`${status.label} is not available for launch`);
@@ -112,7 +112,7 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 let session = resolveTaskPacketSession(ctx.db, ctx.userId, p.id, item);
                 const existed = !!session;
                 if (!session) {
-                    const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi']).parse(v.aiTool ?? p.aiTool);
+                    const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? p.aiTool);
                     session = new SessionRepository(ctx.db, ctx.userId).create({ projectId: p.id, name: createTaskPacketSessionName(item.title), aiTool: adapter, workingDir: p.path, credentialMode: 'host_environment' });
                     item = repo.updateWorkItem(p.id, item.id, { details: withTaskPacketSessionLink(item.details, session, p, createTaskPacketContext(item, p)) });
                 }

@@ -84,5 +84,7 @@
   "0083_drop_pm_feishu_refs.sql": "7edfc6a4b955721250a1fa653069dc74fa023aa2d485239f4ac997063c309180",
   "0084_copilot_connections.sql": "6556c1bfcc313b6d77eafc69b75b06c88b23f9135eae0193707051e05573a98d",
   "0085_copilot_skill_revisions.sql": "c47a912f9ddb28dbf6cb604633320d91b2507469561d878ef553eac292f986e9",
-  "0086_copilot_request_identity.sql": "05ca1c0a32955dd9b3d244d6f30de8c59d6ec31f9b4966330e14c77dd8272d05"
+  "0086_copilot_request_identity.sql": "05ca1c0a32955dd9b3d244d6f30de8c59d6ec31f9b4966330e14c77dd8272d05",
+  "0087_pi_adapter.sql": "44c5e21f111da1110e8a308b83206f9f9884fe54d9f9a348c450a6182620eca4",
+  "0088_pi_supported_adapters_backfill.sql": "3967c3ff351a81dbaf025c0aebab3adcfe8f161bdf376c4ca6074a4513e2a3cb"
 }

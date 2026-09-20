@@ -121,7 +121,7 @@ async function start(ctx: CommandContext, sessionId: string) {
             }
             authorize();
             effectsStarted = true;
-            const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, dbSession.workingDir, dbSession.id);
+            const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, dbSession.workingDir);
             const launchPlan = createLaunchPlan({
                 adapter,
                 projectRoot: dbSession.workingDir,

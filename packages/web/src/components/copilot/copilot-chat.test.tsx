@@ -5,6 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 
 import { LanguageProvider } from "@/hooks/use-language";
 import { CopilotChat } from "@/components/copilot/copilot-chat";
+import { LAST_COPILOT_CONVERSATION_KEY } from "@/lib/copilot-conversation-storage";
+import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
 
 const {
   pushMock,
@@ -332,6 +334,90 @@ describe("CopilotChat console layout", () => {
     renderChat();
 
     await waitFor(() => expect(listMessagesMock).toHaveBeenCalledWith("conv-1"));
+  });
+
+  it("keeps the conversation the user picks after the ?c= deep link was applied", async () => {
+    const deepLinked = { ...baseConversation, id: "conv-2", title: "目标对话" };
+    const deepLinkedMessage = { ...baseUserMessage, id: "msg-2", conversationId: "conv-2", content: "目标消息" };
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation, deepLinked] });
+    listMessagesMock.mockImplementation(async (id: string) => ({
+      messages: id === "conv-2" ? [deepLinkedMessage] : [baseUserMessage],
+    }));
+    window.history.replaceState({}, "", "/copilot?c=conv-2");
+
+    renderChat();
+
+    // The deep link is applied first (the user has not interacted yet).
+    await waitFor(() => expect(screen.getByText("目标消息")).toBeTruthy());
+
+    // The user then switches to conv-1 manually from the sidebar.
+    fireEvent.click(screen.getAllByRole("button", { name: /测试对话/ })[0]!);
+    await waitFor(() => expect(screen.getByText("你好")).toBeTruthy());
+
+    // A later conversation-list refresh (e.g. a reactive update) must not
+    // pull the selection back to the deep-linked conversation.
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(FORGEBADGER_GATEWAY_EVENT, {
+          detail: { type: "copilot_run_updated", payload: { source: "reactive", run_id: "run-1", conversation_id: "conv-2" } },
+        })
+      );
+    });
+    await waitFor(() => expect(listConversationsMock).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(screen.getByText("你好")).toBeTruthy();
+    expect(screen.queryByText("目标消息")).toBeNull();
+    // conv-2's messages were fetched exactly once — the initial deep-link apply.
+    expect(listMessagesMock.mock.calls.filter((call) => call[0] === "conv-2")).toHaveLength(1);
+  });
+
+  it("ignores a stale listMessages response after the user switches conversations", async () => {
+    const otherConversation = { ...baseConversation, id: "conv-2", title: "目标对话" };
+    const staleMessage = { ...baseUserMessage, id: "msg-2", conversationId: "conv-1", content: "过期消息" };
+    const freshMessage = { ...baseUserMessage, id: "msg-3", conversationId: "conv-2", content: "最新内容" };
+    let resolveStale!: (value: { messages: typeof staleMessage[] }) => void;
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation, otherConversation] });
+    listMessagesMock.mockImplementation((id: string) =>
+      id === "conv-1"
+        ? new Promise((resolve) => { resolveStale = resolve; })
+        : Promise.resolve({ messages: [freshMessage] })
+    );
+
+    renderChat();
+
+    // conv-1's initial auto-select is still in flight when the user
+    // switches to conv-2.
+    await waitFor(() => expect(screen.getAllByText("目标对话").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("button", { name: /目标对话/ })[0]!);
+    await waitFor(() => expect(screen.getByText("最新内容")).toBeTruthy());
+
+    // The slow conv-1 response lands late and must not clobber the stream.
+    await act(async () => { resolveStale({ messages: [staleMessage] }); });
+    expect(screen.queryByText("过期消息")).toBeNull();
+    expect(screen.getByText("最新内容")).toBeTruthy();
+  });
+
+  it("shares the active conversation with the floating robot panel's storage", async () => {
+    const otherConversation = { ...baseConversation, id: "conv-2", title: "目标对话" };
+    const freshMessage = { ...baseUserMessage, id: "msg-3", conversationId: "conv-2", content: "最新内容" };
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation, otherConversation] });
+    listMessagesMock.mockImplementation(async (id: string) => ({
+      messages: id === "conv-2" ? [freshMessage] : [baseUserMessage],
+    }));
+
+    renderChat();
+
+    // Mount + initial auto-select already records conv-1 for the panel.
+    await waitForConversationLoaded();
+    expect(window.localStorage.getItem(LAST_COPILOT_CONVERSATION_KEY)).toBe("conv-1");
+
+    await waitFor(() => expect(screen.getAllByText("目标对话").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("button", { name: /目标对话/ })[0]!);
+    await waitFor(() => expect(screen.getByText("最新内容")).toBeTruthy());
+    expect(window.localStorage.getItem(LAST_COPILOT_CONVERSATION_KEY)).toBe("conv-2");
   });
 
   it("falls back to the generic edit error for other failures", async () => {

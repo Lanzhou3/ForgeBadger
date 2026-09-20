@@ -22,9 +22,12 @@ import {
   type CopilotMessage,
 } from "@/lib/copilot-api";
 import { cn } from "@/lib/utils";
+import { LAST_COPILOT_CONVERSATION_KEY, readLastCopilotConversation, writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 
 const AUTO_TITLE_MAX_CHARS = 24;
-export const ROBOT_CONVERSATION_STORAGE_KEY = "forgebadger.copilot.robot-conversation";
+// Shared with the full /copilot console — keep the same storage key so both
+// surfaces resume the conversation the user last worked in.
+export const ROBOT_CONVERSATION_STORAGE_KEY = LAST_COPILOT_CONVERSATION_KEY;
 
 interface RobotChatPanelProps {
   onClose: () => void;
@@ -71,9 +74,12 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
   }, []);
 
   // Restore the previous conversation on mount; a stale id (deleted on the
-  // server) is dropped so the panel falls back to a fresh draft.
+  // server) is dropped so the panel falls back to a fresh draft. Runs that
+  // finished while the panel was hidden (expanded to the console, tab
+  // switched, …) are covered by useCopilotRun's focus/online/reconnect
+  // reconciliation, which reloads the durable messages via onSettled.
   useEffect(() => {
-    const stored = window.localStorage.getItem(ROBOT_CONVERSATION_STORAGE_KEY);
+    const stored = readLastCopilotConversation();
     if (!stored) return;
     setRestoring(true);
     setConversationId(stored);
@@ -82,7 +88,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
         if (conversationIdRef.current === stored) setMessages(next);
       })
       .catch(() => {
-        window.localStorage.removeItem(ROBOT_CONVERSATION_STORAGE_KEY);
+        writeLastCopilotConversation(null);
         if (conversationIdRef.current === stored) {
           setConversationId(null);
           setMessages([]);
@@ -124,7 +130,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
         const { conversation } = await createConversation();
         id = conversation.id;
         setConversationId(id);
-        window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, id);
+        writeLastCopilotConversation(id);
         await renameConversation(id, text.slice(0, AUTO_TITLE_MAX_CHARS)).catch(() => undefined);
       }
       await startRun(id, text);
@@ -143,7 +149,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
     setMessages([]);
     setLoadError(null);
     setSendError(false);
-    window.localStorage.removeItem(ROBOT_CONVERSATION_STORAGE_KEY);
+    writeLastCopilotConversation(null);
   }, [clearActive]);
 
   const stopRun = useCallback(async () => {

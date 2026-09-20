@@ -473,8 +473,8 @@ describe("stream first-byte budget", () => {
   // so a genuinely stalled upstream is answered as 502 within seconds.
   it("keeps a small request on the base budget", () => {
     const small = streamFirstByteBudgetMs(100);
-    assert.ok(small >= 30_000, `expected base budget, got ${small}`);
-    assert.ok(small <= 40_000, `small request should stay near base, got ${small}`);
+    assert.ok(small >= 120_000, `expected base budget, got ${small}`);
+    assert.ok(small <= 130_000, `small request should stay near base, got ${small}`);
   });
 
   // A large context must get a much larger budget — this is the regression

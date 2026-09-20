@@ -127,7 +127,7 @@ const taskPacketSessionLinkBodySchema = z.object({
 }).strict();
 
 const taskPacketStartBodySchema = z.object({
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional()
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional()
 }).strict();
 
 const workItemsQuerySchema = z.object({

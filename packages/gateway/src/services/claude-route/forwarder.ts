@@ -51,7 +51,12 @@ const streamTimeoutMs = 10 * 60 * 1000;
 // letting a small request still fail fast on a real stall while a large
 // context gets the prefill time it needs. It is capped at the total stream
 // timeout so it can never exceed the request backstop.
-const streamFirstByteBaseMs = 30 * 1000;
+// The base is generous on purpose: a single large model (e.g. a local 27B)
+// that also serves auto mode's per-action safety classifier spends long on
+// prefill even for a small request, and a tight 30s floor kept 502-ing those
+// classifier calls. Raising the base trades faster stall detection for
+// letting a slow model finish its first token.
+const streamFirstByteBaseMs = 120 * 1000;
 // Conservative prefill rate (tokens/sec) that assumes the GPU may be shared
 // with concurrent requests; it sizes the per-token first-byte allowance.
 const streamFirstBytePrefillTokensPerSec = 2000;

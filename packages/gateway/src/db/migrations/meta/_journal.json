@@ -603,6 +603,20 @@
       "when": 1789776000000,
       "tag": "0086_copilot_request_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "6",
+      "when": 1789886800000,
+      "tag": "0087_pi_adapter",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1789886800001,
+      "tag": "0088_pi_supported_adapters_backfill",
+      "breakpoints": true
     }
   ]
 }
