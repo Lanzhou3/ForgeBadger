@@ -45,7 +45,7 @@ export function createSecurityPolicy(context?: SecurityPolicyContext) {
 
   function evaluate(input: SecurityPolicyInput): SecurityDecision {
     // Global denylist first: traversal or known-dangerous patterns in any input.
-    const dangerous = detectDangerousInput(input.input);
+    const dangerous = detectDangerousInput(executableInput(input.toolName, input.input));
     if (dangerous) {
       return { action: "deny", reason: dangerous, riskClass: "high" };
     }
@@ -80,6 +80,28 @@ export function createSecurityPolicy(context?: SecurityPolicyContext) {
   }
 
   return { evaluate };
+}
+
+// Only these exact fields on known platform tools contain inert prose. Keep
+// keys, unknown/nested fields and every path/command subject to normal checks.
+const DESCRIPTIVE_FIELDS: Record<string, readonly string[]> = {
+  write_memory: ['text'],
+  create_project: ['description'],
+  update_project: ['description'],
+  pm_create_work_item: ['title', 'description', 'acceptanceCriteria'],
+  pm_update_work_item: ['title', 'description'],
+  pm_update_management: ['nextAction']
+};
+
+function executableInput(toolName: string, input: unknown): unknown {
+  const fields = DESCRIPTIVE_FIELDS[toolName];
+  if (!fields || !input || typeof input !== 'object' || Array.isArray(input)) return input;
+  return Object.fromEntries(Object.entries(input).map(([key, value]) => {
+    if (!fields.includes(key)) return [key, value];
+    if (typeof value === 'string') return [key, ''];
+    if (key === 'acceptanceCriteria' && Array.isArray(value) && value.every(v => typeof v === 'string')) return [key, []];
+    return [key, value];
+  }));
 }
 
 function evaluateCreateProject(input: unknown, home: string): SecurityDecision | undefined {

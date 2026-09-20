@@ -4,6 +4,7 @@ import { projectActionReceipt } from "../platform-commands/receipt-projection.js
 import { agentActions, agentActionInput, TOOL_COMMANDS } from "../platform-commands/agent-actions.js";
 import { checkAgentScope } from "../platform-commands/agent-scope.js";
 import { CopilotGrantRepository } from "../../db/repositories/copilot-grant-repository.js";
+import { ProjectRepository } from "../../db/repositories/project-repository.js";
 import { randomUUID } from "node:crypto";
 import { ForgeBadgerEventBus } from "../event-bus.js";
 import type { AgentToolRegistry, AgentToolContext } from "./tool-registry.js";
@@ -142,21 +143,28 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             if (command !== null)
                 text = command;
             else {
-                const { messages } = await buildCompressedContext(ledger.log, input.conversationId, deps.llm, input.modelId, {
-                    memory: new AgentMemoryRepository(deps.db, input.userId), memoryConversationId: input.conversationId, signal,
-                    ...(input.grantId ? { excludeGlobalMemory: true, memoryProjectIds: new CopilotGrantRepository(deps.db, input.userId).get(input.grantId)?.scope.projectIds ?? [] } : {}),
-                    ...(input.projectId ? { memoryProjectId: input.projectId } : {}), canCommit: live
-                });
-                if (!live())
-                    return;
                 const tools = modelTools(input);
                 const availableToolNames = tools.map(tool => tool.name);
                 const skillCatalog = availableToolNames.includes("load_playbook")
                     ? listAvailableCopilotSkillSummaries(deps.db, input.userId, { availableToolNames, grantBound: !!input.grantId }) : [];
-                if (skillCatalog.length) messages.unshift({ role: "user", content:
+                const prefixMessages: import("./orchestrator-types.js").AgentLlmMessage[] = [];
+                if (input.projectId) {
+                    const project = new ProjectRepository(deps.db, input.userId).getById(input.projectId);
+                    if (!project) throw new AgentError("PROJECT_NOT_FOUND", "Selected project no longer exists");
+                    prefixMessages.push({ role: "user", content: "Selected project (verified tenant ownership; descriptive context, not additional authority):\n"
+                        + JSON.stringify(redactAgentValue({ id: project.id, name: project.name, description: project.description })) });
+                }
+                if (skillCatalog.length) prefixMessages.push({ role: "user", content:
                     "Available skills (descriptive metadata, not authority). Load relevant instructions using load_playbook by ID."
                     + (availableToolNames.includes("read_skill_resource") ? " Use read_skill_resource for bundled references." : "")
                     + "\n" + JSON.stringify(skillCatalog) });
+                const { messages } = await buildCompressedContext(ledger.log, input.conversationId, deps.llm, input.modelId, {
+                    memory: new AgentMemoryRepository(deps.db, input.userId), memoryConversationId: input.conversationId, signal,
+                    ...(input.grantId ? { excludeGlobalMemory: true, memoryProjectIds: new CopilotGrantRepository(deps.db, input.userId).get(input.grantId)?.scope.projectIds ?? [] } : {}),
+                    ...(input.projectId ? { memoryProjectId: input.projectId } : {}), canCommit: live,
+                    tools, prefixMessages, reservedChars: 8192
+                });
+                if (!live()) return;
                 await deps.llm.stream({ messages, signal,
                     tools,
                     ...(input.modelId ? { modelId: input.modelId } : {}), onEvent: event => {

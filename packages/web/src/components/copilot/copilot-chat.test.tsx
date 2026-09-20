@@ -18,6 +18,7 @@ const {
   editMessageMock,
   getCopilotCapabilitiesMock,
   listModelProvidersMock,
+  listProjectsMock,
   getRunMock,
   listRunsMock,
 } = vi.hoisted(() => ({
@@ -32,6 +33,7 @@ const {
   editMessageMock: vi.fn(),
   getCopilotCapabilitiesMock: vi.fn(),
   listModelProvidersMock: vi.fn(),
+  listProjectsMock: vi.fn(),
   getRunMock: vi.fn(),
   listRunsMock: vi.fn(),
 }));
@@ -64,6 +66,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   return {
     ...actual,
     listModelProviders: listModelProvidersMock,
+    listProjects: listProjectsMock,
   };
 });
 
@@ -158,6 +161,23 @@ function deferred<T>() {
 }
 
 describe("CopilotChat console layout", () => {
+  it("retains project and request identity when retrying an uncertain submission", async () => {
+    sendMessageMock.mockRejectedValueOnce(new Error("network lost"));
+    renderChat();
+    await waitForConversationLoaded();
+    await waitFor(() => expect(screen.getByRole("option", { name: "Selected project" })).toBeTruthy());
+    fireEvent.change(screen.getByLabelText("项目上下文"), { target: { value: "project-1" } });
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "inspect" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "重试" })).toBeTruthy());
+    const options = sendMessageMock.mock.calls[0]![3];
+    expect(options).toEqual({ projectId: "project-1", clientRequestId: expect.any(String) });
+    fireEvent.change(screen.getByLabelText("项目上下文"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));
+    expect(sendMessageMock.mock.calls[1]).toEqual(["conv-1", "inspect", undefined, options]);
+  });
+
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -174,6 +194,7 @@ describe("CopilotChat console layout", () => {
     editMessageMock.mockResolvedValue({ runId: "run-2" });
     getCopilotCapabilitiesMock.mockResolvedValue(baseCapabilities);
     listModelProvidersMock.mockResolvedValue(baseModels);
+    listProjectsMock.mockResolvedValue({ projects: [{ id: "project-1", name: "Selected project" }] });
     getRunMock.mockResolvedValue({
       run: {
         id: "run-1",
@@ -204,7 +225,7 @@ describe("CopilotChat console layout", () => {
     await act(async () => {
       blocked.resolve({ runId: "run-1" });
     });
-    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "继续", undefined));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "继续", undefined, expect.objectContaining({ clientRequestId: expect.any(String) })));
   });
 
   it("clears the thinking pulse and shows the send error when the POST fails", async () => {

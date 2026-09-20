@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { UserRepository } from '../src/db/repositories/user-repository.js';
+import { ProjectRepository } from '../src/db/repositories/project-repository.js';
+import { ModelProviderRepository } from '../src/db/repositories/model-provider-repository.js';
+import { PlatformActions } from '../src/services/platform-commands/actions.js';
+import { createPlatformCommands } from '../src/services/platform-commands/catalog.js';
+import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
+import { createCopilotOrchestrator } from '../src/services/agent/orchestrator.js';
+import { createAgentLlmClient } from '../src/services/agent/llm-client.js';
+import { createAgentToolRegistry } from '../src/services/agent/tool-registry.js';
+import { createPlatformTools } from '../src/services/agent/tools/index.js';
+import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
+import { MAX_CONTEXT_CHARS } from '../src/services/agent/context.js';
+for(const apiFormat of ['openai','anthropic'] as const)it(`selected project without memory and huge tool turn fit complete ${apiFormat} wire body`,async()=>{
+  const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+  try{
+    const user=new UserRepository(db).create('context-wire@test.dev','hash');
+    const project=new ProjectRepository(db,user.id).create({name:'明确选择的项目',path:'/tmp/copilot-project-wire',description:'Context does not grant authority.',aiTool:''});
+    const ledger=new CopilotRunLedger(db,user.id);const c=ledger.log.createConversation('fixed title');
+    ledger.log.appendMessage(c.id,{role:'user',kind:'text',content:'Keep this exact current goal.'});
+    for(const id of ['a','b','c'])ledger.log.appendMessage(c.id,{role:'assistant',kind:'tool_call',content:'',toolName:'get_project',toolCallId:id,toolInputJson:JSON.stringify({projectId:project.id})});
+    for(const id of ['a','b','c'])ledger.log.appendMessage(c.id,{role:'tool',kind:'tool_result',content:'"\\'.repeat(48000),toolCallId:id});
+    const repo=new ModelProviderRepository(db,user.id,'a'.repeat(32));
+    const provider=repo.createProviderProfile({name:'fixture',providerKey:'fixture',baseUrl:'https://8.8.8.8',apiFormat,authType:'api_key',supportedAdapters:['opencode']});
+    repo.createCredential({providerProfileId:provider.id,label:'test',plaintextSecret:'fixture'});
+    repo.createModelProfile({providerProfileId:provider.id,name:'fixture',modelId:'fixture',capabilities:['chat'],isDefault:true});
+    const bodies:string[]=[];
+    const llm=createAgentLlmClient({modelProviderRepository:repo,fetchImpl:async(_url,init)=>{
+      bodies.push(String(init?.body));return new Response(JSON.stringify(apiFormat==='openai'?{choices:[{finish_reason:'stop',message:{content:'done'}}]}:{content:[{type:'text',text:'done'}],stop_reason:'end_turn'}),{headers:{'Content-Type':'application/json'}});
+    }});
+    const tools=createPlatformTools();tools[0]={...tools[0]!,description:'"\\'.repeat(5000)};
+    const orchestrator=createCopilotOrchestrator({db,masterKey:'a'.repeat(32),eventBus:new ForgeBadgerEventBus(),llm,toolRegistry:createAgentToolRegistry(tools)});
+    const runId=await orchestrator.runTurn({userId:user.id,conversationId:c.id,userText:'Keep this exact current goal.',projectId:project.id,skipUserMessage:true});
+    assert.equal(ledger.get(runId)?.status,'completed');assert.equal(bodies.length,1);
+    assert.ok(bodies[0]!.length<=MAX_CONTEXT_CHARS,`wire request length ${bodies[0]!.length}`);
+    assert.ok(bodies[0]!.includes(project.id));assert.ok(bodies[0]!.includes(project.name));
+    assert.ok(bodies[0]!.includes('Keep this exact current goal.'));assert.ok(bodies[0]!.includes('read_tool_result'));
+    const outsider=new UserRepository(db).create('foreign-project-context@test.dev','hash');
+    const foreign=new ProjectRepository(db,outsider.id).create({name:'foreign',path:'/tmp/foreign-project-context',aiTool:''});
+    const rejected=ledger.log.createConversation('rejected');
+    await assert.rejects(orchestrator.runTurn({userId:user.id,conversationId:rejected.id,userText:'inspect',projectId:foreign.id}),/Project not found/);
+    const grant=new PlatformActions({db,userId:user.id},createPlatformCommands()).createGrant({name:'scope',projectIds:[project.id],capabilities:['memory.write'],expiresAt:Date.now()+10000,maxActions:5});
+    const outside=new ProjectRepository(db,user.id).create({name:'outside',path:'/tmp/outside-project-context',aiTool:''});
+    await assert.rejects(orchestrator.runTurn({userId:user.id,conversationId:rejected.id,userText:'inspect',projectId:outside.id,grantId:grant.id}),/outside grant/);
+    assert.equal(bodies.length,1);assert.equal(ledger.log.listRuns(rejected.id).length,0);
+  }finally{db.close();}
+});

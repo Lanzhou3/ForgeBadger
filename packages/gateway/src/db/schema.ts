@@ -1405,6 +1405,8 @@ export const copilotRuns = sqliteTable("copilot_runs", {
   status: text("status").notNull().default("pending"), // pending | running | awaiting_approval | completed | cancelled | failed
   runtimeVersion: integer("runtime_version").notNull().default(0),
   source: text("source").notNull().default("user"),
+  clientRequestId: text('client_request_id'),
+  requestDigest: text('request_digest'),
   inputJson: text("input_json").notNull().default("{}"),
   maxSteps: integer("max_steps").notNull().default(16),
   stopReason: text("stop_reason"),
@@ -1420,7 +1422,7 @@ export const copilotRuns = sqliteTable("copilot_runs", {
   completedAt: integer("completed_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ tenantIdentity: uniqueIndex("idx_copilot_run_tenant").on(table.userId,table.id), activeConversation: uniqueIndex("idx_copilot_active_conversation").on(table.userId,table.conversationId).where(sql`${table.runtimeVersion} = 1 AND ${table.status} IN ('pending','running','awaiting_approval')`), conversationLookup: index("idx_copilot_runs_conversation_created").on(table.conversationId, table.createdAt), userLookup: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt) }));
+}, (table) => ({ requestIdentity: uniqueIndex("idx_copilot_request_identity").on(table.userId,table.conversationId,table.clientRequestId).where(sql`${table.clientRequestId} IS NOT NULL`), tenantIdentity: uniqueIndex("idx_copilot_run_tenant").on(table.userId,table.id), activeConversation: uniqueIndex("idx_copilot_active_conversation").on(table.userId,table.conversationId).where(sql`${table.runtimeVersion} = 1 AND ${table.status} IN ('pending','running','awaiting_approval')`), conversationLookup: index("idx_copilot_runs_conversation_created").on(table.conversationId, table.createdAt), userLookup: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt) }));
 
 export const copilotPendingActions = sqliteTable("copilot_pending_actions", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),

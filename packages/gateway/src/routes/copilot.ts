@@ -37,7 +37,8 @@ const sendMessageSchema = z.object({
   content: z.string().trim().min(1).max(32 * 1024),
   modelId: modelIdSchema,
   projectId: idSchema.optional(),
-  grantId: idSchema.optional()
+  grantId: idSchema.optional(),
+  clientRequestId: idSchema.optional()
 }).strict();
 const memoryScopeSchema = z.enum(["global", "project", "session"]);
 const writeMemorySchema = z.object({
@@ -194,7 +195,8 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
           userText: value.content,
           ...(value.modelId !== undefined ? { modelId: value.modelId } : {}),
           ...(value.projectId ? {projectId:value.projectId}: {}),
-          ...(value.grantId ? {grantId:value.grantId}: {})
+          ...(value.grantId ? { grantId: value.grantId } : {}),
+          ...(value.clientRequestId ? { clientRequestId: value.clientRequestId } : {})
         });
         res.status(201).json(ok({ runId }));
       } catch (error) {
@@ -300,7 +302,7 @@ function notFound(res: Response): void {
   res.status(404).json({ code: 1, message: "Copilot record not found", details: { code: "COPILOT_NOT_FOUND" } });
 }
 function domainError(res: Response, error: unknown): void {
-  if (error instanceof AgentError && ["COPILOT_RUN_BUSY","COPILOT_CONVERSATION_BUSY"].includes(error.code)) {
+  if (error instanceof AgentError && ["COPILOT_RUN_BUSY","COPILOT_CONVERSATION_BUSY","COPILOT_REQUEST_CONFLICT"].includes(error.code)) {
     res.status(409).json({ code: 1, message: error.message, details: { code: error.code } });
     return;
   }

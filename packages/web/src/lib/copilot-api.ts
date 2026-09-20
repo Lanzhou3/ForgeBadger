@@ -163,12 +163,17 @@ export function listMessages(conversationId: string) {
 }
 
 /** Run a turn; returns the run id. Streaming deltas arrive via /ws/events. */
-export function sendMessage(conversationId: string, content: string, modelId?: string) {
+export interface CopilotMessageOptions {
+  projectId?: string;
+  clientRequestId?: string;
+}
+
+export function sendMessage(conversationId: string, content: string, modelId?: string, options?: CopilotMessageOptions) {
   return fetchJson<{ runId: string }>(
     `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/messages`,
     {
       method: "POST",
-      body: JSON.stringify(modelId ? { content, modelId } : { content }),
+      body: JSON.stringify({ content, ...(modelId ? { modelId } : {}), ...options }),
     }
   );
 }

@@ -158,7 +158,7 @@ describe("RobotChatPanel", () => {
     expect(panel.className).toContain("bottom-2");
     expect(panel.className).toContain("md:w-[380px]");
     expect(panel.className).toContain("md:h-[520px]");
-    expect(panel.className).toContain("md:bottom-24");
+    expect(panel.className).toContain("md:bottom-32");
   });
 
   it("renders a floating composer instead of a docked bottom bar", () => {

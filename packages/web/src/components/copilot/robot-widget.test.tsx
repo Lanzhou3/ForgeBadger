@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
@@ -174,5 +174,139 @@ describe("RobotWidget bubble queue", () => {
     expect(routerPushMock).toHaveBeenCalledWith("/sessions/sess-1");
     // The next queued bubble takes over the display.
     await waitFor(() => expect(screen.getByText(/Second build finished/)).toBeTruthy());
+  });
+});
+
+
+describe("RobotWidget motion budget", () => {
+  const originalMatchMedia = window.matchMedia;
+  let preference: EventTarget & { matches: boolean };
+
+  beforeEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    window.localStorage.clear();
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    preference = Object.assign(new EventTarget(), { matches: false });
+    window.matchMedia = (() => preference) as unknown as typeof window.matchMedia;
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    window.matchMedia = originalMatchMedia;
+    Reflect.deleteProperty(document, "visibilityState");
+  });
+
+  it("stops all decorative timers while hidden and resumes on return", () => {
+    renderWidget();
+    act(() => vi.advanceTimersByTime(8001));
+    expect(document.querySelector("[data-robot-frame]")?.getAttribute("data-robot-frame")).toMatch(/^sit/);
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    act(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.advanceTimersByTime(30000));
+    expect(vi.getTimerCount()).toBe(0);
+
+    act(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    act(() => vi.advanceTimersByTime(8001));
+    expect(document.querySelector("[data-robot-frame]")?.getAttribute("data-robot-frame")).toMatch(/^sit/);
+    cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("reacts to reduced-motion changes and keeps keyboard activation available", () => {
+    const { onActivate } = renderWidget();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    act(() => {
+      preference.matches = true;
+      preference.dispatchEvent(new Event("change"));
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.advanceTimersByTime(30000));
+    expect(document.querySelector("[data-robot-frame]")?.getAttribute("data-robot-frame")).toBe("stand");
+    fireEvent.keyDown(screen.getByRole("button", { name: "Copilot" }), { key: "Enter" });
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => {
+      preference.matches = false;
+      preference.dispatchEvent(new Event("change"));
+    });
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+  });
+
+  it("starts static without timers when reduced motion is already enabled", () => {
+    preference.matches = true;
+    renderWidget();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(document.querySelector("[data-robot-frame]")?.getAttribute("data-robot-frame")).toBe("stand");
+  });
+});
+
+describe("RobotWidget drag direction", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    window.localStorage.clear();
+    window.localStorage.setItem("forgebadger.robotCorner", "top-left");
+  });
+  afterEach(cleanup);
+
+  function facesRight(robot: HTMLElement) {
+    // The Blender sprite faces left natively; mirroring makes it face right.
+    return robot.querySelector("[data-robot-frame]")!.classList.contains("-scale-x-100");
+  }
+
+  it("faces right when dragged right and left when dragged left", async () => {
+    const { onActivate } = renderWidget();
+    const robot = await robotButton();
+    fireEvent.pointerDown(robot, { button: 0, pointerId: 1, clientX: 500, clientY: 500 });
+    fireEvent.pointerMove(robot, { pointerId: 1, clientX: 540, clientY: 500 });
+    expect(facesRight(robot)).toBe(true);
+    fireEvent.pointerMove(robot, { pointerId: 1, clientX: 460, clientY: 500 });
+    expect(facesRight(robot)).toBe(false);
+    fireEvent.pointerUp(robot, { pointerId: 1, clientX: 460, clientY: 500 });
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+
+  it("turns immediately on reversal before crossing the original pointer position", async () => {
+    renderWidget();
+    const robot = await robotButton();
+    fireEvent.pointerDown(robot, { button: 0, pointerId: 1, clientX: 500, clientY: 500 });
+    fireEvent.pointerMove(robot, { pointerId: 1, clientX: 600, clientY: 500 });
+    const outer = robot.parentElement!;
+    const rightX = Number.parseFloat(outer.style.left);
+    fireEvent.pointerMove(robot, { pointerId: 1, clientX: 580, clientY: 500 });
+    expect(facesRight(robot)).toBe(false);
+    // Position still follows total displacement; reversing the heading must not jump it.
+    expect(Number.parseFloat(outer.style.left)).toBe(rightX - 20);
+    fireEvent.pointerMove(robot, { pointerId: 1, clientX: 590, clientY: 500 });
+    expect(facesRight(robot)).toBe(true);
+    expect(Number.parseFloat(outer.style.left)).toBe(rightX - 10);
+  });
+
+  it("keeps its heading during vertical dragging and small horizontal jitter", async () => {
+    renderWidget();
+    const robot = await robotButton();
+    fireEvent.pointerDown(robot, { button: 0, pointerId: 1, clientX: 500, clientY: 500 });
+    fireEvent.pointerMove(robot, { pointerId: 1, clientX: 460, clientY: 500 });
+    for (const x of [460, 460.5, 459.5, 461]) {
+      fireEvent.pointerMove(robot, { pointerId: 1, clientX: x, clientY: 550 });
+      expect(facesRight(robot)).toBe(false);
+    }
+    // Several small steps can accumulate into an intentional turn.
+    for (const x of [461.5, 462, 462.5]) {
+      fireEvent.pointerMove(robot, { pointerId: 1, clientX: x, clientY: 550 });
+    }
+    expect(facesRight(robot)).toBe(true);
   });
 });

@@ -16,6 +16,7 @@ export interface TurnInput {
     grantId?: string;
     source?: "user" | "reactive" | "scheduled";
     skipUserMessage?: boolean;
+    clientRequestId?: string;
 }
 export interface RunRecord {
     id: string;
@@ -55,6 +56,11 @@ export interface Claim {
 }
 export const ACTIVE_RUN_STATES = ["pending", "running", "awaiting_approval"];
 export const inputDigest = (value: string) => createHash("sha256").update(value).digest("hex");
+function requestDigest(input: TurnInput): string {
+    return inputDigest(JSON.stringify({ content: input.userText, modelId: input.modelId ?? null,
+        projectId: input.projectId ?? null, grantId: input.grantId ?? null,
+        source: input.source ?? 'user', skipUserMessage: input.skipUserMessage ?? false }));
+}
 /** All writes are tenant scoped; no transaction spans asynchronous work. */
 export class CopilotRunLedger {
     readonly log: CopilotConversationLog;
@@ -92,12 +98,25 @@ export class CopilotRunLedger {
                 if (this.log.listMessages(input.conversationId).length || this.log.listRuns(input.conversationId).length) throw new Error("Grant requires a fresh empty conversation");
             }
             this.validateScope(input);
+            const digest = requestDigest(input);
+            if (input.clientRequestId !== undefined) {
+                if (!input.clientRequestId.trim() || input.clientRequestId.length > 128)
+                    throw new AgentError('COPILOT_REQUEST_KEY_INVALID', 'Invalid client request key');
+                const existing = this.db.prepare('SELECT id,request_digest FROM copilot_runs WHERE user_id=? AND conversation_id=? AND client_request_id=?')
+                    .get(this.userId, input.conversationId, input.clientRequestId) as { id: string; request_digest: string } | undefined;
+                if (existing) {
+                    if (existing.request_digest !== digest)
+                        throw new AgentError('COPILOT_REQUEST_CONFLICT', 'Client request key was used for a different payload');
+                    return existing.id;
+                }
+            }
             if (!binding && input.grantId) grants.bind(input.conversationId, input.grantId);
             if (this.log.listRuns(input.conversationId).some(r => ACTIVE_RUN_STATES.includes(r.status)))
                 throw new AgentError("COPILOT_CONVERSATION_BUSY", "Conversation already has an active run");
             const run = this.log.createRun(input.conversationId, input.modelId ? { model: input.modelId } : {});
-            this.db.prepare("UPDATE copilot_runs SET runtime_version=1, input_json=?, source=?, max_steps=? WHERE user_id=? AND id=?")
-                .run(JSON.stringify({ ...input, userText: redactAgentText(input.userText) }), input.source ?? "user", maxSteps, this.userId, run.id);
+            this.db.prepare("UPDATE copilot_runs SET runtime_version=1, input_json=?, source=?, max_steps=?,client_request_id=?,request_digest=? WHERE user_id=? AND id=?")
+                .run(JSON.stringify({ ...input, userText: redactAgentText(input.userText) }), input.source ?? "user", maxSteps,
+                    input.clientRequestId ?? null, input.clientRequestId ? digest : null, this.userId, run.id);
             if (!input.skipUserMessage)
                 this.append(run.id, { role: "user", kind: "text", content: input.userText });
             return run.id;

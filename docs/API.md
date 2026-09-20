@@ -469,7 +469,7 @@ All responses use the standard `{code,data,message}` envelope and authenticated 
 
 | Endpoint | Contract |
 |---|---|
-| `POST /api/v1/copilot/conversations/:id/messages` | `{content,modelId?,projectId?,grantId?}`; returns 201 `{runId}` after durable admission, before model completion. A second active run returns 409 `COPILOT_CONVERSATION_BUSY`. |
+| `POST /api/v1/copilot/conversations/:id/messages` | `{content,modelId?,projectId?,grantId?,clientRequestId?}`; returns 201 `{runId}` after durable admission, before model completion. A new request during an active run returns 409 `COPILOT_CONVERSATION_BUSY`. Matching request-key retries return the original run, including after completion; conflicting payloads return 409 `COPILOT_REQUEST_CONFLICT`. |
 | `GET /api/v1/copilot/conversations/:id/runs` | `{runs,activeRun}`; latest 50 runs and current active run, or null. |
 | `GET /api/v1/copilot/runs/:id` | `{run,pendingActions,steps}`; run includes revision and stopReason, actions include full inputJson/inputDigest, stepId and toolCallId. Steps retain execution receipts. |
 | `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/decide` | `{approved}`; persists a single decision and returns `{resumed,runId}`. The original run continues asynchronously, including after rejection. |
@@ -1726,6 +1726,31 @@ at most 100 newest records for that tenant, explicitly selecting only `id`,
 `inboxId`, `phase`, `status`, `createdAt`, and boolean `receiptRecorded`. Payload,
 claim token, peer IDs and provider message IDs are never returned. The UI labels
 unknown outcomes as uncertain and offers no resend action.
+
+### Copilot request identity and context
+
+`clientRequestId` is optional, nonempty, and at most 128 characters. Its unique
+scope is `(userId, conversationId, clientRequestId)`. Use a fresh key for each
+intentional message; preserve it when retrying an uncertain response. The digest
+covers content, explicit model/project, effective Grant, source, and admission
+mode. Current user, conversation, project, channel and Grant scope are rechecked
+before any cached run is returned. The key deduplicates message admission, not
+conversation creation. Legacy callers without a key retain existing behavior.
+
+The full Copilot chat offers explicit project context. The Gateway verifies
+ownership and any bound Grant, then includes the selected ID/name in the model
+context. Selection grants no additional tool authority. JSON/SSE model replies
+must be structurally valid; partial or unsuccessful tool batches are not committed.
+Text deltas may be tentative until the durable run reaches a terminal state.
+
+The model-only `read_tool_result({messageId,offset?,length?})` tool returns up to
+6,000 UTF-16 characters of a persisted redacted receipt in the current conversation.
+It verifies the source run/step, current/original authority, current source-tool
+visibility and referenced resources. Deleted, unrelated, legacy unassociated,
+external MCP, Skill and nested readback receipts are rejected. This retrieves only
+saved content; it cannot recover output already discarded by the original 48 KiB
+receipt cap. `nextOffset`, `totalChars` and `originalOutputTruncated` describe paging
+and retained evidence. No additional HTTP endpoint is introduced.
 
 ### Persistent Copilot grants
 

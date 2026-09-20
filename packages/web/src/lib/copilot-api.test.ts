@@ -81,6 +81,12 @@ describe("copilot api client", () => {
     );
   });
 
+  it("sends explicit project context and a stable logical request identity", async () => {
+    await sendMessage("conv-1", "inspect", undefined, { projectId: "project-1", clientRequestId: "request-1" });
+    expect(fetch).toHaveBeenLastCalledWith(`${BASE}/api/v1/copilot/conversations/conv-1/messages`,
+      expect.objectContaining({ body: JSON.stringify({ content: "inspect", projectId: "project-1", clientRequestId: "request-1" }) }));
+  });
+
   it("gets a run with its pending actions", async () => {
     vi.stubGlobal(
       "fetch",

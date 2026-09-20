@@ -12,6 +12,7 @@ import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { AccountSecuritySettings } from "@/components/settings/AccountSecuritySettings";
 import { ClaudeRouteSettings } from "@/components/settings/ClaudeRouteSettings";
 import { McpIntegrationSettings } from "@/components/settings/McpIntegrationSettings";
+import { PetSettings } from "@/components/settings/PetSettings";
 import {
   Card,
   CardContent,
@@ -211,6 +212,8 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          <PetSettings />
 
           <Card className="forgebadger-animate-in" style={{ animationDelay: "80ms" }}>
             <SettingsCardHeader

@@ -129,7 +129,7 @@ for (const format of ["anthropic", "openai"] as const) {
   it(`preserves correlated tool batches in ${format} requests`, async () => {
     const db = createTestDb();
     try {
-      const { client, calls } = setupClient(db, format, {});
+      const { client, calls } = setupClient(db, format, format === "openai" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] });
       await client.stream({ messages: [
         { role: "user", content: "inspect" },
         { role: "assistant", content: "checking", toolCalls: [
@@ -166,7 +166,7 @@ it("removes abort listeners after completion and avoids sending pre-cancelled re
   const { getEventListeners } = await import("node:events");
   const db = createTestDb();
   try {
-    const { client, calls } = setupClient(db, "openai", {});
+    const { client, calls } = setupClient(db, "openai", { choices: [{ message: { content: "okay" } }] });
     const controller = new AbortController();
     await client.stream({ messages: [{ role: "user", content: "hi" }], tools: [], signal: controller.signal, onEvent() {} });
     assert.equal(getEventListeners(controller.signal, "abort").length, 0);

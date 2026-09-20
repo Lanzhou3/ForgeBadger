@@ -33,7 +33,7 @@ interface RobotChatPanelProps {
 }
 
 /**
- * Floating quick-chat panel anchored above the pixel robot (Linear/v0-style
+ * Floating quick-chat panel anchored above the robot (Linear/v0-style
  * side assistant). Desktop: a 380x520 card pinned to the bottom-right corner;
  * small screens: a near-fullscreen bottom sheet. Conversations are created
  * lazily on the first message (no empty-conversation litter) and the active
@@ -194,7 +194,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
       role="dialog"
       aria-label={t("nav.copilot")}
       data-testid="robot-chat-panel"
-      className="fixed inset-x-2 bottom-2 top-14 z-40 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl shadow-black/40 md:inset-x-auto md:bottom-24 md:right-4 md:top-auto md:h-[520px] md:w-[380px]"
+      className="fixed inset-x-2 bottom-2 top-14 z-40 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl shadow-black/40 md:inset-x-auto md:bottom-32 md:right-4 md:top-auto md:h-[520px] md:w-[380px]"
     >
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3">
         <div className="flex min-w-0 items-center gap-2">

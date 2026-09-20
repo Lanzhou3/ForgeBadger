@@ -1661,3 +1661,40 @@ read-only trust. Credentials remain write-only and are redacted from tool output
 Rollback after activation requires the matching pre-upgrade source and a consistent
 SQLite backup. Isolated migration/reopen/restore checks do not activate the live
 Gateway or migrate its database.
+
+
+### Copilot runtime request correctness
+
+The Gateway keeps its durable run/step ledger and approval fence as the execution
+boundary. Anthropic Messages and OpenAI-compatible Chat Completions request SSE,
+with validated bounded JSON fallback for compatible providers. A tool batch is
+published only after valid completion; cancellation, malformed/truncated output
+and unsuccessful finish reasons cannot become a completed run. Incremental text
+is provisional. Provider finish reason and token usage are optional result metadata,
+not a new billing or persisted usage contract.
+
+Official MiniMax HTTPS endpoints (`api.minimaxi.com`, `api.minimax.cn`,
+`api.minimax.io`) may complete an SSE body without `[DONE]`. Only these exact
+request hostnames allow clean EOF after a validated successful `finish_reason`;
+the entire stream and tool batch must still validate before tools are published.
+Reader errors, incomplete frames and unsuccessful reasons remain failures.
+Other OpenAI-compatible endpoints continue to require `[DONE]`.
+
+Context assembly budgets the serialized application representation of messages and
+tools plus 8,192 reserved characters within 96,000 characters. Skills, selected
+project and memory are included. This is a character bound, not a model-specific
+token-window guarantee. Both providers also reject the actual serialized JSON
+body above 96,000 characters before transport, covering envelope and escaping
+overhead that projection estimates cannot guarantee. Summary requests and failure fallback remain bounded;
+the newest user goal and correlated tool argument JSON are never silently cut.
+Oversized immutable context fails explicitly. Compacted receipts carry a scoped
+readback handle; only persisted redacted evidence can be retrieved. Memory recall
+interleaves bounded session, project and global candidates to avoid scope starvation.
+
+Migration 0086 adds nullable request identity/digest columns and a partial unique
+index to `copilot_runs`. Admission normalizes the effective conversation Grant,
+rechecks scope, and resolves duplicate keys before the busy check in one immediate
+transaction. Existing unkeyed runs remain valid. The Web retains one identity and
+its selected project for uncertain retries; selecting a project affects context,
+not authority. Backup/restore and reopen validation use disposable databases;
+production activation requires its own authorized migration and restart.

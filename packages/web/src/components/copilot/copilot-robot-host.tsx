@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { RobotWidget } from "@/components/copilot/robot-widget";
+import { usePetPreference } from "@/hooks/use-pet-preference";
 
 // Lazy-loaded so the chat panel's heavy dependencies (react-markdown,
 // remark-gfm, shiki) never ship in the shared app-shell bundle — they load
@@ -15,7 +16,7 @@ const RobotChatPanel = dynamic(
 );
 
 /**
- * Dashboard-mounted pixel robot. Clicking toggles a floating quick-chat panel
+ * Dashboard-mounted pre-rendered robot. Clicking toggles a floating quick-chat panel
  * (the robot stays quiet while it is open, same as on the Copilot page); the
  * panel's "expand" button hands the current conversation to the full console
  * via /copilot?c=<conversationId>.
@@ -23,6 +24,7 @@ const RobotChatPanel = dynamic(
 export function CopilotRobotHost() {
   const router = useRouter();
   const pathname = usePathname();
+  const petId = usePetPreference();
   const [chatOpen, setChatOpen] = useState(false);
 
   const onActivate = useCallback(() => {
@@ -38,12 +40,12 @@ export function CopilotRobotHost() {
   );
 
   return (
-    <div data-floating-copilot>
-      <RobotWidget
+    <div data-floating-copilot data-pet={petId}>
+      {petId === "robot" && <RobotWidget
         onActivate={onActivate}
         suppressBubbles={pathname === "/copilot"}
         panelOpen={chatOpen}
-      />
+      />}
       {chatOpen && (
         <RobotChatPanel onClose={() => setChatOpen(false)} onExpandFull={onExpandFull} />
       )}

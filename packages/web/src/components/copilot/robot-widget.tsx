@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Poin
 import { useRouter } from "next/navigation";
 import { XIcon } from "lucide-react";
 
-import { PixelRobot } from "@/components/copilot/pixel-robot";
+import { RobotSprite } from "@/components/copilot/RobotSprite";
+import { useRobotMotion } from "@/hooks/use-robot-motion";
 import { useLanguage } from "@/hooks/use-language";
 import { useNotifications } from "@/hooks/use-notifications";
 import { shouldTriggerBrowserNotification } from "@/lib/browser-notifications";
@@ -69,10 +70,13 @@ interface RobotBubble {
 interface DragState {
   startX: number;
   startY: number;
+  directionX: number;
   baseX: number;
   baseY: number;
   moved: boolean;
 }
+
+const DIRECTION_DEAD_ZONE_PX = 2;
 
 export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = false }: RobotWidgetProps) {
   const { t } = useLanguage();
@@ -102,8 +106,16 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
   const modeRef = useRef<RobotMode>(mode);
   const cornerRef = useRef<RobotCorner>(corner);
   const suppressBubblesRef = useRef(suppressBubbles);
-  const reducedMotionRef = useRef(false);
-  const [reducedMotion, setReducedMotion] = useState(false);
+  const motionEnabled = useRobotMotion();
+  const motionEnabledRef = useRef(motionEnabled);
+
+  useEffect(() => {
+    motionEnabledRef.current = motionEnabled;
+    if (!motionEnabled) {
+      setNudge(false);
+      if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+    }
+  }, [motionEnabled]);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -128,9 +140,6 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
 
   // Mount: restore the persisted corner and keep the robot pinned on resize.
   useEffect(() => {
-    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    reducedMotionRef.current = prefersReducedMotion;
-    setReducedMotion(prefersReducedMotion);
     const stored = window.localStorage.getItem(ROBOT_CORNER_STORAGE_KEY);
     const initial = isRobotCorner(stored) ? stored : "bottom-right";
     setCorner(initial);
@@ -148,7 +157,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
 
   // Blink loop: a ~160ms closed-eye frame every 3-6s while standing or sitting.
   useEffect(() => {
-    if (mode === "walk" || reducedMotionRef.current) {
+    if (mode === "walk" || !motionEnabled) {
       setBlinking(false);
       return;
     }
@@ -176,18 +185,19 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
       if (blinkTimer) clearTimeout(blinkTimer);
       if (openTimer) clearTimeout(openTimer);
     };
-  }, [mode]);
+  }, [mode, motionEnabled]);
 
   // Any interaction stands the robot back up and re-arms the 8s sit timer.
   const interact = useCallback(() => {
     setMode((current) => (current === "sit" ? "stand" : current));
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (!motionEnabled) return;
     idleTimerRef.current = setTimeout(() => {
       if (modeRef.current !== "walk") {
         setMode("sit");
       }
     }, IDLE_SIT_DELAY_MS);
-  }, []);
+  }, [motionEnabled]);
 
   useEffect(() => {
     interact();
@@ -198,7 +208,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
 
   // Walk frames swap legs while dragging; reduced motion stays on one frame.
   useEffect(() => {
-    if (mode !== "walk" || reducedMotionRef.current) {
+    if (mode !== "walk" || !motionEnabled) {
       setWalkFrame("walk1");
       return;
     }
@@ -207,11 +217,11 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
       WALK_FRAME_INTERVAL_MS
     );
     return () => clearInterval(id);
-  }, [mode]);
+  }, [mode, motionEnabled]);
 
   // Sit frames loop a typing motion; reduced motion stays on one frame.
   useEffect(() => {
-    if (mode !== "sit" || reducedMotionRef.current) {
+    if (mode !== "sit" || !motionEnabled) {
       setSitFrame("sit1");
       return;
     }
@@ -220,7 +230,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
       SIT_FRAME_INTERVAL_MS
     );
     return () => clearInterval(id);
-  }, [mode]);
+  }, [mode, motionEnabled]);
 
   // Notification bubble: derive content from the shared gateway event bus.
   useEffect(() => {
@@ -247,7 +257,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
         const result = enqueueBubble(bubbleQueueRef.current, next);
         bubbleQueueRef.current = result.queue;
         setBubbleQueue(result.queue);
-        if (!reducedMotionRef.current) {
+        if (motionEnabledRef.current) {
           setNudge(true);
           if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
           nudgeTimerRef.current = setTimeout(() => setNudge(false), ROBOT_NUDGE_DURATION_MS);
@@ -317,6 +327,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
     dragRef.current = {
       startX: event.clientX,
       startY: event.clientY,
+      directionX: event.clientX,
       baseX: pos.x,
       baseY: pos.y,
       moved: false,
@@ -335,8 +346,12 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
       setDragging(true);
       setMode("walk");
     }
-    if (Math.abs(dx) > 1) {
-      setFlip(dx < 0);
+    const directionDelta = event.clientX - drag.directionX;
+    if (Math.abs(directionDelta) > DIRECTION_DEAD_ZONE_PX) {
+      // The rendered robot faces left natively. Follow the latest movement,
+      // while retaining sub-threshold deltas so slow drags can still turn.
+      setFlip(directionDelta > 0);
+      drag.directionX = event.clientX;
     }
     const viewport = currentViewport();
     setPos({
@@ -438,17 +453,17 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
           aria-hidden="true"
           className={cn(
             "pointer-events-none absolute -bottom-1 left-1/2 h-[7px] w-[72%] -translate-x-1/2 rounded-full bg-black/60 blur-[3px]",
-            !dragging && mode === "stand" && !reducedMotion && "forgebadger-robot-ground-shadow"
+            !dragging && mode === "stand" && motionEnabled && "forgebadger-robot-ground-shadow"
           )}
         />
         <div className={nudge ? "forgebadger-robot-nudge" : undefined}>
           <div
             className={cn(
-              !dragging && mode === "stand" && !reducedMotion && "forgebadger-robot-idle-bob",
-              bubble && "forgebadger-robot-alert rounded-md"
+              !dragging && mode === "stand" && motionEnabled && "forgebadger-robot-idle-bob",
+              bubble && motionEnabled && "forgebadger-robot-alert rounded-md"
             )}
           >
-            <PixelRobot frame={frame} flip={flip} size={ROBOT_SIZE_PX} glow={!!bubble} />
+            <RobotSprite frame={frame} flip={flip} size={ROBOT_SIZE_PX} />
           </div>
         </div>
       </div>

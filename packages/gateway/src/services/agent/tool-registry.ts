@@ -1,3 +1,4 @@
+import { zodToJsonSchema } from "./tool-schema.js";
 import { checkAgentScope, scopedListResult } from "../platform-commands/agent-scope.js";
 import { executeAgentAction, TOOL_COMMANDS } from "../platform-commands/agent-actions.js";
 /**
@@ -105,35 +106,4 @@ function capOutput(value: unknown): unknown {
   return { truncated: true, preview: `${cut}…` };
 }
 
-/** Convert a zod schema to a JSON schema (best-effort for the model surface). */
-export function zodToJsonSchema(schema: z.ZodType<unknown>): Record<string, unknown> {
-  return zodToJsonSchemaInner(schema);
-}
-
-function zodToJsonSchemaInner(schema: z.ZodType<unknown>): Record<string, unknown> {
-  if (schema instanceof z.ZodString) return { type: "string" };
-  if (schema instanceof z.ZodNumber) return { type: "number" };
-  if (schema instanceof z.ZodBoolean) return { type: "boolean" };
-  if (schema instanceof z.ZodEnum) return { type: "string", enum: schema.options };
-  if (schema instanceof z.ZodArray) return { type: "array", items: zodToJsonSchemaInner(schema.element) };
-  if (schema instanceof z.ZodObject) {
-    const shape = schema.shape as Record<string, z.ZodType<unknown>>;
-    const properties: Record<string, unknown> = {};
-    const required: string[] = [];
-    for (const [key, value] of Object.entries(shape)) {
-      properties[key] = zodToJsonSchemaInner(value);
-      if (!(value instanceof z.ZodOptional)) required.push(key);
-    }
-    return { type: "object", properties, ...(required.length ? { required } : {}) };
-  }
-  if (schema instanceof z.ZodOptional) return zodToJsonSchemaInner(schema.unwrap());
-  if (schema instanceof z.ZodNullable) return { ...zodToJsonSchemaInner(schema.unwrap()), nullable: true };
-  if (schema instanceof z.ZodNull) return { type: "null" };
-  if (schema instanceof z.ZodDefault) return zodToJsonSchemaInner(schema.removeDefault());
-  if (schema instanceof z.ZodEffects) return zodToJsonSchemaInner(schema.innerType());
-  if (schema instanceof z.ZodUnion) {
-    const options = schema.options as readonly z.ZodType<unknown>[];
-    return { anyOf: options.map((option) => zodToJsonSchemaInner(option)) };
-  }
-  return { type: "object" };
-}
+export { zodToJsonSchema } from "./tool-schema.js";
