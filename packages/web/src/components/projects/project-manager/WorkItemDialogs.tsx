@@ -1,3 +1,4 @@
+import { TaskAssignments } from "./TaskAssignments";
 import type { RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -99,6 +100,7 @@ export function CreateWorkItemDialog({
             </p>
           )}
         </div>
+        <TaskAssignments assigneeId={draft.assigneeId} reviewerId={draft.reviewerId} disabled={isSaving} onChange={value => onDraftChange({...draft, ...value})} />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             {t("projects.projectManagerCancel")}
@@ -199,6 +201,7 @@ export function EditWorkItemDialog({
             </p>
           )}
         </div>
+        <TaskAssignments assigneeId={draft.assigneeId} reviewerId={draft.reviewerId} disabled={isSaving} onChange={value => onDraftChange({...draft, ...value})} />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             {t("projects.projectManagerCancel")}

@@ -1,3 +1,7 @@
+import {ConfirmedSessionNotStartedError} from './session-server/confirmed-stop.js';
+import {SessionRuntimeConfirmationRepository} from '../db/repositories/session-runtime-confirmation-repository.js';
+import type {RuntimeGeneration} from './session-server/confirmed-stop.js';
+import { assertVerificationProcessStopped } from './collaboration/legacy-verification-recovery.js';
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 
@@ -27,6 +31,8 @@ export class SessionConflictError extends Error {
     this.name = "SessionConflictError";
   }
 }
+
+import { assertManagedSessionAccess } from '../db/repositories/managed-project-access.js';
 
 export interface GateASession {
   id: string;
@@ -139,6 +145,7 @@ class EmptyRecoveryStore implements SessionRecoveryStore {
 }
 
 export class InMemorySessionManager {
+  private readonly db: Database | undefined;
   private readonly writerLeases: SessionWriterLeases;
   private readonly writerGenerations = new Map<string, number>();
   private readonly sessions = new Map<string, GateASession>();
@@ -157,6 +164,7 @@ export class InMemorySessionManager {
     private readonly eventBus?: ForgeBadgerEventBus,
     options: SessionManagerOptions = {}
   ) {
+    this.db = options.db;
     this.writerLeases = new SessionWriterLeases(options.db ? {db:options.db} : {});
     this.sessionPrefix = normalizeSessionPrefix(options.sessionPrefix);
     this.runtimeInputAuthorizer = options.runtimeInputAuthorizer;
@@ -207,10 +215,28 @@ export class InMemorySessionManager {
       updatedAt: now
     };
     this.sessions.set(session.id, session);
+    let generation:RuntimeGeneration|undefined;
 
     try {
+      const managed=!!this.db?.prepare("SELECT 1 FROM sqlite_master WHERE name='delivery_runs'").get()&&!!this.db?.prepare('SELECT 1 FROM delivery_runs WHERE session_id=?').get(input.sessionId);
+      const authority=await this.backend.confirmedStopAuthority?.();
+      if(managed&&!authority)throw new Error('SESSION_SERVER_UPGRADE_REQUIRED');
+
+      if(this.db){
+       const previous=this.db.prepare('SELECT runtime_session_name FROM sessions WHERE user_id=? AND id=?').get(input.userId,input.sessionId) as {runtime_session_name:string|null}|undefined;
+       const old=new SessionRuntimeConfirmationRepository(this.db,input.userId).get(input.sessionId);
+       if((managed||old||authority)&&(old||previous?.runtime_session_name)&&!await this.isSessionExecutionStopped(input.userId,input.sessionId,previous?.runtime_session_name??undefined))throw new Error('SESSION_RUNTIME_STOP_UNCONFIRMED');
+       this.sessions.set(session.id,session);
+      }
+      if(this.db) {
+       assertManagedSessionAccess(this.db,input.userId,input.sessionId,input.launchPlan.cwd);
+       if(this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='delivery_runs'").get()&&this.db.prepare('SELECT 1 FROM delivery_runs WHERE session_id=?').get(input.sessionId)) await assertVerificationProcessStopped({cwd:input.launchPlan.cwd});
+       assertManagedSessionAccess(this.db,input.userId,input.sessionId,input.launchPlan.cwd);
+      }
+      if(this.db&&authority){generation={runtimeName:runtimeSessionName,launchNonce:randomUUID(),daemon:authority};new SessionRuntimeConfirmationRepository(this.db,input.userId).begin(input.sessionId,generation);}
       await this.backend.createSession({
         name: runtimeSessionName,
+        ...(generation?{launchNonce:generation.launchNonce,expectedDaemon:generation.daemon}:{}),
         cwd: input.launchPlan.cwd,
         command: input.launchPlan.command,
         args: input.launchPlan.args,
@@ -225,6 +251,8 @@ export class InMemorySessionManager {
           NO_COLOR: ""
         }
       });
+      try { if(this.db) assertManagedSessionAccess(this.db,input.userId,input.sessionId,input.launchPlan.cwd); }
+      catch(error) { if(generation)await this.confirmSessionExecutionStopped(input.userId,input.sessionId,true);else await this.backend.killSession(runtimeSessionName);throw error; }
       await this.recoveryStore.upsertSession({
         id: session.id,
         userId: session.userId,
@@ -235,6 +263,7 @@ export class InMemorySessionManager {
       });
       return this.updateSession(session.id, { status: "running" });
     } catch (error) {
+      if(generation&&this.db&&error instanceof ConfirmedSessionNotStartedError)new SessionRuntimeConfirmationRepository(this.db,input.userId).confirm(input.sessionId,generation.launchNonce,error.receipt);
       this.updateSession(session.id, {
         status: "error",
         error: error instanceof Error ? error.message : String(error)
@@ -342,6 +371,11 @@ export class InMemorySessionManager {
 
   async stopSession(id: string, runtimeSessionName?: string, userId?: string): Promise<GateASession> {
     const session = this.sessions.get(id);
+    const owner=userId??session?.userId;
+    if(this.db&&owner&&new SessionRuntimeConfirmationRepository(this.db,owner).get(id)){
+      if(!await this.confirmSessionExecutionStopped(owner,id,true))throw new Error('SESSION_RUNTIME_STOP_UNCONFIRMED');
+      return fallbackStoppedSession(id,runtimeSessionName??session?.runtimeSessionName??'',owner);
+    }
     if (!session && !runtimeSessionName) {
       throw new Error(`Unknown session: ${id}`);
     }
@@ -383,6 +417,30 @@ export class InMemorySessionManager {
    * subsequent start heals the stale claim by overwriting the DB row and
    * in-memory entry in createSession.
    */
+  supportsConfirmedSessionStop():boolean{return this.backend.supportsConfirmedSessionStop?.()===true;}
+  async isSessionExecutionStopped(userId:string,sessionId:string,runtimeName?:string):Promise<boolean>{
+    if(!this.db)return false;
+    const record=new SessionRuntimeConfirmationRepository(this.db,userId).get(sessionId);
+    if(!record)return !runtimeName&&!this.sessions.get(sessionId);
+    return this.confirmSessionExecutionStopped(userId,sessionId,false);
+  }
+  async confirmSessionExecutionStopped(userId:string,sessionId:string,stop:boolean):Promise<boolean>{
+    if(!this.db)return false;
+    const repository=new SessionRuntimeConfirmationRepository(this.db,userId),record=repository.get(sessionId);
+    if(!record)return false;
+    if(record.status==='stopped'&&record.receipt)return true;
+    const receipt=stop?await this.backend.confirmedStop?.(record):await this.backend.confirmedStopStatus?.(record);
+    if(!receipt)return false;
+    if(!repository.confirm(sessionId,record.launchNonce,receipt))return false;
+    const live=this.sessions.get(sessionId);if(live)this.invalidateWriter(live);
+    this.sessions.delete(sessionId);await this.recoveryStore.removeSession(sessionId,userId);return true;
+  }
+  /** Authoritative shutdown probe: never infer absence from cached session state.
+   * IPC failures propagate so callers keep revocation/handoff pending. */
+  async hasRuntimeTerminal(runtimeSessionName: string): Promise<boolean> {
+    return this.backend.hasSession(runtimeSessionName);
+  }
+
   async hasLiveTerminal(id: string, runtimeSessionName?: string): Promise<boolean> {
     const live = this.sessions.get(id);
     if (!live) {
@@ -580,6 +638,7 @@ export class InMemorySessionManager {
 
   assertManualInputAllowed(userId: string, id: string): void {
     const session = this.requireOwnedSession(userId, id);
+    if(this.db) assertManagedSessionAccess(this.db,userId,id,session.launchPlan.cwd);
     this.writerLeases.assertManualInputAllowed({ userId, sessionId: id, workspace: session.launchPlan.cwd });
   }
 

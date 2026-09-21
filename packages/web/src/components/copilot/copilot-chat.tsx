@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { ArrowDown, ArrowUp, Bot, MessageSquare, PanelLeft, Square } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -47,7 +48,7 @@ const AUTO_TITLE_MAX_CHARS = 24;
  * dedicated /copilot/settings page.
  */
 export function CopilotChat() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const searchParams = useSearchParams();
   // Deep link: /copilot?c=<conversationId> (e.g. "expand to full console" from
   // the robot chat panel) selects that conversation.
@@ -387,6 +388,7 @@ export function CopilotChat() {
                 {t("copilot.running")}
               </Badge>
             ) : null}
+            <Link href="/copilot/tasks" className="rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">{language === "zh-CN" ? "开发任务" : "Development tasks"}</Link>
             <CopilotSettings />
           </div>
         </div>

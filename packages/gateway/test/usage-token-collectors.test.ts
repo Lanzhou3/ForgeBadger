@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it, afterEach } from "node:test";
@@ -13,19 +13,19 @@ import { CodexSource } from "../src/services/usage/codex-source.js";
 import { KimiSource } from "../src/services/usage/kimi-source.js";
 import { OpenCodeSource } from "../src/services/usage/opencode-source.js";
 import { TokenUsageRepository, type TokenUsageSummary } from "../src/db/repositories/token-usage-repository.js";
-import { UserRepository } from "../src/db/repositories/index.js";
+import { UserRepository, ProjectRepository } from "../src/db/repositories/index.js";
 import type { TokenUsageRecord } from "../src/services/usage/usage-source.js";
 
 const tempDirs: string[] = [];
 
 function tempDir(): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "of-usage-"));
+  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "fb-usage-")));
   tempDirs.push(dir);
   return dir;
 }
 
 afterEach(() => {
-  while (tempDirs.length > 0) tempDirs.pop();
+  while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });
 });
 
 function createTestDb(): Database {
@@ -55,6 +55,7 @@ function writeClaudeFixture(root: string, sessionId: string, lines: string[]): s
 const claudeRepeatedUsageLine = (id: string, outputTokens: number, inputTokens: number, ts: string) =>
   JSON.stringify({
     type: "assistant",
+    cwd: "/Users/lanzhou/Project/ForgeBadger",
     sessionId: "a1b2c3",
     timestamp: ts,
     message: {
@@ -157,6 +158,40 @@ describe("ClaudeCodeSource", () => {
       else process.env.CLAUDE_CONFIG_DIR = original;
     }
   });
+  it("does not guess cwd from ambiguous encoded directories", () => {
+    const root = tempDir();
+    const entry = JSON.parse(claudeRepeatedUsageLine("unknown-cwd", 5, 10, "2026-09-19T00:00:00Z"));
+    delete entry.cwd;
+    writeClaudeFixture(root, "ambiguous", [JSON.stringify(entry)]);
+    const original = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = root;
+    try {
+      assert.equal(new ClaudeCodeSource().scan(null).records[0]?.projectPath, "unknown");
+    } finally {
+      if (original === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = original;
+    }
+  });
+
+  it("retries torn first-scan tails after non-ASCII bytes without losing records", () => {
+    const root = tempDir();
+    const first = claudeRepeatedUsageLine("消息一", 5, 10, "2026-09-19T00:00:00Z");
+    const second = claudeRepeatedUsageLine("消息二", 5, 10, "2026-09-19T00:01:00Z");
+    const file = writeClaudeFixture(root, "torn", [first, second.slice(0, 40)]);
+    const original = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = root;
+    try {
+      const source = new ClaudeCodeSource();
+      const initial = source.scan(null);
+      assert.equal(initial.records.length, 1);
+      writeFileSync(file, `${first}\n${second}\n`);
+      assert.deepEqual(source.scan(initial.nextWatermark).records.map((r) => r.requestId), ["消息二"]);
+    } finally {
+      if (original === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = original;
+    }
+  });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -590,14 +625,19 @@ describe("TokenUsageRepository", () => {
   it("upserts idempotently and aggregates summary", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("tokens@example.com", "hash");
+    const projectA = tempDir();
+    const projectB = tempDir();
+    new ProjectRepository(db, user.id).create({ name: "A", path: projectA, aiTool: "claude" });
+    new ProjectRepository(db, user.id).create({ name: "B", path: projectB, aiTool: "claude" });
+    const fixtureRecord = (value: Partial<TokenUsageRecord>) => fakeRecord({ projectPath: projectA, ...value });
     const repo = new TokenUsageRepository(db, user.id);
 
     repo.upsertRecords([
-      fakeRecord({ requestId: "req-1" }),
-      fakeRecord({ requestId: "req-2", projectPath: "/tmp/proj-b", inputTokens: 500, outputTokens: 50 })
+      fixtureRecord({ requestId: "req-1" }),
+      fixtureRecord({ requestId: "req-2", projectPath: projectB, inputTokens: 500, outputTokens: 50 })
     ]);
     // Re-insert req-1 with updated counts — should update, not duplicate.
-    repo.upsertRecords([fakeRecord({ requestId: "req-1", inputTokens: 2000, outputTokens: 400 })]);
+    repo.upsertRecords([fixtureRecord({ requestId: "req-1", inputTokens: 2000, outputTokens: 400 })]);
 
     const summary: TokenUsageSummary = repo.getSummary();
     assert.equal(summary.requestCount, 2);
@@ -609,7 +649,7 @@ describe("TokenUsageRepository", () => {
     assert.equal(summary.byModel[0]?.cacheHitRate, 19.4);
     assert.equal(summary.byAdapter.length, 1);
     assert.equal(summary.byAdapter[0]?.key, "claude");
-    assert.equal(summary.byProject[0]?.key, "/tmp/proj-a");
+    assert.equal(summary.byProject[0]?.key, projectA);
     assert.equal(summary.byProject[0]?.totalTokens, 2000 + 400 + 300 + 0 + 0);
     assert.equal(summary.byModel[0]?.key, "anthropic/claude-sonnet-4-5");
   });
@@ -617,11 +657,16 @@ describe("TokenUsageRepository", () => {
   it("filters by date range", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("tokens-range@example.com", "hash");
+    const projectA = tempDir();
+    const projectB = tempDir();
+    new ProjectRepository(db, user.id).create({ name: "A", path: projectA, aiTool: "claude" });
+    new ProjectRepository(db, user.id).create({ name: "B", path: projectB, aiTool: "claude" });
+    const fixtureRecord = (value: Partial<TokenUsageRecord>) => fakeRecord({ projectPath: projectA, ...value });
     const repo = new TokenUsageRepository(db, user.id);
 
     repo.upsertRecords([
-      fakeRecord({ requestId: "old", occurredAt: new Date("2026-07-01T10:00:00.000Z") }),
-      fakeRecord({ requestId: "new", occurredAt: new Date("2026-08-02T10:00:00.000Z") })
+      fixtureRecord({ requestId: "old", occurredAt: new Date("2026-07-01T10:00:00.000Z") }),
+      fixtureRecord({ requestId: "new", occurredAt: new Date("2026-08-02T10:00:00.000Z") })
     ]);
 
     const summary = repo.getSummary(new Date("2026-08-01T00:00:00.000Z"));
@@ -632,6 +677,11 @@ describe("TokenUsageRepository", () => {
   it("persists and restores per-adapter cursors", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("tokens-cursor@example.com", "hash");
+    const projectA = tempDir();
+    const projectB = tempDir();
+    new ProjectRepository(db, user.id).create({ name: "A", path: projectA, aiTool: "claude" });
+    new ProjectRepository(db, user.id).create({ name: "B", path: projectB, aiTool: "claude" });
+    const fixtureRecord = (value: Partial<TokenUsageRecord>) => fakeRecord({ projectPath: projectA, ...value });
     const repo = new TokenUsageRepository(db, user.id);
 
     assert.equal(repo.getCursor("claude"), "");
@@ -644,22 +694,27 @@ describe("TokenUsageRepository", () => {
   it("builds daily series grouped by project and adapter", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("tokens-series@example.com", "hash");
+    const projectA = tempDir();
+    const projectB = tempDir();
+    new ProjectRepository(db, user.id).create({ name: "A", path: projectA, aiTool: "claude" });
+    new ProjectRepository(db, user.id).create({ name: "B", path: projectB, aiTool: "claude" });
+    const fixtureRecord = (value: Partial<TokenUsageRecord>) => fakeRecord({ projectPath: projectA, ...value });
     const repo = new TokenUsageRepository(db, user.id);
 
     repo.upsertRecords([
-      fakeRecord({ requestId: "r1", adapter: "claude", projectPath: "/p/a", occurredAt: new Date("2026-08-01T10:00:00.000Z") }),
-      fakeRecord({ requestId: "r2", adapter: "claude", projectPath: "/p/a", occurredAt: new Date("2026-08-01T14:00:00.000Z") }),
-      fakeRecord({ requestId: "r3", adapter: "opencode", projectPath: "/p/b", occurredAt: new Date("2026-08-02T10:00:00.000Z") })
+      fixtureRecord({ requestId: "r1", adapter: "claude", projectPath: projectA, occurredAt: new Date("2026-08-01T10:00:00.000Z") }),
+      fixtureRecord({ requestId: "r2", adapter: "claude", projectPath: projectA, occurredAt: new Date("2026-08-01T14:00:00.000Z") }),
+      fixtureRecord({ requestId: "r3", adapter: "opencode", projectPath: projectB, occurredAt: new Date("2026-08-02T10:00:00.000Z") })
     ]);
 
     const series = repo.getDailySeries({ groupBy: "project" });
     // Same day + same project aggregate into one row; /p/a on 08-01 merges r1+r2.
     assert.equal(series.length, 2);
-    const dayA = series.filter((row) => row.group === "/p/a");
+    const dayA = series.filter((row) => row.group === projectA);
     assert.equal(dayA.length, 1);
     assert.equal(dayA[0]?.day, "2026-08-01");
     assert.equal(dayA[0]?.totalTokens, 2 * (1000 + 200 + 300));
-    const dayB = series.find((row) => row.group === "/p/b");
+    const dayB = series.find((row) => row.group === projectB);
     assert.equal(dayB?.day, "2026-08-02");
   });
 });

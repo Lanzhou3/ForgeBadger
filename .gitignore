@@ -109,3 +109,6 @@ packages/gateway/pty-attach-e2e.mts
 
 # Local scratch / one-off debug scripts kept in the workspace but never shipped.
 packages/gateway/scratch-*.ts
+
+!docs/PERSONAL-TEAM-WORKFLOWS.md
+!docs/adr/0002-personal-team-delivery.md

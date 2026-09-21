@@ -603,6 +603,62 @@
       "when": 1789776000000,
       "tag": "0086_copilot_request_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "6",
+      "when": 1789776000001,
+      "tag": "0087_personal_team_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1789776000002,
+      "tag": "0088_copilot_development_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "6",
+      "when": 1789776000003,
+      "tag": "0089_team_administration",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1789776000004,
+      "tag": "0090_delivery_pull_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "6",
+      "when": 1789776000005,
+      "tag": "0091_session_runtime_confirmations",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "6",
+      "when": 1789776000006,
+      "tag": "0092_task_artifact_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "6",
+      "when": 1789776000007,
+      "tag": "0093_task_semantic_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "6",
+      "when": 1789776000008,
+      "tag": "0094_pending_runtime_delete_guard",
+      "breakpoints": true
     }
   ]
 }

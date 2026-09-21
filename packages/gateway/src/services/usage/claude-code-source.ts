@@ -3,7 +3,9 @@
  *
  * Reads `~/.claude/projects/<encoded-cwd>/<session>.jsonl` transcripts.
  * Assistant messages carry `message.usage` with input/output/cache token
- * counts. Known CLI quirk: the same `message.id` is repeated across multiple
+ * counts. Attribution requires an explicit cwd on the assistant record; encoded
+ * directory names are lossy and must never be guessed back into project paths.
+ * Known CLI quirk: the same `message.id` is repeated across multiple
  * content-block lines, and streamed `input_tokens` may be placeholder 0/1 on
  * early lines — so we dedupe by `message.id` and keep the line with the max
  * `output_tokens` (the final one), per provider risk research.
@@ -20,7 +22,6 @@ import path from "node:path";
 
 import {
   claudeProjectsRoot,
-  decodeClaudeProjectDir,
   type TokenUsageRecord,
   type UsageScanResult,
   type UsageSource
@@ -33,7 +34,6 @@ interface WatermarkEntry {
 
 interface TranscriptFile {
   absolutePath: string;
-  projectPath: string;
   sessionId: string;
 }
 
@@ -57,8 +57,7 @@ export class ClaudeCodeSource implements UsageSource {
 
     for (const projectDir of projectDirs) {
       const projectRoot = path.join(root, projectDir);
-      const projectPath = decodeClaudeProjectDir(projectDir);
-      for (const file of readFiles(projectRoot, projectPath)) {
+      for (const file of readFiles(projectRoot)) {
         const key = cursorKeyForPath(file.absolutePath);
         const stat = safeStat(file.absolutePath);
         if (!stat) continue;
@@ -80,8 +79,9 @@ export class ClaudeCodeSource implements UsageSource {
         }
 
         // First sight or rewritten/shrank: full parse.
-        next[key] = { bytes: stat.size, mtimeMs: stat.mtimeMs };
-        records.push(...parseTranscriptFile(file));
+        const parsed = parseTranscriptChunk(readChunk(file.absolutePath, 0), file);
+        next[key] = { bytes: parsed.consumedBytes, mtimeMs: stat.mtimeMs };
+        records.push(...parsed.records);
       }
     }
 
@@ -89,7 +89,7 @@ export class ClaudeCodeSource implements UsageSource {
   }
 }
 
-function readFiles(projectRoot: string, projectPath: string): TranscriptFile[] {
+function readFiles(projectRoot: string): TranscriptFile[] {
   let entries: string[] = [];
   try {
     entries = readdirSync(projectRoot);
@@ -101,7 +101,6 @@ function readFiles(projectRoot: string, projectPath: string): TranscriptFile[] {
     if (!entry.endsWith(".jsonl")) continue;
     files.push({
       absolutePath: path.join(projectRoot, entry),
-      projectPath,
       sessionId: entry.replace(/\.jsonl$/u, "")
     });
   }
@@ -119,14 +118,15 @@ function safeStat(file: string): { size: number; mtimeMs: number } | null {
 
 function readChunk(file: string, fromBytes: number): string {
   try {
-    const full = readFileSync(file, "utf8");
-    return full.slice(fromBytes);
+    const full = readFileSync(file);
+    return full.subarray(fromBytes).toString("utf8");
   } catch {
     return "";
   }
 }
 
 interface ClaudeUsageLine {
+  projectPath: string;
   id: string;
   model: string | null;
   usage: {
@@ -166,7 +166,7 @@ function parseTranscriptChunk(
       fullConsumed -= Buffer.byteLength(line, "utf8");
       break;
     }
-    fullConsumed += 1; // the newline
+    if (!isLast) fullConsumed += 1; // only count a newline that exists
   }
 
   const records: TokenUsageRecord[] = [];
@@ -175,16 +175,6 @@ function parseTranscriptChunk(
     records.push(toRecord(line, file));
   }
   return { records, consumedBytes: fullConsumed };
-}
-
-function parseTranscriptFile(file: TranscriptFile): TokenUsageRecord[] {
-  let content: string;
-  try {
-    content = readFileSync(file.absolutePath, "utf8");
-  } catch {
-    return [];
-  }
-  return parseTranscriptChunk(content, file).records;
 }
 
 function tryCollectLine(line: string, byMessageId: Map<string, ClaudeUsageLine>): boolean {
@@ -203,9 +193,13 @@ function tryCollectLine(line: string, byMessageId: Map<string, ClaudeUsageLine>)
   const usage = message.usage;
   const outputTokens = numeric(usage.output_tokens);
   const existing = byMessageId.get(message.id);
+  const cwd = typeof entry.cwd === "string" && path.isAbsolute(entry.cwd) ? entry.cwd : "unknown";
+  const projectPath = existing && existing.projectPath !== cwd ? "unknown" : cwd;
+  if (existing) existing.projectPath = projectPath;
   if (!existing || outputTokens > existing.usage.output_tokens) {
     byMessageId.set(message.id, {
       id: message.id,
+      projectPath,
       model: typeof message.model === "string" ? message.model : null,
       usage: {
         input_tokens: numeric(usage.input_tokens),
@@ -223,7 +217,7 @@ function toRecord(line: ClaudeUsageLine, file: TranscriptFile): TokenUsageRecord
   return {
     adapter: "claude",
     sessionId: file.sessionId,
-    projectPath: file.projectPath,
+    projectPath: line.projectPath,
     modelId: line.model,
     requestId: line.id,
     occurredAt: parseTimestamp(line.timestamp) ?? inferOccurredAt(line.id),
@@ -260,7 +254,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function cursorKeyForPath(absolutePath: string): string {
-  return absolutePath.replace(/[/\\:]/g, "_");
+  return absolutePath;
 }
 
 function parseWatermark(watermark: string | null): Record<string, WatermarkEntry> {

@@ -1,3 +1,4 @@
+import { revokeUserCredentials } from "../auth/credential-epoch.js";
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
@@ -72,7 +73,9 @@ export function createAdminUserRoutes(
       return;
     }
 
-    const user = repo.update(req.params.id, parseResult.data);
+    let user:User|undefined;
+    try { user=repo.update(req.params.id,parseResult.data); }
+    catch(error){const message=error instanceof Error?error.message:'';const code=message.includes('TEAM_OWNER_TRANSFER_REQUIRED')?'TEAM_OWNER_TRANSFER_REQUIRED':message.includes('DELIVERY_INTEGRATION_IN_PROGRESS')?'DELIVERY_INTEGRATION_IN_PROGRESS':'USER_UPDATE_FAILED';res.status(409).json({code:1,message:code,details:{code}});return;}
     if (!user) {
       res.status(404).json({ code: 1, message: "User not found" });
       return;
@@ -103,8 +106,11 @@ export function createAdminUserRoutes(
     }
 
     const passwordHash = await bcrypt.hash(parseResult.data.password, 10);
-    repo.updatePassword(target.id, passwordHash);
-    const revoked = new AuthSessionRepository(db).deleteAllByUser(target.id);
+    const revoked = db.transaction(() => {
+      repo.updatePassword(target.id, passwordHash);
+      return revokeUserCredentials(db,target.id);
+    })();
+    runtimeAuthorizationInvalidator.invalidate({scope:"user",userId:target.id});
     res.json({
       code: 0,
       data: { user: toAdminUserPayload(repo.findById(target.id)!), revokedSessions: revoked },

@@ -1,4 +1,8 @@
 "use client";
+import { hasCapability } from "@/lib/collaboration-api";
+import { TaskCopilotArtifacts } from "./TaskCopilotArtifacts";
+import { TaskExecutionPanel } from "@/components/workspaces/TaskExecutionPanel";
+import { useTaskAuthority } from "./TaskAuthority";
 
 import { useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -105,11 +109,13 @@ export function ProjectManagerWorkItemDetailSheet({
   taskPacketSessions: Session[];
   workItems: ProjectManagerWorkItem[];
 }) {
+  const { canEdit, legacySessions, collaboration, actorId } = useTaskAuthority();
+
   const traceMarkers = item ? workItemTraceMarkers(item, ledgerEvents) : [];
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+      <SheetContent className="w-full overflow-y-auto sm:max-w-4xl">
         <SheetHeader>
           <SheetTitle>{item?.title ?? t("projects.projectManagerViewDetails")}</SheetTitle>
           <SheetDescription>{t("projects.projectManagerWorkItemDetail")}</SheetDescription>
@@ -141,6 +147,7 @@ export function ProjectManagerWorkItemDetailSheet({
               <SummaryMetric label={t("projects.projectManagerPriority")} value={item.priority} />
               <SummaryMetric label={t("projects.projectManagerEvidenceRefs")} value={item.evidenceRefCount} />
             </div>
+            {collaboration && <div className="grid gap-2 text-sm sm:grid-cols-2"><p>{t("workspace.assignee")}: {collaboration.members.find(m => m.userId === item.assigneeId)?.email ?? t("workspace.unassigned")}</p><p>{t("workspace.reviewAssignee")}: {collaboration.members.find(m => m.userId === item.reviewerId)?.email ?? t("workspace.unassigned")}</p></div>}
             <DetailField label={t("projects.projectManagerStageAssign")}>
               <ProjectManagerStageSelect
                 item={item}
@@ -167,7 +174,10 @@ export function ProjectManagerWorkItemDetailSheet({
                 <span className="text-muted-foreground">-</span>
               )}
             </DetailField>
-            <ProjectManagerTaskPacketSection
+            {item.manualCompletion && <div className="space-y-1 text-xs text-muted-foreground"><p>{t("task.manualDone")}</p><p>{item.manualCompletion.reason}</p><p>{item.manualCompletion.actorId} · {formatTimestamp(item.manualCompletion.createdAt)}</p></div>}
+            {collaboration && <TaskCopilotArtifacts key={`artifact:${actorId}:${projectId}:${item.id}`} actorId={actorId} projectId={projectId} taskId={item.id} revision={item.revision} canLink={hasCapability(collaboration.project, "develop")} />}
+            {collaboration && <TaskExecutionPanel key={`execution:${actorId}:${projectId}:${item.id}`} detail={collaboration} taskId={item.id} actorId={actorId} />}
+            {legacySessions && <ProjectManagerTaskPacketSection
               error={taskPacketError}
               isLinking={isTaskPacketLinking}
               isLoading={isTaskPacketLoading}
@@ -181,7 +191,7 @@ export function ProjectManagerWorkItemDetailSheet({
               linkError={taskPacketLinkError}
               startError={taskPacketStartError}
               isStarting={isTaskPacketStarting}
-            />
+            />}
             <DetailField label={t("projects.projectManagerEvidenceRefs")}>
               {item.evidenceRefs.length > 0 ? (
                 <ul className="space-y-2">
@@ -208,7 +218,7 @@ export function ProjectManagerWorkItemDetailSheet({
                 </div>
               </DetailField>
             )}
-            <fieldset className="space-y-3 rounded-md border border-border/70 p-3">
+            <fieldset disabled={!canEdit} className="space-y-3 rounded-md border border-border/70 p-3">
               <legend className="px-1 text-sm font-medium">{t("projects.projectManagerAttachEvidence")}</legend>
               <p className="text-xs leading-5 text-muted-foreground">
                 {t("projects.projectManagerEvidenceReferenceHint")}
@@ -340,6 +350,9 @@ function ProjectManagerDependenciesSection({
   t: Translate;
   workItems: ProjectManagerWorkItem[];
 }) {
+  const { canEdit: edit, canManage, legacySessions } = useTaskAuthority();
+  const canEdit = canManage ?? edit;
+
   const queryClient = useQueryClient();
   const [selection, setSelection] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -356,7 +369,7 @@ function ProjectManagerDependenciesSection({
     projectManagerMutationMessage(mutationError, t("projects.projectManagerDependencyMutationError"));
   const addMutation = useMutation({
     mutationFn: (blockerWorkItemId: string) =>
-      addProjectManagerWorkItemDependency(projectId, item.id, blockerWorkItemId),
+      addProjectManagerWorkItemDependency(projectId, item.id, blockerWorkItemId, item.revision),
     onSuccess: async () => {
       setError(null);
       setSelection("");
@@ -366,7 +379,7 @@ function ProjectManagerDependenciesSection({
   });
   const removeMutation = useMutation({
     mutationFn: (blockerWorkItemId: string) =>
-      removeProjectManagerWorkItemDependency(projectId, item.id, blockerWorkItemId),
+      removeProjectManagerWorkItemDependency(projectId, item.id, blockerWorkItemId, item.revision),
     onSuccess: async () => {
       setError(null);
       await queryClient.invalidateQueries({ queryKey: ["project-manager", projectId] });
@@ -376,7 +389,7 @@ function ProjectManagerDependenciesSection({
   const isPending = addMutation.isPending || removeMutation.isPending;
 
   return (
-    <fieldset className="space-y-3 rounded-md border border-border/70 p-3">
+    <fieldset disabled={!canEdit} className="space-y-3 rounded-md border border-border/70 p-3">
       <legend className="px-1 text-sm font-medium">{t("projects.projectManagerDependencies")}</legend>
       {blockedBy.length === 0 && blocking.length === 0 && (
         <p className="text-xs text-muted-foreground">{t("projects.projectManagerDependencyNone")}</p>
@@ -481,12 +494,13 @@ function ProjectManagerTaskPacketSection({
   t: Translate;
   taskPacket: ProjectManagerTaskPacket | null;
 }) {
+  const {canEdit} = useTaskAuthority();
   const selectedSessionAvailable = sessions.some((session) => session.id === selectedSessionId);
   const canLinkSession = selectedSessionId.length > 0 && selectedSessionAvailable && !isLinking;
   const canStartTask = taskPacketCanStart(taskPacket, isStarting);
 
   return (
-    <fieldset className="space-y-3 rounded-md border border-border/70 p-3" data-testid="project-manager-task-packet">
+    <fieldset disabled={!canEdit} className="space-y-3 rounded-md border border-border/70 p-3" data-testid="project-manager-task-packet">
       <legend className="flex items-center gap-2 px-1 text-sm font-medium">
         <ClipboardList className="size-4" />
         {t("projects.projectManagerTaskPacket")}

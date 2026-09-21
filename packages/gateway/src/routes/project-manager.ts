@@ -1,3 +1,7 @@
+import {mutateAssignedTask} from '../services/project-manager/tasks.js';
+import {projectManagerAccess,assertProjectManagerWrite,assertLegacyTaskExecution} from '../services/project-manager/access.js';
+import {CollaborationRepository} from '../db/repositories/collaboration-repository.js';
+import {CollaborationError} from '../services/collaboration/types.js';
 import { PlatformActions } from "../services/platform-commands/actions.js";
 import { createPlatformCommands } from "../services/platform-commands/catalog.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -63,6 +67,8 @@ const goalBodySchema = z.object({
 }).strict();
 
 const workItemCreateSchema = z.object({
+  assigneeId: z.string().min(1).nullable().optional(),
+  reviewerId: z.string().min(1).nullable().optional(),
   title: z.string().min(1).max(256),
   description: z.string().min(1).max(4_000).nullable().optional(),
   status: z.literal("todo").optional(),
@@ -73,6 +79,9 @@ const workItemCreateSchema = z.object({
 }).strict();
 
 const workItemUpdateSchema = z.object({
+  assigneeId: z.string().min(1).nullable().optional(),
+  reviewerId: z.string().min(1).nullable().optional(),
+  expectedRevision: z.number().int().positive().optional(),
   title: z.string().min(1).max(256).optional(),
   description: z.string().min(1).max(4_000).nullable().optional(),
   priority: z.number().int().min(0).max(100).optional(),
@@ -96,10 +105,12 @@ const stageReorderSchema = z.object({
 }).strict();
 
 const dependencyBodySchema = z.object({
+  expectedRevision: z.number().int().positive().optional(),
   blockerWorkItemId: z.string().min(1).max(128)
 }).strict();
 
 const statusBodySchema = z.object({
+  expectedRevision: z.number().int().positive().optional(),
   status: statusSchema,
   evidenceRefs: z.array(evidenceRefSchema).max(20).optional(),
   manualCompletionReason: z.string().min(1).max(1_000).optional()
@@ -108,6 +119,7 @@ const statusBodySchema = z.object({
 const batchStatusBodySchema = z.object({
   updates: z.array(z.object({
     workItemId: z.string().min(1).max(128),
+    expectedRevision: z.number().int().positive().optional(),
     status: statusSchema,
     evidenceRefs: z.array(evidenceRefSchema).max(20).optional(),
     manualCompletionReason: z.string().min(1).max(1_000).optional()
@@ -115,10 +127,12 @@ const batchStatusBodySchema = z.object({
 }).strict();
 
 const deleteWorkItemBodySchema = z.object({
+  expectedRevision: z.number().int().positive().optional(),
   confirm: z.literal(true)
 }).strict();
 
 const evidenceBodySchema = z.object({
+  expectedRevision: z.number().int().positive().optional(),
   evidenceRefs: z.array(evidenceRefSchema).min(1).max(20)
 }).strict();
 
@@ -192,12 +206,39 @@ export function createProjectManagerRoutes(
 ): Router {
   const router = Router({ mergeParams: true });
   router.use(authenticate);
+  router.use('/:projectId/project-manager', (req,res,next)=>{
+    try {
+      const actor=userIdFor(req),context=projectManagerAccess(db,actor,req.params.projectId!);
+      if(req.method!=='GET') {
+        assertProjectManagerWrite(db,actor,req.params.projectId!,/^\/(goal|stages)(\/|$)/.test(req.path)||req.path.includes('/dependencies'));
+        if(/\/task-packet(?:\/|$)/.test(req.path))assertLegacyTaskExecution(db,req.params.projectId!);
+        if(context.revisionRequired) {
+          const updates=req.path==='/work-items/batch/status'?req.body?.updates: /^\/work-items\/[^/]+/.test(req.path)?[req.body]:[];
+          if(Array.isArray(updates)&&updates.some((item:unknown)=>!item||typeof item!=='object'||!Number.isSafeInteger((item as {expectedRevision?:number}).expectedRevision)))throw new CollaborationError(409,'EXPECTED_TASK_REVISION_REQUIRED');
+        }
+        const transitions=req.body?.updates??[req.body];
+        if(context.revisionRequired&&Array.isArray(transitions)&&transitions.some((item:{status?:string;manualCompletionReason?:string})=>item?.status==='done'&& !item.manualCompletionReason?.trim()))throw new CollaborationError(400,'MANUAL_COMPLETION_REASON_REQUIRED');
+        const evidence=req.body?.evidenceRefs??req.body?.updates?.flatMap((u:{evidenceRefs?:unknown[]})=>u.evidenceRefs??[])??[];
+        if(Array.isArray(evidence)&&evidence.some((e:unknown)=>e&&typeof e==='object'&&/^(delivery|verified|verification|integrated)$/i.test(String((e as {kind?:string}).kind).trim())))throw new CollaborationError(400,'RESERVED_DELIVERY_EVIDENCE');
+      }
+      if(context.revisionRequired && req.method==='GET' && (req.path.includes('task-packet')||req.path.includes('starter-packs')))throw new CollaborationError(409,'SHARED_TASK_REQUIRES_DELIVERY');
+      const originalJson=res.json.bind(res);
+      res.json=(body:unknown)=>originalJson(sanitizePmResponse(body,context.revisionRequired));
+      next();
+    }catch(error){if(error instanceof CollaborationError&&error.status===404)return sendProjectNotFound(res);sendMutationError(res,error,'Project access denied');}
+  });
+  router.get('/:projectId/project-manager/context',(req,res)=>{
+    const c=projectManagerAccess(db,userIdFor(req),req.params.projectId);
+    const supported=options.sessionManager?.supportsConfirmedSessionStop()===true;
+    res.json({code:0,data:{project:{id:c.project.id,name:c.project.name,description:c.project.description,status:c.project.status},access:{role:c.access.role,capabilities:c.access.capabilities,teamId:c.access.teamId,logicalOwnerId:c.access.logicalOwnerId},privateDetailAllowed:c.privateDetailAllowed,shared:c.shared,revisionRequired:c.revisionRequired,managedExecution:{supported,reason:supported?null:'SESSION_SERVER_UPGRADE_REQUIRED'}},message:''});
+  });
+
 
   router.get("/:projectId/project-manager/goal", (req, res) => {
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const goal = new ProjectManagerRepository(db, userId).getGoal(project.id);
+    const goal = pmRepository(db, userId, project.id).getGoal(project.id);
     res.json({ code: 0, data: { goal: goal ? toGoalDto(goal) : null }, message: "" });
   });
 
@@ -208,7 +249,7 @@ export function createProjectManagerRoutes(
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
     try {
-      const goal = new ProjectManagerRepository(db, userId).upsertGoal(project.id, parse.data);
+      const goal = pmRepository(db, userId, project.id).upsertGoal(project.id, parse.data);
       res.json({ code: 0, data: { goal: toGoalDto(goal) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Goal update failed");
@@ -225,9 +266,9 @@ export function createProjectManagerRoutes(
       ...(parse.data.status ? { status: parse.data.status } : {}),
       ...(parse.data.limit !== undefined ? { limit: parse.data.limit } : {})
     };
-    const workItems = new ProjectManagerRepository(db, userId)
+    const workItems = pmRepository(db, userId, project.id)
       .listWorkItems(project.id, options)
-      .map(toWorkItemDto);
+      .map(item=>toWorkItemDto(item,db));
     res.json({ code: 0, data: { workItems }, message: "" });
   });
 
@@ -239,8 +280,10 @@ export function createProjectManagerRoutes(
     if (!project) return sendProjectNotFound(res);
     try {
       const { status: _status, ...input } = parse.data;
-      const workItem = await new PlatformActions({db,userId,...options},createPlatformCommands()).executeOwner("pm.work_item.create_with_evidence",{projectId:project.id,...input},randomUUID()) as ProjectManagerWorkItem;
-      res.status(201).json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
+      const workItem = projectManagerAccess(db,userId,project.id).revisionRequired
+        ?mutateAssignedTask(db,userId,project.id,undefined,input)
+        :await new PlatformActions({db,userId,...options},createPlatformCommands()).executeOwner('pm.work_item.create_with_evidence',{projectId:project.id,...input},randomUUID()) as ProjectManagerWorkItem;
+      res.status(201).json({ code: 0, data: { workItem: toWorkItemDto(workItem,db) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Work item creation failed");
     }
@@ -252,7 +295,7 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const workItems = new ProjectManagerRepository(db, userId).listWorkItems(project.id, {
+    const workItems = pmRepository(db, userId, project.id).listWorkItems(project.id, {
       ...(parse.data.limit !== undefined ? { limit: parse.data.limit } : {})
     });
     const sessionsByWorkItem = resolveTaskPacketSessions(db, userId, project.id, workItems);
@@ -278,14 +321,14 @@ export function createProjectManagerRoutes(
     const pack = getStarterTaskPack(req.params.packId);
     if (!pack) return sendStarterPackNotFound(res);
     try {
-      const repo = new ProjectManagerRepository(db, userId);
+      const repo = pmRepository(db, userId, project.id);
       const workItem = repo.createWorkItem(project.id, createStarterPackWorkItemInput(pack));
       const taskPacket = buildTaskPacket({ project, workItem });
       res.status(201).json({
         code: 0,
         data: {
           pack: toStarterPackDto(pack),
-          workItem: toWorkItemDto(workItem),
+          workItem: toWorkItemDto(workItem,db),
           taskPacket
         },
         message: ""
@@ -302,9 +345,9 @@ export function createProjectManagerRoutes(
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
     try {
-      const workItems = new ProjectManagerRepository(db, userId)
+      const workItems = pmRepository(db, userId, project.id)
         .batchUpdateWorkItemStatuses(project.id, parse.data)
-        .map(toWorkItemDto);
+        .map(item=>toWorkItemDto(item,db));
       res.json({ code: 0, data: { workItems }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Work item batch status update failed");
@@ -315,16 +358,16 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const workItem = new ProjectManagerRepository(db, userId).getWorkItem(project.id, req.params.workItemId);
+    const workItem = pmRepository(db, userId, project.id).getWorkItem(project.id, req.params.workItemId);
     if (!workItem) return sendWorkItemNotFound(res);
-    res.json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
+    res.json({ code: 0, data: { workItem: toWorkItemDto(workItem,db) }, message: "" });
   });
 
   router.get("/:projectId/project-manager/work-items/:workItemId/task-packet", (req, res) => {
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const workItem = new ProjectManagerRepository(db, userId).getWorkItem(project.id, req.params.workItemId);
+    const workItem = pmRepository(db, userId, project.id).getWorkItem(project.id, req.params.workItemId);
     if (!workItem) return sendWorkItemNotFound(res);
     const packet = buildTaskPacket({
       project,
@@ -340,7 +383,7 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const repo = new ProjectManagerRepository(db, userId);
+    const repo = pmRepository(db, userId, project.id);
     const workItem = repo.getWorkItem(project.id, req.params.workItemId);
     if (!workItem) return sendWorkItemNotFound(res);
     const session = new SessionRepository(db, userId).getById(parse.data.sessionId);
@@ -387,7 +430,7 @@ export function createProjectManagerRoutes(
       return;
     }
 
-    const repo = new ProjectManagerRepository(db, userId);
+    const repo = pmRepository(db, userId, project.id);
     const workItem = repo.getWorkItem(project.id, req.params.workItemId);
     if (!workItem) return sendWorkItemNotFound(res);
 
@@ -409,11 +452,13 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const repo = new ProjectManagerRepository(db, userId);
+    const repo = pmRepository(db, userId, project.id);
     if (!repo.getWorkItem(project.id, req.params.workItemId)) return sendWorkItemNotFound(res);
     try {
-      const workItem = await new PlatformActions({db,userId,...options},createPlatformCommands()).executeOwner("pm.work_item.update",{projectId:project.id,workItemId:req.params.workItemId,...parse.data},randomUUID()) as ProjectManagerWorkItem;
-      res.json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
+      const workItem = projectManagerAccess(db,userId,project.id).revisionRequired
+        ?mutateAssignedTask(db,userId,project.id,req.params.workItemId,parse.data)
+        :await new PlatformActions({db,userId,...options},createPlatformCommands()).executeOwner('pm.work_item.update',{projectId:project.id,workItemId:req.params.workItemId,...parse.data},randomUUID()) as ProjectManagerWorkItem;
+      res.json({ code: 0, data: { workItem: toWorkItemDto(workItem,db) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Work item update failed");
     }
@@ -425,11 +470,11 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const repo = new ProjectManagerRepository(db, userId);
+    const repo = pmRepository(db, userId, project.id);
     if (!repo.getWorkItem(project.id, req.params.workItemId)) return sendWorkItemNotFound(res);
     try {
       const workItem = repo.updateWorkItemStatus(project.id, req.params.workItemId, parse.data);
-      res.json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
+      res.json({ code: 0, data: { workItem: toWorkItemDto(workItem,db) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Work item status update failed");
     }
@@ -441,11 +486,11 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const repo = new ProjectManagerRepository(db, userId);
+    const repo = pmRepository(db, userId, project.id);
     if (!repo.getWorkItem(project.id, req.params.workItemId)) return sendWorkItemNotFound(res);
     try {
       const workItem = repo.attachEvidence(project.id, req.params.workItemId, parse.data);
-      res.json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
+      res.json({ code: 0, data: { workItem: toWorkItemDto(workItem,db) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Evidence attachment failed");
     }
@@ -457,11 +502,11 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const repo = new ProjectManagerRepository(db, userId);
+    const repo = pmRepository(db, userId, project.id);
     if (!repo.getWorkItem(project.id, req.params.workItemId)) return sendWorkItemNotFound(res);
     try {
       const workItem = repo.deleteWorkItem(project.id, req.params.workItemId, parse.data);
-      res.json({ code: 0, data: { workItem: toWorkItemDto(workItem) }, message: "" });
+      res.json({ code: 0, data: { workItem: toWorkItemDto(workItem,db) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Work item deletion failed");
     }
@@ -471,7 +516,7 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const stages = new ProjectManagerRepository(db, userId)
+    const stages = pmRepository(db, userId, project.id)
       .listStages(project.id)
       .map(toStageDto);
     res.json({ code: 0, data: { stages }, message: "" });
@@ -484,7 +529,7 @@ export function createProjectManagerRoutes(
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
     try {
-      const stage = new ProjectManagerRepository(db, userId).createStage(project.id, parse.data);
+      const stage = pmRepository(db, userId, project.id).createStage(project.id, parse.data);
       res.status(201).json({ code: 0, data: { stage: toStageDto(stage) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Stage creation failed");
@@ -496,7 +541,7 @@ export function createProjectManagerRoutes(
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
     try {
-      const stages = new ProjectManagerRepository(db, userId)
+      const stages = pmRepository(db, userId, project.id)
         .seedStageTemplate(project.id)
         .map(toStageDto);
       res.status(201).json({ code: 0, data: { stages }, message: "" });
@@ -512,7 +557,7 @@ export function createProjectManagerRoutes(
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
     try {
-      const stages = new ProjectManagerRepository(db, userId)
+      const stages = pmRepository(db, userId, project.id)
         .reorderStages(project.id, parse.data.stageIds)
         .map(toStageDto);
       res.json({ code: 0, data: { stages }, message: "" });
@@ -527,7 +572,7 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const repo = new ProjectManagerRepository(db, userId);
+    const repo = pmRepository(db, userId, project.id);
     if (!repo.getStage(project.id, req.params.stageId)) return sendStageNotFound(res);
     try {
       const stage = repo.updateStage(project.id, req.params.stageId, parse.data);
@@ -541,7 +586,7 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const repo = new ProjectManagerRepository(db, userId);
+    const repo = pmRepository(db, userId, project.id);
     if (!repo.getStage(project.id, req.params.stageId)) return sendStageNotFound(res);
     try {
       const stage = repo.deleteStage(project.id, req.params.stageId);
@@ -555,7 +600,7 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const links = new ProjectManagerRepository(db, userId)
+    const links = pmRepository(db, userId, project.id)
       .listWorkItemLinks(project.id)
       .map(toWorkItemLinkDto);
     res.json({ code: 0, data: { links }, message: "" });
@@ -567,10 +612,11 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const repo = new ProjectManagerRepository(db, userId);
+    const repo = pmRepository(db, userId, project.id);
     if (!repo.getWorkItem(project.id, req.params.workItemId)) return sendWorkItemNotFound(res);
     try {
-      const link = repo.addWorkItemDependency(project.id, req.params.workItemId, parse.data.blockerWorkItemId);
+      const link = db.transaction(()=>{repo.assertRevision(project.id,req.params.workItemId,parse.data.expectedRevision);
+        return repo.addWorkItemDependency(project.id, req.params.workItemId, parse.data.blockerWorkItemId);})();
       res.status(201).json({ code: 0, data: { link: toWorkItemLinkDto(link) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Dependency creation failed");
@@ -581,10 +627,13 @@ export function createProjectManagerRoutes(
     const userId = userIdFor(req);
     const project = requireProject(db, userId, req.params.projectId);
     if (!project) return sendProjectNotFound(res);
-    const repo = new ProjectManagerRepository(db, userId);
+    const repo = pmRepository(db, userId, project.id);
     if (!repo.getWorkItem(project.id, req.params.workItemId)) return sendWorkItemNotFound(res);
     try {
-      repo.removeWorkItemDependency(project.id, req.params.workItemId, req.params.blockerWorkItemId);
+      const parsed=z.object({expectedRevision:z.number().int().positive().optional()}).strict().safeParse(req.body??{});
+      if(!parsed.success)return sendInvalidInput(res);
+      db.transaction(()=>{repo.assertRevision(project.id,req.params.workItemId,parsed.data.expectedRevision);
+        repo.removeWorkItemDependency(project.id, req.params.workItemId, req.params.blockerWorkItemId);})();
       res.json({ code: 0, data: {}, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Dependency removal failed");
@@ -601,7 +650,7 @@ export function createProjectManagerRoutes(
       ...(parse.data.eventType ? { eventType: parse.data.eventType } : {}),
       ...(parse.data.limit !== undefined ? { limit: parse.data.limit } : {})
     };
-    const events = new ProjectManagerRepository(db, userId)
+    const events = pmRepository(db, userId, project.id)
       .listLedgerEvents(project.id, options)
       .map(toLedgerEventDto);
     res.json({ code: 0, data: { events }, message: "" });
@@ -616,7 +665,7 @@ function userIdFor(req: unknown): string {
 
 function requireProject(db: Database, userId: string, projectId: string | undefined) {
   if (!projectId) return undefined;
-  return new ProjectRepository(db, userId).getById(projectId);
+  try{return projectManagerAccess(db,userId,projectId).project;}catch{return undefined;}
 }
 
 function toGoalDto(goal: ProjectManagerGoal) {
@@ -632,8 +681,10 @@ function toGoalDto(goal: ProjectManagerGoal) {
   };
 }
 
-function toWorkItemDto(workItem: ProjectManagerWorkItem) {
+function toWorkItemDto(workItem: ProjectManagerWorkItem, db:Database) {
   return {
+    ...new ProjectManagerRepository(db,workItem.userId).taskMetadata(workItem.projectId,workItem.id),
+    manualCompletion: workItem.details.manualCompletion ?? null,
     id: workItem.id,
     projectId: workItem.projectId,
     title: workItem.title,
@@ -798,8 +849,25 @@ function sendMutationError(
   error: unknown,
   fallback: string
 ): void {
-  res.status(400).json({
+  res.status(error instanceof CollaborationError?error.status:error instanceof Error&&/STALE_TASK_REVISION|DELIVERY_/.test(error.message)?409:400).json({
     code: 1,
     message: error instanceof Error ? error.message : fallback
   });
+}
+
+function pmRepository(db:Database,actorId:string,projectId:string) {
+ const {access}=projectManagerAccess(db,actorId,projectId);
+ return new ProjectManagerRepository(db,access.userId,actorId);
+}
+
+function sanitizePmResponse(value:unknown,shared:boolean):unknown {
+ if(!shared||!value||typeof value!=='object')return value;
+ if(Array.isArray(value))return value.map(v=>sanitizePmResponse(v,true));
+ const result:Record<string,unknown>={};
+ for(const [key,item]of Object.entries(value)) {
+  if(['path','sessionId','sessionLink','feishuChatId','feishuMessageId'].includes(key))continue;
+  if(key==='evidenceRefs'&&Array.isArray(item)){result[key]=item.map(e=>({kind:e.kind==='delivery'?'delivery':'reference',label:e.kind==='delivery'?e.label:'Reference',status:e.kind==='delivery'?e.status:undefined,createdAt:e.createdAt}));continue;}
+  result[key]=sanitizePmResponse(item,true);
+ }
+ return result;
 }

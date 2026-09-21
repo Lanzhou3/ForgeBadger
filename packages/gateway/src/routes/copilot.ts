@@ -1,3 +1,4 @@
+import { createCopilotDevelopmentRoutes } from './copilot-development.js';
 import { createCopilotSkillRoutes } from "./copilot-skills.js";
 import { createCopilotConnectionRoutes } from "./copilot-connections.js";
 import { createCopilotPlaybookRoutes } from "./copilot-playbooks.js";
@@ -38,7 +39,8 @@ const sendMessageSchema = z.object({
   modelId: modelIdSchema,
   projectId: idSchema.optional(),
   grantId: idSchema.optional(),
-  clientRequestId: idSchema.optional()
+  clientRequestId: idSchema.optional(),
+  toolDiscovery: z.boolean().optional()
 }).strict();
 const memoryScopeSchema = z.enum(["global", "project", "session"]);
 const writeMemorySchema = z.object({
@@ -58,6 +60,7 @@ export type CopilotRouteDeps = AgentStackDeps;
 export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   const router = Router();
   router.use(authenticate);
+  router.use(createCopilotDevelopmentRoutes(deps.db));
   router.use(createCopilotConnectionRoutes(deps.db, deps.masterKey));
 
   const KNOWN_TOOL_NAMES = new Set<string>(createPlatformTools().map((tool) => tool.name));
@@ -196,7 +199,8 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
           ...(value.modelId !== undefined ? { modelId: value.modelId } : {}),
           ...(value.projectId ? {projectId:value.projectId}: {}),
           ...(value.grantId ? { grantId: value.grantId } : {}),
-          ...(value.clientRequestId ? { clientRequestId: value.clientRequestId } : {})
+          ...(value.clientRequestId ? { clientRequestId: value.clientRequestId } : {}),
+          ...(value.toolDiscovery !== undefined ? { toolDiscovery: value.toolDiscovery } : {})
         });
         res.status(201).json(ok({ runId }));
       } catch (error) {

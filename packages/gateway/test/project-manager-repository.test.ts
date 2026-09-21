@@ -256,7 +256,8 @@ describe("ProjectManagerRepository", () => {
     assert.equal(updated.status, "done");
     assert.equal(events.length, 3);
     assert.equal(events[2]?.eventType, "manual_completion_recorded");
-    assert.equal(JSON.stringify(events[2]).includes("Maintainer verified"), false);
+    assert.equal(JSON.stringify(events[2]).includes("Maintainer verified"), true);
+    assert.deepEqual(updated.details.manualCompletion, {reason:"Maintainer verified local smoke evidence.",actorId:owner.id,createdAt:(updated.details.manualCompletion as {createdAt:number}).createdAt});
   });
 
   it("normalizes secret-like evidence and details before ledger or audit persistence", () => {

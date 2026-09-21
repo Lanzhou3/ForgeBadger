@@ -20,6 +20,7 @@ import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js"
 import { AgentError } from "./types.js";
 import { CopilotRunLedger, inputDigest, type TurnInput, type Claim, type RunStep } from "./run-ledger.js";
 import { executionControl } from "./execution-control.js";
+import { selectDiscoveredTools } from './tool-discovery.js';
 export interface CopilotOrchestratorDependencies {
     db: import("../../db/types.js").Database;
     masterKey: string;
@@ -51,7 +52,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             return;
         deps.eventBus.emitEvent({ type: "copilot_run_updated", userId: ledger.userId, runId, conversationId: r.conversation_id, status: r.status, source: r.source, revision: r.revision, ...extra, occurredAt: new Date() });
     }
-    const modelTools = (input: TurnInput) => visibleToolSchemas(deps.toolRegistry, {
+    const allVisibleTools = (input: TurnInput) => visibleToolSchemas(deps.toolRegistry, {
         hasSessionManager: !!deps.sessionManager, isToolDisabled: deps.isToolDisabled,
         grantBound: !!input.grantId, scheduled: input.source === "scheduled", reactive: input.source === "reactive"
     });
@@ -132,7 +133,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             if (!ledger.startStep(c, step))
                 break;
             const command = ledger.get(c.runId)!.steps === 1 ? resolveLocalCommandReply(input.userText, () => {
-                const availableToolNames = modelTools(input).map(tool => tool.name);
+                const availableToolNames = allVisibleTools(input).map(tool => tool.name);
                 if (!availableToolNames.includes("list_playbooks")) return [];
                 return listEnabledCopilotPlaybookSummaries(deps.db, input.userId, {
                     availableToolNames, grantBound: !!input.grantId
@@ -143,11 +144,15 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             if (command !== null)
                 text = command;
             else {
-                const tools = modelTools(input);
-                const availableToolNames = tools.map(tool => tool.name);
+                const allVisible = allVisibleTools(input);
+                const tools = selectDiscoveredTools({ allVisible, steps: ledger.steps(c.runId), userId: input.userId,
+                    runId: c.runId, masterKey: deps.masterKey, enabled: input.toolDiscovery === true });
+                const availableToolNames = allVisible.map(tool => tool.name);
                 const skillCatalog = availableToolNames.includes("load_playbook")
                     ? listAvailableCopilotSkillSummaries(deps.db, input.userId, { availableToolNames, grantBound: !!input.grantId }) : [];
                 const prefixMessages: import("./orchestrator-types.js").AgentLlmMessage[] = [];
+                if (input.toolDiscovery) prefixMessages.push({ role: 'user', content:
+                    'Tool discovery mode is enabled. Use discover_tools to find additional current platform capabilities. Successful selections become available on the next model round; discovery does not change permissions or approvals.' });
                 if (input.projectId) {
                     const project = new ProjectRepository(deps.db, input.userId).getById(input.projectId);
                     if (!project) throw new AgentError("PROJECT_NOT_FOUND", "Selected project no longer exists");
@@ -233,8 +238,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             rejection = "Invalid tool input";
         else if (action?.status === "rejected")
             rejection = "Action rejected by owner";
+        const availableToolSchemas = allVisibleTools(input);
         const context: AgentToolContext = { source: input.source ?? "user", runId: c.runId, stepId: step.id, externalActionId: action?.id, checkExecutionAuthority: live, userId: input.userId, db: deps.db, masterKey: deps.masterKey, conversationId: input.conversationId,
-            availableToolNames: modelTools(input).map(tool => tool.name),
+            availableToolNames: availableToolSchemas.map(tool => tool.name), availableToolSchemas,
             ...(input.grantId ? { grantId: input.grantId } : {}),
             ...(input.projectId ? { projectId: input.projectId } : {}), ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}), ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}) };
         if (!rejection && tool) {

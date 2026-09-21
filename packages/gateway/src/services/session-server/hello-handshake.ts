@@ -18,6 +18,7 @@ import { PROTOCOL_VERSION } from "./ipc-protocol.js";
  */
 export interface ClientHelloResult {
   leftover: string;
+  confirmedStop?:boolean|undefined;
   pid?: number | undefined;
   startedAt?: string | undefined;
 }
@@ -75,7 +76,7 @@ export function performClientHello(
           fail(new Error("Invalid Session Server hello identity or protocol version")); return;
         }
         cleanup();
-        resolve({ leftover: rest, pid: msg.pid, startedAt: msg.startedAt });
+        resolve({ leftover: rest, pid: msg.pid, startedAt: msg.startedAt,confirmedStop:isRecord(msg.capabilities)&&msg.capabilities.confirmed_stop_v1===true });
         return;
       }
       if (msg.type === "hello_error") {

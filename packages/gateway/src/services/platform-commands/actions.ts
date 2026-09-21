@@ -147,7 +147,7 @@ export class PlatformActions {
             this.checkMemoryScope(g, c, input);
         }
         const digest = createHash('sha256').update(canonical({ commandId: c.id, input, resources, authority: v.authority, grantId: g?.id, grantRevision: g?.revision, policyVersion: 1 })).digest('hex');
-        return this.intents.create({ actor_user_id: this.context.userId, grant_id: g?.id ?? null, grant_revision: g?.revision ?? null, authority: v.authority, command_id: c.id, input_json: canonical(input), digest, resources_json: canonical(resources), policy_version: 1, expires_at: Math.min(Date.now() + 15 * 60000, g?.expiresAt ?? Infinity), idempotency_key: v.idempotencyKey, status: g ? 'approved' : 'pending' });
+        return this.intents.create({ actor_user_id: this.context.userId, grant_id: g?.id ?? null, grant_revision: g?.revision ?? null, authority: v.authority, command_id: c.id, input_json: canonical(input), digest, resources_json: canonical(resources), policy_version: 1, expires_at: Math.min(Date.now() + 15 * 60000, g?.expiresAt ?? Infinity), idempotency_key: v.idempotencyKey, status: g ? 'approved' : 'pending' }, this.context.actionOrigin);
     }
     decide(id: string, digest: string, approve: boolean) {
         this.activeActor();
@@ -211,7 +211,7 @@ export class PlatformActions {
                     const fresh = this.intents.get(id)!;
                     const checked = this.check(fresh);
                     this.claim(fresh);
-                    const result = checked.c.execute(this.context, checked.input);
+                    const result = checked.c.execute({ ...this.context, actionIntentId: id }, checked.input);
                     if (result instanceof Promise)
                         throw new Error('Database commands must be synchronous');
                     return this.intents.finish(id, 'confirmed', result);

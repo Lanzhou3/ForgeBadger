@@ -1,3 +1,6 @@
+import {ConfirmedSessionNotStartedError} from './session-server/confirmed-stop.js';
+import {z} from 'zod';
+import type {ConfirmedStopReceipt,RuntimeGeneration} from './session-server/confirmed-stop.js';
 /**
  * Gateway-side IPC client for the Session Server.
  *
@@ -65,6 +68,7 @@ export class SessionServerClient implements TerminalBackendClient {
   private intentionalClose = false;
   private serverIdentity: SessionServerIdentity | undefined;
   private restartPending = false;
+  private confirmedStopCapability=false;
 
   /**
    * Fired when the management socket closes unexpectedly (daemon crash or
@@ -134,6 +138,7 @@ export class SessionServerClient implements TerminalBackendClient {
       this.restartPending = true;
     }
     this.serverIdentity = nextIdentity;
+    this.confirmedStopCapability=hello.confirmedStop===true;
 
     this.intentionalClose = false;
     this.socket = socket;
@@ -143,6 +148,9 @@ export class SessionServerClient implements TerminalBackendClient {
   }
 
   /** Identity of the connected daemon (from hello_ok), for diagnostics. */
+  supportsConfirmedSessionStop():boolean {return this.isAvailable()&&this.confirmedStopCapability;}
+  async confirmedStopAuthority(){await this.connect();return this.supportsConfirmedSessionStop()?this.serverIdentity??null:null;}
+
   getServerIdentity(): SessionServerIdentity | undefined {
     return this.serverIdentity;
   }
@@ -286,6 +294,7 @@ export class SessionServerClient implements TerminalBackendClient {
       await this.connect();
     }
 
+    if(msg.expectedDaemon&&(!this.supportsConfirmedSessionStop()||JSON.stringify(msg.expectedDaemon)!==JSON.stringify(this.serverIdentity)))throw new Error('SESSION_SERVER_UPGRADE_REQUIRED');
     const id = msg.id;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -296,7 +305,11 @@ export class SessionServerClient implements TerminalBackendClient {
       this.pending.set(id, {
         resolve: (response) => {
           if (response.type === "error") {
-            reject(new Error(response.message));
+            if(msg.type==='create_session'&&response.notStarted!==undefined){
+              const parsed=z.object({runtimeName:z.string(),launchNonce:z.string().uuid(),daemon:z.object({pid:z.number().int().positive(),startedAt:z.string().datetime()}),stopped:z.literal(true)}).strict().safeParse(response.notStarted);
+              if(parsed.success&&parsed.data.runtimeName===msg.sessionId&&parsed.data.launchNonce===msg.launchNonce&&JSON.stringify(parsed.data.daemon)===JSON.stringify(msg.expectedDaemon))reject(new ConfirmedSessionNotStartedError(parsed.data));
+              else reject(new Error('CONFIRMED_STOP_IDENTITY_MISMATCH'));
+            }else reject(new Error(response.message));
           } else {
             resolve(response.data as T);
           }
@@ -325,6 +338,8 @@ export class SessionServerClient implements TerminalBackendClient {
   // ------------------------------------------------------------------
 
   async createSession(options: TerminalSessionOptions): Promise<void> {
+    await this.connect();
+    if(options.launchNonce&&(!this.supportsConfirmedSessionStop()||JSON.stringify(options.expectedDaemon)!==JSON.stringify(this.serverIdentity)))throw new Error("SESSION_SERVER_UPGRADE_REQUIRED");
     // Extract sessionId from the runtime session name
     const sessionId = this.nameToSessionId.get(options.name) ?? options.name;
     this.nameToSessionId.set(options.name, sessionId);
@@ -336,6 +351,7 @@ export class SessionServerClient implements TerminalBackendClient {
     await this.sendRequest({
       id: randomUUID(),
       type: "create_session",
+      ...(options.launchNonce?{launchNonce:options.launchNonce,expectedDaemon:options.expectedDaemon}:{}),
       sessionId,
       userId: options.env.FORGEBADGER_USER_ID ?? "",
       attachToken: options.env.FORGEBADGER_ATTACH_TOKEN ?? "",
@@ -358,6 +374,15 @@ export class SessionServerClient implements TerminalBackendClient {
     });
   }
 
+  confirmedStop(generation:RuntimeGeneration):Promise<ConfirmedStopReceipt|null>{return this.stopReceipt(generation,true);}
+  confirmedStopStatus(generation:RuntimeGeneration):Promise<ConfirmedStopReceipt|null>{return this.stopReceipt(generation,false);}
+  private async stopReceipt(generation:RuntimeGeneration,stop:boolean):Promise<ConfirmedStopReceipt|null>{
+    await this.connect();if(!this.supportsConfirmedSessionStop()||JSON.stringify(this.serverIdentity)!==JSON.stringify(generation.daemon))return null;
+    const value=await this.sendRequest<unknown>({id:randomUUID(),type:stop?'confirmed_stop_session':'confirmed_stop_status',sessionId:generation.runtimeName,launchNonce:generation.launchNonce,expectedDaemon:generation.daemon});
+    if(value===null)return null;
+    const result=z.object({runtimeName:z.string(),launchNonce:z.string().uuid(),daemon:z.object({pid:z.number().int().positive(),startedAt:z.string()}),stopped:z.literal(true)}).strict().parse(value);
+    if(result.runtimeName!==generation.runtimeName||result.launchNonce!==generation.launchNonce||JSON.stringify(result.daemon)!==JSON.stringify(generation.daemon))throw new Error('CONFIRMED_STOP_IDENTITY_MISMATCH');return result;
+  }
   async killSession(name: string): Promise<void> {
     const sessionId = this.nameToSessionId.get(name) ?? name;
     this.nameToSessionId.delete(name);

@@ -1,3 +1,4 @@
+import type {DaemonIdentity} from './confirmed-stop.js';
 /**
  * IPC protocol for the Session Server.
  *
@@ -38,6 +39,7 @@ export interface HelloOkResponse {
   pid: number;
   /** Daemon start time (ISO 8601); together with pid it identifies a daemon instance. */
   startedAt: string;
+  capabilities?: {confirmed_stop_v1?:boolean};
 }
 
 export interface HelloErrorResponse {
@@ -51,6 +53,8 @@ export interface HelloErrorResponse {
 // ---------------------------------------------------------------------------
 
 export interface CreateSessionRequest {
+  launchNonce?:string|undefined;
+  expectedDaemon?:DaemonIdentity|undefined;
   id: string;
   type: "create_session";
   sessionId: string;
@@ -132,7 +136,11 @@ export interface ShutdownServerRequest {
   type: "shutdown_server";
 }
 
+export interface ConfirmedStopRequest {
+ id:string;type:'confirmed_stop_session'|'confirmed_stop_status';sessionId:string;launchNonce:string;expectedDaemon:DaemonIdentity;
+}
 export type ManagementRequest =
+  | ConfirmedStopRequest
   | CreateSessionRequest
   | KillSessionRequest
   | ListSessionsRequest
@@ -160,6 +168,7 @@ export interface ErrorResponse {
   id: string;
   type: "error";
   message: string;
+  notStarted?: import("./confirmed-stop.js").ConfirmedStopReceipt;
 }
 
 export type ManagementResponse = OkResponse | ErrorResponse;

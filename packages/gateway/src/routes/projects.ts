@@ -1,3 +1,4 @@
+import { canUseProjectPath, hasDeliveryHistory } from '../db/repositories/managed-project-access.js';
 import { randomUUID } from "node:crypto";
 import { PlatformActions } from "../services/platform-commands/actions.js";
 import { createPlatformCommands } from "../services/platform-commands/catalog.js";
@@ -146,6 +147,13 @@ export function createProjectRoutes(
 ): Router {
   const router = Router();
   router.use(authenticate);
+  router.use((req,res,next) => {
+    const actorId=(req as unknown as AuthenticatedRequest).userId;
+    if (typeof req.body?.path === "string" && !canUseProjectPath(db,actorId,req.body.path)) {
+      res.status(403).json({code:1,message:"Protected project path",details:{code:"MANAGED_PROJECT_ACCESS_DENIED"}}); return;
+    }
+    next();
+  });
 
   router.post("/", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
@@ -287,23 +295,35 @@ export function createProjectRoutes(
       res.status(404).json({ code: 1, message: "Project not found" });
       return;
     }
-    if (sessionManager) {
-      const sessionRepo = new SessionRepository(db, userId);
-      const projectSessions = sessionRepo
-        .list()
-        .filter((session) => session.projectId === project.id && session.status === "running");
-      for (const session of projectSessions) {
-        if (!session.runtimeSessionName) {
-          continue;
-        }
-        try {
-          await sessionManager.stopSession(session.id, session.runtimeSessionName, userId);
-        } catch {
-          // The project record can still be removed when an already-dead runtime session is referenced.
+    if (hasDeliveryHistory(db,"project",project.id)) {
+      res.status(409).json({code:1,message:"Project has delivery history; archive it in the workspace",details:{code:"DELIVERY_HISTORY_REQUIRES_ARCHIVE"}}); return;
+    }
+    const sessionRepo = new SessionRepository(db, userId);
+    const projectSessions = sessionRepo.list().filter(session => session.projectId === project.id)
+      .sort((a, b) => a.id.localeCompare(b.id));
+    const removeWhenStopped = async (): Promise<void> => {
+      if (sessionManager) {
+        for (const session of projectSessions) {
+          const live = sessionManager.getSession(session.id);
+          const runtimeName = live?.runtimeSessionName ?? session.runtimeSessionName ?? undefined;
+          if (live || runtimeName) await sessionManager.stopSession(session.id, runtimeName, userId);
         }
       }
+      repo.delete(project.id);
+    };
+    // Hold every existing session lock through deletion, including error/idle
+    // rows whose process can still be alive after a failed launch or IPC outage.
+    const withSessionLocks = async (index: number): Promise<void> => {
+      const session = projectSessions[index];
+      if (!sessionManager || !session) return removeWhenStopped();
+      await sessionManager.runExclusive(session.id, () => withSessionLocks(index + 1));
+    };
+    try {
+      await withSessionLocks(0);
+    } catch {
+      res.status(409).json({ code: 1, message: "Project sessions have not all confirmed their stop; retry after the runtime is available", details: { code: "SESSION_RUNTIME_STOP_UNCONFIRMED" } });
+      return;
     }
-    repo.delete(req.params.id);
     runtimeAuthorizationInvalidator.invalidate({
       scope: "project",
       userId,

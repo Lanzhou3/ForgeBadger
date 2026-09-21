@@ -1,3 +1,4 @@
+import { hasDeliveryHistory } from './managed-project-access.js';
 import { randomUUID } from "node:crypto";
 
 import { AuditLogRepository } from "./audit-log-repository.js";
@@ -149,6 +150,7 @@ export interface CreateProjectManagerWorkItemInput {
 }
 
 export interface UpdateProjectManagerWorkItemInput {
+  expectedRevision?: number | undefined;
   title?: string | undefined;
   description?: string | null | undefined;
   priority?: number | undefined;
@@ -169,6 +171,7 @@ export interface UpdateProjectManagerStageInput {
 }
 
 export interface UpdateProjectManagerWorkItemStatusInput {
+  expectedRevision?: number | undefined;
   status: ProjectManagerWorkItemStatus;
   evidenceRefs?: ProjectManagerEvidenceRef[] | undefined;
   manualCompletionReason?: string | undefined;
@@ -184,11 +187,13 @@ export interface BatchUpdateProjectManagerWorkItemStatusesInput {
 }
 
 export interface AttachProjectManagerEvidenceInput {
+  expectedRevision?: number | undefined;
   evidenceRefs: ProjectManagerEvidenceRef[];
   details?: Record<string, unknown> | undefined;
 }
 
 export interface DeleteProjectManagerWorkItemInput {
+  expectedRevision?: number | undefined;
   confirm: true;
   details?: Record<string, unknown> | undefined;
 }
@@ -289,7 +294,16 @@ const headerSecretPattern = /\b(X-Lark-[Ss]ignature|Authorization)(\s*:\s*)([^\s
 const keyValueSecretPattern = /\b(api[_-]?key|token|password|secret|private[_-]?key|credential|event[_-]?encrypt[_-]?key)\b(\s*[:=]\s*)([^\s,;]+)/giu;
 
 export class ProjectManagerRepository {
-  constructor(private readonly db: Database, private readonly userId: string) {}
+  constructor(private readonly db: Database, private readonly userId: string, private readonly actorId: string = userId) {}
+
+  taskMetadata(projectId: string, workItemId: string) {
+    const row = this.db.prepare('SELECT revision,semantic_revision AS semanticRevision,assignee_id AS assigneeId,reviewer_id AS reviewerId FROM collaboration_tasks WHERE user_id=? AND project_id=? AND work_item_id=?').get(this.userId,projectId,workItemId) as {revision:number;semanticRevision:number;assigneeId:string|null;reviewerId:string|null}|undefined;
+    return row ?? {revision:1,semanticRevision:1,assigneeId:null,reviewerId:null};
+  }
+
+  assertRevision(projectId:string, workItemId:string, expectedRevision:number|undefined):void {
+    if(expectedRevision !== undefined && this.taskMetadata(projectId,workItemId).revision !== expectedRevision) throw new Error('STALE_TASK_REVISION');
+  }
 
   getGoal(projectId: string): ProjectManagerGoal | undefined {
     const row = this.db.prepare(`
@@ -452,6 +466,7 @@ export class ProjectManagerRepository {
     workItemId: string,
     input: UpdateProjectManagerWorkItemInput
   ): ProjectManagerWorkItem {
+    this.assertRevision(projectId,workItemId,input.expectedRevision);
     const existing = this.requireWorkItem(projectId, workItemId);
     const nextTitle = input.title === undefined
       ? existing.title
@@ -488,6 +503,7 @@ export class ProjectManagerRepository {
     const now = Date.now();
 
     const write = this.db.transaction(() => {
+      this.assertRevision(projectId,workItemId,input.expectedRevision);
       this.db.prepare(`
         UPDATE project_manager_work_items
         SET title = ?, description = ?, priority = ?, acceptance_criteria_json = ?, details_json = ?, stage_id = ?, updated_at = ?
@@ -519,6 +535,7 @@ export class ProjectManagerRepository {
     workItemId: string,
     input: UpdateProjectManagerWorkItemStatusInput
   ): ProjectManagerWorkItem {
+    this.assertRevision(projectId,workItemId,input.expectedRevision);
     const existing = this.requireWorkItem(projectId, workItemId);
     const nextStatus = normalizeStatus(input.status);
     validateTransition(existing.status, nextStatus);
@@ -530,6 +547,7 @@ export class ProjectManagerRepository {
     }
 
     const details = mergeWorkItemDetails(existing.details, input.details);
+    if(nextStatus === "done" && hasManualReason) details.manualCompletion={reason:input.manualCompletionReason,actorId:this.actorId,createdAt:Date.now()};
     const eventType = statusLedgerEventType(existing.status, nextStatus, hasManualReason);
     const eventDetails = mergeLedgerDetails({
       fromStatus: existing.status,
@@ -539,6 +557,7 @@ export class ProjectManagerRepository {
     }, details);
     const now = Date.now();
     const write = this.db.transaction(() => {
+      this.assertRevision(projectId,workItemId,input.expectedRevision);
       this.db.prepare(`
         UPDATE project_manager_work_items
         SET status = ?, evidence_refs_json = ?, details_json = ?, updated_at = ?
@@ -567,6 +586,7 @@ export class ProjectManagerRepository {
     const prepared = input.updates.map((update) => {
       if (seen.has(update.workItemId)) throw new Error("Duplicate work item in batch status update");
       seen.add(update.workItemId);
+      this.assertRevision(projectId,update.workItemId,update.expectedRevision);
       const existing = this.requireWorkItem(projectId, update.workItemId);
       const nextStatus = normalizeStatus(update.status);
       validateTransition(existing.status, nextStatus);
@@ -577,6 +597,7 @@ export class ProjectManagerRepository {
         throw new Error("Marking done requires evidence references or a manual completion reason");
       }
       const details = mergeWorkItemDetails(existing.details, update.details);
+      if(nextStatus === "done" && hasManualReason) details.manualCompletion={reason:update.manualCompletionReason,actorId:this.actorId,createdAt:Date.now()};
       return {
         existing,
         nextStatus,
@@ -588,6 +609,7 @@ export class ProjectManagerRepository {
     });
     const now = Date.now();
     const write = this.db.transaction(() => {
+      for(const update of input.updates)this.assertRevision(projectId,update.workItemId,update.expectedRevision);
       for (const item of prepared) {
         const eventDetails = mergeLedgerDetails({
           fromStatus: item.existing.status,
@@ -629,7 +651,9 @@ export class ProjectManagerRepository {
     workItemId: string,
     input: DeleteProjectManagerWorkItemInput
   ): ProjectManagerWorkItem {
+    this.assertRevision(projectId,workItemId,input.expectedRevision);
     if (input.confirm !== true) throw new Error("Work item deletion requires confirmation");
+    if (hasDeliveryHistory(this.db,"task",workItemId)) throw new Error("DELIVERY_HISTORY_REQUIRES_ARCHIVE");
     const existing = this.requireWorkItem(projectId, workItemId);
     const details = normalizeDetails(input.details ?? {});
     const eventDetails = mergeLedgerDetails({
@@ -640,6 +664,7 @@ export class ProjectManagerRepository {
     }, details);
     const now = Date.now();
     const write = this.db.transaction(() => {
+      this.assertRevision(projectId,workItemId,input.expectedRevision);
       this.insertLedgerEvent(projectId, null, "work_item_deleted", existing.status, existing.evidenceRefs, eventDetails, now);
       this.db.prepare(`
         DELETE FROM project_manager_work_item_links
@@ -664,6 +689,7 @@ export class ProjectManagerRepository {
     workItemId: string,
     input: AttachProjectManagerEvidenceInput
   ): ProjectManagerWorkItem {
+    this.assertRevision(projectId,workItemId,input.expectedRevision);
     const existing = this.requireWorkItem(projectId, workItemId);
     const nextEvidenceRefs = [...existing.evidenceRefs, ...normalizeEvidenceRefs(input.evidenceRefs)];
     if (nextEvidenceRefs.length === existing.evidenceRefs.length) {
@@ -676,6 +702,7 @@ export class ProjectManagerRepository {
     const now = Date.now();
 
     const write = this.db.transaction(() => {
+      this.assertRevision(projectId,workItemId,input.expectedRevision);
       this.db.prepare(`
         UPDATE project_manager_work_items
         SET evidence_refs_json = ?, details_json = ?, updated_at = ?
@@ -766,6 +793,8 @@ export class ProjectManagerRepository {
     const now = Date.now();
 
     const write = this.db.transaction(() => {
+      const moved=this.db.prepare('SELECT id FROM project_manager_work_items WHERE user_id=? AND project_id=? AND stage_id=?').all(this.userId,projectId,stageId) as Array<{id:string}>;
+      for(const item of moved)this.bumpTaskRevision(projectId,item.id);
       // Test databases run with foreign keys off, so work items are moved back
       // to the backlog explicitly instead of relying on ON DELETE SET NULL.
       this.db.prepare(`
@@ -1077,6 +1106,9 @@ export class ProjectManagerRepository {
     details: Record<string, unknown>,
     createdAt: number
   ): void {
+    if(workItemId && eventType !== 'work_item_created') {
+      this.bumpTaskRevision(projectId,workItemId);
+    }
     this.db.prepare(`
       INSERT INTO project_manager_ledger_events (
         id, user_id, project_id, work_item_id, event_type, status,
@@ -1095,6 +1127,11 @@ export class ProjectManagerRepository {
     );
   }
 
+  private bumpTaskRevision(projectId:string,workItemId:string):void {
+    this.db.prepare('INSERT OR IGNORE INTO collaboration_tasks(user_id,project_id,work_item_id) VALUES(?,?,?)').run(this.userId,projectId,workItemId);
+    this.db.prepare('UPDATE collaboration_tasks SET revision=revision+1 WHERE user_id=? AND project_id=? AND work_item_id=?').run(this.userId,projectId,workItemId);
+  }
+
   private writeAudit(
     action: string,
     resourceType: string,
@@ -1105,7 +1142,7 @@ export class ProjectManagerRepository {
       action,
       resourceType,
       resourceId,
-      details: normalizeDetails(details)
+      details: normalizeDetails({ ...details, actorId: this.actorId })
     });
   }
 
@@ -1285,6 +1322,11 @@ function normalizeDetailValue(value: unknown, key: string, depth: number): unkno
     return value.map((item) => normalizeDetailValue(item, key, depth + 1));
   }
   if (value && typeof value === "object") {
+    if(key === 'manualCompletion') {
+      const record=value as Record<string,unknown>;
+      if(typeof record.reason==='string'&&record.reason.length<=1000&&typeof record.actorId==='string'&&record.actorId.length<=128&&typeof record.createdAt==='number'&&Number.isFinite(record.createdAt))return {reason:record.reason,actorId:record.actorId,createdAt:record.createdAt};
+      throw new Error('Invalid manual completion record');
+    }
     if (depth >= maxDetailDepth) return "[REDACTED]";
     const entries = Object.entries(value);
     if (entries.length > maxDetailKeys) throw new Error("Project-manager details cannot exceed 20 keys");

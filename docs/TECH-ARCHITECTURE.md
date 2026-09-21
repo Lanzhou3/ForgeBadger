@@ -1698,3 +1698,134 @@ transaction. Existing unkeyed runs remain valid. The Web retains one identity an
 its selected project for uncertain retries; selecting a project affects context,
 not authority. Backup/restore and reopen validation use disposable databases;
 production activation requires its own authorized migration and restart.
+
+## Trusted-host personal and small-team delivery
+
+[ADR 0002](adr/0002-personal-team-delivery.md) records the collaboration boundary.
+The Gateway `/api/v1/collaboration` facade checks the actual actor's project role,
+then uses owner-scoped shared repositories. Migration `0087_personal_team_delivery`
+adds memberships/epochs, task metadata, delivery runs, immutable verification/review
+evidence, events and durable operation fences. Existing Project Manager tasks remain
+the task source of truth; edits through either interface invalidate delivery evidence.
+The Development tasks module uses this facade while execution sessions stay private
+to their executor. See [API contract](API.md#personal-and-small-team-collaboration)
+and [workflow guide](PERSONAL-TEAM-WORKFLOWS.md).
+
+`services/collaboration` separates task authority, delivery lifecycle, Git worktree
+operations and historical evidence. Each durable run owns a `codex/task-<runId>` branch,
+a managed worktree and an actor-owned backing project/session. Canonical path and
+membership guards also protect legacy import/session/terminal entrypoints. Review
+and integration share session lifecycle locking and persistent operation fences;
+final merge authorization freezes the matching task/policy/role inputs. Integration
+is explicit fast-forward-only and restart reconciliation checks actual Git effects.
+
+The verification configuration API, verification action and independent command
+supervisor have been retired. `delivery-evidence.ts` retains historical receipt-based
+review/integration gates. `legacy-verification-recovery.ts` only reads old private
+identity/exit state and authenticates cancellation of an already-running supervisor;
+it cannot spawn a program. Uncertain process state keeps execution fenced without
+trusting stored numeric PIDs. Applied migrations and historical tables are retained.
+Builds remove retired executor artifacts and npm package verification rejects them.
+
+CLI backup uses SQLite online backup plus a versioned hash/schema/count manifest and
+restricted instance configuration needed to decrypt saved secrets. Restore validates
+integrity, foreign keys, compatible migrations and ciphertext, stages into a fresh
+state directory, rotates JWT secrets and invalidates opaque browser sessions. It does
+not back up repositories/worktrees, host CLI logins or live terminal/runtime state.
+No backup or migration activates the user's running installation by itself.
+
+
+### Controlled Copilot development runtime (2026-09-20)
+
+Copilot generates an immutable patch recipe, not autonomous CLI input. The Gateway
+copies only explicit approved source files into a private workspace, verifies the
+snapshot and runs fixed Node built-in test commands under macOS Seatbelt. Other
+platforms and unsupported Node versions fail closed. The initial backend requires
+Node >=22.8; Node permission flags alone are not a malicious-code sandbox.
+
+The OS policy allows approved workspace reads, a separate writable scratch area,
+minimal Node/dynamic-loader runtime reads and no network or child process fork.
+Source/tests are read-only; no host environment credentials, user home, Gateway
+state, dependencies, shell or shared writable links are inherited. Original UTF-8
+bytes (including BOM) remain hash-bound. The source project is never modified.
+The total test deadline is 60 seconds, output is capped at 64 KiB per check, and
+V8 heap is configured at 128 MiB. These are not hard process RSS or scratch disk
+quotas. A trusted supervisor owns the deadline and kills children on Gateway pipe
+EOF; Gateway also cleans up the private process group if the helper dies.
+
+Migration 0088 adds tenant-scoped development tasks, explicit action provenance
+and a transactional event outbox after the preserved personal/team 0087. They persist recipe,
+source/output hashes, exact owner intent origin, execution lease and finite test
+receipts. Origin is explicitly `owner_api`, `copilot` or historical `legacy`;
+missing Copilot provenance cannot become owner API authority. Queued work rechecks
+confirmed receipt identity, user status, tool switch, approval expiry, origin and
+source revision. Checks and periodic heartbeat recheck authority; cancellation or
+revocation aborts the child and cannot publish successful evidence.
+
+Database claim/fencing serializes the host across tenants. Running work with an
+expired lease becomes indeterminate and is never replayed or auto-released. A
+storage failure aborts workers, keeps the durable uncertainty, and is caught at
+both queue and worker boundaries rather than crashing the Gateway. Task changes
+and outbox records commit together; delivery retries use the same event ID. Events
+refresh task state without triggering a new model turn or incurring model cost.
+At most 100 task records per owner are retained in this initial implementation;
+there is no automatic cleanup or indeterminate-task reconciliation API yet.
+
+Acceptance requires explicit owner approval of the evidence digest, all approved
+checks successful in order, and unchanged source, output and workspace hashes.
+It records acceptance only: there is no automatic merge, source write, PM completion,
+CLI dispatch or broad-language dependency environment. Imported Skills and external
+connections keep their existing immutable revision and exact approval boundaries.
+
+Optional tool discovery reduces the provider schema set, with HMAC-bound durable
+read receipts scoped to user/run/step. The full authorized tool set remains the
+source for execution, Skills and evidence readback. Current switches and authority
+are reapplied on every round. Discovery defaults off; no read concurrency, PTC,
+cloud execution or multi-agent backend was adopted without measured benefit.
+Local fixture quality/recovery evidence and schema-size measurements do not prove
+real-model quality, token cost, arbitrary-language support or cross-platform safety.
+
+### Team administration and stable storage tenancy
+
+Migration 0089 follows the independent Copilot migration 0088 and extends
+[ADR 0002](adr/0002-personal-team-delivery.md) with explicit team authority.
+`team-repository.ts` and `team-authority.ts` are the bounded cross-tenant authority
+lookups; ordinary business repositories retain their storage `user_id` filtering.
+`team_projects.logical_owner_id` is the current steward, while
+`project_user_id` and the original project/session/task/delivery records keep their
+storage tenant. Disabling a former storage owner therefore does not disable a
+properly handed-over team project. Enrollment is explicit and checks canonical
+source/alias execution both before asynchronous liveness checks and again in its
+final transaction. Legacy private route and terminal authorization cannot bypass
+the resulting source protection.
+
+Team owner/admin/member and project developer/reviewer/viewer are separate role
+sets. API capability arrays are authoritative; administration does not confer
+private execution or review permission. User status generations, team membership
+and project grant revisions, and logical ownership revisions bind worktree runs.
+Reviewer generations bind acceptance records; every enrolled team project requires
+an independent reviewer. Interrupted integration can reconcile through an active
+effective team manager when its logical steward is disabled, with explicit system
+recovery attribution. Database integration fences prevent
+concurrent changes to these inputs after a merge starts and retain uncertainty
+until reconciliation can prove the outcome.
+
+`services/teams/invitations.ts` stores one-time, email-bound token digests and
+issuer membership revisions. Account creation and acceptance share one transaction
+after password hashing. Issuer disable permanently revokes pending invitations.
+A separate remote invited-registration capability preserves ordinary local
+bootstrap/recovery restrictions. `auth/credential-epoch.ts` revokes legacy JWTs
+as well as opaque sessions after password reset; HTTP, events and terminal sockets
+share the fresh credential check. Reset closes authenticated access without
+terminating independent Session Server processes.
+
+`services/teams/service.ts` persists offboarding preview digests, actor-bound
+confirmation and stopping plans before revocation becomes effective. It stops known
+processes, conservatively holds unresolved Git/runtime leases, then atomically
+hands over logical ownership and current task assignments. Historical attribution
+and storage IDs are unchanged. A replacement administrator can discover/resume
+plans or explicitly repair failed recipients while revoked membership remains
+revoked; plan revisions prevent an older in-flight drain applying obsolete handoffs.
+The delivery recovery sweep resumes these durable operations without replaying
+verification, CLI prompts or uncertain Git merges. See [API contracts](API.md#team-administration-and-invitation-contracts)
+and [operator workflows](PERSONAL-TEAM-WORKFLOWS.md) for request fields and states.

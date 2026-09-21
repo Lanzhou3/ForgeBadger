@@ -17,6 +17,7 @@ export interface TurnInput {
     source?: "user" | "reactive" | "scheduled";
     skipUserMessage?: boolean;
     clientRequestId?: string;
+    toolDiscovery?: boolean;
 }
 export interface RunRecord {
     id: string;
@@ -59,7 +60,8 @@ export const inputDigest = (value: string) => createHash("sha256").update(value)
 function requestDigest(input: TurnInput): string {
     return inputDigest(JSON.stringify({ content: input.userText, modelId: input.modelId ?? null,
         projectId: input.projectId ?? null, grantId: input.grantId ?? null,
-        source: input.source ?? 'user', skipUserMessage: input.skipUserMessage ?? false }));
+        source: input.source ?? 'user', skipUserMessage: input.skipUserMessage ?? false,
+        ...(input.toolDiscovery === true ? { toolDiscovery: true } : {}) }));
 }
 /** All writes are tenant scoped; no transaction spans asynchronous work. */
 export class CopilotRunLedger {
@@ -72,6 +74,8 @@ export class CopilotRunLedger {
         return this.db.prepare("SELECT * FROM copilot_run_steps WHERE user_id=? AND run_id=? ORDER BY ordinal").all(this.userId, id) as RunStep[];
     }
     validateScope(input: TurnInput): void {
+        if (input.toolDiscovery !== undefined && typeof input.toolDiscovery !== 'boolean')
+            throw new AgentError('COPILOT_TOOL_DISCOVERY_INVALID', 'Tool discovery must be a boolean');
         if (input.userId !== this.userId || !this.log.getConversation(input.conversationId))
             throw new AgentError("COPILOT_NOT_FOUND", "Conversation not found");
         const user = this.db.prepare("SELECT status FROM users WHERE id=?").get(this.userId) as {

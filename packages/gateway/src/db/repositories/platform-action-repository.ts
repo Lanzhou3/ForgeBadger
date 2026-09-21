@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Database } from '../types.js';
+export type ActionOrigin = {kind:'owner_api'} | {kind:'copilot';runId:string;stepId:string};
 export interface ActionIntent {
     id: string;
     user_id: string;
@@ -17,6 +18,9 @@ export interface ActionIntent {
     status: 'pending' | 'approved' | 'rejected' | 'executing' | 'completed' | 'indeterminate';
     created_at: number;
     channel_conversation_id: string | null;
+    origin_kind:'legacy'|'copilot'|'owner_api';
+    origin_run_id:string|null;
+    origin_step_id:string|null;
     execution_owner: string | null;
     execution_lease_expires_at: number | null;
 }
@@ -35,12 +39,19 @@ export class PlatformActionRepository {
     byKey(key: string) {
         return this.db.prepare('SELECT * FROM platform_action_intents WHERE user_id=? AND idempotency_key=?').get(this.userId, key) as ActionIntent | undefined;
     }
-    create(input: Omit<ActionIntent, 'id' | 'user_id' | 'created_at' | 'execution_owner' | 'execution_lease_expires_at' | 'channel_conversation_id'>) {
+    create(input: Omit<ActionIntent, 'id' | 'user_id' | 'created_at' | 'execution_owner' | 'execution_lease_expires_at' | 'channel_conversation_id' | 'origin_kind' | 'origin_run_id' | 'origin_step_id'>, originSource?:ActionOrigin) {
         return this.db.transaction(() => {
         const id = randomUUID();
         this.db.prepare(`INSERT INTO platform_action_intents
  (id,user_id,actor_user_id,grant_id,grant_revision,authority,command_id,input_json,digest,resources_json,policy_version,expires_at,idempotency_key,status,created_at)
  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, this.userId, input.actor_user_id, input.grant_id, input.grant_revision, input.authority, input.command_id, input.input_json, input.digest, input.resources_json, input.policy_version, input.expires_at, input.idempotency_key, input.status, Date.now());
+        let step:{id:string;run_id:string}|undefined;
+        if(originSource?.kind==='copilot') {
+            if(originSource.stepId!==input.idempotency_key)throw new Error('Copilot action origin key mismatch');
+            step=this.db.prepare('SELECT s.id,s.run_id FROM copilot_run_steps s JOIN copilot_runs r ON r.id=s.run_id AND r.user_id=s.user_id WHERE s.user_id=? AND s.id=? AND r.id=?').get(this.userId,originSource.stepId,originSource.runId) as {id:string;run_id:string}|undefined;
+            if(!step)throw new Error('Copilot action origin missing');
+        }
+        this.db.prepare('UPDATE platform_action_intents SET origin_kind=?,origin_run_id=?,origin_step_id=? WHERE user_id=? AND id=?').run(originSource?.kind??'legacy',step?.run_id??null,step?.id??null,this.userId,id);
         const origin=this.originConversation(input.idempotency_key);
         if(origin && this.db.prepare('SELECT 1 FROM copilot_conversations WHERE user_id=? AND id=? AND channel_owned=1').get(this.userId,origin)) {
             this.db.prepare('UPDATE platform_action_intents SET channel_conversation_id=? WHERE user_id=? AND id=?').run(origin,this.userId,id);

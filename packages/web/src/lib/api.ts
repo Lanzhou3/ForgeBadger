@@ -81,6 +81,10 @@ export type ProjectManagerTaskPacketQueueStatus =
   | "cancelled";
 
 export interface ProjectManagerWorkItem {
+  manualCompletion?: {reason: string; actorId: string; createdAt: number} | null;
+  revision?: number;
+  assigneeId?: string | null;
+  reviewerId?: string | null;
   id: string;
   projectId: string;
   title: string;
@@ -132,6 +136,8 @@ export interface ProjectManagerStarterPack {
 }
 
 export interface ProjectManagerWorkItemInput {
+  assigneeId?: string | null;
+  reviewerId?: string | null;
   title: string;
   description?: string | null;
   priority?: number;
@@ -141,6 +147,9 @@ export interface ProjectManagerWorkItemInput {
 }
 
 export interface ProjectManagerWorkItemUpdateInput {
+  expectedRevision?: number;
+  assigneeId?: string | null;
+  reviewerId?: string | null;
   title?: string;
   description?: string | null;
   priority?: number;
@@ -149,6 +158,7 @@ export interface ProjectManagerWorkItemUpdateInput {
 }
 
 export interface ProjectManagerWorkItemStatusInput {
+  expectedRevision?: number;
   status: ProjectManagerWorkItemStatus;
   evidenceRefs?: ProjectManagerEvidenceRef[];
   manualCompletionReason?: string;
@@ -156,6 +166,7 @@ export interface ProjectManagerWorkItemStatusInput {
 
 export interface ProjectManagerBatchStatusInput {
   updates: Array<{
+    expectedRevision?: number;
     workItemId: string;
     status: ProjectManagerWorkItemStatus;
     evidenceRefs?: ProjectManagerEvidenceRef[];
@@ -164,10 +175,12 @@ export interface ProjectManagerBatchStatusInput {
 }
 
 export interface ProjectManagerWorkItemDeleteInput {
+  expectedRevision?: number;
   confirm: true;
 }
 
 export interface ProjectManagerEvidenceInput {
+  expectedRevision?: number;
   evidenceRefs: ProjectManagerEvidenceRef[];
 }
 
@@ -943,6 +956,7 @@ export interface ConfigSyncWriteResult extends ConfigWriteResult {
 export type ConfigDecision = "skip" | "overwrite";
 
 export interface DashboardStats {
+  acceptedDeliveries?: number;
   projects: number;
   sessions: number;
   runningSessions: number;
@@ -1096,6 +1110,7 @@ function formatHttpError(res: Response): string {
  * wrong password, not a stale session, and must not trigger a redirect.
  * change-password likewise answers 401 for a wrong current password. */
 const AUTH_CREDENTIAL_PATHS = [
+  "/api/v1/auth/team-invitations/",
   "/api/v1/auth/login",
   "/api/v1/auth/register",
   "/api/v1/auth/logout",
@@ -1151,10 +1166,10 @@ export async function login(email: string, password: string) {
   });
 }
 
-export async function register(email: string, password: string, recoveryKey: string) {
+export async function register(email: string, password: string, recoveryKey: string, inviteCode?: string) {
   return fetchEnvelope<AuthPayload>("/api/v1/auth/register", {
     method: "POST",
-    body: JSON.stringify({ email, password, recoveryKey }),
+    body: JSON.stringify({ email, password, recoveryKey, ...(inviteCode ? {inviteCode}: {}) }),
   });
 }
 
@@ -2448,27 +2463,30 @@ export async function listProjectManagerWorkItemLinks(
 export async function addProjectManagerWorkItemDependency(
   projectId: string,
   workItemId: string,
-  blockerWorkItemId: string
+  blockerWorkItemId: string,
+  expectedRevision?: number
 ): Promise<{ link: ProjectManagerWorkItemLink }> {
   return fetchJson(projectManagerPath(
     projectId,
     `/work-items/${encodeURIComponent(workItemId)}/dependencies`
   ), {
     method: "POST",
-    body: JSON.stringify({ blockerWorkItemId }),
+    body: JSON.stringify({ blockerWorkItemId, expectedRevision }),
   }) as Promise<{ link: ProjectManagerWorkItemLink }>;
 }
 
 export async function removeProjectManagerWorkItemDependency(
   projectId: string,
   workItemId: string,
-  blockerWorkItemId: string
+  blockerWorkItemId: string,
+  expectedRevision?: number
 ): Promise<Record<string, never>> {
   return fetchJson(projectManagerPath(
     projectId,
     `/work-items/${encodeURIComponent(workItemId)}/dependencies/${encodeURIComponent(blockerWorkItemId)}`
   ), {
     method: "DELETE",
+    body: JSON.stringify({expectedRevision}),
   }) as Promise<Record<string, never>>;
 }
 

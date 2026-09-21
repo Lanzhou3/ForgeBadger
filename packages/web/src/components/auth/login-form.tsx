@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { safeRedirectTarget } from "@/lib/auth-navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
 import { Button } from "@/components/ui/button";
@@ -115,19 +116,10 @@ export function LoginForm() {
       </Button>
       <p className="text-xs text-muted-foreground">
         {t("auth.noAccount")}{" "}
-        <Link href="/register" className="font-medium text-brand underline-offset-4 hover:underline">
+        <Link href={safeRedirectTarget(searchParams.get("next")) === "/join" ? "/join" : `/register?next=${encodeURIComponent(safeRedirectTarget(searchParams.get("next")))}`} className="font-medium text-brand underline-offset-4 hover:underline">
           {t("auth.register")}
         </Link>
       </p>
     </form>
   );
-}
-
-/**
- * Only same-origin app paths are honored as post-login redirect targets:
- * must start with "/" but not "//" (protocol-relative) to avoid open redirects.
- */
-function safeRedirectTarget(next: string | null): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/";
-  return next;
 }

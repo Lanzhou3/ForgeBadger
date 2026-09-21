@@ -2,48 +2,33 @@
 
 import Link from "next/link";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, Download, FolderOpen, GitBranch, Plus, Trash2 } from "lucide-react";
+import { ArrowUpRight, Download, FolderOpen, Plus, GitBranch, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { deleteProject, getProjectGitChanges, listProjects } from "@/lib/api";
+import { listProjects, deleteProject, getProjectGitChanges } from "@/lib/api";
+import { getProjectTaskContext } from "@/lib/project-task-api";
+import { collaborationApi } from "@/lib/collaboration-api";
+import { ErrorNotice } from "@/components/workspaces/WorkspaceShared";
+import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
 
 export default function ProjectsPage() {
   const { t } = useLanguage();
-  const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery({
-    queryKey: ["projects"],
+  const {user} = useAuth();
+  const client = useQueryClient();
+  const deletion = useMutation({mutationFn: deleteProject, onSuccess: async () => {await client.invalidateQueries({queryKey: ["projects"]}); await client.invalidateQueries({queryKey: ["collaboration", "projects"]});}});
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["projects", user?.id],
+    enabled: !!user,
     queryFn: listProjects,
   });
-  const deleteMutation = useMutation({
-    mutationFn: deleteProject,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-    },
-  });
-
-  const handleDelete = (projectId: string) => {
-    if (window.confirm(t("projects.deleteConfirm"))) {
-      deleteMutation.mutate(projectId);
-    }
-  };
-
-  const projects = data?.projects ?? [];
-
-  const branchResults = useQueries({
-    queries: projects.map((project) => ({
-      queryKey: ["project", project.id, "git-branch"],
-      queryFn: () => getProjectGitChanges(project.id),
-      enabled: projects.length > 0,
-      staleTime: 60_000,
-    })),
-  });
-
-  const branchFor = (index: number): string | null => {
-    const git = branchResults[index]?.data;
-    return git && git.isGitRepo && git.branch ? git.branch : null;
-  };
+  const shared = useQuery({queryKey: ["collaboration", "projects", user?.id], enabled: !!user, queryFn: collaborationApi.projects});
+  const privateProjects = data?.projects ?? [];
+  const projects = [...privateProjects.map(p => ({id: p.id, name: p.name, status: p.status, path: p.path ?? p.rootPath})), ...(shared.data?.projects ?? []).filter(p => !privateProjects.some(own => own.id === p.id)).map(p => ({id: p.id, name: p.name, status: p.role, path: undefined}))];
+  const contexts = useQueries({queries: projects.map(p => ({queryKey: ["project-task-context", p.id, user?.id], enabled: !!user, queryFn: () => getProjectTaskContext(p.id), retry: false}))});
+  const branches = useQueries({queries: projects.map((p, i) => ({queryKey: ["project", p.id, "git-branch"], queryFn: () => getProjectGitChanges(p.id), enabled: contexts[i]?.data?.privateDetailAllowed === true, staleTime: 60_000}))});
+  const loadError = error ?? shared.error;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6">
@@ -68,7 +53,8 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      <ErrorNotice error={deletion.error} />
+      {loadError ? <ErrorNotice error={loadError} retry={() => {void refetch(); void shared.refetch();}} /> : isLoading || shared.isLoading ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("projects.loading")}
@@ -112,33 +98,16 @@ export default function ProjectsPage() {
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{project.name}</div>
                   <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {project.path ?? project.rootPath}
+                    {contexts[index]?.data?.privateDetailAllowed ? project.path : t("projects.devTasks")}
                   </div>
                 </div>
-                {branchFor(index) ? (
-                  <span
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/60 bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                    title={branchFor(index) ?? undefined}
-                  >
-                    <GitBranch className="size-3" />
-                    {branchFor(index)}
-                  </span>
-                ) : null}
+                {branches[index]?.data?.branch && <span className="hidden items-center gap-1 text-xs text-muted-foreground sm:inline-flex"><GitBranch className="size-3" />{branches[index]?.data?.branch}</span>}
                 <span className="hidden w-20 shrink-0 truncate text-right text-xs text-muted-foreground sm:inline">
                   {project.status ?? "—"}
                 </span>
                 <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-brand" />
               </Link>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="shrink-0 text-muted-foreground hover:text-destructive"
-                onClick={() => handleDelete(project.id)}
-                disabled={deleteMutation.isPending}
-                aria-label={`${t("projects.deleteRecord")} ${project.name}`}
-              >
-                <Trash2 className="size-4" />
-              </Button>
+              {contexts[index]?.data?.privateDetailAllowed && <Button variant="ghost" size="icon-sm" disabled={deletion.isPending} aria-label={`${t("projects.deleteRecord")} ${project.name}`} onClick={() => {if(window.confirm(t("projects.deleteConfirm"))) deletion.mutate(project.id);}}><Trash2 className="size-4" /></Button>}
             </div>
           ))}
         </div>

@@ -1,3 +1,6 @@
+import {mutateAssignedTask} from '../project-manager/tasks.js';
+import {assertLegacyTaskExecution} from '../project-manager/access.js';
+import { createDevelopmentCommands } from '../development/commands.js';
 import { getAdapterLaunchStatus } from '../adapter-discovery.js';
 import { createHash } from 'node:crypto';
 import { createManagementCommands } from '../project-manager/management.js';
@@ -17,9 +20,9 @@ const id = z.string().min(1).max(128);
 const projectInput = z.object({ projectId: id }).strict();
 export const projectCreateInput = z.object({ name: z.string().trim().min(1).max(200), path: z.string().trim().min(1).max(1024), description: z.string().max(2000).optional(), techStack: z.string().max(2000).optional(), templateId: id.optional() }).strict();
 export const workItemCreateInput = z.object({ projectId: id, title: z.string().min(1).max(256), description: z.string().max(4000).nullable().optional(), priority: z.number().int().min(0).max(100).optional(), acceptanceCriteria: z.array(z.string().max(1000)).max(50).optional(), stageId: id.nullable().optional() }).strict();
-const evidenceRef = z.object({ kind: z.string().min(1).max(64).optional(), label: z.string().min(1).max(256).optional(), status: z.string().min(1).max(64).optional(), ref: z.string().min(1).max(512).optional(), path: z.string().min(1).max(512).optional(), sessionId: id.optional(), feishuChatId: id.optional(), feishuMessageId: id.optional(), createdAt: z.string().min(1).max(64).optional() }).strict();
-const workItemWithEvidence = workItemCreateInput.extend({ status: z.literal('todo').optional(), evidenceRefs: z.array(evidenceRef).max(20).optional() });
-export const workItemUpdateInput = z.object({ projectId: id, workItemId: id, title: z.string().min(1).max(256).optional(), description: z.string().max(4000).nullable().optional(), priority: z.number().int().min(0).max(100).optional(), acceptanceCriteria: z.array(z.string().max(1000)).max(50).optional(), stageId: id.nullable().optional() }).strict();
+const evidenceRef = z.object({ kind: z.string().trim().min(1).max(64).refine(value=>!/^(delivery|verified|verification|integrated)$/i.test(value),'Reserved delivery evidence kind').optional(), label: z.string().min(1).max(256).optional(), status: z.string().min(1).max(64).optional(), ref: z.string().min(1).max(512).optional(), path: z.string().min(1).max(512).optional(), sessionId: id.optional(), feishuChatId: id.optional(), feishuMessageId: id.optional(), createdAt: z.string().min(1).max(64).optional() }).strict();
+const workItemWithEvidence = workItemCreateInput.extend({assigneeId:id.nullable().optional(),reviewerId:id.nullable().optional(), status: z.literal('todo').optional(), evidenceRefs: z.array(evidenceRef).max(20).optional() });
+export const workItemUpdateInput = z.object({expectedRevision:z.number().int().positive().optional(),assigneeId:id.nullable().optional(),reviewerId:id.nullable().optional(), projectId: id, workItemId: id, title: z.string().min(1).max(256).optional(), description: z.string().max(4000).nullable().optional(), priority: z.number().int().min(0).max(100).optional(), acceptanceCriteria: z.array(z.string().max(1000)).max(50).optional(), stageId: id.nullable().optional() }).strict();
 export const taskPrepareInput = z.object({ projectId: id, workItemId: id, aiTool: z.enum(['claude', 'opencode', 'codex', 'kimi']).optional() }).strict();
 export const memoryWriteInput = z.object({ kind: z.enum(['fact', 'preference', 'decision', 'project_note']), scope: z.enum(['global', 'project', 'session']), text: z.string().min(1).max(8192), projectId: id.optional(), conversationId: id.optional(), metadata: z.record(z.unknown()).optional() }).strict();
 function project(ctx: CommandContext, id: string) {
@@ -52,6 +55,8 @@ function sessionResources(ctx: CommandContext, input: unknown) {
 function command<T>(c: Omit<PlatformCommand, 'capability'>): PlatformCommand {
     return { ...c, capability: c.id };
 }
+import { assertNewProjectResource } from '../../db/repositories/managed-project-access.js';
+
 export function createPlatformCommands(): Map<string, PlatformCommand> {
     const commands: PlatformCommand[] = [
         command({ id: 'project.create', effect: 'external', delegatable: true, inputSchema: projectCreateInput,
@@ -67,6 +72,7 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                         throw new Error('Template not found');
                 }
                 const root = canonicalRoot(v.path);
+                assertNewProjectResource(ctx.db,ctx.userId,root);
                 mkdirSync(root, { recursive: true });
                 if (!statSync(root).isDirectory())
                     throw new Error('Project root must be a directory');
@@ -80,25 +86,30 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
         command({ id: 'pm.work_item.create', effect: 'database', delegatable: true, inputSchema: workItemCreateInput, resolve: projectResources,
             execute(ctx, input) {
                 const v = workItemCreateInput.parse(input);
+                assertLegacyTaskExecution(ctx.db,v.projectId);
                 return new ProjectManagerRepository(ctx.db, ctx.userId).createWorkItem(v.projectId, v);
             } }),
         command({ id: 'pm.work_item.create_with_evidence', effect: 'database', delegatable: false, inputSchema: workItemWithEvidence, resolve: projectResources, execute(ctx, input) {
                 const v = workItemWithEvidence.parse(input);
-                return new ProjectManagerRepository(ctx.db, ctx.userId).createWorkItem(v.projectId, v);
+                assertLegacyTaskExecution(ctx.db,v.projectId);
+                return mutateAssignedTask(ctx.db,ctx.userId,v.projectId,undefined,v);
             } }),
         command({ id: 'pm.work_item.update', effect: 'database', delegatable: false, inputSchema: workItemUpdateInput, resolve: itemResources,
             execute(ctx, input) {
                 const v = workItemUpdateInput.parse(input);
-                return new ProjectManagerRepository(ctx.db, ctx.userId).updateWorkItem(v.projectId, v.workItemId, v);
+                assertLegacyTaskExecution(ctx.db,v.projectId);
+                return mutateAssignedTask(ctx.db,ctx.userId,v.projectId,v.workItemId,v);
             } }),
-        command({ id: 'pm.work_item.metadata', effect: 'database', delegatable: true, inputSchema: workItemUpdateInput.omit({ acceptanceCriteria: true, stageId: true }), resolve: itemResources,
+        command({ id: 'pm.work_item.metadata', effect: 'database', delegatable: true, inputSchema: workItemUpdateInput.omit({ acceptanceCriteria: true, stageId: true,assigneeId:true,reviewerId:true }), resolve: itemResources,
             execute(ctx, input) {
-                const v = workItemUpdateInput.omit({ acceptanceCriteria: true, stageId: true }).parse(input);
-                return new ProjectManagerRepository(ctx.db, ctx.userId).updateWorkItem(v.projectId, v.workItemId, v);
+                const v = workItemUpdateInput.omit({ acceptanceCriteria: true, stageId: true,assigneeId:true,reviewerId:true }).parse(input);
+                assertLegacyTaskExecution(ctx.db,v.projectId);
+                return mutateAssignedTask(ctx.db,ctx.userId,v.projectId,v.workItemId,v);
             } }),
         command({ id: 'pm.task.prepare', effect: 'database', delegatable: true, inputSchema: taskPrepareInput, resolve: itemResources,
             async prepare(ctx, input) {
                 const v = taskPrepareInput.parse(input);
+                assertLegacyTaskExecution(ctx.db,v.projectId);
                 const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi']).parse(v.aiTool ?? project(ctx, v.projectId).aiTool);
                 const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
                 if (!status.launchEnabled)
@@ -106,6 +117,7 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
             },
             execute(ctx, input) {
                 const v = taskPrepareInput.parse(input);
+                assertLegacyTaskExecution(ctx.db,v.projectId);
                 const p = project(ctx, v.projectId);
                 const repo = new ProjectManagerRepository(ctx.db, ctx.userId);
                 let item = repo.getWorkItem(v.projectId, v.workItemId)!;
@@ -150,6 +162,6 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 return new AgentMemoryRepository(ctx.db, ctx.userId).create({ kind: v.kind, scope: v.scope, text: v.text, ...(v.projectId ? { projectId: v.projectId } : {}), ...(v.conversationId ? { conversationId: v.conversationId } : {}), ...(v.metadata ? { metadata: v.metadata } : {}) });
             } })
     ];
-    commands.push(...createSessionCommands(), ...createManagementCommands());
+    commands.push(...createSessionCommands(), ...createManagementCommands(), ...createDevelopmentCommands());
     return new Map(commands.map(c => [c.id, c]));
 }

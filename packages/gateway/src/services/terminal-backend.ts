@@ -1,3 +1,4 @@
+import type {ConfirmedStopReceipt,RuntimeGeneration,DaemonIdentity} from './session-server/confirmed-stop.js';
 /**
  * Terminal backend client contract.
  *
@@ -15,6 +16,8 @@ export interface TerminalSessionOptions {
   command: string;
   args: string[];
   env: Record<string, string>;
+  launchNonce?: string | undefined;
+  expectedDaemon?: DaemonIdentity | undefined;
 }
 
 export interface BackendPaneSnapshot {
@@ -24,6 +27,11 @@ export interface BackendPaneSnapshot {
 }
 
 export interface TerminalBackendClient {
+  supportsConfirmedSessionStop?():boolean;
+  confirmedStopAuthority?():Promise<DaemonIdentity|null>;
+  getServerIdentity?():DaemonIdentity|undefined;
+  confirmedStop?(generation:RuntimeGeneration):Promise<ConfirmedStopReceipt|null>;
+  confirmedStopStatus?(generation:RuntimeGeneration):Promise<ConfirmedStopReceipt|null>;
   createSession(options: TerminalSessionOptions): Promise<void>;
   killSession(name: string): Promise<void>;
   capturePane(name: string): Promise<string>;

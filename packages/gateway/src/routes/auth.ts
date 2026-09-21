@@ -1,3 +1,7 @@
+import {TeamInvitations} from '../services/teams/invitations.js';
+import {CollaborationError} from '../services/collaboration/types.js';
+import {revokeUserCredentials} from '../auth/credential-epoch.js';
+import type {RuntimeAuthorizationInvalidator} from '../services/runtime-authorization-invalidation.js';
 import { Router, type Request, type Response } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
@@ -50,6 +54,7 @@ export type RegistrationMode = "open" | "off" | "invite";
 
 export interface AuthRouterOptions {
   db?: Database;
+  invalidator?: RuntimeAuthorizationInvalidator | undefined;
   registrationMode?: RegistrationMode;
   accountRecovery?: LocalAccountRecovery;
 }
@@ -68,6 +73,17 @@ export function createAuthRouter(
   // account-creation for register. Generous enough for test suites and CI.
   const authLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
   const recoveryLimiter = createRateLimiter({ windowMs: 15 * 60_000, maxRequests: 5 });
+
+  const teamToken=z.string().regex(/^[a-zA-Z0-9_-]{43}$/);
+  const invitationError=(res:Response,error:unknown)=>{const typed=error instanceof CollaborationError,invalid=error instanceof z.ZodError;const code=typed?error.code:invalid?'INVALID_INPUT':'TEAM_INVITATION_FAILED';res.status(typed?error.status:invalid?400:409).json({code:1,message:code,details:{code}});};
+  router.post('/team-invitations/inspect',authLimiter,(req,res)=>{try{if(!db)throw new CollaborationError(503,'AUTH_STORAGE_UNAVAILABLE');const b=z.object({token:teamToken}).strict().parse(req.body);res.json({code:0,data:new TeamInvitations(db).inspect(b.token,registrationMode!=='off'&&userRepository.count()>0),message:''});}catch(error){invitationError(res,error);}});
+  router.post('/team-invitations/register',authLimiter,async(req,res)=>{try{
+   if(!db)throw new CollaborationError(503,'AUTH_STORAGE_UNAVAILABLE');if(registrationMode==='off')throw new CollaborationError(403,'REGISTRATION_DISABLED');
+   const b=z.object({token:teamToken,email:z.string().email().max(254),password:z.string().min(8).max(1024)}).strict().parse(req.body),invitations=new TeamInvitations(db);
+   invitations.valid(b.token);const passwordHash=await bcrypt.hash(b.password,10);
+   const joined=invitations.register(b.token,b.email,passwordHash);
+   await respondWithCredentials(res,joined.user,jwtSecret,options,req,201,{team:joined.team,membership:joined.membership});
+  }catch(error){invitationError(res,error);}});
 
   router.post("/register", authLimiter, async (req, res) => {
     const parseResult = registerSchema.safeParse(req.body);
@@ -199,9 +215,8 @@ export function createAuthRouter(
     }
 
     const passwordHash = await bcrypt.hash(parseResult.data.newPassword, 10);
-    userRepository.updatePassword(userId, passwordHash);
-    // A password change invalidates every signed-in device.
-    new AuthSessionRepository(db).deleteAllByUser(userId);
+    db.transaction(()=>{userRepository.updatePassword(userId,passwordHash);revokeUserCredentials(db,userId);})();
+    options.invalidator?.invalidate({scope:"user",userId});
     clearSessionCookie(res);
     res.status(200).json({ code: 0, data: { revokedSessions: true }, message: "" });
   });
@@ -235,8 +250,9 @@ export function createAuthRouter(
 
     db.transaction(() => {
       userRepository.updatePassword(user.id, passwordHash);
-      new AuthSessionRepository(db).deleteAllByUser(user.id);
+      revokeUserCredentials(db,user.id);
     })();
+    options.invalidator?.invalidate({scope:"user",userId:user.id});
     clearSessionCookie(res);
     res.status(200).json({
       code: 0,
@@ -328,7 +344,8 @@ async function respondWithCredentials(
   jwtSecret: string,
   options: AuthRouterOptions,
   req: Request,
-  status: number
+  status: number,
+  extra:Record<string,unknown>={}
 ): Promise<void> {
   let token: string;
   if (options.db) {
@@ -350,7 +367,7 @@ async function respondWithCredentials(
   }
   res.status(status).json({
     code: 0,
-    data: { token, user: toPublicUser(user) },
+    data: { token, user: toPublicUser(user),...extra },
     message: ""
   });
 }

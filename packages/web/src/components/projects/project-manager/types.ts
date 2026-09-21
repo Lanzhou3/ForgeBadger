@@ -18,6 +18,8 @@ export type WorkItemViewMode = "board" | "table" | "queue";
 export type EvidenceReferenceType = "custom" | "file_path" | "terminal_snapshot" | "session";
 
 export interface WorkItemDraft {
+  assigneeId?: string | null;
+  reviewerId?: string | null;
   title: string;
   description: string;
   priority: string;
@@ -34,6 +36,9 @@ export interface EvidenceDraft {
 }
 
 export interface EditWorkItemDraft {
+  expectedRevision?: number;
+  assigneeId?: string | null;
+  reviewerId?: string | null;
   title: string;
   description: string;
   priority: string;

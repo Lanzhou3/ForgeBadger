@@ -58,9 +58,9 @@ describe("Session Server IPC", () => {
 
   it("create session via IPC and verify management", async () => {
     const ipcPath = uniqueIpcPath();
-    const { ipcServer, client } = await startPair(ipcPath, cwd);
+    const { sessionServer, ipcServer, client } = await startPair(ipcPath, cwd);
     try {
-      const plan = shellPlan(cwd, "echo ipc && exit 0");
+      const plan = {cwd,command:process.execPath,args:['-e',"console.log('ipc');process.stdin.once('data',()=>process.exit(0));setTimeout(()=>process.exit(1),15000);"],env:{}};
 
       await client.createSession({
         name: "ipc-s1", cwd: plan.cwd, command: plan.command, args: plan.args, env: plan.env
@@ -74,9 +74,11 @@ describe("Session Server IPC", () => {
 
       const scrollback = await client.capturePane("ipc-s1");
       assert.strictEqual(typeof scrollback, "string");
+      await client.sendInput("ipc-s1", "finish\n");
     } finally {
       await client.disconnect();
       await ipcServer.stop();
+      await sessionServer.destroy();
     }
   });
 

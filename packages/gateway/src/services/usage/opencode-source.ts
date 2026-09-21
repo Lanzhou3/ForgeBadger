@@ -112,8 +112,8 @@ function rowToRecord(row: {
   if (input <= 0 && output <= 0) return null;
   const cache = isRecord(tokens.cache) ? tokens.cache : {};
   const projectPath =
-    typeof row.directory === "string" && row.directory.length > 0
-      ? path.resolve(row.directory)
+    typeof row.directory === "string" && path.isAbsolute(row.directory)
+      ? row.directory
       : "";
 
   return {

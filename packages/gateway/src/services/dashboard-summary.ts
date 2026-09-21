@@ -9,6 +9,7 @@ export interface DashboardStats {
   models: number;
   apiKeys: number;
   templates: number;
+  acceptedDeliveries: number;
 }
 
 export interface DashboardHealthItem {
@@ -48,7 +49,8 @@ export function getDashboardResourceCounts(db: Database, userId: string): Dashbo
           ))
       ) AS skills,
       (SELECT COUNT(*) FROM model_profiles WHERE user_id = @userId) AS models,
-      (SELECT COUNT(*) FROM api_keys WHERE user_id = @userId) AS apiKeys
+      (SELECT COUNT(*) FROM api_keys WHERE user_id = @userId) AS apiKeys,
+      (SELECT COUNT(*) FROM delivery_runs WHERE (user_id = @userId OR actor_id = @userId) AND state = 'integrated') AS acceptedDeliveries
   `).get({ userId }) as DashboardResourceCounts;
   return row;
 }
@@ -73,14 +75,14 @@ export function getDashboardSummary(
         message: stats.projects > 0 ? "Projects can use available templates" : "Create or import a project"
       },
       models: {
-        healthy: stats.models > 0,
+        healthy: true,
         count: stats.models,
-        message: stats.models > 0 ? "Models are configured" : "Add a model before launching stored sessions"
+        message: stats.models > 0 ? "Models are configured" : "Optional: CLI sessions use models configured in the host environment"
       },
       credentials: {
-        healthy: stats.apiKeys > 0,
+        healthy: true,
         count: stats.apiKeys,
-        message: stats.apiKeys > 0 ? "Encrypted API keys are available" : "Add an API key for stored credentials"
+        message: stats.apiKeys > 0 ? "Encrypted API keys are available" : "Optional: CLI sessions use host credentials; verify login in the CLI"
       },
       sessions: {
         healthy: stats.sessions > 0,

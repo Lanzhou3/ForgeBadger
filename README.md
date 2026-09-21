@@ -114,8 +114,8 @@ Key rules:
 - The embedded Session Server is the persistence layer for terminal sessions.
 - Terminal history is recovered from the Session Server's rendered screen, not
   stored in SQLite.
-- API keys are decrypted only in Gateway memory and injected into CLI sessions
-  through the session launch environment.
+- CLI sessions use host-environment credentials. Applying a Model Center provider
+  explicitly writes the selected CLI global configuration; session launch injects no provider secrets.
 
 ## Requirements
 
@@ -239,3 +239,33 @@ results.
 ## License
 
 ForgeBadger is released under the [MIT License](LICENSE).
+
+### Backup and restore
+
+```bash
+forgebadger backup --output /private/path/new-backup
+# Stop the Gateway and Web processes before restoring.
+forgebadger restore --from /private/path/new-backup --to /private/path/new-state
+FORGEBADGER_STATE_DIR=/private/path/new-state forgebadger start
+```
+
+Backup uses SQLite's online backup API, including committed WAL data. It stores the platform database and effective runtime `config.json`, **including the master encryption key and JWT secret**. Keep the backup private: directories are mode `0700` and files `0600`. Source selection follows `FORGEBADGER_STATE_DIR`, the saved runtime config and `FORGEBADGER_DB_PATH`; installations without a saved config must supply their original `FORGEBADGER_MASTER_KEY` and `FORGEBADGER_JWT_SECRET` in the environment. Keys are never printed or included in the manifest.
+
+Restore verifies file hashes, schema/migration compatibility, table counts, SQLite integrity, foreign keys and encrypted database contents. It requires a new destination, refuses symlink inputs and existing destinations, and checks that the recorded Gateway/Web endpoints are stopped. It publishes staged state atomically, preserves the master key for decryption, rotates the JWT secret and revokes restored browser authentication sessions. Clear an old `FORGEBADGER_DB_PATH` override before starting the restored instance. Unknown encryption formats or incompatible/future migrations are rejected rather than silently restored.
+
+This backup does not contain project repositories, managed worktrees, running terminals, terminal history, host CLI login/configuration, filesystem-side CLI config rollback files or the account-recovery key. Restore those resources separately as needed; restored session metadata does not recreate processes. JWT rotation invalidates legacy JWTs, and restored opaque browser sessions are deleted; sign in again after restore. Source and backup authentication records remain unchanged. The backup is sensitive local state, not an encrypted archive.
+
+
+## Personal and small-team delivery
+
+Open **Workspaces** to turn a project task into an isolated Git worktree, private CLI
+session, commit-bound verification receipt, review and explicit fast-forward delivery.
+Owners can add existing local users as developers, reviewers or viewers. Shared
+screens expose task evidence and diffs; terminals and host credentials stay private.
+This mode is for a trusted local/private host. It does not sandbox untrusted code or
+provide hosted multi-tenant execution. Verification currently supports macOS/Linux;
+native Windows process-tree containment remains an open release gate.
+
+See [the workflow and recovery guide](docs/PERSONAL-TEAM-WORKFLOWS.md) for first delivery,
+roles, concurrency, backup scope and recovery limits. No workflow automatically starts
+an AI task, pushes a branch, opens a pull request, or deploys an application.

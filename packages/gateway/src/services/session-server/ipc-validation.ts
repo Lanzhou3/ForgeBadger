@@ -4,6 +4,7 @@ import type { ManagementRequest, IoStreamRequest } from './ipc-protocol.js';
 const text = z.string().min(1).max(4096);
 const session = { sessionId: text };
 const request = { id: text };
+const daemon=z.object({pid:z.number().int().positive(),startedAt:z.string().datetime()}).strict();
 const client = { ...session, clientId: text };
 const dimensions = { cols: z.number().int().min(1).max(500), rows: z.number().int().min(1).max(200) };
 const launchPlan = z.object({
@@ -12,7 +13,8 @@ const launchPlan = z.object({
   credentialMode: z.enum(['stored_encrypted_key', 'host_environment'])
 });
 const schema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('create_session'), ...request, ...session, userId: z.string(), attachToken: z.string(), launchPlan }),
+  z.object({ type: z.literal('create_session'), ...request, ...session, userId: z.string(), attachToken: z.string(), launchPlan,launchNonce:z.string().uuid().optional(),expectedDaemon:daemon.optional() }),
+  ...(['confirmed_stop_session','confirmed_stop_status'] as const).map(type=>z.object({type:z.literal(type),...request,...session,launchNonce:z.string().uuid(),expectedDaemon:daemon})),
   ...(['kill_session', 'has_session', 'capture_pane', 'show_environment', 'inspect_pane', 'press_enter'] as const)
     .map(type => z.object({ type: z.literal(type), ...request, ...session })),
   ...(['list_sessions', 'shutdown_server'] as const).map(type => z.object({ type: z.literal(type), ...request })),

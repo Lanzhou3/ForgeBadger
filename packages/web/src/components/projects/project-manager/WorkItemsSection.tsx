@@ -1,4 +1,5 @@
 "use client";
+import { useTaskAuthority } from "./TaskAuthority";
 
 import { useMemo, useState, type ReactNode } from "react";
 import {
@@ -171,6 +172,8 @@ export function ProjectManagerWorkItemsSection({
   workItems: ProjectManagerWorkItem[];
   t: Translate;
 }) {
+  const { canEdit, legacySessions } = useTaskAuthority();
+
   const [searchQuery, setSearchQuery] = useState("");
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const visibleWorkItems = useMemo(
@@ -265,7 +268,7 @@ export function ProjectManagerWorkItemsSection({
           <Button
             size="sm"
             className="bg-brand text-brand-foreground hover:bg-brand/90"
-            onClick={onCreate}
+            disabled={!canEdit} onClick={onCreate}
           >
             <Plus className="mr-2 size-4" />
             {t("projects.projectManagerCreateWorkItem")}
@@ -363,7 +366,7 @@ export function ProjectManagerWorkItemsSection({
           <Select
             value={batchTargetStatus || undefined}
             onValueChange={(value) => onBatchTargetStatusChange(value as ProjectManagerWorkItemStatus)}
-            disabled={batchStatusPending || batchTargetOptions.length === 0}
+            disabled={!canEdit || batchStatusPending || batchTargetOptions.length === 0}
           >
             <SelectTrigger
               size="sm"
@@ -387,7 +390,7 @@ export function ProjectManagerWorkItemsSection({
             size="sm"
             className="bg-brand text-brand-foreground hover:bg-brand/90"
             onClick={onBatchStatusSubmit}
-            disabled={batchStatusPending || !batchTargetStatus}
+            disabled={!canEdit || batchStatusPending || !batchTargetStatus}
           >
             {t("projects.projectManagerMoveSelected")}
           </Button>
@@ -609,13 +612,15 @@ function ProjectManagerBoardCard({
   t: Translate;
   taskPacket: ProjectManagerTaskPacket | null;
 }) {
+  const { canEdit, legacySessions } = useTaskAuthority();
+
   const level = priorityLevel(item.priority);
   const {
     attributes: dragAttributes,
     isDragging,
     listeners: dragListeners,
     setNodeRef: setDragNodeRef,
-  } = useDraggable({ id: item.id, disabled: statusMutationPending });
+  } = useDraggable({ id: item.id, disabled: statusMutationPending || !canEdit });
 
   return (
     <article
@@ -634,7 +639,7 @@ function ProjectManagerBoardCard({
       <div className="flex items-start gap-2">
         <Checkbox
           className="mt-1"
-          checked={selected}
+          disabled={!canEdit} checked={selected}
           aria-label={t("projects.projectManagerSelectWorkItem")}
           onCheckedChange={(checked) => onToggleSelection(item, checked === true)}
         />
@@ -670,11 +675,11 @@ function ProjectManagerBoardCard({
           <Eye className="mr-1 size-3" />
           {t("projects.projectManagerViewDetails")}
         </Button>
-        <Button size="xs" variant="outline" onClick={() => onEdit(item)}>
+        <Button size="xs" variant="outline" disabled={!canEdit} onClick={() => onEdit(item)}>
           <Pencil className="mr-1 size-3" />
           {t("projects.projectManagerEditWorkItem")}
         </Button>
-        <Button size="xs" variant="destructive" onClick={() => onDelete(item)}>
+        <Button size="xs" variant="destructive" disabled={!canEdit} onClick={() => onDelete(item)}>
           <Trash2 className="mr-1 size-3" />
           {t("projects.projectManagerDeleteWorkItem")}
         </Button>
@@ -1008,6 +1013,9 @@ function WorkItemSessionActions({
   taskPacket: ProjectManagerTaskPacket | null;
   t: Translate;
 }) {
+  const { canEdit, legacySessions } = useTaskAuthority();
+
+  if (!legacySessions) return null;
   if (taskPacket?.sessionLink) {
     return (
       <a
@@ -1049,6 +1057,8 @@ export function ProjectManagerStatusActions({
   size?: "xs" | "sm";
   t: Translate;
 }) {
+  const { canEdit, legacySessions } = useTaskAuthority();
+
   const nextStatuses = PROJECT_MANAGER_STATUS_TRANSITIONS[item.status];
   if (nextStatuses.length === 0) {
     return <span className="inline-flex h-9 items-center text-xs text-muted-foreground">-</span>;
@@ -1057,7 +1067,7 @@ export function ProjectManagerStatusActions({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size={size} variant="outline" disabled={disabled}>
+        <Button size={size} variant="outline" disabled={disabled || !canEdit}>
           <ArrowRightCircle className={size === "xs" ? "mr-1 size-3" : "mr-2 size-4"} />
           {t("projects.projectManagerChangeStatus")}
         </Button>

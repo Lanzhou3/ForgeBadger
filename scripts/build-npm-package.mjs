@@ -55,6 +55,8 @@ try {
   await copyReadmeForNpm(path.join(workspaceRoot, "docs/README.zh-CN.md"), path.join(cliDocs, "README.zh-CN.md"));
   await copyReadmeForNpm(path.join(workspaceRoot, "docs/README.zh-TW.md"), path.join(cliDocs, "README.zh-TW.md"));
 
+  await cp(path.join(workspaceRoot, "docs/PERSONAL-TEAM-WORKFLOWS.md"), path.join(cliDocs, "PERSONAL-TEAM-WORKFLOWS.md"));
+
   run("node", ["scripts/verify-npm-package.mjs"]);
 } finally {
   await restoreWebNextEnv();

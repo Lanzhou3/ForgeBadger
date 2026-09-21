@@ -275,7 +275,7 @@ export function attachTerminalWebSocket(options: TerminalWebSocketOptions): void
     }
 
     const attachToken = extractWsAttachToken(request.headers, TERMINAL_WS_AUTH_PROTOCOLS) ?? "";
-    const terminalAccessRequest: TerminalAccessRequest = { authTokenUserId: userId, attachToken };
+    const terminalAccessRequest: TerminalAccessRequest = { authTokenUserId: userId, attachToken, credentialsValid: () => resolveTokenUserId(options.db,authToken,options.jwtSecret) === userId };
     const previousSocket = registry.getSocket(sessionId);
 
     wss.handleUpgrade(request, socket, head, (ws) => {
@@ -384,7 +384,7 @@ async function handleTerminalSocket(
     userId,
     sessionId,
     projectId,
-    revalidate: () => validateTerminalRuntimeAuthorization(db, userId, sessionId),
+    revalidate: () => access.credentialsValid() && validateTerminalRuntimeAuthorization(db, userId, sessionId),
     onInvalidated: revokeRuntime
   });
   if (!authorizationLease.isAuthorized()) return;
@@ -549,7 +549,7 @@ export function formatTerminalClientError(error: unknown): string {
 }
 
 interface TerminalAccessSession { userId: string; attachToken: string }
-interface TerminalAccessRequest { authTokenUserId: string; attachToken: string }
+interface TerminalAccessRequest { authTokenUserId: string; attachToken: string; credentialsValid():boolean }
 
 export function validateTerminalAccess(session: TerminalAccessSession, request: { userId: string; attachToken: string }): boolean {
   return session.userId === request.userId && session.attachToken.length > 0 && request.attachToken.length > 0 && session.attachToken === request.attachToken;

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-
 import { buildActivationReadiness } from "./activation-readiness";
 
 const readyRuntime = {
@@ -8,7 +7,6 @@ const readyRuntime = {
   supported: true,
   message: "Session server ready",
 };
-
 const readyAdapter = {
   id: "claude",
   label: "Claude Code",
@@ -17,86 +15,68 @@ const readyAdapter = {
   launchEnabled: true,
   runtimeModes: ["terminal"],
 };
+const prepared = {
+  terminalRuntime: readyRuntime,
+  adapters: [readyAdapter],
+  projectCount: 1,
+  sessionCount: 0,
+  firstProjectId: "project-1",
+};
 
 describe("buildActivationReadiness", () => {
-  it("prioritizes terminal runtime blockers before adapter and project setup", () => {
+  it("prioritizes terminal runtime blockers before development", () => {
     const readiness = buildActivationReadiness({
+      ...prepared,
       terminalRuntime: {
         ...readyRuntime,
         mode: "unavailable",
         supported: false,
-        message: "Session server unavailable",
       },
-      adapters: [readyAdapter],
-      modelsHealthy: true,
       projectCount: 0,
-      sessionCount: 0,
     });
-
     expect(readiness.complete).toBe(false);
     expect(readiness.currentStepId).toBe("runtime");
     expect(readiness.primaryAction).toEqual({
       href: "/settings",
       labelKey: "dashboard.activationOpenSettings",
     });
-    expect(readiness.steps.map((step) => [step.id, step.done])).toEqual([
-      ["runtime", false],
-      ["adapter", true],
-      ["model", true],
-      ["project", false],
-      ["session", false],
-    ]);
   });
-
-  it("surfaces missing launchable CLI adapters before model and project setup", () => {
+  it("surfaces missing launchable CLI adapters before project setup", () => {
     const readiness = buildActivationReadiness({
-      terminalRuntime: readyRuntime,
+      ...prepared,
       adapters: [{ ...readyAdapter, available: false }],
-      modelsHealthy: true,
-      projectCount: 1,
-      sessionCount: 0,
-      firstProjectId: "project-1",
     });
-
-    expect(readiness.complete).toBe(false);
     expect(readiness.currentStepId).toBe("adapter");
-    expect(readiness.primaryAction).toEqual({
-      href: "/settings",
-      labelKey: "dashboard.activationOpenSettings",
-    });
-    expect(readiness.steps.find((step) => step.id === "adapter")).toMatchObject({
-      done: false,
-      detailKey: "dashboard.activationAdapterMissing",
-    });
+    expect(readiness.steps.find((step) => step.id === "adapter")).toMatchObject(
+      { done: false, detailKey: "dashboard.activationAdapterMissing" },
+    );
   });
-
-  it("does not block host-environment sessions when no custom model exists", () => {
-    const readiness = buildActivationReadiness({
-      terminalRuntime: readyRuntime,
-      adapters: [readyAdapter],
-      modelsHealthy: false,
-      projectCount: 1,
-      sessionCount: 0,
-      firstProjectId: "project-1",
-    });
-
-    expect(readiness.currentStepId).toBe("session");
-    expect(readiness.primaryAction).toEqual({
-      href: "/projects/project-1",
-      labelKey: "dashboard.activationStartSession",
-    });
-    expect(readiness.steps.find((step) => step.id === "model")).toMatchObject({ done: true });
+  it("does not block native host CLI use when Model Center fails or is loading", () => {
+    for (const models of [
+      { modelsError: true },
+      { modelsLoading: true },
+      { modelsHealthy: false },
+    ]) {
+      const readiness = buildActivationReadiness({ ...prepared, ...models });
+      expect(readiness.currentStepId).toBe("delivery");
+      expect(readiness.steps.find((step) => step.id === "model")).toMatchObject(
+        {
+          done: false,
+          optional: true,
+          detailKey: "dashboard.activationModelReady",
+        },
+      );
+      expect(readiness.primaryAction).toEqual({
+        href: "/projects",
+        labelKey: "dashboard.activationStartDelivery",
+      });
+    }
   });
-
-  it("routes prepared users without a project to create or import a project", () => {
+  it("routes users without a project to create or import one", () => {
     const readiness = buildActivationReadiness({
-      terminalRuntime: readyRuntime,
-      adapters: [readyAdapter],
-      modelsHealthy: true,
+      ...prepared,
       projectCount: 0,
-      sessionCount: 0,
     });
-
     expect(readiness.currentStepId).toBe("project");
     expect(readiness.primaryAction).toEqual({
       href: "/projects/new",
@@ -106,46 +86,65 @@ describe("buildActivationReadiness", () => {
       { href: "/projects/import", labelKey: "projects.import" },
     ]);
   });
-
-  it("routes prepared users with a project but no session to the first project launch path", () => {
-    const readiness = buildActivationReadiness({
-      terminalRuntime: readyRuntime,
-      adapters: [readyAdapter],
-      modelsHealthy: true,
-      projectCount: 1,
-      sessionCount: 0,
-      firstProjectId: "project-1",
-    });
-
-    expect(readiness.currentStepId).toBe("session");
-    expect(readiness.primaryAction).toEqual({
-      href: "/projects/project-1",
-      labelKey: "dashboard.activationStartSession",
-    });
+  it("starts the task delivery flow without requiring a separate private session first", () => {
+    const readiness = buildActivationReadiness(prepared);
+    expect(readiness.currentStepId).toBe("delivery");
+    expect(readiness.steps.find((step) => step.id === "session")).toMatchObject(
+      {
+        optional: true,
+        done: false,
+        action: { href: "/projects/project-1?tab=project-manager" },
+      },
+    );
     expect(readiness.steps.map((step) => step.id)).toEqual([
       "runtime",
       "adapter",
       "model",
       "project",
       "session",
+      "delivery",
     ]);
   });
-
-  it("marks activation complete and links to sessions once a local AI CLI session exists", () => {
+  it("never equates an existing session with a completed first development", () => {
     const readiness = buildActivationReadiness({
-      terminalRuntime: readyRuntime,
-      adapters: [readyAdapter],
-      modelsHealthy: true,
-      projectCount: 1,
-      sessionCount: 1,
-      firstProjectId: "project-1",
+      ...prepared,
+      sessionCount: 10,
+      acceptedDeliveries: 0,
     });
-
+    expect(readiness.complete).toBe(false);
+    expect(readiness.currentStepId).toBe("delivery");
+    expect(
+      readiness.steps.find((step) => step.id === "delivery"),
+    ).toMatchObject({
+      done: false,
+      detailKey: "dashboard.activationDeliveryMissing",
+    });
+  });
+  it("requires explicit server evidence rather than an absent summary field", () => {
+    const readiness = buildActivationReadiness({
+      ...prepared,
+      sessionCount: 1,
+    });
+    expect(readiness.complete).toBe(false);
+  });
+  it("marks first delivery complete only after server-reported safe integration", () => {
+    const readiness = buildActivationReadiness({
+      ...prepared,
+      sessionCount: 1,
+      acceptedDeliveries: 1,
+      modelsError: true,
+    });
     expect(readiness.complete).toBe(true);
     expect(readiness.currentStepId).toBeNull();
+    expect(
+      readiness.steps.find((step) => step.id === "delivery"),
+    ).toMatchObject({
+      done: true,
+      detailKey: "dashboard.activationDeliveryReady",
+    });
     expect(readiness.primaryAction).toEqual({
-      href: "/sessions",
-      labelKey: "dashboard.activationContinueSession",
+      href: "/projects",
+      labelKey: "dashboard.activationContinueDelivery",
     });
   });
 });

@@ -1,3 +1,4 @@
+import { developmentPlanSchema } from '../development/contracts.js';
 /**
  * Copilot security policy engine — Codex-style "auto" security model.
  *
@@ -94,6 +95,11 @@ const DESCRIPTIVE_FIELDS: Record<string, readonly string[]> = {
 };
 
 function executableInput(toolName: string, input: unknown): unknown {
+  if(toolName==='submit_development_task') {
+    const parsed=developmentPlanSchema.safeParse(input);
+    if(!parsed.success)return input;
+    return {...parsed.data,changes:parsed.data.changes.map(({content: _untrustedCode,...rest})=>rest)};
+  }
   const fields = DESCRIPTIVE_FIELDS[toolName];
   if (!fields || !input || typeof input !== 'object' || Array.isArray(input)) return input;
   return Object.fromEntries(Object.entries(input).map(([key, value]) => {

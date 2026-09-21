@@ -4,13 +4,13 @@ import { assertResolvedPublicHttpsEndpoint } from '../network-policy.js';
 
 const LIMIT = 1024 * 1024;
 /** No redirects or ambient proxy/auth; actual TLS socket uses only validated DNS addresses. */
-export async function publicFetch(input: string | URL | Request, init: RequestInit = {}, beforeSend?: () => void): Promise<Response> {
+export async function publicFetch(input: string | URL | Request, init: RequestInit = {}, beforeSend?: () => void, options: { allowQuery?: boolean } = {}): Promise<Response> {
   const url = new URL(input instanceof Request ? input.url : input.toString());
   let addresses: Awaited<ReturnType<typeof resolveAll>> = [];
   await assertResolvedPublicHttpsEndpoint(url.href, async hostname => {
     addresses = await resolveBounded(hostname); return addresses;
   });
-  if (url.hash || url.search) throw new Error('Endpoint query and fragment are unsupported');
+  if (url.hash || (url.search && !options.allowQuery)) throw new Error('Endpoint query and fragment are unsupported');
   const method = init.method ?? (input instanceof Request ? input.method : 'GET');
   const headers = new Headers(input instanceof Request ? input.headers : undefined);
   new Headers(init.headers).forEach((value, key) => headers.set(key, value));

@@ -7,6 +7,8 @@ export function grantedToolVisible(name: string) {
     return !GLOBAL_TOOLS.has(name);
 }
 export function checkAgentScope(context: AgentToolContext, name: string, raw: unknown) {
+    if (['takeover_session','submit_development_task','cancel_development_task','accept_development_task'].includes(name) && (context.grantId || context.source !== 'user'))
+        throw new Error('This operation requires direct interactive owner authority');
     const grantId = context.grantId as string | undefined;
     if (!grantId)
         return;

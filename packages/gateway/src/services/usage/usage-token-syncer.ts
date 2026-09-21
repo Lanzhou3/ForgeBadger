@@ -7,6 +7,7 @@
  */
 
 import type { Database } from "../../db/types.js";
+import { UsageOwnershipRepository } from "../../db/repositories/usage-ownership-repository.js";
 import { TokenUsageRepository } from "../../db/repositories/token-usage-repository.js";
 import { ClaudeCodeSource } from "./claude-code-source.js";
 import { CodexSource } from "./codex-source.js";
@@ -18,6 +19,7 @@ export interface UsageSyncResult {
   adapter: UsageTokenAdapter;
   scanned: number;
   inserted: number;
+  excluded: number;
 }
 
 export interface UsageSyncSummary {
@@ -32,15 +34,19 @@ export function createUsageTokenSyncer(db: Database): {
 } {
   const syncForUser = (userId: string, source: UsageSource): UsageSyncResult => {
     const repo = new TokenUsageRepository(db, userId);
-    const lastWatermark = repo.getCursor(source.adapter);
-    const result = source.scan(lastWatermark || null);
-    repo.upsertRecords(result.records);
-    repo.setCursor(source.adapter, result.nextWatermark);
-    return {
-      adapter: source.adapter,
-      scanned: result.records.length,
-      inserted: result.records.length
-    };
+    const ownership = new UsageOwnershipRepository(db, userId).snapshot();
+    const lastWatermark = sourceCursor(repo.getCursor(source.adapter), ownership.fingerprint);
+    const result = source.scan(lastWatermark);
+    return db.transaction(() => {
+      // Recheck after source I/O and commit the write + cursor as one unit.
+      const current = new UsageOwnershipRepository(db, userId).snapshot();
+      if (current.fingerprint !== ownership.fingerprint) throw new Error("Usage ownership changed during scan; retry sync");
+      const roots = new Set(current.roots);
+      const records = result.records.filter((record) => record.adapter === source.adapter && roots.has(record.projectPath));
+      repo.upsertRecords(records);
+      repo.setCursor(source.adapter, JSON.stringify({ version: 1, ownership: current.fingerprint, source: result.nextWatermark }));
+      return { adapter: source.adapter, scanned: result.records.length, inserted: records.length, excluded: result.records.length - records.length };
+    })();
   };
 
   return {
@@ -58,4 +64,17 @@ export function createUsageTokenSyncer(db: Database): {
       };
     }
   };
+}
+
+/** Older or changed-ownership cursors trigger a filtered, idempotent rebuild. */
+function sourceCursor(value: string, fingerprint: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object") return null;
+    const cursor = parsed as Record<string, unknown>;
+    return cursor.version === 1 && cursor.ownership === fingerprint && typeof cursor.source === "string"
+      ? cursor.source : null;
+  } catch {
+    return null;
+  }
 }

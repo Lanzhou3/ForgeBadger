@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { randomUUID } from "node:crypto";
 
+import { UsageOwnershipRepository } from "./usage-ownership-repository.js";
 import { tokenUsageRecords, usageSyncCursors } from "../schema.js";
 import type { Database } from "../types.js";
 import type { TokenUsageRecord } from "../../services/usage/usage-source.js";
@@ -43,7 +44,7 @@ export class TokenUsageRepository {
 
   /** Persist scanned records (idempotent via unique (user_id, adapter, request_id)). */
   upsertRecords(records: TokenUsageRecord[]): void {
-    const BATCH = 200; // SQLite caps bound variables (~999); 200 rows × 12 cols fits safely.
+    const BATCH = 200; // Bound statement size for the bundled SQLite runtime.
     const build = (records: TokenUsageRecord[]) =>
       this.drizzle
         .insert(tokenUsageRecords)
@@ -67,6 +68,9 @@ export class TokenUsageRepository {
         .onConflictDoUpdate({
           target: [tokenUsageRecords.userId, tokenUsageRecords.adapter, tokenUsageRecords.requestId],
           set: {
+            projectPath: sql`excluded.project_path`,
+            sessionId: sql`excluded.session_id`,
+            modelId: sql`excluded.model_id`,
             occurredAt: sql`excluded.occurred_at`,
             inputTokens: sql`excluded.input_tokens`,
             outputTokens: sql`excluded.output_tokens`,
@@ -109,7 +113,8 @@ export class TokenUsageRepository {
   getSummary(from?: Date, to?: Date): TokenUsageSummary {
     const fromSeconds = from ? Math.floor(from.getTime() / 1000) : null;
     const toSeconds = to ? Math.floor(to.getTime() / 1000) : null;
-    const { whereSql, params } = buildRangeFilter(this.userId, fromSeconds, toSeconds);
+    const { roots } = new UsageOwnershipRepository(this.db, this.userId).snapshot();
+    const { whereSql, params } = buildRangeFilter(this.userId, roots, fromSeconds, toSeconds);
     const rows = this.db.prepare(`
       SELECT
         adapter,
@@ -167,7 +172,8 @@ export class TokenUsageRepository {
   }> {
     const fromSeconds = options.from ? Math.floor(options.from.getTime() / 1000) : null;
     const toSeconds = options.to ? Math.floor(options.to.getTime() / 1000) : null;
-    const { whereSql, params } = buildRangeFilter(this.userId, fromSeconds, toSeconds, options.projectPath);
+    const { roots } = new UsageOwnershipRepository(this.db, this.userId).snapshot();
+    const { whereSql, params } = buildRangeFilter(this.userId, roots, fromSeconds, toSeconds, options.projectPath);
     const groupColumn = options.groupBy === "project" ? "project_path" : "adapter";
 
     return this.db.prepare(`
@@ -246,12 +252,13 @@ function sortBuckets(map: Map<string, TokenUsageBucket>): TokenUsageBucket[] {
 
 function buildRangeFilter(
   userId: string,
+  roots: string[],
   fromSeconds: number | null,
   toSeconds: number | null,
   projectPath?: string
 ): { whereSql: string; params: Array<string | number> } {
-  const clauses = ["user_id = ?"];
-  const params: Array<string | number> = [userId];
+  const clauses = ["user_id = ?", "project_path IN (SELECT value FROM json_each(?))"];
+  const params: Array<string | number> = [userId, JSON.stringify(roots)];
   if (fromSeconds !== null) {
     clauses.push("occurred_at >= ?");
     params.push(fromSeconds);

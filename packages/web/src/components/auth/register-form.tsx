@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm, type UseFormRegisterReturn } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import {safeRedirectTarget} from "@/lib/auth-navigation";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,7 @@ import type { TranslationKey } from "@/lib/i18n";
 
 interface FormData {
   email: string;
+  inviteCode?: string;
   recoveryKey: string;
   password: string;
   confirmPassword: string;
@@ -24,11 +26,13 @@ interface FormData {
 
 export function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { register: registerAuth } = useAuth();
   const { t } = useLanguage();
   const [isHydrated, setIsHydrated] = useState(false);
   const schema = useMemo(() => z.object({
     email: z.string().email(t("auth.emailInvalid")),
+    inviteCode: z.string().trim().optional(),
     recoveryKey: z.string().min(1, t("auth.recoveryKeyRequired")),
     password: z.string().min(8, t("auth.passwordMinLength")),
     confirmPassword: z.string().min(1, t("auth.registrationConfirmPasswordRequired"))
@@ -52,10 +56,11 @@ export function RegisterForm() {
       const result = await registerAuth({
         email: data.email,
         password: data.password,
-        recoveryKey: data.recoveryKey.trim()
+        recoveryKey: data.recoveryKey.trim(),
+        ...(data.inviteCode?.trim() ? {inviteCode:data.inviteCode.trim()}: {})
       });
       if (result.code === 0) {
-        router.replace("/");
+        router.replace(safeRedirectTarget(searchParams.get("next")));
         return;
       }
       setError("root", { message: t("auth.registrationFailed") });
@@ -90,6 +95,7 @@ export function RegisterForm() {
         error={errors.recoveryKey?.message}
         registration={register("recoveryKey")}
       />
+      <RegisterField id="inviteCode" label={t("teams.inviteCode")} type="text" autoComplete="off" registration={register("inviteCode")} />
       <RegisterField
         id="password"
         label={t("auth.password")}
@@ -120,7 +126,7 @@ export function RegisterForm() {
       </Button>
       <p className="text-xs text-muted-foreground">
         {t("auth.alreadyHaveAccount")} {" "}
-        <Link href="/login" className="font-medium text-brand underline-offset-4 hover:underline">
+        <Link href={`/login?next=${encodeURIComponent(safeRedirectTarget(searchParams.get("next")))}`} className="font-medium text-brand underline-offset-4 hover:underline">
           {t("auth.signIn")}
         </Link>
       </p>
@@ -131,7 +137,7 @@ export function RegisterForm() {
 interface RegisterFieldProps {
   id: string;
   label: string;
-  type: "email" | "password";
+  type: "email" | "password" | "text";
   autoComplete: string;
   error?: string;
   registration: UseFormRegisterReturn;

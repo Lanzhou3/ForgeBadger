@@ -1,3 +1,4 @@
+import {Suspense} from "react";
 import { RegisterForm } from "@/components/auth/register-form";
 import { AuthShell } from "@/components/auth/auth-shell";
 
@@ -10,7 +11,7 @@ export default function RegisterPage() {
       descriptionKey="auth.registerDescription"
       showLanguageSwitcher
     >
-      <RegisterForm />
+      <Suspense><RegisterForm /></Suspense>
     </AuthShell>
   );
 }

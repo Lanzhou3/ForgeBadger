@@ -1,3 +1,6 @@
+import { createDevelopmentTools } from './development.js';
+import { createDiscoveryTools } from './discovery.js';
+import { createPlatformCoverageTools } from "./platform-coverage.js";
 import { createToolResultTools } from "./tool-results.js";
 import { createPlatformManagementTools } from "./platform-management.js";
 /**
@@ -18,6 +21,9 @@ import { createGraphTools } from "./graph.js";
 
 export function createPlatformTools(): AgentTool[] {
   return [
+    ...createDiscoveryTools(),
+    ...createDevelopmentTools(),
+    ...createPlatformCoverageTools(),
     ...createToolResultTools(),
     ...createPlatformManagementTools(),
     ...createSkillTools(),
