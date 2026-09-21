@@ -29,9 +29,9 @@ it('populated0086 upgrade preserves legacy intent evidence and queued identity a
   db.close();fs.copyFileSync(path.join(dir,'after.db'),filename);db=new Database(filename);assert.equal(new DevelopmentTaskRepository(db,user.id).get(result.taskId)?.status,'queued');
  }finally{if(db.open)db.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
-it('0087 team records remain unchanged across the forward0088 migration',()=>{
+it('0089 team records remain unchanged across the forward 0090 migration',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'development-team-migration-')),legacy=path.join(dir,'legacy'),root=new URL('../src/db/migrations/',import.meta.url).pathname;
- fs.mkdirSync(path.join(legacy,'meta'),{recursive:true});const journal=JSON.parse(fs.readFileSync(path.join(root,'meta/_journal.json'),'utf8'));journal.entries=journal.entries.filter((e:{tag:string})=>Number(e.tag.slice(0,4))<=87);
+ fs.mkdirSync(path.join(legacy,'meta'),{recursive:true});const journal=JSON.parse(fs.readFileSync(path.join(root,'meta/_journal.json'),'utf8'));journal.entries=journal.entries.filter((e:{tag:string})=>Number(e.tag.slice(0,4))<=89);
  fs.writeFileSync(path.join(legacy,'meta/_journal.json'),JSON.stringify(journal));for(const e of journal.entries)fs.copyFileSync(path.join(root,e.tag+'.sql'),path.join(legacy,e.tag+'.sql'));
  const db=new Database(path.join(dir,'test.db'));try{
   db.pragma('foreign_keys=ON');migrate(drizzle(db),{migrationsFolder:legacy});const user=new UserRepository(db).create('team-migration@test.local','hash');const project=new ProjectRepository(db,user.id).create({name:'team fixture',path:dir,aiTool:'codex'});

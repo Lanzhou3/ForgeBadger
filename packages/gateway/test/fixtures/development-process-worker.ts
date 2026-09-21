@@ -8,7 +8,10 @@ import { startDevelopmentRuntime } from '../../src/services/development/runtime.
 import { ForgeBadgerEventBus } from '../../src/services/event-bus.js';
 
 // A separate OS process owns each database connection and runtime lifecycle.
-const input = JSON.parse(fs.readFileSync(process.argv[2]!, 'utf8'));
+// `node --test` discovers every file under test/: exit quietly when this
+// worker is loaded without its spawn arguments instead of crashing the run.
+if (!process.argv[2]) process.exit(0);
+const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const mode = process.argv[3]!;
 const db = new Database(input.database);
 db.pragma('foreign_keys=ON');
