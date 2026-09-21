@@ -71,7 +71,7 @@
   "0070_copilot_platform_action_recovery.sql": "9f4baa71898dfb5c28d84e6501a68682a2959595d6e1e3f706c5dc01969e1e98",
   "0071_cli_config_applied_providers.sql": "e569ea6491b5932e980ee8248e04ee2db61e2e5c4af79c016d10c7afc6f23d97",
   "0072_model_provider_kimi_adapter.sql": "c16d815b497d9e193e420f30a7ff3630f3105b7e6fd779d9330e49a7de5ceb89",
-  "0073_claude_route.sql": "be9c96a8faccb13c2f7b542c7deef93c1abe79420ac24cc7e6c1f459aa762637",
+  "0073_claude_route.sql": "1dc8cb719c2eda8886fb438ca8856a67baa7e0998c3308c3265f4648d0db9393",
   "0074_template_adapter_and_git_sources.sql": "53addfd93166944300e9e1c5511c248be75bd1451d9b3e61010d3e827961f9e9",
   "0075_notification_category.sql": "7c474fdd88f04e1e611d8837521ffe0f12e087017e51a3a46300c2fc4990020e",
   "0076_session_runtime_names.sql": "2f07ea7d28e8520784e8621debbcbf2af5844344d481f57e4e7062d5e418ef22",
