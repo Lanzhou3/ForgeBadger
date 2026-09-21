@@ -124,6 +124,8 @@ Key rules:
 - SQLite-compatible local filesystem
 - Claude Code, OpenCode, Codex, and/or Kimi Code installed on `PATH` for real AI CLI
   sessions
+- CodeGraph (`npm install -g @colbymchenry/codegraph`) optionally, for the
+  read-only project code graph
 
 ## Install From npm
 
@@ -137,15 +139,20 @@ Open the Web console at the URL printed by `forgebadger start`.
 
 The interactive `start` / `init` preflight prints a dependency-free ForgeBadger
 text logo before any environment probe. Color is used only on a capable TTY;
-redirected, `NO_COLOR`, and `TERM=dumb` output stays plain text.
+redirected, `NO_COLOR`, and `TERM=dumb` output stays plain text. On the first
+`forgebadger start` (no runtime config yet), a non-blocking environment check
+lists the detected AI CLIs, or prints their official install commands when none
+are found.
 
 The npm package postinstall does not install system software. `forgebadger
-doctor` only reports dependency state, including whether the bundled `node-pty`
-native module loads; if it does not, reinstall ForgeBadger to rebuild native
-modules. `forgebadger doctor` is read-only: inspecting an empty
-state directory does not create config, secrets, databases, or directories.
-Install Claude Code, OpenCode, Codex, or Kimi Code separately and make sure the
-tools you plan to use are available on `PATH`.
+doctor` reports the platform, architecture, and Node version, then checks the
+bundled `node-pty` native module, the supported AI CLIs (Claude Code, OpenCode,
+Codex, Kimi Code), and optional tooling (`codegraph`, `git`); each missing tool
+is paired with its official install command. If `node-pty` does not load,
+reinstall ForgeBadger to rebuild native modules. `forgebadger doctor` is
+read-only: inspecting an empty state directory does not create config, secrets,
+databases, or directories. Install the AI CLIs you plan to use separately and
+make sure they are available on `PATH`.
 
 ## Development From Source
 

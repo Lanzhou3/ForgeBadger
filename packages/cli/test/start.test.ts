@@ -7,7 +7,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { runStart } from "../src/commands/start.js";
+import { formatFirstStartPreflight, runStart } from "../src/commands/start.js";
 import { runCli } from "../src/index.js";
 import type { RuntimeConfig } from "../src/runtime/config.js";
 import { resolveInstalledPaths } from "../src/runtime/paths.js";
@@ -549,6 +549,87 @@ describe("runStart", () => {
     assert.equal(children[1]?.listenerCount("close"), 0);
   });
 
+  it("runs a non-blocking first-start preflight when the runtime config is not initialized", async () => {
+    // Arrange
+    const stdout = createMemoryWriter();
+    let checked = false;
+
+    // Act
+    const codePromise = runStart({
+      inspectConfig: async () => ({
+        stateDir: "/tmp/forgebadger-state",
+        initialized: false,
+        gateway: { host: "127.0.0.1", port: 48731 },
+        web: { host: "127.0.0.1", port: 48732 }
+      }),
+      dependencyChecker: async () => {
+        checked = true;
+        return [
+          { name: "node-pty", available: true, required: true, group: "runtime" },
+          {
+            name: "claude",
+            available: false,
+            required: false,
+            group: "ai-cli",
+            error: "not found",
+            installHint: "npm install -g @anthropic-ai/claude-code"
+          }
+        ];
+      },
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
+      resolvePaths: () => createInstalledPaths(),
+      checkPort: async () => undefined,
+      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
+      spawn: () => new FakeChild(),
+      installShutdown: (children) => {
+        setImmediate(() => children[1]?.emit("exit", 0, null));
+      },
+      stdout
+    });
+    const code = await codePromise;
+
+    // Assert
+    assert.equal(code, 0);
+    assert.equal(checked, true);
+    assert.match(stdout.text, /First-run environment check:\n/);
+    assert.match(stdout.text, / No AI CLI detected on PATH\. Install at least one to create sessions:\n/);
+    assert.match(stdout.text, / {3}claude: npm install -g @anthropic-ai\/claude-code\n/);
+  });
+
+  it("skips the first-start preflight when the runtime config already exists", async () => {
+    // Arrange
+    const stdout = createMemoryWriter();
+
+    // Act
+    const codePromise = runStart({
+      inspectConfig: async () => ({
+        stateDir: "/tmp/forgebadger-state",
+        initialized: true,
+        gateway: { host: "127.0.0.1", port: 48731 },
+        web: { host: "127.0.0.1", port: 48732 }
+      }),
+      dependencyChecker: async () => {
+        throw new Error("dependencyChecker must not run for initialized state");
+      },
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
+      resolvePaths: () => createInstalledPaths(),
+      checkPort: async () => undefined,
+      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
+      spawn: () => new FakeChild(),
+      installShutdown: (children) => {
+        setImmediate(() => children[1]?.emit("exit", 0, null));
+      },
+      stdout
+    });
+    const code = await codePromise;
+
+    // Assert
+    assert.equal(code, 0);
+    assert.doesNotMatch(stdout.text, /First-run environment check/);
+  });
+
   it("wraps web runtime config write failures with a diagnostic path", async () => {
     // Arrange
     const paths = createInstalledPaths();
@@ -576,6 +657,48 @@ describe("runStart", () => {
       new RegExp(`Unable to write Web runtime config to ${escapeRegExp(runtimePublicDir)}.*EACCES`)
     );
     assert.deepEqual(spawns, []);
+  });
+});
+
+describe("formatFirstStartPreflight", () => {
+  it("warns when node-pty is unavailable and lists detected AI CLIs", () => {
+    // Arrange
+    const dependencies = [
+      { name: "node-pty", available: false, required: true, group: "runtime" as const, error: "node-pty failed to load (native binding missing)" },
+      { name: "claude", available: true, required: false, group: "ai-cli" as const },
+      { name: "codex", available: false, required: false, group: "ai-cli" as const, installHint: "npm install -g @openai/codex" }
+    ];
+
+    // Act
+    const output = formatFirstStartPreflight(dependencies);
+
+    // Assert
+    assert.match(output, /^First-run environment check:\n/);
+    assert.match(output, / warning: node-pty failed to load \(native binding missing\)\n/);
+    assert.match(output, / Detected AI CLIs: claude\n/);
+    assert.doesNotMatch(output, /No AI CLI detected/);
+  });
+
+  it("lists install hints when no AI CLI is available", () => {
+    // Arrange
+    const dependencies = [
+      { name: "node-pty", available: true, required: true, group: "runtime" as const },
+      { name: "claude", available: false, required: false, group: "ai-cli" as const, installHint: "npm install -g @anthropic-ai/claude-code" },
+      { name: "kimi", available: false, required: false, group: "ai-cli" as const, installHint: "npm install -g @moonshot-ai/kimi-code" }
+    ];
+
+    // Act
+    const output = formatFirstStartPreflight(dependencies);
+
+    // Assert
+    assert.match(output, / No AI CLI detected on PATH\. Install at least one to create sessions:\n/);
+    assert.match(output, / {3}claude: npm install -g @anthropic-ai\/claude-code\n/);
+    assert.match(output, / {3}kimi: npm install -g @moonshot-ai\/kimi-code\n/);
+    assert.doesNotMatch(output, /warning:/);
+  });
+
+  it("returns an empty string when there is nothing to report", () => {
+    assert.equal(formatFirstStartPreflight([]), "");
   });
 });
 

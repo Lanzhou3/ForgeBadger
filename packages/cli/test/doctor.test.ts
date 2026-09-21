@@ -9,9 +9,11 @@ import { pathToFileURL } from "node:url";
 import { runDoctor } from "../src/commands/doctor.js";
 import { isMainModule, runCli } from "../src/index.js";
 import {
+  collectEnvironmentInfo,
   commandSpawnOptions,
   checkCliDependencies,
   checkNodePtyLoadable,
+  isSupportedNodeVersion,
   runCommand
 } from "../src/runtime/dependency-check.js";
 import type { RuntimeConfig } from "../src/runtime/config.js";
@@ -29,24 +31,88 @@ describe("checkCliDependencies", () => {
       { command: "claude", args: ["--version"] },
       { command: "opencode", args: ["--version"] },
       { command: "codex", args: ["--version"] },
-      { command: "kimi", args: ["--version"] }
+      { command: "kimi", args: ["--version"] },
+      { command: "codegraph", args: ["--version"] },
+      { command: "git", args: ["--version"] }
     ]);
     assert.deepEqual(
       result.map((item) => ({
         name: item.name,
         available: item.available,
         required: item.required,
+        group: item.group,
         version: item.version,
         error: item.error
       })),
       [
-        { name: "node-pty", available: true, required: true, version: undefined, error: undefined },
-        { name: "claude", available: false, required: false, version: undefined, error: "not found" },
-        { name: "opencode", available: false, required: false, version: undefined, error: "not found" },
-        { name: "codex", available: false, required: false, version: undefined, error: "not found" },
-        { name: "kimi", available: false, required: false, version: undefined, error: "not found" }
+        { name: "node-pty", available: true, required: true, group: "runtime", version: undefined, error: undefined },
+        { name: "claude", available: false, required: false, group: "ai-cli", version: undefined, error: "not found" },
+        { name: "opencode", available: false, required: false, group: "ai-cli", version: undefined, error: "not found" },
+        { name: "codex", available: false, required: false, group: "ai-cli", version: undefined, error: "not found" },
+        { name: "kimi", available: false, required: false, group: "ai-cli", version: undefined, error: "not found" },
+        { name: "codegraph", available: false, required: false, group: "tooling", version: undefined, error: "not found" },
+        { name: "git", available: false, required: false, group: "tooling", version: undefined, error: "not found" }
       ]
     );
+  });
+
+  it("attaches the official install hint to missing optional dependencies", async () => {
+    const result = await checkCliDependencies(async (command) => {
+      if (command === "codegraph") {
+        return { exitCode: 0, stdout: "codegraph 1.6.0\n", stderr: "" };
+      }
+      return { exitCode: 127, stdout: "", stderr: "not found" };
+    }, async () => ({}));
+
+    const claude = result.find((item) => item.name === "claude");
+    const codegraph = result.find((item) => item.name === "codegraph");
+    assert.equal(claude?.installHint, "npm install -g @anthropic-ai/claude-code");
+    assert.equal(codegraph?.available, true);
+    assert.equal(codegraph?.installHint, undefined);
+  });
+});
+
+describe("collectEnvironmentInfo", () => {
+  it("reports the current platform, arch, and Node version", () => {
+    const info = collectEnvironmentInfo({ platform: "darwin", arch: "arm64", nodeVersion: "v22.14.0" });
+
+    assert.deepEqual(info, {
+      platform: "darwin",
+      arch: "arm64",
+      nodeVersion: "v22.14.0",
+      supportedNode: true,
+      notes: []
+    });
+  });
+
+  it("flags unsupported Node versions", () => {
+    const info = collectEnvironmentInfo({ platform: "linux", arch: "x64", nodeVersion: "v20.11.0" });
+
+    assert.equal(info.supportedNode, false);
+    assert.equal(info.notes.length, 1);
+    assert.match(info.notes[0] ?? "", /outside the supported range \(>=20\.12 <25\)/);
+  });
+
+  it("adds a ConPTY note on Windows", () => {
+    const info = collectEnvironmentInfo({ platform: "win32", arch: "x64", nodeVersion: "v22.14.0" });
+
+    assert.equal(info.supportedNode, true);
+    assert.equal(info.notes.length, 1);
+    assert.match(info.notes[0] ?? "", /ConPTY/);
+  });
+});
+
+describe("isSupportedNodeVersion", () => {
+  it("accepts Node 20.12 through 24", () => {
+    assert.equal(isSupportedNodeVersion("v20.12.0"), true);
+    assert.equal(isSupportedNodeVersion("v24.14.1"), true);
+  });
+
+  it("rejects versions outside the supported range", () => {
+    assert.equal(isSupportedNodeVersion("v20.11.0"), false);
+    assert.equal(isSupportedNodeVersion("v19.9.0"), false);
+    assert.equal(isSupportedNodeVersion("v25.0.0"), false);
+    assert.equal(isSupportedNodeVersion("not-a-version"), false);
   });
 });
 
@@ -54,7 +120,7 @@ describe("checkNodePtyLoadable", () => {
   it("reports node-pty as available when the module loads", async () => {
     const status = await checkNodePtyLoadable(async () => ({}));
 
-    assert.deepEqual(status, { name: "node-pty", available: true, required: true });
+    assert.deepEqual(status, { name: "node-pty", available: true, required: true, group: "runtime" });
   });
 
   it("reports node-pty as missing with reinstall guidance when loading fails", async () => {
@@ -135,8 +201,12 @@ describe("runDoctor", () => {
     });
 
     assert.equal(code, 0);
+    assert.match(stdout.text, /^Environment: \w+ \w+, Node v\d+\.\d+\.\d+\n/);
     assert.match(stdout.text, new RegExp(`ForgeBadger state: ${escapeRegex(stateDir)} \\(not initialized\\)`));
     assert.match(stdout.text, /Diagnostic defaults: gateway=http:\/\/127\.0\.0\.1:48731 web=http:\/\/127\.0\.0\.1:48732/);
+    assert.match(stdout.text, /No supported AI CLI found on PATH; install at least one to create sessions:\n/);
+    assert.match(stdout.text, / {2}claude: npm install -g @anthropic-ai\/claude-code\n/);
+    assert.match(stdout.text, / {2}kimi: npm install -g @moonshot-ai\/kimi-code\n/);
     assert.equal(existsSync(stateDir), false);
     assert.equal(existsSync(path.join(stateDir, "config.json")), false);
     assert.equal(stderr.text, "");
@@ -164,6 +234,10 @@ describe("runDoctor", () => {
     assert.match(stdout.text, /ok node-pty\n/);
     assert.match(stdout.text, /ok claude claude 1\.2\.3\n/);
     assert.match(stdout.text, /optional-missing opencode - not found\n/);
+    assert.match(stdout.text, / {2}install: npm install -g opencode-ai\n/);
+    assert.match(stdout.text, /optional-missing codegraph - not found\n/);
+    assert.match(stdout.text, / {2}install: npm install -g @colbymchenry\/codegraph\n/);
+    assert.doesNotMatch(stdout.text, /No supported AI CLI found/);
     assert.equal(stderr.text, "");
   });
 
@@ -189,6 +263,39 @@ describe("runDoctor", () => {
     assert.match(stdout.text, /missing node-pty - node-pty failed to load \(native binding missing\)/);
     assert.match(stdout.text, /npm install -g forgebadger/);
     assert.match(stderr.text, /Required dependencies are missing/);
+  });
+
+  it("prints environment notes from the injected environment collector", async () => {
+    const stdout = createMemoryWriter();
+    const stderr = createMemoryWriter();
+
+    const code = await runDoctor({
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
+      loadNodePty: async () => ({}),
+      collectEnvironment: () => ({
+        platform: "win32",
+        arch: "x64",
+        nodeVersion: "v25.0.0",
+        supportedNode: false,
+        notes: [
+          "Node v25.0.0 is outside the supported range (>=20.12 <25); upgrade Node.js before running ForgeBadger.",
+          "Windows terminal sessions use ConPTY; WSL sessions are not managed by ForgeBadger."
+        ]
+      }),
+      dependencyRunner: async (command) => ({
+        exitCode: 0,
+        stdout: `${command} ok\n`,
+        stderr: ""
+      }),
+      stdout,
+      stderr
+    });
+
+    assert.equal(code, 0);
+    assert.match(stdout.text, /^Environment: win32 x64, Node v25\.0\.0\n/);
+    assert.match(stdout.text, /note: Node v25\.0\.0 is outside the supported range/);
+    assert.match(stdout.text, /note: Windows terminal sessions use ConPTY/);
+    assert.equal(stderr.text, "");
   });
 });
 
