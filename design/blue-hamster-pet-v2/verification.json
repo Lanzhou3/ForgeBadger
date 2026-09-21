@@ -1,0 +1,54 @@
+{
+  "passed": true,
+  "blender": "5.2.1 LTS",
+  "saved_file_reopened": true,
+  "packed_reference": true,
+  "missing_external_images": [],
+  "hair_strands": 353859,
+  "finite_hair_geometry": true,
+  "head_pivot_verified": true,
+  "images": {
+    "hero.png": {
+      "dimensions": [
+        1200,
+        1200
+      ],
+      "bytes": 1827946,
+      "alpha_min": 1.0,
+      "alpha_max": 1.0,
+      "sha256": "cb2c3e1c840714b5240f4b81cd8beeeeb9bb1023379598f97d465cb4e15ee40c"
+    },
+    "front.png": {
+      "dimensions": [
+        1000,
+        1100
+      ],
+      "bytes": 1429472,
+      "alpha_min": 1.0,
+      "alpha_max": 1.0,
+      "sha256": "5910a417ed33900621d30f031208e301525bb322e7689b955f77121f1d1e0d9a"
+    },
+    "rear.png": {
+      "dimensions": [
+        1000,
+        1100
+      ],
+      "bytes": 1341376,
+      "alpha_min": 1.0,
+      "alpha_max": 1.0,
+      "sha256": "c279b88f26756e915ab778ebfcb1c453edae50c2c2b61e9469bf795c51c23e0e"
+    },
+    "pet-transparent.png": {
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "bytes": 916218,
+      "alpha_min": 0.0,
+      "alpha_max": 1.0,
+      "sha256": "20b63f92546055e90f163f37eb898a933a87b850087d2eadbc262bcedb15813d"
+    }
+  },
+  "rigged": false,
+  "runtime_integrated": false
+}
