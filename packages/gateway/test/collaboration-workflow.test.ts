@@ -180,7 +180,7 @@ test('real source PTY blocks integration until stopped; revocation closes actual
  const {attachTerminalWebSocket}=await import('../src/websocket/terminal.js');
  const {resolveSessionServerTokenPath}=await import('../src/services/session-server/auth-token.js');
  const {default:WebSocket}=await import('ws');
- const stateDir=mkdtempSync('/private/tmp/fb-team-pty-'),integration=await startAndConnectSessionServer({stateDir,ipcPath:path.join(stateDir,'server.sock')});
+ const stateDir=mkdtempSync(path.join(tmpdir(),'fb-team-pty-')),integration=await startAndConnectSessionServer({stateDir,ipcPath:path.join(stateDir,'server.sock')});
  const f=await fixture();let socket:InstanceType<typeof WebSocket>|undefined;
  const manager=new InMemorySessionManager(integration.client,undefined,undefined,{db:f.db});f.service.options.sessionManager=manager;
  const invalidator=new RuntimeAuthorizationInvalidator();f.service.options.invalidator=invalidator;

@@ -59,13 +59,22 @@ describe("SessionServer core", () => {
 
   it("throws on duplicate session", async () => {
     const server = new SessionServer();
-    const plan = shortPlan(cwd, "echo dup");
+    // Long-lived process: a short-lived one may already be exited by the
+    // second create, and replacing an exited session is intentionally allowed.
+    const plan: LaunchPlanPayload = {
+      command: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"],
+      cwd, env: {}, secretEnvNames: [], credentialMode: "host_environment"
+    };
 
     await server.createSession({ sessionId: "dup", userId: "u", attachToken: "t", launchPlan: plan });
-    await assert.rejects(
-      () => server.createSession({ sessionId: "dup", userId: "u", attachToken: "t", launchPlan: plan }),
-      /Session already exists/
-    );
+    try {
+      await assert.rejects(
+        () => server.createSession({ sessionId: "dup", userId: "u", attachToken: "t", launchPlan: plan }),
+        /Session already exists/
+      );
+    } finally {
+      await server.destroy();
+    }
   });
 
   it("throws on unknown session operations", async () => {

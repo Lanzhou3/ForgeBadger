@@ -39,6 +39,7 @@ test('administrator password reset rejects old JWT and opaque sessions on HTTP/W
 
 import {mkdtempSync,rmSync,realpathSync} from 'node:fs';
 import path from 'node:path';
+import {tmpdir} from 'node:os';
 import {SessionServer} from '../src/services/session-server/session-server.js';
 import {IpcServer} from '../src/services/session-server/ipc-server.js';
 import {SessionServerClient} from '../src/services/session-server-client.js';
@@ -48,7 +49,7 @@ import {SessionRepository} from '../src/db/repositories/session-repository.js';
 import {attachTerminalWebSocket} from '../src/websocket/terminal.js';
 
 test('reset closes a real authenticated terminal socket without killing its CLI process',{skip:process.platform==='win32',timeout:15000},async(t)=>{
- const root=realpathSync(mkdtempSync('/private/tmp/fb-reset-pty-')),ipcPath=path.join(root,'server.sock'),ipcToken=randomBytes(32).toString('hex'),daemon=new SessionServer(),ipc=new IpcServer({ipcPath,sessionServer:daemon,token:ipcToken});await ipc.start();
+ const root=realpathSync(mkdtempSync(path.join(tmpdir(),'fb-reset-pty-'))),ipcPath=path.join(root,'server.sock'),ipcToken=randomBytes(32).toString('hex'),daemon=new SessionServer(),ipc=new IpcServer({ipcPath,sessionServer:daemon,token:ipcToken});await ipc.start();
  const client=new SessionServerClient({ipcPath,token:ipcToken});await client.connect();const manager=new InMemorySessionManager(client),db=new Database(':memory:');let terminalSocket:WebSocket|undefined;let terminalServer:import('node:http').Server|undefined;
  t.after(async()=>{terminalSocket?.terminate();terminalServer?.closeAllConnections();if(terminalServer)await new Promise<void>(r=>terminalServer!.close(()=>r()));await client.disconnect();await daemon.destroy();await ipc.stop();db.close();rmSync(root,{recursive:true,force:true});});
  migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations',import.meta.url))});
