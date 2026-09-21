@@ -121,7 +121,7 @@ describe("cli-config apply: PI", () => {
     assert.equal(entry.api, "openai-completions");
     assert.equal(entry.apiKey, "sk-pi-secret");
     assert.deepEqual(entry.models, [
-      { id: "pi-model-1", name: "Default Model", contextWindow: 262144 }
+      { id: "pi-model-1", name: "Default Model", contextWindow: 262144, reasoning: false }
     ]);
     assertPrivateMode(path.join(root, "models.json"));
 
@@ -138,6 +138,164 @@ describe("cli-config apply: PI", () => {
     const pointer = new CliConfigAppliedProviderRepository(db, user.id).get("pi");
     assert.equal(pointer?.providerProfileId, fixture.providerId);
     assert.equal(pointer?.modelProfileId, fixture.modelId);
+  });
+
+  it("writes every active model into the models.json array; the selection only pins the startup default", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("apply-pi-multi@example.com", "hash");
+    const root = await useConfigRoot("forgebadger-apply-pi-multi-");
+    const fixture = createFixture(db, user.id);
+    fixture.repo.createModelProfile({ providerProfileId: fixture.providerId, name: "Second Model", modelId: "pi-model-2" });
+    fixture.repo.createModelProfile({ providerProfileId: fixture.providerId, name: "Third Model", modelId: "pi-model-3" });
+
+    const result = await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    assert.equal(result.changed, true);
+
+    const models = JSON.parse(await readFile(path.join(root, "models.json"), "utf8")) as {
+      providers: Record<string, { models: Array<{ id: string; name: string }> }>;
+    };
+    const entry = models.providers["pi-provider"];
+    // All active models land in models.json so `pi /model` can switch between
+    // them; the single UI selection only chooses the startup default.
+    assert.deepEqual(
+      entry.models.map((model) => model.id),
+      ["pi-model-1", "pi-model-2", "pi-model-3"]
+    );
+
+    const settings = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(settings.defaultProvider, "pi-provider");
+    assert.equal(settings.defaultModel, "pi-model-1", "isDefault model pins the startup selection");
+  });
+
+  it("writes reasoning: true from the profile capability so PI thinking is enabled and adjustable", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("apply-pi-reasoning@example.com", "hash");
+    const root = await useConfigRoot("forgebadger-apply-pi-reasoning-");
+    const fixture = createFixture(db, user.id);
+    fixture.repo.updateModelProfile(fixture.modelId, { capabilities: ["chat", "reasoning"] });
+
+    await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+
+    const models = JSON.parse(await readFile(path.join(root, "models.json"), "utf8")) as {
+      providers: Record<string, { models: Array<Record<string, unknown>> }>;
+    };
+    const model = models.providers["pi-provider"].models[0];
+    // reasoning: true makes pi expose the /thinking controls; with no
+    // defaultThinkingLevel configured the built-in "medium" default means
+    // thinking starts ON for this model.
+    assert.equal(model.reasoning, true, "reasoning capability enables PI extended thinking");
+    // First apply: a reasoning model on openai-completions gains the additive
+    // xhigh entry — PI's TUI hides xhigh/max unless thinkingLevelMap defines
+    // them, and generic openai-completions relays receive
+    // reasoning_effort: "xhigh" verbatim when the level is picked.
+    assert.deepEqual(model.thinkingLevelMap, { xhigh: "xhigh" }, "additive xhigh exposure for openai-completions reasoning models");
+
+    // A hand-written map without xhigh gets xhigh added on the next apply.
+    await writeFile(
+      path.join(root, "models.json"),
+      JSON.stringify({
+        providers: {
+          "pi-provider": {
+            baseUrl: "https://api.deepseek.com/v1",
+            api: "openai-completions",
+            apiKey: "sk-pi-secret",
+            models: [{ id: "pi-model-1", name: "Default Model", contextWindow: 262144, reasoning: true, thinkingLevelMap: { low: "low", medium: "medium", high: "high" } }]
+          }
+        }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+    await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    let remodeled = (JSON.parse(await readFile(path.join(root, "models.json"), "utf8")) as {
+      providers: Record<string, { models: Array<Record<string, unknown>> }>;
+    }).providers["pi-provider"].models[0];
+    assert.equal(remodeled.reasoning, true);
+    assert.deepEqual(remodeled.thinkingLevelMap, { low: "low", medium: "medium", high: "high", xhigh: "xhigh" }, "xhigh added additively to a user map");
+
+    // A user-defined xhigh mapping (e.g. emulated with the provider's "high")
+    // wins and re-apply becomes idempotent.
+    await writeFile(
+      path.join(root, "models.json"),
+      JSON.stringify({
+        providers: {
+          "pi-provider": {
+            baseUrl: "https://api.deepseek.com/v1",
+            api: "openai-completions",
+            apiKey: "sk-pi-secret",
+            models: [{ id: "pi-model-1", name: "Default Model", contextWindow: 262144, reasoning: true, thinkingLevelMap: { xhigh: "high" } }]
+          }
+        }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+    const reapply = await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    assert.equal(reapply.changed, false, "idempotent with a user-defined xhigh mapping");
+    remodeled = (JSON.parse(await readFile(path.join(root, "models.json"), "utf8")) as {
+      providers: Record<string, { models: Array<Record<string, unknown>> }>;
+    }).providers["pi-provider"].models[0];
+    assert.deepEqual(remodeled.thinkingLevelMap, { xhigh: "high" }, "user-defined xhigh mapping preserved");
+
+    // Without the capability a hand-set reasoning: true still survives (monotonic).
+    fixture.repo.updateModelProfile(fixture.modelId, { capabilities: ["chat"] });
+    await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    const stripped = (JSON.parse(await readFile(path.join(root, "models.json"), "utf8")) as {
+      providers: Record<string, { models: Array<Record<string, unknown>> }>;
+    }).providers["pi-provider"].models[0];
+    assert.equal(stripped.reasoning, true, "manual reasoning: true is not stripped when the capability is removed");
+  });
+
+  it("does not expose xhigh for non openai-completions APIs", async () => {
+    // anthropic-messages maps levels to effort via a different scheme and
+    // google-generative-ai only knows minimal/low/medium/high, so the
+    // additive xhigh entry is scoped to openai-completions relays.
+    const db = createTestDb();
+    const user = new UserRepository(db).create("apply-pi-xhigh-api@example.com", "hash");
+    const root = await useConfigRoot("forgebadger-apply-pi-xhigh-api-");
+    const repo = new ModelProviderRepository(db, user.id, masterKey);
+    const provider = repo.createProviderProfile({
+      name: "anthropic provider",
+      providerKey: "anthropic-relay",
+      baseUrl: "https://api.deepseek.com",
+      anthropicBaseUrl: "https://api.deepseek.com/anthropic",
+      openaiBaseUrl: "https://api.deepseek.com/v1",
+      authType: "api_key",
+      apiFormat: "anthropic",
+      supportedAdapters: ["pi"]
+    });
+    const createdModel = repo.createModelProfile({
+      providerProfileId: provider.id, name: "M", modelId: "claude-x",
+      isDefault: true, capabilities: ["chat", "reasoning"]
+    });
+    repo.createCredential({ providerProfileId: provider.id, label: "c", plaintextSecret: "sk-x" });
+
+    await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: provider.id, resolveHost: publicResolver
+    });
+
+    const models = JSON.parse(await readFile(path.join(root, "models.json"), "utf8")) as {
+      providers: Record<string, { api: string; models: Array<Record<string, unknown>> }>;
+    };
+    const entry = models.providers["anthropic-relay"];
+    assert.equal(entry.api, "anthropic-messages");
+    assert.equal(entry.models[0].id, createdModel.modelId);
+    assert.equal(entry.models[0].reasoning, true);
+    assert.equal(entry.models[0].thinkingLevelMap, undefined, "no thinkingLevelMap written for anthropic-messages");
   });
 
   it("uses the model profile context window and preserves user-tuned model fields", async () => {

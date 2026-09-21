@@ -101,6 +101,44 @@ describe("programmatic terminal submit classifiers", () => {
     assert.equal(isProgrammaticComposerReady("pi", pane), true);
   });
 
+  it("handles the pi 0.86.1 layout where staged input renders inside the bordered box", () => {
+    // Live capture, pi 0.86.1, 120x40 (session-server size), 2026-09-21: the
+    // editor box (two full-width border lines) sits above the cwd line and
+    // staged input appears INSIDE the box — not below the status line as in
+    // pi 0.86.0 (layout A fixtures above).
+    const border = "  " + "─".repeat(90);
+    const readyB = [
+      " pi v0.86.1",
+      " escape interrupt · ctrl+c/ctrl+d clear/exit",
+      "",
+      "[Skills]",
+      "  code-review, find-skills, tdd",
+      "",
+      "",
+      border,
+      "  ",
+      border,
+      "  ~\\AppData\\Local\\Temp\\project",
+      "  0.0%/262k (auto)                    qwen3.8-27b • medium"
+    ].join("\n");
+    assert.equal(isProgrammaticComposerReady("pi", readyB), true, "0.86.1 idle box is ready");
+    assert.equal(currentProgrammaticComposer("pi", readyB), "");
+
+    const stagedB = readyB.replace(
+      "\n" + border + "\n  \n" + border,
+      "\n" + border + "\n  修复登录流程\n" + border
+    );
+    const needle = programmaticDeliveryNeedle("修复登录流程");
+    assert.equal(currentProgrammaticComposer("pi", stagedB), "修复登录流程");
+    assert.equal(composerContainsNeedle("pi", stagedB, needle), true);
+
+    // A long status line with the model suffix must not break the anchor, and
+    // scrollback text above the box must not count as staged input.
+    const polluted = `修复登录流程\n${readyB}`;
+    assert.equal(composerContainsNeedle("pi", polluted, needle), false);
+    assert.equal(isProgrammaticComposerReady("pi", polluted), true);
+  });
+
   it("requires a changed pane and removal from the current composer", () => {
     const needle = programmaticDeliveryNeedle("修复登录流程");
     assert.equal(

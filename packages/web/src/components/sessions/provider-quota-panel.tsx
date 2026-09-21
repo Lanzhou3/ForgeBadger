@@ -23,7 +23,7 @@ interface Props {
 }
 
 const REFRESH_INTERVAL_MS = 60_000;
-const KNOWN_TOOLS = new Set(["claude", "opencode", "codex", "kimi"]);
+const KNOWN_TOOLS = new Set(["claude", "opencode", "codex", "kimi", "pi"]);
 
 export function ProviderQuotaPanel({ aiTool }: Props) {
   const { t } = useLanguage();

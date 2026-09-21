@@ -704,12 +704,31 @@ function buildApplyDocument(
     const providers = record(doc.providers);
     const existing = record(providers[context.providerKey]);
     const existingModels = Array.isArray(existing.models) ? existing.models : [];
-    // Whole-provider upsert (D4): baseUrl/api/apiKey/models are managed, but
-    // unknown provider-level fields and per-model user tuning (reasoning,
-    // maxTokens, input, thinkingLevelMap) are preserved additively.
+    // Whole-provider upsert (D4): baseUrl/api/apiKey/models are managed.
+    // Per-model `reasoning` is capability-driven: the profile's "reasoning"
+    // capability enables PI's extended thinking — without the flag the TUI
+    // hides every thinking control and the model never thinks. Startup level
+    // then falls back to pi's built-in "medium", so thinking is on by default
+    // and adjustable via /thinking. A hand-set `reasoning: true` on an
+    // existing entry is preserved even when the profile lacks the capability.
+    // `thinkingLevelMap` is mostly user-managed, except that reasoning
+    // models on openai-completions relays gain an additive `xhigh: "xhigh"`
+    // entry (PI's TUI hides xhigh/max unless the map explicitly defines
+    // them; generic openai-completions relays receive
+    // `reasoning_effort: <mapped value>` verbatim). Existing map entries —
+    // and any other per-model user tuning (maxTokens, input, ...) — are
+    // preserved additively.
+    const api = piApiName(context.provider.apiFormat, context.providerKey);
     const models = context.activeModels.map((activeModel) => {
       const current = record(existingModels.find((entry) => record(entry).id === activeModel.modelId));
       const next: Record<string, unknown> = { ...current, id: activeModel.modelId, name: activeModel.name };
+      next.reasoning = activeModel.capabilities.includes("reasoning") || current.reasoning === true;
+      if (next.reasoning === true && api === "openai-completions") {
+        const currentMap = record(current.thinkingLevelMap);
+        if (currentMap.xhigh === undefined) {
+          next.thinkingLevelMap = { ...currentMap, xhigh: "xhigh" };
+        }
+      }
       next.contextWindow = activeModel.contextWindow && activeModel.contextWindow > 0
         ? activeModel.contextWindow
         : typeof current.contextWindow === "number" && current.contextWindow > 0
@@ -720,7 +739,7 @@ function buildApplyDocument(
     providers[context.providerKey] = {
       ...existing,
       baseUrl: context.baseUrl,
-      api: piApiName(context.provider.apiFormat, context.providerKey),
+      api,
       apiKey: secret,
       models
     };

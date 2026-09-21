@@ -97,22 +97,30 @@ function kimiComposer(lines: string[]): string {
   return selected.join("\n");
 }
 
-// PI TUI (measured 2026-09-20, pi 0.86.0, 160x50, live-verified against a
-// real tool-call turn): the footer is anchored to the pane bottom — a cwd
-// line above the status line (`0.9%/262k (auto)  <model> • <thinking>`),
-// which is always the last line of the current screen. Staged composer input
-// renders BELOW the status line at the very bottom of the screen. While the
-// agent runs, the box bar above the cwd line becomes a ` ── ⠦ Working ─…`
-// spinner bar (fixed slot, a few lines above the status); folded multi-line
-// input shows an `↑ N more` marker in the input block. Stale spinner frames
-// from earlier turns remain in the scrollback (capturePane returns 500 lines
-// of it), so busy/fold matching is restricted to a small window around the
-// status line instead of scanning the whole pane.
+// PI TUI footer (measured 2026-09-20 pi 0.86.0, re-measured 2026-09-21 pi
+// 0.86.1, 120x40 production size, live-verified against a real model turn):
+// a cwd line above the status line (`0.9%/262k (auto)  <model> • <thinking>`),
+// which is the pane's bottom line. Staged composer input renders in one of
+// two layouts depending on the pi version:
+//   A (0.86.0): BELOW the status line at the very bottom of the screen;
+//   B (0.86.1): INSIDE the bordered editor box above the cwd line (the box's
+//     bottom border sits directly above the cwd line).
+// While the agent runs, the box's top border slot becomes a ` ── ⠦ Working ─…`
+// spinner bar (statusIndex-4 in layout B, statusIndex-3 in layout A — both
+// inside the footer window below); folded multi-line input shows an
+// `↑ N more` marker in the input block. Stale spinner frames from earlier
+// turns remain in the scrollback (capturePane returns 500 lines of it), so
+// busy/fold matching is restricted to a small window around the status line
+// instead of scanning the whole pane.
 const PI_STATUS_LINE = /\d+(\.\d+)?%\/\d+[kmKM]/u;
 const PI_BUSY_BAR = /Working\s*─+/u;
 const PI_FOLD_MARKER = /↑\s*\d+\s*more/u;
+// A full-width horizontal rule (the editor box border lines).
+const PI_BOX_BORDER = /^\s*─{20,}\s*$/u;
 // Box-bar/spacer slots above the status line that the busy spinner occupies.
 const PI_FOOTER_WINDOW = 4;
+// Max interior height when searching upward for the box's top border.
+const PI_BOX_MAX_HEIGHT = 20;
 
 function isPiComposerReady(lines: string[]): boolean {
   const statusIndex = lastIndexMatching(lines, PI_STATUS_LINE);
@@ -125,14 +133,32 @@ function isPiComposerReady(lines: string[]): boolean {
 function piComposer(lines: string[]): string {
   const statusIndex = lastIndexMatching(lines, PI_STATUS_LINE);
   if (statusIndex < 0) return "";
-  const selected: string[] = [];
+  // Layout A (pi ≤ 0.86.0): input renders below the status line.
+  const below: string[] = [];
   for (const line of lines.slice(statusIndex + 1)) {
     if (PI_FOLD_MARKER.test(line)) continue; // `↑ N more` fold line, not input
     if (PI_BUSY_BAR.test(line)) continue; // spinner bar, not input
     if (line.trim() === "") continue;
-    selected.push(line.trimStart());
+    below.push(line.trimStart());
   }
-  return selected.join("\n");
+  if (below.length > 0) return below.join("\n");
+  // Layout B (pi ≥ 0.86.1): input renders inside the bordered box whose bottom
+  // border sits directly above the cwd line (statusIndex-1).
+  const bottomBorder = statusIndex - 2;
+  if (bottomBorder < 1 || !PI_BOX_BORDER.test(lines[bottomBorder] ?? "")) return "";
+  for (let index = bottomBorder - 1; index >= 0; index -= 1) {
+    if (PI_BOX_BORDER.test(lines[index] ?? "")) {
+      const interior: string[] = [];
+      for (let inner = index + 1; inner < bottomBorder; inner += 1) {
+        const line = lines[inner] ?? "";
+        if (line.trim() === "") continue;
+        interior.push(line.trimStart());
+      }
+      return interior.join("\n");
+    }
+    if (bottomBorder - index > PI_BOX_MAX_HEIGHT) break;
+  }
+  return "";
 }
 
 export function currentProgrammaticComposer(adapter: AdapterId, pane: string): string {

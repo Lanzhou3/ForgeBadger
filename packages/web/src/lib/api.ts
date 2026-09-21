@@ -128,7 +128,7 @@ export interface ProjectManagerStarterPack {
   id: string;
   name: string;
   description: string;
-  recommendedAdapter: "claude" | "opencode" | "codex" | "kimi";
+  recommendedAdapter: "claude" | "opencode" | "codex" | "kimi" | "pi";
   promptFrame: string;
   acceptanceChecklist: string[];
   verificationGuidance: string[];
@@ -547,7 +547,7 @@ export interface ProjectSkill {
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi";
+export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
 export interface ProviderProfile {
@@ -796,7 +796,7 @@ export interface TokenDailyPoint {
 }
 
 export interface UsageSyncResultItem {
-  adapter: "claude" | "opencode";
+  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi";
   scanned: number;
   inserted: number;
 }
@@ -807,7 +807,7 @@ export interface UsageSyncResult {
 }
 
 export interface AdapterDiscovery {
-  id: "claude" | "opencode" | "codex" | "kimi";
+  id: "claude" | "opencode" | "codex" | "kimi" | "pi";
   label: string;
   command: string;
   supportLevel: "supported" | "prototype";
