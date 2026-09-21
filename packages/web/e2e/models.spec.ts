@@ -152,7 +152,7 @@ test("Models CLI status grid shows per-CLI applied state", async ({ page }) => {
 
   const grid = page.getByTestId("cli-status-section");
   await expect(grid).toBeVisible();
-  for (const adapter of ["claude", "opencode", "codex", "kimi"]) {
+  for (const adapter of ["claude", "opencode", "codex", "kimi", "pi"]) {
     await expect(page.getByTestId(`cli-status-${adapter}`)).toBeVisible();
   }
   // The mocked applied pointer puts this provider in effect on Claude Code.
@@ -217,6 +217,7 @@ async function mockModelsApis(
             { adapter: "opencode", applied: null, configDefaultModel: null, stale: false },
             { adapter: "codex", applied: null, configDefaultModel: null, stale: false },
             { adapter: "kimi", applied: null, configDefaultModel: null, stale: false },
+            { adapter: "pi", applied: null, configDefaultModel: null, stale: false },
           ],
         }),
       });
@@ -226,7 +227,7 @@ async function mockModelsApis(
     if (url.pathname === "/api/v1/adapters/discovery") {
       await route.fulfill({
         json: envelope({
-          adapters: ["claude", "opencode", "codex", "kimi"].map((id) => ({
+          adapters: ["claude", "opencode", "codex", "kimi", "pi"].map((id) => ({
             id,
             label: id,
             command: id,
