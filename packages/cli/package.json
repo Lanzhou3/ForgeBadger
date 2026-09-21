@@ -29,8 +29,10 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.71.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@xterm/addon-serialize": "^0.13.0",
     "@xterm/headless": "^5.5.0",
+    "ajv": "8.20.0",
     "bcryptjs": "^3.0.2",
     "better-sqlite3": "^11.7.0",
     "croner": "10.0.1",
@@ -40,6 +42,7 @@
     "node-pty": "^1.0.0",
     "smol-toml": "^1.7.1",
     "ws": "^8.18.0",
+    "yaml": "2.8.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
