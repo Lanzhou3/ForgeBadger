@@ -104,8 +104,11 @@ describe("Session Server IPC", () => {
     const ipcPath = uniqueIpcPath();
     const { ipcServer, client } = await startPair(ipcPath, cwd);
     try {
+      // Stay alive briefly: a plain "exit 0" can exit before the first
+      // has_session roundtrip on fast machines, racing the assertion below.
+      const linger = process.platform === "win32" ? "ping -n 3 127.0.0.1 >nul" : "sleep 2";
       await client.createSession({
-        name: "ipc-x1", cwd, command: shell, args: [shellArg, "exit 0"], env: {}
+        name: "ipc-x1", cwd, command: shell, args: [shellArg, linger], env: {}
       });
       assert.strictEqual(await client.hasSession("ipc-x1"), true);
 
