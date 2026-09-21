@@ -86,8 +86,11 @@ describe("Session Server IPC", () => {
     const ipcPath = uniqueIpcPath();
     const { ipcServer, client } = await startPair(ipcPath, cwd);
     try {
+      // Long-lived process: an instant "exit 0" can be reaped before the kill
+      // arrives on fast machines, turning the kill into a Session-not-found.
+      const linger = process.platform === "win32" ? "ping -n 30 127.0.0.1 >nul" : "sleep 30";
       await client.createSession({
-        name: "ipc-k1", cwd, command: shell, args: [shellArg, "exit 0"], env: {}
+        name: "ipc-k1", cwd, command: shell, args: [shellArg, linger], env: {}
       });
 
       await client.killSession("ipc-k1");
