@@ -862,7 +862,7 @@ stored adapter hint reject creation with `400` when `aiTool` is omitted.
 Session launch is model-agnostic: sessions always run with host-environment
 credentials, and ForgeBadger injects no provider, model, or credential
 environment at launch. Model/provider setup is per-CLI and user-global
-(cc-switch style) through the CLI Config API below; each CLI process reads its
+through the CLI Config API below; each CLI process reads its
 own global config files when it starts. `POST /:id/start` re-launches the
 adapter the same way and never restores a ForgeBadger-managed provider
 environment.
@@ -892,7 +892,7 @@ returned, and work items with unparseable details are skipped.
 
 ### CLI Config and Provider Apply
 
-cc-switch style management of each code CLI's global config files
+Management of each code CLI's global config files
 (Kimi `~/.kimi-code/config.toml`, Claude `~/.claude/settings.json`,
 Codex `~/.codex/config.toml` + `~/.codex/auth.json`,
 OpenCode `$XDG_CONFIG_HOME/opencode/opencode.json`;
@@ -942,7 +942,7 @@ the same body:
 }
 ```
 
-Model selection is adapter-specific (cc-switch parity):
+Model selection is adapter-specific:
 
 - **Claude**: `modelProfileId` is the primary model (`ANTHROPIC_MODEL`).
   `modelMapping` pins the alias roles `opus` / `sonnet` / `haiku` (unset roles
@@ -984,7 +984,7 @@ hooks into `.claude/settings.local.json` before Session Server launch.
 OpenAI is a normal verified provider. Applying a provider to Codex writes
 `model`, `model_provider`, and a `model_providers.<id>` entry with `base_url`,
 `wire_api = "responses"`, and `experimental_bearer_token` (the API key) into
-`~/.codex/config.toml` — the cc-switch Codex 0.149+ layout, where third-party
+`~/.codex/config.toml` — the Codex 0.149+ provider-table layout, where third-party
 credentials live in the provider table. The legacy `OPENAI_API_KEY` slot is
 removed from `~/.codex/auth.json` (other existing `auth.json` fields such as
 ChatGPT login tokens are preserved); an `auth.json` left empty by that removal
@@ -1087,8 +1087,8 @@ four CLIs. Historical `PROVIDER_IN_USE_BY_BINDING` /
 by pre-decoupling records; those references remain intact.
 
 The web console ships a static, client-side list of provider presets
-(endpoints, auth type, API format) that prefill the add-provider form,
-cc-switch style. Presets never carry model lists, there is no server-side
+(endpoints, auth type, API format) that prefill the add-provider form.
+Presets never carry model lists, there is no server-side
 preset catalog API, and no models are seeded at creation — the model list is
 always synced live from the configured provider endpoint.
 

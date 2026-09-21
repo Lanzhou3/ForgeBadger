@@ -1731,7 +1731,7 @@ export async function getCliConfigFieldValues(
   return fetchJson(cliConfigPath(adapter, "/field-values")) as Promise<{ values: Record<string, unknown> }>;
 }
 
-// ---- CLI config apply (cc-switch style provider application) ----
+// ---- CLI config apply (provider application to CLI global config) ----
 
 export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
 export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";

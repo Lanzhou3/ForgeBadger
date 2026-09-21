@@ -77,8 +77,8 @@ identifiers.
 - Provider model profiles with encrypted API key storage and live model sync
   for OpenAI-compatible provider endpoints.
 - Explicit apply-provider flow that writes a selected provider/model/credential
-  into each CLI's native global config (cc-switch parity: atomic `0600` writes,
-  AES-256-GCM-encrypted backup, and rollback), with a redacted preview.
+  into each CLI's native global config with atomic `0600` writes, an
+  AES-256-GCM-encrypted backup, and rollback, with a redacted preview.
 - Agent, Skill, Template, usage, history, notification, and settings
   surfaces in the Web console.
 - Session snapshots, terminal focus mode, command palette prototype, and local

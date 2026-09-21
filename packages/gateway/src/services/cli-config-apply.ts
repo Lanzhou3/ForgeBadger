@@ -34,7 +34,7 @@ import {
 const backupMaxAgeMs = 7 * 24 * 60 * 60 * 1000;
 const inProcessLocks = new Map<string, Promise<void>>();
 
-/** cc-switch parity: Kimi For Coding exposes a 256k context window. */
+/** Kimi For Coding exposes a 256k context window. */
 const kimiCodingContextTokens = "262144";
 
 /**
@@ -60,7 +60,7 @@ export class CliConfigApplyError extends Error {
   }
 }
 
-/** Claude alias slots that can be mapped to distinct models (cc-switch role table). */
+/** Claude alias slots that can be mapped to distinct models. */
 export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
 
 export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
@@ -131,7 +131,7 @@ interface ApplyContext {
   model: ModelProfile;
   /** All active model profiles of the provider (OpenCode writes them all). */
   activeModels: ModelProfile[];
-  /** Claude role slots resolved to model profiles (cc-switch normalize semantics). */
+  /** Claude role slots resolved to model profiles; unset slots fall back to the primary model. */
   slotModels: Partial<Record<ClaudeModelSlot, ModelProfile>>;
   reasoningEffort: CodexReasoningEffort | undefined;
   credential: ProviderCredentialSummary;
@@ -222,7 +222,7 @@ export async function previewCliConfigApply(input: CliConfigApplyInput): Promise
 
 /**
  * Applies the selected provider/model/credential to the adapter's global CLI
- * config with plaintext credentials (cc-switch semantics): encrypted backup
+ * config with plaintext credentials: encrypted backup
  * first, then atomic 0600 writes (or deletes for emptied auth files) with
  * read-back verification. A failure on a later file (Codex auth.json) rolls
  * back the files already written.
@@ -531,7 +531,7 @@ function planApplyDocuments(context: ApplyContext, plaintextSecret: string | nul
     buildApplyDocument(context, target, doc, plaintextSecret);
     // An auth file whose last managed field was removed is deleted outright:
     // Codex reports an error for an empty auth.json but shows the login screen
-    // when the file is missing (cc-switch behavior).
+    // when the file is missing.
     const serialized = target.role === "auth" && Object.keys(doc).length === 0
       ? null
       : serializeDocument(target.fileType, doc);
@@ -591,7 +591,7 @@ function buildApplyDocument(
     // shadow the freshly written token.
     delete env.ANTHROPIC_API_KEY;
     // Role mapping (official alias pinning): unset slots fall back to the
-    // primary model — fill only, matching cc-switch normalize semantics.
+    // primary model — fill only, never overwriting explicit user values.
     const primary = context.model;
     const opus = context.slotModels.opus ?? primary;
     const sonnet = context.slotModels.sonnet ?? primary;
@@ -620,7 +620,7 @@ function buildApplyDocument(
   }
   if (context.adapter === "codex") {
     if (target.role === "auth") {
-      // cc-switch semantics (Codex 0.149+): third-party credentials live in
+      // Codex 0.149+ layout: third-party credentials live in
       // model_providers.<id>.experimental_bearer_token, not in auth.json.
       // Remove the legacy OPENAI_API_KEY slot but preserve other auth material
       // (e.g. ChatGPT login tokens); the planner deletes an emptied file.
@@ -656,7 +656,7 @@ function buildApplyDocument(
     const options: Record<string, unknown> = { apiKey: secret };
     if (context.baseUrl) options.baseURL = context.baseUrl;
     const existing = record(providers[context.providerKey]);
-    // Additive semantics (cc-switch): upsert the provider entry with every
+    // Additive semantics: upsert the provider entry with every
     // active model of the provider, merging into models already present from
     // earlier applies. The top-level "model" key is user-owned and is never
     // touched — model selection happens inside OpenCode.
@@ -753,7 +753,7 @@ function buildApplyDocument(
   };
   if (context.baseUrl) definition.base_url = context.baseUrl;
   providers[context.providerKey] = definition;
-  // Additive semantics (cc-switch parity with the opencode branch): upsert
+  // Additive semantics (matching the opencode branch): upsert
   // every active model of the provider as an alias so the /model picker in
   // Kimi Code can switch between them; default_model pins the selected one.
   const models = record(doc.models);
@@ -899,7 +899,7 @@ function maskSecretsDeep(value: Record<string, unknown>): void {
     const normalized = key.replace(/[^a-z0-9]/giu, "").toLowerCase();
     // Suffix-match instead of a fixed allowlist: api_key / auth_token /
     // bearer_token / access_token / refresh_token and any future *-key/*-token
-    // field are all masked (cc-switch sensitive-key convention).
+    // field are all masked.
     if ((normalized === "apikey" || normalized.endsWith("apikey") || normalized.endsWith("token"))
       && typeof child === "string" && child.length > 0) {
       value[key] = "[redacted]";

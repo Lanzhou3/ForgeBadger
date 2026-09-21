@@ -1,7 +1,7 @@
 /**
  * OpenAI Chat Completions SSE stream → Anthropic Messages API SSE stream.
  *
- * Event sequence produced (cc-switch parity for the core shapes):
+ * Event sequence produced:
  *   message_start → content_block_start/delta/stop (text and/or tool_use)
  *   → message_delta (stop_reason + usage) → message_stop
  *

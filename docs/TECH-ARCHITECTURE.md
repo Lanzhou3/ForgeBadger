@@ -756,9 +756,9 @@ live 代码不再读写。Provider 只保存服务商元数据、模型与加密
 配置文件（claude `~/.claude/settings.json`、codex `~/.codex/config.toml`、
 opencode `opencode.json`、kimi `~/.kimi-code/config.toml`）。
 
-凭据按 cc-switch 方式明文写入 CLI 配置文件：写前对现有配置做 AES-256-GCM 加密
+凭据明文写入 CLI 配置文件：写前对现有配置做 AES-256-GCM 加密
 备份，使用原子 `0600` 写入，失败可 rollback；preview 掩码密钥且不落盘。
-模型选择按 CLI 分别适配（cc-switch 对齐）：claude 支持角色映射
+模型选择按 CLI 分别适配：claude 支持角色映射
 （`modelMapping: {opus, sonnet, haiku, fable?, subagent?}`，未设置的角色回退主模型；
 写入官方别名固定 `ANTHROPIC_DEFAULT_<ROLE>_MODEL` + 显示名 `*_MODEL_NAME`，
 并删除官方已废弃的 `ANTHROPIC_SMALL_FAST_MODEL`）；codex 支持

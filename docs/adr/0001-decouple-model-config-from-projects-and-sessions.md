@@ -1,4 +1,4 @@
-# ADR 0001: Decouple model configuration from projects and sessions (cc-switch model)
+# ADR 0001: Decouple model configuration from projects and sessions (per-CLI user-global config model)
 
 - Status: accepted (2026-09-01)
 - Supersedes: the provider-binding design persisted by migrations 0053-0056
@@ -13,9 +13,9 @@ and froze a launch snapshot on every bound session. Session creation accepted
 `bindingId` (or legacy `modelId`/`apiKeyId`), restart rebuilt the frozen
 environment, and `/api/v1/cli-config/*` was claim-gated read-only.
 
-This design contradicted how the underlying CLIs actually work and how
-cc-switch operates: model providers are a property of the CLI's user-global
-config, not of a project. It also forced dual maintenance (global vs project
+This design contradicted how the underlying CLIs actually work: model
+providers are a property of the CLI's user-global config, not of a
+project. It also forced dual maintenance (global vs project
 scopes), made `/cli-config` read-only, and spread secret injection across the
 launch path.
 
@@ -39,7 +39,7 @@ launch path.
   overrides (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`)
   without overwriting explicit user values, and a stale `ANTHROPIC_API_KEY`
   is removed whenever a new `ANTHROPIC_AUTH_TOKEN` is written.
-- Model selection is adapter-specific (cc-switch parity, 2026-09-02): Claude
+- Model selection is adapter-specific (2026-09-02): Claude
   accepts `modelMapping` (`opus`/`sonnet`/`haiku` plus optional
   `fable`/`subagent`; unset roles fall back to the primary model) and writes
   the official alias pins `ANTHROPIC_DEFAULT_<ROLE>_MODEL` with their
@@ -48,8 +48,7 @@ launch path.
   (`model_reasoning_effort`). OpenCode apply is additive: every active model
   of the provider joins the provider entry's `models` map, and the user-owned
   top-level `model` key is never touched.
-- Credentials are written plaintext into the CLI config file (cc-switch
-  parity), via atomic mode-`0600` writes after an AES-256-GCM-encrypted backup
+- Credentials are written plaintext into the CLI config file, via atomic mode-`0600` writes after an AES-256-GCM-encrypted backup
   under the state directory. Plaintext keys still never touch the database,
   logs, events, or API responses; preview responses mask secret values.
 - `/api/v1/cli-config/*` is no longer claim-gated: instance-admin authority is

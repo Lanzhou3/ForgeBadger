@@ -1,7 +1,7 @@
 /**
  * Anthropic Messages API request → OpenAI Chat Completions request.
  *
- * Mirrors cc-switch's anthropic_to_openai semantics for the subset Claude Code
+ * Converts the subset of the Anthropic Messages API that Claude Code
  * actually sends: system (string | text blocks), user/assistant messages with
  * text/image/tool_use/tool_result blocks, tools + tool_choice, sampling
  * params. Anthropic `thinking` is dropped (v1: no reasoning_effort mapping),

@@ -894,7 +894,7 @@ export const userSettings = sqliteTable("user_settings", {
   theme: text("theme").notNull().default("light"),
   language: text("language").notNull().default("zh-CN"),
   modelId: text("model_id").references(() => modelProfiles.id),
-  // Claude Code protocol routing (cc-switch-style local proxy, Gateway edition).
+  // Claude Code protocol routing (Gateway loopback Anthropic-compatible proxy).
   claudeRouteEnabled: integer("claude_route_enabled", { mode: "boolean" }).notNull().default(false),
   // EncryptedSecret JSON (master key) of the loopback route token; null until
   // routing is first enabled.

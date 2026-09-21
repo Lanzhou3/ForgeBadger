@@ -8,7 +8,7 @@ import type {
 import type { CustomProviderForm } from "@/components/models/shared";
 
 /**
- * Static provider presets, cc-switch style: each preset is only a connection
+ * Static provider presets: each preset is only a connection
  * template (endpoints, auth type, API format, supported CLIs) that prefills
  * the add-provider form. Presets never carry model lists — models are always
  * synced live from the configured provider's own endpoint, and a sync failure
