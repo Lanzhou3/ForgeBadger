@@ -2,6 +2,8 @@ import { mkdir } from "node:fs/promises";
 
 import { expect, test } from "@playwright/test";
 
+import { fillRecoveryKey } from "./register-user";
+
 test.describe.configure({ mode: "serial" });
 
 test("first-value flow creates projects without CLI/template binding, runs an idle task session, and exports a manual handoff", async ({ context, page }) => {
@@ -21,6 +23,7 @@ test("first-value flow creates projects without CLI/template binding, runs an id
 
   await page.goto("/register");
   await page.locator('input[name="email"]').fill(`first-value-${suffix}@example.com`);
+  await fillRecoveryKey(page);
   await page.locator('input[name="password"]').fill(password);
   await page.locator('input[name="confirmPassword"]').fill(password);
   await page.getByRole("button", { name: "Create account" }).click();

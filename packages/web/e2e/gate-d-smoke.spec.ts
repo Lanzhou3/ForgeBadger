@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 
+import { fillRecoveryKey } from "./register-user";
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("forgebadger-language", "en");
@@ -18,6 +20,7 @@ test("complete MVP-0 user journey", async ({ page }) => {
 
   // 2. Register a new user
   await page.fill('input[name="email"]', email);
+  await fillRecoveryKey(page);
   await page.fill('input[name="password"]', password);
   await page.fill('input[name="confirmPassword"]', password);
   await page.click('button[type="submit"]');
@@ -73,6 +76,7 @@ test("login flow", async ({ page }) => {
   // Register first via UI to ensure user exists
   await page.goto("/register");
   await page.fill('input[name="email"]', email);
+  await fillRecoveryKey(page);
   await page.fill('input[name="password"]', password);
   await page.fill('input[name="confirmPassword"]', password);
   await page.click('button[type="submit"]');
