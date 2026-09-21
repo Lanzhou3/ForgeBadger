@@ -79,7 +79,7 @@ export async function startSessionRuntime(deps: SessionRuntimeDeps, sessionId: s
       throw err;
     }
 
-    const pluginDirs = await prepareAdapterLaunchExtras(deps.db, deps.userId, adapter, dbSession.workingDir, dbSession.id);
+    const pluginDirs = await prepareAdapterLaunchExtras(deps.db, deps.userId, adapter, dbSession.workingDir);
     const launchPlan = createLaunchPlan({
       adapter,
       projectRoot: dbSession.workingDir,

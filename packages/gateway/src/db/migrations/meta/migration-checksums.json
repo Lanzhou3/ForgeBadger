@@ -85,12 +85,14 @@
   "0084_copilot_connections.sql": "6556c1bfcc313b6d77eafc69b75b06c88b23f9135eae0193707051e05573a98d",
   "0085_copilot_skill_revisions.sql": "c47a912f9ddb28dbf6cb604633320d91b2507469561d878ef553eac292f986e9",
   "0086_copilot_request_identity.sql": "05ca1c0a32955dd9b3d244d6f30de8c59d6ec31f9b4966330e14c77dd8272d05",
-  "0087_personal_team_delivery.sql": "b7ae892fb83379115913b283d6556f1fd3372b583590ace0f474f0c4c59b5f74",
-  "0088_copilot_development_tasks.sql": "3440ff6914fb78e0ad2378cf0c8d20efb1b191b050e67134b445ab0f32a84e30",
-  "0089_team_administration.sql": "033aab53e1cf02bcebc79543ffef09d452c6d5334f0b4a03fb8ca3d2f201280a",
-  "0090_delivery_pull_requests.sql": "39ff1aa9c83932d938609fcda00012ecd29d32323eebab2041a64e8049f6cbc7",
-  "0091_session_runtime_confirmations.sql": "1786d097f6a0d59725542c8b1555234841ce2042818ca57f119d902b4919c898",
-  "0092_task_artifact_links.sql": "36d153cf326c31f339ccb016ef57b64bf4aa3b3857ff6fa0a1875f5141a7f63b",
-  "0093_task_semantic_revision.sql": "318eb7dd3e8f4890f00daeb08066cce41e27c11f5359625ad9c3e787d23143b2",
-  "0094_pending_runtime_delete_guard.sql": "902bc323e8d9388ec4ba7f2eccffd997cade4d4eb8a4df7d28a66fdaaaa235d7"
+  "0087_pi_adapter.sql": "44c5e21f111da1110e8a308b83206f9f9884fe54d9f9a348c450a6182620eca4",
+  "0088_pi_supported_adapters_backfill.sql": "3967c3ff351a81dbaf025c0aebab3adcfe8f161bdf376c4ca6074a4513e2a3cb",
+  "0089_personal_team_delivery.sql": "b7ae892fb83379115913b283d6556f1fd3372b583590ace0f474f0c4c59b5f74",
+  "0090_copilot_development_tasks.sql": "3440ff6914fb78e0ad2378cf0c8d20efb1b191b050e67134b445ab0f32a84e30",
+  "0091_team_administration.sql": "033aab53e1cf02bcebc79543ffef09d452c6d5334f0b4a03fb8ca3d2f201280a",
+  "0092_delivery_pull_requests.sql": "39ff1aa9c83932d938609fcda00012ecd29d32323eebab2041a64e8049f6cbc7",
+  "0093_session_runtime_confirmations.sql": "1786d097f6a0d59725542c8b1555234841ce2042818ca57f119d902b4919c898",
+  "0094_task_artifact_links.sql": "36d153cf326c31f339ccb016ef57b64bf4aa3b3857ff6fa0a1875f5141a7f63b",
+  "0095_task_semantic_revision.sql": "318eb7dd3e8f4890f00daeb08066cce41e27c11f5359625ad9c3e787d23143b2",
+  "0096_pending_runtime_delete_guard.sql": "902bc323e8d9388ec4ba7f2eccffd997cade4d4eb8a4df7d28a66fdaaaa235d7"
 }

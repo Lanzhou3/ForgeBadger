@@ -215,12 +215,14 @@ function cliNotificationTitleKey(
     if (adapter === "opencode") return "notifications.opencodePermissionRequest";
     if (adapter === "codex") return "notifications.codexPermissionRequest";
     if (adapter === "kimi") return "notifications.kimiPermissionRequest";
+    if (adapter === "pi") return "notifications.piPermissionRequest";
     return "notifications.claudePermissionRequest";
   }
   if (notificationType === "permission_denied") {
     if (adapter === "opencode") return "notifications.opencodePermissionDenied";
     if (adapter === "codex") return "notifications.codexPermissionDenied";
     if (adapter === "kimi") return "notifications.kimiPermissionDenied";
+    if (adapter === "pi") return "notifications.piPermissionDenied";
     return "notifications.claudePermissionDenied";
   }
   if (notificationType === "task_completed") return "notifications.taskCompleted";
@@ -234,6 +236,7 @@ function adapterLabel(adapter?: string): string | undefined {
   if (adapter === "opencode") return "OpenCode";
   if (adapter === "codex") return "Codex";
   if (adapter === "kimi") return "Kimi Code";
+  if (adapter === "pi") return "PI";
   return adapter;
 }
 

@@ -75,6 +75,15 @@ const ADAPTER_DEPENDENCY_CHECKS: DependencyCheck[] = [
     args: ["--version"],
     required: false,
     timeoutMs: 10_000
+  },
+  {
+    // pi is a bundled Node CLI (pi-node dist / npm bin shim): measured
+    // ~850ms steady-state, ~1.5s first run of the day on Windows. 5s leaves
+    // headroom for cold disk cache without masking a hung probe.
+    command: "pi",
+    args: ["--version"],
+    required: false,
+    timeoutMs: 5_000
   }
 ];
 

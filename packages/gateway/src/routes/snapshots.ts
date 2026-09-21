@@ -151,8 +151,7 @@ async function restoreSnapshot(input: RestoreSnapshotInput): Promise<{
     input.db,
     input.userId,
     adapter,
-    baseSession.workingDir,
-    baseSession.id
+    baseSession.workingDir
   );
   const launchPlan = createLaunchPlan({
     adapter,

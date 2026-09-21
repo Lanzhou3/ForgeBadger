@@ -75,11 +75,19 @@ const kimiFields: CliConfigFieldSpec[] = [
   { key: "defaultModel", path: "default_model", label: "Default model", type: "string" }
 ];
 
+// PI's models.json is a provider/model registry (like OpenCode's), and its
+// scalar startup defaults (defaultModel/defaultProvider) live in a second
+// file (settings.json) that the field-patch mechanism does not read.
+// Curated scalar fields would render as misleading empties, so the fields
+// card is omitted; the provider + model views cover the real content.
+const piFields: CliConfigFieldSpec[] = [];
+
 export const cliConfigFieldCatalog: Record<AdapterId, CliConfigFieldSpec[]> = {
   claude: claudeFields,
   opencode: opencodeFields,
   codex: codexFields,
-  kimi: kimiFields
+  kimi: kimiFields,
+  pi: piFields
 };
 
 const maxFieldValueChars = 512;

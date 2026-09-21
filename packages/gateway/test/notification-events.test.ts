@@ -141,6 +141,8 @@ describe("notification event persistence", () => {
       { notificationType: "permission_denied", adapter: "codex", titleKey: "notifications.codexPermissionDenied" },
       { notificationType: "permission_denied", adapter: "opencode", titleKey: "notifications.opencodePermissionDenied" },
       { notificationType: "permission_denied", adapter: "kimi", titleKey: "notifications.kimiPermissionDenied" },
+      { notificationType: "permission_denied", adapter: "pi", titleKey: "notifications.piPermissionDenied" },
+      { notificationType: "permission_prompt", adapter: "pi", titleKey: "notifications.piPermissionRequest" },
       { notificationType: "task_failed", titleKey: "notifications.taskFailed" },
       { notificationType: "session_ended", titleKey: "notifications.sessionEnded" }
     ];

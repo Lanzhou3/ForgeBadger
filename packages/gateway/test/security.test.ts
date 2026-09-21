@@ -614,7 +614,12 @@ describe("security hardening", () => {
     );
     const permissionHook = localSettings.hooks.PermissionRequest[0].hooks[0];
     assert.equal(permissionHook.type, "http");
-    assert.match(permissionHook.url, /\/api\/v1\/session-hooks\/claude-notification\//);
+    // The hook URL is the shared session-hooks endpoint (no session id or
+    // token baked in); the live session identity + attach token travel in the
+    // headers, expanded from the worker's environment at request time.
+    assert.match(permissionHook.url, /\/api\/v1\/session-hooks\/claude-notification/);
+    assert.doesNotMatch(permissionHook.url, /session-token-value|attach-token-value/);
+    assert.equal(permissionHook.headers["x-forgebadger-session-id"], "$FORGEBADGER_SESSION_ID");
     assert.equal(permissionHook.headers["x-forgebadger-session-token"], "$FORGEBADGER_ATTACH_TOKEN");
     assert.deepEqual(permissionHook.allowedEnvVars, ["FORGEBADGER_SESSION_ID", "FORGEBADGER_ATTACH_TOKEN"]);
   });

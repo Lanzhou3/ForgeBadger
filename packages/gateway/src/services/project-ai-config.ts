@@ -127,6 +127,10 @@ export function candidateFilesForAdapter(adapter: AdapterId): string[] {
   if (adapter === "kimi") {
     return ["AGENTS.md"];
   }
+  if (adapter === "pi") {
+    // PI loads all three context files regardless of project trust.
+    return ["AGENTS.md", "AGENTS.override.md", "CLAUDE.md"];
+  }
   return [
     "AGENTS.md",
     "AGENTS.override.md"
@@ -230,6 +234,10 @@ function candidateGlobalFilesForAdapter(adapter: AdapterId): string[] {
   }
   if (adapter === "kimi") {
     return ["AGENTS.md", "config.toml", "mcp.json"];
+  }
+  if (adapter === "pi") {
+    // auth.json is self-managed by `pi /login` and never listed here.
+    return ["settings.json", "models.json"];
   }
   return ["AGENTS.md", "AGENTS.override.md", "config.toml"];
 }

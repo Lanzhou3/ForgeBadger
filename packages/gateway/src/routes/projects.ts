@@ -43,7 +43,7 @@ export {
   buildProjectConfigRenderPlan
 } from "../services/project-config-render.js";
 
-const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
+const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi", "pi"]);
 
 const createProjectSchema = z.object({
   name: z.string().min(1),

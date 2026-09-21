@@ -17,7 +17,7 @@ const claudeHookEventSchema = z.object({
   body: z.string().optional(),
   title: z.string().optional(),
   tool_name: z.string().optional(),
-  adapter: z.enum(["claude", "opencode", "codex", "kimi"]).optional(),
+  adapter: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional(),
   reason: z.string().optional(),
   error: z.string().optional()
 }).passthrough();
@@ -60,7 +60,10 @@ export function createSessionHookRoutes(
       eventBus,
       req.body ?? {},
       sessionHookHeader(req, "session-token"),
-      req.params.sessionId || sessionHookHeader(req, "session-id")
+      // The x-forgebadger-session-id header reflects the worker's live
+      // environment and is authoritative; the path is a legacy fallback so a
+      // stale session-specific URL cannot outvote the correct session identity.
+      sessionHookHeader(req, "session-id") || req.params.sessionId
     );
     traceClaudeNotificationHook("result", {
       route: "/claude-notification/:sessionId",
@@ -288,6 +291,7 @@ function adapterLabel(adapter: string): string {
   if (adapter === "opencode") return "OpenCode";
   if (adapter === "codex") return "Codex";
   if (adapter === "kimi") return "Kimi Code";
+  if (adapter === "pi") return "PI";
   return "Claude Code";
 }
 

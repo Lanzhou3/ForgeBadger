@@ -5,7 +5,8 @@ import type { Database } from "../db/types.js";
 import { ensureClaudeNotificationSettings } from "./claude-notification-settings.js";
 import {
   ensureCodexNotificationSettings,
-  ensureKimiNotificationSettings
+  ensureKimiNotificationSettings,
+  ensurePiNotificationSettings
 } from "./cli-notification-settings.js";
 import { ensureForgeBadgerOpenCodePlugin } from "./opencode-notification-settings.js";
 
@@ -40,8 +41,7 @@ export async function prepareAdapterLaunchExtras(
   db: Database,
   userId: string,
   adapter: AdapterId,
-  projectRoot: string,
-  sessionId: string
+  projectRoot: string
 ): Promise<string[]> {
   if (adapter === "opencode") {
     await ensureForgeBadgerOpenCodePlugin(projectRoot);
@@ -55,7 +55,13 @@ export async function prepareAdapterLaunchExtras(
     await ensureKimiNotificationSettings(projectRoot);
     return [];
   }
-  await ensureClaudeNotificationSettings(projectRoot, getGatewayUrl(), sessionId);
+  if (adapter === "pi") {
+    // Global extension in <PI_CODING_AGENT_DIR | ~/.pi/agent>/extensions/;
+    // session identity comes from the FORGEBADGER_* session env at runtime.
+    await ensurePiNotificationSettings();
+    return [];
+  }
+  await ensureClaudeNotificationSettings(projectRoot, getGatewayUrl());
   return [];
 }
 

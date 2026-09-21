@@ -53,6 +53,21 @@ describe("multi-adapter launch plans", () => {
     assert.equal("shell" in plan, false);
   });
 
+  it("creates a PI launch plan with zero arguments (host-environment config only)", () => {
+    const plan = createAdapterLaunchPlan({
+      adapter: "pi",
+      projectRoot: "/workspace/app",
+      credentialMode: "host_environment",
+      model: { provider: "my-relay", modelId: "my-model-1" }
+    });
+
+    assert.equal(plan.command, "pi");
+    assert.deepEqual(plan.args, []);
+    assert.equal(plan.cwd, "/workspace/app");
+    assert.deepEqual(plan.secretEnvNames, []);
+    assert.equal("shell" in plan, false);
+  });
+
   it("keeps provider-prefixed OpenCode model IDs unchanged", () => {
     assert.equal(formatAdapterModelId("opencode", "anthropic", "anthropic/claude-sonnet-4-5"), "anthropic/claude-sonnet-4-5");
   });

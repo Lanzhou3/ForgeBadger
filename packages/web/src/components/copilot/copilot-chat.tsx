@@ -21,6 +21,7 @@ import {
 import { CopilotSettings } from "@/components/copilot/copilot-settings";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
 import { listProjects, type Project } from "@/lib/api";
+import { writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 import { listGrants, type CopilotGrant } from "@/lib/platform-actions-api";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
@@ -80,6 +81,13 @@ export function CopilotChat() {
   conversationIdRef.current = conversationId;
   const requestedConversationRef = useRef<string | null>(null);
   requestedConversationRef.current = requestedConversationId;
+  // Out-of-order guard: a slow listMessages for one conversation must never
+  // overwrite the stream the user has since switched to.
+  const messageSerialRef = useRef(0);
+  // The ?c= deep link is consumed once: after it has been applied — or the
+  // user has picked a conversation manually — it must stop fighting the
+  // sidebar for the selection.
+  const deepLinkPendingRef = useRef(Boolean(requestedConversationId));
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -101,16 +109,24 @@ export function CopilotChat() {
   const selectConversation = useCallback(async (id: string) => {
     conversationIdRef.current = id;
     setConversationId(id);
+    // Shared with the floating robot panel so the next panel open resumes
+    // the conversation the user was last working in here.
+    writeLastCopilotConversation(id);
     setLoadError(null);
     setSendError(false);
     setProjectId("");
     lastSentRef.current = null;
+    // A user-initiated switch retires any pending deep link, so the URL can
+    // no longer pull the selection back.
+    deepLinkPendingRef.current = false;
+    const serial = ++messageSerialRef.current;
+    setMessages([]);
     try {
       const { messages: next } = await listMessages(id);
-      if (conversationIdRef.current === id) setMessages(next);
+      if (serial === messageSerialRef.current && conversationIdRef.current === id) setMessages(next);
       setPinnedToBottom(true);
     } catch {
-      setLoadError(t("copilot.loadError"));
+      if (serial === messageSerialRef.current) setLoadError(t("copilot.loadError"));
     }
   }, [t]);
 
@@ -138,19 +154,26 @@ export function CopilotChat() {
   // while already on /copilot) does not remount this component, so react to
   // search-param changes explicitly. If the id is not in the loaded list it
   // may simply be stale (e.g. the panel just created it server-side), so
-  // refresh the list once per requested id before giving up.
-  const deepLinkRetriedRef = useRef<string | null>(null);
+  // refresh the list once before giving up.
   useEffect(() => {
-    if (!requestedConversationId || requestedConversationId === conversationId) return;
-    if (conversations.some((item) => item.id === requestedConversationId)) {
-      void selectConversation(requestedConversationId);
+    if (!deepLinkPendingRef.current || !requestedConversationId) return;
+    if (requestedConversationId === conversationId) {
+      deepLinkPendingRef.current = false;
       return;
     }
-    if (deepLinkRetriedRef.current !== requestedConversationId) {
-      deepLinkRetriedRef.current = requestedConversationId;
-      void refreshConversations();
+    if (conversations.length === 0) return;
+    if (!conversations.some((item) => item.id === requestedConversationId)) {
+      const fallback = conversations[0];
+      if (!fallback) return;
+      // The deep-linked conversation is unknown (or was just deleted); fall
+      // back to the newest one and stop following the stale link.
+      void selectConversation(fallback.id);
+      deepLinkPendingRef.current = false;
+      return;
     }
-  }, [requestedConversationId, conversations, conversationId, selectConversation, refreshConversations]);
+    void selectConversation(requestedConversationId);
+    deepLinkPendingRef.current = false;
+  }, [requestedConversationId, conversations, conversationId, selectConversation]);
 
   // Refresh the conversation list when the reactive loop opens a fresh
   // proactive conversation, so its report becomes visible.
@@ -242,6 +265,7 @@ export function CopilotChat() {
     if (conversationIdRef.current === id) {
       setConversationId(null);
       setMessages([]);
+      writeLastCopilotConversation(null);
     }
     await refreshConversations();
   }, [refreshConversations]);

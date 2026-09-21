@@ -78,10 +78,12 @@ export class ClaudeCodeSource implements UsageSource {
           continue;
         }
 
-        // First sight or rewritten/shrank: full parse.
-        const parsed = parseTranscriptChunk(readChunk(file.absolutePath, 0), file);
-        next[key] = { bytes: parsed.consumedBytes, mtimeMs: stat.mtimeMs };
-        records.push(...parsed.records);
+        // First sight or rewritten/shrank: full parse. The watermark records
+        // only the consumed (parseable) bytes so a torn trailing line is
+        // retried from its start on the next scan.
+        const { records: fullRecords, consumedBytes } = parseTranscriptFile(file);
+        next[key] = { bytes: Math.min(consumedBytes, stat.size), mtimeMs: stat.mtimeMs };
+        records.push(...fullRecords);
       }
     }
 
@@ -175,6 +177,16 @@ function parseTranscriptChunk(
     records.push(toRecord(line, file));
   }
   return { records, consumedBytes: fullConsumed };
+}
+
+function parseTranscriptFile(file: TranscriptFile): { records: TokenUsageRecord[]; consumedBytes: number } {
+  let content: string;
+  try {
+    content = readFileSync(file.absolutePath, "utf8");
+  } catch {
+    return { records: [], consumedBytes: 0 };
+  }
+  return parseTranscriptChunk(content, file);
 }
 
 function tryCollectLine(line: string, byMessageId: Map<string, ClaudeUsageLine>): boolean {

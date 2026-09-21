@@ -10,6 +10,7 @@ describe("getCliBrand", () => {
     expect(getCliBrand("codex")).toMatchObject({ label: "Codex", color: "#e4e4e7" });
     expect(getCliBrand("kimi")).toMatchObject({ label: "Kimi Code", color: "#1783ff" });
     expect(getCliBrand("opencode")).toMatchObject({ label: "OpenCode", color: "#b7b1b1" });
+    expect(getCliBrand("pi")).toMatchObject({ label: "PI", color: "#4d9abf" });
   });
 
   it("normalizes casing and whitespace", () => {
@@ -23,7 +24,7 @@ describe("getCliBrand", () => {
   });
 
   it("gives every supported CLI a distinct color", () => {
-    const colors = ["claude", "codex", "kimi", "opencode"].map((id) => getCliBrand(id).color);
+    const colors = ["claude", "codex", "kimi", "opencode", "pi"].map((id) => getCliBrand(id).color);
     expect(new Set(colors).size).toBe(colors.length);
   });
 });

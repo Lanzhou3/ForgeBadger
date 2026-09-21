@@ -7,7 +7,7 @@ import {
   type TerminalBackendHealth
 } from "../lib/dependency-check.js";
 
-export type AdapterId = "claude" | "opencode" | "codex" | "kimi";
+export type AdapterId = "claude" | "opencode" | "codex" | "kimi" | "pi";
 export type AdapterRuntimeMode = "terminal";
 export interface AdapterDefinition {
   id: AdapterId;
@@ -66,6 +66,16 @@ const adapterDefinitions: AdapterDefinition[] = [
     supportLevel: "supported",
     launchEnabled: true,
     configDir: ".kimi-code",
+    runtimeModes: ["terminal"]
+  },
+  {
+    id: "pi",
+    label: "PI",
+    command: "pi",
+    versionArgs: ["--version"],
+    supportLevel: "supported",
+    launchEnabled: true,
+    configDir: ".pi",
     runtimeModes: ["terminal"]
   }
 ];

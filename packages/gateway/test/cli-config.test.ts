@@ -18,9 +18,9 @@ import {
 } from "../src/services/cli-config.js";
 import { cliConfigFieldCatalog, listCliConfigFields } from "../src/services/cli-config-fields.js";
 
-type EnvKey = "KIMI_CODE_HOME" | "CODEX_HOME" | "CLAUDE_CONFIG_DIR" | "OPENCODE_CONFIG_DIR";
+type EnvKey = "KIMI_CODE_HOME" | "CODEX_HOME" | "CLAUDE_CONFIG_DIR" | "OPENCODE_CONFIG_DIR" | "PI_CODING_AGENT_DIR";
 
-const managedEnvKeys: EnvKey[] = ["KIMI_CODE_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "OPENCODE_CONFIG_DIR"];
+const managedEnvKeys: EnvKey[] = ["KIMI_CODE_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "OPENCODE_CONFIG_DIR", "PI_CODING_AGENT_DIR"];
 const savedEnv = new Map<EnvKey, string | undefined>();
 
 before(() => {
@@ -127,6 +127,125 @@ describe("cli-config service", () => {
       await assert.rejects(
         upsertCliModel("codex", "openai/gpt-5", { provider: "openai", modelId: "gpt-5" }),
         /only supported for the Kimi Code config/
+      );
+    });
+  });
+
+  describe("pi", () => {
+    it("manages providers, models, and the default model in models.json + settings.json", async () => {
+      const root = await useConfigRoot("PI_CODING_AGENT_DIR", "forgebadger-cli-config-pi-");
+
+      let snapshot = await upsertCliProvider("pi", "my-relay", {
+        protocol: "openai-compatible",
+        baseUrl: "https://api.example.com/v1"
+      });
+      assert.equal(snapshot.configFile, "models.json");
+      assert.equal(snapshot.providers.length, 1);
+      assert.deepEqual(snapshot.providers[0], {
+        id: "my-relay",
+        name: "my-relay",
+        protocol: "openai-completions",
+        baseUrl: "https://api.example.com/v1",
+        hasApiKey: false,
+        isActive: false
+      });
+
+      snapshot = await upsertCliModel("pi", "my-relay/my-model-1", {
+        provider: "my-relay",
+        modelId: "my-model-1"
+      });
+      assert.deepEqual(snapshot.models, [
+        { alias: "my-relay/my-model-1", provider: "my-relay", modelId: "my-model-1" }
+      ]);
+
+      snapshot = await setCliDefaultModel("pi", "my-relay/my-model-1", "my-relay");
+      assert.equal(snapshot.defaultModel, "my-model-1");
+      assert.equal(snapshot.providers[0]?.isActive, true);
+
+      const modelsRaw = JSON.parse(await readFile(path.join(root, "models.json"), "utf8"));
+      assert.equal(modelsRaw.providers["my-relay"].api, "openai-completions");
+      assert.equal(modelsRaw.providers["my-relay"].models[0].id, "my-model-1");
+      assert.equal(modelsRaw.providers["my-relay"].models[0].name, "my-model-1");
+      assert.ok(modelsRaw.providers["my-relay"].models[0].contextWindow > 0);
+      assert.equal(modelsRaw.providers["my-relay"].apiKey, undefined, "manual surface must not invent API keys");
+      // PI settings.json pairs a bare model id with the provider key.
+      const settingsRaw = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8"));
+      assert.equal(settingsRaw.defaultModel, "my-model-1");
+      assert.equal(settingsRaw.defaultProvider, "my-relay");
+
+      const configFile = snapshot.files.find((file) => file.relativePath === "models.json");
+      assert.ok(configFile);
+      assert.equal("content" in configFile, false);
+      assert.equal("redacted" in configFile, false);
+
+      const directRead = await readCliConfigFile("pi", "settings.json");
+      assert.equal(typeof directRead.content, "string");
+      assert.match(directRead.content!, /\"defaultModel\": "my-model-1"/);
+    });
+
+    it("maps provider protocols to PI APIs and rejects unsupported formats", async () => {
+      await useConfigRoot("PI_CODING_AGENT_DIR", "forgebadger-cli-config-pi-api-");
+      await upsertCliProvider("pi", "anthropic-relay", {
+        protocol: "anthropic",
+        baseUrl: "https://relay.example.com"
+      });
+      const root = process.env.PI_CODING_AGENT_DIR!;
+      const raw = JSON.parse(await readFile(path.join(root, "models.json"), "utf8"));
+      assert.equal(raw.providers["anthropic-relay"].api, "anthropic-messages");
+      await assert.rejects(
+        upsertCliProvider("pi", "bedrock-p", { protocol: "bedrock", baseUrl: "https://x" }),
+        /does not support/u
+      );
+    });
+
+    it("keeps the existing api key when updating a provider without one", async () => {
+      const root = await useConfigRoot("PI_CODING_AGENT_DIR", "forgebadger-cli-config-pi-keep-");
+      await mkdir(root, { recursive: true });
+      await writeFile(
+        path.join(root, "models.json"),
+        JSON.stringify({ providers: { "my-relay": { baseUrl: "https://api.example.com/v1", apiKey: "sk-existing" } } }, null, 2)
+      );
+      const snapshot = await upsertCliProvider("pi", "my-relay", {
+        protocol: "openai-compatible",
+        baseUrl: "https://api.example.com/v1"
+      });
+      assert.equal(snapshot.providers[0]?.hasApiKey, true);
+      const raw = JSON.parse(await readFile(path.join(root, "models.json"), "utf8"));
+      assert.equal(raw.providers["my-relay"].apiKey, "sk-existing");
+    });
+
+    it("removes a provider together with its models and default model", async () => {
+      const root = await useConfigRoot("PI_CODING_AGENT_DIR", "forgebadger-cli-config-pi-remove-");
+      await upsertCliProvider("pi", "my-relay", { protocol: "openai", baseUrl: "https://api.example.com/v1" });
+      await upsertCliModel("pi", "my-relay/my-model-1", { provider: "my-relay", modelId: "my-model-1" });
+      await setCliDefaultModel("pi", "my-relay/my-model-1", "my-relay");
+
+      let snapshot = await removeCliModel("pi", "my-relay/my-model-1");
+      assert.equal(snapshot.models.length, 0);
+      assert.equal(snapshot.defaultModel, "my-model-1");
+
+      await upsertCliModel("pi", "my-relay/my-model-1", { provider: "my-relay", modelId: "my-model-1" });
+      snapshot = await removeCliProvider("pi", "my-relay");
+      assert.equal(snapshot.providers.length, 0);
+      assert.equal(snapshot.models.length, 0);
+      assert.equal(snapshot.defaultModel, "");
+      const raw = JSON.parse(await readFile(path.join(root, "models.json"), "utf8"));
+      assert.deepEqual(raw.providers, {});
+      const settingsRaw = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8"));
+      assert.equal(settingsRaw.defaultProvider, undefined);
+    });
+
+    it("exposes models.json and settings.json for raw editing but never auth.json", async () => {
+      const root = await useConfigRoot("PI_CODING_AGENT_DIR", "forgebadger-cli-config-pi-raw-");
+      await writeCliConfigFile("pi", "settings.json", "{\n  \"theme\": \"dark\"\n}\n");
+      assert.equal((await readFile(path.join(root, "settings.json"), "utf8")).includes("\"theme\""), true);
+      await assert.rejects(
+        writeCliConfigFile("pi", "auth.json", "{}"),
+        /Unsupported pi config file/
+      );
+      await assert.rejects(
+        writeCliConfigFile("pi", "../escape.json", "x"),
+        /Unsupported config file path/
       );
     });
   });
@@ -248,13 +367,13 @@ describe("cli-config service", () => {
   });
 
   describe("field catalog", () => {
-    const adapters = ["claude", "opencode", "codex", "kimi"] as const;
+    const adapters = ["claude", "opencode", "codex", "kimi", "pi"] as const;
 
     it("keeps unique keys and enum values per adapter", () => {
       for (const adapter of adapters) {
         const fields = listCliConfigFields(adapter);
-        // opencode is a provider/model registry with no curated scalar fields.
-        if (adapter === "opencode") {
+        // opencode and pi are provider/model registries with no curated scalar fields.
+        if (adapter === "opencode" || adapter === "pi") {
           assert.equal(fields.length, 0);
           continue;
         }

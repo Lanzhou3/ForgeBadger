@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it, afterEach } from "node:test";
@@ -12,6 +12,7 @@ import { ClaudeCodeSource } from "../src/services/usage/claude-code-source.js";
 import { CodexSource } from "../src/services/usage/codex-source.js";
 import { KimiSource } from "../src/services/usage/kimi-source.js";
 import { OpenCodeSource } from "../src/services/usage/opencode-source.js";
+import { PiSource } from "../src/services/usage/pi-source.js";
 import { TokenUsageRepository, type TokenUsageSummary } from "../src/db/repositories/token-usage-repository.js";
 import { UserRepository, ProjectRepository } from "../src/db/repositories/index.js";
 import type { TokenUsageRecord } from "../src/services/usage/usage-source.js";
@@ -597,6 +598,250 @@ describe("KimiSource", () => {
     } finally {
       if (original === undefined) delete process.env.KIMI_CODE_HOME;
       else process.env.KIMI_CODE_HOME = original;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PI fixture
+// ---------------------------------------------------------------------------
+
+/**
+ * PI session file shape (pi 0.86.0, format v3) — verified against real
+ * transcripts: header line, then message envelopes; assistant lines carry
+ * camelCase `usage` + per-request `responseId`.
+ */
+const piHeaderLine = (sessionId: string, cwd: string, timestamp = "2026-09-20T07:56:53.354Z") =>
+  JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp, cwd });
+
+const piAssistantLine = (
+  entryId: string,
+  usage: { input: number; output: number; cacheRead?: number; cacheWrite?: number; reasoning?: number },
+  overrides: Record<string, unknown> = {}
+) =>
+  JSON.stringify({
+    type: "message",
+    id: entryId,
+    parentId: null,
+    timestamp: "2026-09-20T07:57:07.745Z",
+    message: {
+      role: "assistant",
+      provider: "lingsoul",
+      model: "qwen3.8-27b",
+      responseId: `chatcmpl-${entryId}`,
+      stopReason: "stop",
+      usage: {
+        input: usage.input,
+        output: usage.output,
+        cacheRead: usage.cacheRead ?? 0,
+        cacheWrite: usage.cacheWrite ?? 0,
+        reasoning: usage.reasoning ?? 0,
+        totalTokens: usage.input + usage.output + (usage.cacheRead ?? 0),
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      },
+      ...overrides
+    }
+  });
+
+/** Aborted line: all-zero usage, no responseId — must be skipped. */
+const piAbortedAssistantLine = (entryId: string) =>
+  JSON.stringify({
+    type: "message",
+    id: entryId,
+    parentId: null,
+    timestamp: "2026-09-20T07:58:00.000Z",
+    message: {
+      role: "assistant",
+      provider: "lingsoul",
+      model: "qwen3.8-27b",
+      stopReason: "aborted",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }
+    }
+  });
+
+function writePiFixture(root: string, lines: string[]): string {
+  const projectDir = path.join(root, "--C--Users-lanzhou-Project-ForgeBadger--");
+  mkdirSync(projectDir, { recursive: true });
+  const file = path.join(
+    projectDir,
+    "2026-09-20T07-56-53-354Z_01a0bdd1-6ae9-7246-8521-652e7697051d.jsonl"
+  );
+  writeFileSync(file, lines.join("\n"));
+  return file;
+}
+
+describe("PiSource", () => {
+  it("extracts assistant envelope usage with header session id + cwd", () => {
+    const root = tempDir();
+    writePiFixture(root, [
+      piHeaderLine("01a0bdd1-6ae9-7246-8521-652e7697051d", "C:\\Users\\lanzhou\\Project\\ForgeBadger"),
+      JSON.stringify({ type: "model_change", id: "mc1", timestamp: "2026-09-20T07:56:54.000Z" }),
+      // One tool round-trip = two billable assistant lines with distinct responseIds.
+      piAssistantLine("da4c1136", { input: 2239, output: 58 }),
+      piAssistantLine("8d26414d", { input: 2314, output: 23, cacheRead: 128, cacheWrite: 4, reasoning: 7 }),
+      piAbortedAssistantLine("ab0rted1"),
+      JSON.stringify({ type: "message", id: "u1", timestamp: "2026-09-20T07:57:01.805Z", message: { role: "user" } })
+    ]);
+
+    const original = process.env.PI_CODING_AGENT_SESSION_DIR;
+    process.env.PI_CODING_AGENT_SESSION_DIR = root;
+    try {
+      const source = new PiSource();
+      const result = source.scan(null);
+      assert.equal(result.records.length, 2);
+      const [first, second] = result.records;
+      assert.equal(first.adapter, "pi");
+      // Session id + cwd come from the header, not the encoded directory name.
+      assert.equal(first.sessionId, "01a0bdd1-6ae9-7246-8521-652e7697051d");
+      assert.equal(first.projectPath, "C:\\Users\\lanzhou\\Project\\ForgeBadger");
+      assert.equal(first.modelId, "lingsoul/qwen3.8-27b");
+      assert.equal(first.requestId, "chatcmpl-da4c1136");
+      assert.equal(first.inputTokens, 2239);
+      assert.equal(first.outputTokens, 58);
+      assert.equal(first.occurredAt.getTime(), Date.parse("2026-09-20T07:57:07.745Z"));
+      assert.equal(second.requestId, "chatcmpl-8d26414d");
+      assert.equal(second.cacheReadTokens, 128);
+      assert.equal(second.cacheWriteTokens, 4);
+      assert.equal(second.reasoningTokens, 7);
+
+      // Watermark: unchanged file yields no duplicates on the next scan.
+      const again = source.scan(result.nextWatermark);
+      assert.equal(again.records.length, 0);
+    } finally {
+      if (original === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+      else process.env.PI_CODING_AGENT_SESSION_DIR = original;
+    }
+  });
+
+  it("resumes by offset: appended assistant lines are picked up on next scan", () => {
+    const root = tempDir();
+    const file = writePiFixture(root, [
+      piHeaderLine("01a0bdd1-6ae9-7246-8521-652e7697051d", "C:\\Users\\lanzhou\\Project\\ForgeBadger"),
+      piAssistantLine("a0000001", { input: 100, output: 10 })
+    ]);
+
+    const source = new PiSource();
+    const original = process.env.PI_CODING_AGENT_SESSION_DIR;
+    process.env.PI_CODING_AGENT_SESSION_DIR = root;
+    try {
+      const first = source.scan(null);
+      assert.equal(first.records.length, 1);
+
+      const appended = piAssistantLine("b0000002", { input: 200, output: 20 });
+      writeFileSync(file, `${piHeaderLine("01a0bdd1-6ae9-7246-8521-652e7697051d", "C:\\Users\\lanzhou\\Project\\ForgeBadger")}\n${piAssistantLine("a0000001", { input: 100, output: 10 })}\n${appended}\n`);
+      const past = Date.now() - 10_000;
+      utimesSync(file, past / 1000, past / 1000);
+      utimesSync(file, Date.now() / 1000, Date.now() / 1000);
+
+      const second = source.scan(first.nextWatermark);
+      assert.equal(second.records.length, 1);
+      assert.equal(second.records[0]?.requestId, "chatcmpl-b0000002");
+    } finally {
+      if (original === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+      else process.env.PI_CODING_AGENT_SESSION_DIR = original;
+    }
+  });
+
+  it("skips torn trailing lines (partial JSON while CLI is writing)", () => {
+    const root = tempDir();
+    const file = writePiFixture(root, [
+      piHeaderLine("01a0bdd1-6ae9-7246-8521-652e7697051d", "C:\\Users\\lanzhou\\Project\\ForgeBadger"),
+      piAssistantLine("a0000001", { input: 100, output: 10 }),
+      '{"type":"message","id":"b0000002","message":{"role":' // torn
+    ]);
+
+    const source = new PiSource();
+    const original = process.env.PI_CODING_AGENT_SESSION_DIR;
+    process.env.PI_CODING_AGENT_SESSION_DIR = root;
+    try {
+      const first = source.scan(null);
+      assert.equal(first.records.length, 1);
+      assert.equal(first.records[0]?.requestId, "chatcmpl-a0000001");
+
+      // The torn tail is not consumed; completing the line on the next scan
+      // (with a newer mtime) picks it up exactly once.
+      const tornStart = Buffer.byteLength(
+        `${piHeaderLine("01a0bdd1-6ae9-7246-8521-652e7697051d", "C:\\Users\\lanzhou\\Project\\ForgeBadger")}\n${piAssistantLine("a0000001", { input: 100, output: 10 })}\n`,
+        "utf8"
+      );
+      const completeLine = piAssistantLine("b0000002", { input: 300, output: 30 });
+      const head = readFileSync(file, "utf8").slice(0, tornStart);
+      writeFileSync(file, `${head}${completeLine}\n`);
+      const past = Date.now() - 10_000;
+      utimesSync(file, past / 1000, past / 1000);
+      utimesSync(file, Date.now() / 1000, Date.now() / 1000);
+
+      const second = source.scan(first.nextWatermark);
+      assert.equal(second.records.length, 1);
+      assert.equal(second.records[0]?.requestId, "chatcmpl-b0000002");
+    } finally {
+      if (original === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+      else process.env.PI_CODING_AGENT_SESSION_DIR = original;
+    }
+  });
+
+  it("falls back to the file uuid and unknown path when the header is missing", () => {
+    const root = tempDir();
+    writePiFixture(root, [
+      piAssistantLine("a0000001", { input: 100, output: 10 }) // no session header
+    ]);
+
+    const source = new PiSource();
+    const original = process.env.PI_CODING_AGENT_SESSION_DIR;
+    process.env.PI_CODING_AGENT_SESSION_DIR = root;
+    try {
+      const result = source.scan(null);
+      assert.equal(result.records.length, 1);
+      assert.equal(result.records[0]?.sessionId, "01a0bdd1-6ae9-7246-8521-652e7697051d");
+      assert.equal(result.records[0]?.projectPath, "unknown");
+    } finally {
+      if (original === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+      else process.env.PI_CODING_AGENT_SESSION_DIR = original;
+    }
+  });
+
+  it("scans the flat layout of a custom session dir (files at root level)", () => {
+    const root = tempDir();
+    // No <encoded-cwd> subdirectory: --session-dir / PI_CODING_AGENT_SESSION_DIR
+    // keeps files flat (verified against pi's getDefaultSessionDirPath source).
+    const file = path.join(
+      root,
+      "2026-09-20T09-11-19-252Z_01a0be15-8fd2-7635-9341-1cc15a7088ab.jsonl"
+    );
+    writeFileSync(
+      file,
+      [
+        piHeaderLine("01a0be15-8fd2-7635-9341-1cc15a7088ab", "C:\\Users\\lanzhou\\Project\\Flat"),
+        piAssistantLine("a0000001", { input: 2239, output: 16 })
+      ].join("\n")
+    );
+
+    const source = new PiSource();
+    const original = process.env.PI_CODING_AGENT_SESSION_DIR;
+    process.env.PI_CODING_AGENT_SESSION_DIR = root;
+    try {
+      const result = source.scan(null);
+      assert.equal(result.records.length, 1);
+      assert.equal(result.records[0]?.sessionId, "01a0be15-8fd2-7635-9341-1cc15a7088ab");
+      assert.equal(result.records[0]?.projectPath, "C:\\Users\\lanzhou\\Project\\Flat");
+      assert.equal(result.records[0]?.outputTokens, 16);
+    } finally {
+      if (original === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+      else process.env.PI_CODING_AGENT_SESSION_DIR = original;
+    }
+  });
+
+  it("handles a missing sessions directory gracefully", () => {
+    const root = tempDir();
+    const original = process.env.PI_CODING_AGENT_SESSION_DIR;
+    process.env.PI_CODING_AGENT_SESSION_DIR = root;
+    try {
+      const source = new PiSource();
+      const result = source.scan(null);
+      assert.deepEqual(result.records, []);
+    } finally {
+      if (original === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+      else process.env.PI_CODING_AGENT_SESSION_DIR = original;
     }
   });
 });

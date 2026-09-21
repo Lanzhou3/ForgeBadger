@@ -7,7 +7,7 @@ import { CliBrandIcon } from "./cli-brand-icon";
 describe("CliBrandIcon", () => {
   it("renders an inline svg for each known CLI brand", () => {
     // Arrange & Act
-    const rendered = ["claude", "codex", "kimi", "opencode"].map((aiTool) =>
+    const rendered = ["claude", "codex", "kimi", "opencode", "pi"].map((aiTool) =>
       render(<CliBrandIcon aiTool={aiTool} />)
     );
 

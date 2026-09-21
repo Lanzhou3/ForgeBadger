@@ -31,7 +31,7 @@ export interface AppliedProvidersOverviewOptions {
   readSnapshot?: ((adapter: AdapterId) => Promise<CliConfigSnapshot>) | undefined;
 }
 
-const ADAPTER_IDS: AdapterId[] = ["claude", "opencode", "codex", "kimi"];
+const ADAPTER_IDS: AdapterId[] = ["claude", "opencode", "codex", "kimi", "pi"];
 
 export async function buildAppliedProvidersOverview(
   db: Database,

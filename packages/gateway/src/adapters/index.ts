@@ -56,6 +56,20 @@ export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPl
         secretEnvNames: input.secretEnvNames ?? [],
         credentialMode: input.credentialMode
       };
+    case "pi":
+      // Zero-arg launch (host_environment policy, same as Kimi): provider,
+      // model, and credential selection live in the applied global config
+      // (~/.pi/agent/models.json + settings.json defaultModel/defaultProvider),
+      // never in launch-time args/env. `--provider`/`--model`/`--api-key`
+      // flags exist in pi but are intentionally not used.
+      return {
+        command: "pi",
+        args: [],
+        cwd: input.projectRoot,
+        env: input.env ?? {},
+        secretEnvNames: input.secretEnvNames ?? [],
+        credentialMode: input.credentialMode
+      };
   }
 }
 

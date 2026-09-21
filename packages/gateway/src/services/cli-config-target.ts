@@ -12,7 +12,11 @@ const mainFiles: Record<ProviderAdapter, string> = {
   claude: "settings.json",
   opencode: "opencode.json",
   codex: "config.toml",
-  kimi: "config.toml"
+  kimi: "config.toml",
+  // PI's provider registry (providers.<id> with baseUrl/api/apiKey/models).
+  // auth.json is deliberately NOT a managed target: it is owned by pi's own
+  // /login (OAuth refresh included) and ForgeBadger must never clobber it.
+  pi: "models.json"
 };
 
 export function cliConfigMainFile(adapter: ProviderAdapter): string {
@@ -29,6 +33,12 @@ export function cliConfigTargetPath(input: {
     const root = path.resolve(input.projectRoot);
     if (input.adapter === "claude") return path.join(root, ".claude", "settings.local.json");
     if (input.adapter === "kimi") return path.join(root, ".kimi-code", "config.toml");
+    if (input.adapter === "pi") {
+      // PI has no project-level provider config; its global config lives in
+      // $PI_CODING_AGENT_DIR (default ~/.pi/agent). Refuse instead of
+      // writing a misleading <project>/models.json.
+      throw new Error("PI config is global-only ($PI_CODING_AGENT_DIR); project scope is not supported");
+    }
     return path.join(root, mainFiles[input.adapter]);
   }
   return path.join(globalConfigRoot(input.adapter), mainFiles[input.adapter]);
@@ -43,6 +53,7 @@ export function globalConfigRoot(
   if (adapter === "claude") return resolveUserRoot(env.CLAUDE_CONFIG_DIR, path.join(homeDir, ".claude"), homeDir);
   if (adapter === "codex") return resolveUserRoot(env.CODEX_HOME, path.join(homeDir, ".codex"), homeDir);
   if (adapter === "kimi") return resolveUserRoot(env.KIMI_CODE_HOME, path.join(homeDir, ".kimi-code"), homeDir);
+  if (adapter === "pi") return resolveUserRoot(env.PI_CODING_AGENT_DIR, path.join(homeDir, ".pi", "agent"), homeDir);
   const xdgRoot = resolveUserRoot(env.XDG_CONFIG_HOME, path.join(homeDir, ".config"), homeDir);
   return resolveUserRoot(env.OPENCODE_CONFIG_DIR, path.join(xdgRoot, "opencode"), homeDir);
 }
