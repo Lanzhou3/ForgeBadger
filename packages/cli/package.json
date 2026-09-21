@@ -13,6 +13,7 @@
     "LICENSE",
     "docs/README.zh-CN.md",
     "docs/README.zh-TW.md",
+    "docs/PERSONAL-TEAM-WORKFLOWS.md",
     "package.json",
     "postinstall.mjs"
   ],
