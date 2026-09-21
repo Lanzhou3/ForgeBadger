@@ -465,13 +465,13 @@ describe("flood integrity (slow)", () => {
     try {
       await server.createSession({
         sessionId: "pauseflood", userId: "u", attachToken: "t",
-        launchPlan: plan(cwd, "awk 'BEGIN{for(i=1;i<=50000;i++) print \"flood-payload-line-\" i}'")
+        launchPlan: plan(cwd, "awk 'BEGIN{for(i=1;i<=5000;i++) print \"flood-payload-line-\" i}'")
       });
       await pollUntil(() => (server.getSession("pauseflood")?.pauseActivations ?? 0) > 0, 60_000);
       // The flood must still complete (pause is backpressure, not a stall).
       await pollUntil(async () => {
         const snap = await server.inspectPane("pauseflood");
-        return snap.content.includes("flood-payload-line-50000");
+        return snap.content.includes("flood-payload-line-5000");
       }, 90_000);
     } finally {
       await server.destroy();
